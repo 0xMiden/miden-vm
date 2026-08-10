@@ -1,12 +1,8 @@
-#[cfg(feature = "serde")]
-use alloc::string::String;
 use alloc::{boxed::Box, string::ToString};
 use core::fmt;
 
 #[cfg(all(feature = "arbitrary", test))]
 use miden_core::serde::{Deserializable, Serializable};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 
 // TARGET TYPE
 // ================================================================================================
@@ -19,7 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeErr
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 #[non_exhaustive]
 #[repr(u8)]
@@ -113,36 +109,6 @@ impl core::str::FromStr for TargetType {
 
 // SERIALIZATION
 // ================================================================================================
-
-#[cfg(feature = "serde")]
-impl Serialize for TargetType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if serializer.is_human_readable() {
-            serializer.serialize_str(self.as_str())
-        } else {
-            serializer.serialize_u8(*self as u8)
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TargetType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
-            s.parse::<TargetType>().map_err(|err| DeError::custom(err.to_string()))
-        } else {
-            let tag = u8::deserialize(deserializer)?;
-            Self::try_from(tag).map_err(|err| DeError::custom(err.to_string()))
-        }
-    }
-}
 
 mod serialization {
     use alloc::string::ToString;

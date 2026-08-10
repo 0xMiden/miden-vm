@@ -803,7 +803,6 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 )]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ByteIndex(pub u32);
 
 impl ByteIndex {
@@ -985,7 +984,6 @@ macro_rules! declare_dual_number_and_index_type {
         )]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
-        #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
         pub struct $index_name(pub u32);
 
         impl $index_name {
@@ -1121,7 +1119,7 @@ macro_rules! declare_dual_number_and_index_type {
         #[cfg_attr(feature = "serde", serde(transparent))]
         #[cfg_attr(
             all(feature = "arbitrary", test),
-            miden_test_serde_macros::serde_test(binary_serde(true))
+            miden_test_serialization_macros::serialization_test
         )]
         pub struct $number_name(NonZeroU32);
 

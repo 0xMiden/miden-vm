@@ -25,8 +25,6 @@ use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::{
@@ -43,8 +41,6 @@ pub type PackageRequirements = BTreeMap<PackageId, VersionRequirement>;
 
 /// Metadata tracked for a specific canonical package version.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct PackageRecord {
     /// The exact published version associated with this package
     version: Version,

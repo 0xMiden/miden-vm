@@ -24,7 +24,6 @@ use crate::{
 /// NOTE: This type assumes that Merkle paths always span from the root of the tree to a leaf.
 /// Partial paths are not supported.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SparseMerklePath {
     /// A bitmask representing empty nodes. The set bit corresponds to the depth of an empty node.
     /// The least significant bit (bit 0) describes depth 1 node (root's children).
@@ -284,27 +283,6 @@ impl Deserializable for SparseMerklePath {
         Self::from_parts(empty_nodes_mask, nodes).map_err(|err| {
             DeserializationError::InvalidValue(format!("invalid SparseMerklePath: {err}"))
         })
-    }
-}
-
-/// Bounds the node sequence while reading it, then validates the mask and length through
-/// [`SparseMerklePath::from_parts`]. The helper preserves the field layout produced by `Serialize`.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for SparseMerklePath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "SparseMerklePath")]
-        struct Raw {
-            empty_nodes_mask: u64,
-            nodes: super::BoundedVec<Word, { SMT_MAX_DEPTH as usize }>,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        SparseMerklePath::from_parts(raw.empty_nodes_mask, raw.nodes.0)
-            .map_err(serde::de::Error::custom)
     }
 }
 

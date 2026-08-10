@@ -6,8 +6,6 @@ use miden_core::Word;
 use miden_core::utils::hash_string_to_word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::VersionRequirement;
 
@@ -54,7 +52,6 @@ impl Arbitrary for InvalidVersionError {
 /// * Record the exact published identity of a canonical package artifact as `semver#digest`
 /// * Provide a total ordering for package versions that may or may not include a specific digest
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct Version {
     /// The semantic version information
     ///
@@ -65,29 +62,6 @@ pub struct Version {
     /// This is the most precise version for a package, and uniquely identifies the canonical
     /// published artifact associated with a semantic version.
     pub digest: Option<Word>,
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for Version {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use alloc::string::ToString;
-
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for Version {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = <alloc::string::String as Deserialize>::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
-    }
 }
 
 impl Version {

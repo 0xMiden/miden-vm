@@ -5,8 +5,6 @@ use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, text},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
@@ -29,8 +27,6 @@ use crate::{
 /// - A simple call: the callee is executed in the new user context.
 /// - A syscall: the callee is executed in the root context.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,

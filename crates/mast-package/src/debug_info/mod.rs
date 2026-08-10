@@ -53,7 +53,7 @@ pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 /// [`PackageDebugInfo::read_from_bytes_unmetered`].
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub type PackageDebugInfo = DebugInfo<MastNodeId, DebugSourceNodeId>;
 

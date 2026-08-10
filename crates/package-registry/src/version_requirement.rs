@@ -5,15 +5,12 @@ use miden_assembly_syntax::debuginfo::Span;
 use miden_core::utils::hash_string_to_word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::Word;
 
 /// Represents a requirement on a specific version (or versions) of a dependency.
 #[derive(Debug, Clone)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub enum VersionRequirement {
     /// A semantic versioning constraint, e.g. `~> 0.1`
     ///
@@ -104,46 +101,6 @@ impl From<Version> for VersionRequirement {
         } else {
             Self::Exact(value)
         }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for VersionRequirement {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use alloc::string::ToString;
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for VersionRequirement {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::str::FromStr;
-
-        let value = <String as Deserialize>::deserialize(deserializer)?;
-
-        if value == "*" {
-            return Ok(Self::from(VersionReq::STAR));
-        }
-
-        if let Some((version, digest)) = value.split_once('#') {
-            let version = version.parse::<SemVer>().map_err(serde::de::Error::custom)?;
-            let digest = Word::parse(digest).map_err(serde::de::Error::custom)?;
-            return Ok(Self::Exact(Version::new(version, digest)));
-        }
-
-        if let Ok(digest) = Word::parse(&value) {
-            return Ok(Self::from(digest));
-        }
-
-        let requirement = VersionReq::from_str(&value).map_err(serde::de::Error::custom)?;
-        Ok(Self::from(requirement))
     }
 }
 

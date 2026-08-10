@@ -145,7 +145,6 @@ impl PartialEq<&[Word]> for NodeStore {
 /// `O(num_nodes / 1024)` pointers instead of the full node buffer, and appending to the original
 /// after a clone copies at most one chunk.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Mmr {
     /// Refer to the `forest` method documentation for details of the semantics of this value.
     pub(super) forest: Forest,

@@ -107,7 +107,7 @@ pub struct LocalPackageRegistry {
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// The metadata about a package produced when listing or describing a package in the index
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageSummary {
     /// The package identifier/name
     pub name: PackageId,
@@ -132,10 +132,146 @@ pub struct PublishedPackage {
 }
 
 /// The representation of the on-disk package index
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 struct PersistedIndex {
-    #[serde(default)]
     packages: BTreeMap<PackageId, PackageVersions>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PackageRecordFormat {
+    version: String,
+    description: Option<Arc<str>>,
+    dependencies: BTreeMap<String, String>,
+}
+
+impl Serialize for PackageSummary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let dependencies = self
+            .dependencies
+            .iter()
+            .map(|(name, requirement)| (name.to_string(), requirement.to_string()))
+            .collect::<BTreeMap<_, _>>();
+        let mut state = serializer.serialize_struct("PackageSummary", 5)?;
+        state.serialize_field("name", <PackageId as AsRef<str>>::as_ref(&self.name))?;
+        state.serialize_field("version", &self.version.to_string())?;
+        state.serialize_field("description", &self.description)?;
+        state.serialize_field("dependencies", &dependencies)?;
+        state.serialize_field("artifact_path", &self.artifact_path)?;
+        state.end()
+    }
+}
+
+impl Serialize for PersistedIndex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let packages = self
+            .packages
+            .iter()
+            .map(|(name, versions)| {
+                let versions = versions
+                    .iter()
+                    .map(|(version, record)| {
+                        let dependencies = record
+                            .dependencies()
+                            .iter()
+                            .map(|(name, requirement)| (name.to_string(), requirement.to_string()))
+                            .collect();
+                        (
+                            version.to_string(),
+                            PackageRecordFormat {
+                                version: record.version().to_string(),
+                                description: record.description().cloned(),
+                                dependencies,
+                            },
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                (name.to_string(), versions)
+            })
+            .collect::<BTreeMap<_, _>>();
+        #[derive(Serialize)]
+        struct Format<T> {
+            packages: T,
+        }
+
+        Format { packages }.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PersistedIndex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        #[derive(Deserialize)]
+        struct Format {
+            #[serde(default)]
+            packages: BTreeMap<String, BTreeMap<String, PackageRecordFormat>>,
+        }
+
+        let format = Format::deserialize(deserializer)?;
+        let packages = format
+            .packages
+            .into_iter()
+            .map(|(name, versions)| {
+                let versions = versions
+                    .into_iter()
+                    .map(|(semantic_version, record)| {
+                        let semantic_version =
+                            semantic_version.parse().map_err(D::Error::custom)?;
+                        let version = record.version.parse().map_err(D::Error::custom)?;
+                        let dependencies = record
+                            .dependencies
+                            .into_iter()
+                            .map(|(name, requirement)| {
+                                parse_version_requirement(&requirement)
+                                    .map(|requirement| (PackageId::from(name), requirement))
+                                    .map_err(D::Error::custom)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let mut package = PackageRecord::new(version, dependencies);
+                        if let Some(description) = record.description {
+                            package = package.with_description(description);
+                        }
+                        Ok((semantic_version, package))
+                    })
+                    .collect::<Result<BTreeMap<_, _>, D::Error>>()?;
+                Ok((PackageId::from(name), versions))
+            })
+            .collect::<Result<BTreeMap<_, _>, D::Error>>()?;
+        Ok(Self { packages })
+    }
+}
+
+fn parse_version_requirement(value: &str) -> Result<VersionRequirement, String> {
+    use core::str::FromStr;
+
+    use miden_core::Word;
+    use miden_package_registry::{SemVer, VersionReq};
+
+    if value == "*" {
+        return Ok(VersionRequirement::from(VersionReq::STAR));
+    }
+    if let Some((version, digest)) = value.split_once('#') {
+        let version = version.parse::<SemVer>().map_err(|error| error.to_string())?;
+        let digest = Word::parse(digest).map_err(str::to_owned)?;
+        return Ok(VersionRequirement::Exact(Version::new(version, digest)));
+    }
+    if let Ok(digest) = Word::parse(value) {
+        return Ok(VersionRequirement::from(digest));
+    }
+    VersionReq::from_str(value)
+        .map(VersionRequirement::from)
+        .map_err(|error| error.to_string())
 }
 
 impl Default for LocalPackageRegistry {

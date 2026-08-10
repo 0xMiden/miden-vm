@@ -239,8 +239,6 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(transparent))]
     pub struct DebugSourceNodeId;
 );
 

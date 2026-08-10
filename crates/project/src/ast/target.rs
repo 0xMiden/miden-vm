@@ -7,13 +7,51 @@ pub struct LibTarget {
     /// The kind of library target this is.
     ///
     /// Defaults to `library`
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            serialize_with = "target_type_serde::serialize",
+            deserialize_with = "target_type_serde::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     pub kind: Option<Span<TargetType>>,
     /// The optional namespace override for modules parsed from this target
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub namespace: Option<Span<Arc<str>>>,
     /// The relative path from the project manifest to the root source file for this target
     pub path: Span<Uri>,
+}
+
+#[cfg(feature = "serde")]
+mod target_type_serde {
+    use alloc::string::{String, ToString};
+
+    use serde::{Deserialize, Serialize, Serializer, de::Error};
+
+    use super::{Span, TargetType};
+
+    pub fn serialize<S>(value: &Option<Span<TargetType>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        value.as_deref().map(TargetType::as_str).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Span<TargetType>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<String>::deserialize(deserializer)?
+            .map(|value| {
+                value
+                    .parse::<TargetType>()
+                    .map(Span::unknown)
+                    .map_err(|error| D::Error::custom(error.to_string()))
+            })
+            .transpose()
+    }
 }
 
 #[derive(Debug, Clone)]

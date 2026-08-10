@@ -13,14 +13,9 @@ use miden_core::serde::{
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// A unique identifier for optional sections of the Miden package format
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 #[repr(transparent)]
 pub struct SectionId(Cow<'static, str>);
 
@@ -97,19 +92,7 @@ impl fmt::Display for SectionId {
     }
 }
 
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for SectionId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = alloc::string::String::deserialize(deserializer)?;
-        s.parse::<SectionId>().map_err(serde::de::Error::custom)
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Section {
     pub id: SectionId,
     pub data: Cow<'static, [u8]>,
@@ -215,23 +198,6 @@ impl Arbitrary for SectionId {
             });
 
         proptest::prop_oneof![builtins, custom].boxed()
-    }
-}
-
-#[cfg(all(test, feature = "serde"))]
-mod serde_tests {
-    use super::*;
-
-    #[test]
-    fn serde_rejects_invalid_section_id() {
-        let result: Result<SectionId, _> = serde_json::from_str(r#""1bad""#);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn serde_accepts_valid_section_id() {
-        let id: SectionId = serde_json::from_str(r#""my_section""#).unwrap();
-        assert_eq!(id, SectionId::custom("my_section").unwrap());
     }
 }
 

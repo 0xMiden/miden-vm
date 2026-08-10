@@ -29,7 +29,6 @@ use tracing::{field::Empty, instrument};
 
 /// Output file struct
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct OutputFile {
     pub stack: Vec<String>,
 }

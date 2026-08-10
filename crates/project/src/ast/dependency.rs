@@ -11,7 +11,12 @@ pub struct DependencySpec {
     /// The version requirement specified for this dependency
     #[cfg_attr(
         feature = "serde",
-        serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")
+        serde(
+            rename = "version",
+            alias = "digest",
+            serialize_with = "serialization::serialize_version_requirement",
+            skip_serializing_if = "Option::is_none"
+        )
     )]
     pub version_or_digest: Option<VersionRequirement>,
     /// Whether or not the version requirement is inherited from the containing workspace
@@ -113,7 +118,7 @@ mod serialization {
     use miden_assembly_syntax::debuginfo::Span;
     use serde::{
         Deserialize,
-        de::{IntoDeserializer, MapAccess, Visitor},
+        de::{MapAccess, Visitor},
     };
 
     use super::DependencySpec;
@@ -124,7 +129,13 @@ mod serialization {
     struct DependencySpecTable {
         #[serde(default, skip)]
         name: Span<Arc<str>>,
-        #[serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            rename = "version",
+            alias = "digest",
+            default,
+            deserialize_with = "deserialize_version_requirement",
+            skip_serializing_if = "Option::is_none"
+        )]
         version_or_digest: Option<crate::VersionRequirement>,
         #[serde(default, skip_serializing_if = "super::does_not_inherit_from_workspace")]
         workspace: bool,
@@ -163,8 +174,8 @@ mod serialization {
             serde_untagged::UntaggedEnumVisitor::new()
                 .expecting("a dependency requirement string or dependency table")
                 .string(|value| {
-                    crate::VersionRequirement::deserialize(value.into_deserializer()).map(
-                        |version_or_digest| Self {
+                    parse_version_requirement(value)
+                        .map(|version_or_digest| Self {
                             name: Span::default(),
                             version_or_digest: Some(version_or_digest),
                             workspace: false,
@@ -173,12 +184,64 @@ mod serialization {
                             branch: None,
                             rev: None,
                             linkage: None,
-                        },
-                    )
+                        })
+                        .map_err(serde::de::Error::custom)
                 })
                 .map(|map| map.deserialize::<DependencySpecTable>().map(Into::into))
                 .deserialize(deserializer)
         }
+    }
+
+    pub(super) fn serialize_version_requirement<S>(
+        value: &Option<crate::VersionRequirement>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use alloc::string::ToString;
+
+        use serde::Serialize;
+
+        value.as_ref().map(ToString::to_string).serialize(serializer)
+    }
+
+    fn deserialize_version_requirement<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<crate::VersionRequirement>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Option::<alloc::string::String>::deserialize(deserializer)?;
+        value
+            .as_deref()
+            .map(parse_version_requirement)
+            .transpose()
+            .map_err(serde::de::Error::custom)
+    }
+
+    fn parse_version_requirement(
+        value: &str,
+    ) -> Result<crate::VersionRequirement, alloc::string::String> {
+        use alloc::string::ToString;
+        use core::str::FromStr;
+
+        use miden_core::Word;
+
+        if value == "*" {
+            return Ok(crate::VersionRequirement::from(crate::VersionReq::STAR));
+        }
+        if let Some((version, digest)) = value.split_once('#') {
+            let version = version.parse::<crate::SemVer>().map_err(|error| error.to_string())?;
+            let digest = Word::parse(digest).map_err(ToString::to_string)?;
+            return Ok(crate::VersionRequirement::Exact(crate::Version::new(version, digest)));
+        }
+        if let Ok(digest) = Word::parse(value) {
+            return Ok(crate::VersionRequirement::from(digest));
+        }
+        crate::VersionReq::from_str(value)
+            .map(crate::VersionRequirement::from)
+            .map_err(|error| error.to_string())
     }
 
     struct DependencyMapVisitor;

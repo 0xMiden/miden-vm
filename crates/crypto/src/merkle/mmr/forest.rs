@@ -33,7 +33,6 @@ use crate::{
 /// Forest sizes are capped at [`Forest::MAX_LEAVES`]. Use [`Forest::new`] or
 /// [`Forest::append_leaf`] to enforce the limit.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Forest(usize);
 
 impl Forest {
@@ -586,17 +585,6 @@ impl Deserializable for Forest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let value = source.read_usize()?;
         Self::new(value)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Forest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = usize::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
     }
 }
 

@@ -5,8 +5,6 @@ use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, text},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
@@ -27,8 +25,6 @@ use crate::{
 /// The hash of an external node is the hash of the procedure it represents, such that an external
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ExternalNode {
     digest: Word,
 }

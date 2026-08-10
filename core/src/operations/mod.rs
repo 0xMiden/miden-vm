@@ -1,8 +1,5 @@
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 mod debug_metadata;
 pub use debug_metadata::AssemblyOp;
 
@@ -139,7 +136,6 @@ pub mod opcodes {
 /// Note though that those operations have their own unique opcode which lives in the same 7-bit
 /// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------

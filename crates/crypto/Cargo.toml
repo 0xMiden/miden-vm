@@ -86,10 +86,9 @@ default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
 internal          = ["concurrent"]
-persistent-forest = ["rocksdb", "serde"]
+persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
-serde             = ["dep:serde", "serde?/alloc"]
-std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
+std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng"]
 testing           = ["arbitrary"]
 
 [dependencies]
@@ -117,7 +116,6 @@ rand             = { workspace = true }
 rand_chacha      = { workspace = true }
 rayon            = { optional = true, workspace = true }
 rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = true, workspace = true }
-serde            = { features = ["derive"], optional = true, workspace = true }
 sha2             = { workspace = true }
 sha3             = { workspace = true }
 subtle           = { workspace = true }
