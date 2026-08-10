@@ -742,7 +742,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-constraint-compiler",
  "miden-core",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-ace-codegen",
  "miden-core",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "miden-constraint-compiler"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "miden-precompiles"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "hashbrown",
  "itertools",
