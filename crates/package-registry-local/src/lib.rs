@@ -297,7 +297,7 @@ impl LocalPackageRegistry {
         let Ok(bytes) = fs::read(path) else {
             return false;
         };
-        let Ok(loaded) = MastPackage::read_from_bytes(&bytes) else {
+        let Ok(loaded) = MastPackage::read_from_bytes_trusted(&bytes) else {
             return false;
         };
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
@@ -340,7 +340,7 @@ impl LocalPackageRegistry {
         };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        let loaded = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: path.clone(),
                 error: error.to_string(),
@@ -433,12 +433,12 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(legacy_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
                 Ok(existing_package) => {
                     let existing_version =
                         Version::new(existing_package.version.clone(), existing_package.digest());
                     if existing_package.name == package.name && existing_version == *version {
-                        if Self::matches_after_untrusted_package_read(&existing_package, package) {
+                        if Self::matches_after_trusted_package_read(&existing_package, package) {
                             write_file_atomically(artifact_path, &existing_bytes)
                                 .map_err(LocalRegistryError::IndexWrite)
                         } else {
@@ -469,9 +469,9 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(artifact_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
                 Ok(existing_package)
-                    if Self::matches_after_untrusted_package_read(&existing_package, package) =>
+                    if Self::matches_after_trusted_package_read(&existing_package, package) =>
                 {
                     Ok(())
                 },
@@ -497,8 +497,8 @@ impl LocalPackageRegistry {
         }
     }
 
-    fn matches_after_untrusted_package_read(existing: &MastPackage, package: &MastPackage) -> bool {
-        MastPackage::read_from_bytes(&package.to_bytes())
+    fn matches_after_trusted_package_read(existing: &MastPackage, package: &MastPackage) -> bool {
+        MastPackage::read_from_bytes_trusted(&package.to_bytes())
             .is_ok_and(|expected| existing == &expected)
     }
 
@@ -1162,7 +1162,7 @@ mod tests {
         assert_eq!(Some(conflicting_package.digest()), published.version.digest);
         let error = second_registry
             .cache_package(conflicting_package.into())
-            .expect_err("cache repair should revalidate the artifact under the index lock");
+            .expect_err("cache repair should check the artifact under the index lock");
         assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
         assert_eq!(fs::read(&published.artifact_path).unwrap(), repaired_bytes);
     }
