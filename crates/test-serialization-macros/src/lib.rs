@@ -7,7 +7,7 @@ use quote::{ToTokens, quote};
 use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, parse_macro_input};
 
 /// Generates a property test which round-trips arbitrary values through
-/// [`Serializable::to_bytes`] and [`Deserializable::read_from_bytes`].
+/// `Serializable::to_bytes` and `Deserializable::read_from_bytes`.
 ///
 /// Generic types can be supplied with one or more `types(...)` arguments:
 /// ```rust

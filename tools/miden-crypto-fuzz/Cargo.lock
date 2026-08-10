@@ -543,7 +543,6 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rayon",
- "serde",
  "sha2",
  "sha3",
  "subtle",
