@@ -141,13 +141,13 @@ fn test_trace_event_from_stack() {
         .unwrap_program();
 
     let mut host = TestHost::default();
-    let output = miden_processor::execute_sync(
-        &program,
+    let output = FastProcessor::new_with_options(
         StackInputs::new(&[Felt::from_u32(1000)]).unwrap(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .unwrap()
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     assert_eq!(host.trace_handler, vec![1000]);
@@ -176,13 +176,13 @@ fn test_trace_event_manual_emit() {
         .unwrap_program();
 
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
-        &program,
+    FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .unwrap()
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     assert_eq!(host.trace_handler, vec![1000]);

@@ -2,7 +2,8 @@ use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    Program, StackInputs, advice::AdviceInputs,
+    Program, StackInputs,
+    advice::{AdviceError, AdviceInputs},
 };
 
 // PROGRAM EXECUTOR
@@ -14,9 +15,6 @@ use crate::{
 /// add instrumentation, or redirect to a different backend, while leaving the surrounding
 /// executor wiring untouched.
 ///
-/// The `new` constructor is infallible from the trait's perspective: invalid advice inputs are a
-/// caller bug, and the default [`FastProcessor`] implementation panics in that case, matching the
-/// contract of [`FastProcessor::new_with_options`].
 pub trait ProgramExecutor {
     /// Creates a new executor configured with the provided inputs and options.
     ///
@@ -29,9 +27,16 @@ pub trait ProgramExecutor {
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
-    ) -> Self
+    ) -> Result<Self, AdviceError>
     where
         Self: Sized;
+
+    /// Configures package-owned source and debug information for execution.
+    fn with_debug_info(self, package_debug_info: PackageDebugInfo) -> Self;
+
+    /// Configures the source node at which execution begins.
+    fn with_entrypoint_source_node(self, entrypoint_source_node: Option<DebugSourceNodeId>)
+    -> Self;
 
     /// Executes the provided program against the given host.
     fn execute<H: Host + Send>(
@@ -39,24 +44,6 @@ pub trait ProgramExecutor {
         program: &Program,
         host: &mut H,
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>;
-
-    /// Executes the provided program with package-owned source/debug context.
-    ///
-    /// When `entrypoint_source_node` is `Some`, the debug context is rooted at that node.
-    /// Executors that do not support package debug execution may fall back to [`Self::execute`].
-    fn execute_with_package_debug_info<H: Host + Send>(
-        self,
-        program: &Program,
-        package_debug_info: &PackageDebugInfo,
-        entrypoint_source_node: Option<DebugSourceNodeId>,
-        host: &mut H,
-    ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>
-    where
-        Self: Sized,
-    {
-        let _ = (package_debug_info, entrypoint_source_node);
-        self.execute(program, host)
-    }
 }
 
 impl ProgramExecutor for FastProcessor {
@@ -64,9 +51,21 @@ impl ProgramExecutor for FastProcessor {
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
-    ) -> Self {
+    ) -> Result<Self, AdviceError> {
         FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-            .expect("constructing FastProcessor failed due to invalid advice inputs")
+    }
+
+    fn with_debug_info(mut self, package_debug_info: PackageDebugInfo) -> Self {
+        self.package_debug_info = Some(package_debug_info);
+        self
+    }
+
+    fn with_entrypoint_source_node(
+        mut self,
+        entrypoint_source_node: Option<DebugSourceNodeId>,
+    ) -> Self {
+        self.entrypoint_source_node = entrypoint_source_node;
+        self
     }
 
     fn execute<H: Host + Send>(
@@ -74,37 +73,28 @@ impl ProgramExecutor for FastProcessor {
         program: &Program,
         host: &mut H,
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>> {
-        FastProcessor::execute(self, program, host)
-    }
-
-    fn execute_with_package_debug_info<H: Host + Send>(
-        self,
-        program: &Program,
-        package_debug_info: &PackageDebugInfo,
-        entrypoint_source_node: Option<DebugSourceNodeId>,
-        host: &mut H,
-    ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>> {
         async move {
-            match entrypoint_source_node {
-                Some(entrypoint_source_node) => {
+            match (self.package_debug_info.clone(), self.entrypoint_source_node) {
+                (Some(package_debug_info), Some(entrypoint_source_node)) => {
                     FastProcessor::execute_with_package_debug_info_at_source_node(
                         self,
                         program,
-                        package_debug_info,
+                        &package_debug_info,
                         entrypoint_source_node,
                         host,
                     )
                     .await
                 },
-                None => {
+                (Some(package_debug_info), None) => {
                     FastProcessor::execute_with_package_debug_info(
                         self,
                         program,
-                        package_debug_info,
+                        &package_debug_info,
                         host,
                     )
                     .await
                 },
+                (None, _) => FastProcessor::execute(self, program, host).await,
             }
         }
     }
@@ -132,7 +122,8 @@ mod tests {
             StackInputs::default(),
             AdviceInputs::default(),
             ExecutionOptions::default(),
-        );
+        )
+        .unwrap();
         let output = <FastProcessor as ProgramExecutor>::execute(
             processor,
             &program,
@@ -144,6 +135,18 @@ mod tests {
         // push.3 leaves 3 on top; `swap drop` restores the operand stack to its
         // fixed depth of 16 so the program ends with a well-formed output stack.
         assert_eq!(output.stack.get_element(0), Some(crate::Felt::from_u32(3)));
+    }
+
+    #[test]
+    fn program_executor_reports_invalid_advice_inputs() {
+        let advice_inputs =
+            AdviceInputs::default().with_map([(crate::Word::default(), vec![crate::Felt::ONE])]);
+        let options = ExecutionOptions::default().with_max_adv_map_elements(0);
+
+        let result =
+            <FastProcessor as ProgramExecutor>::new(StackInputs::default(), advice_inputs, options);
+
+        assert!(result.is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -159,12 +162,15 @@ mod tests {
             StackInputs::default(),
             AdviceInputs::default(),
             ExecutionOptions::default(),
+        )
+        .unwrap();
+        let processor = <FastProcessor as ProgramExecutor>::with_debug_info(
+            processor,
+            PackageDebugInfo::default(),
         );
-        let output = <FastProcessor as ProgramExecutor>::execute_with_package_debug_info(
+        let output = <FastProcessor as ProgramExecutor>::execute(
             processor,
             &program,
-            &PackageDebugInfo::default(),
-            None,
             &mut DefaultHost::default(),
         )
         .await

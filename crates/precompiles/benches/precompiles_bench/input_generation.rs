@@ -44,7 +44,7 @@ pub(crate) fn generate_advice_inputs(workload: PrecompileWorkload) -> AdviceInpu
     }
 
     assert_eq!(advice_stack.len(), workload.ecdsas * 40, "unexpected ECDSA advice length");
-    AdviceInputs::default().with_advice_stack(advice_stack)
+    AdviceInputs::default().with_stack(advice_stack)
 }
 
 fn ecdsa_message(index: u64) -> Word {

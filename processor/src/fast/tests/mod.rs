@@ -837,16 +837,17 @@ async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
         StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default(),
-    );
-    let err = <FastProcessor as ProgramExecutor>::execute_with_package_debug_info(
-        processor,
-        &fixture.program,
-        &fixture.debug_info,
-        Some(fixture.entrypoint_source_node_id),
-        &mut host,
     )
-    .await
-    .unwrap_err();
+    .unwrap();
+    let processor =
+        <FastProcessor as ProgramExecutor>::with_debug_info(processor, fixture.debug_info.clone());
+    let processor = <FastProcessor as ProgramExecutor>::with_entrypoint_source_node(
+        processor,
+        Some(fixture.entrypoint_source_node_id),
+    );
+    let err = <FastProcessor as ProgramExecutor>::execute(processor, &fixture.program, &mut host)
+        .await
+        .unwrap_err();
 
     assert_matches!(
         err,

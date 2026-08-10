@@ -675,9 +675,9 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.extend_advice_stack(inputs.advice_stack())?;
-        self.extend_merkle_store(inputs.store.inner_nodes())?;
-        self.extend_map(&inputs.map)
+        self.extend_advice_stack(inputs.stack())?;
+        self.extend_merkle_store(inputs.store().inner_nodes())?;
+        self.extend_map(inputs.map())
     }
 
     /// Consumes `self` and return its parts (stack, map, store).
@@ -791,7 +791,7 @@ mod tests {
         let mut mutation_stack = AdviceStack::new();
         mutation_stack.append_elements([Felt::new_unchecked(1), Felt::new_unchecked(2)]);
         let mut provider = AdviceProvider::new(
-            AdviceInputs::default().with_advice_stack(initial_stack),
+            AdviceInputs::default().with_stack(initial_stack),
             &Default::default(),
         )
         .unwrap();
