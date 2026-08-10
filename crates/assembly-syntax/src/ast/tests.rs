@@ -1623,6 +1623,65 @@ end
     assert_eq!(&formatted, expected);
 }
 
+/// `EmitImm` is printed as the equivalent `push.<id> emit drop` sequence, since `emit.<felt>`
+/// is not valid syntax.
+#[test]
+fn test_emit_imm_roundtrip_formatting() {
+    let event_name = "test::emit::roundtrip";
+    let event_id = EventId::from_name(event_name).as_felt();
+
+    let source = format!(
+        "\
+begin
+    push.1
+    emit
+    drop
+    emit.event(\"{event_name}\")
+end
+"
+    );
+
+    let context = SyntaxTestContext::default();
+    let source = source_file!(&context, source);
+    let module = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    let formatted = module.to_string();
+    let expected = format!(
+        "\
+namespace $exec
+
+begin
+    push.1
+    emit
+    drop
+    push.{event_id} emit drop
+end
+"
+    );
+    assert_eq!(&formatted, &expected);
+
+    // The printed output must parse back.
+    let source = source_file!(&context, &expected);
+    let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    let expanded = format!(
+        "\
+namespace $exec
+
+begin
+    push.1
+    emit
+    drop
+    push.{event_id}
+    emit
+    drop
+end
+"
+    );
+    let source = source_file!(&context, &expanded);
+    let expanded_module =
+        context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(reparsed, expanded_module);
+}
+
 /// `TraceImm` is printed as the equivalent `push.<id> trace drop` sequence, since `trace.<felt>`
 /// is not valid syntax.
 #[test]
