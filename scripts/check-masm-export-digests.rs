@@ -6,14 +6,16 @@ edition = "2024"
 [dependencies]
 miden-assembly-current = { package = "miden-assembly", path = "../crates/assembly" }
 miden-assembly-syntax-current = { package = "miden-assembly-syntax", path = "../crates/assembly-syntax" }
+miden-core-lib-current = { package = "miden-core-lib", path = "../crates/lib/core" }
 miden-mast-package-current = { package = "miden-mast-package", path = "../crates/mast-package" }
 miden-package-registry-current = { package = "miden-package-registry", path = "../crates/package-registry", features = ["resolver"] }
 
 # The release wrapper rewrites these tags to the latest release tag on main.
-miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0", features = ["resolver"] }
+miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-core-lib-previous = { package = "miden-core-lib", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0", features = ["resolver"] }
 ---
 
 use std::{
@@ -501,13 +503,17 @@ mod tests {
 mod current {
     use miden_assembly_current::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_current::prettier::PrettyPrint;
+    use miden_core_lib_current::CoreLibrary;
     use miden_mast_package_current::{Package, PackageExport};
-    use miden_package_registry_current::InMemoryPackageRegistry;
+    use miden_package_registry_current::{InMemoryPackageRegistry, PackageCache};
 
     use super::*;
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
+        store
+            .cache_package(CoreLibrary::default().precompiles_package())
+            .map_err(|err| format!("current: failed to cache precompiles package: {err}"))?;
         let mut project =
             Assembler::default().for_project_at_path(input, &mut store).map_err(|err| {
                 format!("current: failed to load project '{}': {err}", input.display())
@@ -551,13 +557,17 @@ mod current {
 mod previous {
     use miden_assembly_previous::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_previous::prettier::PrettyPrint;
+    use miden_core_lib_previous::CoreLibrary;
     use miden_mast_package_previous::{Package, PackageExport};
-    use miden_package_registry_previous::InMemoryPackageRegistry;
+    use miden_package_registry_previous::{InMemoryPackageRegistry, PackageCache};
 
     use super::*;
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
+        store
+            .cache_package(CoreLibrary::default().precompiles_package())
+            .map_err(|err| format!("previous: failed to cache precompiles package: {err}"))?;
         let mut project =
             Assembler::default().for_project_at_path(input, &mut store).map_err(|err| {
                 format!("previous: failed to load project '{}': {err}", input.display())
