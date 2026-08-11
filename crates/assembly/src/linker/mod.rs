@@ -733,7 +733,7 @@ impl Linker {
             .collect::<Vec<_>>();
         let original_callgraph = self.callgraph.clone();
 
-        let result = {
+        let result = (|| {
             let resolver = SymbolResolver::with_namespaces(self, namespaces, imports);
             let mut edges = Vec::new();
             let mut cache = ResolverCache::default();
@@ -836,7 +836,7 @@ impl Linker {
             } else {
                 Ok::<_, LinkerError>((linked_modules, callgraph, cycle))
             }
-        };
+        })();
 
         match result {
             Ok((linked_modules, callgraph, cycle)) => {
@@ -1465,31 +1465,51 @@ mod tests {
     }
 
     #[test]
-    fn analysis_mode_treats_unresolved_reference_as_fatal() {
-        let context = TestContext::default();
-        let module = context
-            .parse_module(source_file!(
-                &context,
-                r#"
-                namespace proj
+    fn fatal_link_error_rolls_back_symbol_status() {
+        for mode in [LinkMode::Strict, LinkMode::Analysis] {
+            let context = TestContext::default();
+            let module = context
+                .parse_module(source_file!(
+                    &context,
+                    r#"
+                    namespace proj
 
-                use {baz} from missing
+                    pub proc linked
+                        push.1
+                    end
 
-                pub proc a
-                    call.baz
-                end
-                "#
-            ))
-            .expect("module with an unresolved import must parse");
+                    pub proc unresolved
+                        call.::support::missing
+                    end
+                    "#
+                ))
+                .expect("module with an unresolved call must parse");
+            let support = context
+                .parse_module(source_file!(
+                    &context,
+                    r#"
+                    namespace support
 
-        let mut linker = Linker::new(context.source_manager());
-        let err = linker
-            .link_analysis([module], None)
-            .expect_err("analysis link must still reject an unresolved reference");
-        // The unresolved reference is a fatal error, not a nonfatal cycle diagnostic.
-        assert!(
-            !err.to_string().contains("found a cycle in the call graph"),
-            "analysis mode must not defer unresolved references, got: {err}"
-        );
+                    pub proc present
+                        push.1
+                    end
+                    "#
+                ))
+                .expect("support module must parse");
+
+            let mut linker = Linker::new(context.source_manager());
+            let err = match mode {
+                LinkMode::Strict => linker.link([module], [support]).map(drop),
+                LinkMode::Analysis => linker.link_analysis([module], [support]).map(drop),
+            }
+            .expect_err("an unresolved call must be fatal");
+
+            assert!(
+                !err.to_string().contains("found a cycle in the call graph"),
+                "an unresolved call must not be reported as a cycle, got: {err}"
+            );
+            assert!(linker[ModuleIndex::new(0)].is_unlinked());
+            assert!(linker[ModuleIndex::new(0)].symbols().all(Symbol::is_unlinked));
+        }
     }
 }
