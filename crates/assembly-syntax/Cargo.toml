@@ -24,6 +24,7 @@ std = [
     "thiserror/std",
     "proptest?/std",
 ]
+serde = ["dep:serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
@@ -43,6 +44,7 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
 semver = { version = "1.0", default-features = false }
+serde = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
 
@@ -51,6 +53,7 @@ env_logger.workspace = true
 miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }
+serde_json.workspace = true
 
 [build-dependencies]
 rustc_version = "0.4"

@@ -17,7 +17,8 @@ edition.workspace = true
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-mast-package/serde"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std", "serde?/std"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
@@ -25,6 +26,7 @@ miden-core.workspace = true
 miden-mast-package.workspace = true
 proptest = { workspace = true, optional = true }
 pubgrub = { version = "0.3", optional = true }
+serde = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 thiserror.workspace = true
 

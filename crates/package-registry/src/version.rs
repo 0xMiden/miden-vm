@@ -4,6 +4,8 @@ pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer}
 use miden_core::Word;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::VersionRequirement;
 
@@ -60,6 +62,29 @@ pub struct Version {
     /// This is the most precise version for a package, and uniquely identifies the canonical
     /// published artifact associated with a semantic version.
     pub digest: Option<Word>,
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Version {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use alloc::string::ToString;
+
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <alloc::string::String as Deserialize>::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl Version {

@@ -47,6 +47,8 @@ pub type Digest512 = Digest<DIGEST512_BYTES>;
 /// fixed-size outputs. The const parameter `N` specifies the digest size in bytes,
 /// defaulting to 32 bytes (256 bits).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "&str"))]
 #[repr(transparent)]
 pub struct Digest<const N: usize = DIGEST256_BYTES>([u8; N]);
 

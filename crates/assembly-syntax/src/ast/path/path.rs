@@ -21,6 +21,45 @@ impl fmt::Debug for Path {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Path {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.inner)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for &'de Path {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Visitor;
+
+        struct PathVisitor;
+
+        impl<'de> Visitor<'de> for PathVisitor {
+            type Value = &'de Path;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a borrowed Path")
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Path::validate(value).map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(PathVisitor)
+    }
+}
+
 impl ToOwned for Path {
     type Owned = PathBuf;
     #[inline]

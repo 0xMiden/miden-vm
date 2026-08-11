@@ -88,7 +88,8 @@ fuzzing           = []
 internal          = ["concurrent"]
 persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
-std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng"]
+serde             = ["dep:serde", "serde?/alloc"]
+std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
 testing           = ["arbitrary"]
 
 [dependencies]
@@ -116,6 +117,7 @@ rand             = { workspace = true }
 rand_chacha      = { workspace = true }
 rayon            = { optional = true, workspace = true }
 rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = true, workspace = true }
+serde            = { features = ["derive"], optional = true, workspace = true }
 sha2             = { workspace = true }
 sha3             = { workspace = true }
 subtle           = { workspace = true }

@@ -24,7 +24,8 @@ harness = false
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "dep:proptest-derive", "miden-assembly-syntax/arbitrary", "miden-core/arbitrary"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "miden-utils-indexing/std", "rustc-hash/std", "thiserror/std"]
+serde = ["dep:serde"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "miden-utils-indexing/std", "rustc-hash/std", "serde?/std", "thiserror/std"]
 
 [dependencies]
 # Miden dependencies
@@ -38,6 +39,7 @@ hashbrown.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 rustc-hash = { version = "2.1", default-features = false }
+serde = { workspace = true, optional = true }
 thiserror.workspace = true
 zerocopy.workspace = true
 

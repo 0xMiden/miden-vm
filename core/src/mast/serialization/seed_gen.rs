@@ -12,7 +12,7 @@ use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof},
+    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     serde::{ByteWriter, Serializable},
 };
 

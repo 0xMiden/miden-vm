@@ -1,7 +1,9 @@
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use core::{fmt, str::FromStr};
 
 use miden_assembly_syntax::debuginfo::Span;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::Word;
@@ -95,6 +97,27 @@ impl FromStr for VersionRequirement {
             return Ok(Self::from(digest));
         }
         VersionReq::from_str(value).map(Self::from).map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for VersionRequirement {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for VersionRequirement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as Deserialize>::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
     }
 }
 
