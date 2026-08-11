@@ -1,6 +1,6 @@
 use miden_assembly::Assembler;
 use miden_core::Felt;
-use miden_processor::{ExecutionOptions, StackInputs, advice::AdviceInputs};
+use miden_processor::{ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs};
 use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
 
@@ -489,12 +489,8 @@ fn run_insert_mem_with_max_size(
     let mut host = super::TestHost::default();
     let options = ExecutionOptions::default().with_max_adv_map_value_size(max_adv_map_value_size);
 
-    miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        options,
-    )?;
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .map_err(miden_processor::ExecutionError::advice_error_no_context)?
+        .execute_sync(&program, &mut host)?;
     Ok(())
 }

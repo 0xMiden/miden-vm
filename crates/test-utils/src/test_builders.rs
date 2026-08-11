@@ -237,7 +237,7 @@ macro_rules! build_test_by_mode {
         let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let store = $crate::crypto::MerkleStore::new();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_advice_stack(advice_stack)
+            .with_stack(advice_stack)
             .with_merkle_store(store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
@@ -269,7 +269,7 @@ macro_rules! build_test_by_mode {
         let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_advice_stack(advice_stack)
+            .with_stack(advice_stack)
             .with_merkle_store($advice_merkle_store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
@@ -302,7 +302,7 @@ macro_rules! build_test_by_mode {
         let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let advice_stack = $crate::advice_stack_from(&$advice_stack).unwrap();
         let advice_inputs = $crate::AdviceInputs::default()
-            .with_advice_stack(advice_stack)
+            .with_stack(advice_stack)
             .with_merkle_store($advice_merkle_store)
             .with_map($advice_map);
         let name = format!("test{}", line!());

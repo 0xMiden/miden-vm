@@ -348,7 +348,7 @@ fn run_core_program_with_advice(
     advice_stack.append_elements(advice.iter().copied());
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
-        AdviceInputs::default().with_advice_stack(advice_stack),
+        AdviceInputs::default().with_stack(advice_stack),
         ExecutionOptions::default(),
     )
     .expect("processor construction");
