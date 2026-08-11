@@ -329,6 +329,10 @@ pub enum OperationError {
     #[error("FRI operation failed: {0}")]
     FriError(String),
     #[error(
+        "Horner evaluation point at memory address {addr} in context {ctx} must be encoded as [alpha0, alpha1, 0, 0]"
+    )]
+    InvalidHornerEvaluationPointWord { ctx: ContextId, addr: u64 },
+    #[error(
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
     )]
     InvalidMerklePathLength { path_len: usize, depth: Felt },

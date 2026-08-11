@@ -105,7 +105,7 @@ impl ProofOrder {
     /// Decode a Lehmer rank into its AIR permutation.
     fn from_rank(rank: usize) -> Self {
         debug_assert!(rank < PROOF_ORDER_COUNT);
-        debug_assert!(rank <= u32::MAX as usize);
+        debug_assert!(u32::try_from(rank).is_ok());
 
         let tag = rank as u32;
         let mut rank = rank;
