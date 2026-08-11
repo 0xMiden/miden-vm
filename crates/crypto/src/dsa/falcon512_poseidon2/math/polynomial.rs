@@ -377,8 +377,38 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     Polynomial<F>
 {
     /// Multiply two polynomials using Karatsuba's divide-and-conquer algorithm.
+    ///
+    /// This returns the same product as [`Mul`], including the length of the coefficient vector,
+    /// for every pair of operands.
     pub fn karatsuba(&self, other: &Self) -> Self {
-        Polynomial::new(vector_karatsuba(&self.coefficients, &other.coefficients))
+        if self.coefficients.iter().all(Zero::is_zero)
+            || other.coefficients.iter().all(Zero::is_zero)
+        {
+            return Polynomial::new(Vec::new());
+        }
+
+        let self_len = self.coefficients.len();
+        let other_len = other.coefficients.len();
+        // `vector_karatsuba` only accepts operands of equal length that halve down to its base
+        // case of eight without ever passing through an odd length greater than eight, i.e.
+        // lengths of the form `m * 2^k` with `m <= 8`. Rounding up to a multiple of the block
+        // size below yields the smallest such length. Trailing zero coefficients do not change
+        // the polynomial they encode, so zero-extending both operands to it leaves the product
+        // unchanged.
+        let n = self_len.max(other_len);
+        let block = n.next_power_of_two().max(8) / 8;
+        let padded_len = n.next_multiple_of(block);
+
+        let mut self_coefficients = self.coefficients.clone();
+        let mut other_coefficients = other.coefficients.clone();
+        self_coefficients.resize(padded_len, F::zero());
+        other_coefficients.resize(padded_len, F::zero());
+
+        let mut product = vector_karatsuba(&self_coefficients, &other_coefficients);
+        // The product of the unpadded operands has degree at most (self_len - 1) + (other_len - 1),
+        // so every coefficient past that index comes from the zero-extension above.
+        product.truncate(self_len + other_len - 1);
+        Polynomial::new(product)
     }
 }
 
@@ -469,6 +499,14 @@ where
     }
 }
 
+/// Multiplies two coefficient vectors of equal length, which must halve down to the base case of
+/// eight without ever passing through an odd length greater than eight.
+///
+/// Halving an odd length greater than eight produces a low half and a high half of different
+/// sizes, which the recursion does not handle: the `zip`s that build the operand sums silently
+/// drop the top coefficient of the longer half, and the accumulation of the high sub-product runs
+/// past the end of the output buffer. Callers must establish both properties;
+/// [`Polynomial::karatsuba`] does so by zero-extending its operands.
 fn vector_karatsuba<
     F: Zero + AddAssign + Mul<Output = F> + Sub<Output = F> + Div<Output = F> + Clone,
 >(
@@ -650,8 +688,29 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 #[cfg(test)]
 mod tests {
+    use num::Zero;
+
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
+
+    /// Builds a polynomial of the given length with small, non-symmetric coefficients.
+    fn poly(len: usize) -> Polynomial<i64> {
+        Polynomial::new((0..len).map(|i| (i as i64 % 7) - 3).collect())
+    }
+
+    /// Asserts that `karatsuba` agrees with `Mul` coefficient for coefficient, lengths included.
+    fn assert_karatsuba_matches_mul(left_len: usize, right_len: usize) {
+        let left = poly(left_len);
+        let right = poly(right_len);
+
+        let expected = left.clone() * right.clone();
+        let actual = left.karatsuba(&right);
+
+        assert_eq!(
+            actual.coefficients, expected.coefficients,
+            "karatsuba disagrees with Mul for lengths ({left_len}, {right_len})"
+        );
+    }
 
     #[test]
     fn div_zero_by_nonzero_returns_zero() {
@@ -675,5 +734,67 @@ mod tests {
             prod.reduce_by_cyclotomic(N),
             Polynomial::reduce_negacyclic(&Polynomial::mul_modulo_p(&poly1, &poly2))
         );
+    }
+
+    // KARATSUBA
+    // ============================================================================================
+
+    /// A zero operand used to underflow the base case length `left.len() + right.len() - 1`.
+    #[test]
+    fn karatsuba_zero_operand_returns_zero() {
+        let empty = Polynomial::<i64>::new(vec![]);
+        let all_zeros = Polynomial::new(vec![0i64; 9]);
+        let nonzero = poly(3);
+
+        assert!(empty.karatsuba(&empty).is_zero());
+        assert!(empty.karatsuba(&nonzero).is_zero());
+        assert!(nonzero.karatsuba(&empty).is_zero());
+        assert!(all_zeros.karatsuba(&all_zeros).is_zero());
+        assert!(nonzero.karatsuba(&all_zeros).is_zero());
+    }
+
+    /// The smallest operands that used to be silently wrong rather than panicking: `1 * 1`
+    /// returned `1 - x^4`, because the high half of the shorter operand degenerated and the
+    /// `zip`s building the operand sums collapsed with it.
+    #[test]
+    fn karatsuba_of_one_times_one_is_one() {
+        let one_len_9 = Polynomial::new(vec![1i64, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let one_len_4 = Polynomial::new(vec![1i64, 0, 0, 0]);
+
+        assert_eq!(
+            one_len_9.karatsuba(&one_len_4).coefficients,
+            vec![1i64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
+
+    /// Exhaustive check that `karatsuba` is a drop-in replacement for `Mul` on small operands.
+    ///
+    /// This covers every shape that used to fail below length 25: unequal lengths that sliced the
+    /// shorter operand out of bounds, unequal lengths that returned a wrong product without
+    /// panicking, and equal odd lengths greater than eight whose high sub-product was accumulated
+    /// past the end of the output buffer.
+    #[test]
+    fn karatsuba_matches_mul_for_all_small_shapes() {
+        for left_len in 0..=24 {
+            for right_len in 0..=24 {
+                assert_karatsuba_matches_mul(left_len, right_len);
+            }
+        }
+    }
+
+    /// The same agreement at lengths past the exhaustive sweep: equal powers of two, which are
+    /// what `ntru_solve` and `babai_reduce` pass and for which the zero-extension must be a no-op,
+    /// plus larger unequal and odd lengths.
+    #[test]
+    fn karatsuba_matches_mul_at_larger_boundaries() {
+        for len in [32, 64, 128, 256, 512] {
+            assert_karatsuba_matches_mul(len, len);
+        }
+
+        for (left_len, right_len) in [(32, 5), (512, 7), (36, 36), (65, 65)] {
+            assert_karatsuba_matches_mul(left_len, right_len);
+        }
+
+        assert_eq!(poly(N).karatsuba(&poly(N)).coefficients.len(), 2 * N - 1);
     }
 }
