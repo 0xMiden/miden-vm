@@ -109,7 +109,7 @@ fn enforce_cryptostream_constraints<AB>(
 /// Stack layout:
 ///   s[0..8]    c0..c7       base-field coefficients (c0 = alpha^7 term, c7 = constant)
 ///   s[8..13]   (unused)     not affected by this operation
-///   s[13]      alpha_ptr    memory address of alpha
+///   s[13]      alpha_ptr    address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1) accumulator (quadratic extension element)
 ///
 /// Preservation of s[0..14] is enforced by the general stack transition constraints
@@ -183,12 +183,12 @@ fn enforce_hornerbase_constraints<AB>(
 ///   s[4..6]    (c2_0, c2_1)  alpha term
 ///   s[6..8]    (c3_0, c3_1)  constant term
 ///   s[8..13]   (unused)       not affected by this operation
-///   s[13]      alpha_ptr      memory address of alpha (word: [alpha0, alpha1, k0, k1])
+///   s[13]      alpha_ptr      address of the word [alpha0, alpha1, 0, 0]
 ///   s[14..16]  (acc0, acc1)   accumulator (quadratic extension element)
 ///
 /// Helper registers:
 ///   h[0..2]    (alpha0, alpha1) evaluation point
-///   h[2..4]    k0, k1           padding from the alpha memory word (unused by constraints)
+///   h[2..4]    unused
 ///   h[4..6]    (tmp0, tmp1)     intermediate result
 ///
 /// Horner steps:

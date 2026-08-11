@@ -828,20 +828,6 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_memory_read_element_pair(
-        &mut self,
-        element_0: Felt,
-        addr_0: Felt,
-        element_1: Felt,
-        addr_1: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    ) {
-        self.memory_reads.record_read_element(element_0, addr_0, ctx, clk);
-        self.memory_reads.record_read_element(element_1, addr_1, ctx, clk);
-    }
-
-    #[inline(always)]
     fn record_memory_read_dword(
         &mut self,
         words: [Word; 2],

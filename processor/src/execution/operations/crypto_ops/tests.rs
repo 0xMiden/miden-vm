@@ -14,6 +14,7 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
+    errors::{IoError, MemoryError, OperationError},
     fast::{FastProcessor, NoopTracer},
     processor::{Processor, SystemInterface},
 };
@@ -437,21 +438,18 @@ proptest! {
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
-        // Store alpha in memory at ALPHA_ADDR
-        // Memory format requirement: [alpha_0, alpha_1, k0, k1] (k0, k1 are unused but read)
         let alpha_word: Word = [felt(alpha_0), felt(alpha_1), ZERO, ZERO].into();
         let clk = processor.clock();
-        processor.memory_mut().write_word(
-            ContextId::root(),
-            felt(ALPHA_ADDR),
-            clk,
-            alpha_word,
-        ).unwrap();
+        processor
+            .memory_mut()
+            .write_word(ContextId::root(), felt(ALPHA_ADDR), clk, alpha_word)
+            .unwrap();
         processor.system_mut().increment_clock();
 
         // Execute the operation
-        let result = op_horner_eval_ext(&mut processor, &mut tracer);
-        prop_assert!(result.is_ok());
+        let helpers = op_horner_eval_ext(&mut processor, &mut tracer);
+        prop_assert!(helpers.is_ok());
+        let helpers = helpers.unwrap().to_user_op_helpers();
         processor.system_mut().increment_clock();
 
         // Compute expected result
@@ -470,6 +468,10 @@ proptest! {
         // acc_tmp = coef.iter().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc)
         let acc_tmp = coefficients.iter().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
         let acc_new = coefficients.iter().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
+
+        let acc_tmp_base: &[Felt] = acc_tmp.as_basis_coefficients_slice();
+        prop_assert_eq!(&helpers[..2], &[felt(alpha_0), felt(alpha_1)]);
+        prop_assert_eq!(&helpers[4..], acc_tmp_base);
 
         // Check stack state using stack_top()
         let stack = processor.stack_top();
@@ -499,6 +501,56 @@ proptest! {
         prop_assert_eq!(stack[1], acc_new_base[0], "acc_low at position 14");
         prop_assert_eq!(stack[0], acc_new_base[1], "acc_high at position 15");
     }
+}
+
+#[test]
+fn horner_eval_ops_reject_nonzero_eval_point_padding() {
+    let stack_inputs = [ZERO; 16];
+
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    let mut tracer = NoopTracer;
+    let clk = processor.clock();
+    processor
+        .memory_mut()
+        .write_word(ContextId::root(), ZERO, clk, [ZERO, ZERO, Felt::ONE, ZERO].into())
+        .unwrap();
+    assert!(matches!(
+        op_horner_eval_base(&mut processor, &mut tracer),
+        Err(IoError::Operation(OperationError::InvalidHornerEvaluationPointWord {
+            ctx,
+            addr,
+        })) if ctx == ContextId::root() && addr == 0
+    ));
+
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    let clk = processor.clock();
+    processor
+        .memory_mut()
+        .write_word(ContextId::root(), ZERO, clk, [ZERO, ZERO, ZERO, Felt::ONE].into())
+        .unwrap();
+    assert!(matches!(
+        op_horner_eval_ext(&mut processor, &mut tracer),
+        Err(IoError::Operation(OperationError::InvalidHornerEvaluationPointWord {
+            ctx,
+            addr,
+        })) if ctx == ContextId::root() && addr == 0
+    ));
+}
+
+#[test]
+fn horner_eval_base_rejects_unaligned_eval_point_address() {
+    const UNALIGNED_ADDR: u32 = 2;
+
+    let mut stack_inputs = [ZERO; 16];
+    stack_inputs[13] = Felt::from_u32(UNALIGNED_ADDR);
+
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    let mut tracer = NoopTracer;
+    assert!(matches!(
+        op_horner_eval_base(&mut processor, &mut tracer),
+        Err(IoError::Memory(MemoryError::UnalignedWordAccess { addr, ctx }))
+            if addr == UNALIGNED_ADDR && ctx == ContextId::root()
+    ));
 }
 
 // MERKLE TREE TESTS
