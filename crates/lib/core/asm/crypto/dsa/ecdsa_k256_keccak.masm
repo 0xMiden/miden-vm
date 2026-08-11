@@ -53,15 +53,34 @@ use miden::core::word
 #! Invocation: exec
 @locals(24)
 pub proc verify
-    locaddr.0
-    # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
-    exec.load_and_verify_public_key
-    # => [digest_ptr=loc[16], MSG_WORD, ...]
+    # load QX || QY from advice into the verifier public-key buffer while absorbing the same
+    # two chunks into the Poseidon2 `hash_elements` state. Since there are exactly 16 elements,
+    # the `hash_elements` capacity word is zero and no partial-block padding is required.
+    # `adv_pipe` exposes each just-written chunk in the rate slots in the same order that
+    # `mem_stream` would read it back from memory.
+    locaddr.0 padw padw padw
+    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[0], PK_COMM, MSG_WORD, ...]
+    adv_pipe
+    # => [QX_RATE[8], C=0w, write_ptr=loc[8], PK_COMM, MSG_WORD, ...]
+    hperm
+    # => [R0, R1, C, write_ptr=loc[8], PK_COMM, MSG_WORD, ...]
+    adv_pipe
+    # => [QY_RATE[8], C, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
+    hperm
+    # => [R0, R1, C, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
+    # assert Poseidon2::hash_elements(QX[8] || QY[8]) == PK_COMM.
+    exec.poseidon2::squeeze_digest
+    # => [PK_HASH, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
+    movup.4 movdn.8
+    # => [PK_HASH, PK_COMM, write_ptr=loc[16], MSG_WORD, ...]
+    assert_eqw.err="invalid public key commitment"
+    # => [write_ptr=loc[16], MSG_WORD, ...]
 
     movdn.4
     # => [MSG_WORD, digest_ptr=loc[16], ...]
 
-    # Stage MSG_WORD[32] in loc[16..24], hash it in-place via the memory-oriented Keccak precompile.
+    # stage MSG_WORD[32] in loc[16..24], hash it in-place via the memory-oriented Keccak precompile,
+    # then convert the digest bytes into the native little-endian scalar limbs used as ECDSA z.
     exec.store_word_u32s_le
     # => [digest_ptr, ...]  (MSG_U32[8] written to loc[16..24])
 
@@ -70,9 +89,41 @@ pub proc verify
     exec.keccak256::hash_1_chunk_mem
     # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    exec.load_keccak_digest_as_z
-    # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
-    exec.verify_digest_impl
+    dup sub.16 swap
+    # => [read_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    repeat.8
+        dup mem_load
+        exec.reverse_u32_bytes
+        swap add.1
+    end
+    # => [read_ptr=loc[24], PREHASH_U32[8], pubkey_ptr, ...]
+    drop
+    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
+
+    exec.prepare_verify_inputs
+    # => [U1, Q, U2, SIG_R, ...]
+
+    dupw.1
+    # => [Q, U1, Q, U2, SIG_R, ...]
+    exec.secp256k1::push_generator
+    # => [G, Q, U1, Q, U2, SIG_R, ...]
+    exec.word::eq
+    # => [is_q_generator, U1, Q, U2, SIG_R, ...]
+    if.true
+        movupw.2 swapw
+        # => [U1, U2, Q, SIG_R, ...]
+        exec.k1_scalar::add
+        # => [U1_PLUS_U2, Q, SIG_R, ...]
+        swapw dropw
+        # => [U1_PLUS_U2, SIG_R, ...]
+        exec.secp256k1::mul_scalar_generator
+    else
+        exec.secp256k1::push_generator
+        # => [G, U1, Q, U2, SIG_R, ...]
+        exec.secp256k1::msm2
+    end
+    # => [VERIFY_POINT, SIG_R, ...]
+    exec.assert_x_eq_scalar_k1
     # => [...]
 end
 

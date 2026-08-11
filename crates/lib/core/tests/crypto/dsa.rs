@@ -24,7 +24,7 @@ use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use crate::helpers::masm_store_felts;
 
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
-const VERIFY_EXPECTED_CYCLES: u64 = 1_584;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
 const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 const MESSAGE_PTR: u32 = 128;

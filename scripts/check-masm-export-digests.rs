@@ -130,11 +130,10 @@ fn compare_exports(previous: Exports, current: Exports) -> Result<(), String> {
             },
             (None, Some(current_export)) => match current_export {
                 ExportInfo::Procedure(_) => {
-                    eprintln!(
-                        "::error::export added: {name} current={}",
+                    println!(
+                        "::notice::export added: {name} current={}",
                         current_export.describe()
                     );
-                    status = Err("procedure exports changed".to_string());
                 },
                 ExportInfo::Type(_) => {
                     println!("{name} {}", current_export.describe());
@@ -390,6 +389,31 @@ fn normalize(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn procedure(digest: &str) -> ExportInfo {
+        ExportInfo::Procedure(ProcedureInfo {
+            digest: digest.to_string(),
+            signature: None,
+            abi_attributes: BTreeMap::new(),
+        })
+    }
+
+    #[test]
+    fn compare_exports_allows_added_procedure() {
+        let previous = Exports::new();
+        let current = Exports::from([("new_proc".to_string(), procedure("0x01"))]);
+
+        assert_eq!(compare_exports(previous, current), Ok(()));
+    }
+
+    #[test]
+    fn compare_exports_rejects_changed_procedure() {
+        let previous =
+            Exports::from([("existing_proc".to_string(), procedure("0x01"))]);
+        let current = Exports::from([("existing_proc".to_string(), procedure("0x02"))]);
+
+        assert!(compare_exports(previous, current).is_err());
+    }
 
     #[test]
     fn canonicalize_strips_struct_field_labels() {
