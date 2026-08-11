@@ -94,6 +94,11 @@
 #### Changes
 
 - [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
+## v0.29.2 (Unreleased)
+
+#### Changes
+
+- Added explicit unavailable and tagged Miden frame-base debug variable locations, replacing private compiler/debugger expression encodings for new packages and bumping the package debug-info wire format to version 3.
 
 ## v0.29.1 (2026-08-11)
 

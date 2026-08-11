@@ -8,7 +8,7 @@ use core::ops::Range;
 
 pub use self::{
     advice::SystemEventNode,
-    debug_var::{DebugVarInfo, DebugVarLocation},
+    debug_var::{DebugFrameBase, DebugVarInfo, DebugVarLocation},
     inline_call::DebugInlineCallInfo,
 };
 use crate::{

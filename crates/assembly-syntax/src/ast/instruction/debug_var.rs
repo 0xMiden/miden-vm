@@ -1,8 +1,8 @@
-use alloc::{format, sync::Arc, vec::Vec};
+use alloc::{format, sync::Arc};
 use core::{fmt, num::NonZeroU32};
 
 use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::Location;
 
@@ -130,6 +130,16 @@ impl fmt::Display for DebugVarInfo {
 // DEBUG VARIABLE LOCATION
 // ================================================================================================
 
+/// A frame base resolved into Miden execution coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DebugFrameBase {
+    /// The base value is stored in local memory at this signed FMP-relative offset.
+    Local(i16),
+    /// The base value is stored at this Miden memory element address.
+    Memory(u32),
+}
+
 /// Describes where a variable's value can be found during execution.
 ///
 /// This enum models the different ways a variable's value might be stored
@@ -149,22 +159,19 @@ pub enum DebugVarLocation {
     /// where offset is typically negative (locals are below FMP).
     /// For example, with 3 locals: local\[0\] has offset -3, local\[2\] has offset -1.
     Local(i16),
-    /// Variable is in WASM linear memory at an address computed from a global base
-    /// plus a byte offset: `value_of(global[global_index]) + byte_offset`.
+    /// The variable has no representable location at this program point.
+    Unavailable,
+    /// Variable is in Wasm linear memory at `value_of(base) + byte_offset`.
     ///
-    /// This corresponds to DWARF's `DW_OP_fbreg` where the frame base is a WASM
-    /// global (typically `__stack_pointer`). The byte offset is divided by the
-    /// element size (4 for i32) to get the Miden memory element address.
-    FrameBase {
-        /// WASM global index whose runtime value provides the base address.
-        global_index: u32,
+    /// The base is expressed entirely in Miden execution coordinates. Its runtime value and the
+    /// offset are byte addresses; the debugger converts the resulting address to a Miden memory
+    /// element address before reading the variable.
+    ResolvedFrameBase {
+        /// Resolved location containing the frame-base byte address.
+        base: DebugFrameBase,
         /// Byte offset from the base (may be positive or negative).
         byte_offset: i64,
     },
-    /// Complex location described by expression bytes.
-    /// This is used for variables that require computation to locate,
-    /// such as struct fields or array elements.
-    Expression(Vec<u8>),
 }
 
 impl fmt::Display for DebugVarLocation {
@@ -174,18 +181,14 @@ impl fmt::Display for DebugVarLocation {
             Self::Memory(addr) => write!(f, "mem[{addr}]"),
             Self::Const(val) => write!(f, "const({})", val.as_canonical_u64()),
             Self::Local(offset) => write!(f, "FMP{offset:+}"),
-            Self::FrameBase { global_index, byte_offset } => {
-                write!(f, "global[{global_index}]{byte_offset:+}")
-            },
-            Self::Expression(bytes) => {
-                write!(f, "expr(")?;
-                for (i, byte) in bytes.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{byte:02x}")?;
-                }
-                write!(f, ")")
+            Self::Unavailable => f.write_str("unavailable"),
+            Self::ResolvedFrameBase { base, byte_offset } => match base {
+                DebugFrameBase::Local(offset) => {
+                    write!(f, "frame-base(FMP{offset:+}){byte_offset:+}")
+                },
+                DebugFrameBase::Memory(address) => {
+                    write!(f, "frame-base(mem[{address}]){byte_offset:+}")
+                },
             },
         }
     }
@@ -213,13 +216,21 @@ impl Serializable for DebugVarLocation {
                 target.write_u8(3);
                 target.write_bytes(&offset.to_le_bytes());
             },
-            Self::Expression(bytes) => {
+            Self::Unavailable => {
                 target.write_u8(4);
-                bytes.write_into(target);
             },
-            Self::FrameBase { global_index, byte_offset } => {
+            Self::ResolvedFrameBase { base, byte_offset } => {
                 target.write_u8(5);
-                target.write_u32(*global_index);
+                match base {
+                    DebugFrameBase::Local(offset) => {
+                        target.write_u8(0);
+                        target.write_bytes(&offset.to_le_bytes());
+                    },
+                    DebugFrameBase::Memory(address) => {
+                        target.write_u8(1);
+                        target.write_u32(*address);
+                    },
+                }
                 target.write_bytes(&byte_offset.to_le_bytes());
             },
         }
@@ -240,15 +251,23 @@ impl Deserializable for DebugVarLocation {
                 let bytes = source.read_array::<2>()?;
                 Ok(Self::Local(i16::from_le_bytes(bytes)))
             },
-            4 => {
-                let bytes = read_bounded_bytes(source, "debug variable expression bytes")?;
-                Ok(Self::Expression(bytes))
-            },
+            4 => Ok(Self::Unavailable),
             5 => {
-                let global_index = source.read_u32()?;
+                let base = match source.read_u8()? {
+                    0 => {
+                        let bytes = source.read_array::<2>()?;
+                        DebugFrameBase::Local(i16::from_le_bytes(bytes))
+                    },
+                    1 => DebugFrameBase::Memory(source.read_u32()?),
+                    tag => {
+                        return Err(DeserializationError::InvalidValue(format!(
+                            "invalid resolved debug frame-base tag: {tag}"
+                        )));
+                    },
+                };
                 let bytes = source.read_array::<8>()?;
                 let byte_offset = i64::from_le_bytes(bytes);
-                Ok(Self::FrameBase { global_index, byte_offset })
+                Ok(Self::ResolvedFrameBase { base, byte_offset })
             },
             _ => Err(DeserializationError::InvalidValue(format!(
                 "invalid DebugVarLocation tag: {tag}"
@@ -257,22 +276,14 @@ impl Deserializable for DebugVarLocation {
     }
 
     fn min_serialized_size() -> usize {
-        // `Stack` is encoded as a one-byte tag followed by a one-byte stack position.
-        u8::min_serialized_size() + u8::min_serialized_size()
+        // `Unavailable` is encoded as a one-byte tag with no payload.
+        u8::min_serialized_size()
     }
-}
-
-fn read_bounded_bytes<R: ByteReader>(
-    source: &mut R,
-    label: &str,
-) -> Result<Vec<u8>, DeserializationError> {
-    let len = read_bounded_len(source, label, 1)?;
-    source.read_slice(len).map(<[u8]>::to_vec)
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::ToString;
+    use alloc::{string::ToString, vec::Vec};
 
     use miden_core::serde::{Deserializable, Serializable, SliceReader};
     use miden_debug_types::{ByteIndex, Uri};
@@ -283,18 +294,6 @@ mod tests {
     fn debug_var_info_display_simple() {
         let var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
         assert_eq!(var.to_string(), "var.x = stack[0]");
-    }
-
-    #[test]
-    fn debug_var_location_rejects_oversized_expression_length() {
-        let bytes = [4, 0x08, 0x2a, 0xfe, 0xfe, 0x01];
-        let mut reader = SliceReader::new(&bytes);
-        let err = DebugVarLocation::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("debug variable expression bytes count"));
-        assert!(message.contains("exceeds remaining input"));
     }
 
     #[test]
@@ -322,13 +321,14 @@ mod tests {
         assert_eq!(DebugVarLocation::Const(Felt::new_unchecked(42)).to_string(), "const(42)");
         assert_eq!(DebugVarLocation::Local(-3).to_string(), "FMP-3");
         assert_eq!(
-            DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 }.to_string(),
-            "global[20]-12"
+            DebugVarLocation::ResolvedFrameBase {
+                base: DebugFrameBase::Local(-3),
+                byte_offset: 12,
+            }
+            .to_string(),
+            "frame-base(FMP-3)+12"
         );
-        assert_eq!(
-            DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]).to_string(),
-            "expr(10 20 30)"
-        );
+        assert_eq!(DebugVarLocation::Unavailable.to_string(), "unavailable");
     }
 
     #[test]
@@ -338,8 +338,15 @@ mod tests {
             DebugVarLocation::Memory(0xdead_beef),
             DebugVarLocation::Const(Felt::new_unchecked(999)),
             DebugVarLocation::Local(-3),
-            DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 },
-            DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
+            DebugVarLocation::Unavailable,
+            DebugVarLocation::ResolvedFrameBase {
+                base: DebugFrameBase::Local(-3),
+                byte_offset: 28,
+            },
+            DebugVarLocation::ResolvedFrameBase {
+                base: DebugFrameBase::Memory(100),
+                byte_offset: -16,
+            },
         ];
 
         for loc in &locations {
@@ -353,24 +360,28 @@ mod tests {
 
     #[test]
     fn debug_var_location_min_serialized_size_matches_shortest_variant() {
-        let locations = [DebugVarLocation::Stack(0), DebugVarLocation::Expression(Vec::new())];
+        let location = DebugVarLocation::Unavailable;
         let min_serialized_size = DebugVarLocation::min_serialized_size();
+        let mut bytes = Vec::new();
+        location.write_into(&mut bytes);
 
-        assert_eq!(min_serialized_size, 2);
-        for location in locations {
-            let mut bytes = Vec::new();
-            location.write_into(&mut bytes);
-            assert_eq!(bytes.len(), min_serialized_size);
-        }
+        assert_eq!(min_serialized_size, 1);
+        assert_eq!(bytes.len(), min_serialized_size);
     }
 
     #[test]
     fn debug_var_info_set_value_location() {
         let mut var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
-        var.set_value_location(DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 });
+        var.set_value_location(DebugVarLocation::ResolvedFrameBase {
+            base: DebugFrameBase::Local(-2),
+            byte_offset: 12,
+        });
         assert_eq!(
             var.value_location(),
-            &DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 }
+            &DebugVarLocation::ResolvedFrameBase {
+                base: DebugFrameBase::Local(-2),
+                byte_offset: 12,
+            }
         );
     }
 }
