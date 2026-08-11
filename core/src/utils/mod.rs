@@ -89,7 +89,14 @@ where
     I: Clone + Into<u64>,
 {
     match bound {
-        Bound::Excluded(i) => i.clone().into().saturating_sub(1),
+        Bound::Excluded(i) => {
+            let val = i.clone().into();
+            if is_start {
+                val.saturating_add(1)
+            } else {
+                val.saturating_sub(1)
+            }
+        },
         Bound::Included(i) => i.clone().into(),
         Bound::Unbounded => {
             if is_start {
@@ -193,6 +200,17 @@ mod tests {
             // Should be equal
             prop_assert_eq!(felts, roundtrip_felts);
         }
+    }
+
+    #[test]
+    fn test_bound_into_included_u64() {
+        let val = 10u64;
+        assert_eq!(bound_into_included_u64(Bound::Included(&val), true), 10);
+        assert_eq!(bound_into_included_u64(Bound::Included(&val), false), 10);
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&val), true), 11);
+        assert_eq!(bound_into_included_u64(Bound::Excluded(&val), false), 9);
+        assert_eq!(bound_into_included_u64(Bound::<&u64>::Unbounded, true), 0);
+        assert_eq!(bound_into_included_u64(Bound::<&u64>::Unbounded, false), u64::MAX);
     }
 
     #[test]
