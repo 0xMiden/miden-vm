@@ -94,6 +94,63 @@ pub use byte_reader::{BudgetedReader, ByteReader, ReadManyIter, SliceReader};
 mod byte_writer;
 pub use byte_writer::ByteWriter;
 
+// BOUNDED LENGTH HELPERS
+// ================================================================================================
+
+/// Reads and validates a serialized length before it is used for allocation.
+///
+/// `label` names the collection being read and is only used to build the error message.
+/// `min_element_size` is the minimum number of bytes one element occupies once serialized.
+///
+/// # Errors
+/// Returns an error if the length cannot be read, or if it fails the checks described in
+/// [`validate_bounded_len`].
+pub fn read_bounded_len<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+    min_element_size: usize,
+) -> Result<usize, DeserializationError> {
+    let len = source.read_usize()?;
+    validate_bounded_len(source, label, len, min_element_size)?;
+    Ok(len)
+}
+
+/// Validates that a serialized length fits both the reader budget and remaining input.
+///
+/// This guards against malicious length prefixes that would otherwise cause a compact payload
+/// to be amplified into a large allocation.
+///
+/// # Errors
+/// Returns [`DeserializationError::InvalidValue`] if:
+/// * `len` exceeds the number of elements the reader's remaining budget allows.
+/// * `len * min_element_size` overflows.
+/// * The source does not hold `len * min_element_size` more bytes.
+pub fn validate_bounded_len<R: ByteReader>(
+    source: &R,
+    label: &str,
+    len: usize,
+    min_element_size: usize,
+) -> Result<(), DeserializationError> {
+    let max_len = source.max_alloc(min_element_size);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds budget {max_len}"
+        )));
+    }
+
+    let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
+        DeserializationError::InvalidValue(format!(
+            "{label} count {len} overflows minimum serialized size {min_element_size}"
+        ))
+    })?;
+    source.check_eor(min_bytes).map_err(|err| match err {
+        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds remaining input"
+        )),
+        err => err,
+    })
+}
+
 // SERIALIZABLE TRAIT
 // ================================================================================================
 
@@ -923,6 +980,49 @@ mod tests {
         let result = BTreeSet::<u8>::read_from_bytes(&bytes);
 
         assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn read_bounded_len_accepts_a_length_backed_by_enough_input() {
+        let mut bytes = 3usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 3]);
+        let mut source = SliceReader::new(&bytes);
+
+        assert_eq!(read_bounded_len(&mut source, "elements", 1).unwrap(), 3);
+    }
+
+    #[test]
+    fn read_bounded_len_rejects_a_length_exceeding_remaining_input() {
+        let mut bytes = 8usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 3]);
+        let mut source = SliceReader::new(&bytes);
+
+        assert!(matches!(
+            read_bounded_len(&mut source, "elements", 1),
+            Err(DeserializationError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn read_bounded_len_rejects_a_length_exceeding_the_budget() {
+        let mut bytes = 64usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 64]);
+        let mut source = BudgetedReader::new(SliceReader::new(&bytes), 16);
+
+        assert!(matches!(
+            read_bounded_len(&mut source, "elements", 1),
+            Err(DeserializationError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn validate_bounded_len_rejects_a_length_overflowing_the_element_size() {
+        let source = SliceReader::new(&[]);
+
+        assert!(matches!(
+            validate_bounded_len(&source, "elements", usize::MAX, 2),
+            Err(DeserializationError::InvalidValue(_))
+        ));
     }
 
     #[test]

@@ -768,6 +768,7 @@ dependencies = [
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
+ "miden-serde-utils",
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",

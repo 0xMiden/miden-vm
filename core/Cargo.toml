@@ -34,6 +34,7 @@ std = [
     "miden-crypto/std",
     "miden-debug-types/std",
     "miden-formatting/std",
+    "miden-serde-utils/std",
     "miden-utils-indexing/std",
     "miden-utils-sync/std",
     "thiserror/std",
@@ -53,6 +54,7 @@ fuzzing = []
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
+miden-serde-utils.workspace = true
 miden-utils-core-derive.workspace = true
 miden-utils-indexing.workspace = true
 miden-utils-sync.workspace = true
