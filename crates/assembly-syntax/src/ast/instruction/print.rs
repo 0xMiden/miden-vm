@@ -342,11 +342,7 @@ impl PrettyPrint for Instruction {
             // `trace.<FELT_IMM>` is invalid syntax, so to support a `print -> parse` round trip
             // we print the equivalent `push.<value> trace drop` sequence instead.
             Self::TraceImm(value) => {
-                let value = match value {
-                    Immediate::Value(value) => display(*value),
-                    Immediate::Constant(name) => text(name),
-                };
-                flatten(const_text("push") + const_text(".") + value + const_text(" trace drop"))
+                flatten(inst_with_felt_imm("push", value) + const_text(" trace drop"))
             },
 
             // Handled by the early return for !has_textual_representation()
