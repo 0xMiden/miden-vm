@@ -30,6 +30,7 @@
 #### Features
 
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
+- Validated `CsrMatrix` on deserialization, so an `indptr` that does not describe `data` is rejected by `read_from()` instead of panicking later in `row()` ([#3591](https://github.com/0xMiden/miden-vm/issues/3591)).
 
 ## v0.29.0 (2026-08-04)
 

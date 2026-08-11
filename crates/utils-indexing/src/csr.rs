@@ -4,7 +4,7 @@
 //! data. It's commonly used for storing decorator IDs, assembly operation IDs, and similar
 //! sparse mappings in the Miden VM.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -372,7 +372,15 @@ where
             DeserializationError::InvalidValue("indptr too large for IndexVec".into())
         })?;
 
-        Ok(Self { data, indptr })
+        // `indptr` holds offsets into `data`, and the accessors slice `data` with them without
+        // re-checking. A decoded pair that breaks the structural invariants would therefore panic
+        // in `row()` instead of being reported here.
+        let matrix = Self { data, indptr };
+        matrix
+            .validate()
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+
+        Ok(matrix)
     }
 
     /// Returns the minimum serialized size for a CsrMatrix.
@@ -538,5 +546,51 @@ mod tests {
         let restored: CsrMatrix<TestRowId, u32> = CsrMatrix::read_from(&mut reader).unwrap();
 
         assert_eq!(csr, restored);
+    }
+
+    /// Encodes a matrix in the wire format from raw parts, bypassing [`CsrMatrix::push_row`].
+    fn encode_parts(data: &[u32], indptr: &[usize]) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.write_usize(data.len());
+        for value in data {
+            value.write_into(&mut bytes);
+        }
+        bytes.write_usize(indptr.len());
+        for &ptr in indptr {
+            bytes.write_usize(ptr);
+        }
+        bytes
+    }
+
+    fn read_parts(
+        data: &[u32],
+        indptr: &[usize],
+    ) -> Result<CsrMatrix<TestRowId, u32>, DeserializationError> {
+        CsrMatrix::read_from_bytes(&encode_parts(data, indptr))
+    }
+
+    #[test]
+    fn test_read_from_rejects_indptr_past_end_of_data() {
+        // Row 0 would span `data[0..5]`, but no data was encoded.
+        assert!(read_parts(&[], &[0, 5]).is_err());
+    }
+
+    #[test]
+    fn test_read_from_rejects_non_monotonic_indptr() {
+        // Row 1 would span `data[2..1]`, i.e. a reversed range.
+        assert!(read_parts(&[1, 2], &[0, 2, 1]).is_err());
+    }
+
+    #[test]
+    fn test_read_from_rejects_indptr_not_starting_at_zero() {
+        assert!(read_parts(&[1], &[1, 1]).is_err());
+    }
+
+    #[test]
+    fn test_read_from_accepts_a_valid_encoding() {
+        let csr = read_parts(&[1, 2, 3], &[0, 2, 3]).unwrap();
+        assert_eq!(csr.num_rows(), 2);
+        assert_eq!(csr.row(TestRowId::from(0)), Some([1, 2].as_slice()));
+        assert_eq!(csr.row(TestRowId::from(1)), Some([3].as_slice()));
     }
 }
