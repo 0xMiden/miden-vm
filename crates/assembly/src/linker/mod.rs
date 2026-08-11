@@ -712,9 +712,14 @@ impl Linker {
             return Err(LinkerError::Empty);
         }
 
-        // If no changes are being made, we're done
+        // If no changes are being made, report or reject any cycle already committed by analysis
+        // mode.
         if self.modules.iter().all(LinkModule::is_linked) {
-            return Ok(None);
+            return match self.callgraph.toposort() {
+                Err(cycle) if mode == LinkMode::Strict => Err(self.cycle_error(cycle)),
+                Err(cycle) => Ok(Some(cycle)),
+                Ok(_) => Ok(None),
+            };
         }
 
         // Obtain a set of resolvers for the pending modules so that we can do name resolution
@@ -1355,6 +1360,20 @@ mod tests {
             .topological_sort_from_root(independent)
             .expect("a procedure outside the cycle must still be liftable");
         assert_eq!(sorted, vec![independent]);
+
+        // Once analysis mode commits the linked graph, later calls must still observe its cycle.
+        let repeated = linker
+            .link_analysis([], [])
+            .expect("repeated analysis must preserve the cycle diagnostic");
+        assert_eq!(repeated.cycle, analysis.cycle);
+
+        let err = linker
+            .link([], [])
+            .expect_err("strict linking must reject a cycle committed by analysis mode");
+        assert!(
+            err.to_string().contains("found a cycle in the call graph"),
+            "strict link should report the committed cycle, got: {err}"
+        );
     }
 
     #[test]
