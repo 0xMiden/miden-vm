@@ -211,7 +211,7 @@ mod tests {
     use miden_assembly::Assembler;
 
     use super::TestHost;
-    use crate::{AdviceInputs, ExecutionOptions, Program, StackInputs};
+    use crate::{AdviceInputs, ExecutionOptions, FastProcessor, Program, StackInputs};
 
     #[test]
     fn test_host_records_trace_and_snapshot() {
@@ -234,13 +234,13 @@ mod tests {
             .unwrap()
             .unwrap_program();
         let mut host = TestHost::default();
-        crate::execute_sync(
-            &program,
+        FastProcessor::new_with_options(
             StackInputs::default(),
             AdviceInputs::default(),
-            &mut host,
             ExecutionOptions::default(),
         )
+        .expect("failed to construct FastProcessor")
+        .execute_sync(&program, &mut host)
         .unwrap();
 
         // Each trace id is recorded, in emission order.

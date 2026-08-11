@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, Felt, ProcessorState, Program, StackInputs, StackOutputs,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, Program, StackInputs,
+    StackOutputs,
     advice::AdviceInputs,
     event::{EventName, SystemEvent, TraceError},
 };
@@ -37,13 +38,13 @@ fn test_trace_event_handling() {
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
-        &program,
+    FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     assert_eq!(host.event_handler, vec![3000, 4000]);
@@ -71,13 +72,13 @@ fn test_unhandled_trace_does_not_raise_error() {
 
     // No trace handler is registered on this host.
     let mut host = DefaultHost::default();
-    let output = miden_processor::execute_sync(
-        &program,
+    let output = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut host)
     .expect("emitting an unhandled trace event must not abort execution");
 
     assert_eq!(output.stack, StackOutputs::default());
@@ -114,13 +115,13 @@ fn test_trace_handler_registry() {
     host.register_trace_handler(EventName::new(trace_name), Arc::new(recorder))
         .unwrap();
 
-    miden_processor::execute_sync(
-        &program,
+    FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .expect("failed to construct FastProcessor")
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     let recorded = recorded.lock().unwrap();
@@ -140,13 +141,13 @@ fn test_trace_event_from_stack() {
         .unwrap_program();
 
     let mut host = TestHost::default();
-    let output = miden_processor::execute_sync(
-        &program,
+    let output = FastProcessor::new_with_options(
         StackInputs::new(&[Felt::from_u32(1000)]).unwrap(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .unwrap()
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     assert_eq!(host.trace_handler, vec![1000]);
@@ -175,13 +176,13 @@ fn test_trace_event_manual_emit() {
         .unwrap_program();
 
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
-        &program,
+    FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
-        &mut host,
         ExecutionOptions::default(),
     )
+    .unwrap()
+    .execute_sync(&program, &mut host)
     .unwrap();
 
     assert_eq!(host.trace_handler, vec![1000]);
