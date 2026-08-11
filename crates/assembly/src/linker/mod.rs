@@ -1295,6 +1295,7 @@ mod tests {
 
                 pub proc a
                     call.b
+                    call.leaf
                 end
 
                 pub proc b
@@ -1303,6 +1304,10 @@ mod tests {
 
                 pub proc caller
                     call.a
+                end
+
+                pub proc leaf
+                    push.1
                 end
 
                 pub proc independent
@@ -1324,9 +1329,10 @@ mod tests {
         );
         assert!(analysis.has_cycle(), "analysis must report the static recursion cycle");
         let cycle: BTreeSet<String> = analysis.cycle.iter().cloned().collect();
-        assert!(
-            cycle.contains("::proj::a") && cycle.contains("::proj::b"),
-            "cycle diagnostic should report the recursive procedure paths, got: {cycle:?}"
+        assert_eq!(
+            cycle,
+            BTreeSet::from(["::proj::a".to_string(), "::proj::b".to_string()]),
+            "cycle diagnostic must exclude acyclic callees"
         );
 
         let module_index = analysis.module_indices[0];
