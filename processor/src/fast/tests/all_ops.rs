@@ -136,9 +136,41 @@ fn test_basic_block(
 
 // Workaround to make insta and rstest work together.
 // See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
+//
+// `rstest` names each generated test thread after the full `Debug` output of every
+// `#[values(..)]` argument (e.g. `..._stack_inputs_13_vec![Felt::from_u32(1), ...]_operations_45_vec![...]`).
+// For `test_basic_block` below, that produces snapshot file names over 250 characters long,
+// which exceeds Windows' default 260-character path limit once combined with a repo checkout
+// path — `git clone` on Windows fails with "Filename too long" before any tests can even run.
+//
+// `rstest` already numbers each `#[values(..)]` entry (the `_NN_` after each parameter name),
+// and that pair of indices alone uniquely identifies a test case, so we extract just the
+// indices instead of embedding the full Debug-formatted values. (insta additionally prepends
+// its own `<crate>__<module path>__` prefix to whatever name we return here, so the final
+// snapshot filename is `miden_processor__fast__tests__all_ops__case_NN_NN.snap` — still under
+// 55 characters, well within Windows' limit.)
 #[fixture]
 fn testname() -> String {
-    // Replace `::` with `__` to make snapshot file names Windows-compatible.
-    // Windows does not allow `:` in file names.
-    std::thread::current().name().unwrap().replace("::", "__")
+    let full_name = std::thread::current().name().unwrap().replace("::", "__");
+
+    let stack_inputs_idx = extract_index_after(&full_name, "stack_inputs_");
+    let operations_idx = extract_index_after(&full_name, "operations_");
+
+    match (stack_inputs_idx, operations_idx) {
+        (Some(a), Some(b)) => {
+            alloc::format!("miden_processor__fast__tests__all_ops__case_{a}_{b}")
+        },
+        // Fall back to the full (verbose) name for any test that doesn't match the
+        // expected `..._NN_vec..._NN_vec...` shape from the two `#[values(..)]`
+        // parameters, so this fixture stays safe to reuse elsewhere.
+        _ => full_name,
+    }
+}
+
+/// Reads the run of ASCII digits immediately following the first occurrence of `marker` in
+/// `s`, e.g. `extract_index_after("..._stack_inputs_13_vec...", "stack_inputs_") == Some("13")`.
+fn extract_index_after<'a>(s: &'a str, marker: &str) -> Option<&'a str> {
+    let after = &s[s.find(marker)? + marker.len()..];
+    let digit_len = after.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_len == 0 { None } else { Some(&after[..digit_len]) }
 }
