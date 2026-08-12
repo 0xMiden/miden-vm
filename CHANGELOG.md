@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.29.1 (Unreleased)
+## v0.29.1 (2026-08-11)
 
 #### Fixes
 
