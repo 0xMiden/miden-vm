@@ -16,9 +16,10 @@
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
 /// Functions in this module generate the public-key commitment and native advice witness expected
-/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
-/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
-/// Rust verifier, the MASM verifier intentionally accepts high-s values.
+/// by the `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes` ABIs. The public-key
+/// coordinates are bound by that commitment, but `r` and `s` are not committed to a particular
+/// signature encoding. Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally
+/// accepts high-s values.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
@@ -44,7 +45,7 @@ pub mod ecdsa_k256_keccak {
     }
 
     /// Encodes the provided public key and signature into the native advice-stack format expected
-    /// by `ecdsa_k256_keccak::verify`.
+    /// by `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The encoding is the structural order consumed from the advice stack:
     /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
@@ -68,7 +69,8 @@ pub mod ecdsa_k256_keccak {
         out
     }
 
-    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.
+    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify` and
+    /// `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The commitment is delegated to [`PublicKey::to_commitment()`], which commits to the same
     /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].
