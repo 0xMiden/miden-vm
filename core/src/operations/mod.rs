@@ -1,7 +1,7 @@
 use core::fmt;
 
 mod debug_metadata;
-pub use debug_metadata::{AssemblyOp, DebugInlineCallInfo};
+pub use debug_metadata::AssemblyOp;
 
 use crate::{
     Felt,

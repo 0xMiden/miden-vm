@@ -1,9 +1,12 @@
+use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
     diagnostics::Report,
 };
 use miden_core::operations::{AssemblyOp, Operation};
+use miden_mast_package::debug_info::DebugSourceInlineCall;
 use smallvec::SmallVec;
 
 use crate::{
@@ -26,15 +29,21 @@ impl Assembler {
         caller: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
         let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
-            InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
+            InvokeKind::ProcRef => Ok(resolved.node),
+            InvokeKind::Exec => {
+                mast_forest_builder.record_exec_inline_calls(resolved.node, &inline_calls)?;
+                Ok(resolved.node)
+            },
             InvokeKind::Call | InvokeKind::SysCall => mast_forest_builder.ensure_call_node_ref(
                 resolved.node,
                 matches!(kind, InvokeKind::SysCall),
                 asm_op.expect("call and syscall invocations must provide an AssemblyOp"),
+                inline_calls,
             ),
         }
     }
@@ -44,8 +53,9 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_ref(false, asm_op)?;
+        let dyn_node_ref = mast_forest_builder.ensure_dyn_node_ref(false, asm_op, inline_calls)?;
 
         Ok(Some(dyn_node_ref))
     }
@@ -55,8 +65,10 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<Option<MastNodeRef>, Report> {
-        let dyn_call_node_ref = mast_forest_builder.ensure_dyn_node_ref(true, asm_op)?;
+        let dyn_call_node_ref =
+            mast_forest_builder.ensure_dyn_node_ref(true, asm_op, inline_calls)?;
 
         Ok(Some(dyn_call_node_ref))
     }

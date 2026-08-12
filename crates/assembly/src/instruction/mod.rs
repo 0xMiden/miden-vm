@@ -542,6 +542,7 @@ impl Assembler {
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Exec,
@@ -549,10 +550,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         None,
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::Call(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Call,
@@ -560,10 +563,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("call instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::SysCall(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::SysCall,
@@ -571,19 +576,24 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("syscall instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::DynExec => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dynexec(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dynexec instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::DynCall => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dyncall(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dyncall instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,

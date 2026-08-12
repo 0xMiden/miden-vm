@@ -6,14 +6,14 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ast::{DebugVarInfo, Instruction},
+    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
     debuginfo::{Location, Span},
     diagnostics::Report,
 };
 use miden_core::{
     Felt, Word,
     events::SystemEvent,
-    operations::{AssemblyOp, DebugInlineCallInfo, Operation},
+    operations::{AssemblyOp, Operation},
 };
 use miden_mast_package::debug_info::{
     DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
@@ -47,7 +47,7 @@ struct PendingAsmOp {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ActiveInlineCall {
+pub(super) struct ActiveInlineCall {
     callee_idx: DebugFunctionIdx,
     loc_idx: DebugLocIdx,
 }
@@ -109,10 +109,20 @@ impl<'a> BasicBlockBuilder<'a> {
                 asm_ops: Vec::new(),
                 debug_vars: Default::default(),
                 inline_calls: Default::default(),
-                active_inline_calls: Default::default(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
         }
+    }
+
+    pub(super) fn with_active_inline_calls(
+        wrapper: Option<BodyWrapper>,
+        mast_forest_builder: &'a mut MastForestBuilder,
+        active_inline_calls: Vec<ActiveInlineCall>,
+    ) -> Self {
+        let mut builder = Self::new(wrapper, mast_forest_builder);
+        builder.active_inline_calls = active_inline_calls;
+        builder
     }
 }
 
@@ -126,6 +136,21 @@ impl BasicBlockBuilder<'_> {
     /// Returns a mutable reference to the internal [`MastForestBuilder`].
     pub fn mast_forest_builder_mut(&mut self) -> &mut MastForestBuilder {
         self.mast_forest_builder
+    }
+
+    pub(super) fn active_inline_calls(&self) -> &[ActiveInlineCall] {
+        &self.active_inline_calls
+    }
+
+    pub(super) fn active_inline_call_rows(&self, op_idx: u32) -> Vec<DebugSourceInlineCall> {
+        self.active_inline_calls
+            .iter()
+            .map(|inline_call| DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            })
+            .collect()
     }
 }
 
@@ -301,13 +326,7 @@ impl BasicBlockBuilder<'_> {
     }
 
     fn record_active_inline_calls(&mut self, op_idx: u32) {
-        self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
-            DebugSourceInlineCall {
-                op_idx,
-                callee_idx: inline_call.callee_idx,
-                loc_idx: inline_call.loc_idx,
-            }
-        }));
+        self.inline_calls.extend(self.active_inline_call_rows(op_idx));
     }
 }
 

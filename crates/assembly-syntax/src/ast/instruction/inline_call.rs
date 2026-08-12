@@ -48,12 +48,4 @@ impl DebugInlineCallInfo {
     pub fn call_site(&self) -> &FileLineCol {
         &self.call_site
     }
-
-    pub fn set_declaration(&mut self, declaration: FileLineCol) {
-        self.declaration = declaration;
-    }
-
-    pub fn set_call_site(&mut self, call_site: FileLineCol) {
-        self.call_site = call_site;
-    }
 }

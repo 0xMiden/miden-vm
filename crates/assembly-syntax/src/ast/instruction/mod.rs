@@ -1,5 +1,6 @@
 pub mod advice;
 mod debug_var;
+mod inline_call;
 mod print;
 
 use alloc::vec::Vec;
@@ -8,6 +9,7 @@ use core::ops::Range;
 pub use self::{
     advice::SystemEventNode,
     debug_var::{DebugVarInfo, DebugVarLocation},
+    inline_call::DebugInlineCallInfo,
 };
 use crate::{
     Felt,
@@ -282,8 +284,18 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
+    /// Records a source variable location at this point in the generated operation stream.
     DebugVar(DebugVarInfo),
-    DebugInlineCall(miden_core::operations::DebugInlineCallInfo),
+    /// Appends one source function to the inline call chain active for subsequent operations.
+    ///
+    /// Frames are emitted from innermost to outermost. This compiler-internal marker has no VM
+    /// execution semantics; the assembler stores the active chain on each generated source-node
+    /// occurrence until [`DebugInlineCallClear`](Self::DebugInlineCallClear) is encountered.
+    DebugInlineCall(DebugInlineCallInfo),
+    /// Clears the inline call chain for subsequent generated operations and control nodes.
+    ///
+    /// This marks the point at which source attribution returns to the containing non-inlined
+    /// function. It is compiler-internal and does not emit a VM operation.
     DebugInlineCallClear,
 
     // ----- event decorators --------------------------------------------------------------------

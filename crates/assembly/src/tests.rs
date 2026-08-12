@@ -3055,6 +3055,168 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
     Ok(())
 }
 
+fn replace_nops_with_inline_call_markers(
+    context: &TestContext,
+    module: &mut Module,
+) -> Result<(), Report> {
+    use miden_assembly_syntax::ast::DebugInlineCallInfo;
+
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+    let mut replaced = 0usize;
+    for op in entrypoint.body_mut().iter_mut() {
+        let Op::Inst(instruction) = op else {
+            continue;
+        };
+        if !matches!(instruction.inner(), Instruction::Nop) {
+            continue;
+        }
+
+        let span = instruction.span();
+        let replacement = if replaced.is_multiple_of(2) {
+            Instruction::DebugInlineCallClear
+        } else {
+            let source_location = context
+                .source_manager()
+                .file_line_col(span)
+                .map_err(|error| Report::msg(error.to_string()))?;
+            Instruction::DebugInlineCall(DebugInlineCallInfo::new(
+                "source::inlined",
+                source_location.clone(),
+                source_location,
+            ))
+        };
+        *op = Op::Inst(Span::new(span, replacement));
+        replaced += 1;
+    }
+
+    assert!(replaced > 0, "test fixture must contain inline-call marker placeholders");
+    assert!(replaced.is_multiple_of(2), "markers must be emitted as clear/push pairs");
+    Ok(())
+}
+
+#[test]
+fn inline_call_chains_are_recorded_on_call_and_structured_control_occurrences() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        proc callee
+            add
+        end
+
+        begin
+            nop
+            nop
+            call.callee
+            nop
+            nop
+            if.true
+                add
+            else
+                mul
+            end
+        end
+        "
+    );
+    let mut module = context.parse_module(source)?;
+    replace_nops_with_inline_call_markers(&context, &mut module)?;
+
+    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let debug_info = package
+        .debug_info()
+        .into_diagnostic()?
+        .expect("assembled package should contain debug info");
+
+    for expected_op in ["call.", "if.true"] {
+        let source_node = debug_info
+            .nodes()
+            .iter()
+            .find(|source_node| {
+                source_node
+                    .asm_ops
+                    .iter()
+                    .any(|asm_op| debug_info[asm_op.op_name_idx].starts_with(expected_op))
+            })
+            .unwrap_or_else(|| panic!("missing source occurrence for {expected_op}"));
+        let inline_calls = source_node
+            .inline_calls
+            .iter()
+            .filter(|inline_call| inline_call.op_idx == 0)
+            .collect::<Vec<_>>();
+
+        assert_eq!(inline_calls.len(), 1, "{expected_op} should retain its inline chain");
+        let function = debug_info
+            .get_function(inline_calls[0].callee_idx)
+            .expect("inline callee should be registered");
+        assert_eq!(debug_info[function.name_idx].as_ref(), "source::inlined");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        proc callee
+            add
+            mul
+        end
+
+        begin
+            nop
+            nop
+            exec.callee
+            nop
+            nop
+            exec.callee
+        end
+        "
+    );
+    let mut module = context.parse_module(source)?;
+    replace_nops_with_inline_call_markers(&context, &mut module)?;
+
+    let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
+    let debug_info = package
+        .debug_info()
+        .into_diagnostic()?
+        .expect("assembled package should contain debug info");
+
+    let callee_source = debug_info
+        .nodes()
+        .iter()
+        .find(|source_node| {
+            source_node
+                .asm_ops
+                .iter()
+                .any(|asm_op| debug_info[asm_op.context_name_idx].contains("callee"))
+                && !source_node.inline_calls.is_empty()
+        })
+        .expect("exec target should have a decorated source occurrence");
+    for asm_op in callee_source
+        .asm_ops
+        .iter()
+        .filter(|asm_op| debug_info[asm_op.context_name_idx].contains("callee"))
+    {
+        assert_eq!(
+            callee_source
+                .inline_calls
+                .iter()
+                .filter(|inline_call| inline_call.op_idx == asm_op.op_idx)
+                .count(),
+            1,
+            "every operation in the exec target should retain the active inline chain",
+        );
+    }
+
+    Ok(())
+}
+
 #[test]
 fn invalid_proc_missing_end_unexpected_begin() {
     let context = TestContext::default();
@@ -4115,6 +4277,7 @@ fn nested_blocks() -> Result<(), Report> {
                 kernel_foo_node_ref,
                 true,
                 AssemblyOp::new(None, "test", 1, "syscall.foo"),
+                vec![],
             )
             .unwrap()
     };
@@ -4177,7 +4340,11 @@ fn nested_blocks() -> Result<(), Report> {
         .ensure_block_ref(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_split_node_ref([r#true1, r#false1], AssemblyOp::new(None, "test", 1, "if.true"))
+        .ensure_split_node_ref(
+            [r#true1, r#false1],
+            AssemblyOp::new(None, "test", 1, "if.true"),
+            vec![],
+        )
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
@@ -4187,7 +4354,11 @@ fn nested_blocks() -> Result<(), Report> {
         .ensure_block_ref(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_split_node_ref([r#true3, r#false3], AssemblyOp::new(None, "test", 1, "if.true"))
+        .ensure_split_node_ref(
+            [r#true3, r#false3],
+            AssemblyOp::new(None, "test", 1, "if.true"),
+            vec![],
+        )
         .unwrap();
 
     let r#while = {
@@ -4207,14 +4378,14 @@ fn nested_blocks() -> Result<(), Report> {
 
         let asm_op = AssemblyOp::new(None, "test", 1, "while.true");
         let loop_node_ref = expected_mast_forest_builder
-            .ensure_loop_node_ref(body_node_ref, asm_op.clone())
+            .ensure_loop_node_ref(body_node_ref, asm_op.clone(), vec![])
             .unwrap();
         let noop_node_ref = expected_mast_forest_builder
             .ensure_block_ref(vec![Operation::Noop], vec![], vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_split_node_ref([loop_node_ref, noop_node_ref], asm_op)
+            .ensure_split_node_ref([loop_node_ref, noop_node_ref], asm_op, vec![])
             .unwrap()
     };
     let push_13_basic_block_ref = expected_mast_forest_builder
@@ -4225,7 +4396,11 @@ fn nested_blocks() -> Result<(), Report> {
         .join_node_refs(vec![push_13_basic_block_ref, r#while], None)
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_split_node_ref([r#true2, r#false2], AssemblyOp::new(None, "test", 1, "if.true"))
+        .ensure_split_node_ref(
+            [r#true2, r#false2],
+            AssemblyOp::new(None, "test", 1, "if.true"),
+            vec![],
+        )
         .unwrap();
 
     let combined_node_ref = expected_mast_forest_builder

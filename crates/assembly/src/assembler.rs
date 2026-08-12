@@ -39,7 +39,7 @@ use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
-    basic_block_builder::BasicBlockBuilder,
+    basic_block_builder::{ActiveInlineCall, BasicBlockBuilder},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{
         Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
@@ -1323,8 +1323,14 @@ impl Assembler {
             None
         };
 
-        let proc_body_ref =
-            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
+        let proc_body_ref = self.compile_body(
+            proc.iter(),
+            &mut proc_ctx,
+            body_wrapper,
+            Vec::new(),
+            mast_forest_builder,
+            0,
+        )?;
 
         let proc_mast_root = mast_forest_builder
             .mast_root_for_ref(proc_body_ref)
@@ -1350,6 +1356,7 @@ impl Assembler {
         body: I,
         proc_ctx: &mut ProcedureContext,
         wrapper: Option<BodyWrapper>,
+        active_inline_calls: Vec<ActiveInlineCall>,
         mast_forest_builder: &mut MastForestBuilder,
         nesting_depth: usize,
     ) -> Result<MastNodeRef, Report>
@@ -1359,7 +1366,11 @@ impl Assembler {
         use ast::Op;
 
         let mut body_node_refs: Vec<MastNodeRef> = Vec::new();
-        let mut block_builder = BasicBlockBuilder::new(wrapper, mast_forest_builder);
+        let mut block_builder = BasicBlockBuilder::with_active_inline_calls(
+            wrapper,
+            mast_forest_builder,
+            active_inline_calls,
+        );
 
         for op in body {
             match op {
@@ -1379,6 +1390,8 @@ impl Assembler {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_refs.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1393,6 +1406,7 @@ impl Assembler {
                         then_blk.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls.clone(),
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1400,6 +1414,7 @@ impl Assembler {
                         else_blk.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1407,7 +1422,7 @@ impl Assembler {
                     let asm_op = self.create_asm_op(span, "if.true", proc_ctx);
                     let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_split_node_ref([then_blk, else_blk], asm_op)?;
+                        .ensure_split_node_ref([then_blk, else_blk], asm_op, inline_calls)?;
 
                     body_node_refs.push(split_node_ref);
                 },
@@ -1416,6 +1431,7 @@ impl Assembler {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_refs.push(basic_block_id);
                     }
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1430,6 +1446,7 @@ impl Assembler {
                         body.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1468,6 +1485,8 @@ impl Assembler {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_refs.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1493,23 +1512,30 @@ impl Assembler {
                         body.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let loop_node_ref = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_loop_node_ref(loop_body_node_ref, asm_op.clone())?;
+                    let loop_node_ref =
+                        block_builder.mast_forest_builder_mut().ensure_loop_node_ref(
+                            loop_body_node_ref,
+                            asm_op.clone(),
+                            inline_calls.clone(),
+                        )?;
                     let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_ref(
                         vec![Operation::Noop],
                         vec![],
                         vec![],
-                        vec![],
+                        inline_calls.clone(),
                         vec![],
                     )?;
 
-                    let split_node_ref = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_split_node_ref([loop_node_ref, noop_block_ref], asm_op)?;
+                    let split_node_ref =
+                        block_builder.mast_forest_builder_mut().ensure_split_node_ref(
+                            [loop_node_ref, noop_block_ref],
+                            asm_op,
+                            inline_calls,
+                        )?;
 
                     body_node_refs.push(split_node_ref);
                 },
@@ -1518,6 +1544,8 @@ impl Assembler {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_refs.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1540,18 +1568,20 @@ impl Assembler {
                         body.iter().chain(condition.iter()),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
                     let loop_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_loop_node_ref(loop_body_node_ref, asm_op)?;
+                        .ensure_loop_node_ref(loop_body_node_ref, asm_op, inline_calls)?;
 
                     body_node_refs.push(loop_node_ref);
                 },
             }
         }
 
+        let fallback_inline_calls = block_builder.active_inline_call_rows(0);
         if let Some(basic_block_id) = block_builder.try_into_basic_block()? {
             body_node_refs.push(basic_block_id);
         }
@@ -1561,7 +1591,7 @@ impl Assembler {
                 vec![Operation::Noop],
                 vec![],
                 vec![],
-                vec![],
+                fallback_inline_calls,
                 vec![],
             )?
         } else {

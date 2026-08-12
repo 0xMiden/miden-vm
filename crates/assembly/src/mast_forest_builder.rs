@@ -86,6 +86,8 @@ pub struct MastForestBuilder {
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
+    /// Original source occurrence underlying each `exec`-decorated alias occurrence.
+    exec_inline_base_by_source_ref: BTreeMap<SourceNodeRef, SourceNodeRef>,
     /// Selectable source occurrences recorded for each execution node ref, in creation order.
     ///
     /// Supplemental range records created while merging blocks are excluded because they do not
@@ -490,6 +492,92 @@ impl MastForestBuilder {
 
     fn source_child_refs_for_node_refs(&self, child_refs: &[MastNodeRef]) -> Vec<SourceNodeRef> {
         self.source_refs_for_node_ref_occurrences(child_refs)
+    }
+
+    /// Records a source occurrence of an `exec` target under the supplied inline call chain.
+    ///
+    /// `exec` reuses the callee's execution node instead of creating a control node. Clone its
+    /// source-occurrence tree so the call-site chain is visible for every executed operation while
+    /// leaving the shared MAST nodes and other source occurrences unchanged.
+    pub(crate) fn record_exec_inline_calls(
+        &mut self,
+        node_ref: MastNodeRef,
+        inline_calls: &[DebugSourceInlineCall],
+    ) -> Result<(), Report> {
+        if inline_calls.is_empty() {
+            return Ok(());
+        }
+
+        let latest_source_ref = self
+            .latest_source_ref_for_node_ref(node_ref)
+            .expect("execution ref must have a source occurrence");
+        let source_ref = self
+            .exec_inline_base_by_source_ref
+            .get(&latest_source_ref)
+            .copied()
+            .unwrap_or(latest_source_ref);
+        let mut cloned = BTreeMap::new();
+        let decorated_source_ref = self.clone_source_occurrence_with_inline_calls(
+            source_ref,
+            inline_calls,
+            &mut cloned,
+            true,
+        )?;
+        self.exec_inline_base_by_source_ref.insert(decorated_source_ref, source_ref);
+        Ok(())
+    }
+
+    fn clone_source_occurrence_with_inline_calls(
+        &mut self,
+        source_ref: SourceNodeRef,
+        active_inline_calls: &[DebugSourceInlineCall],
+        cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
+        update_latest: bool,
+    ) -> Result<SourceNodeRef, Report> {
+        if let Some(cloned_ref) = cloned.get(&source_ref) {
+            return Ok(*cloned_ref);
+        }
+
+        let source_node = self.debug_info[source_ref].clone();
+        let mut child_refs = Vec::with_capacity(source_node.children.len());
+        for child_ref in source_node.children.iter().copied() {
+            child_refs.push(self.clone_source_occurrence_with_inline_calls(
+                child_ref,
+                active_inline_calls,
+                cloned,
+                false,
+            )?);
+        }
+
+        let mut inline_calls = Vec::with_capacity(
+            source_node.inline_calls.len()
+                + active_inline_calls.len()
+                    * source_node.op_end.saturating_sub(source_node.op_start) as usize,
+        );
+        for op_idx in source_node.op_start..source_node.op_end {
+            inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
+                DebugSourceInlineCall {
+                    op_idx,
+                    callee_idx: inline_call.callee_idx,
+                    loc_idx: inline_call.loc_idx,
+                }
+            }));
+        }
+        inline_calls.extend(source_node.inline_calls);
+
+        let cloned_ref = self.push_source_occurrence(
+            source_node.exec_node,
+            child_refs,
+            source_node.op_start as usize,
+            source_node.op_end as usize,
+            source_node.asm_ops,
+            source_node.debug_vars,
+            inline_calls,
+            &[],
+            update_latest,
+        )?;
+        cloned.insert(source_ref, cloned_ref);
+        Ok(cloned_ref)
     }
 
     fn record_source_occurrence(
@@ -923,31 +1011,33 @@ impl MastForestBuilder {
         &mut self,
         branches: [MastNodeRef; 2],
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
         let branch_digests = branches.map(|node_ref| self.pending_node_mast_root(node_ref));
         let split_digest = hasher::merge_in_domain(&branch_digests, SplitNode::DOMAIN);
         let child_refs = Vec::from(branches);
+        let mut draft =
+            PendingMastNodeDraft::new(PendingMastNodeKind::Split, split_digest, child_refs);
+        draft.inline_calls = inline_calls;
 
-        self.intern_pending_node_with_asm_op(
-            PendingMastNodeDraft::new(PendingMastNodeKind::Split, split_digest, child_refs),
-            asm_op,
-        )
+        self.intern_pending_node_with_asm_op(draft, asm_op)
     }
 
     pub(crate) fn ensure_loop_node_ref(
         &mut self,
         body: MastNodeRef,
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
         let body_digest = self.pending_node_mast_root(body);
         let loop_digest =
             hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
         let child_refs = vec![body];
+        let mut draft =
+            PendingMastNodeDraft::new(PendingMastNodeKind::Loop, loop_digest, child_refs);
+        draft.inline_calls = inline_calls;
 
-        self.intern_pending_node_with_asm_op(
-            PendingMastNodeDraft::new(PendingMastNodeKind::Loop, loop_digest, child_refs),
-            asm_op,
-        )
+        self.intern_pending_node_with_asm_op(draft, asm_op)
     }
 
     pub(crate) fn ensure_call_node_ref(
@@ -955,6 +1045,7 @@ impl MastForestBuilder {
         callee: MastNodeRef,
         is_syscall: bool,
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
         let callee_digest = self.pending_node_mast_root(callee);
         let call_domain = if is_syscall {
@@ -964,20 +1055,20 @@ impl MastForestBuilder {
         };
         let call_digest = hasher::merge_in_domain(&[callee_digest, Word::default()], call_domain);
         let child_refs = vec![callee];
-        self.intern_pending_node_with_asm_op(
-            PendingMastNodeDraft::new(
-                PendingMastNodeKind::Call { is_syscall },
-                call_digest,
-                child_refs,
-            ),
-            asm_op,
-        )
+        let mut draft = PendingMastNodeDraft::new(
+            PendingMastNodeKind::Call { is_syscall },
+            call_digest,
+            child_refs,
+        );
+        draft.inline_calls = inline_calls;
+        self.intern_pending_node_with_asm_op(draft, asm_op)
     }
 
     pub(crate) fn ensure_dyn_node_ref(
         &mut self,
         is_dyncall: bool,
         asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
         let dyn_digest = if is_dyncall {
             DynNode::DYNCALL_DEFAULT_DIGEST
@@ -985,14 +1076,13 @@ impl MastForestBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
         let child_refs = Vec::new();
-        self.intern_pending_node_with_asm_op(
-            PendingMastNodeDraft::new(
-                PendingMastNodeKind::Dyn { is_dyncall },
-                dyn_digest,
-                child_refs,
-            ),
-            asm_op,
-        )
+        let mut draft = PendingMastNodeDraft::new(
+            PendingMastNodeKind::Dyn { is_dyncall },
+            dyn_digest,
+            child_refs,
+        );
+        draft.inline_calls = inline_calls;
+        self.intern_pending_node_with_asm_op(draft, asm_op)
     }
 
     fn merge_contiguous_basic_block_refs(
@@ -1475,12 +1565,14 @@ mod tests {
                         .ensure_split_node_ref(
                             [first_ref, second_ref],
                             test_asm_op(context.clone(), "if.true"),
+                            vec![],
                         )
                         .unwrap(),
                     2 => builder
                         .ensure_loop_node_ref(
                             first_ref,
                             test_asm_op(context.clone(), "begin"),
+                            vec![],
                         )
                         .unwrap(),
                     3 => builder
@@ -1488,6 +1580,7 @@ mod tests {
                             first_ref,
                             step.flags & 1 == 1,
                             test_asm_op(context.clone(), "call"),
+                            vec![],
                         )
                         .unwrap(),
                     _ => builder
@@ -2131,10 +2224,10 @@ mod tests {
         );
 
         let call_ref = builder
-            .ensure_call_node_ref(block_ref, false, test_asm_op("test", "call"))
+            .ensure_call_node_ref(block_ref, false, test_asm_op("test", "call"), vec![])
             .unwrap();
         let trailing_noop_call_ref = builder
-            .ensure_call_node_ref(trailing_noop_ref, false, test_asm_op("test", "call"))
+            .ensure_call_node_ref(trailing_noop_ref, false, test_asm_op("test", "call"), vec![])
             .unwrap();
         assert_ne!(
             call_ref, trailing_noop_call_ref,
@@ -2377,10 +2470,10 @@ mod tests {
         );
 
         let first_call = builder
-            .ensure_call_node_ref(first_block, false, test_asm_op("test", "call"))
+            .ensure_call_node_ref(first_block, false, test_asm_op("test", "call"), vec![])
             .unwrap();
         let second_call = builder
-            .ensure_call_node_ref(second_block, false, test_asm_op("test", "call"))
+            .ensure_call_node_ref(second_block, false, test_asm_op("test", "call"), vec![])
             .unwrap();
 
         assert_ne!(
@@ -2622,6 +2715,7 @@ mod tests {
             .ensure_split_node_ref(
                 [block_a_ref, block_b_ref],
                 AssemblyOp::new(None, "split", 1, "if.true"),
+                vec![],
             )
             .unwrap();
         record_test_root(&mut builder, split_ref);
@@ -2652,6 +2746,7 @@ mod tests {
             .ensure_split_node_ref(
                 [block_ref, block_ref],
                 AssemblyOp::new(None, "split", 1, "if.true"),
+                vec![],
             )
             .unwrap();
         record_test_root(&mut builder, split_ref);
@@ -2674,10 +2769,20 @@ mod tests {
             .ensure_block_ref(vec![Operation::Add], vec![], vec![], vec![], vec![])
             .unwrap();
         let call_a_ref = builder
-            .ensure_call_node_ref(callee_ref, false, AssemblyOp::new(None, "ctx_a", 1, "call.foo"))
+            .ensure_call_node_ref(
+                callee_ref,
+                false,
+                AssemblyOp::new(None, "ctx_a", 1, "call.foo"),
+                vec![],
+            )
             .unwrap();
         let call_b_ref = builder
-            .ensure_call_node_ref(callee_ref, false, AssemblyOp::new(None, "ctx_b", 1, "call.foo"))
+            .ensure_call_node_ref(
+                callee_ref,
+                false,
+                AssemblyOp::new(None, "ctx_b", 1, "call.foo"),
+                vec![],
+            )
             .unwrap();
 
         assert_eq!(
@@ -2974,6 +3079,7 @@ mod tests {
             .ensure_split_node_ref(
                 [left_ref, right_ref],
                 AssemblyOp::new(None, "split_ctx", 1, "if.true"),
+                vec![],
             )
             .unwrap();
         record_test_root(&mut source_builder, split_ref);
