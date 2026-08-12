@@ -14,8 +14,7 @@ pub use miden_crypto::{
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 pub use miden_utils_indexing::{
-    CsrMatrix, CsrValidationError, DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx,
-    newtype_id,
+    DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };
 
 use crate::{Felt, Word, crypto::hash::Blake3_256, field::PrimeCharacteristicRing};
