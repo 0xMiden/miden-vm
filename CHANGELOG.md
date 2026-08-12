@@ -31,7 +31,7 @@
 
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
 
-## v0.29.1 (Unreleased)
+## v0.29.1 (2026-08-11)
 
 #### Fixes
 
