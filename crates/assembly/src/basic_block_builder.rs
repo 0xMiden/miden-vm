@@ -23,7 +23,7 @@ use miden_mast_package::debug_info::{
 use crate::{
     ProcedureContext,
     assembler::BodyWrapper,
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeUse},
 };
 
 // PENDING ASM OP
@@ -338,14 +338,14 @@ impl BasicBlockBuilder<'_> {
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
-    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeUse>, Report> {
         if !self.ops.is_empty() {
             let ops = core::mem::take(&mut self.ops);
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars = core::mem::take(&mut self.debug_vars);
             let inline_calls = core::mem::take(&mut self.inline_calls);
 
-            let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
+            let basic_block_node_use = self.mast_forest_builder.ensure_block_use(
                 ops,
                 asm_ops,
                 debug_vars,
@@ -353,7 +353,7 @@ impl BasicBlockBuilder<'_> {
                 vec![],
             )?;
 
-            Ok(Some(basic_block_node_ref))
+            Ok(Some(basic_block_node_use))
         } else {
             Ok(None)
         }
@@ -366,7 +366,7 @@ impl BasicBlockBuilder<'_> {
     /// - Operations contained in the epilogue of the builder are appended to the list of ops which
     ///   go into the new BASIC BLOCK node.
     /// - The builder is consumed in the process.
-    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeUse>, Report> {
         self.ops.append(&mut self.epilogue);
         self.make_basic_block()
     }

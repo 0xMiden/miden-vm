@@ -37,6 +37,31 @@ use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, Pending
 pub(crate) use pending_record::{MastNodeRef, SourceNodeRef};
 mod static_import;
 
+/// One use of an interned execution node together with its exact source/debug occurrence.
+///
+/// Execution nodes are deduplicated, but source occurrences are not. Keeping these references
+/// paired prevents a later use of the same execution node from changing which source occurrence
+/// is selected for an earlier parent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MastNodeUse {
+    node_ref: MastNodeRef,
+    source_ref: SourceNodeRef,
+}
+
+impl MastNodeUse {
+    pub(crate) fn new(node_ref: MastNodeRef, source_ref: SourceNodeRef) -> Self {
+        Self { node_ref, source_ref }
+    }
+
+    pub(crate) fn node_ref(self) -> MastNodeRef {
+        self.node_ref
+    }
+
+    pub(crate) fn source_ref(self) -> SourceNodeRef {
+        self.source_ref
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -79,6 +104,7 @@ pub struct MastForestBuilder {
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
     /// Number of source/debug occurrences already selected as procedure roots per execution ref.
+    #[cfg(test)]
     procedure_source_root_count_by_node_ref: BTreeMap<MastNodeRef, usize>,
     /// A map of MAST node interning keys to their corresponding builder-local node refs.
     node_ref_by_key: BTreeMap<MastNodeKey, MastNodeRef>,
@@ -86,8 +112,6 @@ pub struct MastForestBuilder {
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
-    /// Original source occurrence underlying each `exec`-decorated alias occurrence.
-    exec_inline_base_by_source_ref: BTreeMap<SourceNodeRef, SourceNodeRef>,
     /// Selectable source occurrences recorded for each execution node ref, in creation order.
     ///
     /// Supplemental range records created while merging blocks are excluded because they do not
@@ -271,9 +295,12 @@ impl MastForestBuilder {
         self.key_for_pending_record(draft.digest, &draft.kind, &draft.child_refs)
     }
 
-    fn intern_pending_node(&mut self, draft: PendingMastNodeDraft) -> Result<MastNodeRef, Report> {
+    fn intern_pending_node_use(
+        &mut self,
+        draft: PendingMastNodeDraft,
+        source_child_refs: Vec<SourceNodeRef>,
+    ) -> Result<MastNodeUse, Report> {
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
         let node_ref = if let Some(node_ref) = self.find_node_ref_by_key(&dedup_key) {
             if self.should_replace_pending_node(node_ref, &draft) {
                 self.replace_pending_node_record_ref(
@@ -288,8 +315,13 @@ impl MastForestBuilder {
             self.insert_pending_node_record_ref(dedup_key, draft.clone())?
         };
 
-        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
-        Ok(node_ref)
+        let source_ref = self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+        Ok(MastNodeUse::new(node_ref, source_ref))
+    }
+
+    fn intern_pending_node(&mut self, draft: PendingMastNodeDraft) -> Result<MastNodeRef, Report> {
+        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
+        Ok(self.intern_pending_node_use(draft, source_child_refs)?.node_ref())
     }
 
     fn find_node_ref_by_key(&self, key: &MastNodeKey) -> Option<MastNodeRef> {
@@ -426,13 +458,13 @@ impl MastForestBuilder {
         &mut self.debug_info
     }
 
-    fn intern_pending_node_with_asm_op(
+    fn intern_pending_node_with_asm_op_use(
         &mut self,
         mut draft: PendingMastNodeDraft,
         asm_op: AssemblyOp,
-    ) -> Result<MastNodeRef, Report> {
+        source_child_refs: Vec<SourceNodeRef>,
+    ) -> Result<MastNodeUse, Report> {
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
 
         let location_idx = asm_op.location().map(|loc| self.debug_info.add_location(loc.clone()));
         let context_name_idx = self.debug_info.add_string(asm_op.context_name().clone());
@@ -455,9 +487,9 @@ impl MastForestBuilder {
                 )?
             };
 
-        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+        let source_ref = self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
 
-        Ok(node_ref)
+        Ok(MastNodeUse::new(node_ref, source_ref))
     }
 
     fn source_refs_for_node_ref_occurrences(
@@ -501,30 +533,17 @@ impl MastForestBuilder {
     /// leaving the shared MAST nodes and other source occurrences unchanged.
     pub(crate) fn record_exec_inline_calls(
         &mut self,
-        node_ref: MastNodeRef,
+        target: MastNodeUse,
         inline_calls: &[DebugSourceInlineCall],
-    ) -> Result<(), Report> {
-        if inline_calls.is_empty() {
-            return Ok(());
-        }
-
-        let latest_source_ref = self
-            .latest_source_ref_for_node_ref(node_ref)
-            .expect("execution ref must have a source occurrence");
-        let source_ref = self
-            .exec_inline_base_by_source_ref
-            .get(&latest_source_ref)
-            .copied()
-            .unwrap_or(latest_source_ref);
+    ) -> Result<MastNodeUse, Report> {
         let mut cloned = BTreeMap::new();
         let decorated_source_ref = self.clone_source_occurrence_with_inline_calls(
-            source_ref,
+            target.source_ref(),
             inline_calls,
             &mut cloned,
             true,
         )?;
-        self.exec_inline_base_by_source_ref.insert(decorated_source_ref, source_ref);
-        Ok(())
+        Ok(MastNodeUse::new(target.node_ref(), decorated_source_ref))
     }
 
     fn clone_source_occurrence_with_inline_calls(
@@ -552,9 +571,31 @@ impl MastForestBuilder {
         let mut inline_calls = Vec::with_capacity(
             source_node.inline_calls.len()
                 + active_inline_calls.len()
-                    * source_node.op_end.saturating_sub(source_node.op_start) as usize,
+                    * core::cmp::max(
+                        source_node.op_end.saturating_sub(source_node.op_start),
+                        u32::from(self.nodes[source_node.exec_node].kind.is_external()),
+                    ) as usize,
         );
+        if source_node.op_start == source_node.op_end
+            && self.nodes[source_node.exec_node].kind.is_external()
+        {
+            inline_calls.extend(source_node.inline_calls.iter().copied());
+            inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
+                DebugSourceInlineCall {
+                    op_idx: 0,
+                    callee_idx: inline_call.callee_idx,
+                    loc_idx: inline_call.loc_idx,
+                }
+            }));
+        }
         for op_idx in source_node.op_start..source_node.op_end {
+            inline_calls.extend(
+                source_node
+                    .inline_calls
+                    .iter()
+                    .filter(|inline_call| inline_call.op_idx == op_idx)
+                    .copied(),
+            );
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
                 DebugSourceInlineCall {
                     op_idx,
@@ -563,7 +604,6 @@ impl MastForestBuilder {
                 }
             }));
         }
-        inline_calls.extend(source_node.inline_calls);
 
         let cloned_ref = self.push_source_occurrence(
             source_node.exec_node,
@@ -816,6 +856,11 @@ impl MastForestBuilder {
         self.latest_source_ref_by_node_ref.get(&node_ref).copied()
     }
 
+    pub(crate) fn latest_node_use(&self, node_ref: MastNodeRef) -> Option<MastNodeUse> {
+        self.latest_source_ref_for_node_ref(node_ref)
+            .map(|source_ref| MastNodeUse::new(node_ref, source_ref))
+    }
+
     fn pending_node_mast_root(&self, node_ref: MastNodeRef) -> Word {
         self.nodes[node_ref].digest
     }
@@ -888,7 +933,7 @@ impl MastForestBuilder {
             }
         }
 
-        self.record_procedure_root_ref(procedure.body_node_ref());
+        self.record_procedure_root_use(procedure.body_node_use());
         self.record_procedure_debug_info(&procedure, source_manager)?;
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
 
@@ -905,7 +950,7 @@ impl MastForestBuilder {
         use miden_assembly_syntax::ast::types::Type;
 
         if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
-            let source_ref = self.latest_source_ref_for_node_ref(procedure.body_node_ref());
+            let source_ref = Some(procedure.body_source_ref());
             let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
             let name_idx = self.debug_info.add_string(procedure.path().as_str());
             let type_idx = if let Some(signature) = procedure.signature() {
@@ -936,6 +981,7 @@ impl MastForestBuilder {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn record_procedure_root_ref(&mut self, root_ref: MastNodeRef) {
         if !self.procedure_root_refs.contains(&root_ref) {
             self.procedure_root_refs.push(root_ref);
@@ -952,6 +998,15 @@ impl MastForestBuilder {
         }
     }
 
+    pub(crate) fn record_procedure_root_use(&mut self, root: MastNodeUse) {
+        if !self.procedure_root_refs.contains(&root.node_ref()) {
+            self.procedure_root_refs.push(root.node_ref());
+        }
+        if !self.debug_info.roots().contains(&root.source_ref()) {
+            self.debug_info.add_root(root.source_ref());
+        }
+    }
+
     fn is_procedure_root_ref(&self, node_ref: MastNodeRef) -> bool {
         self.procedure_root_refs.contains(&node_ref)
     }
@@ -960,59 +1015,99 @@ impl MastForestBuilder {
 // ------------------------------------------------------------------------------------------------
 /// Joining nodes
 impl MastForestBuilder {
+    #[cfg(test)]
     pub(crate) fn join_node_refs(
         &mut self,
         node_refs: Vec<MastNodeRef>,
         asm_op: Option<AssemblyOp>,
     ) -> Result<MastNodeRef, Report> {
-        debug_assert!(!node_refs.is_empty(), "cannot combine empty MAST node ref list");
+        let source_refs = self.source_refs_for_node_ref_occurrences(&node_refs);
+        let node_uses = node_refs
+            .into_iter()
+            .zip(source_refs)
+            .map(|(node_ref, source_ref)| MastNodeUse::new(node_ref, source_ref))
+            .collect();
+        Ok(self.join_node_uses(node_uses, asm_op)?.node_ref())
+    }
 
-        let mut node_refs = self.merge_contiguous_basic_block_refs(node_refs)?;
+    pub(crate) fn join_node_uses(
+        &mut self,
+        node_uses: Vec<MastNodeUse>,
+        asm_op: Option<AssemblyOp>,
+    ) -> Result<MastNodeUse, Report> {
+        debug_assert!(!node_uses.is_empty(), "cannot combine empty MAST node use list");
+
+        let mut node_uses = self.merge_contiguous_basic_block_uses(node_uses)?;
 
         // build a binary tree of blocks joining them using JOIN blocks
-        while node_refs.len() > 1 {
-            let last_mast_node_ref = if node_refs.len().is_multiple_of(2) {
+        while node_uses.len() > 1 {
+            let last_mast_node_use = if node_uses.len().is_multiple_of(2) {
                 None
             } else {
-                node_refs.pop()
+                node_uses.pop()
             };
 
-            let mut source_node_refs = Vec::new();
-            core::mem::swap(&mut node_refs, &mut source_node_refs);
+            let mut source_node_uses = Vec::new();
+            core::mem::swap(&mut node_uses, &mut source_node_uses);
 
-            let mut source_mast_node_iter = source_node_refs.drain(0..);
+            let mut source_mast_node_iter = source_node_uses.drain(0..);
             while let (Some(left), Some(right)) =
                 (source_mast_node_iter.next(), source_mast_node_iter.next())
             {
-                let left_digest = self.pending_node_mast_root(left);
-                let right_digest = self.pending_node_mast_root(right);
+                let left_digest = self.pending_node_mast_root(left.node_ref());
+                let right_digest = self.pending_node_mast_root(right.node_ref());
                 let join_digest =
                     hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN);
-                let child_refs = vec![left, right];
+                let child_refs = vec![left.node_ref(), right.node_ref()];
+                let source_child_refs = vec![left.source_ref(), right.source_ref()];
                 let draft =
                     PendingMastNodeDraft::new(PendingMastNodeKind::Join, join_digest, child_refs);
-                let join_mast_node_ref = if let Some(ref asm_op) = asm_op {
-                    self.intern_pending_node_with_asm_op(draft, asm_op.clone())?
+                let join_mast_node_use = if let Some(ref asm_op) = asm_op {
+                    self.intern_pending_node_with_asm_op_use(
+                        draft,
+                        asm_op.clone(),
+                        source_child_refs,
+                    )?
                 } else {
-                    self.intern_pending_node(draft)?
+                    self.intern_pending_node_use(draft, source_child_refs)?
                 };
 
-                node_refs.push(join_mast_node_ref);
+                node_uses.push(join_mast_node_use);
             }
-            if let Some(mast_node_ref) = last_mast_node_ref {
-                node_refs.push(mast_node_ref);
+            if let Some(mast_node_use) = last_mast_node_use {
+                node_uses.push(mast_node_use);
             }
         }
 
-        Ok(node_refs.remove(0))
+        Ok(node_uses.remove(0))
     }
 
+    #[cfg(test)]
     pub(crate) fn ensure_split_node_ref(
         &mut self,
         branches: [MastNodeRef; 2],
         asm_op: AssemblyOp,
         inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
+        let source_refs = self.source_refs_for_node_ref_occurrences(&branches);
+        let uses = branches
+            .into_iter()
+            .zip(source_refs)
+            .map(|(node_ref, source_ref)| MastNodeUse::new(node_ref, source_ref))
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("split must have exactly two branches");
+        Ok(self.ensure_split_node_use(uses, asm_op, inline_calls)?.node_ref())
+    }
+
+    pub(crate) fn ensure_split_node_use(
+        &mut self,
+        branches: [MastNodeUse; 2],
+        asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<MastNodeUse, Report> {
+        let source_child_refs = branches.map(MastNodeUse::source_ref).into();
+        let branches = branches.map(MastNodeUse::node_ref);
         let branch_digests = branches.map(|node_ref| self.pending_node_mast_root(node_ref));
         let split_digest = hasher::merge_in_domain(&branch_digests, SplitNode::DOMAIN);
         let child_refs = Vec::from(branches);
@@ -1020,15 +1115,32 @@ impl MastForestBuilder {
             PendingMastNodeDraft::new(PendingMastNodeKind::Split, split_digest, child_refs);
         draft.inline_calls = inline_calls;
 
-        self.intern_pending_node_with_asm_op(draft, asm_op)
+        self.intern_pending_node_with_asm_op_use(draft, asm_op, source_child_refs)
     }
 
+    #[cfg(test)]
     pub(crate) fn ensure_loop_node_ref(
         &mut self,
         body: MastNodeRef,
         asm_op: AssemblyOp,
         inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
+        let body = MastNodeUse::new(
+            body,
+            self.latest_source_ref_for_node_ref(body)
+                .expect("execution ref must have a source occurrence"),
+        );
+        Ok(self.ensure_loop_node_use(body, asm_op, inline_calls)?.node_ref())
+    }
+
+    pub(crate) fn ensure_loop_node_use(
+        &mut self,
+        body: MastNodeUse,
+        asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<MastNodeUse, Report> {
+        let source_child_refs = vec![body.source_ref()];
+        let body = body.node_ref();
         let body_digest = self.pending_node_mast_root(body);
         let loop_digest =
             hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
@@ -1037,9 +1149,10 @@ impl MastForestBuilder {
             PendingMastNodeDraft::new(PendingMastNodeKind::Loop, loop_digest, child_refs);
         draft.inline_calls = inline_calls;
 
-        self.intern_pending_node_with_asm_op(draft, asm_op)
+        self.intern_pending_node_with_asm_op_use(draft, asm_op, source_child_refs)
     }
 
+    #[cfg(test)]
     pub(crate) fn ensure_call_node_ref(
         &mut self,
         callee: MastNodeRef,
@@ -1047,6 +1160,23 @@ impl MastForestBuilder {
         asm_op: AssemblyOp,
         inline_calls: Vec<DebugSourceInlineCall>,
     ) -> Result<MastNodeRef, Report> {
+        let callee = MastNodeUse::new(
+            callee,
+            self.latest_source_ref_for_node_ref(callee)
+                .expect("execution ref must have a source occurrence"),
+        );
+        Ok(self.ensure_call_node_use(callee, is_syscall, asm_op, inline_calls)?.node_ref())
+    }
+
+    pub(crate) fn ensure_call_node_use(
+        &mut self,
+        callee: MastNodeUse,
+        is_syscall: bool,
+        asm_op: AssemblyOp,
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Result<MastNodeUse, Report> {
+        let source_child_refs = vec![callee.source_ref()];
+        let callee = callee.node_ref();
         let callee_digest = self.pending_node_mast_root(callee);
         let call_domain = if is_syscall {
             CallNode::SYSCALL_DOMAIN
@@ -1061,15 +1191,15 @@ impl MastForestBuilder {
             child_refs,
         );
         draft.inline_calls = inline_calls;
-        self.intern_pending_node_with_asm_op(draft, asm_op)
+        self.intern_pending_node_with_asm_op_use(draft, asm_op, source_child_refs)
     }
 
-    pub(crate) fn ensure_dyn_node_ref(
+    pub(crate) fn ensure_dyn_node_use(
         &mut self,
         is_dyncall: bool,
         asm_op: AssemblyOp,
         inline_calls: Vec<DebugSourceInlineCall>,
-    ) -> Result<MastNodeRef, Report> {
+    ) -> Result<MastNodeUse, Report> {
         let dyn_digest = if is_dyncall {
             DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
@@ -1082,30 +1212,28 @@ impl MastForestBuilder {
             child_refs,
         );
         draft.inline_calls = inline_calls;
-        self.intern_pending_node_with_asm_op(draft, asm_op)
+        self.intern_pending_node_with_asm_op_use(draft, asm_op, Vec::new())
     }
 
-    fn merge_contiguous_basic_block_refs(
+    fn merge_contiguous_basic_block_uses(
         &mut self,
-        node_refs: Vec<MastNodeRef>,
-    ) -> Result<Vec<MastNodeRef>, Report> {
-        let mut merged_node_refs = Vec::with_capacity(node_refs.len());
-        let mut contiguous_basic_block_refs: Vec<MastNodeRef> = Vec::new();
+        node_uses: Vec<MastNodeUse>,
+    ) -> Result<Vec<MastNodeUse>, Report> {
+        let mut merged_node_uses = Vec::with_capacity(node_uses.len());
+        let mut contiguous_basic_block_uses = Vec::new();
 
-        for node_ref in node_refs {
-            if self.pending_node_is_basic_block(node_ref) {
-                contiguous_basic_block_refs.push(node_ref);
+        for node_use in node_uses {
+            if self.pending_node_is_basic_block(node_use.node_ref()) {
+                contiguous_basic_block_uses.push(node_use);
             } else {
-                merged_node_refs.extend(self.merge_basic_block_refs(&contiguous_basic_block_refs)?);
-                contiguous_basic_block_refs.clear();
-
-                merged_node_refs.push(node_ref);
+                merged_node_uses.extend(self.merge_basic_block_uses(&contiguous_basic_block_uses)?);
+                contiguous_basic_block_uses.clear();
+                merged_node_uses.push(node_use);
             }
         }
 
-        merged_node_refs.extend(self.merge_basic_block_refs(&contiguous_basic_block_refs)?);
-
-        Ok(merged_node_refs)
+        merged_node_uses.extend(self.merge_basic_block_uses(&contiguous_basic_block_uses)?);
+        Ok(merged_node_uses)
     }
 
     fn record_merged_source_occurrences(
@@ -1161,15 +1289,31 @@ impl MastForestBuilder {
         Ok(())
     }
 
+    #[cfg(test)]
     fn merge_basic_block_refs(
         &mut self,
         contiguous_basic_block_refs: &[MastNodeRef],
     ) -> Result<Vec<MastNodeRef>, Report> {
-        if contiguous_basic_block_refs.is_empty() {
-            return Ok(Vec::new());
-        }
-        if contiguous_basic_block_refs.len() == 1 {
-            return Ok(contiguous_basic_block_refs.to_vec());
+        let source_refs = self.source_refs_for_node_ref_occurrences(contiguous_basic_block_refs);
+        let node_uses = contiguous_basic_block_refs
+            .iter()
+            .copied()
+            .zip(source_refs)
+            .map(|(node_ref, source_ref)| MastNodeUse::new(node_ref, source_ref))
+            .collect::<Vec<_>>();
+        Ok(self
+            .merge_basic_block_uses(&node_uses)?
+            .into_iter()
+            .map(MastNodeUse::node_ref)
+            .collect())
+    }
+
+    fn merge_basic_block_uses(
+        &mut self,
+        contiguous_basic_block_uses: &[MastNodeUse],
+    ) -> Result<Vec<MastNodeUse>, Report> {
+        if contiguous_basic_block_uses.len() <= 1 {
+            return Ok(contiguous_basic_block_uses.to_vec());
         }
 
         let mut operations: Vec<Operation> = Vec::new();
@@ -1180,11 +1324,11 @@ impl MastForestBuilder {
         let mut merged_functions: Vec<DebugFunctionIdx> = Vec::new();
         let mut merged_source_occurrences: Vec<(SourceNodeRef, usize)> = Vec::new();
 
-        let mut merged_basic_block_refs: Vec<MastNodeRef> = Vec::new();
+        let mut merged_basic_block_uses = Vec::new();
 
-        let source_refs = self.source_refs_for_node_ref_occurrences(contiguous_basic_block_refs);
-
-        for (&basic_block_ref, source_ref) in contiguous_basic_block_refs.iter().zip(source_refs) {
+        for &basic_block_use in contiguous_basic_block_uses {
+            let basic_block_ref = basic_block_use.node_ref();
+            let source_ref = basic_block_use.source_ref();
             // check if the block should be merged with other blocks
             if should_merge(
                 self.is_procedure_root_ref(basic_block_ref),
@@ -1236,7 +1380,7 @@ impl MastForestBuilder {
                     let block_inline_calls = core::mem::take(&mut merged_inline_calls);
                     let block_functions = core::mem::take(&mut merged_functions);
                     let block_source_occurrences = core::mem::take(&mut merged_source_occurrences);
-                    let merged_basic_block_ref = self.ensure_block_ref(
+                    let merged_basic_block_use = self.ensure_block_use(
                         block_ops,
                         block_asm_ops,
                         block_debug_vars,
@@ -1244,32 +1388,36 @@ impl MastForestBuilder {
                         block_functions,
                     )?;
                     self.record_merged_source_occurrences(
-                        merged_basic_block_ref,
+                        merged_basic_block_use.node_ref(),
                         &block_source_occurrences,
                     )?;
 
-                    merged_basic_block_refs.push(merged_basic_block_ref);
+                    merged_basic_block_uses.push(merged_basic_block_use);
                 }
-                merged_basic_block_refs.push(basic_block_ref);
+                merged_basic_block_uses.push(basic_block_use);
             }
         }
 
         if !operations.is_empty() {
-            let merged_basic_block = self.ensure_block_ref(
+            let merged_basic_block = self.ensure_block_use(
                 operations,
                 merged_asm_ops,
                 merged_debug_vars,
                 merged_inline_calls,
                 merged_functions,
             )?;
-            self.record_merged_source_occurrences(merged_basic_block, &merged_source_occurrences)?;
-            merged_basic_block_refs.push(merged_basic_block);
+            self.record_merged_source_occurrences(
+                merged_basic_block.node_ref(),
+                &merged_source_occurrences,
+            )?;
+            merged_basic_block_uses.push(merged_basic_block);
         }
 
-        Ok(merged_basic_block_refs)
+        Ok(merged_basic_block_uses)
     }
 
     /// Adds a basic block node to the forest, and returns its builder-local [`MastNodeRef`].
+    #[cfg(test)]
     pub(crate) fn ensure_block_ref(
         &mut self,
         operations: Vec<Operation>,
@@ -1278,17 +1426,33 @@ impl MastForestBuilder {
         inline_calls: Vec<DebugSourceInlineCall>,
         functions: Vec<DebugFunctionIdx>,
     ) -> Result<MastNodeRef, Report> {
+        Ok(self
+            .ensure_block_use(operations, asm_ops, debug_vars, inline_calls, functions)?
+            .node_ref())
+    }
+
+    pub(crate) fn ensure_block_use(
+        &mut self,
+        operations: Vec<Operation>,
+        asm_ops: Vec<DebugSourceAsmOp>,
+        debug_vars: Vec<DebugSourceVar>,
+        inline_calls: Vec<DebugSourceInlineCall>,
+        functions: Vec<DebugFunctionIdx>,
+    ) -> Result<MastNodeUse, Report> {
         let (op_batches, digest) = batch_basic_block_operations(operations)?;
         let kind = PendingMastNodeKind::BasicBlock { op_batches };
-        self.intern_pending_node(PendingMastNodeDraft {
-            kind,
-            digest,
-            child_refs: Vec::new(),
-            asm_ops,
-            debug_vars,
-            inline_calls,
-            functions,
-        })
+        self.intern_pending_node_use(
+            PendingMastNodeDraft {
+                kind,
+                digest,
+                child_refs: Vec::new(),
+                asm_ops,
+                debug_vars,
+                inline_calls,
+                functions,
+            },
+            Vec::new(),
+        )
     }
 }
 

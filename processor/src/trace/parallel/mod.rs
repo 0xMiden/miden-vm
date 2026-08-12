@@ -930,11 +930,14 @@ fn translate_snapshot_continuation_stack(
     let mut out: ContinuationStack<Arc<SparseMastForest>> = ContinuationStack::default();
     for cont in snapshot.into_inner() {
         let translated = match cont {
-            Continuation::EnterForest { forest: id, package_debug_info } => {
-                Continuation::EnterForest {
-                    forest: lookup_mast_forest(mast_forest_store, id)?.clone(),
-                    package_debug_info,
-                }
+            Continuation::EnterForest {
+                forest: id,
+                package_debug_info,
+                inline_context_depth,
+            } => Continuation::EnterForest {
+                forest: lookup_mast_forest(mast_forest_store, id)?.clone(),
+                package_debug_info,
+                inline_context_depth,
             },
             Continuation::StartNode(id) => Continuation::StartNode(id),
             Continuation::FinishJoin(id) => Continuation::FinishJoin(id),

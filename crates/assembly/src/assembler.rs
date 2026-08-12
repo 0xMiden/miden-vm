@@ -45,7 +45,9 @@ use crate::{
         Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
         SymbolResolver,
     },
-    mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceNodeRef, StaticLibrary},
+    mast_forest_builder::{
+        MastForestBuilder, MastNodeRef, MastNodeUse, SourceNodeRef, StaticLibrary,
+    },
 };
 
 /// Maximum number of locals a single procedure may allocate.
@@ -647,7 +649,7 @@ impl Assembler {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_ref(),
+                        node: proc.body_node_use(),
                         signature: proc.signature(),
                     },
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -686,8 +688,8 @@ impl Assembler {
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
-                    node_ref: node,
-                    source_ref: mast_forest_builder.latest_source_ref_for_node_ref(node),
+                    node_ref: node.node_ref(),
+                    source_ref: Some(node.source_ref()),
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
@@ -713,8 +715,7 @@ impl Assembler {
                     digest,
                     path: symbol_path,
                     node_ref: proc.body_node_ref(),
-                    source_ref: mast_forest_builder
-                        .latest_source_ref_for_node_ref(proc.body_node_ref()),
+                    source_ref: Some(proc.body_source_ref()),
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
                 })
@@ -1049,19 +1050,18 @@ impl Assembler {
         }
 
         self.compile_subgraph(SubgraphRoot::with_entrypoint(entrypoint), &mut mast_forest_builder)?;
-        let entry_node_ref = mast_forest_builder
+        let entry_procedure = mast_forest_builder
             .get_procedure(entrypoint)
-            .expect("compilation succeeded but root not found in cache")
-            .body_node_ref();
-        let entry_source_ref = mast_forest_builder.latest_source_ref_for_node_ref(entry_node_ref);
+            .expect("compilation succeeded but root not found in cache");
+        let entry_node_ref = entry_procedure.body_node_ref();
+        let entry_source_ref = entry_procedure.body_source_ref();
 
         let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
             mast_forest_builder.build()?.into_parts_with_debug_info();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
-        let entry_source_id =
-            entry_source_ref.and_then(|source_ref| source_id_by_ref.get(&source_ref).copied());
+        let entry_source_id = source_id_by_ref.get(&entry_source_ref).copied();
 
         let kernel_package = self.linker.kernel_package();
         self.finish_program_product(
@@ -1323,7 +1323,7 @@ impl Assembler {
             None
         };
 
-        let proc_body_ref = self.compile_body(
+        let proc_body = self.compile_body(
             proc.iter(),
             &mut proc_ctx,
             body_wrapper,
@@ -1333,9 +1333,9 @@ impl Assembler {
         )?;
 
         let proc_mast_root = mast_forest_builder
-            .mast_root_for_ref(proc_body_ref)
+            .mast_root_for_ref(proc_body.node_ref())
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref))
+        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body))
     }
 
     /// Creates assembly operation metadata for control flow nodes.
@@ -1359,13 +1359,13 @@ impl Assembler {
         active_inline_calls: Vec<ActiveInlineCall>,
         mast_forest_builder: &mut MastForestBuilder,
         nesting_depth: usize,
-    ) -> Result<MastNodeRef, Report>
+    ) -> Result<MastNodeUse, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
     {
         use ast::Op;
 
-        let mut body_node_refs: Vec<MastNodeRef> = Vec::new();
+        let mut body_node_uses = Vec::new();
         let mut block_builder = BasicBlockBuilder::with_active_inline_calls(
             wrapper,
             mast_forest_builder,
@@ -1379,16 +1379,16 @@ impl Assembler {
                         self.compile_instruction(inst, &mut block_builder, proc_ctx)?
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                            body_node_refs.push(basic_block_id);
+                            body_node_uses.push(basic_block_id);
                         }
 
-                        body_node_refs.push(node_ref);
+                        body_node_uses.push(node_ref);
                     }
                 },
 
                 Op::If { then_blk, else_blk, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
                     let inline_calls = block_builder.active_inline_call_rows(0);
                     let nested_inline_calls = block_builder.active_inline_calls().to_vec();
@@ -1422,14 +1422,14 @@ impl Assembler {
                     let asm_op = self.create_asm_op(span, "if.true", proc_ctx);
                     let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_split_node_ref([then_blk, else_blk], asm_op, inline_calls)?;
+                        .ensure_split_node_use([then_blk, else_blk], asm_op, inline_calls)?;
 
-                    body_node_refs.push(split_node_ref);
+                    body_node_uses.push(split_node_ref);
                 },
 
                 Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
                     let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
@@ -1477,13 +1477,13 @@ impl Assembler {
                     }
 
                     for _ in 0..iteration_count {
-                        body_node_refs.push(repeat_node_ref);
+                        body_node_uses.push(repeat_node_ref);
                     }
                 },
 
                 Op::While { body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
                     let inline_calls = block_builder.active_inline_call_rows(0);
                     let nested_inline_calls = block_builder.active_inline_calls().to_vec();
@@ -1517,12 +1517,12 @@ impl Assembler {
                         next_depth,
                     )?;
                     let loop_node_ref =
-                        block_builder.mast_forest_builder_mut().ensure_loop_node_ref(
+                        block_builder.mast_forest_builder_mut().ensure_loop_node_use(
                             loop_body_node_ref,
                             asm_op.clone(),
                             inline_calls.clone(),
                         )?;
-                    let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_ref(
+                    let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_use(
                         vec![Operation::Noop],
                         vec![],
                         vec![],
@@ -1531,18 +1531,18 @@ impl Assembler {
                     )?;
 
                     let split_node_ref =
-                        block_builder.mast_forest_builder_mut().ensure_split_node_ref(
+                        block_builder.mast_forest_builder_mut().ensure_split_node_use(
                             [loop_node_ref, noop_block_ref],
                             asm_op,
                             inline_calls,
                         )?;
 
-                    body_node_refs.push(split_node_ref);
+                    body_node_uses.push(split_node_ref);
                 },
 
                 Op::DoWhile { body, condition, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
                     let inline_calls = block_builder.active_inline_call_rows(0);
                     let nested_inline_calls = block_builder.active_inline_calls().to_vec();
@@ -1574,20 +1574,20 @@ impl Assembler {
                     )?;
                     let loop_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_loop_node_ref(loop_body_node_ref, asm_op, inline_calls)?;
+                        .ensure_loop_node_use(loop_body_node_ref, asm_op, inline_calls)?;
 
-                    body_node_refs.push(loop_node_ref);
+                    body_node_uses.push(loop_node_ref);
                 },
             }
         }
 
         let fallback_inline_calls = block_builder.active_inline_call_rows(0);
         if let Some(basic_block_id) = block_builder.try_into_basic_block()? {
-            body_node_refs.push(basic_block_id);
+            body_node_uses.push(basic_block_id);
         }
 
-        let procedure_body_ref = if body_node_refs.is_empty() {
-            mast_forest_builder.ensure_block_ref(
+        let procedure_body_ref = if body_node_uses.is_empty() {
+            mast_forest_builder.ensure_block_use(
                 vec![Operation::Noop],
                 vec![],
                 vec![],
@@ -1596,7 +1596,7 @@ impl Assembler {
             )?
         } else {
             let asm_op = self.create_asm_op(&proc_ctx.span(), "begin", proc_ctx);
-            mast_forest_builder.join_node_refs(body_node_refs, Some(asm_op))?
+            mast_forest_builder.join_node_uses(body_node_uses, Some(asm_op))?
         };
 
         Ok(procedure_body_ref)
@@ -1640,7 +1640,7 @@ impl Assembler {
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(ResolvedProcedure {
-                        node: proc.body_node_ref(),
+                        node: proc.body_node_use(),
                         signature: proc.signature(),
                     }),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1688,7 +1688,7 @@ impl Assembler {
         source_root_id: Option<MastNodeId>,
         source_debug_root_id: Option<DebugSourceNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<MastNodeRef, Report> {
+    ) -> Result<MastNodeUse, Report> {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
@@ -1716,12 +1716,15 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link_with_source_ref(
+        let node_ref = mast_forest_builder.ensure_external_link_with_source_ref(
             mast_root,
             source_library_commitment,
             source_root_id,
             source_debug_root_id,
-        )
+        )?;
+        Ok(mast_forest_builder
+            .latest_node_use(node_ref)
+            .expect("linked procedure root must have a source occurrence"))
     }
 }
 
@@ -1755,6 +1758,6 @@ pub(crate) struct BodyWrapper {
 }
 
 pub(super) struct ResolvedProcedure {
-    pub node: MastNodeRef,
+    pub node: MastNodeUse,
     pub signature: Option<Arc<FunctionType>>,
 }

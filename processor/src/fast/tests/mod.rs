@@ -1,10 +1,15 @@
-use alloc::{format, string::ToString, sync::Arc, vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+};
 use core::{assert_matches, str::FromStr};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
-    ast::{Module, ModuleKind, QualifiedProcedureName},
+    ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
 };
 use miden_core::{
     ONE, Word,
@@ -18,7 +23,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
+    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
+    Span, Uri,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
@@ -48,6 +54,59 @@ mod memory;
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
+
+fn set_entrypoint_inline_context(
+    source_manager: &DefaultSourceManager,
+    module: &mut Module,
+    name: &str,
+) {
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+    let mut replacements = [None, Some(name)].into_iter();
+    for op in entrypoint.body_mut().iter_mut() {
+        let Op::Inst(instruction) = op else {
+            continue;
+        };
+        if !matches!(instruction.inner(), Instruction::Nop) {
+            continue;
+        }
+        let replacement = replacements.next().expect("unexpected marker placeholder");
+        let span = instruction.span();
+        let instruction = match replacement {
+            None => Instruction::DebugInlineCallClear,
+            Some(name) => {
+                let location = source_manager.file_line_col(span).unwrap();
+                Instruction::DebugInlineCall(DebugInlineCallInfo::new(
+                    name,
+                    location.clone(),
+                    location,
+                ))
+            },
+        };
+        *op = Op::Inst(Span::new(span, instruction));
+    }
+    assert!(replacements.next().is_none(), "test fixture has too few marker placeholders");
+}
+
+fn active_inline_names(resume_context: &ResumeContext) -> Vec<String> {
+    resume_context
+        .inherited_inline_call_contexts()
+        .flat_map(|context| {
+            context
+                .debug_info()
+                .inline_calls_for_operation(context.source_node_id(), 0)
+                .map(|inline_call| {
+                    let function = context
+                        .debug_info()
+                        .get_function(inline_call.callee_idx)
+                        .expect("inline callee should be registered");
+                    context.debug_info()[function.name_idx].to_string()
+                })
+        })
+        .collect()
 }
 
 fn debug_asm_op(
@@ -965,6 +1024,138 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
         .unwrap();
 
     assert_eq!(output.stack.get_element(0), Some(Felt::from_u32(7)));
+}
+
+#[test]
+fn dynexec_propagates_inline_context_through_the_selected_target() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut parser = Module::parser(Some(ModuleKind::Executable));
+    let mut module = parser
+        .parse_str(
+            None,
+            "
+            proc target
+                push.7
+                drop
+            end
+
+            begin
+                procref.target mem_storew_le.100 dropw push.100
+                nop
+                nop
+                dynexec
+                push.9
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    set_entrypoint_inline_context(&source_manager, &mut module, "source::dynamic");
+    let package: Arc<Package> =
+        Arc::from(Assembler::new(source_manager).assemble_program("program", module).unwrap());
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context_for_package(package)
+        .expect("package resume context should initialize");
+    let mut host = DefaultHost::default();
+    let mut saw_target_context = false;
+    let mut saw_context_cleared = false;
+    loop {
+        let names = active_inline_names(&resume_context);
+        if names.is_empty() {
+            saw_context_cleared |= saw_target_context;
+        } else {
+            assert_eq!(names, ["source::dynamic"]);
+            saw_target_context = true;
+        }
+
+        let Some(next_resume_context) = processor.step_sync(&mut host, resume_context).unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_target_context, "dynexec target should inherit the call-site inline context");
+    assert!(saw_context_cleared, "inline context should end when dynexec returns");
+}
+
+#[test]
+fn external_exec_propagates_inline_context_into_the_loaded_package() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut library_parser = Module::parser(Some(ModuleKind::Library));
+    let library_module = library_parser
+        .parse_str(
+            None,
+            "
+            namespace dep::math
+
+            pub proc target
+                push.7
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    let library: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library("dep", library_module, None::<Box<Module>>)
+            .unwrap(),
+    );
+    let assembler = Assembler::new(source_manager.clone())
+        .with_package(library.clone(), Linkage::Dynamic)
+        .unwrap();
+    let mut program_parser = Module::parser(Some(ModuleKind::Executable));
+    let mut program_module = program_parser
+        .parse_str(
+            None,
+            "
+            use dep::math
+
+            begin
+                nop
+                nop
+                exec.math::target
+                push.9
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    set_entrypoint_inline_context(&source_manager, &mut program_module, "source::external");
+    let package: Arc<Package> =
+        Arc::from(assembler.assemble_program("program", program_module).unwrap());
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context_for_package(package)
+        .expect("package resume context should initialize");
+    let mut host = DefaultHost::default();
+    host.load_library(library).unwrap();
+    let mut saw_target_context = false;
+    let mut saw_context_cleared = false;
+    loop {
+        let names = active_inline_names(&resume_context);
+        if names.is_empty() {
+            saw_context_cleared |= saw_target_context;
+        } else {
+            assert_eq!(names, ["source::external"]);
+            saw_target_context = true;
+        }
+
+        let Some(next_resume_context) = processor.step_sync(&mut host, resume_context).unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_target_context, "loaded target should inherit the external boundary context");
+    assert!(saw_context_cleared, "inline context should end when external execution returns");
 }
 
 fn absolute_path(name: &str) -> Arc<Path> {

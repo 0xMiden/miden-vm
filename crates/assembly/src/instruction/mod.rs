@@ -12,7 +12,7 @@ use miden_core::{
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastNodeRef, push_value_ops,
+    mast_forest_builder::MastNodeUse, push_value_ops,
 };
 
 mod crypto_ops;
@@ -32,7 +32,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         // Determine whether this instruction can create a new node
         let can_create_node = matches!(
             instruction.inner(),
@@ -82,7 +82,7 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
         node_asm_op: Option<AssemblyOp>,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         use Operation::*;
 
         let span = instruction.span();

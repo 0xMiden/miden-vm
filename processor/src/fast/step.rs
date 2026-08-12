@@ -1,13 +1,13 @@
 //! This module defines items relevant to controlling execution stopping conditions.
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::KernelDescriptor};
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
-    ExecutionError, FastProcessor, Stopper,
+    ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
 };
 
@@ -22,6 +22,7 @@ pub struct ResumeContext {
     pub(crate) continuation_stack: ContinuationStack<Arc<MastForest>>,
     pub(crate) kernel: KernelDescriptor,
     pub(crate) package_debug_info: Option<Arc<PackageDebugInfo>>,
+    pub(crate) inline_call_contexts: Vec<Option<SourceInlineCallContext>>,
 }
 
 impl ResumeContext {
@@ -45,6 +46,12 @@ impl ResumeContext {
         self.continuation_stack
             .peek_continuation_with_source_node_id()
             .and_then(|(_, source_node_id)| source_node_id)
+    }
+
+    /// Returns dynamic-boundary inline contexts active for the next operation, ordered from the
+    /// innermost boundary to the outermost.
+    pub fn inherited_inline_call_contexts(&self) -> impl Iterator<Item = &SourceInlineCallContext> {
+        self.inline_call_contexts.iter().rev().filter_map(Option::as_ref)
     }
 
     /// Returns a reference to the kernel being currently executed.
