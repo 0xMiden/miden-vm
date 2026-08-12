@@ -289,7 +289,7 @@ fn glv_joint_wnaf_with_tables_reused_across_scalars() {
         from_hex("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
         from_hex("123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"),
     ] {
-        let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, &endo, u)]);
+        let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, Some(&endo), u)]);
         let (x, y) = s.msm_value_coords(expr);
         let expected =
             curve.mul_scalar(curve.generator(), to_limbs32(u)).expect("valid scalar mul");

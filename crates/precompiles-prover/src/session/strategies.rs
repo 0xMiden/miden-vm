@@ -389,10 +389,10 @@ pub fn glv_joint_wnaf(
         .iter()
         .map(|(p, _)| (wnaf_table(session, p, w), wnaf_table_endo(session, p, w)))
         .collect();
-    let table_terms: Vec<(&WnafTable, &WnafTable, U256)> = tables
+    let table_terms: Vec<(&WnafTable, Option<&WnafTable>, U256)> = tables
         .iter()
         .zip(terms)
-        .map(|((plain, endo), &(_, k))| (plain, endo, k))
+        .map(|((plain, endo), &(_, k))| (plain, Some(endo), k))
         .collect();
     glv_joint_wnaf_with_tables(session, &table_terms)
 }
@@ -406,21 +406,29 @@ pub fn glv_joint_wnaf(
 /// since the split (and its signs) is scalar-specific; only the tables —
 /// which depend on the base alone — are shared.
 ///
-/// `terms` pairs each base's `(plain_table, endo_table, scalar)`. Returns
-/// the combined MSM expression. Panics if `terms` is empty or any scalar is
-/// zero.
+/// `terms` pairs each base's `(plain_table, endo_table, scalar)`. `endo_table`
+/// is `None` for a base with no endomorphism image — the point at infinity,
+/// whose GLV split is undefined by the `φ` coordinate formula — in which case
+/// the term rides its plain leg alone at the scalar's full (undecomposed)
+/// magnitude instead of a split half. Returns the combined MSM expression.
+/// Panics if `terms` is empty or any scalar is zero.
 pub fn glv_joint_wnaf_with_tables(
     session: &mut Session,
-    terms: &[(&WnafTable, &WnafTable, U256)],
+    terms: &[(&WnafTable, Option<&WnafTable>, U256)],
 ) -> EcExprPtr {
     assert!(!terms.is_empty(), "an MSM needs at least one base");
 
     let mut signed_terms: Vec<(&WnafTable, U256, bool)> = Vec::with_capacity(terms.len() * 2);
     for &(plain, endo, k) in terms {
         assert_ne!(k, U256::ZERO, "glv_joint_wnaf_with_tables terms must have a nonzero scalar");
-        let [(a_neg, a_mag), (b_neg, b_mag)] = glv_decompose(to_limbs32(k));
-        signed_terms.push((plain, from_limbs32(&a_mag), a_neg));
-        signed_terms.push((endo, from_limbs32(&b_mag), b_neg));
+        match endo {
+            Some(endo) => {
+                let [(a_neg, a_mag), (b_neg, b_mag)] = glv_decompose(to_limbs32(k));
+                signed_terms.push((plain, from_limbs32(&a_mag), a_neg));
+                signed_terms.push((endo, from_limbs32(&b_mag), b_neg));
+            },
+            None => signed_terms.push((plain, k, false)),
+        }
     }
     joint_wnaf_with_signed_tables(session, &signed_terms)
 }
