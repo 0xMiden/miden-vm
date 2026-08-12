@@ -7,6 +7,7 @@
 
 #### Changes
 
+- [BREAKING] Removed the unused `CsrMatrix` and `CsrValidationError` APIs from `miden-utils-indexing` and `miden-core::utils` ([#3591](https://github.com/0xMiden/miden-vm/issues/3591)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
 
