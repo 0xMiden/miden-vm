@@ -1643,6 +1643,50 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
 }
 
 #[test]
+fn link_time_const_evaluation_nested_imported_expression_succeeds() -> TestResult {
+    let context = TestContext::default();
+    let constants = parse_module!(
+        &context,
+        r#"
+            namespace lib::constants
+
+            pub const WORD_NUM_ELEMENTS = 4
+
+            pub proc noop
+                nop
+            end
+        "#
+    );
+    let lib = Assembler::new(context.source_manager()).assemble_library(
+        "lib",
+        constants,
+        None::<Box<Module>>,
+    )?;
+
+    let program = source_file!(
+        &context,
+        r#"
+            use {WORD_NUM_ELEMENTS} from lib::constants
+
+            const OFFSET_1 = WORD_NUM_ELEMENTS + 1
+            const OFFSET_2 = OFFSET_1 + 1
+
+            begin
+                push.OFFSET_2
+                push.6
+                assert_eq
+            end
+        "#
+    );
+
+    Assembler::new(context.source_manager())
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", program)?;
+
+    Ok(())
+}
+
+#[test]
 fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     let context = TestContext::default();
     let a = r#"

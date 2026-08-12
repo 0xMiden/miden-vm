@@ -1,6 +1,5 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span};
 use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
@@ -1461,9 +1460,6 @@ fn assert_parsing_line_unexpected_token() {
 /// - Line comments (i.e. not docstrings) are not preserved, and so do not end up in the output
 /// - The original choice to place a sequence of instructions on the same line or multiple lines is
 ///   not preserved in the AST, so the formatter always places them on individual lines.
-/// - References to constant values by name are replaced with their value during semantic analysis,
-///   so no named constants appear in the formatted output.
-/// - Constant declarations are not preserved by the parser, and so are not shown in the output
 #[test]
 fn test_roundtrip_formatting() {
     let source = "\
@@ -1477,6 +1473,7 @@ namespace test::formatting
 #!
 #! with spaces
 const DEFAULT_CONST = 100
+const NEXT_CONST = DEFAULT_CONST + 1
 
 #! Perform `a + b`, `n` times
 #!
@@ -1506,7 +1503,7 @@ proc add_n_times # [n, b, a]
 end
 
 begin
-    push.1.1.DEFAULT_CONST
+    push.1.1.NEXT_CONST
     exec.add_n_times
     push.20
     assert_eq
@@ -1530,6 +1527,8 @@ namespace test::formatting
 #!
 #! with spaces
 const DEFAULT_CONST = 100
+
+const NEXT_CONST = DEFAULT_CONST+1
 
 #! Perform `a + b`, `n` times
 #!
@@ -1566,7 +1565,7 @@ end
 begin
     push.1
     push.1
-    push.100
+    push.NEXT_CONST
     exec.add_n_times
     push.20
     assert_eq
@@ -1607,48 +1606,35 @@ const B = [2,3,4,5]
 
 begin
     push.[2,3,4,5]
-    push.[2,3,4,5]
+    push.A
     push.6
-    push.[2,3,4,5]
+    push.B
     push.6
     push.2
     push.3
     push.4
     push.5
-    push.[2,3,4,5]
-    push.[2,3,4,5]
+    push.A
+    push.B
 end
 ";
 
     assert_eq!(&formatted, expected);
 }
 
-/// `EmitImm` is printed as the equivalent `push.<id> emit drop` sequence, since `emit.<felt>`
-/// is not valid syntax.
 #[test]
-fn test_emit_imm_roundtrip_formatting() {
-    check_imm_event_roundtrip_formatting("emit");
-}
-
-/// `TraceImm` is printed as the equivalent `push.<id> trace drop` sequence, since `trace.<felt>`
-/// is not valid syntax.
-#[test]
-fn test_trace_roundtrip_formatting() {
-    check_imm_event_roundtrip_formatting("trace");
-}
-
-/// Checks that immediate `emit`/`trace` instructions round-trip through parsing and formatting.
-fn check_imm_event_roundtrip_formatting(kind: &str) {
-    let event_name = format!("test::{kind}::roundtrip");
-    let event_id = EventId::from_name(&event_name).as_felt();
+fn test_event_name_roundtrip_formatting() {
+    let trace_name = "test::trace::roundtrip";
+    let event_name = "test::emit::roundtrip";
 
     let source = format!(
         "\
 begin
     push.1
-    {kind}
+    trace
     drop
-    {kind}.event(\"{event_name}\")
+    trace.event(\"{trace_name}\")
+    emit.event(\"{event_name}\")
 end
 "
     );
@@ -1663,35 +1649,18 @@ namespace $exec
 
 begin
     push.1
-    {kind}
+    trace
     drop
-    push.{event_id} {kind} drop
+    trace.event(\"{trace_name}\")
+    emit.event(\"{event_name}\")
 end
 "
     );
     assert_eq!(&formatted, &expected);
 
-    // The printed output must parse back.
     let source = source_file!(&context, &expected);
     let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    let expanded = format!(
-        "\
-namespace $exec
-
-begin
-    push.1
-    {kind}
-    drop
-    push.{event_id}
-    {kind}
-    drop
-end
-"
-    );
-    let source = source_file!(&context, &expanded);
-    let expanded_module =
-        context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    assert_eq!(reparsed, expanded_module);
+    assert_eq!(module, reparsed);
 }
 
 #[test]

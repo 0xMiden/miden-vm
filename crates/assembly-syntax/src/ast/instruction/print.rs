@@ -1,6 +1,6 @@
 use crate::{
     DisplayHex,
-    ast::{Immediate, Instruction, InvocationTarget},
+    ast::{EventImmediate, Immediate, Instruction, InvocationTarget},
     prettier::{Document, PrettyPrint},
 };
 
@@ -335,17 +335,13 @@ impl PrettyPrint for Instruction {
 
             // ----- events -----------------------------------------------------------------------
             Self::Emit => const_text("emit"),
-            // `emit.<FELT_IMM>` is invalid syntax, so to support a `print -> parse` round trip
-            // we print the equivalent `push.<value> emit drop` sequence instead.
-            Self::EmitImm(value) => {
-                flatten(inst_with_felt_imm("push", value) + const_text(" emit drop"))
-            },
+            Self::EmitImm(value) => inst_with_event_imm("emit", value),
 
             // ----- traces (read-only events) ----------------------------------------------------
             Self::Trace => const_text("trace"),
-            // `trace.<FELT_IMM>` is invalid syntax, so to support a `print -> parse` round trip
-            // we print the equivalent `push.<value> trace drop` sequence instead.
-            Self::TraceImm(value) => {
+            Self::TraceImm(EventImmediate::Name(name)) => inline_event_imm("trace", name.inner()),
+            // `trace.<FELT_IMM>` is invalid syntax, so print the equivalent instruction sequence.
+            Self::TraceImm(EventImmediate::Immediate(value)) => {
                 flatten(inst_with_felt_imm("push", value) + const_text(" trace drop"))
             },
 
@@ -353,6 +349,24 @@ impl PrettyPrint for Instruction {
             Self::DebugVar(_) => unreachable!(),
         }
     }
+}
+
+fn inst_with_event_imm(name: &'static str, imm: &EventImmediate) -> Document {
+    match imm {
+        EventImmediate::Immediate(imm) => inst_with_felt_imm(name, imm),
+        EventImmediate::Name(event) => inline_event_imm(name, event.inner()),
+    }
+}
+
+fn inline_event_imm(name: &'static str, event: &str) -> Document {
+    use crate::prettier::*;
+
+    flatten(
+        const_text(name)
+            + const_text(".event(\"")
+            + text(format!("{}", event.escape_debug()))
+            + const_text("\")"),
+    )
 }
 
 fn inst_with_imm(name: &'static str, imm: &dyn PrettyPrint) -> Document {
