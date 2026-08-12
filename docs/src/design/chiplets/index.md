@@ -205,7 +205,7 @@ Lookup requests are sent to the chiplets bus by the following components:
 - The decoder sends a procedure access request to the [Kernel ROM chiplet](./kernel_rom.md) for each `SYSCALL` during [program block hashing](../decoder/index.md#program-block-hashing).
 - The verifier initializes the bus with requests to the [Kernel ROM chiplet](./kernel_rom.md) for each unique kernel procedure digest.
 
-Responses are provided by the [hash](./hasher.md#chiplets-bus-constraints), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
+Responses are provided by the [hash](./hasher.md#chiplets-bus), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
 
 The verifier computes the expected final value of $b_{chip}$ from public inputs and checks it
 against `aux_finals`. There is no explicit last-row boundary constraint in the chiplets bus.
