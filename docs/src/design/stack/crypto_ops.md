@@ -125,6 +125,10 @@ The above constraint enforces that the specified input and output controller row
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
 
+## Merkle-depth range checks
+
+`MPVERIFY` and `MRUPDATE` also request range checks for $d$ and $c(d - 1)$, where $c = 2^{16} / 64 = 1024$. Both values are in the 16-bit range exactly when $1 \le d \le 64$.
+
 ## CRYPTOSTREAM
 The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
 top 8 stack elements (the rate), writes the resulting ciphertext back to memory,

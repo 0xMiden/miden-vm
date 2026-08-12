@@ -91,6 +91,20 @@ pub const NUM_METADATA_COLS: usize = 5;
 /// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + perm_id = 20.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + NUM_METADATA_COLS;
 
+/// Largest Merkle path depth accepted by MPVERIFY and MRUPDATE.
+///
+/// Depths above 64 require more index bits than a field element provides. At depth 64, a separate
+/// constraint must still bind the path bits to the index's canonical field representation.
+pub const MAX_MERKLE_DEPTH: u8 = 64;
+
+const _: () = assert!(
+    MAX_MERKLE_DEPTH > 1 && (1_u32 << 16).is_multiple_of(MAX_MERKLE_DEPTH as u32),
+    "MAX_MERKLE_DEPTH must be greater than one and divide 2^16"
+);
+
+/// Scale used with a 16-bit range check to enforce the upper Merkle-depth bound.
+pub const MERKLE_DEPTH_RANGE_SCALE: u16 = ((1_u32 << 16) / MAX_MERKLE_DEPTH as u32) as u16;
+
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
 
@@ -125,3 +139,36 @@ pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
 pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
 
 // NOTE: Selectors s0/s1/s2 are hasher-controller internal selectors.
+
+#[cfg(test)]
+mod tests {
+    use miden_core::field::PrimeCharacteristicRing;
+
+    use super::*;
+
+    fn merkle_depth_range_values(depth: Felt) -> [Felt; 2] {
+        [depth, (depth - Felt::ONE) * Felt::from_u16(MERKLE_DEPTH_RANGE_SCALE)]
+    }
+
+    fn is_u16(value: Felt) -> bool {
+        value.as_canonical_u64() < 1 << 16
+    }
+
+    #[test]
+    fn merkle_depth_range_checks_accept_exactly_the_supported_depths() {
+        let max_depth = u64::from(MAX_MERKLE_DEPTH);
+        for depth in 0..=u64::from(u16::MAX) {
+            let values = merkle_depth_range_values(Felt::new_unchecked(depth));
+            let accepted = values.into_iter().all(is_u16);
+            assert_eq!(accepted, (1..=max_depth).contains(&depth), "depth {depth}");
+        }
+    }
+
+    #[test]
+    fn merkle_depth_range_checks_reject_near_modulus_values() {
+        let max_depth = Felt::from_u8(MAX_MERKLE_DEPTH);
+        for depth in [Felt::NEG_ONE, Felt::NEG_ONE - max_depth + Felt::ONE] {
+            assert!(!merkle_depth_range_values(depth).into_iter().all(is_u16));
+        }
+    }
+}

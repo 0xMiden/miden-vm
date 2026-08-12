@@ -61,7 +61,7 @@ impl RangeChecker {
 
     /// Adds a batch of range-check lookups to this [RangeChecker] instance.
     pub fn add_range_checks(&mut self, values: &[u16]) {
-        // Current emitters record range checks in batches of two or four limbs.
+        // Current emitters record range checks in batches of two or four values.
         debug_assert!(values.len() == 2 || values.len() == 4);
 
         for value in values.iter() {
@@ -110,9 +110,8 @@ impl RangeChecker {
             prev_value = value;
         }
 
-        // Pad the trace with an extra row of 0 lookups for u16::MAX so that when b_range is
-        // built there is space for the inclusion of u16::MAX range check lookups before the
-        // trace ends.
+        // Preserve the trailing zero-multiplicity u16::MAX row in the range-table layout. It
+        // contributes zero to the RangeCheck sum, and its zero delta is permitted by the range AIR.
         write_trace_row(sink, &mut step, 0, (u16::MAX).into());
         step
     }
@@ -122,8 +121,7 @@ impl RangeChecker {
 
     /// Returns the number of rows needed to support all 16-bit lookups requested by the VM.
     pub fn get_number_range_checker_rows(&self) -> usize {
-        // pad the trace length by one, to account for an extra row of the u16::MAX value at the end
-        // of the trace, required for building the `b_range` column.
+        // Account for the trailing zero-multiplicity u16::MAX row emitted by `emit_table_rows`.
         let mut num_rows = 1;
 
         let mut prev_value = 0u16;
