@@ -55,8 +55,10 @@ fn precompiles_bench(c: &mut Criterion) {
                 let mut total = Duration::ZERO;
                 for _ in 0..iterations {
                     let started_at = std::time::Instant::now();
-                    black_box(prove_once_with_hash(&fixture, proof_hash));
-                    total += started_at.elapsed();
+                    let proof = black_box(prove_once_with_hash(&fixture, proof_hash));
+                    let elapsed = started_at.elapsed();
+                    black_box(proof);
+                    total += elapsed;
                 }
                 total
             });

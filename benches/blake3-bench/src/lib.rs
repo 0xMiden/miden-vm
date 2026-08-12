@@ -6,8 +6,9 @@ use std::{
 
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionOptions, FastProcessor, HashFunction, Program, ProvingOptions,
-    StackInputs, TraceBuildInputs, TraceProvingInputs, Verifier,
+    Assembler, DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionProof, ExecutionTrace,
+    FastProcessor, HashFunction, Program, ProvingOptions, StackInputs, StackOutputs,
+    TraceBuildInputs, TraceProvingInputs, Verifier,
     advice::AdviceInputs,
     assembly::{
         DefaultSourceManager, Path as LibraryPath,
@@ -133,7 +134,7 @@ pub fn execute_trace_inputs(fixture: &Blake3Fixture) -> TraceBuildInputs {
     }
 }
 
-pub fn execute_program(fixture: &Blake3Fixture) {
+pub fn execute_program(fixture: &Blake3Fixture) -> ExecutionOutput {
     let mut host = host_for_fixture(fixture);
     let processor = FastProcessor::new_with_options(
         fixture.stack_inputs,
@@ -143,7 +144,7 @@ pub fn execute_program(fixture: &Blake3Fixture) {
     .expect("processor advice inputs should fit advice map limits");
     processor
         .execute_sync(&fixture.program, &mut host)
-        .expect("failed to execute Blake3 benchmark");
+        .expect("failed to execute Blake3 benchmark")
 }
 
 pub fn prove_program(fixture: &Blake3Fixture) {
@@ -151,8 +152,8 @@ pub fn prove_program(fixture: &Blake3Fixture) {
     prove_trace(execute_trace_inputs(fixture));
 }
 
-pub fn prove_trace(trace_inputs: TraceBuildInputs) {
-    let _ = prove_trace_outputs(trace_inputs);
+pub fn prove_trace(trace_inputs: TraceBuildInputs) -> (StackOutputs, ExecutionProof) {
+    prove_trace_outputs(trace_inputs)
 }
 
 pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
@@ -169,15 +170,13 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
         .expect("failed to verify Blake3 benchmark proof");
 }
 
-fn prove_trace_outputs(
-    trace_inputs: TraceBuildInputs,
-) -> (miden_vm::StackOutputs, miden_vm::ExecutionProof) {
+fn prove_trace_outputs(trace_inputs: TraceBuildInputs) -> (StackOutputs, ExecutionProof) {
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options()))
         .expect("failed to prove Blake3 benchmark trace")
 }
 
-pub fn build_trace(trace_inputs: TraceBuildInputs) {
-    trace::build_trace(trace_inputs).expect("failed to build Blake3 execution trace");
+pub fn build_trace(trace_inputs: TraceBuildInputs) -> ExecutionTrace {
+    trace::build_trace(trace_inputs).expect("failed to build Blake3 execution trace")
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
