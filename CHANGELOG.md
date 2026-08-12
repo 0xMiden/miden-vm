@@ -7,6 +7,8 @@
 
 #### Changes
 
+- [BREAKING] Removed the unused `CsrMatrix` and `CsrValidationError` APIs from `miden-utils-indexing` and `miden-core::utils` ([#3591](https://github.com/0xMiden/miden-vm/issues/3591)).
+- Added a Lychee check for local Markdown links in pull requests and fixed 17 broken links in README and docs files ([#3606](https://github.com/0xMiden/miden-vm/pull/3606)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
 
@@ -27,12 +29,16 @@
 - [BREAKING] Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, and the bypassing `serde` derives were removed from `LeafIndex`, `SmtLeaf`, `Smt`, and `PartialSmt` ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
 - Fixed `Polynomial::div` panicking when the numerator is zero by adding the missing `return` keyword ([#3534](https://github.com/0xMiden/miden-vm/issues/3534)).
 - Moved the `read_bounded_len` and `validate_bounded_len` helpers from `miden-core` to `miden-serde-utils`, where they are now public. `miden-core::serde` re-exports them unchanged, and the private duplicates in `miden-utils-indexing` were removed ([#3415](https://github.com/0xMiden/miden-vm/issues/3415)).
+#### Features
+
+- Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
 
 ## v0.29.0 (2026-08-04)
 
 #### Changes
 
 - [BREAKING] Recursive MASM verification now accepts a claim commitment and authenticates the advice-supplied claim and kernel witness. Rust callers construct request-addressed inputs with `RecursiveVerifierInputs::for_request` ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
+- Adopted cargo-fixit, aligned clippy lints with crypto, cleared cargo-shear warnings ([#3479](https://github.com/0xMiden/miden-vm/pull/3479))
 
 #### Fixes
 

@@ -72,6 +72,13 @@ FEATURES_verifier        :=
 # which runs `make clippy` with RUSTFLAGS=-D warnings (see .github/workflows/lint.yml).
 DENY_WARNINGS := RUSTFLAGS="$(RUSTFLAGS) -D warnings"
 
+# The clippy lint set is defined once, in the `xclippy` cargo alias in
+# .cargo/config.toml, and extracted here so the check and fix paths cannot
+# drift apart. cargo-fixit (a faster drop-in for `cargo clippy --fix`) cannot
+# take lint flags as trailing arguments, so the fix path passes them via
+# RUSTFLAGS instead.
+CLIPPY_LINT_FLAGS := $(shell sed -n '/^xclippy = \[/,/^]/p' .cargo/config.toml | grep -oE '"-[WD][^"]+"' | tr -d '"' | tr '\n' ' ')
+
 .PHONY: clippy
 clippy: ## Runs Clippy with configs (alias for xclippy)
 	$(DENY_WARNINGS) cargo +stable xclippy
@@ -86,8 +93,16 @@ xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
 fix: xclippy-fix format ## Applies automatic lint and format fixes
 
 .PHONY: xclippy-fix
-xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
-	cargo +stable xclippy-fix
+xclippy-fix: ## Applies clippy lint fixes via cargo-fixit (a faster `cargo clippy --fix`)
+	@if ! command -v cargo-fixit >/dev/null 2>&1; then \
+		echo "cargo-fixit is not installed; skipping clippy lint fixes." >&2; \
+		echo "It is a faster drop-in replacement for 'cargo clippy --fix'." >&2; \
+		echo "Install it with:  cargo install cargo-fixit --locked" >&2; \
+	else \
+		RUSTFLAGS="$(CLIPPY_LINT_FLAGS)" cargo +stable fixit --clippy \
+			--allow-dirty --allow-staged \
+			--workspace --all-targets --all-features; \
+	fi
 
 
 .PHONY: format

@@ -387,6 +387,11 @@ pub struct NodeFlags {
 
 impl NodeFlags {
     /// Creates a new instance of `NodeFlags`.
+    ///
+    /// The four booleans are independent flags packed into the hasher state's
+    /// second word for an END operation; there is no natural smaller grouping,
+    /// so we accept the bool parameters explicitly.
+    #[allow(clippy::fn_params_excessive_bools)]
     pub fn new(is_loop_body: bool, is_loop: bool, is_call: bool, is_syscall: bool) -> Self {
         Self {
             is_loop_body,
