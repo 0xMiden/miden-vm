@@ -712,6 +712,22 @@ fn node_path_should_be_truncated_by_midtier_insert() {
 // ================================================================================================
 
 #[test]
+fn get_leaf_depth_rejects_depth_zero() {
+    let mut store = MerkleStore::new();
+    let empty_root: Word = EmptySubtreeRoots::empty_hashes(64)[0];
+
+    // put the root in the store so that the depth check is what rejects the call
+    let index = NodeIndex::new(64, 0).unwrap();
+    let node = Word::from([Felt::new_unchecked(1); Word::NUM_ELEMENTS]);
+    let root = store.set_node(empty_root, index, node).unwrap().root;
+
+    // `64 - tree_depth` is the shift used to build the traversal path, so a depth of 0 would
+    // shift by the full width of a `u64`.
+    let err = store.get_leaf_depth(root, 0, 0).unwrap_err();
+    assert_matches!(err, MerkleError::DepthTooSmall(0));
+}
+
+#[test]
 fn get_leaf_depth_works_depth_64() {
     let mut store = MerkleStore::new();
     let mut root: Word = EmptySubtreeRoots::empty_hashes(64)[0];

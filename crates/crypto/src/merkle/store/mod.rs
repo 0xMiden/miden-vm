@@ -224,6 +224,7 @@ impl MerkleStore {
     /// # Errors
     /// Will return an error if:
     /// - The provided root is not found.
+    /// - The provided `tree_depth` is smaller than 1.
     /// - The provided `tree_depth` is greater than 64.
     /// - The provided `index` is not valid for a depth equivalent to `tree_depth`.
     /// - No leaf or an empty node was found while traversing the tree down to `tree_depth`.
@@ -234,6 +235,9 @@ impl MerkleStore {
         index: u64,
     ) -> Result<u8, MerkleError> {
         // validate depth and index
+        if tree_depth == 0 {
+            return Err(MerkleError::DepthTooSmall(tree_depth));
+        }
         if tree_depth > 64 {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
@@ -247,6 +251,8 @@ impl MerkleStore {
         }
 
         // we traverse from root to leaf, so the path is reversed
+        //
+        // `tree_depth` is at least 1 here, so the shift stays below the width of `u64`.
         let mut path = (index << (64 - tree_depth)).reverse_bits();
 
         // iterate every depth and reconstruct the path from root to leaf
