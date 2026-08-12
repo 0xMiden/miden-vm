@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Range Checker
 
-Miden VM relies very heavily on 16-bit range-checks (checking if a value of a field element is between $0$ and $2^{16}$). For example, most of the [u32 operations](./stack/u32_ops.md) need to perform between two and four 16-bit range-checks per operation. Similarly, operations involving memory (e.g. load and store) require two 16-bit range-checks per operation.
+Miden VM relies very heavily on 16-bit range-checks (checking if a field element is smaller than $2^{16}$). Most [u32 operations](./stack/u32_ops.md) perform between two and four 16-bit range-checks; `U32DIV` performs six. Each active memory row requires five 16-bit range-checks.
 
 Thus, it is very important for the VM to be able to perform a large number of 16-bit range checks very efficiently. In this note we describe how this can be achieved using the [LogUp](./lookups/logup.md) lookup argument.
 
@@ -147,8 +147,8 @@ In addition to the transition constraints described above, we also need to enfor
 $b_{range}$ is the [bus](./lookups/index.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
 
 Requests are sent to the range checker bus by the following components:
-- The Stack sends requests for 16-bit range checks during some [`u32` operations](./stack/u32_ops.md#range-checks).
-- The [Memory chiplet](./chiplets/memory.md) sends requests for 16-bit range checks against the values in the $d_0$ and $d_1$ trace columns to enforce internal consistency.
+- The Stack sends four requests during each range-checked [`u32` operation](./stack/u32_ops.md#range-checks), plus two more for `U32DIV`.
+- The [Memory chiplet](./chiplets/memory.md) sends five requests per active row for its delta and word-address decompositions.
 
 Responses are provided by the range checker using the transition constraint for the LogUp construction described above.
 
@@ -156,18 +156,22 @@ Responses are provided by the range checker using the transition constraint for 
 > b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
 > $$
 
-To describe the complete transition constraint for the bus, we'll define the following variables:
+To describe the requests sent to the bus, we'll define the following variables:
 
 - $f_{stack}$: the boolean flag that indicates whether or not a stack operation requiring range checks is occurring. This flag has degree 3.
+- $f_{div}$: the boolean flag that indicates whether or not a `U32DIV` operation is occurring. This flag has degree 6.
 - $f_{mem}$: the boolean flag that indicates whether or not a memory operation requiring range checks is occurring. This flag has degree 3.
 - $s_0, s_1, s_2, s_3$: the values for which range checks are requested from the stack when $f_{stack}$ is set.
-- $m_0, m_1$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
+- $s_4, s_5$: the low and high 16-bit limbs of `divisor - remainder - 1` for `U32DIV`.
+- $m_0, ..., m_4$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
 
 > $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)}  - \frac{f_{mem}}{(\alpha - m_0)} - \frac{f_{mem}}{(\alpha - m_1)} \text{ | degree} = 9
+> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)} - \frac{f_{div}}{(\alpha - s_4)} - \frac{f_{div}}{(\alpha - s_5)} - \sum_{i=0}^{4}\frac{f_{mem}}{(\alpha - m_i)}
 > $$
 
-As previously mentioned, constraints cannot include divisions, so the actual constraint which is applied will be the equivalent expression in which all denominators have been multiplied through, which is degree 9.
+The equation above shows the combined range-bus contribution. The implementation distributes these
+terms across several LogUp accumulator columns and multiplies through only the denominators assigned
+to each column. This packing keeps the maximum constraint degree at $9$.
 
 If $b_{range}$ is initialized to $0$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 0$.
 

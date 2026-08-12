@@ -906,6 +906,18 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+        let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
+        self.range_checker.record_u32div_remainder_diff([d0, d1]);
+    }
+
+    #[inline(always)]
     fn record_kernel_proc_access(&mut self, proc_hash: Word) {
         self.kernel.record_kernel_proc_access(proc_hash);
     }

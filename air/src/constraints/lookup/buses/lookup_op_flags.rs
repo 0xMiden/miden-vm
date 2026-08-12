@@ -67,6 +67,9 @@ pub struct LookupOpFlags<E> {
     hornerbase: E,
     hornerext: E,
 
+    // -- Degree-6 individual ops ----------------------------------------------------------------
+    u32div: E,
+
     // -- Degree-7 individual ops ----------------------------------------------------------------
     mload: E,
     mstore: E,
@@ -190,6 +193,7 @@ where
         // -- Composite flags --------------------------------------------------------------
         // u32_rc_op = prefix_100 = b6*(1-b5)*(1-b4), degree 3.
         let u32_rc_op = bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone();
+        let u32div = u32_rc_op.clone() * b321[get_op_index(opcodes::U32DIV)].clone();
 
         // right_shift_scalar (degree 6): prefix_011 + PUSH + U32SPLIT.
         // U32SPLIT is a degree-6 op: u32_rc_op * b321[get_op_index(U32SPLIT)].
@@ -241,6 +245,7 @@ where
             log_deferred,
             hornerbase,
             hornerext,
+            u32div,
             mload,
             mstore,
             mloadw,
@@ -314,6 +319,7 @@ impl LookupOpFlags<Felt> {
             opcodes::MSTOREW => f.mstorew = Felt::ONE,
             opcodes::U32AND => f.u32and = Felt::ONE,
             opcodes::U32XOR => f.u32xor = Felt::ONE,
+            opcodes::U32DIV => f.u32div = Felt::ONE,
             _ => {},
         }
         match opcode_next {
@@ -386,6 +392,7 @@ impl LookupOpFlags<Felt> {
             log_deferred: Felt::ZERO,
             hornerbase: Felt::ZERO,
             hornerext: Felt::ZERO,
+            u32div: Felt::ZERO,
             mload: Felt::ZERO,
             mstore: Felt::ZERO,
             mloadw: Felt::ZERO,
@@ -450,6 +457,7 @@ impl LookupOpFlags<Felt> {
             log_deferred,
             hornerbase,
             hornerext,
+            u32div,
             mload,
             mstore,
             mloadw,
@@ -527,6 +535,8 @@ accessors!(
     log_deferred,
     hornerbase,
     hornerext,
+    // Degree-6 individual ops
+    u32div,
     // Degree-7 individual ops
     mload,
     mstore,
@@ -589,6 +599,15 @@ mod tests {
         for op in non_u32_ops {
             let flags = flags_for_opcode(op.op_code().into());
             assert_eq!(flags.u32_rc_op(), ZERO, "u32_rc_op should be ZERO for {op:?}");
+        }
+    }
+
+    #[test]
+    fn u32div_flag_is_exact_for_valid_opcodes() {
+        for opcode in valid_opcodes() {
+            let flags = flags_for_opcode(opcode);
+            let expected = if opcode == opcodes::U32DIV as usize { ONE } else { ZERO };
+            assert_eq!(flags.u32div(), expected, "u32div flag mismatch for opcode {opcode}");
         }
     }
 
@@ -730,7 +749,7 @@ mod tests {
     #[test]
     fn boolean_row_matches_polynomial_for_chiplet_request_ops() {
         type FlagAccessor = fn(&LookupOpFlags<Felt>) -> Felt;
-        let cases: [(&str, u8, FlagAccessor); 26] = [
+        let cases: [(&str, u8, FlagAccessor); 27] = [
             ("join", opcodes::JOIN, LookupOpFlags::<Felt>::join),
             ("split", opcodes::SPLIT, LookupOpFlags::<Felt>::split),
             ("loop", opcodes::LOOP, LookupOpFlags::<Felt>::loop_op),
@@ -753,6 +772,7 @@ mod tests {
             ("cryptostream", opcodes::CRYPTOSTREAM, LookupOpFlags::<Felt>::cryptostream),
             ("hornerbase", opcodes::HORNERBASE, LookupOpFlags::<Felt>::hornerbase),
             ("hornerext", opcodes::HORNEREXT, LookupOpFlags::<Felt>::hornerext),
+            ("u32div", opcodes::U32DIV, LookupOpFlags::<Felt>::u32div),
             ("u32and", opcodes::U32AND, LookupOpFlags::<Felt>::u32and),
             ("u32xor", opcodes::U32XOR, LookupOpFlags::<Felt>::u32xor),
             ("evalcircuit", opcodes::EVALCIRCUIT, LookupOpFlags::<Felt>::evalcircuit),
@@ -815,6 +835,7 @@ mod tests {
             log_deferred,
             hornerbase,
             hornerext,
+            u32div,
             mload,
             mstore,
             mloadw,
