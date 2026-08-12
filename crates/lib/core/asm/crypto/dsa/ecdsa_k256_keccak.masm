@@ -102,19 +102,7 @@ pub proc verify
 
     movup.12
     # => [pubkey_ptr, U1, U2, SIG_R, ...]
-    dup add.8
-    # => [pubkey_ptr+8, pubkey_ptr, U1, U2, SIG_R, ...]
-    exec.k1_base::load_mem_stream
-    # => [BY, pubkey_ptr+16, pubkey_ptr, U1, U2, SIG_R, ...]
-    movup.5
-    # => [pubkey_ptr, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
-    exec.k1_base::load_mem_stream
-    # => [BX, pubkey_ptr+8, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
-    movup.4 drop
-    # => [BX, BY, pubkey_ptr+16, U1, U2, SIG_R, ...]
-    movup.8 drop
-    # => [BX, BY, U1, U2, SIG_R, ...]
-    exec.secp256k1::load_digest_pair
+    exec.secp256k1::load_mem
     # => [Q, U1, U2, SIG_R, ...]
     movdnw.2
     # => [U1, U2, Q, SIG_R, ...]
@@ -157,8 +145,8 @@ end
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
 #! Output: [U1_DIGEST, U2_DIGEST, SIG_R_DIGEST, pubkey_ptr, ...]
 #!
-#! `pubkey_ptr` rides through unread: the public key is loaded once, by the verification-point
-#! procedure that also needs `Q`'s raw coordinate digests.
+#! `pubkey_ptr` rides through unread: `verify` loads the public key from it once, right after this
+#! call, to build `Q`'s point digest for `verify_point_2base`.
 #!
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;

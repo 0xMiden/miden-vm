@@ -152,33 +152,29 @@ fn constant(value: Limbs, domain: UintDomain) -> ConstantMasm {
 /// truth: [`CurvePrecompile::init`] seeds the same points into the deferred-DAG init node set, so
 /// the MASM constant and the runtime registration cannot drift apart.
 fn render_curve_extra_constants(curve: CurveId) -> String {
-    let points = curve.extra_points().into_iter().map(|(name, point)| {
-        let digest = CurvePrecompile::value_node(curve, point).digest();
-        format!("const {name}_DIGEST = {}\n", word_literal(digest_word(digest)))
-    });
-    let base_constants = curve.extra_base_constants().into_iter().map(|(name, limbs)| {
-        let digest = UintPrecompile::value_node(curve.base_domain(), limbs).digest();
-        format!("const {name}_DIGEST = {}\n", word_literal(digest_word(digest)))
-    });
-    points.chain(base_constants).collect()
+    curve
+        .extra_points()
+        .into_iter()
+        .map(|(name, point)| {
+            let digest = CurvePrecompile::value_node(curve, point).digest();
+            format!("const {name}_DIGEST = {}\n", word_literal(digest_word(digest)))
+        })
+        .collect()
 }
 
-/// Renders `curve.extra_points()` and [`CurveId::extra_base_constants`] as `push_name` wrapper
-/// procs (name lowercased), mirroring `GENERATOR_DIGEST`/`push_generator`.
+/// Renders `curve.extra_points()` as `push_name` wrapper procs (name lowercased), mirroring
+/// `GENERATOR_DIGEST`/`push_generator`.
 fn render_curve_extra_procs(curve: CurveId) -> String {
-    let points = curve.extra_points().into_iter().map(|(name, _)| {
-        format!(
-            "\n#! Pushes the registered digest of the precomputed `{name}` point constant.\npub proc push_{proc_name}\n    push.{name}_DIGEST\nend\n",
-            proc_name = name.to_lowercase(),
-        )
-    });
-    let base_constants = curve.extra_base_constants().into_iter().map(|(name, _)| {
-        format!(
-            "\n#! Pushes the canonical VALUE digest of the base-field constant `{name}`.\npub proc push_{proc_name}\n    push.{name}_DIGEST\nend\n",
-            proc_name = name.to_lowercase(),
-        )
-    });
-    points.chain(base_constants).collect()
+    curve
+        .extra_points()
+        .into_iter()
+        .map(|(name, _)| {
+            format!(
+                "\n#! Pushes the registered digest of the precomputed `{name}` point constant.\npub proc push_{proc_name}\n    push.{name}_DIGEST\nend\n",
+                proc_name = name.to_lowercase(),
+            )
+        })
+        .collect()
 }
 
 fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {

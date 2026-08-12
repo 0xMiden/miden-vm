@@ -37,21 +37,6 @@ pub fn phi_generator() -> CurvePoint {
     }
 }
 
-/// The base-field x-coordinates `G_x`, `β·G_x`, `β²·G_x` — the orbit of the generator's
-/// x-coordinate under the endomorphism.
-///
-/// A public key `Q` whose x-coordinate lies in this orbit makes a 4-base GLV split
-/// `{±G, ±φ(G), ±Q, ±φ(Q)}` carry the same point twice, which an MSM over distinct bases cannot
-/// express. The three cases are `Q = ±G` (`Q_x = G_x`), `Q = ±φ(G)` (`Q_x = β·G_x`), and
-/// `φ(Q) = ±G` (`β·Q_x = G_x`, so `Q_x = β²·G_x` because `β³ = 1`). The remaining pairing,
-/// `Q = ±φ(Q)`, would need `Q_x = 0`, and no secp256k1 point has one: it would require `y² = 7`,
-/// and `7` is a quadratic non-residue mod `p`.
-pub fn generator_x_phi_orbit() -> [Limbs; 3] {
-    let beta_gx = UintDomain::K1Base.mul(SECP256K1_BETA, SECP256K1_GENERATOR_X);
-    let beta2_gx = UintDomain::K1Base.mul(SECP256K1_BETA, beta_gx);
-    [SECP256K1_GENERATOR_X, beta_gx, beta2_gx]
-}
-
 /// A magnitude type wide enough to hold every intermediate value [`glv_decompose`]'s Babai
 /// rounding produces. The largest is a short-basis-coefficient-by-scalar product (a ~128-bit
 /// basis magnitude times a ~256-bit scalar), which peaks at 384 bits — this leaves 128 bits of
@@ -284,26 +269,5 @@ mod tests {
         for (_, mag) in glv_decompose(k) {
             assert!(limbs_to_wide(mag) < bound, "GLV half is not short: {mag:?}");
         }
-    }
-
-    /// The orbit is what MASM compares a public key's x-coordinate against to spot a GLV split
-    /// that would repeat a base, so it must be exactly `G_x` under repeated multiplication by
-    /// `beta`, and it must close after three steps (`beta^3 = 1`).
-    #[test]
-    fn generator_x_phi_orbit_is_the_beta_orbit_of_the_generator() {
-        let orbit = generator_x_phi_orbit();
-        let beta_times = |x| UintDomain::K1Base.mul(SECP256K1_BETA, x);
-
-        assert_eq!(orbit[0], SECP256K1_GENERATOR_X);
-        assert_eq!(orbit[1], beta_times(orbit[0]));
-        assert_eq!(orbit[2], beta_times(orbit[1]));
-        assert_eq!(beta_times(orbit[2]), orbit[0], "beta^3 = 1 must close the orbit");
-
-        let CurvePoint::Affine { x: phi_gx, .. } = phi_generator() else {
-            panic!("phi(G) is an affine point");
-        };
-        assert_eq!(orbit[1], phi_gx, "the orbit's second element is phi(G)'s x-coordinate");
-
-        assert!(orbit[0] != orbit[1] && orbit[1] != orbit[2] && orbit[0] != orbit[2]);
     }
 }

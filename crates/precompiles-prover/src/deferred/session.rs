@@ -298,6 +298,12 @@ impl<'a> DeferredSessionBuilder<'a> {
                     reason: "zero-scalar terms are not supported",
                 });
             }
+            if self.session.is_pai(&point.node) {
+                return Err(DeferredSessionError::UnsupportedMsm {
+                    digest,
+                    reason: "an identity (point-at-infinity) base is not supported",
+                });
+            }
         }
 
         if let Some((point, _)) = terms.first() {

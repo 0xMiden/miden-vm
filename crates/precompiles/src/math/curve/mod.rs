@@ -380,25 +380,6 @@ impl CurveId {
         }
     }
 
-    /// Returns named fixed base-field constants whose canonical VALUE digests the generated MASM
-    /// needs as comparison literals -- empty for curves with no such constants.
-    ///
-    /// Unlike [`Self::extra_points`], these are never precompile operands: MASM only compares a
-    /// runtime coordinate digest against them, so they are deliberately *not* seeded into
-    /// [`CurvePrecompile::init`] and cost nothing outside the generated constant table.
-    pub fn extra_base_constants(self) -> Vec<(&'static str, Limbs)> {
-        match self {
-            Self::Secp256k1 => {
-                let [gx, beta_gx, beta2_gx] = glv::generator_x_phi_orbit();
-                vec![
-                    ("GENERATOR_X", gx),
-                    ("PHI_GENERATOR_X", beta_gx),
-                    ("PHI2_GENERATOR_X", beta2_gx),
-                ]
-            },
-        }
-    }
-
     /// Checked boundary dispatcher that constructs this curve's canonical point for affine
     /// coordinates.
     pub fn point_from_affine(self, x: Limbs, y: Limbs) -> Result<CurvePoint, PrecompileError> {

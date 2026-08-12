@@ -21,7 +21,7 @@ use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
-const VERIFY_EXPECTED_CYCLES: u64 = 1_609;
+const VERIFY_EXPECTED_CYCLES: u64 = 1_591;
 const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 
@@ -77,7 +77,9 @@ fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
         ("Q == G", one),
         ("Q == -G", negate_scalar_mod_n(one)),
         ("Q == phi(G)", SECP256K1_LAMBDA),
+        ("Q == -phi(G)", negate_scalar_mod_n(SECP256K1_LAMBDA)),
         ("Q == phi^2(G)", lambda_squared),
+        ("Q == -phi^2(G)", negate_scalar_mod_n(lambda_squared)),
     ] {
         let sk = SigningKey::read_from_bytes(&le_limbs_to_be_bytes(secret_scalar))
             .unwrap_or_else(|_| panic!("{name}: the secret scalar must be a valid key"));

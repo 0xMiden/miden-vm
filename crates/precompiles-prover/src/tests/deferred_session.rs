@@ -126,12 +126,12 @@ fn deferred_session_inputs_reject_duplicate_base_msm() {
 }
 
 #[test]
-fn deferred_session_lowers_msm_with_identity_base_without_panicking() {
+fn deferred_session_rejects_msm_with_identity_base_without_panicking() {
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let identity = CurvePrecompile::identity_node(curve);
     let generator = CurvePrecompile::generator_node(curve);
-    let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
+    let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(17));
     let two = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
     state.register(identity.clone()).expect("identity must register");
     state.register(generator.clone()).expect("generator must register");
@@ -141,7 +141,10 @@ fn deferred_session_lowers_msm_with_identity_base_without_panicking() {
     let msm = curve_msm_node(vec![(identity, one), (generator, two)]);
     register_curve_equality(&mut state, msm.clone(), msm);
 
-    session_from_deferred_state(&state).expect("MSM with an identity base should lower");
+    assert!(
+        session_from_deferred_state(&state).is_err(),
+        "an identity-base MSM term must be rejected, not panic",
+    );
 }
 
 #[test]
