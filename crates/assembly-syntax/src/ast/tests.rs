@@ -1627,75 +1627,28 @@ end
 /// is not valid syntax.
 #[test]
 fn test_emit_imm_roundtrip_formatting() {
-    let event_name = "test::emit::roundtrip";
-    let event_id = EventId::from_name(event_name).as_felt();
-
-    let source = format!(
-        "\
-begin
-    push.1
-    emit
-    drop
-    emit.event(\"{event_name}\")
-end
-"
-    );
-
-    let context = SyntaxTestContext::default();
-    let source = source_file!(&context, source);
-    let module = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    let formatted = module.to_string();
-    let expected = format!(
-        "\
-namespace $exec
-
-begin
-    push.1
-    emit
-    drop
-    push.{event_id} emit drop
-end
-"
-    );
-    assert_eq!(&formatted, &expected);
-
-    // The printed output must parse back.
-    let source = source_file!(&context, &expected);
-    let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    let expanded = format!(
-        "\
-namespace $exec
-
-begin
-    push.1
-    emit
-    drop
-    push.{event_id}
-    emit
-    drop
-end
-"
-    );
-    let source = source_file!(&context, &expanded);
-    let expanded_module =
-        context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
-    assert_eq!(reparsed, expanded_module);
+    check_imm_event_roundtrip_formatting("emit");
 }
 
 /// `TraceImm` is printed as the equivalent `push.<id> trace drop` sequence, since `trace.<felt>`
 /// is not valid syntax.
 #[test]
 fn test_trace_roundtrip_formatting() {
-    let trace_name = "test::trace::roundtrip";
-    let trace_id = EventId::from_name(trace_name).as_felt();
+    check_imm_event_roundtrip_formatting("trace");
+}
+
+/// Checks that immediate `emit`/`trace` instructions round-trip through parsing and formatting.
+fn check_imm_event_roundtrip_formatting(kind: &str) {
+    let event_name = format!("test::{kind}::roundtrip");
+    let event_id = EventId::from_name(&event_name).as_felt();
 
     let source = format!(
         "\
 begin
     push.1
-    trace
+    {kind}
     drop
-    trace.event(\"{trace_name}\")
+    {kind}.event(\"{event_name}\")
 end
 "
     );
@@ -1710,9 +1663,9 @@ namespace $exec
 
 begin
     push.1
-    trace
+    {kind}
     drop
-    push.{trace_id} trace drop
+    push.{event_id} {kind} drop
 end
 "
     );
@@ -1727,10 +1680,10 @@ namespace $exec
 
 begin
     push.1
-    trace
+    {kind}
     drop
-    push.{trace_id}
-    trace
+    push.{event_id}
+    {kind}
     drop
 end
 "
