@@ -19,12 +19,11 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-debug-types/std", "miden-utils-diagnostics/std", "rowan/std", "thiserror/std"]
+std = ["miden-debug-types/std", "miden-utils-diagnostics/std", "rowan/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
-thiserror.workspace = true
 rowan = { package = "miden-rowan", version = "0.16", default-features = false }
 
 [dev-dependencies]

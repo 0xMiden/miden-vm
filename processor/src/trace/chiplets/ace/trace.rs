@@ -216,7 +216,8 @@ impl CircuitEvaluation {
             eval.m_0 = m_0;
         }
 
-        debug_assert!(multiplicities_iter.next().is_none());
+        let next = multiplicities_iter.next();
+        debug_assert!(next.is_none());
     }
 
     /// Returns the output value, if the circuit has finished evaluating.

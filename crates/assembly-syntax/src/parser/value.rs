@@ -417,11 +417,11 @@ impl proptest::arbitrary::Arbitrary for IntValue {
 
 #[inline]
 pub(crate) fn shrink_u64_hex(n: u64) -> IntValue {
-    if n <= (u8::MAX as u64) {
+    if u8::try_from(n).is_ok() {
         IntValue::U8(n as u8)
-    } else if n <= (u16::MAX as u64) {
+    } else if u16::try_from(n).is_ok() {
         IntValue::U16(n as u16)
-    } else if n <= (u32::MAX as u64) {
+    } else if u32::try_from(n).is_ok() {
         IntValue::U32(n as u32)
     } else {
         IntValue::Felt(Felt::new_unchecked(n))

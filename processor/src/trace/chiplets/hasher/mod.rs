@@ -259,7 +259,8 @@ impl Hasher {
 
         // Last batch: boundary output only.
         let last_batch = batch_groups.next().expect("multi-batch block has a final op batch");
-        debug_assert!(batch_groups.next().is_none());
+        let next = batch_groups.next();
+        debug_assert!(next.is_none());
         absorb_into_state(&mut state, last_batch);
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,

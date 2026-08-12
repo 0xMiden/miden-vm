@@ -2130,7 +2130,6 @@ dependencies = [
  "miden-rowan",
  "miden-utils-diagnostics",
  "pretty_assertions",
- "thiserror",
 ]
 
 [[package]]

@@ -756,7 +756,6 @@ dependencies = [
  "miden-debug-types",
  "miden-rowan",
  "miden-utils-diagnostics",
- "thiserror",
 ]
 
 [[package]]
