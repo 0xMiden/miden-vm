@@ -1384,14 +1384,6 @@ mod tests {
         let result = PartialMmr::from_parts(peaks.clone(), invalid_nodes, BTreeSet::new());
         assert!(result.is_err());
 
-        // Invalid case: index 0 (which is never valid for InOrderIndex)
-        let mut nodes_with_zero = BTreeMap::new();
-        // Create an InOrderIndex with value 0 via deserialization
-        let zero_idx = InOrderIndex::read_from_bytes(&0usize.to_bytes()).unwrap();
-        nodes_with_zero.insert(zero_idx, int_to_node(0));
-        let result = PartialMmr::from_parts(peaks.clone(), nodes_with_zero, BTreeSet::new());
-        assert!(result.is_err());
-
         // Invalid case: large even index (internal node) beyond forest bounds
         let mut nodes_with_large_even = BTreeMap::new();
         let large_even_idx = InOrderIndex::read_from_bytes(&1000usize.to_bytes()).unwrap();

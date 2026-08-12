@@ -6,7 +6,7 @@
 //! leaves count.
 use core::num::NonZeroUsize;
 
-use crate::utils::{ByteReader, ByteWriter, Deserializable, Serializable};
+use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // IN-ORDER INDEX
 // ================================================================================================
@@ -128,11 +128,13 @@ impl Serializable for InOrderIndex {
 }
 
 impl Deserializable for InOrderIndex {
-    fn read_from<R: ByteReader>(
-        source: &mut R,
-    ) -> Result<Self, crate::utils::DeserializationError> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let idx = source.read_usize()?;
-        Ok(InOrderIndex { idx })
+        let idx = NonZeroUsize::new(idx).ok_or_else(|| {
+            DeserializationError::InvalidValue("in-order index cannot be zero".into())
+        })?;
+
+        Ok(Self::new(idx))
     }
 }
 
@@ -153,7 +155,7 @@ mod test {
     use proptest::prelude::*;
 
     use super::InOrderIndex;
-    use crate::utils::{Deserializable, Serializable};
+    use crate::utils::{Deserializable, DeserializationError, Serializable};
 
     proptest! {
         #[test]
@@ -194,5 +196,12 @@ mod test {
         let bytes = index.to_bytes();
         let index2 = InOrderIndex::read_from_bytes(&bytes).unwrap();
         assert_eq!(index, index2);
+    }
+
+    #[test]
+    fn test_inorder_index_deserialization_rejects_zero() {
+        let result = InOrderIndex::read_from_bytes(&0usize.to_bytes());
+
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
     }
 }
