@@ -1687,6 +1687,56 @@ fn link_time_const_evaluation_nested_imported_expression_succeeds() -> TestResul
 }
 
 #[test]
+fn link_time_event_constants_must_be_event_hashes() -> TestResult {
+    let context = TestContext::default();
+    let constants = parse_module!(
+        &context,
+        r#"
+            namespace lib::constants
+
+            pub const INT = 100
+            pub const WORD = word("foo")
+            pub const EVENT = event("miden::test::imported")
+
+            pub proc noop
+                nop
+            end
+        "#
+    );
+    let lib: Arc<Package> = Arc::from(Assembler::new(context.source_manager()).assemble_library(
+        "lib",
+        constants,
+        None::<Box<Module>>,
+    )?);
+
+    for (instruction, constant) in
+        [("emit", "INT"), ("emit", "WORD"), ("trace", "INT"), ("trace", "WORD")]
+    {
+        let program = source_file!(
+            &context,
+            format!(
+                "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
+            )
+        );
+        let err = Assembler::new(context.source_manager())
+            .with_package(lib.clone(), Linkage::Dynamic)?
+            .assemble_program("program", program)
+            .expect_err("imported event constant must be defined via event() hashing");
+        assert_diagnostic!(&err, "expected an event name");
+    }
+
+    let program = source_file!(
+        &context,
+        "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend"
+    );
+    Assembler::new(context.source_manager())
+        .with_package(lib, Linkage::Dynamic)?
+        .assemble_program("program", program)?;
+
+    Ok(())
+}
+
+#[test]
 fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     let context = TestContext::default();
     let a = r#"

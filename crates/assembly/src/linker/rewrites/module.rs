@@ -164,6 +164,10 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
                         value,
                     )));
                 }
+
+                let mut visitor = ConstEvalVisitor::new(self);
+                let _ = visitor.visit_mut_inst(inst);
+                wrap_const_control_flow!(visitor)
             },
             _ => {},
         }
