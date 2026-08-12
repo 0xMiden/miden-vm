@@ -1,5 +1,6 @@
 mod dsa;
 mod falcon;
+mod leansig;
 
 mod aead;
 mod blake3;

@@ -1,0 +1,308 @@
+use miden::core::crypto::hashes::poseidon2
+use miden::core::math::u64
+
+# MIDEN-NATIVE LEANSIG PARAMETERS
+# ================================================================================================
+
+const DIMENSION = 46
+const BASE = 8
+const TARGET_SUM = 200
+const TREE_DEPTH = 32
+
+# Goldilocks p = Q * 8^10 + 1. Rejecting p - 1 before division makes every accepted quotient
+# uniform in [0, 8^10), from which ten base-8 digits are extracted.
+const HYPERCUBE_Q_LO = 4294967292
+const HYPERCUBE_Q_HI = 3
+const GOLDILOCKS_P_MINUS_ONE = 18446744069414584320
+
+const DOMAIN_PK = 1
+const DOMAIN_MESSAGE = 2
+const DOMAIN_CHAIN = 3
+const DOMAIN_LEAF = 4
+const DOMAIN_TREE = 5
+
+# VERIFY LOCAL MEMORY ADDRESSES
+# ================================================================================================
+
+const VERIFY_ROOT_ADDR = 0
+const VERIFY_PARAMETER_ADDR = 4
+const VERIFY_MESSAGE_ADDR = 8
+const VERIFY_EPOCH_ADDR = 12
+const VERIFY_CHAIN_INDEX_ADDR = 13
+const VERIFY_MERKLE_POSITION_ADDR = 13
+const VERIFY_CODEWORD_READ_PTR_ADDR = 14
+const VERIFY_MERKLE_LEVEL_ADDR = 14
+const VERIFY_ENDPOINT_WRITE_PTR_ADDR = 15
+const VERIFY_RHO_ADDR = 16
+const VERIFY_CURRENT_NODE_ADDR = 16
+const VERIFY_MESSAGE_HASH_RATE_0_ADDR = 24
+const VERIFY_MESSAGE_HASH_RATE_1_ADDR = 28
+const VERIFY_MESSAGE_HASH_ELEMENT_0_ADDR = 24
+const VERIFY_MESSAGE_HASH_ELEMENT_1_ADDR = 25
+const VERIFY_MESSAGE_HASH_ELEMENT_2_ADDR = 26
+const VERIFY_MESSAGE_HASH_ELEMENT_3_ADDR = 27
+const VERIFY_MESSAGE_HASH_ELEMENT_4_ADDR = 28
+const VERIFY_CODEWORD_ADDR = 32
+const VERIFY_ENDPOINTS_ADDR = 80
+
+# COMPUTE_CHAIN_END LOCAL MEMORY ADDRESSES
+# ================================================================================================
+
+const CHAIN_PARAMETER_ADDR = 0
+const CHAIN_EPOCH_ADDR = 4
+const CHAIN_INDEX_ADDR = 5
+const CHAIN_POSITION_ADDR = 6
+const CHAIN_CURRENT_ADDR = 8
+
+# HASH_PARENT LOCAL MEMORY ADDRESSES
+# ================================================================================================
+
+const PARENT_POSITION_ADDR = 0
+const PARENT_LEVEL_ADDR = 1
+const PARENT_IS_RIGHT_CHILD_ADDR = 2
+const PARENT_SIBLING_ADDR = 4
+const PARENT_CURRENT_ADDR = 8
+
+# VERIFIER
+# ================================================================================================
+
+#! Verifies a Miden-native Poseidon2 LeanSig signature.
+#!
+#! This is a fixed-parameter generalized-XMSS verifier with lifetime 2^32, target-sum dimension 46,
+#! base 8, target sum 200, and a 32-level authentication path. It follows the verification flow of
+#! `leanEthereum/leanSig`, but uses Miden's native Goldilocks Poseidon2 permutation and is therefore
+#! not wire-compatible with the reference KoalaBear Poseidon1 instantiation.
+#!
+#! Inputs:
+#!   Operand stack: [PK_COMM, MSG, EPOCH, ...]
+#!   Advice stack:  [ROOT: word | PARAMETER: word | RHO: word |
+#!                   SIG_HASHES: [word; 46] | AUTH_PATH: [word; 32] | ...]
+#! Outputs:
+#!   Operand stack: [...]
+#!   Advice stack:  [...]
+#!
+#! `PK_COMM`, `MSG`, `ROOT`, `PARAMETER`, `RHO`, every signature hash, and every authentication
+#! node are words. `EPOCH` must be a canonical u32. `PK_COMM` is Poseidon2::merge_in_domain(1,
+#! ROOT, PARAMETER). The procedure traps on malformed inputs or failed verification.
+#!
+#! Local memory layout (element addresses):
+#!   loc[0 ..  4] : public-key root
+#!   loc[4 ..  8] : public hash parameter
+#!   loc[8 .. 12] : message
+#!   loc[12]      : epoch
+#!   loc[13]      : chain index, later reused for the current Merkle position
+#!   loc[14]      : codeword pointer, later reused for the current Merkle level
+#!   loc[15]      : endpoint write pointer
+#!   loc[16.. 20] : rho, later reused for the current Merkle node
+#!   loc[24.. 32] : message-hash rate output
+#!   loc[32.. 78] : target-sum codeword
+#!   loc[80..264] : 46 reconstructed Winternitz chain endpoints
+@locals(264)
+pub proc verify(pk_comm: word, msg: word, epoch: u32)
+    # Load and bind ROOT and PARAMETER before trusting any remaining advice.
+    adv_pushw
+    adv_pushw
+    loc_storew_le.VERIFY_PARAMETER_ADDR
+    swapw
+    loc_storew_le.VERIFY_ROOT_ADDR
+    push.DOMAIN_PK
+    exec.poseidon2::merge_in_domain
+    assert_eqw.err="invalid LeanSig public key commitment"
+    # => [MSG, EPOCH, ...]
+
+    loc_storew_le.VERIFY_MESSAGE_ADDR dropw
+    u32assert.err="LeanSig epoch must be a u32"
+    loc_store.VERIFY_EPOCH_ADDR
+    # => [...]
+
+    adv_pushw
+    loc_storew_le.VERIFY_RHO_ADDR dropw
+
+    # Message hash, block 1: absorb (MSG, PARAMETER) with C = [DOMAIN_MESSAGE, EPOCH, 0, 0].
+    push.0 push.0 loc_load.VERIFY_EPOCH_ADDR push.DOMAIN_MESSAGE
+    padw loc_loadw_le.VERIFY_PARAMETER_ADDR
+    padw loc_loadw_le.VERIFY_MESSAGE_ADDR
+    hperm
+
+    # Message hash, block 2: replace the rate with (RHO, 0) and permute again.
+    dropw dropw
+    padw
+    padw loc_loadw_le.VERIFY_RHO_ADDR
+    hperm
+
+    # Save the first eight rate elements; the first five are decoded below.
+    loc_storew_le.VERIFY_MESSAGE_HASH_RATE_0_ADDR dropw
+    loc_storew_le.VERIFY_MESSAGE_HASH_RATE_1_ADDR dropw
+    dropw
+
+    # Decode 46 base-8 chunks and enforce the incomparable target-sum code.
+    push.0
+    locaddr.VERIFY_CODEWORD_ADDR
+    loc_load.VERIFY_MESSAGE_HASH_ELEMENT_0_ADDR exec.decode_10_chunks
+    loc_load.VERIFY_MESSAGE_HASH_ELEMENT_1_ADDR exec.decode_10_chunks
+    loc_load.VERIFY_MESSAGE_HASH_ELEMENT_2_ADDR exec.decode_10_chunks
+    loc_load.VERIFY_MESSAGE_HASH_ELEMENT_3_ADDR exec.decode_10_chunks
+    loc_load.VERIFY_MESSAGE_HASH_ELEMENT_4_ADDR exec.decode_6_chunks
+    drop
+    push.TARGET_SUM
+    eq assert.err="invalid LeanSig target-sum encoding"
+
+    # Reconstruct all Winternitz chain endpoints.
+    push.0 loc_store.VERIFY_CHAIN_INDEX_ADDR
+    locaddr.VERIFY_CODEWORD_ADDR loc_store.VERIFY_CODEWORD_READ_PTR_ADDR
+    locaddr.VERIFY_ENDPOINTS_ADDR loc_store.VERIFY_ENDPOINT_WRITE_PTR_ADDR
+    repeat.DIMENSION
+        padw loc_loadw_le.VERIFY_PARAMETER_ADDR
+        loc_load.VERIFY_EPOCH_ADDR
+        loc_load.VERIFY_CHAIN_INDEX_ADDR
+        loc_load.VERIFY_CODEWORD_READ_PTR_ADDR mem_load
+        adv_pushw
+        exec.compute_chain_end
+
+        loc_load.VERIFY_ENDPOINT_WRITE_PTR_ADDR mem_storew_le dropw
+        loc_load.VERIFY_CHAIN_INDEX_ADDR add.1 loc_store.VERIFY_CHAIN_INDEX_ADDR
+        loc_load.VERIFY_CODEWORD_READ_PTR_ADDR add.1 loc_store.VERIFY_CODEWORD_READ_PTR_ADDR
+        loc_load.VERIFY_ENDPOINT_WRITE_PTR_ADDR add.4 loc_store.VERIFY_ENDPOINT_WRITE_PTR_ADDR
+    end
+
+    # Hash the 46 endpoint words into the epoch leaf. DIMENSION is even, so no rate padding is
+    # required. C = [DOMAIN_LEAF, EPOCH, DIMENSION, 0].
+    locaddr.VERIFY_ENDPOINTS_ADDR dup add.184 swap
+    push.0 push.DIMENSION loc_load.VERIFY_EPOCH_ADDR push.DOMAIN_LEAF
+    padw padw
+    exec.poseidon2::absorb_double_words_from_memory
+    exec.poseidon2::squeeze_digest
+    movup.4 drop movup.4 drop
+    loc_storew_le.VERIFY_CURRENT_NODE_ADDR dropw
+
+    # Reconstruct the fixed-depth Merkle root.
+    loc_load.VERIFY_EPOCH_ADDR loc_store.VERIFY_MERKLE_POSITION_ADDR
+    push.1 loc_store.VERIFY_MERKLE_LEVEL_ADDR
+    repeat.TREE_DEPTH
+        loc_load.VERIFY_MERKLE_LEVEL_ADDR
+        loc_load.VERIFY_MERKLE_POSITION_ADDR
+        padw loc_loadw_le.VERIFY_CURRENT_NODE_ADDR
+        adv_pushw
+        exec.hash_parent
+        loc_storew_le.VERIFY_CURRENT_NODE_ADDR dropw
+
+        loc_load.VERIFY_MERKLE_POSITION_ADDR u32div.2
+        loc_store.VERIFY_MERKLE_POSITION_ADDR
+        loc_load.VERIFY_MERKLE_LEVEL_ADDR add.1 loc_store.VERIFY_MERKLE_LEVEL_ADDR
+    end
+
+    padw loc_loadw_le.VERIFY_ROOT_ADDR
+    padw loc_loadw_le.VERIFY_CURRENT_NODE_ADDR
+    assert_eqw.err="LeanSig Merkle authentication failed"
+end
+
+# INTERNAL HELPERS
+# ================================================================================================
+
+#! Rejection-samples one message-hash field element, divides it by Q, and writes ten base-8 digits.
+#!
+#! Input:  [value, write_ptr, sum, ...]
+#! Output: [write_ptr + 10, sum + digit_sum, ...]
+proc decode_10_chunks(value: felt, write_ptr: u32, sum: u32) -> (new_write_ptr: u32, new_sum: u32)
+    dup push.GOLDILOCKS_P_MINUS_ONE
+    eq assertz.err="LeanSig message hash rejected"
+
+    u32split
+    push.HYPERCUBE_Q_HI push.HYPERCUBE_Q_LO
+    exec.u64::div
+    swap assertz
+
+    repeat.10
+        u32divmod.BASE
+        dup dup.3 mem_store
+        movup.3 add movdn.2
+        swap add.1 swap
+    end
+    assertz
+end
+
+#! As `decode_10_chunks`, but writes only the first six digits of the fifth field element.
+#!
+#! Input:  [value, write_ptr, sum, ...]
+#! Output: [write_ptr + 6, sum + digit_sum, ...]
+proc decode_6_chunks(value: felt, write_ptr: u32, sum: u32) -> (new_write_ptr: u32, new_sum: u32)
+    dup push.GOLDILOCKS_P_MINUS_ONE
+    eq assertz.err="LeanSig message hash rejected"
+
+    u32split
+    push.HYPERCUBE_Q_HI push.HYPERCUBE_Q_LO
+    exec.u64::div
+    swap assertz
+
+    repeat.6
+        u32divmod.BASE
+        dup dup.3 mem_store
+        movup.3 add movdn.2
+        swap add.1 swap
+    end
+    drop
+end
+
+#! Walks one signature hash from codeword position xi to the end of its base-8 chain.
+#!
+#! Input:  [CURRENT, xi, chain_index, EPOCH, PARAMETER, ...]
+#! Output: [CHAIN_END, ...]
+@locals(12)
+proc compute_chain_end(current: word, position: u8, chain_index: u8, epoch: u32, parameter: word) -> word
+    loc_storew_le.CHAIN_CURRENT_ADDR dropw
+    loc_store.CHAIN_POSITION_ADDR
+    loc_store.CHAIN_INDEX_ADDR
+    loc_store.CHAIN_EPOCH_ADDR
+    loc_storew_le.CHAIN_PARAMETER_ADDR dropw
+
+    loc_load.CHAIN_POSITION_ADDR lt.7
+    while.true
+        loc_load.CHAIN_POSITION_ADDR add.1 loc_store.CHAIN_POSITION_ADDR
+
+        loc_load.CHAIN_POSITION_ADDR
+        loc_load.CHAIN_INDEX_ADDR
+        loc_load.CHAIN_EPOCH_ADDR
+        push.DOMAIN_CHAIN
+        padw loc_loadw_le.CHAIN_PARAMETER_ADDR
+        padw loc_loadw_le.CHAIN_CURRENT_ADDR
+        hperm
+        exec.poseidon2::squeeze_digest
+        loc_storew_le.CHAIN_CURRENT_ADDR dropw
+
+        loc_load.CHAIN_POSITION_ADDR lt.7
+    end
+
+    padw loc_loadw_le.CHAIN_CURRENT_ADDR
+end
+
+#! Hashes a current Merkle node with its sibling using the position-dependent tree tweak.
+#!
+#! Input:  [SIBLING, CURRENT, position, level, ...]
+#! Output: [PARENT, ...]
+@locals(12)
+proc hash_parent(sibling: word, current: word, position: u32, level: u8) -> word
+    movup.9 loc_store.PARENT_LEVEL_ADDR
+    movup.8 loc_store.PARENT_POSITION_ADDR
+    loc_storew_le.PARENT_SIBLING_ADDR dropw
+    loc_storew_le.PARENT_CURRENT_ADDR dropw
+
+    loc_load.PARENT_POSITION_ADDR is_odd loc_store.PARENT_IS_RIGHT_CHILD_ADDR
+    loc_load.PARENT_POSITION_ADDR u32div.2 loc_store.PARENT_POSITION_ADDR
+    push.0
+    loc_load.PARENT_POSITION_ADDR
+    loc_load.PARENT_LEVEL_ADDR
+    push.DOMAIN_TREE
+
+    # Odd positions are right children, so SIBLING is the left rate word.
+    loc_load.PARENT_IS_RIGHT_CHILD_ADDR
+    if.true
+        padw loc_loadw_le.PARENT_CURRENT_ADDR
+        padw loc_loadw_le.PARENT_SIBLING_ADDR
+    else
+        padw loc_loadw_le.PARENT_SIBLING_ADDR
+        padw loc_loadw_le.PARENT_CURRENT_ADDR
+    end
+
+    hperm
+    exec.poseidon2::squeeze_digest
+end

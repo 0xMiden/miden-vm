@@ -7,6 +7,55 @@ sidebar_position: 1
 
 Namespace `miden::core::crypto::dsa` contains core-library signature procedures.
 
+## LeanSig Poseidon2
+
+Module `miden::core::crypto::dsa::leansig_poseidon2` verifies a Miden-native instantiation of
+LeanSig's generalized XMSS construction. The MASM module is a verifier only; the matching
+stateful Rust key generator and signer are available from `miden_crypto::dsa::leansig_poseidon2`.
+The Rust secret key persists a monotonic epoch/nonce cursor and rejects reused or skipped epochs.
+
+This instantiation preserves the reference construction's lifetime-$2^{32}$ target-sum parameters
+($v = 46$, $w = 8$, and target sum $T = 200$), while replacing its KoalaBear Poseidon1 hash with
+Miden's native Goldilocks Poseidon2 permutation. Consequently, it is not wire-compatible with the
+current `leanEthereum/leanSig` Rust instantiation. The hash boundary is deliberately isolated so a
+future Blake3 instantiation can retain the XMSS verification flow and advice layout.
+Like the reference implementation, the Rust signer uses SHAKE128 as its host-side secret-key PRF
+for one-time chain starts and deterministic encoding randomness.
+
+The module exposes the following procedure:
+
+| Procedure | Description |
+|-----------|-------------|
+| `verify` | Verifies a fixed-parameter LeanSig signature and traps on failure.<br /><br />**Stack inputs:** `[PK_COMM, MSG, EPOCH, ...]`<br />**Advice stack inputs:** `[ROOT, PARAMETER, RHO, SIG_HASHES[46], AUTH_PATH[32], ...]`<br />**Outputs:** `[...]`<br /><br />`PK_COMM` binds `ROOT` and `PARAMETER`; `MSG`, `ROOT`, `PARAMETER`, `RHO`, each signature hash, and each authentication-path node are words. `EPOCH` is a canonical `u32`. Advice is consumed in the displayed structural order. |
+
+### Instantiation and hash specification
+
+- Lifetime: $2^{32}$ epochs, with a fixed 32-node authentication path.
+- Incomparable encoding: target-sum Winternitz code with dimension 46, base 8, and target sum 200.
+- Public key: `(ROOT, PARAMETER)`, committed as a domain-separated Poseidon2 merge.
+- Message hash: a two-block replacement sponge. The first permutation absorbs `(MSG, PARAMETER)`
+  with a capacity word containing the message-hash domain and `EPOCH`; the second replaces the
+  rate with `(RHO, 0)` and permutes again.
+- Chunk extraction: the first five rate elements are rejection-sampled using
+  $p = Q \cdot 8^{10} + 1$, where $p = 2^{64} - 2^{32} + 1$ and
+  $Q = 17\,179\,869\,180$. Each accepted element yields ten base-8 digits; the first 46 digits
+  form the codeword and must sum to 200.
+- Chain hash: Poseidon2 over `(CURRENT, PARAMETER)` with a capacity word containing the chain
+  domain, `EPOCH`, chain index, and one-based chain position.
+- Leaf hash: a replacement sponge over the 46 chain endpoints, with a capacity word containing
+  the leaf domain, `EPOCH`, and dimension.
+- Internal-node hash: Poseidon2 over `(LEFT, RIGHT)` with a capacity word containing the tree
+  domain, level, and parent position.
+
+The capacity-domain identifiers are fixed as follows: public-key commitment `1`, message `2`,
+chain `3`, leaf `4`, and internal tree node `5`. A signature consumes 324 advice elements: three
+words for `ROOT`, `PARAMETER`, and `RHO`; 46 chain words; and 32 authentication-path words. The
+current cycle baseline for `verify`, excluding input setup, is 29,383 VM cycles.
+
+The construction and this implementation have not been independently audited. In particular,
+changing the hash layouts, domain constants, encoding parameters, or advice order defines a
+different signature scheme.
+
 ## Poseidon2 Falcon512
 
 Module `miden::core::crypto::dsa::falcon512_poseidon2` contains procedures for verifying

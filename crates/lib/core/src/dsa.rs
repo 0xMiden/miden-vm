@@ -9,6 +9,7 @@
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
 //! - [`falcon512_poseidon2`]: Falcon-512 with Poseidon2 hashing
+//! - [`leansig_poseidon2`]: Miden-native LeanSig with Poseidon2 hashing
 
 // ECDSA K256 KECCAK
 // ================================================================================================
@@ -176,5 +177,52 @@ pub mod falcon512_poseidon2 {
         result.extend_from_slice(&nonce.to_elements());
 
         result
+    }
+}
+
+// LEANSIG POSEIDON2
+// ================================================================================================
+
+/// Rust signer and encoding helpers for the Miden-native Poseidon2 LeanSig verifier.
+pub mod leansig_poseidon2 {
+    extern crate alloc;
+
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, Word};
+
+    pub use miden_crypto::dsa::leansig_poseidon2::{
+        BASE, DIMENSION, KeyGenerationError, PublicKey, SecretKey, Signature, SigningError,
+        TARGET_SUM, TREE_DEPTH,
+    };
+
+    /// Computes the public-key commitment expected by `leansig_poseidon2::verify`.
+    pub fn public_key_commitment(root: Word, parameter: Word) -> Word {
+        PublicKey::new(root, parameter).to_commitment()
+    }
+
+    /// Encodes a Rust-generated signature in the format consumed by `leansig_poseidon2::verify`.
+    pub fn encode(public_key: &PublicKey, signature: &Signature) -> Vec<Felt> {
+        signature.to_advice(public_key)
+    }
+
+    /// Encodes a LeanSig public key and signature in verifier advice-consumption order.
+    ///
+    /// The returned sequence is
+    /// `[ROOT || PARAMETER || RHO || SIG_HASHES[46] || AUTH_PATH[32]]`.
+    pub fn encode_signature(
+        root: Word,
+        parameter: Word,
+        rho: Word,
+        signature_hashes: &[Word; DIMENSION],
+        authentication_path: &[Word; TREE_DEPTH],
+    ) -> Vec<Felt> {
+        let mut advice = Vec::with_capacity((3 + DIMENSION + TREE_DEPTH) * 4);
+        advice.extend(root);
+        advice.extend(parameter);
+        advice.extend(rho);
+        advice.extend(signature_hashes.iter().flat_map(|word| word.iter()).copied());
+        advice.extend(authentication_path.iter().flat_map(|word| word.iter()).copied());
+        advice
     }
 }
