@@ -296,7 +296,7 @@ fn bench_one_scenario(
                 |(host, program, processor)| {
                     black_box(processor.take().unwrap().execute_sync(program, host).expect("exec"))
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
@@ -317,7 +317,7 @@ fn bench_one_scenario(
                             .expect("trace_prep"),
                     )
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
@@ -344,7 +344,7 @@ fn bench_one_scenario(
                         .expect("prove"),
                     )
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }

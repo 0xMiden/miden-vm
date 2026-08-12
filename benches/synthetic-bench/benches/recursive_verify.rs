@@ -890,7 +890,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
             b.iter_batched(
                 || (case.clone(), recursive_host()),
                 execute_recursive_case,
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
 
@@ -898,7 +898,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
             b.iter_batched(
                 || execute_trace_inputs(case.clone(), recursive_host()),
                 build_trace_case,
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
 
@@ -906,7 +906,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
             b.iter_batched(
                 || (case.clone(), recursive_host()),
                 execute_and_build_case,
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
 
@@ -914,7 +914,7 @@ fn bench_recursive_verify(c: &mut Criterion) {
             b.iter_batched(
                 || (case.clone(), recursive_host(), config.hash_fn),
                 prove_recursive_case,
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
