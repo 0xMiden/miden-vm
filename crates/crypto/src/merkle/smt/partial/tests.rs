@@ -13,7 +13,7 @@ use super::{PartialSmt, SMT_DEPTH, serialization::property_tests::arbitrary_vali
 use crate::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
-        EmptySubtreeRoots, MerkleError,
+        EmptySubtreeRoots, MerkleError, NodeIndex,
         smt::{Smt, SmtLeaf},
     },
     rand::test_utils::ContinuousRng,
@@ -618,7 +618,8 @@ fn partial_smt_deserialize_invalid_inner_node() {
     partial.add_proof(proof).unwrap();
 
     // Serialize and tamper with inner node data
-    let mut bytes = partial.to_bytes();
+    let unique_nodes = partial.to_unique_nodes();
+    let mut bytes = unique_nodes.to_bytes();
 
     // The inner node data is at the end of the serialization.
     // Flip a byte in the inner node section to corrupt it.
@@ -671,7 +672,8 @@ fn partial_smt_deserialize_invalid_root() {
     partial.add_proof(proof).unwrap();
 
     // Serialize and tamper with root (first 32 bytes)
-    let mut bytes = partial.to_bytes();
+    let unique_nodes = partial.to_unique_nodes();
+    let mut bytes = unique_nodes.to_bytes();
     bytes[0] ^= 0xff;
 
     let result = PartialSmt::read_from_bytes(&bytes);
@@ -690,10 +692,20 @@ fn partial_smt_deserialize_leaves_count_smaller() {
     let mut partial = PartialSmt::new(smt.root());
     partial.add_proof(proof).unwrap();
 
-    let mut bytes = partial.to_bytes();
+    let unique_nodes = partial.to_unique_nodes();
+    let mut bytes = unique_nodes.to_bytes();
 
     // Tamper the leaves count to be smaller by one
-    let leaves_count_offset = 32;
+    let leaves_count_offset = 32
+        + 8
+        + unique_nodes
+            .nodes
+            .keys()
+            .map(NodeIndex::depth)
+            .fold((0, None), |(size, previous), depth| {
+                (size + 40 + usize::from(previous != Some(depth)) * 9, Some(depth))
+            })
+            .0;
     let count =
         u64::from_le_bytes(bytes[leaves_count_offset..leaves_count_offset + 8].try_into().unwrap());
     let tampered_count = count.saturating_sub(1);
@@ -716,10 +728,20 @@ fn partial_smt_deserialize_leaves_count_larger() {
     let mut partial = PartialSmt::new(smt.root());
     partial.add_proof(proof).unwrap();
 
-    let mut bytes = partial.to_bytes();
+    let unique_nodes = partial.to_unique_nodes();
+    let mut bytes = unique_nodes.to_bytes();
 
     // Tamper the leaves count to be larger by one
-    let leaves_count_offset = 32;
+    let leaves_count_offset = 32
+        + 8
+        + unique_nodes
+            .nodes
+            .keys()
+            .map(NodeIndex::depth)
+            .fold((0, None), |(size, previous), depth| {
+                (size + 40 + usize::from(previous != Some(depth)) * 9, Some(depth))
+            })
+            .0;
     let count =
         u64::from_le_bytes(bytes[leaves_count_offset..leaves_count_offset + 8].try_into().unwrap());
     let tampered_count = count + 1;

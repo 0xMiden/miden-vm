@@ -1,12 +1,14 @@
 #![no_main]
 
+use std::collections::BTreeMap;
+
 use core::mem::size_of;
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{
-    merkle::smt::{LeafIndex, NodeValue, PartialSmt, SmtLeaf, UniqueNodes, SMT_DEPTH},
+    merkle::{NodeIndex, smt::{LeafIndex, PartialSmt, SmtLeaf, UniqueNodes, SMT_DEPTH}},
     utils::{Deserializable, Serializable},
-    Felt, Map, Word,
+    Felt, Word,
 };
 
 const MAX_LEVELS: usize = 16;
@@ -77,25 +79,25 @@ impl<'a> StructuredInput<'a> {
             UniqueNodes::empty().root
         };
 
-        let mut nodes = Map::new();
+        let mut nodes = BTreeMap::new();
         for _ in 0..self.next_count(MAX_LEVELS) {
             let depth = self.next_node_depth();
             let node_count = self.next_count(MAX_NODES_PER_LEVEL);
-            let level_nodes = nodes.entry(depth).or_insert_with(Vec::new);
-
             for _ in 0..node_count {
-                level_nodes.push((self.next_node_position(depth), self.next_node_value()));
+                let position = bounded_position(depth, self.next_node_position(depth));
+                nodes.insert(NodeIndex::new(depth, position).unwrap(), self.next_word());
             }
         }
 
-        let mut leaves = Vec::new();
+        let mut leaves = BTreeMap::new();
         for _ in 0..self.next_count(MAX_LEAVES) {
-            leaves.push(self.next_leaf_entry());
+            let (position, leaf) = self.next_leaf_entry();
+            leaves.insert(position, leaf);
         }
 
-        let mut value_only_leaves = Vec::new();
+        let mut value_only_leaves = BTreeMap::new();
         for _ in 0..self.next_count(MAX_VALUE_ONLY_LEAVES) {
-            value_only_leaves.push((self.next_node_position(SMT_DEPTH), self.next_word()));
+            value_only_leaves.insert(self.next_node_position(SMT_DEPTH), self.next_word());
         }
 
         UniqueNodes { root, nodes, leaves, value_only_leaves }
@@ -131,14 +133,6 @@ impl<'a> StructuredInput<'a> {
             self.next_felt(),
             Felt::new_unchecked(leaf_index % Felt::ORDER),
         ])
-    }
-
-    fn next_node_value(&mut self) -> NodeValue {
-        if self.next_bool() {
-            NodeValue::Present(self.next_word())
-        } else {
-            NodeValue::EmptySubtreeRoot
-        }
     }
 
     fn next_node_depth(&mut self) -> u8 {
