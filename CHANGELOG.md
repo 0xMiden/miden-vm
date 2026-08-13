@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.29.2 (Unreleased)
+
+#### Features
+
+- Added `ast::types::TypedProcInfo`, a typed view over a procedure signature, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
 ## v0.29.1 (2026-08-11)
 
 #### Fixes
@@ -8,11 +14,6 @@
 - Added `ecdsa_k256_keccak::verify_bytes` for verifying signatures over variable-length Keccak256 message bytes stored in VM memory ([#3563](https://github.com/0xMiden/miden-vm/pull/3563)).
 - Fixed persistent `LargeSmtForest::entries()` iteration, including snapshot-backed readers, by bounding RocksDB scans to the requested lineage prefix instead of scanning subsequent lineages ([#3576](https://github.com/0xMiden/miden-vm/pull/3576)).
 - Keccak-256 wrapper preimages may now cover memory that was never written to, matching the in-VM rule that unwritten memory reads as zero ([#3537](https://github.com/0xMiden/miden-vm/issues/3537)).
-## v0.30.0 (Unreleased)
-
-#### Features
-
-- Added `ast::types::TypedProcInfo`, a typed view over a procedure signature, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
 
 ## v0.29.0 (2026-08-04)
 
