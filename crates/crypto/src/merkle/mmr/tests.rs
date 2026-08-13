@@ -354,6 +354,21 @@ fn test_forest_to_root_index() {
     assert_eq!(Forest::new(0b1110).unwrap().root_in_order_index(), idx(26));
 }
 
+/// An empty forest holds no tree, so it has no in-order index to return. Both accessors compute
+/// `num_trees() - 1`, which underflows for an empty forest: that panics in debug builds and wraps
+/// to `usize::MAX` in release builds, yielding a bogus index instead of failing.
+#[test]
+#[should_panic(expected = "an empty forest has no root in-order index")]
+fn test_empty_forest_root_in_order_index_panics() {
+    let _ = Forest::empty().root_in_order_index();
+}
+
+#[test]
+#[should_panic(expected = "an empty forest has no rightmost in-order index")]
+fn test_empty_forest_rightmost_in_order_index_panics() {
+    let _ = Forest::empty().rightmost_in_order_index();
+}
+
 #[test]
 fn test_forest_to_rightmost_index() {
     fn idx(pos: usize) -> InOrderIndex {

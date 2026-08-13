@@ -321,7 +321,13 @@ impl Forest {
     /// This function takes the smallest tree in this forest, "pretends" that it is a subtree of a
     /// fully balanced binary tree, and returns the the in-order index of that balanced tree's root
     /// node.
+    ///
+    /// # Panics
+    /// Panics if the forest is empty, since it then holds no tree whose root could be indexed.
+    /// Check with [`Forest::is_empty`] first.
     pub fn root_in_order_index(&self) -> InOrderIndex {
+        assert!(!self.is_empty(), "an empty forest has no root in-order index");
+
         // Count total size of all trees in the forest.
         let nodes = self.num_nodes();
 
@@ -339,7 +345,13 @@ impl Forest {
     }
 
     /// Returns the in-order index of the rightmost element (the smallest tree).
+    ///
+    /// # Panics
+    /// Panics if the forest is empty, since it then holds no element to index.
+    /// Check with [`Forest::is_empty`] first.
     pub fn rightmost_in_order_index(&self) -> InOrderIndex {
+        assert!(!self.is_empty(), "an empty forest has no rightmost in-order index");
+
         // Count total size of all trees in the forest.
         let nodes = self.num_nodes();
 
