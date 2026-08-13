@@ -1,7 +1,7 @@
 # Miden core library
 Core library for Miden VM.
 
-Miden core library provides a set of procedures which can be used by any Miden program. These procedures build on the core instruction set of [Miden assembly](../assembly) expanding the functionality immediately available to the user.
+Miden core library provides a set of procedures which can be used by any Miden program. These procedures build on the core instruction set of [Miden assembly](../../assembly) expanding the functionality immediately available to the user.
 
 The goals of Miden core library are:
 * Provide highly-optimized and battle-tested implementations of commonly-used primitives.
@@ -35,8 +35,8 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::math::u256](./docs/math/u256.md)
 - [miden::core::math::u64](./docs/math/u64.md)
 - [miden::core::mem](./docs/mem.md)
-- [miden::core::pcs::fri::frie2f4](./docs/pcs/frie2f4.md)
-- [miden::core::stark](./docs/stark/mod.md)
+- [miden::core::pcs::fri::frie2f4](./docs/pcs/fri/frie2f4.md)
+- [miden::core::stark](./docs/stark.md)
 - [miden::core::stark::constants](./docs/stark/constants.md)
 - [miden::core::stark::deep_queries](./docs/stark/deep_queries.md)
 - [miden::core::stark::ood_frames](./docs/stark/ood_frames.md)

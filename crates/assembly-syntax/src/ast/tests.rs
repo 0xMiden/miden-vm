@@ -1623,20 +1623,32 @@ end
     assert_eq!(&formatted, expected);
 }
 
+/// `EmitImm` is printed as the equivalent `push.<id> emit drop` sequence, since `emit.<felt>`
+/// is not valid syntax.
+#[test]
+fn test_emit_imm_roundtrip_formatting() {
+    check_imm_event_roundtrip_formatting("emit");
+}
+
 /// `TraceImm` is printed as the equivalent `push.<id> trace drop` sequence, since `trace.<felt>`
 /// is not valid syntax.
 #[test]
 fn test_trace_roundtrip_formatting() {
-    let trace_name = "test::trace::roundtrip";
-    let trace_id = EventId::from_name(trace_name).as_felt();
+    check_imm_event_roundtrip_formatting("trace");
+}
+
+/// Checks that immediate `emit`/`trace` instructions round-trip through parsing and formatting.
+fn check_imm_event_roundtrip_formatting(kind: &str) {
+    let event_name = format!("test::{kind}::roundtrip");
+    let event_id = EventId::from_name(&event_name).as_felt();
 
     let source = format!(
         "\
 begin
     push.1
-    trace
+    {kind}
     drop
-    trace.event(\"{trace_name}\")
+    {kind}.event(\"{event_name}\")
 end
 "
     );
@@ -1651,9 +1663,9 @@ namespace $exec
 
 begin
     push.1
-    trace
+    {kind}
     drop
-    push.{trace_id} trace drop
+    push.{event_id} {kind} drop
 end
 "
     );
@@ -1668,10 +1680,10 @@ namespace $exec
 
 begin
     push.1
-    trace
+    {kind}
     drop
-    push.{trace_id}
-    trace
+    push.{event_id}
+    {kind}
     drop
 end
 "
