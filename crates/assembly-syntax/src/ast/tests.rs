@@ -1623,18 +1623,23 @@ end
 }
 
 #[test]
-fn test_event_name_roundtrip_formatting() {
+fn test_event_immediate_roundtrip_formatting() {
     let trace_name = "test::trace::roundtrip";
     let event_name = "test::emit::roundtrip";
+    let constant_name = "test::constant::roundtrip";
 
     let source = format!(
         "\
+const EVENT = event(\"{constant_name}\")
+
 begin
     push.1
     trace
     drop
     trace.event(\"{trace_name}\")
     emit.event(\"{event_name}\")
+    trace.EVENT
+    emit.EVENT
 end
 "
     );
@@ -1647,12 +1652,16 @@ end
         "\
 namespace $exec
 
+const EVENT = event(\"{constant_name}\")
+
 begin
     push.1
     trace
     drop
     trace.event(\"{trace_name}\")
     emit.event(\"{event_name}\")
+    trace.EVENT
+    emit.EVENT
 end
 "
     );
@@ -1661,6 +1670,14 @@ end
     let source = source_file!(&context, &expected);
     let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
     assert_eq!(module, reparsed);
+}
+
+#[test]
+fn test_resolved_event_immediate_formatting() {
+    let event = EventImmediate::Immediate(Immediate::Value(Span::unknown(Felt::ONE)));
+
+    assert_eq!(Instruction::EmitImm(event.clone()).to_string(), "push.1 emit drop");
+    assert_eq!(Instruction::TraceImm(event).to_string(), "push.1 trace drop");
 }
 
 #[test]

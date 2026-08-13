@@ -339,11 +339,7 @@ impl PrettyPrint for Instruction {
 
             // ----- traces (read-only events) ----------------------------------------------------
             Self::Trace => const_text("trace"),
-            Self::TraceImm(EventImmediate::Name(name)) => inline_event_imm("trace", name.inner()),
-            // `trace.<FELT_IMM>` is invalid syntax, so print the equivalent instruction sequence.
-            Self::TraceImm(EventImmediate::Immediate(value)) => {
-                flatten(inst_with_felt_imm("push", value) + const_text(" trace drop"))
-            },
+            Self::TraceImm(value) => inst_with_event_imm("trace", value),
 
             // Handled by the early return for !has_textual_representation()
             Self::DebugVar(_) => unreachable!(),
@@ -352,9 +348,18 @@ impl PrettyPrint for Instruction {
 }
 
 fn inst_with_event_imm(name: &'static str, imm: &EventImmediate) -> Document {
+    use crate::prettier::*;
+
     match imm {
-        EventImmediate::Immediate(imm) => inst_with_felt_imm(name, imm),
         EventImmediate::Name(event) => inline_event_imm(name, event.inner()),
+        EventImmediate::Immediate(imm @ Immediate::Constant(_)) => inst_with_felt_imm(name, imm),
+        // A felt literal is not valid as an `emit` or `trace` instruction suffix.
+        EventImmediate::Immediate(imm @ Immediate::Value(_)) => flatten(
+            inst_with_felt_imm("push", imm)
+                + const_text(" ")
+                + const_text(name)
+                + const_text(" drop"),
+        ),
     }
 }
 
