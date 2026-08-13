@@ -136,7 +136,8 @@ impl<
         f0_squared - (x * f1_squared).reduce_by_cyclotomic(n / 2)
     }
 
-    /// Lifts an element from a cyclotomic polynomial ring to one of double the size.
+    /// Lifts an element from a cyclotomic polynomial ring to one of double the size, which
+    /// corresponds to `f(x^2)`.
     pub fn lift_next_cyclotomic(&self) -> Self {
         let n = self.coefficients.len();
         let mut coefficients = vec![F::zero(); n * 2];
@@ -147,7 +148,7 @@ impl<
     }
 
     /// Computes the galois adjoint of the polynomial in the cyclotomic ring F\[ X \] / < X^n + 1 >
-    /// , which corresponds to f(x^2).
+    /// , which corresponds to `f(-x)`.
     pub fn galois_adjoint(&self) -> Self {
         Self::new(
             self.coefficients
@@ -660,6 +661,24 @@ mod tests {
         let nonzero = Polynomial::new(vec![1, 2, 3]);
         let result = zero / nonzero;
         assert!(result.is_zero());
+    }
+
+    /// `galois_adjoint` substitutes `-x` for `x`, so it keeps the even-power coefficients and
+    /// negates the odd-power ones. `ntru_solve` relies on this to build `f(-x)` and `g(-x)`.
+    #[test]
+    fn galois_adjoint_substitutes_minus_x() {
+        // 1 + 2x + 3x^2 + 4x^3  ->  1 - 2x + 3x^2 - 4x^3
+        let f = Polynomial::new(vec![1i64, 2, 3, 4]);
+        assert_eq!(f.galois_adjoint().coefficients, vec![1i64, -2, 3, -4]);
+    }
+
+    /// `lift_next_cyclotomic` substitutes `x^2` for `x`, spreading the coefficients over the even
+    /// powers of a ring of twice the size.
+    #[test]
+    fn lift_next_cyclotomic_substitutes_x_squared() {
+        // 1 + 2x  ->  1 + 2x^2
+        let f = Polynomial::new(vec![1i64, 2]);
+        assert_eq!(f.lift_next_cyclotomic().coefficients, vec![1i64, 0, 2, 0]);
     }
 
     #[test]
