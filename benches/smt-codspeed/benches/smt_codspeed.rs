@@ -137,17 +137,21 @@ fn smt_benches(c: &mut Criterion) {
         mutations.bench_function(BenchmarkId::new("Smt::compute_mutations", size), |bench| {
             let smt = Smt::with_entries(entries(4_096, 0)).unwrap();
             let updates = entries(size, 10_000);
-            bench.iter(|| black_box(smt.compute_mutations(updates.clone()).unwrap()));
+            bench.iter_batched(
+                || updates.clone(),
+                |updates| black_box(smt.compute_mutations(updates).unwrap()),
+                BatchSize::LargeInput,
+            );
         });
         mutations.bench_function(BenchmarkId::new("Smt::apply_mutations", size), |bench| {
-            bench.iter_batched(
+            bench.iter_batched_ref(
                 || {
                     let smt = Smt::with_entries(entries(4_096, 0)).unwrap();
                     let mutations = smt.compute_mutations(entries(size, 10_000)).unwrap();
-                    (smt, mutations)
+                    (smt, Some(mutations))
                 },
-                |(mut smt, mutations)| {
-                    smt.apply_mutations(mutations).unwrap();
+                |(smt, mutations)| {
+                    smt.apply_mutations(mutations.take().unwrap()).unwrap();
                     black_box(())
                 },
                 BatchSize::LargeInput,
@@ -176,32 +180,36 @@ fn large_smt_memory_benches(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("compute_mutations", size), |bench| {
             let smt = LargeSmt::with_entries(MemoryStorage::new(), entries(4_096, 0)).unwrap();
             let updates = entries(size, 10_000);
-            bench.iter(|| black_box(smt.compute_mutations(updates.clone()).unwrap()));
+            bench.iter_batched(
+                || updates.clone(),
+                |updates| black_box(smt.compute_mutations(updates).unwrap()),
+                BatchSize::LargeInput,
+            );
         });
         group.bench_function(BenchmarkId::new("apply_mutations", size), |bench| {
-            bench.iter_batched(
+            bench.iter_batched_ref(
                 || {
                     let smt =
                         LargeSmt::with_entries(MemoryStorage::new(), entries(4_096, 0)).unwrap();
                     let mutations = smt.compute_mutations(entries(size, 10_000)).unwrap();
-                    (smt, mutations)
+                    (smt, Some(mutations))
                 },
-                |(mut smt, mutations)| {
-                    smt.apply_mutations(mutations).unwrap();
+                |(smt, mutations)| {
+                    smt.apply_mutations(mutations.take().unwrap()).unwrap();
                     black_box(())
                 },
                 BatchSize::LargeInput,
             );
         });
         group.bench_function(BenchmarkId::new("insert_batch/populated", size), |bench| {
-            bench.iter_batched(
+            bench.iter_batched_ref(
                 || {
                     let smt =
                         LargeSmt::with_entries(MemoryStorage::new(), entries(4_096, 0)).unwrap();
                     let batch = entries(size, 10_000);
                     (smt, batch)
                 },
-                |(mut smt, batch)| black_box(smt.insert_batch(batch).unwrap()),
+                |(smt, batch)| black_box(smt.insert_batch(std::mem::take(batch)).unwrap()),
                 BatchSize::LargeInput,
             );
         });
@@ -236,30 +244,36 @@ fn large_smt_rocksdb_benches(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("compute_mutations", size), |bench| {
             let (_temp_dir, smt) = rocksdb_smt(4_096);
             let updates = entries(size, 10_000);
-            bench.iter(|| black_box(smt.compute_mutations(updates.clone()).unwrap()));
+            bench.iter_batched(
+                || updates.clone(),
+                |updates| black_box(smt.compute_mutations(updates).unwrap()),
+                BatchSize::LargeInput,
+            );
         });
         group.bench_function(BenchmarkId::new("apply_mutations", size), |bench| {
-            bench.iter_batched(
+            bench.iter_batched_ref(
                 || {
                     let (temp_dir, smt) = rocksdb_smt(4_096);
                     let mutations = smt.compute_mutations(entries(size, 10_000)).unwrap();
-                    (temp_dir, smt, mutations)
+                    (temp_dir, smt, Some(mutations))
                 },
-                |(_temp_dir, mut smt, mutations)| {
-                    smt.apply_mutations(mutations).unwrap();
+                |(_temp_dir, smt, mutations)| {
+                    smt.apply_mutations(mutations.take().unwrap()).unwrap();
                     black_box(())
                 },
                 BatchSize::LargeInput,
             );
         });
         group.bench_function(BenchmarkId::new("insert_batch/populated", size), |bench| {
-            bench.iter_batched(
+            bench.iter_batched_ref(
                 || {
                     let (temp_dir, smt) = rocksdb_smt(4_096);
                     let batch = entries(size, 10_000);
                     (temp_dir, smt, batch)
                 },
-                |(_temp_dir, mut smt, batch)| black_box(smt.insert_batch(batch).unwrap()),
+                |(_temp_dir, smt, batch)| {
+                    black_box(smt.insert_batch(std::mem::take(batch)).unwrap())
+                },
                 BatchSize::LargeInput,
             );
         });
