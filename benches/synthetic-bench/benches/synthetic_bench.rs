@@ -22,9 +22,7 @@
 //! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
 //!   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm`.
 
-use std::{
-    cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
-};
+use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration};
 
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
@@ -32,8 +30,8 @@ use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
 use miden_vm::{
-    Assembler, ExecutionClaim, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions,
-    StackOutputs, Verifier, prove_sync,
+    Assembler, ExecutionClaim, HashFunction, Program, ProgramInfo, ProvingOptions, Verifier,
+    prove_sync,
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
@@ -46,7 +44,6 @@ use miden_vm_synthetic_bench::{
 /// Hash function used for STARK `prove` and `verify` axes.
 const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
 const ALL_AXES: [&str; 4] = ["exec", "trace_prep", "prove", "verify"];
-type ProofFixture = (StackOutputs, ExecutionProof);
 
 fn resolve_bench_axes() -> BTreeSet<&'static str> {
     let Some(raw) = std::env::var("SYNTH_BENCH_AXES").ok().filter(|s| !s.trim().is_empty()) else {
@@ -291,79 +288,78 @@ fn bench_one_scenario(
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {
-            b.iter_batched(
-                || processor_inputs(&program),
-                |(mut host, program, processor)| {
-                    black_box(processor.execute_sync(&program, &mut host).expect("exec"));
+            b.iter_batched_ref(
+                || {
+                    let (host, program, processor) = processor_inputs(&program);
+                    (host, program, Some(processor))
                 },
-                BatchSize::SmallInput,
+                |(host, program, processor)| {
+                    black_box(processor.take().unwrap().execute_sync(program, host).expect("exec"))
+                },
+                BatchSize::PerIteration,
             );
         });
     }
 
     if axes.contains("trace_prep") {
         group.bench_function("trace_prep", |b| {
-            b.iter_batched(
-                || processor_inputs(&program),
-                |(mut host, program, processor)| {
+            b.iter_batched_ref(
+                || {
+                    let (host, program, processor) = processor_inputs(&program);
+                    (host, program, Some(processor))
+                },
+                |(host, program, processor)| {
                     black_box(
                         processor
-                            .execute_trace_inputs_sync(&program, &mut host)
+                            .take()
+                            .unwrap()
+                            .execute_trace_inputs_sync(program, host)
                             .expect("trace_prep"),
-                    );
+                    )
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
 
-    let cached_proof: Rc<RefCell<Option<ProofFixture>>> = Rc::default();
     if axes.contains("prove") {
-        let cached_proof = Rc::clone(&cached_proof);
         group.bench_function("prove", |b| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
                     let stack = StackInputs::default();
                     let advice = AdviceInputs::default();
-                    (host, program.clone(), stack, advice)
+                    (host, program.clone(), Some(stack), Some(advice))
                 },
-                |(mut host, program, stack, advice)| {
-                    let proof = prove_sync(
-                        &program,
-                        stack,
-                        advice,
-                        &mut host,
-                        ExecutionOptions::default(),
-                        ProvingOptions::new(BENCH_HASH),
+                |(host, program, stack, advice)| {
+                    black_box(
+                        prove_sync(
+                            program,
+                            stack.take().unwrap(),
+                            advice.take().unwrap(),
+                            host,
+                            ExecutionOptions::default(),
+                            ProvingOptions::new(BENCH_HASH),
+                        )
+                        .expect("prove"),
                     )
-                    .expect("prove");
-                    let mut cached = cached_proof.borrow_mut();
-                    if cached.is_none() {
-                        *cached = Some(proof.clone());
-                    }
-                    black_box(proof);
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
 
     if axes.contains("verify") {
-        // Reuse a proof from the `prove` axis when it ran for this scenario. This keeps prove time
-        // out of the verify measurement without forcing an extra proof in all-axes runs.
-        let (stack_outputs, proof) = cached_proof.borrow().clone().unwrap_or_else(|| {
-            let mut host = DefaultHost::default();
-            prove_sync(
-                &program,
-                StackInputs::default(),
-                AdviceInputs::default(),
-                &mut host,
-                ExecutionOptions::default(),
-                ProvingOptions::new(BENCH_HASH),
-            )
-            .expect("prove for verify setup")
-        });
+        let mut host = DefaultHost::default();
+        let (stack_outputs, proof) = prove_sync(
+            &program,
+            StackInputs::default(),
+            AdviceInputs::default(),
+            &mut host,
+            ExecutionOptions::default(),
+            ProvingOptions::new(BENCH_HASH),
+        )
+        .expect("prove for verify setup");
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::from(program.clone()),
             StackInputs::default(),
