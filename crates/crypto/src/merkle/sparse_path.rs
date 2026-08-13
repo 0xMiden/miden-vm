@@ -23,8 +23,17 @@ use crate::{
 ///
 /// NOTE: This type assumes that Merkle paths always span from the root of the tree to a leaf.
 /// Partial paths are not supported.
+///
+/// # Invariants
+/// Every construction path must uphold `nodes.len() + empty_nodes_mask.count_ones() <=
+/// SMT_MAX_DEPTH`, i.e. the total depth of the path is in range. The accessors rely on this and
+/// will panic otherwise. Note that the total depth is a `usize` before it is checked, so it must
+/// not be narrowed to `u8` first: narrowing wraps the depth modulo 256, which lets an over-long
+/// path masquerade as an in-range one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+// NOTE: `Deserialize` is implemented manually, below the `Deserializable` impl, so that it routes
+// through `from_parts()` and upholds the invariant above. Deriving it would bypass the check.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct SparseMerklePath {
     /// A bitmask representing empty nodes. The set bit corresponds to the depth of an empty node.
     /// The least significant bit (bit 0) describes depth 1 node (root's children).
@@ -64,8 +73,10 @@ impl SparseMerklePath {
             return Err(MerkleError::InvalidPathLength(min_non_empty_nodes));
         }
 
-        let depth = Self::depth_from_parts(empty_nodes_mask, &nodes) as u8;
-        if depth > SMT_MAX_DEPTH {
+        // `depth_from_parts()` can exceed `u8::MAX`, so it must be range-checked as a `usize`.
+        // Narrowing first would wrap the depth modulo 256 and let over-long paths through.
+        let depth = Self::depth_from_parts(empty_nodes_mask, &nodes);
+        if depth > SMT_MAX_DEPTH as usize {
             return Err(MerkleError::DepthTooBig(depth as u64));
         }
 
@@ -86,11 +97,15 @@ impl SparseMerklePath {
         I: IntoIterator<IntoIter: ExactSizeIterator, Item = Word>,
     {
         let iterator = iterator.into_iter();
-        let tree_depth = iterator.len() as u8;
 
-        if tree_depth > SMT_MAX_DEPTH {
+        // As in `from_parts()`, the length must be range-checked as a `usize`. Narrowing first
+        // would wrap the depth modulo 256, silently truncating the iterator instead of rejecting
+        // it.
+        let tree_depth = iterator.len();
+        if tree_depth > SMT_MAX_DEPTH as usize {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
+        let tree_depth = tree_depth as u8;
 
         let mut empty_nodes_mask: u64 = 0;
         let mut nodes: Vec<Word> = Default::default();
@@ -274,6 +289,29 @@ impl Deserializable for SparseMerklePath {
         let count = depth as u32 - empty_nodes_count;
         let nodes: Vec<Word> = source.read_many_iter(count as usize)?.collect::<Result<_, _>>()?;
         Ok(Self { empty_nodes_mask, nodes })
+    }
+}
+
+/// Deserializes via [`SparseMerklePath::from_parts()`] so that `serde` range-checks the depth of
+/// the path. A derived implementation would populate the fields directly and skip the check,
+/// leaving the accessors free to panic on the resulting path.
+///
+/// The wire format is unchanged: `Raw` mirrors the derived representation field for field.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SparseMerklePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename = "SparseMerklePath")]
+        struct Raw {
+            empty_nodes_mask: u64,
+            nodes: Vec<Word>,
+        }
+
+        let Raw { empty_nodes_mask, nodes } = Raw::deserialize(deserializer)?;
+        Self::from_parts(empty_nodes_mask, nodes).map_err(serde::de::Error::custom)
     }
 }
 
@@ -517,6 +555,7 @@ mod tests {
             smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt, Smt, SparseMerkleTreeReader},
             sparse_path::path_depth_iter,
         },
+        utils::{Deserializable, Serializable},
     };
 
     fn make_smt(pair_count: u64) -> Smt {
@@ -652,6 +691,105 @@ mod tests {
         let sparse_path = SparseMerklePath::from_parts(empty_nodes_mask, nodes).unwrap();
 
         assert_eq!(sparse_path, iter_sparse_path);
+    }
+
+    /// Regression test: the depth computed by `from_parts()` must be range-checked before it is
+    /// narrowed to `u8`.
+    ///
+    /// `depth_from_parts()` returns a `usize`, so a path can describe a depth far beyond
+    /// [`SMT_MAX_DEPTH`]. Narrowing that value to `u8` first makes the depth wrap modulo 256, and
+    /// any wrapped value that lands in `0..=SMT_MAX_DEPTH` passes the check. The resulting path
+    /// reports a `depth()` that disagrees with the number of nodes it actually holds, which makes
+    /// `compute_root()` fold over a prefix of the nodes and makes `write_into()`/`read_from()`
+    /// asymmetric: the writer emits `depth()` followed by *all* nodes, the reader takes `depth()`
+    /// at its word and consumes only that many.
+    #[test]
+    fn from_parts_rejects_depth_wider_than_u8() {
+        // 320 % 256 == 64 == SMT_MAX_DEPTH: an over-long path masquerading as a full-depth one.
+        assert_matches!(
+            SparseMerklePath::from_parts(0, vec![Word::default(); 320]).unwrap_err(),
+            MerkleError::DepthTooBig(320)
+        );
+
+        // 256 % 256 == 0: an over-long path masquerading as the empty path.
+        assert_matches!(
+            SparseMerklePath::from_parts(0, vec![Word::default(); 256]).unwrap_err(),
+            MerkleError::DepthTooBig(256)
+        );
+
+        // The empty-node mask also contributes to the depth, so it can drive the overflow too:
+        // 64 empty nodes + 200 non-empty nodes == 264, and 264 % 256 == 8.
+        assert_matches!(
+            SparseMerklePath::from_parts(u64::MAX, vec![Word::default(); 200]).unwrap_err(),
+            MerkleError::DepthTooBig(264)
+        );
+
+        // The boundary itself must still be accepted, and must round-trip through serialization.
+        let max_depth =
+            SparseMerklePath::from_parts(0, vec![Word::default(); SMT_MAX_DEPTH as usize]).unwrap();
+        assert_eq!(max_depth.depth(), SMT_MAX_DEPTH);
+        assert_eq!(SparseMerklePath::read_from_bytes(&max_depth.to_bytes()).unwrap(), max_depth);
+
+        // One node past the boundary is rejected without any wrapping involved.
+        assert_matches!(
+            SparseMerklePath::from_parts(0, vec![Word::default(); SMT_MAX_DEPTH as usize + 1])
+                .unwrap_err(),
+            MerkleError::DepthTooBig(65)
+        );
+    }
+
+    /// Regression test: the same range check must hold for [`SparseMerklePath::from_sized_iter()`],
+    /// which narrows the iterator length to `u8` before comparing it against [`SMT_MAX_DEPTH`].
+    ///
+    /// Without the fix an over-long iterator wraps to an in-range depth and is silently truncated
+    /// to its first `tree_depth % 256` items rather than rejected.
+    #[test]
+    fn from_sized_iter_rejects_depth_wider_than_u8() {
+        assert_matches!(
+            SparseMerklePath::from_sized_iter(vec![Word::default(); 320]).unwrap_err(),
+            MerkleError::DepthTooBig(320)
+        );
+        assert_matches!(
+            SparseMerklePath::from_sized_iter(vec![Word::default(); 256]).unwrap_err(),
+            MerkleError::DepthTooBig(256)
+        );
+
+        // The `TryFrom<MerklePath>` conversion delegates to the same constructor, but cannot reach
+        // the wrapping case on its own: `MerklePath::new()` caps a path at `u8::MAX` nodes, and
+        // every length in `SMT_MAX_DEPTH + 1..=u8::MAX` is already out of range without wrapping.
+        assert_matches!(
+            SparseMerklePath::try_from(MerklePath::new(vec![Word::default(); u8::MAX as usize]))
+                .unwrap_err(),
+            MerkleError::DepthTooBig(255)
+        );
+    }
+
+    /// Regression test: `serde` deserialization must range-check the depth the same way
+    /// [`SparseMerklePath::from_parts()`] does.
+    ///
+    /// A derived `Deserialize` populates `empty_nodes_mask` and `nodes` directly, so it accepts
+    /// the same over-long payload the `from_parts()` regression test covers, with the same
+    /// consequence: a `depth()` that disagrees with the number of nodes the path holds.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_deserialization_enforces_depth_range() {
+        // Build payloads from `Word`'s own representation rather than hardcoding it.
+        let node = serde_json::to_string(&Word::default()).unwrap();
+        let payload = |empty_nodes_mask: u64, node_count: usize| {
+            let nodes = vec![node.as_str(); node_count].join(",");
+            format!(r#"{{"empty_nodes_mask":{empty_nodes_mask},"nodes":[{nodes}]}}"#)
+        };
+
+        // Rejected by the depth range check: 320 nodes is a true depth of 320, which a derived
+        // implementation would accept and `depth()` would report as 64.
+        let err = serde_json::from_str::<SparseMerklePath>(&payload(0, 320)).unwrap_err();
+        assert!(format!("{err}").contains("too big"), "unexpected error message: {err}");
+
+        // Well-formed paths still round-trip, and the wire format is unchanged: the manual
+        // implementation reads back exactly what the derived `Serialize` writes.
+        let path = SparseMerklePath::from_parts(0b0110_0111, vec![[8u8; 4].into(); 3]).unwrap();
+        let json = serde_json::to_string(&path).unwrap();
+        assert_eq!(serde_json::from_str::<SparseMerklePath>(&json).unwrap(), path);
     }
 
     #[test]
