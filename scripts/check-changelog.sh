@@ -13,8 +13,17 @@ EOF
 
 require_changelog() {
     local changelog_file="$1"
+    local status
 
-    if git diff --quiet "origin/${BASE_REF}" -- "${changelog_file}"; then
+    git diff --quiet "origin/${BASE_REF}" -- "${changelog_file}"
+    status=$?
+
+    if [ "${status}" -gt 1 ]; then
+        >&2 echo "Failed to diff \"${changelog_file}\" against \"origin/${BASE_REF}\" (git exited ${status}). Check that BASE_REF is correct and that the ref is available in this checkout."
+        exit 1
+    fi
+
+    if [ "${status}" -eq 0 ]; then
         >&2 echo "Changes should come with an entry in the \"${changelog_file}\" file. This behavior
 can be overridden by using the \"no changelog\" label, which is used for changes
 that are trivial / explicitly stated not to require a changelog entry."
