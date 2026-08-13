@@ -7,8 +7,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::types::Type;
 use miden_core::Felt;
+use midenc_hir_type::Type;
 
 use super::{
     WitScalarCodec,

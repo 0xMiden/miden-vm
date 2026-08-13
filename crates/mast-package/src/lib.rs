@@ -11,7 +11,6 @@ extern crate std;
 pub mod debug_info;
 mod dependency;
 mod package;
-pub mod typed;
 
 pub use miden_assembly_syntax::{
     PathBuf, Version, VersionError,

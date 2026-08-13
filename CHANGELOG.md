@@ -12,7 +12,7 @@
 
 #### Features
 
-- Added a typed view over a package manifest's procedure signatures, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+- Added `ast::types::TypedProcInfo`, a typed view over a procedure signature, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
 
 ## v0.29.0 (2026-08-04)
 

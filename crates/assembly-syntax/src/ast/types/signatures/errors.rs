@@ -3,7 +3,7 @@ use alloc::string::String;
 use thiserror::Error;
 
 /// Errors from turning argument tokens into felts, or result felts into text, for a procedure
-/// signature from the manifest.
+/// signature.
 #[derive(Debug, Error)]
 pub enum TypedError {
     /// We could not read a token for a WIT type that has a [`WitScalarCodec`].

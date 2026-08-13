@@ -7,8 +7,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::types::{StructField, StructType};
 use miden_core::{Felt, Word};
+use midenc_hir_type::{StructField, StructType};
 
 use super::errors::TypedError;
 

@@ -6,10 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::types::{
-    ArrayType, CallConv, FunctionType, NameAndType, StructType, Type,
-};
 use miden_core::Felt;
+use midenc_hir_type::{ArrayType, CallConv, FunctionType, NameAndType, StructType, Type};
 
 use super::{MIDEN_CORE_TYPES, TypedError, TypedProcInfo, WitScalarCodec};
 

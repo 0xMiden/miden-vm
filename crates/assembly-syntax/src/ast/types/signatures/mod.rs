@@ -1,12 +1,12 @@
 //! A typed view of a procedure signature.
 //!
-//! The manifest keeps the high-level (WIT) signature of each export; the VM stack only holds
-//! felts. [`TypedProcInfo`] joins the two: it prints the signature, turns argument text into stack
-//! felts, and result felts back into text.
+//! A procedure carries a high-level (WIT) signature; the VM stack only holds felts.
+//! [`TypedProcInfo`] joins the two: it prints the signature, turns argument text into stack felts,
+//! and result felts back into text.
 //!
 //! The felts follow the canonical ABI: one stack slot per leaf field, so `struct { u8, u8 }` is
 //! two felts. This is the layout of a component export, the kind a caller reaches with `call`, and
-//! the only convention this crate takes.
+//! the only convention this module takes.
 //!
 //! Types that take one token, like `word` and `felt`, go through a [`WitScalarCodec`]. Those two
 //! are built in; the caller adds others with [`TypedProcInfo::with_scalar_codec`].
@@ -19,8 +19,8 @@ use alloc::{
 };
 use core::fmt;
 
-use miden_assembly_syntax::ast::types::{CallConv, FunctionType, Type};
 use miden_core::Felt;
+use midenc_hir_type::{CallConv, FunctionType, Type};
 
 use self::{
     arity::{felt_count, token_count},
@@ -53,18 +53,17 @@ pub use self::{
 pub struct TypedProcInfo {
     /// The name we show, like `add-points`.
     name: String,
-    /// The signature from the package manifest.
+    /// The signature we encode arguments and decode results against.
     signature: FunctionType,
     /// Codecs the user added. We match them by type name when we encode and decode.
     codecs: Vec<Box<dyn WitScalarCodec>>,
 }
 
 impl TypedProcInfo {
-    /// Builds the typed view of the procedure `name`, with the signature its package manifest
-    /// carries.
+    /// Builds the typed view of the procedure `name`, with the signature `signature`.
     ///
-    /// The caller picks the export. It knows which one it wants, and it keeps the signature and
-    /// anything else it reads from that export, like its digest, on the same procedure.
+    /// The caller picks the procedure. It knows which one it wants, and it keeps the signature and
+    /// anything else it reads about it, like its digest, on the same procedure.
     ///
     /// The signature has to be `component-model`. Another convention puts the same value on the
     /// stack in another shape, and we would read and write felts the procedure never sees.

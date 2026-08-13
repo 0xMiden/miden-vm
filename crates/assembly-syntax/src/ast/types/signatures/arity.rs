@@ -10,7 +10,7 @@
 
 use alloc::boxed::Box;
 
-use miden_assembly_syntax::ast::types::Type;
+use midenc_hir_type::Type;
 
 use super::{WitScalarCodec, codec::codec_for_struct};
 

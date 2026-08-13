@@ -3,8 +3,8 @@
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::str::FromStr;
 
-use miden_assembly_syntax::ast::types::Type;
 use miden_core::Felt;
+use midenc_hir_type::Type;
 
 use super::{
     WitScalarCodec,
