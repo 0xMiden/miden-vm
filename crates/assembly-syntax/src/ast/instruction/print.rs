@@ -333,9 +333,13 @@ impl PrettyPrint for Instruction {
                 flatten(const_text("procref") + const_text(".") + display(path))
             },
 
-            // ----- event decorators -------------------------------------------------------------
+            // ----- events -----------------------------------------------------------------------
             Self::Emit => const_text("emit"),
-            Self::EmitImm(value) => inst_with_felt_imm("emit", value),
+            // `emit.<FELT_IMM>` is invalid syntax, so to support a `print -> parse` round trip
+            // we print the equivalent `push.<value> emit drop` sequence instead.
+            Self::EmitImm(value) => {
+                flatten(inst_with_felt_imm("push", value) + const_text(" emit drop"))
+            },
 
             // ----- traces (read-only events) ----------------------------------------------------
             Self::Trace => const_text("trace"),
