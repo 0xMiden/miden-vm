@@ -456,7 +456,8 @@ where
         let mut remainder = self;
         let mut quotient = Polynomial::<F>::zero();
         while remainder.degree().unwrap() >= denominator.degree().unwrap() {
-            let shift = remainder.degree().unwrap() - denominator.degree().unwrap();
+            let remainder_degree_before_step = remainder.degree().unwrap();
+            let shift = remainder_degree_before_step - denominator.degree().unwrap();
             let quotient_coefficient = remainder.lc() / denominator.lc();
             let monomial = Self::constant(quotient_coefficient).shift(shift);
             quotient += monomial.clone();
@@ -464,6 +465,20 @@ where
             if remainder.is_zero() {
                 break;
             }
+            // For an exact division (e.g. over a field, or over integers
+            // that divide evenly), subtracting `monomial * denominator`
+            // always cancels the remainder's current leading term exactly,
+            // so its degree strictly decreases on every iteration. If `F`'s
+            // `Div` truncates (e.g. `i64`) and the leading coefficients
+            // don't divide evenly, that cancellation can fail silently: the
+            // remainder is left unchanged and this loop would otherwise
+            // repeat the same non-progressing step forever. Fail fast
+            // instead of hanging.
+            assert!(
+                remainder.degree().unwrap() < remainder_degree_before_step,
+                "Polynomial::div: division did not terminate -- the leading \
+                 coefficients did not divide exactly for this coefficient type"
+            );
         }
         quotient
     }
@@ -660,6 +675,31 @@ mod tests {
         let nonzero = Polynomial::new(vec![1, 2, 3]);
         let result = zero / nonzero;
         assert!(result.is_zero());
+    }
+
+    #[test]
+    fn div_exact_i64_polynomials() {
+        // (x + 2) * (x + 3) = 6 + 5x + x^2, divided by (x + 3) should give
+        // back (x + 2) exactly -- the leading coefficients divide evenly at
+        // every step, so this must still work under the stricter check.
+        let denominator = Polynomial::new(vec![3, 1]); // 3 + x
+        let numerator = Polynomial::new(vec![6, 5, 1]); // 6 + 5x + x^2
+        let quotient = numerator / denominator;
+        assert_eq!(quotient, Polynomial::new(vec![2, 1])); // 2 + x
+    }
+
+    #[test]
+    #[should_panic(expected = "Polynomial::div: division did not terminate")]
+    fn div_i64_polynomials_with_inexact_leading_coefficients_terminates() {
+        // Regression test for a division that previously never terminated.
+        // 3 / 2 as i64 constant polynomials: i64's `Div` truncates
+        // (3 / 2 == 1), so `1 * 2 == 2 != 3` -- the leading coefficient
+        // never fully cancels, and the remainder never changes. Before the
+        // fix this would loop forever instead of returning or panicking; it
+        // must now fail fast with a clear panic.
+        let numerator = Polynomial::new(vec![3]);
+        let denominator = Polynomial::new(vec![2]);
+        let _ = numerator / denominator;
     }
 
     #[test]
