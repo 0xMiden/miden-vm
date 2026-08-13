@@ -15,7 +15,7 @@ use miden_processor::{
     event::EventError,
 };
 
-use crate::handlers::read_memory_region;
+use crate::handlers::read_uninitialized_memory_region;
 
 /// Event emitted by bundled `miden::precompiles::hashes::keccak256` wrappers to request a
 /// Keccak-256 digest witness from the host.
@@ -80,7 +80,7 @@ fn read_memory_packed_u32(
         .checked_next_multiple_of(BYTES_PER_U32)
         .ok_or(Keccak256DigestEventError::AddressOverflow { start, len_bytes })?;
 
-    let felts = read_memory_region(process, start, len_felts_u64)
+    let felts = read_uninitialized_memory_region(process, start, len_felts_u64)
         .ok_or(Keccak256DigestEventError::MemoryAccessFailed { address: start_u32 })?;
 
     for (offset, felt) in felts.iter().enumerate() {
