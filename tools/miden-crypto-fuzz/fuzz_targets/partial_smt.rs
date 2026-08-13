@@ -6,9 +6,12 @@ use core::mem::size_of;
 
 use libfuzzer_sys::fuzz_target;
 use miden_crypto::{
-    merkle::{NodeIndex, smt::{LeafIndex, PartialSmt, SmtLeaf, UniqueNodes, SMT_DEPTH}},
-    utils::{Deserializable, Serializable},
     Felt, Word,
+    merkle::{
+        NodeIndex,
+        smt::{LeafIndex, PartialSmt, SMT_DEPTH, SmtLeaf, UniqueNodes},
+    },
+    utils::{Deserializable, Serializable},
 };
 
 const MAX_LEVELS: usize = 16;
@@ -49,7 +52,9 @@ fuzz_target!(|data: &[u8]| {
 fn focused_missing_node_payload(data: &[u8]) -> Vec<u8> {
     let leaf_index = leaf_index_from_prefix(data);
     UniqueNodes {
-        leaves: vec![(leaf_index, SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))],
+        leaves: [(leaf_index, SmtLeaf::new_empty(LeafIndex::new_max_depth(leaf_index)))]
+            .into_iter()
+            .collect(),
         ..UniqueNodes::empty()
     }
     .to_bytes()
