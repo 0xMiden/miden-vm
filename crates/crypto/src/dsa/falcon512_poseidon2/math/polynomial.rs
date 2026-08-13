@@ -650,8 +650,224 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 #[cfg(test)]
 mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use num::{One, Zero};
+    use proptest::prelude::*;
+
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
+
+    /// Builds a polynomial over the Falcon field from small integer coefficients.
+    fn poly(coefficients: &[i16]) -> Polynomial<FalconFelt> {
+        Polynomial::new(coefficients.iter().map(|&c| FalconFelt::new(c)).collect())
+    }
+
+    /// Evaluates a polynomial at `x` by Horner's rule, as an independent reference for the
+    /// coefficient-level operations.
+    fn evaluate(p: &Polynomial<FalconFelt>, x: FalconFelt) -> FalconFelt {
+        let mut acc = FalconFelt::zero();
+        for c in p.coefficients.iter().rev() {
+            acc = acc * x + *c;
+        }
+        acc
+    }
+
+    // DEGREE AND LEADING COEFFICIENT
+    // ----------------------------------------------------------------------------------------
+
+    /// `degree` ignores trailing zero coefficients and reports `None` for the zero polynomial,
+    /// including the empty one. `is_zero` is defined in terms of it, so everything that branches
+    /// on emptiness rests on these cases.
+    #[test]
+    fn degree_skips_trailing_zeros_and_is_none_for_zero() {
+        assert_eq!(poly(&[1, 2, 3]).degree(), Some(2));
+        assert_eq!(poly(&[1, 2, 3, 0, 0]).degree(), Some(2), "trailing zeros must not count");
+        assert_eq!(poly(&[7]).degree(), Some(0));
+
+        assert_eq!(poly(&[]).degree(), None, "the empty polynomial is zero");
+        assert_eq!(poly(&[0, 0, 0]).degree(), None, "all-zero coefficients are zero");
+
+        assert!(poly(&[0, 0]).is_zero());
+        assert!(!poly(&[0, 1]).is_zero());
+    }
+
+    /// `lc` returns the coefficient at `degree`, and zero when there is no degree.
+    #[test]
+    fn lc_returns_the_leading_coefficient() {
+        assert_eq!(poly(&[1, 2, 3]).lc(), FalconFelt::new(3));
+        assert_eq!(poly(&[1, 2, 3, 0, 0]).lc(), FalconFelt::new(3));
+        assert_eq!(poly(&[]).lc(), FalconFelt::zero());
+        assert_eq!(poly(&[0, 0]).lc(), FalconFelt::zero());
+    }
+
+    // RING ARITHMETIC
+    // ----------------------------------------------------------------------------------------
+
+    /// Reduction modulo `X^n + 1` means `X^n` is `-1`, so the reduction of a bare `X^(n+k)` is
+    /// `-X^k`, and of `X^(2n+k)` is `+X^k`. The alternating sign in `reduce_by_cyclotomic` is the
+    /// least obvious part of the file, so it gets pinned directly.
+    #[test]
+    fn reduce_by_cyclotomic_alternates_sign_every_n_degrees() {
+        let n = 4;
+
+        // X^4 == -1
+        let mut x4 = vec![0i16; 5];
+        x4[4] = 1;
+        assert_eq!(poly(&x4).reduce_by_cyclotomic(n), poly(&[-1, 0, 0, 0]));
+
+        // X^5 == -X
+        let mut x5 = vec![0i16; 6];
+        x5[5] = 1;
+        assert_eq!(poly(&x5).reduce_by_cyclotomic(n), poly(&[0, -1, 0, 0]));
+
+        // X^8 == +1
+        let mut x8 = vec![0i16; 9];
+        x8[8] = 1;
+        assert_eq!(poly(&x8).reduce_by_cyclotomic(n), poly(&[1, 0, 0, 0]));
+
+        // Anything already of degree < n is unchanged.
+        assert_eq!(poly(&[1, 2, 3, 4]).reduce_by_cyclotomic(n), poly(&[1, 2, 3, 4]));
+    }
+
+    /// `galois_adjoint` negates the odd-index coefficients, i.e. it maps `f(X)` to `f(-X)`.
+    /// Checking it by evaluation rather than by re-stating the implementation.
+    #[test]
+    fn galois_adjoint_evaluates_as_f_of_minus_x() {
+        let f = poly(&[3, 1, 4, 1, 5]);
+        let adjoint = f.galois_adjoint();
+
+        for x in [2i16, 7, 100, 12288] {
+            let x = FalconFelt::new(x);
+            assert_eq!(evaluate(&adjoint, x), evaluate(&f, -x), "mismatch at x = {}", x.value());
+        }
+    }
+
+    /// `lift_next_cyclotomic` spreads the coefficients over even indices, i.e. it maps `f(X)` to
+    /// `f(X^2)` in a ring of twice the size.
+    #[test]
+    fn lift_next_cyclotomic_evaluates_as_f_of_x_squared() {
+        let f = poly(&[3, 1, 4, 1]);
+        let lifted = f.lift_next_cyclotomic();
+
+        assert_eq!(lifted.coefficients.len(), 2 * f.coefficients.len());
+
+        for x in [2i16, 7, 100] {
+            let x = FalconFelt::new(x);
+            assert_eq!(evaluate(&lifted, x), evaluate(&f, x * x));
+        }
+    }
+
+    /// The field norm drops to a ring of half the size and, per formula 3.25 of the spec, equals
+    /// `f0^2 - X * f1^2` over the even/odd split of the coefficients.
+    #[test]
+    fn field_norm_halves_the_ring_and_matches_the_even_odd_split() {
+        let f = poly(&[3, 1, 4, 1, 5, 9, 2, 6]);
+        let norm = f.field_norm();
+
+        assert_eq!(norm.coefficients.len(), f.coefficients.len() / 2);
+
+        let f0 = poly(&[3, 4, 5, 2]);
+        let f1 = poly(&[1, 1, 9, 6]);
+        let x = poly(&[0, 1]);
+        let expected = (f0.clone() * f0).reduce_by_cyclotomic(4)
+            - (x * (f1.clone() * f1).reduce_by_cyclotomic(4)).reduce_by_cyclotomic(4);
+
+        assert_eq!(norm, expected);
+    }
+
+    // MULTIPLICATION
+    // ----------------------------------------------------------------------------------------
+
+    /// Karatsuba must agree with the schoolbook product it replaces. The recursion only kicks in
+    /// above length 8, so the sizes below straddle that cutoff.
+    ///
+    /// Only powers of two are covered, which is all Falcon uses (`N` is 512). `vector_karatsuba`
+    /// splits at `n / 2` and then reassembles the high half at offset `n`; for an odd `n` the high
+    /// half has one more coefficient than that offset accounts for, so the reassembly indexes past
+    /// the end of the product. Lengths 9 and 17 panic today.
+    #[test]
+    fn karatsuba_agrees_with_schoolbook_multiplication() {
+        for len in [1usize, 2, 4, 8, 16, 32, 64] {
+            let a: Vec<i16> = (0..len).map(|i| (i as i16 * 7 + 1) % 251).collect();
+            let b: Vec<i16> = (0..len).map(|i| (i as i16 * 13 + 5) % 241).collect();
+            let (a, b) = (poly(&a), poly(&b));
+
+            assert_eq!(a.karatsuba(&b), a.clone() * b.clone(), "mismatch at length {len}");
+        }
+    }
+
+    /// Multiplying by the multiplicative identity and adding the additive one.
+    #[test]
+    fn one_and_zero_are_the_polynomial_identities() {
+        let f = poly(&[3, 1, 4, 1, 5]);
+
+        assert_eq!(f.clone() * Polynomial::one(), f);
+        assert_eq!(f.clone() + Polynomial::zero(), f);
+        assert!((f * Polynomial::zero()).is_zero());
+    }
+
+    proptest! {
+        /// Multiplication is evaluation-preserving: the product evaluates to the product of the
+        /// evaluations, at every point.
+        #[test]
+        fn multiplication_preserves_evaluation(
+            a in prop::collection::vec(0i16..12289, 1..12),
+            b in prop::collection::vec(0i16..12289, 1..12),
+            x in 0i16..12289,
+        ) {
+            let (a, b, x) = (poly(&a), poly(&b), FalconFelt::new(x));
+
+            prop_assert_eq!(evaluate(&(a.clone() * b.clone()), x), evaluate(&a, x) * evaluate(&b, x));
+        }
+
+        /// Addition and subtraction round-trip, including across differing lengths, which is the
+        /// case the length-padding in those impls exists for.
+        #[test]
+        fn subtraction_undoes_addition(
+            a in prop::collection::vec(0i16..12289, 1..12),
+            b in prop::collection::vec(0i16..12289, 1..12),
+        ) {
+            let (a, b) = (poly(&a), poly(&b));
+
+            prop_assert_eq!((a.clone() + b.clone()) - b, a);
+        }
+    }
+
+    // HADAMARD OPERATIONS
+    // ----------------------------------------------------------------------------------------
+
+    /// Coefficient-wise division is multiplication by the coefficient-wise inverse, and a zero
+    /// coefficient inverts to zero rather than trapping.
+    #[test]
+    fn hadamard_div_is_multiplication_by_the_hadamard_inverse() {
+        let a = poly(&[3, 1, 4, 1]);
+        let b = poly(&[2, 7, 1, 8]);
+
+        assert_eq!(a.hadamard_div(&b), a.hadamard_mul(&b.hadamard_inv()));
+
+        // A zero coefficient inverts to zero rather than trapping, and leaves its neighbours
+        // alone — the batch-inversion path is easy to get wrong precisely around zeros.
+        let with_zero = poly(&[5, 0, 7, 0]);
+        let inverted = with_zero.hadamard_inv();
+
+        assert_eq!(inverted.coefficients[1], FalconFelt::zero());
+        assert_eq!(inverted.coefficients[3], FalconFelt::zero());
+        assert_eq!(inverted.coefficients[0] * FalconFelt::new(5), FalconFelt::one());
+        assert_eq!(inverted.coefficients[2] * FalconFelt::new(7), FalconFelt::one());
+    }
+
+    // DIVISION
+    // ----------------------------------------------------------------------------------------
+
+    /// Long division against a known factorisation: `(X + 1)(X + 2) = X^2 + 3X + 2`.
+    #[test]
+    fn division_recovers_the_cofactor() {
+        let product = poly(&[2, 3, 1]);
+
+        assert_eq!(product.clone() / poly(&[1, 1]), poly(&[2, 1]));
+        assert_eq!(product / poly(&[2, 1]), poly(&[1, 1]));
+    }
 
     #[test]
     fn div_zero_by_nonzero_returns_zero() {
