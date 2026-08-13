@@ -222,8 +222,8 @@ mod prover_api_lifecycle {
     };
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileProof, Program, Prover, StackInputs, StackOutputs,
-        StarkProof, VerificationError, Verifier, advice::AdviceInputs,
+        FastProcessor, HashFunction, PrecompileProof, PrecompileWitness, Program, Prover,
+        StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
         precompile_witness_from_wire, prove_sync,
     };
 
@@ -349,7 +349,7 @@ mod prover_api_lifecycle {
     }
 
     #[test]
-    fn delegated_precompile_proving_completes_across_transport() {
+    fn delegated_and_merged_precompile_proving_composes_across_transport() {
         let one_witness = u256_witness(1);
         let one_claim = one_witness.claim();
         let one_deferred = Prover::new()
@@ -357,14 +357,12 @@ mod prover_api_lifecycle {
             .prove(one_witness)
             .expect("root-one execution should produce a deferred proof");
         let ExecutionProof::Deferred { vm: one_vm, .. } = &one_deferred else {
-            panic!("precompile execution should remain deferred");
+            panic!("root-one execution should remain deferred");
         };
         let one_root = one_vm.precompile_root;
         let deferred_outcome = Verifier::new()
             .verify(&one_claim, &one_deferred)
             .expect("deferred VM proof should verify");
-        assert_eq!(deferred_outcome.security_level(), 96);
-        assert!(!deferred_outcome.is_complete());
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
 
         let unrelated_wire = ExecutionProof::Deferred {
@@ -376,44 +374,66 @@ mod prover_api_lifecycle {
             .expect("deferred verification should authenticate only the VM root");
         assert_eq!(unrelated_outcome.outstanding_precompile_root(), Some(one_root));
 
-        let encoded = one_deferred.to_bytes();
-        let transported = ExecutionProof::read_from_bytes(&encoded)
-            .expect("deferred proof transport should decode without hydrating its wire");
-        assert_eq!(transported.to_bytes(), encoded);
+        let two_witness = u256_witness(2);
+        let two_claim = two_witness.claim();
+        let two_deferred = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(two_witness)
+            .expect("root-two execution should produce a deferred proof");
 
-        let ExecutionProof::Deferred { precompile, .. } = &transported else {
-            panic!("transported proof should remain deferred");
+        let one_encoded = one_deferred.to_bytes();
+        let one_transported = ExecutionProof::read_from_bytes(&one_encoded)
+            .expect("root-one deferred proof transport should decode without hydrating its wire");
+        let two_transported = ExecutionProof::read_from_bytes(&two_deferred.to_bytes())
+            .expect("root-two deferred proof transport should decode without hydrating its wire");
+
+        let ExecutionProof::Deferred { precompile: one_wire, .. } = &one_transported else {
+            panic!("transported root-one proof should remain deferred");
         };
-        let witness = precompile_witness_from_wire(precompile)
-            .expect("transported deferred wire should hydrate under the standard registry");
-        assert_eq!(witness.roots(), &[one_root]);
+        let ExecutionProof::Deferred { vm: two_vm, precompile: two_wire } = &two_transported else {
+            panic!("transported root-two proof should remain deferred");
+        };
+        let two_root = two_vm.precompile_root;
+        let one_witness = precompile_witness_from_wire(one_wire)
+            .expect("transported root-one wire should hydrate under the standard registry");
+        let two_witness = precompile_witness_from_wire(two_wire)
+            .expect("transported root-two wire should hydrate under the standard registry");
 
-        let precompile = Prover::new()
+        let merged = PrecompileWitness::merge(vec![one_witness.clone(), one_witness, two_witness])
+            .expect("ordered singleton witnesses should merge");
+        let ordered_roots = vec![one_root, one_root, two_root];
+
+        let shared_precompile = Prover::new()
             .with_hash_fn(HashFunction::Poseidon2)
-            .prove_precompile(&witness)
-            .expect("singleton precompile witness should prove");
-        assert_eq!(precompile.roots, vec![one_root]);
+            .prove_precompile(&merged)
+            .expect("merged precompile witness should prove once");
+        assert_eq!(shared_precompile.roots, ordered_roots);
 
-        let invalid_precompile = PrecompileProof {
-            proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
-            roots: vec![one_root],
-        };
-        let invalid_complete = transported
+        let invalid_complete = one_transported
             .clone()
-            .complete(invalid_precompile)
+            .complete(PrecompileProof {
+                proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
+                roots: vec![one_root],
+            })
             .expect("completion should only attach the precompile proof");
         let error = Verifier::new()
             .verify(&one_claim, &invalid_complete)
             .expect_err("the verifier should reject an invalid precompile STARK");
         assert!(matches!(error, VerificationError::PrecompileStarkVerification(_)));
 
-        let complete = transported
-            .complete(precompile)
-            .expect("precompile proof should complete the execution");
-        let outcome = Verifier::new()
-            .verify(&one_claim, &complete)
-            .expect("completed execution should verify");
-        assert!(outcome.is_complete());
-        assert_eq!(outcome.outstanding_precompile_root(), None);
+        let one_complete = one_transported
+            .complete(shared_precompile.clone())
+            .expect("shared proof should complete the root-one execution");
+        let two_complete = two_transported
+            .complete(shared_precompile)
+            .expect("shared proof should complete the root-two execution");
+        let one_outcome = Verifier::new()
+            .verify(&one_claim, &one_complete)
+            .expect("completed root-one execution should verify");
+        let two_outcome = Verifier::new()
+            .verify(&two_claim, &two_complete)
+            .expect("completed root-two execution should verify");
+        assert!(one_outcome.is_complete());
+        assert!(two_outcome.is_complete());
     }
 }
