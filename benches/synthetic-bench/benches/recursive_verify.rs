@@ -315,11 +315,10 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    assert_eq!(
-        proof.vm().proof().hash_fn(),
-        hash_fn,
-        "cached transaction proof hash function mismatch"
-    );
+    let vm = match &proof {
+        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
+    };
+    assert_eq!(vm.proof.hash_fn(), hash_fn, "cached transaction proof hash function mismatch");
 
     let output_bytes = match std::fs::read(&outputs_path) {
         Ok(bytes) => bytes,
@@ -466,10 +465,15 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 }
                 (stack_outputs, proof, "miss")
             };
-            let precompile_roots =
-                proof.precompile().map_or(0, |precompile| precompile.roots().len());
+            let precompile_roots = match &proof {
+                ExecutionProof::Complete { precompile: Some(precompile), .. } => {
+                    precompile.roots.len()
+                },
+                ExecutionProof::Deferred { .. }
+                | ExecutionProof::Complete { precompile: None, .. } => 0,
+            };
             assert!(
-                proof.is_complete() && proof.precompile().is_none(),
+                matches!(proof, ExecutionProof::Complete { precompile: None, .. }),
                 "recursive_verify fixture at proof index {proof_index} is not complete and \
                  precompile-free"
             );

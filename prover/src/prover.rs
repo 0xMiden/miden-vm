@@ -34,12 +34,19 @@ impl Prover {
 
     /// Proves only the VM portion of an execution witness.
     ///
-    /// If the execution authenticated deferred precompile work, the returned proof retains its
-    /// singleton witness for later proving. Otherwise, the returned proof is complete.
+    /// If the execution authenticated deferred precompile work, the returned proof carries its
+    /// passive singleton wire for later hydration and proving. Otherwise, it is complete.
     pub fn prove(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
-        Ok(Self::package_deferred(vm, precompile_witness))
+        let Some(precompile_witness) = precompile_witness else {
+            return Ok(ExecutionProof::Complete { vm, precompile: None });
+        };
+        let precompile = precompile_witness
+            .state()
+            .to_wire()
+            .expect("execution witness state must have canonical deferred wire");
+        Ok(ExecutionProof::Deferred { vm, precompile })
     }
 
     /// Proves a complete execution witness entirely in memory.
@@ -49,7 +56,11 @@ impl Prover {
     pub fn prove_full(&self, witness: ExecutionWitness) -> Result<ExecutionProof, ProverError> {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
-        self.package_complete(vm, precompile_witness.as_ref())
+        let precompile = precompile_witness
+            .as_ref()
+            .map(|witness| self.prove_precompile(witness))
+            .transpose()?;
+        Ok(ExecutionProof::Complete { vm, precompile })
     }
 
     /// Materializes and proves the VM trace represented by `witness`.
@@ -69,9 +80,7 @@ impl Prover {
     ) -> Result<PrecompileProof, ProverError> {
         let proof = miden_precompiles_prover::prove_deferred_state(witness.state(), self.hash_fn)
             .map_err(ProverError::PrecompileProofGeneration)?;
-        let roots = witness.roots().to_vec();
-        Ok(PrecompileProof::from_parts(proof, roots)
-            .expect("validated precompile witness roots must produce valid proof metadata"))
+        Ok(PrecompileProof { proof, roots: witness.roots().to_vec() })
     }
 
     #[cfg(feature = "std")]
@@ -81,30 +90,8 @@ impl Prover {
         precompile: Option<&PrecompileWitness>,
     ) -> Result<ExecutionProof, ProverError> {
         let vm = self.prove_vm_trace(trace)?;
-        self.package_complete(vm, precompile)
-    }
-
-    fn package_deferred(vm: VmProof, precompile: Option<PrecompileWitness>) -> ExecutionProof {
-        match precompile {
-            Some(precompile) => {
-                let precompile = precompile
-                    .into_state()
-                    .to_wire()
-                    .expect("execution witness state must have canonical deferred wire");
-                ExecutionProof::Deferred { vm, precompile }
-            },
-            None => ExecutionProof::Complete { vm, precompile: None },
-        }
-    }
-
-    fn package_complete(
-        &self,
-        vm: VmProof,
-        precompile: Option<&PrecompileWitness>,
-    ) -> Result<ExecutionProof, ProverError> {
         let precompile = precompile.map(|witness| self.prove_precompile(witness)).transpose()?;
-        Ok(ExecutionProof::new_complete(vm, precompile)
-            .expect("locally proved precompile roots must cover the VM obligation"))
+        Ok(ExecutionProof::Complete { vm, precompile })
     }
 
     /// Proves a fully materialized VM trace.
@@ -189,7 +176,7 @@ impl Prover {
         .map_err(ProverError::VmProofGeneration)?;
 
         let proof = miden_core::proof::StarkProof::new(proof_bytes, self.hash_fn);
-        Ok(VmProof::from_parts(proof, precompile_root))
+        Ok(VmProof { proof, precompile_root })
     }
 }
 
@@ -271,26 +258,7 @@ impl ProverError {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{
-        deferred::{DeferredState, Node, TRUE_DIGEST},
-        proof::StarkProof,
-    };
-
     use super::*;
-
-    fn vm_proof(precompile_root: miden_core::Word) -> VmProof {
-        VmProof::from_parts(
-            StarkProof::new(alloc::vec::Vec::new(), HashFunction::Blake3_256),
-            precompile_root,
-        )
-    }
-
-    fn singleton_witness() -> PrecompileWitness {
-        let mut state = DeferredState::default();
-        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
-        state.log_statement(statement).unwrap();
-        PrecompileWitness::new(state).unwrap()
-    }
 
     #[test]
     fn prover_uses_canonical_default_and_allows_hash_override() {
@@ -299,26 +267,5 @@ mod tests {
 
         let prover = prover.with_hash_fn(HashFunction::Poseidon2);
         assert_eq!(prover.hash_fn, HashFunction::Poseidon2);
-    }
-
-    #[test]
-    fn vm_proof_packaging_dispatches_by_precompile_witness_shape() {
-        let complete = Prover::package_deferred(vm_proof(TRUE_DIGEST), None);
-        assert!(matches!(complete, ExecutionProof::Complete { precompile: None, .. }));
-
-        let witness = singleton_witness();
-        let root = witness.root();
-        let expected_wire = witness.state().to_wire().unwrap();
-        let deferred = Prover::package_deferred(vm_proof(root), Some(witness));
-        assert!(matches!(
-            deferred,
-            ExecutionProof::Deferred { precompile, .. } if precompile == expected_wire
-        ));
-    }
-
-    #[test]
-    fn complete_packaging_accepts_empty_precompile_work() {
-        let complete = Prover::new().package_complete(vm_proof(TRUE_DIGEST), None).unwrap();
-        assert!(matches!(complete, ExecutionProof::Complete { precompile: None, .. }));
     }
 }

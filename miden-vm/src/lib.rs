@@ -28,6 +28,9 @@ pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prov
 pub use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
 
 /// Hydrates a passive deferred-state wire using the standard bundled precompile registry.
+///
+/// This is the public factory for precompile witnesses produced outside local execution. It
+/// validates the wire under the facade's installed precompiles before constructing the witness.
 pub fn precompile_witness_from_wire(
     wire: &DeferredStateWire,
 ) -> Result<PrecompileWitness, PrecompileWitnessError> {

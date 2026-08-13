@@ -8,8 +8,8 @@ While [Miden](../miden-vm) crate also contains verifier functionality, if a proj
 Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `ExecutionProof`
 against its `ExecutionClaim`. The claim contains the program information and public stack inputs and
 outputs. The VM STARK authenticates the precompile root in either state. For a deferred proof, the
-retained witness is checked structurally but is not cryptographic evidence; for a complete proof,
-the aggregate precompile STARK is also verified when present.
+passive wire is neither hydrated nor validated and the outcome exposes only the authenticated root;
+for a complete proof, the aggregate precompile STARK is also verified when present.
 
 Stack inputs are in push order (the last value is on top), while stack outputs are in pop order (the
 first value is on top).
@@ -21,10 +21,6 @@ the authenticated obligation through `outstanding_precompile_root()` and reports
 different hash functions. Each encoded STARK and its decoder preallocation are capped at a fixed
 64 MiB ceiling.
 
-Ordinary façade callers decode with the standard bundled registry and fixed
-`MAX_DEFERRED_ELEMENTS` ceiling via `miden_vm::read_execution_proof_from_bytes(bytes)`. Low-level or
-custom-precompile callers use `ExecutionProof::read_from_bytes(bytes, registry)` with an explicit
-trusted registry; proof decoding uses the same fixed hydration ceiling.
 
 Encoding and decoding preserve the transport representation but do not establish proof validity.
 Malformed cross-artifact values may serialize and decode; call `Verifier::verify` to validate all

@@ -84,30 +84,6 @@ impl ExecutionWitness {
                 .expect("a non-TRUE execution root must produce a singleton precompile witness")
         });
 
-        Self::from_parts(vm, precompile)
-    }
-
-    fn from_parts(vm: VmWitness, precompile: Option<PrecompileWitness>) -> Self {
-        match &precompile {
-            Some(precompile) => {
-                assert_eq!(
-                    precompile.roots(),
-                    &[vm.precompile_root()],
-                    "a precompile witness must be a singleton matching the VM root"
-                );
-                assert_eq!(
-                    precompile.root(),
-                    vm.precompile_root(),
-                    "the precompile witness root must match the VM root"
-                );
-            },
-            None => assert_eq!(
-                vm.precompile_root(),
-                TRUE_DIGEST,
-                "an empty precompile witness requires the VM root to be TRUE_DIGEST"
-            ),
-        }
-
         Self { vm, precompile }
     }
 
@@ -121,10 +97,8 @@ impl ExecutionWitness {
         self.vm.precompile_root()
     }
 
-    /// Performs the low-level split into a VM trace witness and optional precompile witness.
-    ///
-    /// The primary proving workflow is via `Prover::prove`, which packages authenticated precompile
-    /// work as `ExecutionProof::Deferred`.
+    /// Performs the low-level split used by prover and trace-building plumbing.
+    #[doc(hidden)]
     pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
         (self.vm, self.precompile)
     }

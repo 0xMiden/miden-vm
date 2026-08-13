@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use super::{
     DeferredState, Digest, IntegrityError, MAX_PRECOMPILE_ROOTS, PrecompileError, TRUE_DIGEST,
-    fold_deferred_root,
 };
 
 /// A hydrated witness for one or more ordered deferred precompile roots.
@@ -21,45 +20,40 @@ pub struct PrecompileWitness {
 impl PrecompileWitness {
     /// Creates a singleton witness from a non-empty execution state.
     ///
-    /// Singleton eligibility is representation-based: this retains exactly one root, but does not
-    /// verify execution provenance.
+    /// This is public only for processor and facade plumbing. Applications should hydrate passive
+    /// deferred wire through the `miden-vm` facade instead.
+    #[doc(hidden)]
     pub fn new(state: DeferredState) -> Result<Self, PrecompileWitnessError> {
         let root = state.root();
         if root == TRUE_DIGEST {
             return Err(PrecompileWitnessError::TrueRoot);
         }
 
-        let witness = Self { state, roots: alloc::vec![root] };
-        witness.validate()?;
-        Ok(witness)
+        Ok(Self { state, roots: alloc::vec![root] })
     }
 
-    /// Returns the aggregate root authenticated by the hydrated deferred state.
-    pub fn root(&self) -> Digest {
-        self.state.root()
-    }
-
-    /// Returns the ordered non-TRUE execution roots represented by this witness.
+    /// Returns the ordered non-TRUE execution roots used as precompile-proof metadata.
+    ///
+    /// This is public only for processor and prover plumbing.
+    #[doc(hidden)]
     pub fn roots(&self) -> &[Digest] {
         &self.roots
     }
 
-    /// Returns the hydrated deferred state used by precompile proving.
+    /// Returns the hydrated deferred state consumed by precompile proving.
+    ///
+    /// This is public only for prover plumbing.
+    #[doc(hidden)]
     pub fn state(&self) -> &DeferredState {
         &self.state
     }
 
-    /// Consumes this witness and returns the hydrated deferred state used by precompile proving.
-    pub fn into_state(self) -> DeferredState {
-        self.state
-    }
-
     /// Merges ordered singleton witnesses into one aggregate witness.
     ///
-    /// All inputs are validated before any deferred state is consumed. Singleton eligibility means
-    /// `roots.len() == 1`; execution provenance is not encoded or verified. Witnesses retaining
-    /// multiple roots are rejected, so roots cannot be regrouped or merged recursively. The
-    /// complete merged state is bounded by [`super::MAX_DEFERRED_ELEMENTS`].
+    /// All inputs are checked for singleton shape before any deferred state is consumed. Singleton
+    /// eligibility means `roots.len() == 1`; execution provenance is not encoded or verified.
+    /// Witnesses retaining multiple roots are rejected, so roots cannot be regrouped or merged
+    /// recursively. The complete merged state is bounded by [`super::MAX_DEFERRED_ELEMENTS`].
     pub fn merge(witnesses: Vec<Self>) -> Result<Self, PrecompileWitnessError> {
         if witnesses.is_empty() {
             return Err(PrecompileWitnessError::EmptyMerge);
@@ -72,7 +66,9 @@ impl PrecompileWitness {
         }
 
         for witness in &witnesses {
-            witness.validate_singleton()?;
+            if witness.roots.len() != 1 {
+                return Err(PrecompileWitnessError::NonSingleton);
+            }
         }
 
         let roots = witnesses.iter().map(|witness| witness.roots[0]).collect::<Vec<_>>();
@@ -83,44 +79,7 @@ impl PrecompileWitness {
             state = state.merge(witness.state).map_err(PrecompileWitnessError::Merge)?;
         }
 
-        let expected_root = roots
-            .iter()
-            .copied()
-            .reduce(fold_deferred_root)
-            .expect("non-empty witness input retains at least one root");
-        if state.root() != expected_root {
-            return Err(PrecompileWitnessError::RootMismatch);
-        }
-
         Ok(Self { state, roots })
-    }
-
-    fn validate_singleton(&self) -> Result<(), PrecompileWitnessError> {
-        if self.roots.len() != 1 {
-            return Err(PrecompileWitnessError::NonSingleton);
-        }
-        self.validate()
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), PrecompileWitnessError> {
-        if self.roots.contains(&TRUE_DIGEST) {
-            return Err(PrecompileWitnessError::TrueRoot);
-        }
-        if self.roots.iter().any(|root| self.state.get_node(root).is_none()) {
-            return Err(PrecompileWitnessError::RootMismatch);
-        }
-
-        let expected_root = self
-            .roots
-            .iter()
-            .copied()
-            .reduce(fold_deferred_root)
-            .expect("witness construction retains at least one root");
-        if self.state.root() != expected_root {
-            return Err(PrecompileWitnessError::RootMismatch);
-        }
-
-        Ok(())
     }
 }
 
@@ -140,9 +99,6 @@ pub enum PrecompileWitnessError {
     /// Merge inputs must come directly from individual executions.
     #[error("precompile witness merge inputs must each contain exactly one root")]
     NonSingleton,
-    /// The retained roots do not describe the hydrated deferred state.
-    #[error("precompile witness roots do not match its deferred state")]
-    RootMismatch,
     /// Sequential deferred-state aggregation failed.
     #[error("failed to merge deferred precompile states: {0}")]
     Merge(#[source] PrecompileError),
@@ -159,8 +115,8 @@ mod tests {
     use crate::{
         Felt, ZERO,
         deferred::{
-            DeferredContext, MAX_DEFERRED_ELEMENTS, Node, NodeType, Payload, Precompile,
-            PrecompileRegistry, Tag, precompile_id,
+            DeferredContext, Node, NodeType, Payload, Precompile, PrecompileRegistry, Tag,
+            precompile_id,
         },
     };
 
@@ -234,9 +190,7 @@ mod tests {
         let root = state.root();
         let witness = PrecompileWitness::new(state).unwrap();
 
-        assert_eq!(witness.root(), root);
         assert_eq!(witness.roots(), &[root]);
-        assert_eq!(witness.state().root(), root);
     }
 
     #[test]
@@ -248,31 +202,27 @@ mod tests {
     }
 
     #[test]
-    fn merge_preserves_order_and_changes_the_aggregate_when_reversed() {
+    fn merge_preserves_order_when_reversed() {
         let first = singleton(1);
         let second = singleton(2);
-        let first_root = first.root();
-        let second_root = second.root();
+        let first_root = first.roots()[0];
+        let second_root = second.roots()[0];
 
         let ordered = PrecompileWitness::merge(alloc::vec![first.clone(), second.clone()]).unwrap();
         let reversed = PrecompileWitness::merge(alloc::vec![second, first]).unwrap();
 
         assert_eq!(ordered.roots(), &[first_root, second_root]);
-        assert_eq!(ordered.root(), fold_deferred_root(first_root, second_root));
         assert_eq!(reversed.roots(), &[second_root, first_root]);
-        assert_eq!(reversed.root(), fold_deferred_root(second_root, first_root));
-        assert_ne!(ordered.root(), reversed.root());
     }
 
     #[test]
     fn merge_preserves_duplicate_singleton_roots() {
         let witness = singleton(1);
-        let root = witness.root();
+        let root = witness.roots()[0];
 
         let merged = PrecompileWitness::merge(alloc::vec![witness.clone(), witness]).unwrap();
 
         assert_eq!(merged.roots(), &[root, root]);
-        assert_eq!(merged.root(), fold_deferred_root(root, root));
     }
 
     #[test]
@@ -286,17 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn one_element_merge_is_a_singleton_identity() {
+    fn one_element_merge_remains_singleton() {
         let witness = singleton(1);
-        let root = witness.root();
-        let num_elements = witness.state().num_elements();
+        let root = witness.roots()[0];
 
         let merged = PrecompileWitness::merge(alloc::vec![witness]).unwrap();
 
-        assert_eq!(merged.root(), root);
         assert_eq!(merged.roots(), &[root]);
-        assert_eq!(merged.state().num_elements(), num_elements);
-        assert_eq!(merged.state().remaining_elements(), MAX_DEFERRED_ELEMENTS - num_elements);
     }
 
     #[test]

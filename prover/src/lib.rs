@@ -23,9 +23,7 @@ mod prover;
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{DeserializationError, MidenAir, PublicInputs, config};
-pub use miden_core::proof::{
-    ExecutionProof, ExecutionProofError, HashFunction, PrecompileProof, StarkProof, VmProof,
-};
+pub use miden_core::proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof};
 pub use miden_processor::{
     ExecutionClaim, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
     FutureMaybeSend, Host, InputError, PrecompileWitness, ProgramInfo, StackInputs, StackOutputs,

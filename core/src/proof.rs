@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST},
+    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -135,30 +135,8 @@ pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VmProof {
-    proof: StarkProof,
-    precompile_root: DeferredRoot,
-}
-
-impl VmProof {
-    /// Creates a VM proof artifact from its STARK proof and authenticated precompile root.
-    pub const fn from_parts(proof: StarkProof, precompile_root: DeferredRoot) -> Self {
-        Self { proof, precompile_root }
-    }
-
-    /// Returns the VM STARK proof.
-    pub const fn proof(&self) -> &StarkProof {
-        &self.proof
-    }
-
-    /// Returns the authenticated precompile obligation.
-    pub const fn precompile_root(&self) -> DeferredRoot {
-        self.precompile_root
-    }
-
-    /// Consumes this artifact and returns its STARK proof and authenticated precompile root.
-    pub fn into_parts(self) -> (StarkProof, DeferredRoot) {
-        (self.proof, self.precompile_root)
-    }
+    pub proof: StarkProof,
+    pub precompile_root: DeferredRoot,
 }
 
 impl Serializable for VmProof {
@@ -172,7 +150,7 @@ impl Deserializable for VmProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = StarkProof::read_from(source)?;
         let precompile_root = DeferredRoot::read_from(source)?;
-        Ok(Self::from_parts(proof, precompile_root))
+        Ok(Self { proof, precompile_root })
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -185,73 +163,15 @@ impl Deserializable for VmProof {
     }
 }
 
-/// A precompile STARK proof with the ordered, non-empty roots that form its aggregate root.
+/// A precompile STARK proof with its ordered constituent roots.
 ///
-/// Verification folds the entire sequence. [`TRUE_DIGEST`] roots are omitted; order and duplicate
-/// multiplicity are significant.
-///
-/// Binary decoding enforces the fixed root ceiling before reserving root storage.
+/// Binary decoding enforces the fixed root ceiling before reserving root storage, but otherwise
+/// preserves the encoded artifact shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PrecompileProof {
-    proof: StarkProof,
-    roots: Vec<DeferredRoot>,
-}
-
-impl PrecompileProof {
-    /// Creates a precompile proof artifact after validating its constituent root shape.
-    ///
-    /// This does not verify the STARK proof.
-    pub fn from_parts(
-        proof: StarkProof,
-        roots: Vec<DeferredRoot>,
-    ) -> Result<Self, ExecutionProofError> {
-        if roots.is_empty() {
-            return Err(ExecutionProofError::EmptyPrecompileRoots);
-        }
-        if roots.len() > MAX_PRECOMPILE_ROOTS {
-            return Err(ExecutionProofError::TooManyPrecompileRoots {
-                roots: roots.len(),
-                max: MAX_PRECOMPILE_ROOTS,
-            });
-        }
-        if let Some(index) = roots.iter().position(|root| *root == TRUE_DIGEST) {
-            return Err(ExecutionProofError::SettledPrecompileRoot { index });
-        }
-
-        Ok(Self { proof, roots })
-    }
-
-    /// Returns the precompile STARK proof.
-    pub const fn proof(&self) -> &StarkProof {
-        &self.proof
-    }
-
-    /// Returns all constituent roots in fold order.
-    pub fn roots(&self) -> &[DeferredRoot] {
-        &self.roots
-    }
-
-    /// Returns the aggregate root obtained by folding all constituent roots in order.
-    pub fn aggregate_root(&self) -> DeferredRoot {
-        self.roots
-            .iter()
-            .copied()
-            .reduce(crate::deferred::fold_deferred_root)
-            .expect("PrecompileProof roots are non-empty by construction")
-    }
-
-    /// Consumes this artifact and returns its STARK proof and ordered constituent roots.
-    pub fn into_parts(self) -> (StarkProof, Vec<DeferredRoot>) {
-        (self.proof, self.roots)
-    }
-
-    fn covers<'a>(&self, required_roots: impl Iterator<Item = &'a DeferredRoot>) -> bool {
-        let mut proof_roots = self.roots.iter();
-        required_roots
-            .filter(|root| **root != TRUE_DIGEST)
-            .all(|required| proof_roots.any(|provided| provided == required))
-    }
+    pub proof: StarkProof,
+    pub roots: Vec<DeferredRoot>,
 }
 
 impl Serializable for PrecompileProof {
@@ -266,10 +186,9 @@ impl Deserializable for PrecompileProof {
         let proof = StarkProof::read_from(source)?;
         let root_count = source.read_usize()?;
         if root_count > MAX_PRECOMPILE_ROOTS {
-            return Err(invalid_proof_shape(ExecutionProofError::TooManyPrecompileRoots {
-                roots: root_count,
-                max: MAX_PRECOMPILE_ROOTS,
-            }));
+            return Err(DeserializationError::InvalidValue(format!(
+                "precompile proof contains too many roots: found {root_count}, maximum is {MAX_PRECOMPILE_ROOTS}"
+            )));
         }
         let roots = source
             .read_many_iter::<DeferredRoot>(root_count)?
@@ -283,9 +202,7 @@ impl Deserializable for PrecompileProof {
     }
 
     fn min_serialized_size() -> usize {
-        StarkProof::min_serialized_size()
-            + usize::min_serialized_size()
-            + DeferredRoot::min_serialized_size()
+        StarkProof::min_serialized_size() + usize::min_serialized_size()
     }
 }
 
@@ -294,17 +211,16 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// A Miden VM execution proof, either awaiting precompile proving or complete.
 ///
-/// The public variants may represent inconsistent artifacts. Checked constructors are conveniences;
-/// only full verification establishes proof validity.
+/// This type preserves proof artifacts without establishing their validity.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExecutionProof {
-    /// The VM STARK is available and its passive singleton precompile wire remains to be proved.
+    /// The VM STARK and deferred precompile wire are available.
     Deferred {
         vm: VmProof,
         precompile: DeferredStateWire,
     },
-    /// All proof work is complete. `None` means the VM authenticated [`TRUE_DIGEST`].
+    /// The proof lifecycle is complete, with an optional precompile proof.
     Complete {
         vm: VmProof,
         precompile: Option<PrecompileProof>,
@@ -312,68 +228,16 @@ pub enum ExecutionProof {
 }
 
 impl ExecutionProof {
-    /// Creates a deferred proof after checking that the VM authenticated outstanding work.
-    ///
-    /// The passive wire is not hydrated or semantically validated here.
-    pub fn new_deferred(
-        vm: VmProof,
-        precompile: DeferredStateWire,
-    ) -> Result<Self, ExecutionProofError> {
-        validate_deferred(&vm)?;
-        Ok(Self::Deferred { vm, precompile })
-    }
-
-    /// Creates a complete proof after checking its optional precompile proof covers the VM root.
-    ///
-    /// This only checks artifact structure; it does not verify either STARK proof.
-    pub fn new_complete(
-        vm: VmProof,
-        precompile: Option<PrecompileProof>,
-    ) -> Result<Self, ExecutionProofError> {
-        validate_complete(&vm, precompile.as_ref())?;
-        Ok(Self::Complete { vm, precompile })
-    }
-
-    /// Checks that this proof's artifacts have a compatible structure.
-    ///
-    /// This does not cryptographically verify either STARK proof.
-    pub fn validate_structure(&self) -> Result<(), ExecutionProofError> {
-        match self {
-            Self::Deferred { vm, .. } => validate_deferred(vm),
-            Self::Complete { vm, precompile } => validate_complete(vm, precompile.as_ref()),
-        }
-    }
-
-    /// Returns whether this value has the [`Self::Complete`] representation.
-    ///
-    /// This is a shape check only. Public variants may be inconsistent; use full verification to
-    /// establish validity and determine whether an authenticated obligation remains outstanding.
+    /// Returns whether this proof has completed its lifecycle transition.
     pub const fn is_complete(&self) -> bool {
         matches!(self, Self::Complete { .. })
     }
 
-    /// Returns the VM proof artifact in either state.
-    pub const fn vm(&self) -> &VmProof {
-        match self {
-            Self::Deferred { vm, .. } | Self::Complete { vm, .. } => vm,
-        }
-    }
-
-    /// Returns the completed precompile proof, if this is a complete proof that carries one.
-    pub const fn precompile(&self) -> Option<&PrecompileProof> {
-        match self {
-            Self::Complete { precompile, .. } => precompile.as_ref(),
-            Self::Deferred { .. } => None,
-        }
-    }
-
-    /// Attaches a compatible precompile proof to a deferred proof.
+    /// Transitions a deferred proof to complete by attaching a precompile proof.
     pub fn complete(self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
         let Self::Deferred { vm, .. } = self else {
             return Err(ExecutionProofError::AlreadyComplete);
         };
-        validate_deferred(&vm)?;
-        validate_complete(&vm, Some(&precompile))?;
         Ok(Self::Complete { vm, precompile: Some(precompile) })
     }
 
@@ -437,73 +301,12 @@ impl ExecutionProof {
     }
 }
 
-/// Structural errors returned while constructing or composing proof artifacts.
+/// Lifecycle errors returned while transitioning an execution proof.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExecutionProofError {
-    /// A precompile proof must identify at least one constituent root.
-    #[error("a precompile proof must contain at least one constituent root")]
-    EmptyPrecompileRoots,
-    /// The ordered root sequence exceeds the hard allocation and folding safety ceiling.
-    #[error("precompile proof contains too many roots: found {roots}, maximum is {max}")]
-    TooManyPrecompileRoots { roots: usize, max: usize },
-    /// Settled roots are omitted from precompile proof constituent roots.
-    #[error("precompile proof constituent root at index {index} is already settled")]
-    SettledPrecompileRoot { index: usize },
-    /// A deferred proof must authenticate outstanding precompile work.
-    #[error("a deferred execution proof cannot authenticate TRUE_DIGEST")]
-    DeferredTrueRoot,
-    /// A precompile proof was supplied for an already settled VM obligation.
-    #[error("a precompile proof was supplied for an already settled VM obligation")]
-    UnexpectedPrecompileProof,
-    /// A non-empty VM obligation had no precompile proof.
-    #[error("a precompile proof is required for a non-empty VM obligation")]
-    MissingPrecompileProof,
-    /// The proof roots do not cover the VM obligations as an ordered subsequence.
-    #[error("precompile proof roots do not cover VM obligations in order")]
-    InsufficientPrecompileRootCoverage,
     /// Only a deferred execution proof can be completed.
     #[error("the execution proof is already complete")]
     AlreadyComplete,
-}
-
-fn validate_deferred(vm: &VmProof) -> Result<(), ExecutionProofError> {
-    if vm.precompile_root == TRUE_DIGEST {
-        return Err(ExecutionProofError::DeferredTrueRoot);
-    }
-    Ok(())
-}
-
-fn validate_complete(
-    vm: &VmProof,
-    precompile: Option<&PrecompileProof>,
-) -> Result<(), ExecutionProofError> {
-    validate_precompile_coverage(core::iter::once(&vm.precompile_root), precompile)
-}
-
-fn validate_precompile_coverage<'a>(
-    required_roots: impl Iterator<Item = &'a DeferredRoot>,
-    precompile: Option<&PrecompileProof>,
-) -> Result<(), ExecutionProofError> {
-    let mut required_roots = required_roots.filter(|root| **root != TRUE_DIGEST).peekable();
-
-    if required_roots.peek().is_none() {
-        return if precompile.is_none() {
-            Ok(())
-        } else {
-            Err(ExecutionProofError::UnexpectedPrecompileProof)
-        };
-    }
-
-    let precompile = precompile.ok_or(ExecutionProofError::MissingPrecompileProof)?;
-    if precompile.covers(required_roots) {
-        Ok(())
-    } else {
-        Err(ExecutionProofError::InsufficientPrecompileRootCoverage)
-    }
-}
-
-fn invalid_proof_shape(error: ExecutionProofError) -> DeserializationError {
-    DeserializationError::InvalidValue(error.to_string())
 }
 
 // STARK PROOF
@@ -574,7 +377,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredState, Node, PrecompileWitness},
+        deferred::{DeferredState, Node, PrecompileWitness, TRUE_DIGEST},
         serde::ByteWriter,
     };
 
@@ -587,11 +390,17 @@ mod tests {
     }
 
     fn vm_proof(precompile_root: DeferredRoot) -> VmProof {
-        VmProof::from_parts(dummy_stark_proof(&[1]), precompile_root)
+        VmProof {
+            proof: dummy_stark_proof(&[1]),
+            precompile_root,
+        }
     }
 
     fn precompile_proof(roots: &[DeferredRoot]) -> PrecompileProof {
-        PrecompileProof::from_parts(dummy_stark_proof(&[2]), roots.to_vec()).unwrap()
+        PrecompileProof {
+            proof: dummy_stark_proof(&[2]),
+            roots: roots.to_vec(),
+        }
     }
 
     fn wire() -> (DeferredStateWire, DeferredRoot) {
@@ -599,52 +408,17 @@ mod tests {
         let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
         state.log_statement(statement).unwrap();
         let witness = PrecompileWitness::new(state).unwrap();
-        (witness.state().to_wire().unwrap(), witness.root())
+        (witness.state().to_wire().unwrap(), witness.roots()[0])
     }
 
     fn assert_same_execution_proof(actual: &ExecutionProof, expected: &ExecutionProof) {
-        match (actual, expected) {
-            (
-                ExecutionProof::Deferred {
-                    vm: actual_vm,
-                    precompile: actual_precompile,
-                },
-                ExecutionProof::Deferred {
-                    vm: expected_vm,
-                    precompile: expected_precompile,
-                },
-            ) => {
-                assert_eq!(actual_vm.to_bytes(), expected_vm.to_bytes());
-                assert_eq!(actual_precompile.to_bytes(), expected_precompile.to_bytes());
-            },
-            (
-                ExecutionProof::Complete {
-                    vm: actual_vm,
-                    precompile: actual_precompile,
-                },
-                ExecutionProof::Complete {
-                    vm: expected_vm,
-                    precompile: expected_precompile,
-                },
-            ) => {
-                assert_eq!(actual_vm.to_bytes(), expected_vm.to_bytes());
-                match (actual_precompile, expected_precompile) {
-                    (Some(actual), Some(expected)) => {
-                        assert_eq!(actual.to_bytes(), expected.to_bytes());
-                    },
-                    (None, None) => {},
-                    _ => panic!("complete proof precompile representations differ"),
-                }
-            },
-            _ => panic!("execution proof variants differ"),
-        }
+        assert_eq!(actual.to_bytes(), expected.to_bytes());
     }
 
     fn round_trip_execution_proof(proof: &ExecutionProof) {
         let bytes = proof.to_bytes();
         let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
         assert_same_execution_proof(&decoded, proof);
-        assert_eq!(decoded.to_bytes(), bytes);
     }
 
     #[test]
@@ -653,23 +427,30 @@ mod tests {
         assert_eq!(StarkProof::min_serialized_size(), stark.to_bytes().len());
         assert_eq!(StarkProof::min_serialized_size(), 2);
 
-        let vm = VmProof::from_parts(stark, TRUE_DIGEST);
+        let vm = VmProof {
+            proof: stark,
+            precompile_root: TRUE_DIGEST,
+        };
         assert_eq!(VmProof::min_serialized_size(), vm.to_bytes().len());
         assert_eq!(VmProof::min_serialized_size(), 34);
 
-        let precompile = PrecompileProof::from_parts(
-            StarkProof::new(Vec::new(), HashFunction::Blake3_256),
-            alloc::vec![root(1)],
-        )
-        .unwrap();
-        assert_eq!(PrecompileProof::min_serialized_size(), precompile.to_bytes().len());
-        assert_eq!(PrecompileProof::min_serialized_size(), 35);
+        let empty = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            roots: Vec::new(),
+        };
+        assert_eq!(PrecompileProof::min_serialized_size(), empty.to_bytes().len());
+        assert_eq!(PrecompileProof::min_serialized_size(), 3);
 
-        let proofs = alloc::vec![precompile.clone(), precompile];
+        let singleton = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            roots: alloc::vec![root(1)],
+        };
+        assert_eq!(singleton.to_bytes().len(), 35);
+
+        let proofs = alloc::vec![singleton.clone(), singleton];
         let bytes = proofs.to_bytes();
         assert_eq!(bytes.len(), 71);
-        let decoded =
-            Vec::<PrecompileProof>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
+        let decoded = Vec::<PrecompileProof>::read_from_bytes_with_budget(&bytes, 71).unwrap();
         assert_eq!(decoded.to_bytes(), bytes);
     }
 
@@ -709,7 +490,7 @@ mod tests {
         let decoded_vm = VmProof::read_from_bytes(&vm_bytes).unwrap();
         assert_eq!(decoded_vm.to_bytes(), vm_bytes);
 
-        let precompile = precompile_proof(&[root(1), root(2)]);
+        let precompile = precompile_proof(&[]);
         let precompile_bytes = precompile.to_bytes();
         let decoded_precompile = PrecompileProof::read_from_bytes(&precompile_bytes).unwrap();
         assert_eq!(decoded_precompile.to_bytes(), precompile_bytes);
@@ -725,8 +506,8 @@ mod tests {
                 precompile: None,
             },
             ExecutionProof::Complete {
-                vm: vm_proof(root(2)),
-                precompile: Some(precompile_proof(&[root(1), root(2), root(3)])),
+                vm: vm_proof(TRUE_DIGEST),
+                precompile: Some(precompile_proof(&[TRUE_DIGEST])),
             },
         ];
         for proof in &proofs {
@@ -771,6 +552,41 @@ mod tests {
         };
         let decoded_complete = round_trip(&complete);
         assert_same_execution_proof(&decoded_complete, &complete);
+    }
+
+    #[test]
+    fn complete_transitions_deferred_proof_without_validating_artifact_shape() {
+        let vm = vm_proof(TRUE_DIGEST);
+        let precompile = precompile_proof(&[]);
+        let deferred = ExecutionProof::Deferred {
+            vm: vm.clone(),
+            precompile: DeferredStateWire::default(),
+        };
+
+        let completed = deferred.complete(precompile.clone()).unwrap();
+
+        let ExecutionProof::Complete {
+            vm: completed_vm,
+            precompile: Some(completed_precompile),
+        } = completed
+        else {
+            panic!("deferred proof should transition to complete")
+        };
+        assert_eq!(completed_vm.to_bytes(), vm.to_bytes());
+        assert_eq!(completed_precompile.to_bytes(), precompile.to_bytes());
+    }
+
+    #[test]
+    fn complete_rejects_an_already_complete_proof() {
+        let complete = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        };
+
+        assert!(matches!(
+            complete.complete(precompile_proof(&[])),
+            Err(ExecutionProofError::AlreadyComplete)
+        ));
     }
 
     #[test]

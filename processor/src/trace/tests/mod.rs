@@ -135,10 +135,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
     assert_eq!(vm_witness.precompile_root(), precompile_root);
-    assert_eq!(precompile_witness.root(), precompile_root);
     assert_eq!(precompile_witness.roots(), &[precompile_root]);
-    assert_eq!(precompile_witness.state().root(), precompile_root);
-    assert_eq!(precompile_witness.into_state().root(), precompile_root);
 
     let trace = build_trace(vm_witness).unwrap();
     assert_eq!(trace.precompile_root(), precompile_root);

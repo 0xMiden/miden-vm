@@ -8,7 +8,7 @@ use miden_processor::{
     advice::AdviceMutation,
     event::{EventError, EventName},
 };
-use miden_prover::{AdviceInputs, Prover, StackInputs};
+use miden_prover::{AdviceInputs, ExecutionProof, Prover, StackInputs};
 
 struct YieldingAsyncHost {
     event_calls: usize,
@@ -92,11 +92,8 @@ async fn async_and_sync_execution_witnesses_prove_equivalently() {
     let async_proof = Prover::new().prove_full(async_witness).unwrap();
 
     assert_eq!(sync_outputs, async_outputs);
-    assert_eq!(sync_proof.vm().proof().hash_fn(), async_proof.vm().proof().hash_fn());
-    assert!(sync_proof.precompile().is_none());
-    assert!(async_proof.precompile().is_none());
-    assert!(!sync_proof.vm().proof().bytes().is_empty());
-    assert!(!async_proof.vm().proof().bytes().is_empty());
+    assert!(matches!(sync_proof, ExecutionProof::Complete { precompile: None, .. }));
+    assert!(matches!(async_proof, ExecutionProof::Complete { precompile: None, .. }));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -121,6 +118,5 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
     let proof = Prover::new().prove_full(witness).expect("proving should succeed");
 
     assert_eq!(host.event_calls, 1);
-    assert!(proof.precompile().is_none());
-    assert!(!proof.vm().proof().bytes().is_empty());
+    assert!(matches!(proof, ExecutionProof::Complete { precompile: None, .. }));
 }

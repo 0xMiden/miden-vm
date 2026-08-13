@@ -299,8 +299,11 @@ fn generate_fuzz_seeds() {
     // Execution proof seed (minimal complete proof with no precompile obligation).
     {
         let stark = StarkProof::new(Vec::new(), HashFunction::Rpo256);
-        let vm = VmProof::from_parts(stark, TRUE_DIGEST);
-        let proof = ExecutionProof::new_complete(vm, None).expect("minimal proof should compose");
+        let vm = VmProof {
+            proof: stark,
+            precompile_root: TRUE_DIGEST,
+        };
+        let proof = ExecutionProof::Complete { vm, precompile: None };
         let proof = proof.to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
     }

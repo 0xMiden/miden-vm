@@ -119,8 +119,10 @@ fn build_verifier_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let vm = proof.vm();
-    let stark = vm.proof();
+    let vm = match proof {
+        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
+    };
+    let stark = &vm.proof;
     if stark.hash_fn() != HashFunction::Poseidon2 {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
     }
@@ -128,7 +130,7 @@ fn build_verifier_inputs(
         claim.to_program_info(),
         *claim.stack_inputs(),
         *claim.stack_outputs(),
-        vm.precompile_root(),
+        vm.precompile_root,
     );
 
     let claim_commitment = claim.commitment();
@@ -459,10 +461,10 @@ mod tests {
     #[test]
     fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
         let proof = ExecutionProof::Complete {
-            vm: VmProof::from_parts(
-                CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
-                Word::default(),
-            ),
+            vm: VmProof {
+                proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
+                precompile_root: Word::default(),
+            },
             precompile: None,
         };
         let claim = ExecutionClaim::from_program_info(
