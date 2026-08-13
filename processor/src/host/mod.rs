@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    Word,
+    Felt, Word,
     advice::{AdviceMap, AdviceStack},
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
@@ -37,6 +37,16 @@ pub enum AdviceMutation {
 impl AdviceMutation {
     pub fn extend_advice_stack(stack: AdviceStack) -> Self {
         Self::ExtendStack { stack }
+    }
+
+    /// Extends the advice stack with `elements`, ordered from the top of the stack down.
+    ///
+    /// The typed [`AdviceMutation::extend_advice_stack`] is the one to reach for when the caller
+    /// already holds an [`AdviceStack`], or needs its element/word/dword layout helpers. This one
+    /// covers the common case of a host reply that is just a handful of field elements, which
+    /// would otherwise have to build an [`AdviceStack`] only to hand it straight over.
+    pub fn extend_advice_stack_with(elements: impl IntoIterator<Item = Felt>) -> Self {
+        Self::ExtendStack { stack: elements.into_iter().collect() }
     }
 
     pub fn extend_map(map: AdviceMap) -> Self {
@@ -239,3 +249,24 @@ pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
 
 #[cfg(not(target_family = "wasm"))]
 impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
+
+#[cfg(test)]
+mod tests {
+    use super::{AdviceMutation, AdviceStack, Felt};
+
+    /// The iterator helper must be indistinguishable from building the stack by hand, so that a
+    /// handler can switch to it without changing what the VM sees.
+    ///
+    /// Driven from a lazy `Map` rather than a collection, since taking any `IntoIterator` is the
+    /// point of the helper.
+    #[test]
+    fn extend_advice_stack_with_matches_the_typed_helper() {
+        let mut stack = AdviceStack::new();
+        stack.append_elements((1..=3u32).map(Felt::from_u32));
+
+        assert_eq!(
+            AdviceMutation::extend_advice_stack_with((1..=3u32).map(Felt::from_u32)),
+            AdviceMutation::extend_advice_stack(stack)
+        );
+    }
+}
