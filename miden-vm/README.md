@@ -1,6 +1,10 @@
 # Miden VM
 
-This crate aggregates all components of the Miden VM in a single place. Specifically, it re-exports functionality from [processor](../processor/), [prover](../prover/), and [verifier](../verifier/) crates. Additionally, when compiled as an executable, this crate can be used via a [CLI interface](#cli-interface) to execute Miden VM programs and to verify correctness of their execution.
+This crate aggregates all components of the Miden VM in a single place. Specifically, it re-exports
+functionality from [processor](../processor/), [prover](../prover/), and [verifier](../verifier/)
+crates. Additionally, when compiled as an executable, this crate can be used via a
+[CLI interface](#cli-interface) to execute Miden VM programs and to verify correctness of their
+execution.
 
 ## Basic concepts
 
@@ -8,7 +12,11 @@ An in-depth description of Miden VM is available in the full Miden VM [documenta
 
 ### Writing programs
 
-Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust, Move, Sway, and others. We believe it is important to let people write programs in the languages of their choice. However, compilers to help with this have not been developed yet. Thus, for now, the primary way to write programs for Miden VM is to use [Miden assembly](../crates/assembly/).
+Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust,
+Move, Sway, and others. We believe it is important to let people write programs in the languages of
+their choice. However, compilers to help with this have not been developed yet. Thus, for now, the
+primary way to write programs for Miden VM is to use
+[Miden assembly](../crates/assembly/).
 
 Miden assembler compiles assembly source code in a [program MAST](https://docs.miden.xyz/miden-vm/design/programs), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
 
@@ -169,7 +177,8 @@ The verifier returns `Result<VerificationOutcome, VerificationError>`. A success
 authenticates an outstanding VM root without validating the passive wire; a successful complete
 outcome verifies every applicable STARK. Canonical proof decoding is registry-free, while delegated
 precompile proving hydrates wire explicitly with `precompile_witness_from_wire`. See the
-[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit details.
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit
+details.
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
@@ -205,7 +214,9 @@ match Verifier::new().verify(&claim, &proof) {
 
 ## Fibonacci calculator
 
-Let's write a simple program for Miden VM (using [Miden assembly](../crates/assembly/)). Our program will compute the 5-th [Fibonacci number](https://en.wikipedia.org/wiki/Fibonacci_number):
+Let's write a simple program for Miden VM (using
+[Miden assembly](../crates/assembly/)). Our program will compute the 5-th
+[Fibonacci number](https://en.wikipedia.org/wiki/Fibonacci_number):
 
 ```masm
 push.0      // stack state: 0

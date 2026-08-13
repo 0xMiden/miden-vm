@@ -50,7 +50,8 @@ assert!(outcome.is_complete());
 
 To share precompile proving across several deferred proofs, hydrate each transported wire, merge the
 singleton witnesses with `PrecompileWitness::merge`, and call `prove_precompile` once. Attach the
-resulting `PrecompileProof` to each deferred proof with `complete`, then verify each completed proof.
+resulting `PrecompileProof` to each deferred proof with `complete`, then verify each completed
+proof.
 `complete` performs only the deferred-to-complete lifecycle transition; it does not check artifact
 compatibility.
 

@@ -223,8 +223,8 @@ orphans are dropped.
 
 `ExecutionProof::to_bytes` is infallible, and `ExecutionProof::read_from_bytes` decodes canonical
 transport without a registry or hydration. When precompile proving is required, the caller passes
-the deferred proof's wire to `miden_vm::precompile_witness_from_wire`; this explicit façade step uses
-the bundled registry and validates the wire's implicit root.
+the deferred proof's wire to `miden_vm::precompile_witness_from_wire`; this explicit façade step
+uses the bundled registry and validates the wire's implicit root.
 
 Hydration performs structural decoding, a canonicality check, and root evaluation:
 

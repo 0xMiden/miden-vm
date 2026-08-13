@@ -542,6 +542,20 @@ mod tests {
     }
 
     #[test]
+    fn merge_enforces_the_combined_element_limit() {
+        let mut first = framework_state(1);
+        let second = framework_state(2);
+        first.remaining_elements = 0;
+
+        let error = first.merge(second).unwrap_err();
+
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredStateTooLarge { .. })
+        ));
+    }
+
+    #[test]
     fn merge_combines_exact_roots_without_filtering_true() {
         let settled = DeferredState::default();
         let unsettled = framework_state(1);

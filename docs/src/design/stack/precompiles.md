@@ -26,8 +26,8 @@ modules are currently internal implementation detail used by core-library facade
 - **`DeferredState`** — The host-side DAG witness accumulated during execution. It tracks
   registered nodes, evaluates them under the registry, and maintains the rolling deferred root.
 - **`DeferredStateWire`** — The passive canonical opening transported by a deferred execution proof.
-  Proof decoding does not hydrate it. `miden_vm::precompile_witness_from_wire` explicitly applies the
-  bundled registry and validates it when precompile proving is required.
+  Proof decoding does not hydrate it. `miden_vm::precompile_witness_from_wire` explicitly applies
+  the bundled registry and validates it when precompile proving is required.
 - **Deferred root** — A single digest public value. Each logged statement appends
   `Node::AND(previous_root, statement_digest)` and advances the root to that node digest.
 

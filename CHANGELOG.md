@@ -18,7 +18,8 @@
 #### Changes
 
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
-- [BREAKING] `verify` and `Verifier::verify` now borrow the proof and the claim instead of consuming them.
+- [BREAKING] `verify` and `Verifier::verify` now borrow the proof and the claim instead of
+  consuming them.
 - [BREAKING] Renamed the `AdviceMutation::ExtendMap` field `other` to `map` and the `AdviceMutation::ExtendMerkleStore` field `infos` to `inner_nodes`.
 - [BREAKING] Replaced the partial-proof and configurable-verifier APIs with VM-first `Prover`
   methods and deferred/complete `ExecutionProof` states. Deferred proofs carry passive

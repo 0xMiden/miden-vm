@@ -138,8 +138,9 @@ wire nodes.
 
 ## Proof obligations and composition
 
-`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `ExecutionProof::Complete` without a
-precompile proof; any other root yields `ExecutionProof::Deferred` with the `VmProof` and passive
+`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `ExecutionProof::Complete`
+without a precompile proof; any other root yields `ExecutionProof::Deferred` with the `VmProof` and
+passive
 `DeferredStateWire`. Canonical proof decoding is registry-free and does not hydrate that wire.
 `Prover::prove_full` proves both stages directly from the in-memory execution witness.
 
@@ -149,8 +150,9 @@ implicit root to `TRUE`. The result is a singleton witness suitable for
 `Prover::prove_precompile`.
 
 `PrecompileWitness::merge` accepts a non-empty vector of singleton witnesses. It preserves exact
-input order and duplicate root multiplicity: `[one, one, two]` remains `[one, one, two]`. A one-input
-merge remains singleton; a multi-root result cannot be merged recursively. DAG nodes may be
+input order and duplicate root multiplicity: `[one, one, two]` remains `[one, one, two]`. A
+one-input merge remains singleton; a multi-root result cannot be merged recursively. DAG nodes may
+be
 deduplicated, but root occurrences are not. The root count and merged hydrated state are bounded by
 the fixed `MAX_PRECOMPILE_ROOTS` and `MAX_DEFERRED_ELEMENTS` hard ceilings.
 
@@ -184,9 +186,9 @@ Canonical binary decoders enforce fixed hard ceilings before allocating declared
 state and root ceilings. These are library safety bounds, not configurable protocol, whole-envelope,
 file, network, or ingestion policy.
 
-Proof and wire artifacts use derived Serde as a representation format. Generic Serde deserialization
-is not guaranteed to apply the canonical decoder's early allocation bounds and must not be treated as
-a hardened untrusted-input decoder.
+Proof and wire artifacts use derived Serde as a representation format. Generic Serde
+deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must
+not be treated as a hardened untrusted-input decoder.
 
 The canonical representational minima are 2 bytes for `StarkProof`, 34 bytes for `VmProof`, and 3
 bytes for `PrecompileProof`, because an empty-root record remains transportable until verification.
@@ -195,7 +197,7 @@ The shortest canonical singleton `PrecompileProof` is 35 bytes; a vector of two 
 
 Recursive VM verification packages the unchanged proof stream under
 `proof_request_key(verifier_root, claim_commitment)`. The consumer derives the same key from the
-claim commitment and `verify_vm_proof` procedure root, fetches the stream with `adv.push_mapval`, and
-then invokes `verify_vm_proof`. Claim and kernel preimages remain separately content-addressed; no
-proof values are copied into claim memory. Recursive verification authenticates and returns the VM
-root but does not settle precompile work.
+claim commitment and `verify_vm_proof` procedure root, fetches the stream with
+`adv.push_mapval`, and then invokes `verify_vm_proof`. Claim and kernel preimages remain
+separately content-addressed; no proof values are copied into claim memory. Recursive verification
+authenticates and returns the VM root but does not settle precompile work.

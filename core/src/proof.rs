@@ -155,7 +155,13 @@ impl Deserializable for VmProof {
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        Self::read_from(&mut reader)
+        let proof = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after VM proof payload".into(),
+            ));
+        }
+        Ok(proof)
     }
 
     fn min_serialized_size() -> usize {
@@ -198,7 +204,13 @@ impl Deserializable for PrecompileProof {
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        Self::read_from(&mut reader)
+        let proof = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after precompile proof payload".into(),
+            ));
+        }
+        Ok(proof)
     }
 
     fn min_serialized_size() -> usize {
@@ -476,6 +488,17 @@ mod tests {
             panic!("expected excessive root count to be rejected")
         };
         assert!(message.contains("precompile proof contains too many roots"));
+    }
+
+    #[test]
+    fn standalone_proof_decoders_reject_trailing_bytes() {
+        let mut vm_bytes = vm_proof(root(3)).to_bytes();
+        vm_bytes.push(0);
+        assert!(VmProof::read_from_bytes(&vm_bytes).is_err());
+
+        let mut precompile_bytes = precompile_proof(&[root(3)]).to_bytes();
+        precompile_bytes.push(0);
+        assert!(PrecompileProof::read_from_bytes(&precompile_bytes).is_err());
     }
 
     #[test]
