@@ -248,11 +248,9 @@ pub enum StarkVerificationError {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{sync::Arc, vec, vec::Vec};
+    use alloc::{vec, vec::Vec};
 
-    use miden_core::deferred::{
-        DeferredState, Node, PrecompileRegistry, PrecompileWitness, TRUE_DIGEST,
-    };
+    use miden_core::deferred::{DeferredStateWire, TRUE_DIGEST};
 
     use super::*;
 
@@ -292,13 +290,6 @@ mod tests {
         VmProof::from_parts(StarkProof::new(vec![0, 0], HashFunction::Blake3_256), precompile_root)
     }
 
-    fn witness() -> PrecompileWitness {
-        let mut state = DeferredState::default();
-        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
-        state.log_statement(statement).unwrap();
-        PrecompileWitness::new(state).unwrap()
-    }
-
     fn precompile_proof(roots: Vec<Word>) -> PrecompileProof {
         PrecompileProof::from_parts(StarkProof::new(vec![0, 0], HashFunction::Poseidon2), roots)
             .unwrap()
@@ -315,34 +306,18 @@ mod tests {
 
     #[test]
     fn verifier_revalidates_public_variants_before_stark_verification() {
-        let witness = witness();
-        let witness_root = witness.root();
+        let precompile_root = root(1);
 
         assert_invalid_shape(
             &ExecutionProof::Deferred {
                 vm: vm_proof(TRUE_DIGEST),
-                precompile: witness.clone(),
+                precompile: DeferredStateWire::default(),
             },
             ExecutionProofError::DeferredTrueRoot,
         );
-        let merged = PrecompileWitness::merge(vec![witness.clone(), witness.clone()]).unwrap();
-        assert_invalid_shape(
-            &ExecutionProof::Deferred {
-                vm: vm_proof(merged.root()),
-                precompile: merged,
-            },
-            ExecutionProofError::DeferredNonSingletonWitness { roots: 2 },
-        );
-        assert_invalid_shape(
-            &ExecutionProof::Deferred {
-                vm: vm_proof(root(99)),
-                precompile: witness,
-            },
-            ExecutionProofError::DeferredRootMismatch,
-        );
         assert_invalid_shape(
             &ExecutionProof::Complete {
-                vm: vm_proof(witness_root),
+                vm: vm_proof(precompile_root),
                 precompile: None,
             },
             ExecutionProofError::MissingPrecompileProof,
@@ -350,14 +325,14 @@ mod tests {
         assert_invalid_shape(
             &ExecutionProof::Complete {
                 vm: vm_proof(TRUE_DIGEST),
-                precompile: Some(precompile_proof(vec![witness_root])),
+                precompile: Some(precompile_proof(vec![precompile_root])),
             },
             ExecutionProofError::UnexpectedPrecompileProof,
         );
         assert_invalid_shape(
             &ExecutionProof::Complete {
                 vm: vm_proof(root(99)),
-                precompile: Some(precompile_proof(vec![witness_root])),
+                precompile: Some(precompile_proof(vec![precompile_root])),
             },
             ExecutionProofError::InsufficientPrecompileRootCoverage,
         );
@@ -366,11 +341,10 @@ mod tests {
     #[test]
     fn malformed_execution_proof_round_trips_but_fails_verification() {
         let malformed = ExecutionProof::Complete { vm: vm_proof(root(1)), precompile: None };
-        let bytes = malformed.to_bytes().unwrap();
-        let decoded =
-            ExecutionProof::read_from_bytes(&bytes, Arc::new(PrecompileRegistry::new())).unwrap();
+        let bytes = malformed.to_bytes();
+        let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
 
-        assert_eq!(decoded.to_bytes().unwrap(), bytes);
+        assert_eq!(decoded.to_bytes(), bytes);
         assert_invalid_shape(&decoded, ExecutionProofError::MissingPrecompileProof);
     }
 

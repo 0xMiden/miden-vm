@@ -86,10 +86,14 @@ impl Prover {
 
     fn package_deferred(vm: VmProof, precompile: Option<PrecompileWitness>) -> ExecutionProof {
         match precompile {
-            Some(precompile) => ExecutionProof::new_deferred(vm, precompile)
-                .expect("execution witness validates the VM and singleton precompile roots"),
-            None => ExecutionProof::new_complete(vm, None)
-                .expect("an execution without precompile work authenticates TRUE_DIGEST"),
+            Some(precompile) => {
+                let precompile = precompile
+                    .into_state()
+                    .to_wire()
+                    .expect("execution witness state must have canonical deferred wire");
+                ExecutionProof::Deferred { vm, precompile }
+            },
+            None => ExecutionProof::Complete { vm, precompile: None },
         }
     }
 
@@ -304,10 +308,11 @@ mod tests {
 
         let witness = singleton_witness();
         let root = witness.root();
+        let expected_wire = witness.state().to_wire().unwrap();
         let deferred = Prover::package_deferred(vm_proof(root), Some(witness));
         assert!(matches!(
             deferred,
-            ExecutionProof::Deferred { precompile, .. } if precompile.roots() == [root]
+            ExecutionProof::Deferred { precompile, .. } if precompile == expected_wire
         ));
     }
 

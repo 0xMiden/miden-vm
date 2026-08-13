@@ -56,7 +56,7 @@ use miden_processor::{
 use miden_verifier::recursive::RecursiveVerifierInputs;
 use miden_vm::{
     Assembler, ExecutionProof, ExecutionWitness, HashFunction, Program, ProgramInfo, Prover,
-    StackInputs, StackOutputs, prove_sync, read_execution_proof_from_bytes, trace::build_trace,
+    StackInputs, StackOutputs, prove_sync, trace::build_trace,
 };
 
 const DEFAULT_PROOF_COUNTS: [usize; 7] = [2, 3, 4, 5, 6, 7, 8];
@@ -308,7 +308,7 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    let proof = match read_execution_proof_from_bytes(&proof_bytes) {
+    let proof = match ExecutionProof::read_from_bytes(&proof_bytes) {
         Ok(proof) => proof,
         Err(err) => {
             eprintln!("ignoring undecodable cached proof {}: {err}", proof_path.display());
@@ -350,7 +350,7 @@ fn store_cached_tx_proof(
         .unwrap_or_else(|err| panic!("create proof cache {}: {err}", cache_dir.display()));
     let (proof_path, outputs_path) = tx_proof_cache_paths(cache_dir, proof_index, cache_key);
 
-    let proof_bytes = proof.to_bytes().expect("cached proof should encode");
+    let proof_bytes = proof.to_bytes();
     std::fs::write(&proof_path, proof_bytes)
         .unwrap_or_else(|err| panic!("write cached proof {}: {err}", proof_path.display()));
 
@@ -473,7 +473,7 @@ fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixt
                 "recursive_verify fixture at proof index {proof_index} is not complete and \
                  precompile-free"
             );
-            let proof_bytes = proof.to_bytes().expect("recursive fixture proof should encode");
+            let proof_bytes = proof.to_bytes();
             let proof_bytes_len = proof_bytes.len();
             let proof_digest: [u8; 32] = Blake3_256::hash(&proof_bytes).into();
             let proof_prefix = hex_prefix(&proof_bytes);
@@ -681,7 +681,7 @@ fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, us
     let (_, proof) =
         execute_and_prove(&case.program, StackInputs::default(), advice_inputs, &mut host, hash_fn);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
-    let proof_bytes = proof.to_bytes().expect("recursive proof should encode").len();
+    let proof_bytes = proof.to_bytes().len();
     black_box(proof);
     (elapsed_ms, proof_bytes)
 }

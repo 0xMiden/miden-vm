@@ -5,8 +5,7 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{
-        DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
-        TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
+        DeferredState, Digest, Node as VmNode, PrecompileRegistry, TRUE_DIGEST as VM_TRUE_DIGEST,
     },
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
@@ -241,13 +240,6 @@ fn translated_traces_check(state: &DeferredState) {
     traces.check();
 }
 
-fn uint_value_entry(domain: UintDomain, value: U256) -> WireEntry {
-    WireEntry::Data {
-        tag: UintPrecompile::value_tag(domain),
-        chunks: vec![to_limbs32(value).map(Felt::from_u32)],
-    }
-}
-
 #[test]
 fn synthetic_keccak_deferred_state_reconstructs_root() {
     let input: Vec<u8> = (0u8..33).collect();
@@ -324,51 +316,6 @@ fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
         let sum_eq = register_curve_op(&mut state, CurvePrecompile::EQ_OP_ID, sum, generator);
         state.log_statement(sum_eq).expect("generator plus identity logs");
     }
-
-    translated_traces_check(&state);
-}
-
-#[test]
-fn deferred_session_translates_arbitrary_non_log_spine_truthy_root() {
-    let wire = DeferredStateWire {
-        entries: vec![
-            WireEntry::Join {
-                tag: Tag::AND,
-                lhs: TRUE_INDEX,
-                rhs: TRUE_INDEX,
-            },
-            WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 1 },
-        ],
-    };
-    let state = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire)
-        .expect("AND-only wire state rehydrates");
-
-    translated_traces_check(&state);
-}
-
-#[test]
-fn deferred_session_translates_shared_uint_intermediate() {
-    let domain = UintDomain::U256;
-    let wire = DeferredStateWire {
-        entries: vec![
-            uint_value_entry(domain, U256::from(5u8)),
-            uint_value_entry(domain, U256::from(7u8)),
-            WireEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
-                lhs: 1,
-                rhs: 2,
-            },
-            uint_value_entry(domain, U256::from(12u8)),
-            WireEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
-                lhs: 3,
-                rhs: 4,
-            },
-            WireEntry::Join { tag: Tag::AND, lhs: 5, rhs: 5 },
-        ],
-    };
-    let state = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire)
-        .expect("shared uint wire state rehydrates");
 
     translated_traces_check(&state);
 }

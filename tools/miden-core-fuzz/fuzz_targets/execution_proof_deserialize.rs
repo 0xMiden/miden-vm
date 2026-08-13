@@ -4,13 +4,9 @@
 
 #![no_main]
 
-use std::sync::Arc;
-
 use libfuzzer_sys::fuzz_target;
-use miden_core::{deferred::PrecompileRegistry, proof::ExecutionProof};
+use miden_core::proof::ExecutionProof;
 
 fuzz_target!(|data: &[u8]| {
-    // An empty registry intentionally exercises framework-only decoding.
-    let registry = Arc::new(PrecompileRegistry::new());
-    let _ = ExecutionProof::read_from_bytes(data, registry);
+    let _ = ExecutionProof::read_from_bytes(data);
 });

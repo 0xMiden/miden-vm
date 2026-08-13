@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{DeferredStateWire, TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry},
+    deferred::{DeferredState, DeferredStateWire, Node, TRUE_DIGEST},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
@@ -266,25 +266,12 @@ fn generate_fuzz_seeds() {
         let empty = DeferredStateWire::default();
         write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
 
-        let tag = Tag::from_word([
-            Felt::new_unchecked(7),
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-        ]);
-        let wire = DeferredStateWire {
-            entries: vec![
-                WireEntry::Data {
-                    tag,
-                    chunks: vec![[Felt::new_unchecked(1); 8]],
-                },
-                WireEntry::Data {
-                    tag,
-                    chunks: vec![[Felt::new_unchecked(2); 8], [Felt::new_unchecked(3); 8]],
-                },
-                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
-            ],
-        };
+        let mut state = DeferredState::default();
+        let statement = state
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .expect("framework statement should register");
+        state.log_statement(statement).expect("framework statement should log");
+        let wire = state.to_wire().expect("framework state should encode as wire");
         write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
 
         let mut oversized_entry_count = Vec::new();
@@ -314,7 +301,7 @@ fn generate_fuzz_seeds() {
         let stark = StarkProof::new(Vec::new(), HashFunction::Rpo256);
         let vm = VmProof::from_parts(stark, TRUE_DIGEST);
         let proof = ExecutionProof::new_complete(vm, None).expect("minimal proof should compose");
-        let proof = proof.to_bytes().expect("minimal proof should encode");
+        let proof = proof.to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
     }
 

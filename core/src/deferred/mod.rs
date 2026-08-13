@@ -21,7 +21,7 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
+pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX};
 pub use witness::{PrecompileWitness, PrecompileWitnessError};
 
 use crate::Word;

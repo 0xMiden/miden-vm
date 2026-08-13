@@ -223,7 +223,7 @@ mod prover_api_lifecycle {
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileWitness, Program, Prover, StackInputs, StackOutputs,
-        Verifier, advice::AdviceInputs, prove_sync, read_execution_proof_from_bytes,
+        Verifier, advice::AdviceInputs, precompile_witness_from_wire, prove_sync,
     };
 
     fn assemble(source: &str) -> Program {
@@ -376,22 +376,24 @@ mod prover_api_lifecycle {
         assert!(!deferred_outcome.is_complete());
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
 
-        let encoded = one_deferred.to_bytes().expect("deferred proof should encode");
-        let transported = read_execution_proof_from_bytes(&encoded)
-            .expect("standard-registry proof decoding should hydrate the deferred witness");
-        assert_eq!(transported.to_bytes().unwrap(), encoded);
+        let encoded = one_deferred.to_bytes();
+        let transported = ExecutionProof::read_from_bytes(&encoded)
+            .expect("deferred proof transport should decode without hydrating its wire");
+        assert_eq!(transported.to_bytes(), encoded);
         assert_eq!(transported.vm().precompile_root(), one_root);
 
-        let one_witness = transported
-            .precompile_witness()
-            .expect("transported deferred proof should retain its witness")
-            .clone();
+        let ExecutionProof::Deferred { precompile, .. } = &transported else {
+            panic!("transported proof should remain deferred");
+        };
+        let one_witness = precompile_witness_from_wire(precompile)
+            .expect("transported deferred wire should hydrate under the standard registry");
         let (two_claim, two_deferred) = prove_deferred_u256(2, HashFunction::Blake3_256);
         let two_root = two_deferred.vm().precompile_root();
-        let two_witness = two_deferred
-            .precompile_witness()
-            .expect("second deferred proof should retain its witness")
-            .clone();
+        let ExecutionProof::Deferred { precompile, .. } = &two_deferred else {
+            panic!("second proof should remain deferred");
+        };
+        let two_witness = precompile_witness_from_wire(precompile)
+            .expect("second deferred wire should hydrate under the standard registry");
 
         let merged =
             PrecompileWitness::merge(vec![one_witness.clone(), one_witness.clone(), two_witness])

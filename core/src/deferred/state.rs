@@ -279,8 +279,8 @@ impl DeferredState {
     /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
     /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
     /// evaluates the implicit root to TRUE under the installed precompiles. The wire remains a
-    /// low-level transport representation for deferred-state witnesses; final proofs use explicit
-    /// VM and precompile STARK artifacts instead.
+    /// passive transport representation; semantic validity is established only by this explicit
+    /// rehydration path.
     pub fn from_wire(
         registry: Arc<PrecompileRegistry>,
         wire: &DeferredStateWire,

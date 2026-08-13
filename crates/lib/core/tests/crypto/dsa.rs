@@ -21,7 +21,6 @@ use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
 const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
-const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 
 #[test]
@@ -32,7 +31,6 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     assert_deferred_state_round_trips(&output);
 
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    assert_eq!(wire.entries.len(), VERIFY_EXPECTED_WIRE_ENTRIES);
     assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
 }
 

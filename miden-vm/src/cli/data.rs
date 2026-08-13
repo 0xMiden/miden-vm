@@ -15,10 +15,7 @@ use miden_assembly::{
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_vm::{
-    ExecutionProof, Program, StackOutputs, Word, read_execution_proof_from_bytes,
-    serde::SliceReader,
-};
+use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -213,7 +210,7 @@ impl ProofFile {
             .map_err(|err| format!("Failed to open proof file `{}` - {}", path.display(), err))?;
 
         // deserialize bytes into an execution proof
-        read_execution_proof_from_bytes(&file)
+        ExecutionProof::read_from_bytes(&file)
             .map_err(|err| format!("Failed to decode proof data - {err}"))
     }
 
@@ -234,8 +231,7 @@ impl ProofFile {
             None => program_path.with_extension("proof"),
         };
 
-        let proof_bytes =
-            proof.to_bytes().map_err(|err| format!("Failed to encode proof data - {err}"))?;
+        let proof_bytes = proof.to_bytes();
         tracing::Span::current()
             .record("size", tracing::field::display(format!("{} KB", proof_bytes.len() / 1024)));
 

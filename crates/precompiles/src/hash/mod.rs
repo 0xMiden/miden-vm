@@ -204,7 +204,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::{
-        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, Tag, WireEntry},
+        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, Tag},
         utils::bytes_to_packed_u32_elements,
     };
 
@@ -371,10 +371,6 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let assertion = state.register(assertion_node).unwrap();
     state.log_statement(assertion).unwrap();
     let wire = state.to_wire().expect("hash assertion state should encode");
-    assert!(wire.entries.iter().any(|entry| matches!(
-        entry,
-        WireEntry::Join { tag, .. } if *tag == HashPrecompile::<H>::assert_tag(input.len() as u32)
-    )));
     let mut rehydrated = DeferredState::from_wire(
         Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
         &wire,
