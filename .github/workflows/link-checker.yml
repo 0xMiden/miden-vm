@@ -1,7 +1,9 @@
-# Checks documentation for broken links once per day and creates issues if broken links are found
+# Checks local documentation links on pull requests and external links once per day.
 name: Check documentation links
 
 on:
+  pull_request:
+    types: [opened, reopened, synchronize]
   workflow_call:
     inputs:
       fail-fast:
@@ -15,7 +17,28 @@ on:
 permissions: {}
 
 jobs:
+  localLinks:
+    name: Check local documentation links
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check local documentation links
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          fail: true
+          args: |
+            --offline
+            --include-fragments
+            **/*.md
+
   linkChecker:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

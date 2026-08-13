@@ -551,8 +551,8 @@ mod tests {
     }
 
     /// Repeating `(ctx, word_addr, clk)` is safe for any combination of read access sizes. This is
-    /// required when operations such as `horner_eval_base` or ACE read multiple elements from the
-    /// same word in one clock cycle.
+    /// required when operations such as ACE read multiple elements from the same word in one clock
+    /// cycle.
     #[test]
     fn same_key_memory_rows_allow_all_read_access_sizes() {
         for (local_size, next_size) in [

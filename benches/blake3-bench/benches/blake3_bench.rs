@@ -119,7 +119,7 @@ fn blake3_bench(c: &mut Criterion) {
                     || execute_trace_inputs(&fixture),
                     |trace_inputs| {
                         let trace_inputs = black_box(trace_inputs);
-                        prove_trace(trace_inputs);
+                        black_box(prove_trace(trace_inputs))
                     },
                     BatchSize::SmallInput,
                 );
@@ -140,24 +140,13 @@ fn blake3_bench(c: &mut Criterion) {
 
         if has_axis(&axes, "execute_sync") {
             group.bench_function("execute_sync", |b| {
-                b.iter_batched(
-                    || fixture.clone(),
-                    |fixture| {
-                        execute_program(&fixture);
-                        black_box(())
-                    },
-                    BatchSize::SmallInput,
-                );
+                b.iter_with_large_drop(|| black_box(execute_program(&fixture)));
             });
         }
 
         if has_axis(&axes, "execute_trace_inputs_sync") {
             group.bench_function("execute_trace_inputs_sync", |b| {
-                b.iter_batched(
-                    || fixture.clone(),
-                    |fixture| black_box(execute_trace_inputs(&fixture)),
-                    BatchSize::SmallInput,
-                );
+                b.iter_with_large_drop(|| black_box(execute_trace_inputs(&fixture)));
             });
         }
 
@@ -167,7 +156,7 @@ fn blake3_bench(c: &mut Criterion) {
                     || execute_trace_inputs(&fixture),
                     |trace_inputs| {
                         let trace_inputs = black_box(trace_inputs);
-                        build_trace(trace_inputs);
+                        black_box(build_trace(trace_inputs))
                     },
                     BatchSize::SmallInput,
                 );

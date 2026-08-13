@@ -94,7 +94,7 @@ impl LiftedAir<F, EF> for TestAir {
         _aux_inputs: &[F],
         _challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
-        unimplemented!("ACE codegen tests do not build concrete traces")
+        unreachable!("ACE codegen tests do not build concrete traces")
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {

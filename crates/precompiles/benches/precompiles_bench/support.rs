@@ -38,7 +38,7 @@ impl PrecompileFixture {
 }
 
 fn generate_stack_inputs(workload: PrecompileWorkload) -> StackInputs {
-    assert!(workload.keccaks <= u32::MAX as usize, "Keccak workload count must fit in u32");
+    assert!(u32::try_from(workload.keccaks).is_ok(), "Keccak workload count must fit in u32");
     StackInputs::new(&[Felt::new_unchecked(workload.keccaks as u64)])
         .expect("single Keccak count should fit on the operand stack")
 }
