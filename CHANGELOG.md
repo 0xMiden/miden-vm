@@ -13,6 +13,7 @@
 - [BREAKING] `Instruction::EmitImm` now pretty-prints as the equivalent `push.<value> emit drop` sequence instead of `emit.<felt>`, since `emit.<felt>` is invalid MASM which cannot be parsed ([#3567](https://github.com/0xMiden/miden-vm/pull/3567)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
+- [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 
 #### Features
 
@@ -80,8 +81,6 @@
 - Bound deferred precompile STARK proofs to the generated precompile ACE relation digest ([#3344](https://github.com/0xMiden/miden-vm/pull/3344)).
 - [BREAKING] Split Poseidon2 permutation rows out of `ChipletsAir` into `Poseidon2PermutationAir`, and updated the recursive verifier ACE registry for three AIRs ([#3345](https://github.com/0xMiden/miden-vm/pull/3345)).
 - [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
-- [BREAKING] Optimize periodic columns evaluation for fewer ACE gates ([#3347](https://github.com/0xMiden/miden-vm/pull/3347)).
-- [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 - Split dense `MastForest` order helpers and package serialization tests into smaller modules, and routed dense forest finalization and static library setup through dedicated builder and library methods ([#3346](https://github.com/0xMiden/miden-vm/pull/3346)).
 - [BREAKING] Renamed module and kernel metadata APIs from `ModuleInfo`/`Kernel` to `ModuleDescriptor`/`KernelDescriptor`, including matching module descriptor method names ([#3356](https://github.com/0xMiden/miden-vm/pull/3356)).
 - Replaced panics in `OverflowTable::restore_context()`, `get_current_overflow_stack()`, and `get_current_overflow_stack_mut()` with proper `OperationError` returns ([#3370](https://github.com/0xMiden/miden-vm/pull/3370)).
