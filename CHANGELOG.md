@@ -8,6 +8,7 @@
 #### Changes
 
 - [BREAKING] `UniqueNodes` entries are now keyed by tree position, and missing nodes mean canonical empty subtree roots. The `NodeValue` enum was removed ([#3620](https://github.com/0xMiden/miden-vm/pull/3620)).
+- Documented, tested, and hardened the Falcon `math` module: fixed `FalconFelt::new` canonicalization and `Polynomial::div` non-termination edge cases, enforced `karatsuba` and FFT size preconditions, and added oracle-style tests (SamplerZ reference vectors, RCDT boundaries, FFT self-derivation and convolution checks, NTRU equation checks) ([#3629](https://github.com/0xMiden/miden-vm/pull/3629)).
 - Changed CodSpeed benchmarks to exclude input setup and result cleanup from timed samples, so comparisons measure only the operation under test ([#3613](https://github.com/0xMiden/miden-vm/pull/3613)).
 - [BREAKING] Removed the unused `CsrMatrix` and `CsrValidationError` APIs from `miden-utils-indexing` and `miden-core::utils` ([#3591](https://github.com/0xMiden/miden-vm/issues/3591)).
 - Added a Lychee check for local Markdown links in pull requests and fixed 17 broken links in README and docs files ([#3606](https://github.com/0xMiden/miden-vm/pull/3606)).
