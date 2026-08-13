@@ -46,10 +46,6 @@ After execution with `FastProcessor::execute_for_proving*()`, split the returned
 `ExecutionWitness` and pass its `VmWitness` to `build_trace()`. When the `concurrent` feature is
 enabled, trace generation is parallelized for improved performance.
 
-`ExecutionWitness`, `VmWitness`, and `PrecompileWitness` may contain private and potentially large
-prover data. `PrecompileWitness` hydration is registry-aware and bounded by the fixed
-`MAX_DEFERRED_ELEMENTS` ceiling; its outer byte payload needs a separate ingestion limit.
-`VmWitness` transport is owned by a separate integration and is not defined by this crate yet.
 
 The trace consists of several sections:
 * The decoder, which tracks instruction decoding and control flow.

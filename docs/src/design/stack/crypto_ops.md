@@ -387,12 +387,8 @@ $$
 The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
 merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
-`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The final root is authenticated by
-the VM STARK and carried by `VmProof` as a remaining obligation. `TRUE_DIGEST` produces a complete
-execution proof immediately; other roots produce `ExecutionProof::Deferred`, which can transition
-to `ExecutionProof::Complete` by attaching a structurally compatible `PrecompileProof`.
-`Verifier::verify` performs cryptographic verification. This section concentrates on the stack
-interaction and bus messages.
+`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The VM STARK authenticates the final
+root as one public value.
 
 ### Operation Overview
 
@@ -527,7 +523,4 @@ $$
 
 Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
 itself the digest at every step. The final deferred root is a fixed four-field-element value
-committed by `VmProof`, not a variable-length request transcript. While work is outstanding,
-private root-reachable DAG material remains in the `PrecompileWitness` carried by
-`ExecutionProof::Deferred`; `ExecutionProof::Complete` contains the VM proof and, when required, a
-singular `PrecompileProof`.
+committed by `VmProof`, not a variable-length request transcript.

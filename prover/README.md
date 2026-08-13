@@ -9,13 +9,10 @@ synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` v
 
 `Prover` is synchronous and consumes post-execution witnesses:
 
-- `Prover::prove(ExecutionWitness)` proves only the VM portion. It returns a `Complete` proof
-  without a precompile artifact when the VM authenticated no precompile work, or `Deferred` with
-  the singleton precompile witness retained for later proving.
-- `Prover::prove_full(ExecutionWitness)` proves the VM and any precompile witness immediately in
-  memory and returns a complete proof.
-- `Prover::prove_precompile(&PrecompileWitness)` proves one singleton or merged witness without
-  cloning its hydrated DAG, including a witness retained by `Deferred`.
+- `Prover::prove(ExecutionWitness)` proves the VM portion and returns `Complete` when there is no
+  deferred work, or `Deferred` carrying a passive `DeferredStateWire`.
+- `Prover::prove_full(ExecutionWitness)` proves the VM and any precompile work locally.
+- `Prover::prove_precompile(&PrecompileWitness)` proves one hydrated singleton or merged witness.
 
 Use `Prover::with_hash_fn` to select the proof hash function.
 
@@ -29,56 +26,36 @@ will be passed to `Prover`.
 ```rust,ignore
 use miden_prover::{ExecutionProof, Prover};
 use miden_verifier::Verifier;
+use miden_vm::precompile_witness_from_wire;
 
 // `witness` is an ExecutionWitness produced by FastProcessor.
 let claim = witness.claim();
 let prover = Prover::new();
-
 let deferred = prover.prove(witness)?;
-assert!(matches!(&deferred, ExecutionProof::Deferred { .. }));
-assert!(!deferred.is_complete());
 
-let precompile_proof = prover.prove_precompile(
-    deferred
-        .precompile_witness()
-        .expect("a deferred proof retains its precompile witness"),
-)?;
-let complete = deferred.complete(precompile_proof)?;
+// Passively transport the proof, then decode it without a registry.
+let bytes = deferred.to_bytes();
+let transported = ExecutionProof::read_from_bytes(&bytes)?;
+let ExecutionProof::Deferred { precompile: wire, .. } = &transported else {
+    unreachable!("precompile proving is only needed for deferred proofs");
+};
 
+// Hydration installs the bundled registry only when precompile proving begins.
+let precompile_witness = precompile_witness_from_wire(wire)?;
+let precompile_proof = prover.prove_precompile(&precompile_witness)?;
+let complete = transported.complete(precompile_proof)?;
 let outcome = Verifier::new().verify(&claim, &complete)?;
 assert!(outcome.is_complete());
-assert_eq!(outcome.outstanding_precompile_root(), None);
 ```
 
-For merged proving, `PrecompileWitness::merge` accepts only singleton witnesses. Given
-`[one, one, two]`, it preserves that order and duplicate; attempting to merge the resulting merged
-witness again is rejected. The input list is capped at `MAX_PRECOMPILE_ROOTS`, and the complete
-merged state is capped at `MAX_DEFERRED_ELEMENTS`. Proving the merged witness once produces
-one shared `PrecompileProof` that can be cloned to complete compatible deferred proofs for `one` or
-`two`. This is proof-artifact reuse, not a protocol batch or settlement envelope.
+To share precompile proving across several deferred proofs, hydrate each transported wire, merge the
+singleton witnesses with `PrecompileWitness::merge`, and call `prove_precompile` once. Attach the
+resulting `PrecompileProof` to each deferred proof with `complete`, then verify each completed proof.
+`complete` performs only the deferred-to-complete lifecycle transition; it does not check artifact
+compatibility.
 
-`PrecompileWitness` may contain private execution data and a large hydrated DAG. Treat it as
-sensitive prover input, transport it only to trusted workers, and borrow it for proving. Clone it
-only when an ownership-requiring transport needs a separate value. This crate does not currently
-expose a delegated VM-worker proving or transport interface.
-
-### Transport and verification
-
-Encoding a witness or execution proof preserves its representation; it does not establish validity.
-Malformed cross-artifact `ExecutionProof` values can therefore serialize and decode, but full
-verification rejects inconsistent structure or invalid STARKs.
-
-Ordinary façade callers can decode with the standard bundled registry via
-`miden_vm::read_execution_proof_from_bytes(bytes)`. Custom-precompile callers use
-`ExecutionProof::read_from_bytes(bytes, registry)` directly.
-
-The deferred-wire canonical decode-and-reencode policy remains unchanged. The outer execution-proof
-decoder now rejects trailing bytes and encodings that do not round-trip exactly. Witness hydration,
-proof decoding, and witness merging use the fixed `MAX_DEFERRED_ELEMENTS` ceiling. Merged root
-sequences use the fixed `MAX_PRECOMPILE_ROOTS` ceiling; low-level decoding still retains its
-per-allocation ceiling.
-
-Outer-envelope, file, and network-payload limits remain ingestion concerns.
+Transport, hydration, structural validity, and fixed limits are specified in the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md).
 
 ### Synchronous execution and proving
 

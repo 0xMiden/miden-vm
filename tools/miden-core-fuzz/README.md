@@ -101,9 +101,8 @@ cargo +nightly fuzz run operation_deserialize --fuzz-dir tools/miden-core-fuzz
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`execution_proof_deserialize`** — Tests `ExecutionProof::read_from_bytes` with a precompile
-registry and the fixed deferred-element ceiling. The empty registry intentionally exercises
-framework-only decoding.
+**`execution_proof_deserialize`** — Tests registry-free canonical `ExecutionProof` decoding,
+including its passive deferred-state proof wire.
 
 ```bash
 cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir tools/miden-core-fuzz
@@ -204,5 +203,4 @@ Where we expect malicious inputs to cause problems:
 
 1. **No panics** — Deserialization never panics on any input
 2. **No crashes** — No undefined behavior, buffer overflows, or memory corruption
-3. **Resource limits** — Excessive allocations rejected early
-4. **Validation completeness** — `UntrustedMastForest::validate()` catches all invalid forests
+3. **Validation completeness** — `UntrustedMastForest::validate()` catches all invalid forests

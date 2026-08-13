@@ -8,7 +8,7 @@ An in-depth description of Miden VM is available in the full Miden VM [documenta
 
 ### Writing programs
 
-Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust, Move, Sway, and others. We believe it is important to let people write programs in the languages of their choice. However, compilers to help with this have not been developed yet. Thus, for now, the primary way to write programs for Miden VM is to use [Miden assembly](../assembly).
+Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust, Move, Sway, and others. We believe it is important to let people write programs in the languages of their choice. However, compilers to help with this have not been developed yet. Thus, for now, the primary way to write programs for Miden VM is to use [Miden assembly](../crates/assembly/).
 
 Miden assembler compiles assembly source code in a [program MAST](https://docs.miden.xyz/miden-vm/design/programs), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
 
@@ -101,12 +101,15 @@ let output = FastProcessor::new_with_options(
 ### Proving program execution
 
 Execute with `FastProcessor` to produce an `ExecutionWitness`, and read its public claim before
-proving consumes it. `Prover::prove` proves the VM portion and returns a `Complete` proof without a
-precompile artifact when no deferred work exists, or `Deferred` with its witness retained. Use
-`Prover::prove_full` when all proof work should complete immediately in the local process. For
-deferred work, borrow `proof.precompile_witness()`, pass it directly to
-`Prover::prove_precompile`, and attach the result with `proof.complete(...)`. Clone the witness only
-when ownership-requiring transport needs a separate value.
+proving consumes it. `Prover::prove` proves the VM portion and returns `Complete` when no deferred
+work exists, or `Deferred` containing a passive `DeferredStateWire`. Use `Prover::prove_full` to
+complete all proof work in the local process.
+
+For delegated precompile proving, transport `proof.to_bytes()`, decode with the registry-free
+`ExecutionProof::read_from_bytes`, match `ExecutionProof::Deferred`, and pass its wire to
+`precompile_witness_from_wire`. Optionally merge hydrated singleton witnesses, call
+`Prover::prove_precompile`, transition each deferred proof with `complete`, and establish validity
+with `Verifier::verify`.
 
 `ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
@@ -144,10 +147,8 @@ let witness = FastProcessor::new_with_options(
 .unwrap();
 let outputs = *witness.claim().stack_outputs();
 
-// this program has no precompile work, so VM-only proving returns a complete proof
+// this program has no precompile work, so the proof is ready for verification
 let proof = Prover::new().prove(witness).unwrap();
-assert!(proof.is_complete());
-assert!(proof.precompile().is_none());
 
 // the output should be 8
 assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
@@ -164,19 +165,11 @@ Stack inputs are expected to be ordered as if they would be pushed onto the stac
 
 Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the `stack_outputs`, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the `stack_inputs`.
 
-The verifier returns `Result<VerificationOutcome, VerificationError>`. The outcome reports the
-minimum verified component security level and any authenticated precompile root that remains
-outstanding. A successful deferred verification is valid but incomplete; finality-sensitive callers
-inspect `VerificationOutcome::is_complete()` or `outstanding_precompile_root()`.
-
-Ordinary callers decode execution proofs with
-`read_execution_proof_from_bytes(bytes)`, which installs the standard bundled precompile registry
-and fixed `MAX_DEFERRED_ELEMENTS` ceiling. Custom-precompile callers use
-`ExecutionProof::read_from_bytes(bytes, registry)` directly.
-
-Encoding and decoding preserve representation and canonical transport; they do not establish proof
-validity. Public malformed cross-artifact values can serialize and decode, then fail full
-verification as intended.
+The verifier returns `Result<VerificationOutcome, VerificationError>`. A successful deferred outcome
+authenticates an outstanding VM root without validating the passive wire; a successful complete
+outcome verifies every applicable STARK. Canonical proof decoding is registry-free, while delegated
+precompile proving hydrates wire explicitly with `precompile_witness_from_wire`. See the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for transport and limit details.
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.
 
@@ -200,24 +193,19 @@ let claim = ExecutionClaim::from_program_info(
     expected_outputs,
 );
 
-// Verify all supplied structure and STARKs without consuming either value.
 match Verifier::new().verify(&claim, &proof) {
-    Ok(outcome) if outcome.is_complete() => {
-        println!("Execution verified and complete!");
-    },
-    Ok(outcome) => {
-        println!(
-            "Execution verified; outstanding precompile root: {:?}",
-            outcome.outstanding_precompile_root(),
-        );
-    },
-    Err(msg) => println!("Something went terribly wrong: {}", msg),
+    Ok(outcome) if outcome.is_complete() => println!("Execution verified and complete!"),
+    Ok(outcome) => println!(
+        "Execution verified with outstanding root {:?}",
+        outcome.outstanding_precompile_root(),
+    ),
+    Err(err) => eprintln!("Verification failed: {err}"),
 }
 ```
 
 ## Fibonacci calculator
 
-Let's write a simple program for Miden VM (using [Miden assembly](../assembly)). Our program will compute the 5-th [Fibonacci number](https://en.wikipedia.org/wiki/Fibonacci_number):
+Let's write a simple program for Miden VM (using [Miden assembly](../crates/assembly/)). Our program will compute the 5-th [Fibonacci number](https://en.wikipedia.org/wiki/Fibonacci_number):
 
 ```masm
 push.0      // stack state: 0

@@ -37,7 +37,7 @@ use crate::{
 // ================================================================================================
 
 /// Reserved index for the always-known [`super::TRUE_DIGEST`] / [`super::Node::TRUE`] node.
-pub const TRUE_INDEX: u32 = 0;
+const TRUE_INDEX: u32 = 0;
 
 const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / Tag::FELT_LEN;
 

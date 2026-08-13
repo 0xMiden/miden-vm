@@ -143,7 +143,7 @@ impl DeferredState {
     /// Root-reachable nodes from `other` are re-registered under this state's registry, so shared
     /// nodes are deduplicated without serializing either state. This state's remaining node budget
     /// applies to imported nodes.
-    pub fn merge(mut self, other: Self) -> Result<Self, PrecompileError> {
+    pub(crate) fn merge(mut self, other: Self) -> Result<Self, PrecompileError> {
         let other_root = other.root();
         self.import_reachable_from(&other, other_root)?;
         self.log_statement(other_root)?;
@@ -281,6 +281,7 @@ impl DeferredState {
     /// evaluates the implicit root to TRUE under the installed precompiles. The wire remains a
     /// passive transport representation; semantic validity is established only by this explicit
     /// rehydration path.
+    #[doc(hidden)]
     pub fn from_wire(
         registry: Arc<PrecompileRegistry>,
         wire: &DeferredStateWire,

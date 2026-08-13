@@ -128,13 +128,12 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
         .execute_for_proving_sync(&program, &mut host)
         .unwrap();
     let claim = execution_witness.claim();
-    let precompile_root = execution_witness.precompile_root();
+    let (vm_witness, precompile_witness) = execution_witness.into_parts();
+    let precompile_root = vm_witness.precompile_root;
     assert_ne!(precompile_root, TRUE_DIGEST);
 
-    let (vm_witness, precompile_witness) = execution_witness.into_parts();
     let precompile_witness = precompile_witness.expect("logged statement must be retained");
     assert_eq!(vm_witness.claim(), claim);
-    assert_eq!(vm_witness.precompile_root(), precompile_root);
     assert_eq!(precompile_witness.roots(), &[precompile_root]);
 
     let trace = build_trace(vm_witness).unwrap();
@@ -159,7 +158,6 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
     let claim = execution_witness.claim();
     assert_eq!(claim.to_program_info(), program.to_info());
     assert_eq!(claim.stack_inputs(), &stack_inputs);
-    assert_eq!(execution_witness.precompile_root(), TRUE_DIGEST);
     let expected_public_inputs = PublicInputs::new(
         claim.to_program_info(),
         *claim.stack_inputs(),
@@ -169,6 +167,7 @@ fn empty_execution_witness_splits_and_replays_with_explicit_stack_inputs() {
 
     let (vm_witness, precompile_witness) = execution_witness.into_parts();
     assert_eq!(vm_witness.claim(), claim);
+    assert_eq!(vm_witness.precompile_root, TRUE_DIGEST);
     assert!(precompile_witness.is_none());
 
     let trace = build_trace(vm_witness).unwrap();

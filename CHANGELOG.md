@@ -18,20 +18,17 @@
 #### Changes
 
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
-- [BREAKING] `verify`, `Verifier::verify`, and `Verifier::verify_partial` now borrow the proof and the claim instead of consuming them.
+- [BREAKING] `verify` and `Verifier::verify` now borrow the proof and the claim instead of consuming them.
 - [BREAKING] Renamed the `AdviceMutation::ExtendMap` field `other` to `map` and the `AdviceMutation::ExtendMerkleStore` field `infos` to `inner_nodes`.
-- [BREAKING] Replaced the partial-proof and configurable-verifier APIs with
-  checked `ExecutionWitness` and `VmWitness` artifacts, VM-first `Prover` methods,
-  deferred/complete `ExecutionProof` states, and borrowed verification that reports any
-  authenticated outstanding precompile root. The intermediate `prove_partial*`,
-  `Verifier::verify_partial`, `Verifier::with_max_deferred_elements`, and
-  `ExecutionOptions::with_max_deferred_elements` APIs were removed. Proof encoding preserves
-  representation without establishing validity. Witness hydration, proof decoding, and witness
-  merging use the fixed `MAX_DEFERRED_ELEMENTS` ceiling; merged root sequences use the fixed
-  `MAX_PRECOMPILE_ROOTS` ceiling, and encoded STARK proofs use the fixed
-  `MAX_STARK_PROOF_BYTES` ceiling. A deferred proof retains a hydrated
-  `PrecompileWitness`; `DeferredStateWire` is its transport representation, not the in-memory proof
-  payload. See the PR description for the complete migration guide
+- [BREAKING] Replaced the partial-proof and configurable-verifier APIs with VM-first `Prover`
+  methods and deferred/complete `ExecutionProof` states. Deferred proofs carry passive
+  `DeferredStateWire`; decode them without a registry, hydrate explicitly through
+  `precompile_witness_from_wire`, and use `Verifier::verify` as the structural and cryptographic
+  validity seam. `VmProof` and `PrecompileProof` are public-field records; `StarkProof` retains its
+  existing constructor and field-access interface.
+  The intermediate `prove_partial*`, `Verifier::verify_partial`,
+  `Verifier::with_max_deferred_elements`, and `ExecutionOptions::with_max_deferred_elements` APIs
+  were removed
   ([#3437](https://github.com/0xMiden/miden-vm/pull/3437)).
 
 #### Fixes

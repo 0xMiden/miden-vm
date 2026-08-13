@@ -21,7 +21,7 @@ pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX};
+pub use wire::{DeferredStateWire, IntegrityError};
 pub use witness::{PrecompileWitness, PrecompileWitnessError};
 
 use crate::Word;
@@ -43,30 +43,6 @@ pub const MAX_PRECOMPILE_ROOTS: usize = 1 << 12;
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
     Node::and(root, statement).digest()
-}
-
-/// Small helper for tests and trace plumbing that need to advance a deferred root incrementally.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct DeferredRootTracker {
-    root: DeferredRoot,
-}
-
-impl DeferredRootTracker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn from_root(root: DeferredRoot) -> Self {
-        Self { root }
-    }
-
-    pub fn root(&self) -> DeferredRoot {
-        self.root
-    }
-
-    pub fn record_statement(&mut self, statement: Digest) {
-        self.root = fold_deferred_root(self.root, statement);
-    }
 }
 
 // ERROR

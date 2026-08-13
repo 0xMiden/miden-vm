@@ -41,7 +41,7 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
 - **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
 - **Fast processor execution mode.** In addition to the trace-generating processor used for proof generation, Miden VM includes a fast processor that can execute programs at up to 320 MHz, enabling among other things rapid program testing and debugging.
-- **Precompiles.** Miden VM supports [precompiles](./docs/src/design/stack/precompiles.md), allowing programs to defer expensive computations to the host while still producing auditable evidence inside the STARK proof. This enables efficient verification of operations like signature schemes and hash functions that would otherwise be prohibitively expensive to execute natively in the VM.
+- **Precompiles.** Miden VM supports [precompiles](./docs/src/design/stack/precompiles.md), allowing programs to defer expensive computations to the host. VM verification authenticates the outstanding deferred root; an aggregate precompile proof can settle compatible deferred executions later.
 
 #### Planned features
 

@@ -18,9 +18,9 @@ to `TRUE` proves every claim it transitively references. The framework (`miden_c
 owns the data model, the root commitment, and the wire format; individual *precompiles* plug in the
 meaning of the nodes.
 
-> **Status.** This page describes the current proof-bound precompile model: execution produces an
-> `ExecutionWitness`, and VM proving produces an `ExecutionProof` in either the `Deferred` or
-> `Complete` lifecycle state. See [Status and scope](#status-and-scope).
+> **Status.** VM proving produces an `ExecutionProof` in either the `Deferred` or `Complete`
+> lifecycle state. A deferred proof carries passive deferred wire, not a hydrated witness. See
+> [Status and scope](#status-and-scope).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
@@ -45,21 +45,9 @@ its eventual constraint implementation. This direction is developed in GitHub di
 
 ## Precompile proof shape
 
-The VM STARK proves execution and authenticates the deferred root accumulated for precompile
-claims; it does not prove those claims itself. `VmProof` carries that authenticated root alongside
-the VM STARK. `TRUE_DIGEST` means there is no remaining obligation, so VM-only proving returns
-`ExecutionProof::Complete` without a precompile proof. A non-`TRUE_DIGEST` root produces
-`ExecutionProof::Deferred`, which retains the matching singleton `PrecompileWitness` for later
-proving. `ExecutionProof::complete` attaches a structurally compatible `PrecompileProof`;
-`Verifier::verify` performs structural and cryptographic verification. A successful deferred
-outcome returns the exact authenticated root through `outstanding_precompile_root()`. Callers that
-require settlement inspect `VerificationOutcome::is_complete()`, not the unverified enum shape.
-
-`DeferredStateWire` remains low-level deferred-state infrastructure. A deferred execution proof
-serializes its retained witness using that representation, but the wire is not itself a proof
-variant or cryptographic evidence. Encoding preserves representation and accepts cross-artifact
-inconsistency. Deferred wire materialization remains fallible; only full verification establishes
-proof validity.
+The VM STARK authenticates one deferred root but does not prove its committed claims. See the
+[deferred-proof semantics](./semantics.md) for passive transport, hydration, aggregate precompile
+proofs, completion, and verification.
 
 ## The model
 
@@ -213,11 +201,9 @@ implicit root and evaluates that root directly. The digest is structural: even `
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-For low-level wire validation, the deferred check collapses to a single fixed point: rehydrate the
-wire and evaluate its implicit root to `TRUE`. When a deferred execution proof is decoded, this
-context-aware rehydration checks its retained witness structure; the witness is not cryptographic
-evidence. `Verifier::verify` separately verifies the VM STARK and, for a complete proof, any
-precompile STARK.
+Hydration checks one fixed point: reconstruct the wire's implicit root and evaluate it to `TRUE`
+under the bundled precompiles. This prepares prover input; it is separate from execution-proof
+decoding and from STARK verification.
 
 ## Wire format and verification
 
@@ -235,18 +221,12 @@ The low-level deferred-state transport format is `DeferredStateWire`, not the in
 `to_wire` emits a deterministic child-first DFS of the root-reachable closure, so unreferenced
 orphans are dropped.
 
-Deferred decoding is context-aware. `DeferredState::from_wire(registry, wire)`,
-`PrecompileWitness::from_bytes(bytes, registry)`, and
-`ExecutionProof::read_from_bytes(bytes, registry)` require a caller-supplied trusted registry.
-State and witness hydration and execution-proof decoding use the fixed `MAX_DEFERRED_ELEMENTS`
-ceiling. For bundled precompiles,
-callers normally use `miden_vm::read_execution_proof_from_bytes`, which installs
-`miden_precompiles::registry()`. Custom-precompile callers use the low-level context-aware decoder
-directly. `PrecompileRegistry::new()` is only an empty low-level registry and cannot decode concrete
-precompile tags. `Prover` and `Verifier` do not support caller-selected registries.
+`ExecutionProof::to_bytes` is infallible, and `ExecutionProof::read_from_bytes` decodes canonical
+transport without a registry or hydration. When precompile proving is required, the caller passes
+the deferred proof's wire to `miden_vm::precompile_witness_from_wire`; this explicit façade step uses
+the bundled registry and validates the wire's implicit root.
 
-`DeferredState::from_wire` runs as a structural decode, a canonicality check, and a root evaluation,
-validating the wire's own implicit root.
+Hydration performs structural decoding, a canonicality check, and root evaluation:
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
    entry (translating structural child indices back to digests), decode its tag, check that the entry
@@ -260,17 +240,15 @@ validating the wire's own implicit root.
    the wire nodes.
 
 A wire that yields any integrity error is rejected; a faithful one reconstructs a state whose root is
-the wire's implicit root and whose canonical wire output is byte-for-byte identical to the input
-wire.
+the wire's implicit root and whose canonical wire output is byte-for-byte identical to the input.
 
 ## Status and scope
 
-This framework is now the proof-bound precompile substrate. The VM retains its host-side
-`DeferredState` in `ExecutionWitness`, and `log_deferred` advances its root by folding registered
-statements with `Tag::AND`. The `miden-precompiles` crate supplies the concrete implementations used
-by core-library facades and standard proving. See the
-[API contract](./semantics.md#proof-obligations-and-composition) for independent proving, merge and
-completion invariants, and completeness checks.
+This framework is the proof-bound precompile substrate. Execution accumulates host-side
+`DeferredState`; `log_deferred` advances its root by folding registered statements with `Tag::AND`.
+The `miden-precompiles` crate supplies the bundled implementations used by core-library facades and
+standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
+transport, hydration, merge, completion, and verification lifecycle.
 
 More generic DAG resource accounting remains a follow-up; the external STARK that verifies a
 committed DAG, the **Precompile VM**, is described in GitHub discussion #3005.

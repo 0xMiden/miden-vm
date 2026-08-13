@@ -15,20 +15,10 @@ Stack inputs are in push order (the last value is on top), while stack outputs a
 first value is on top).
 
 `Verifier::verify` returns a `VerificationOutcome`. Its `security_level()` is the minimum security
-level among the VM and precompile STARK components actually verified. Deferred verification exposes
-the authenticated obligation through `outstanding_precompile_root()` and reports
-`is_complete() == false`; complete verification returns no outstanding root. The components may use
-different hash functions. Each encoded STARK and its decoder preallocation are capped at a fixed
-64 MiB ceiling.
-
-
-Encoding and decoding preserve the transport representation but do not establish proof validity.
-Malformed cross-artifact values may serialize and decode; call `Verifier::verify` to validate all
-structure and supplied STARKs.
-
-The fixed STARK ceiling applies independently to each inner STARK. It does not bound the outer
-execution-proof bytes, deferred witness, file, or network payload. Root counts and hydrated
-deferred state have separate fixed ceilings.
+level among the STARK components actually verified. Deferred verification exposes the authenticated
+obligation through `outstanding_precompile_root()`; complete verification returns no outstanding
+root. See the [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for artifact,
+transport, and fixed-limit policy.
 
 ## Crate features
 Miden verifier can be compiled with the following features:

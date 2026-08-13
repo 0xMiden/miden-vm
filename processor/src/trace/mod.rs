@@ -49,9 +49,9 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Complete in-memory witness produced by a traced program execution.
 ///
-/// This processor-constructed aggregate checks that its optional singleton precompile witness
-/// matches the root authenticated by the VM witness. It may contain private and potentially large
-/// prover data.
+/// The processor constructs its VM witness and optional singleton precompile witness from the same
+/// execution output, so they retain the same deferred root. The aggregate may contain private and
+/// potentially large prover data.
 #[derive(Debug)]
 pub struct ExecutionWitness {
     vm: VmWitness,
@@ -92,11 +92,6 @@ impl ExecutionWitness {
         self.vm.claim()
     }
 
-    /// Returns the authenticated root of the deferred precompile state.
-    pub fn precompile_root(&self) -> Digest {
-        self.vm.precompile_root()
-    }
-
     /// Performs the low-level split used by prover and trace-building plumbing.
     #[doc(hidden)]
     pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
@@ -135,11 +130,6 @@ impl VmWitness {
     #[cfg(feature = "std")]
     pub(crate) fn take_hasher_replay(&mut self) -> trace_state::HasherRequestReplay {
         core::mem::take(&mut self.trace.hasher_for_chiplet)
-    }
-
-    /// Returns the authenticated root of the deferred precompile state.
-    pub fn precompile_root(&self) -> Digest {
-        self.precompile_root
     }
 
     /// Returns the replay data captured during execution.
