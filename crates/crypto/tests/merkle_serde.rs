@@ -31,7 +31,8 @@ fn merkle_path_serde_validates_length() {
         "nodes": vec![Word::default(); u8::MAX as usize + 1],
     }))
     .unwrap();
-    assert!(serde_json::from_slice::<MerklePath>(&encoded).is_err());
+    let error = serde_json::from_slice::<MerklePath>(&encoded).unwrap_err();
+    assert!(error.to_string().contains("sequence contains more than 255 elements"));
 }
 
 #[test]
@@ -61,5 +62,6 @@ fn sparse_merkle_path_serde_validates_parts() {
         "nodes": vec![Word::default(); 65],
     }))
     .unwrap();
-    assert!(serde_json::from_slice::<SparseMerklePath>(&encoded).is_err());
+    let error = serde_json::from_slice::<SparseMerklePath>(&encoded).unwrap_err();
+    assert!(error.to_string().contains("sequence contains more than 64 elements"));
 }

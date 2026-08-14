@@ -33,9 +33,27 @@ pub use sparse_path::SparseMerklePath;
 // SERDE HELPERS
 // ================================================================================================
 
-/// A sequence whose deserializer never allocates or materializes more than `MAX_LEN` elements.
+/// A sequence deserializer that caps its initial allocation and materialized element count at
+/// `MAX_LEN`.
 #[cfg(feature = "serde")]
 struct BoundedVec<T, const MAX_LEN: usize>(alloc::vec::Vec<T>);
+
+#[cfg(feature = "serde")]
+struct RejectExcessElement<const MAX_LEN: usize>;
+
+#[cfg(feature = "serde")]
+impl<'de, const MAX_LEN: usize> serde::de::DeserializeSeed<'de> for RejectExcessElement<MAX_LEN> {
+    type Value = ();
+
+    fn deserialize<D>(self, _deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Err(serde::de::Error::custom(format_args!(
+            "sequence contains more than {MAX_LEN} elements"
+        )))
+    }
+}
 
 #[cfg(feature = "serde")]
 impl<'de, T, const MAX_LEN: usize> serde::Deserialize<'de> for BoundedVec<T, MAX_LEN>
@@ -74,11 +92,9 @@ where
                     }
                 }
 
-                // Probe for one excess element without deserializing it into `T`. If present,
-                // abort immediately rather than consuming the rest of an attacker-sized input.
-                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
-                    return Err(serde::de::Error::invalid_length(MAX_LEN + 1, &self));
-                }
+                // The seed reports an error as soon as `SeqAccess` observes another element. It
+                // does not deserialize the element, which may itself be attacker-sized.
+                let _ = seq.next_element_seed(RejectExcessElement::<MAX_LEN>)?;
 
                 Ok(BoundedVec(values))
             }
@@ -90,7 +106,6 @@ where
 
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
-    use alloc::rc::Rc;
     use core::cell::Cell;
 
     use serde::Deserialize;
@@ -98,35 +113,13 @@ mod serde_tests {
     use super::BoundedVec;
 
     #[test]
-    fn bounded_vec_stops_after_the_first_excess_element() {
-        struct CountingIter {
-            remaining: usize,
-            consumed: Rc<Cell<usize>>,
-        }
-
-        impl Iterator for CountingIter {
-            type Item = serde::de::value::U8Deserializer<serde::de::value::Error>;
-
-            fn next(&mut self) -> Option<Self::Item> {
-                if self.remaining == 0 {
-                    return None;
-                }
-
-                self.remaining -= 1;
-                self.consumed.set(self.consumed.get() + 1);
-                Some(serde::de::value::U8Deserializer::new(0))
-            }
-
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                (self.remaining, Some(self.remaining))
-            }
-        }
-
-        let consumed = Rc::new(Cell::new(0));
-        let iter = CountingIter {
-            remaining: 100,
-            consumed: Rc::clone(&consumed),
-        };
+    fn bounded_vec_caps_allocation_and_stops_after_the_first_excess_element() {
+        let consumed = Cell::new(0);
+        // Model an attacker-controlled length prefix without materializing the input.
+        let iter = (0..usize::MAX).map(|_| {
+            consumed.set(consumed.get() + 1);
+            serde::de::value::U8Deserializer::<serde::de::value::Error>::new(0)
+        });
         let deserializer =
             serde::de::value::SeqDeserializer::<_, serde::de::value::Error>::new(iter);
 
@@ -134,6 +127,22 @@ mod serde_tests {
 
         assert!(result.is_err());
         assert_eq!(consumed.get(), 3);
+    }
+
+    #[test]
+    fn bounded_vec_does_not_deserialize_the_first_excess_element() {
+        // The third value is deliberately malformed. Once the length limit is reached, its
+        // contents must not be visited.
+        let error = match serde_json::from_str::<BoundedVec<u8, 2>>("[0, 0, ?]") {
+            Ok(_) => panic!("an excess element must be rejected"),
+            Err(error) => error,
+        };
+
+        let message = format!("{error}");
+        assert!(
+            message.contains("sequence contains more than 2 elements"),
+            "unexpected error: {message}"
+        );
     }
 }
 

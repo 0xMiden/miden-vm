@@ -28,10 +28,8 @@ pub struct NodeIndex {
     position: u64,
 }
 
-/// A manual impl (instead of a derive) so serde deserialization enforces the same invariants as
-/// [`NodeIndex::new`] (depth at most 64, position within the depth's width), matching the
-/// binary [`Deserializable`] impl below. Mirrors the field layout the `Serialize` derive
-/// produces.
+/// Deserializes through [`NodeIndex::new`] so serde and binary inputs enforce the same depth and
+/// position bounds. The helper preserves the field layout produced by `Serialize`.
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for NodeIndex {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

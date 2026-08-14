@@ -287,11 +287,8 @@ impl Deserializable for SparseMerklePath {
     }
 }
 
-/// A manual impl (instead of a derive) for the same reason as the [`Deserializable`] impl above:
-/// every deserialization route must bound the node sequence while reading it and then go through
-/// [`SparseMerklePath::from_parts`]. Otherwise, untrusted input could allocate an unbounded node
-/// vector or construct a path whose mask is inconsistent with its node count and panics during
-/// iteration. Mirrors the field layout the `Serialize` derive produces.
+/// Bounds the node sequence while reading it, then validates the mask and length through
+/// [`SparseMerklePath::from_parts`]. The helper preserves the field layout produced by `Serialize`.
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for SparseMerklePath {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -589,6 +586,30 @@ mod tests {
         bytes.write_u64(1u64 << 63);
         Word::from([ONE, ONE, ONE, ONE]).write_into(&mut bytes);
         assert!(SparseMerklePath::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn binary_serialization_roundtrips_valid_boundary_paths() {
+        use crate::utils::{Deserializable, Serializable};
+
+        let node = Word::from([ONE, ONE, ONE, ONE]);
+        for (depth, empty_nodes_mask) in [
+            (0u8, 0u64),
+            (1, 0),
+            (1, 1),
+            (64, 0),
+            (64, 1u64 << 63),
+            (64, 0xaaaa_aaaa_aaaa_aaaa),
+            (64, u64::MAX),
+        ] {
+            let node_count = depth as usize - empty_nodes_mask.count_ones() as usize;
+            let path =
+                SparseMerklePath::from_parts(empty_nodes_mask, vec![node; node_count]).unwrap();
+
+            let decoded = SparseMerklePath::read_from_bytes(&path.to_bytes()).unwrap();
+            assert_eq!(decoded, path);
+            assert_eq!(decoded.depth(), depth);
+        }
     }
 
     fn make_smt(pair_count: u64) -> Smt {
