@@ -127,8 +127,14 @@ where
     ///    `Self::bitreversed_powers(psi, n)` for this purpose, but this trait implementation is not
     ///    const. For the performance benefit you want a precompiled array, which you can get if you
     ///    can get by implementing the same method and marking it "const".
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` is empty, its length is not a power of two, or `psi_rev` is too short for
+    /// the transform.
     fn fft(a: &mut [Self], psi_rev: &[Self]) {
         let n = a.len();
+        assert_supported_transform_size(n, psi_rev.len());
         let mut t = n;
         let mut m = 1;
         while m < n {
@@ -163,8 +169,14 @@ where
     ///    trait implementation is not const. For the performance benefit you want a precompiled
     ///    array, which you can get if you can get by implementing the same methods and marking them
     ///    "const".
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` is empty, its length is not a power of two, or `psi_inv_rev` is too short for
+    /// the transform.
     fn ifft(a: &mut [Self], psi_inv_rev: &[Self], ninv: Self) {
         let n = a.len();
+        assert_supported_transform_size(n, psi_inv_rev.len());
         let mut t = 1;
         let mut m = n;
         while m > 1 {
@@ -189,7 +201,15 @@ where
         }
     }
 
+    /// Splits a transform into the transforms of its even- and odd-degree coefficients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` has fewer than two elements, its length is not a power of two, or
+    /// `psi_inv_rev` is too short for the transform.
     fn split_fft(f: &[Self], psi_inv_rev: &[Self]) -> (Vec<Self>, Vec<Self>) {
+        assert!(f.len() >= 2, "split_fft requires at least two coefficients, got {}", f.len());
+        assert_supported_transform_size(f.len(), psi_inv_rev.len());
         let n_over_2 = f.len() / 2;
         let mut f0 = vec![Self::zero(); n_over_2];
         let mut f1 = vec![Self::zero(); n_over_2];
@@ -203,10 +223,18 @@ where
         (f0, f1)
     }
 
+    /// Merges transforms of even- and odd-degree coefficients into one transform.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inputs have different lengths or their combined length is not a power of two
+    /// supported by `psi_rev`.
     fn merge_fft(f0: &[Self], f1: &[Self], psi_rev: &[Self]) -> Vec<Self> {
+        assert_eq!(f0.len(), f1.len(), "merge_fft operands must have equal coefficient counts");
         let n_over_2 = f0.len();
-        let n = 2 * n_over_2;
-        let mut f = vec![Self::zero(); n];
+        let output_len = n_over_2.checked_mul(2).expect("merge_fft output length overflow");
+        assert_supported_merge_size(output_len, psi_rev.len());
+        let mut f = vec![Self::zero(); output_len];
         for i in 0..n_over_2 {
             let two_i = i * 2;
             f[two_i] = f0[i] + psi_rev[n_over_2 + i] * f1[i];
@@ -249,31 +277,28 @@ impl CyclotomicFourier for Complex64 {
     }
 }
 
-/// True for the transform sizes the precomputed 512-entry tables support: a power of two at most
-/// 512. Sizes below 512 reuse the same tables because the first `n` entries of a bit-reversed
-/// power table for a larger order are exactly the bit-reversed table for order `n` (a property
-/// the tests pin).
-const fn is_supported_transform_size(n: usize) -> bool {
-    n.is_power_of_two() && n <= 512
+fn assert_supported_transform_size(n: usize, table_len: usize) {
+    assert!(
+        n.is_power_of_two() && n <= table_len,
+        "unsupported transform size n = {n}: must be a power of two at most the root-table length {table_len}"
+    );
+}
+
+fn assert_supported_merge_size(output_len: usize, table_len: usize) {
+    assert!(
+        output_len.is_power_of_two() && output_len <= table_len,
+        "unsupported merge output size {output_len}: must be a power of two at most the root-table length {table_len}"
+    );
 }
 
 impl FastFft for Polynomial<Complex64> {
     type Field = Complex64;
     fn fft_inplace(&mut self) {
-        let n = self.coefficients.len();
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
         Complex64::fft(&mut self.coefficients, &COMPLEX_BITREVERSED_POWERS);
     }
 
     fn ifft_inplace(&mut self) {
         let n = self.coefficients.len();
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
         let psi_inv_rev: Vec<Complex64> =
             COMPLEX_BITREVERSED_POWERS.iter().map(|c| Complex64::new(c.re, -c.im)).collect();
         let ninv = Complex64::new(1.0 / (n as f64), 0.0);
@@ -281,19 +306,6 @@ impl FastFft for Polynomial<Complex64> {
     }
 
     fn merge_fft(a: &Self, b: &Self) -> Self {
-        // Merging two n-halves yields a 2n-point transform and reads root-table entries up to
-        // index 2n - 1, so it is the OUTPUT size that must be supported.
-        let n = a.coefficients.len();
-        assert_eq!(
-            n,
-            b.coefficients.len(),
-            "merge_fft operands must have equal coefficient counts"
-        );
-        assert!(
-            is_supported_transform_size(2 * n),
-            "unsupported merge output size 2n = {}: must be a power of two at most 512",
-            2 * n
-        );
         Self {
             coefficients: Self::Field::merge_fft(
                 &a.coefficients,
@@ -304,12 +316,6 @@ impl FastFft for Polynomial<Complex64> {
     }
 
     fn split_fft(&self) -> (Self, Self) {
-        let n = self.coefficients.len();
-        assert!(n >= 2, "split_fft requires at least two coefficients, got {n}");
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
         let psi_inv_rev: Vec<Complex64> =
             COMPLEX_BITREVERSED_POWERS.iter().map(|c| Complex64::new(c.re, -c.im)).collect();
         let (a, b) = Self::Field::split_fft(&self.coefficients, &psi_inv_rev);
@@ -321,20 +327,12 @@ impl FastFft for Polynomial<FalconFelt> {
     type Field = FalconFelt;
 
     fn fft_inplace(&mut self) {
-        let n = self.coefficients.len();
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
         FalconFelt::fft(&mut self.coefficients, &FELT_BITREVERSED_POWERS);
     }
 
     fn ifft_inplace(&mut self) {
         let n = self.coefficients.len();
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
+        assert_supported_transform_size(n, FELT_BITREVERSED_POWERS_INVERSE.len());
         let ninv = match n {
             1 => FELT_NINV_1,
             2 => FELT_NINV_2,
@@ -352,19 +350,6 @@ impl FastFft for Polynomial<FalconFelt> {
     }
 
     fn merge_fft(a: &Self, b: &Self) -> Self {
-        // Merging two n-halves yields a 2n-point transform and reads root-table entries up to
-        // index 2n - 1, so it is the OUTPUT size that must be supported.
-        let n = a.coefficients.len();
-        assert_eq!(
-            n,
-            b.coefficients.len(),
-            "merge_fft operands must have equal coefficient counts"
-        );
-        assert!(
-            is_supported_transform_size(2 * n),
-            "unsupported merge output size 2n = {}: must be a power of two at most 512",
-            2 * n
-        );
         Self {
             coefficients: Self::Field::merge_fft(
                 &a.coefficients,
@@ -375,12 +360,6 @@ impl FastFft for Polynomial<FalconFelt> {
     }
 
     fn split_fft(&self) -> (Self, Self) {
-        let n = self.coefficients.len();
-        assert!(n >= 2, "split_fft requires at least two coefficients, got {n}");
-        assert!(
-            is_supported_transform_size(n),
-            "unsupported transform size n = {n}: must be a power of two at most 512"
-        );
         let (a, b) = Self::Field::split_fft(&self.coefficients, &FELT_BITREVERSED_POWERS_INVERSE);
         (Self { coefficients: a }, Self { coefficients: b })
     }
@@ -2089,27 +2068,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unsupported merge output size")]
-    fn complex_merge_fft_rejects_halves_that_would_overrun_the_root_tables() {
-        let half = random_complex_poly(512, 15);
-        let _ = Polynomial::<Complex64>::merge_fft(&half, &half.clone());
-    }
-
-    #[test]
     #[should_panic(expected = "equal coefficient counts")]
     fn merge_fft_rejects_unequal_halves() {
         // A longer right half would otherwise be silently truncated by the merge walk.
         let a = random_felt_poly(8, 16);
         let b = random_felt_poly(16, 17);
         let _ = Polynomial::<FalconFelt>::merge_fft(&a, &b);
-    }
-
-    #[test]
-    #[should_panic(expected = "equal coefficient counts")]
-    fn complex_merge_fft_rejects_unequal_halves() {
-        let a = random_complex_poly(8, 18);
-        let b = random_complex_poly(16, 19);
-        let _ = Polynomial::<Complex64>::merge_fft(&a, &b);
     }
 
     #[test]
@@ -2144,6 +2108,14 @@ mod tests {
     fn fft_rejects_non_power_of_two_sizes() {
         let mut f = Polynomial::new(vec![FalconFelt::new(1); 3]);
         f.fft_inplace();
+    }
+
+    #[test]
+    #[should_panic(expected = "root-table length 2")]
+    fn cyclotomic_fft_rejects_a_short_root_table() {
+        let mut values = [FalconFelt::new(1); 4];
+        let roots = [FalconFelt::new(1); 2];
+        FalconFelt::fft(&mut values, &roots);
     }
 
     #[test]

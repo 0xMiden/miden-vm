@@ -16,11 +16,7 @@ pub struct FalconFelt(u32);
 impl FalconFelt {
     /// Reduces an arbitrary signed value into its canonical representative modulo q.
     pub const fn new(value: i16) -> Self {
-        // Truncated remainder lands in (-q, q); adding q and reducing once more lands in [0, q)
-        // for every input, including negative multiples of q.
-        let reduced = value as i32 % MODULUS as i32;
-        let canonical_representative = ((reduced + MODULUS as i32) % MODULUS as i32) as u32;
-        FalconFelt(canonical_representative)
+        FalconFelt(value.rem_euclid(MODULUS) as u32)
     }
 
     /// Returns the canonical representative in [0, q).

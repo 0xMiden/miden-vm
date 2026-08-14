@@ -153,11 +153,7 @@ mod test {
         }
 
         fn new(hex: &str) -> Self {
-            assert!(hex.len().is_multiple_of(2));
-            let bytes = (0..hex.len())
-                .step_by(2)
-                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-                .collect();
+            let bytes = hex::decode(hex).expect("KAT randomness must be valid hexadecimal");
             Self { bytes, cursor: 0 }
         }
 
@@ -206,7 +202,7 @@ mod test {
         // silently weakening the test.
         let (x, ccs) = (0.3f64, 0.7f64);
         let z = (approx_exp(x, ccs) << 1) - 1;
-        let z_bytes: Vec<u8> = (0..8).map(|j| ((z >> (56 - 8 * j)) & 0xff) as u8).collect();
+        let z_bytes = z.to_be_bytes().to_vec();
         assert!(
             z_bytes.iter().all(|&b| b > 0x00 && b < 0xff),
             "test parameters must give interior comparison bytes: {z_bytes:?}"

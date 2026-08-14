@@ -383,8 +383,12 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     ///
     /// Both coefficient vectors must have the same nonzero length `n`, and `n` must stay even
     /// under repeated halving until it reaches the recursion's base case (`n <= 8`); any power of
-    /// two qualifies, and Falcon only multiplies power-of-two lengths. Unsupported shapes panic:
-    /// an odd split truncates a cross term and overruns the output buffer.
+    /// two qualifies, and Falcon only multiplies power-of-two lengths.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient vectors have different lengths, are empty, or have a length that
+    /// reaches an odd value above eight while being repeatedly halved.
     pub fn karatsuba(&self, other: &Self) -> Self {
         assert_eq!(
             self.coefficients.len(),
@@ -698,6 +702,8 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 #[cfg(test)]
 mod tests {
+    use proptest::{collection::vec, prelude::*};
+
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
 
@@ -737,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn karatsuba_matches_schoolbook_for_every_accepted_shape() {
+    fn karatsuba_agrees_with_mul_for_representative_admissible_shapes() {
         // Powers of two (the live Falcon shapes) plus the accepted non-power-of-two lengths,
         // which halve evenly to the base case and would otherwise have no output coverage.
         for n in [2i64, 4, 8, 16, 32, 10, 20, 24] {
@@ -745,6 +751,20 @@ mod tests {
             let g = Polynomial::new((0..n).map(|i| 5 * i - 11).collect());
             let schoolbook = f.clone() * g.clone();
             assert_eq!(f.karatsuba(&g), schoolbook, "karatsuba disagrees at n = {n}");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn karatsuba_agrees_with_mul_for_admissible_operands(
+            (left, right) in (1usize..=8, 0u32..=6).prop_flat_map(|(base, doublings)| {
+                let len = base << doublings;
+                (vec(-1_000i64..=1_000, len), vec(-1_000i64..=1_000, len))
+            }),
+        ) {
+            let left = Polynomial::new(left);
+            let right = Polynomial::new(right);
+            prop_assert_eq!(left.karatsuba(&right), left * right);
         }
     }
 
