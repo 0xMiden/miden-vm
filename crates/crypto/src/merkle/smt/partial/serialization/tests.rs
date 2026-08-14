@@ -58,6 +58,15 @@ fn unique_nodes_roundtrips() {
 }
 
 #[test]
+fn unique_nodes_rejects_mismatched_leaf_position() {
+    let leaf = SmtLeaf::new_empty(LeafIndex::new_max_depth(7));
+    let mut value = UniqueNodes::empty();
+    value.leaves.insert(8, leaf);
+
+    assert!(UniqueNodes::read_from_bytes(&value.to_bytes()).is_err());
+}
+
+#[test]
 fn missing_entries_return_canonical_empty_hashes() {
     let value = UniqueNodes::empty();
     let leaf_position = 42;

@@ -422,18 +422,13 @@ impl PartialSmt {
     /// - [`DeserializationError::InvalidValue`] if a leaf's map key does not match its embedded
     ///   index, or the reconstructed tree fails validation.
     pub fn from_unique_nodes(unique_nodes: UniqueNodes) -> Result<Self, DeserializationError> {
-        for (&position, leaf) in &unique_nodes.leaves {
-            let node_index = NodeIndex::new(SMT_DEPTH, position)
-                .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-            if node_index != leaf.index().index {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "Node index {position} did not match the embedded leaf index {}",
-                    leaf.index().index
-                )));
-            }
-        }
+        unique_nodes.validate()?;
 
         let mut smt = Self::new(unique_nodes.root);
+
+        // Reconstruction starts from every known leaf position. Stored internal nodes are also
+        // starting points because an exclusion proof may contain no leaf below them. Group these
+        // positions by depth so each layer can be rebuilt before its parent layer.
         let mut active_by_depth = BTreeMap::<u8, BTreeSet<NodeIndex>>::new();
 
         for &position in unique_nodes.leaves.keys().chain(unique_nodes.value_only_leaves.keys()) {
@@ -445,13 +440,19 @@ impl PartialSmt {
             active_by_depth.entry(index.depth()).or_default().insert(index);
         }
 
+        // Rebuild the tree one layer at a time, from the deepest starting positions to the root.
         for child_depth in (1..=SMT_DEPTH).rev() {
             let Some(active_nodes) = active_by_depth.remove(&child_depth) else {
                 continue;
             };
+
+            // Every active node requires its parent. The set removes shared parents before the
+            // next layer is built.
             let parents = active_nodes.into_iter().map(NodeIndex::parent).collect::<BTreeSet<_>>();
 
             for parent in &parents {
+                // A child is either a leaf, a node rebuilt on the prior pass, a stored sparse node,
+                // or an omitted empty subtree root. The lookup helpers handle the last two cases.
                 let [left, right] = [parent.left_child(), parent.right_child()].map(|child| {
                     if child.depth() == SMT_DEPTH {
                         unique_nodes.get_leaf_hash(child.position())
@@ -465,6 +466,7 @@ impl PartialSmt {
             }
 
             if child_depth > 1 {
+                // The parents become the active nodes for the next layer toward the root.
                 active_by_depth.entry(child_depth - 1).or_default().extend(parents);
             }
         }

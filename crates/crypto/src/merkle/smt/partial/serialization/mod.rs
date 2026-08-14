@@ -32,8 +32,8 @@ use crate::merkle::{
 ///
 /// # Serialization
 ///
-/// Deserialization validates node indices. The client is responsible for checking that leaf map
-/// keys agree with the indices embedded in their values.
+/// Deserialization validates node indices and checks each leaf map key against the index embedded
+/// in its value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniqueNodes {
     /// The expected root of the tree after reconstruction.
@@ -85,6 +85,20 @@ impl UniqueNodes {
             .copied()
             .unwrap_or_else(|| *EmptySubtreeRoots::entry(SMT_DEPTH, index.depth()))
     }
+
+    /// Checks that each leaf is stored under its embedded tree position.
+    pub(super) fn validate(&self) -> Result<(), DeserializationError> {
+        for (&position, leaf) in &self.leaves {
+            if position != leaf.index().position() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Node index {position} did not match the embedded leaf index {}",
+                    leaf.index().position()
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for UniqueNodes {
@@ -98,6 +112,8 @@ impl Serializable for UniqueNodes {
         // First we write the expected root into the buffer.
         self.root.write_into(target);
 
+        // `NodeIndex` sorts first by depth and then by position. Since `nodes` is a `BTreeMap`, all
+        // nodes at the same depth are next to each other and can be written as one level.
         let mut levels = self.nodes.iter().peekable();
         let level_count = self
             .nodes
@@ -112,10 +128,10 @@ impl Serializable for UniqueNodes {
         while let Some((index, _)) = levels.peek() {
             let depth = index.depth();
             target.write(depth);
-            let level_count =
+            let level_node_count =
                 levels.clone().take_while(|(index, _)| index.depth() == depth).count();
-            target.write(level_count as u64);
-            for (index, value) in levels.by_ref().take(level_count) {
+            target.write(level_node_count as u64);
+            for (index, value) in levels.by_ref().take(level_node_count) {
                 target.write(index.position());
                 target.write(value);
             }
@@ -176,6 +192,8 @@ impl Deserializable for UniqueNodes {
             value_only_leaves.insert(position, value);
         }
 
-        Ok(Self { root, nodes, leaves, value_only_leaves })
+        let unique_nodes = Self { root, nodes, leaves, value_only_leaves };
+        unique_nodes.validate()?;
+        Ok(unique_nodes)
     }
 }
