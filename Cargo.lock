@@ -2275,6 +2275,7 @@ dependencies = [
  "rocksdb",
  "seq-macro",
  "serde",
+ "serde_json",
  "sha2",
  "sha3",
  "shake",

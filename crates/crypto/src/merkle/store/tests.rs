@@ -712,6 +712,29 @@ fn node_path_should_be_truncated_by_midtier_insert() {
 // ================================================================================================
 
 #[test]
+fn get_leaf_depth_depth_0_reports_bare_leaf_roots_as_not_in_store() {
+    // The store tracks only internal nodes, so the depth-zero empty root (a bare leaf) is
+    // reported as not in the store; this early return happens before any path computation.
+    let store = MerkleStore::new();
+    let root = EmptySubtreeRoots::empty_hashes(0)[0];
+    assert!(matches!(
+        store.get_leaf_depth(root, 0, 0),
+        Err(MerkleError::RootNotInStore(r)) if r == root
+    ));
+}
+
+#[test]
+fn get_leaf_depth_depth_0_does_not_overflow_the_path_shift() {
+    // Regression: computing the path used to shift by the full 64-bit width for a depth-zero
+    // tree, which panics in debug builds and relies on target-dependent shift masking in
+    // release builds. Querying an internal root (present in the pre-populated store) at depth
+    // zero reaches the path computation and must report that no leaf fits within depth zero.
+    let store = MerkleStore::new();
+    let root = EmptySubtreeRoots::empty_hashes(1)[0];
+    assert!(matches!(store.get_leaf_depth(root, 0, 0), Err(MerkleError::DepthTooBig(1))));
+}
+
+#[test]
 fn get_leaf_depth_works_depth_64() {
     let mut store = MerkleStore::new();
     let mut root: Word = EmptySubtreeRoots::empty_hashes(64)[0];

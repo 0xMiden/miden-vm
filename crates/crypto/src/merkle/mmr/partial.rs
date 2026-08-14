@@ -329,7 +329,7 @@ impl PartialMmr {
             let mut track_left = self.tracked_leaves.contains(&prev_last_pos);
 
             let mut right = leaf;
-            let mut right_idx = self.forest.rightmost_in_order_index();
+            let mut right_idx = self.forest.rightmost_in_order_index_unchecked();
 
             for _ in 0..num_merges {
                 let left = self.peaks.pop().expect("Missing peak");
@@ -566,7 +566,7 @@ impl PartialMmr {
 
         if !trees_to_merge.is_empty() {
             // starts at the smallest peak and follows the merged peaks
-            let mut peak_idx = self.forest.root_in_order_index();
+            let mut peak_idx = self.forest.root_in_order_index_unchecked();
 
             // match order of the update data while applying it
             self.peaks.reverse();
@@ -1384,13 +1384,10 @@ mod tests {
         let result = PartialMmr::from_parts(peaks.clone(), invalid_nodes, BTreeSet::new());
         assert!(result.is_err());
 
-        // Invalid case: index 0 (which is never valid for InOrderIndex)
-        let mut nodes_with_zero = BTreeMap::new();
-        // Create an InOrderIndex with value 0 via deserialization
-        let zero_idx = InOrderIndex::read_from_bytes(&0usize.to_bytes()).unwrap();
-        nodes_with_zero.insert(zero_idx, int_to_node(0));
-        let result = PartialMmr::from_parts(peaks.clone(), nodes_with_zero, BTreeSet::new());
-        assert!(result.is_err());
+        // Invalid case: index 0 (which is never valid for InOrderIndex). Deserialization used to
+        // be the only way to construct it and is now rejected at the source, so the invalid value
+        // can no longer reach `from_parts` at all.
+        assert!(InOrderIndex::read_from_bytes(&0usize.to_bytes()).is_err());
 
         // Invalid case: large even index (internal node) beyond forest bounds
         let mut nodes_with_large_even = BTreeMap::new();
