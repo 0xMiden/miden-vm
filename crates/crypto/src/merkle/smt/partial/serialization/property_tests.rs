@@ -1,15 +1,15 @@
 #![cfg(test)]
 //! Contains the property tests for the new serialization mechanism for the `PartialSmt` type.
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_field::{Felt, Word};
 use miden_serde_utils::{Deserializable, Serializable};
 use proptest::prelude::*;
 
-use crate::{
-    Map,
-    merkle::smt::{LeafIndex, NodeValue, SmtLeaf, UniqueNodes},
+use crate::merkle::{
+    NodeIndex,
+    smt::{LeafIndex, SmtLeaf, UniqueNodes},
 };
 // GENERATORS
 // ================================================================================================
@@ -24,53 +24,40 @@ pub fn arbitrary_valid_word() -> impl Strategy<Value = Word> {
     prop::array::uniform4(arbitrary_valid_felt()).prop_map(Word::new)
 }
 
-impl Arbitrary for NodeValue {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![
-            Just(NodeValue::EmptySubtreeRoot),
-            arbitrary_valid_word().prop_map(NodeValue::Present)
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
 /// Generates an arbitrary node for the given `level` in the tree, ensuring that the index is in
 /// bounds.
-fn arbitrary_node_for_level(level: u8) -> impl Strategy<Value = (u64, NodeValue)> + Clone {
+fn arbitrary_node_for_level(level: u8) -> impl Strategy<Value = (NodeIndex, Word)> + Clone {
     let limit = 2u64.pow(level as u32);
 
-    (0..limit).prop_flat_map(|i| (Just(i), any::<NodeValue>())).prop_filter_map(
-        "Invalid node index for level",
-        move |(i, v)| {
-            if i < 2u64.pow(level as u32) { Some((i, v)) } else { None }
-        },
-    )
+    (0..limit)
+        .prop_flat_map(move |i| (Just(i), arbitrary_valid_word()))
+        .prop_filter_map("Invalid node index for level", move |(i, v)| {
+            if i < 2u64.pow(level as u32) {
+                Some((NodeIndex::new(level, i).unwrap(), v))
+            } else {
+                None
+            }
+        })
 }
 
 /// Generates a set of arbitrary nodes for the given `level` in the tree, ensuring that the indices
 /// are in bounds.
-fn arbitrary_nodes_for_level(level: u8) -> impl Strategy<Value = Vec<(u64, NodeValue)>> + Clone {
+fn arbitrary_nodes_for_level(level: u8) -> impl Strategy<Value = Vec<(NodeIndex, Word)>> + Clone {
     prop::collection::vec(arbitrary_node_for_level(level), 0..=100)
 }
 
 /// Generates a set of arbitrary nodes for a random depth.
-fn arbitrary_nodes_for_depth(
-    level: u8,
-) -> impl Strategy<Value = (u8, Vec<(u64, NodeValue)>)> + Clone {
-    (Just(level), arbitrary_nodes_for_level(level))
+fn arbitrary_nodes_for_depth(level: u8) -> impl Strategy<Value = Vec<(NodeIndex, Word)>> + Clone {
+    arbitrary_nodes_for_level(level)
 }
 
 /// Generates an arbitrary set of nodes.
-fn arbitrary_nodes() -> impl Strategy<Value = Map<u8, Vec<(u64, NodeValue)>>> {
+fn arbitrary_nodes() -> impl Strategy<Value = BTreeMap<NodeIndex, Word>> {
     prop::collection::vec(1u8..64, 0..=1000)
         .prop_flat_map(|depths| {
             depths.into_iter().map(arbitrary_nodes_for_depth).collect::<Vec<_>>()
         })
-        .prop_map(|nodes| nodes.into_iter().collect::<Map<_, _>>())
+        .prop_map(|nodes| nodes.into_iter().flatten().collect())
 }
 
 /// Generates a leaf with a single, arbitrary entry.
@@ -112,7 +99,7 @@ fn arbitrary_leaf() -> impl Strategy<Value = SmtLeaf> {
 }
 
 /// Generates an arbitrary number of leaves.
-pub fn arbitrary_leaves() -> impl Strategy<Value = Vec<(u64, SmtLeaf)>> {
+pub fn arbitrary_leaves() -> impl Strategy<Value = BTreeMap<u64, SmtLeaf>> {
     prop::collection::vec(arbitrary_leaf(), 0..100).prop_map(|leaves| {
         leaves
             .into_iter()
@@ -120,13 +107,14 @@ pub fn arbitrary_leaves() -> impl Strategy<Value = Vec<(u64, SmtLeaf)>> {
                 let index = l.index().position();
                 (index, l)
             })
-            .collect::<Vec<_>>()
+            .collect()
     })
 }
 
 /// Generates arbitrary value-only leaves.
-pub fn arbitrary_value_only_leaves() -> impl Strategy<Value = Vec<(u64, Word)>> {
+pub fn arbitrary_value_only_leaves() -> impl Strategy<Value = BTreeMap<u64, Word>> {
     prop::collection::vec((any::<u64>(), arbitrary_valid_word()), 0..100)
+        .prop_map(|entries| entries.into_iter().collect())
 }
 
 // UNIQUE NODES TESTS
@@ -145,23 +133,6 @@ proptest! {
         let value = UniqueNodes { root, nodes, leaves, value_only_leaves };
         let serialized = value.to_bytes();
         let result = UniqueNodes::read_from_bytes(serialized.as_slice());
-
-        prop_assert_eq!(result, Ok(value));
-    }
-}
-
-// NODE VALUE TESTS
-// ================================================================================================
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100_000))]
-
-    #[test]
-    fn node_value_serialization_always_roundtrips(
-        value in any::<NodeValue>()
-    ) {
-        let serialized = value.to_bytes();
-        let result = NodeValue::read_from_bytes(serialized.as_slice());
 
         prop_assert_eq!(result, Ok(value));
     }

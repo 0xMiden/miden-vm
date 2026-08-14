@@ -53,7 +53,7 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-pub use partial::{NodeValue, PartialSmt, UniqueNodes};
+pub use partial::{PartialSmt, UniqueNodes};
 
 mod forest;
 pub use forest::SmtForest;
