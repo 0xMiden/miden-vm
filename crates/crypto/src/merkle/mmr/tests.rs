@@ -355,6 +355,12 @@ fn test_forest_to_root_index() {
 }
 
 #[test]
+#[should_panic(expected = "forest must not be empty")]
+fn test_forest_to_root_index_panics_for_empty_forest() {
+    Forest::empty().root_in_order_index();
+}
+
+#[test]
 fn test_forest_to_rightmost_index() {
     fn idx(pos: usize) -> InOrderIndex {
         InOrderIndex::new(pos.try_into().unwrap())
@@ -382,6 +388,12 @@ fn test_forest_to_rightmost_index() {
     assert_eq!(Forest::new(0b1101).unwrap().rightmost_in_order_index(), idx(25));
     assert_eq!(Forest::new(0b1110).unwrap().rightmost_in_order_index(), idx(27));
     assert_eq!(Forest::new(0b1111).unwrap().rightmost_in_order_index(), idx(29));
+}
+
+#[test]
+#[should_panic(expected = "forest must not be empty")]
+fn test_forest_to_rightmost_index_panics_for_empty_forest() {
+    Forest::empty().rightmost_in_order_index();
 }
 
 #[test]
