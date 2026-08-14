@@ -474,3 +474,36 @@ path = "lib.masm"
 
     assert!(format!("{error}").contains("duplicate"), "{error}");
 }
+
+/// `Project::load` canonicalizes the manifest before handing it to the source manager, which on
+/// Windows produces a verbatim `\?\C:\...` path. Reading that back with `Uri::path()` yields `\`,
+/// which does not exist, so the manifest path used to be dropped and target paths were then
+/// resolved against the process working directory instead of the project directory.
+#[test]
+fn manifest_path_survives_loading_from_disk() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[package]
+name = "probe"
+version = "0.1.0"
+
+[lib]
+namespace = "probe::lib"
+path = "mod.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(root.join("mod.masm"), "export.noop\n    nop\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let project = Project::load(root, context.source_manager.as_ref()).unwrap();
+
+    let manifest_path = project.manifest_path().expect("manifest path should be recorded");
+    assert_eq!(
+        manifest_path,
+        root.join("miden-project.toml").canonicalize().unwrap(),
+        "the recorded manifest path should be the canonicalized manifest"
+    );
+}

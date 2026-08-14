@@ -298,12 +298,16 @@ impl Package {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Box<Self>, Report> {
-        let manifest_path = Path::new(source.uri().path());
-        let manifest_path = if manifest_path.try_exists().is_ok_and(|exists| exists) {
-            Some(manifest_path.to_path_buf().into_boxed_path())
-        } else {
-            None
-        };
+        // `Uri::path()` returns the URI's path component, which is not a usable filesystem path for
+        // every form a source file URI can take. A canonicalized manifest on Windows is a verbatim
+        // `\\?\C:\...` path, whose prefix parses as an authority and leaves a path component of
+        // `\\`. `Uri::to_path()` handles those forms, so use it to avoid silently dropping the
+        // manifest path.
+        let manifest_path = source
+            .uri()
+            .to_path()
+            .filter(|path| path.try_exists().is_ok_and(|exists| exists))
+            .map(std::path::PathBuf::into_boxed_path);
 
         // Parse the manifest into an AST for further processing
         let package_ast = ast::ProjectFile::parse(source.clone())?;
@@ -354,7 +358,7 @@ impl Package {
 
         // Extract project dependencies, using the workspace to resolve workspace-relative
         // dependencies
-        let dependencies = package_ast.extract_dependencies(source.clone(), workspace)?;
+        let dependencies = package_ast.extract_dependencies(source, workspace)?;
 
         // Extract the build targets for this project
         let lib = package_ast.extract_library_target()?;

@@ -77,7 +77,7 @@ impl Workspace {
 
         let manifest_uri = source.content().uri();
         let manifest_path = if manifest_uri.scheme().is_none_or(|scheme| scheme == "file") {
-            Some(Path::new(manifest_uri.path()).to_path_buf().into_boxed_path())
+            manifest_uri.to_path().map(std::path::PathBuf::into_boxed_path)
         } else {
             None
         };
