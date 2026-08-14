@@ -147,33 +147,14 @@ pub(crate) fn shared_recursive_factory() -> &'static RecursiveAceCircuitFactory 
     })
 }
 
-/// One proof order's complete registry entry: the encoded circuit the verifier evaluates
-/// and the leaf-plus-path that authenticates it in the registry tree.
-///
-/// Fields are private so an entry only exists once the constructor's leaf-equals-commitment
-/// check has passed; consume it with [`Self::into_parts`].
-pub struct RecursiveRegistryEntry {
-    /// Encoded circuit for the order.
-    circuit: RecursiveAceCircuit,
-    /// Registry leaf: the circuit's commitment.
-    leaf: Word,
-    /// Authentication path from the leaf to the registry root.
-    path: MerklePath,
-}
-
-impl RecursiveRegistryEntry {
-    /// Consumes the entry into `(circuit, leaf, path)`.
-    pub fn into_parts(self) -> (RecursiveAceCircuit, Word, MerklePath) {
-        (self.circuit, self.leaf, self.path)
-    }
-}
-
-/// Derives circuit, leaf, and path for one proof order from a single factory.
+/// Derives the circuit and its authentication path for one proof order from a single factory.
 ///
 /// `std` uses the process-wide factory and the cached registry tree; without `std` one
 /// factory and one tree are built for this call and serve both outputs, instead of one
 /// build for the path and another for the circuit.
-pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryEntry, AceError> {
+pub fn recursive_registry_entry(
+    order: &ProofOrder,
+) -> Result<(RecursiveAceCircuit, MerklePath), AceError> {
     #[cfg(feature = "std")]
     {
         let circuit = shared_recursive_factory().circuit_for_order(order)?;
@@ -183,7 +164,7 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+        Ok((circuit, path))
     }
     #[cfg(not(feature = "std"))]
     {
@@ -196,7 +177,7 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+        Ok((circuit, path))
     }
 }
 

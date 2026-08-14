@@ -320,6 +320,14 @@ end
 #!
 #! Generic consumers take this pointer and a count as arguments; the relation owns the
 #! meaning of each offset.
+#!
+#! Inputs:  []
+#! Outputs: [ptr]
+#!
+#! Where:
+#! - `ptr` is the base address of the per-AIR log-height cells.
+#!
+#! Invocation: exec
 pub proc air_trace_length_logs_ptr
     push.AIR_TRACE_LENGTH_LOGS_PTR
 end
