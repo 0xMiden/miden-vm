@@ -4,6 +4,7 @@ use miden_utils_testing::{
 };
 
 mod adv_ops;
+mod advice_injection_ops;
 mod constant_ops;
 mod env_ops;
 mod local_ops;

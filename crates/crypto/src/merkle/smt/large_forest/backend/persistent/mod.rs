@@ -178,6 +178,16 @@ const MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE: usize = 5;
 /// The minimum number of items per rayon chunk when parallelizing deserialization and extraction.
 const CHUNKING_UNIT: usize = 100;
 
+// HELPERS
+// ================================================================================================
+
+/// Builds read options that restrict iteration to keys beginning with `lineage_bytes`.
+fn lineage_entries_read_options(lineage_bytes: &[u8]) -> db::ReadOptions {
+    let mut read_options = db::ReadOptions::default();
+    read_options.set_iterate_range(db::PrefixRange(lineage_bytes));
+    read_options
+}
+
 // BACKEND READER TRAIT
 // ================================================================================================
 
@@ -299,16 +309,19 @@ impl BackendReader for PersistentBackend {
         }
 
         let lineage_bytes = lineage.to_bytes();
+        let read_options = lineage_entries_read_options(&lineage_bytes);
 
-        // In order to improve iteration performance significantly, we iterate with a prefix. As
-        // leaves are keyed on `LeafKey`, which begins with the bytes of the lineage, we can use the
-        // lineage as our prefix. That means that the iterator should only yield values whose key
-        // begins with the prefix with a high likelihood.
-        let pfx_iterator = self.db.prefix_iterator_cf(self.cf(LEAVES_CF)?, lineage_bytes);
+        // Leaf keys begin with their lineage bytes, so an explicit prefix range prevents RocksDB
+        // from scanning into leaves belonging to later lineages.
+        let entries_iterator = self.db.iterator_cf_opt(
+            self.cf(LEAVES_CF)?,
+            read_options,
+            db::IteratorMode::From(&lineage_bytes, db::Direction::Forward),
+        );
 
         // Data ownership concerns mean we cannot use this iterator directly even if we could change
         // its type, so we delegate to our custom entries iterator impl.
-        Ok(PersistentBackendEntriesIterator::new(lineage, pfx_iterator))
+        Ok(PersistentBackendEntriesIterator::new(lineage, entries_iterator))
     }
 }
 
