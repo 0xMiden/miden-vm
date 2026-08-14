@@ -1,8 +1,8 @@
-use alloc::{format, sync::Arc};
+use alloc::{format, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
 use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
 use miden_debug_types::Location;
 
@@ -140,6 +140,71 @@ pub enum DebugFrameBase {
     Memory(u32),
 }
 
+/// A location expression in Miden runtime coordinates.
+///
+/// This is the package-level escape hatch for locations which cannot be represented by one of the
+/// simple [`DebugVarLocation`] variants. Producers must resolve source-specific coordinates, such
+/// as Wasm local/global indices, before constructing this expression.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugLocationExpression {
+    operations: Vec<DebugLocationExpressionOp>,
+}
+
+impl DebugLocationExpression {
+    /// Creates a location expression from runtime-resolved operations.
+    pub fn new(operations: Vec<DebugLocationExpressionOp>) -> Self {
+        Self { operations }
+    }
+
+    /// Returns the operations in evaluation order.
+    pub fn operations(&self) -> &[DebugLocationExpressionOp] {
+        &self.operations
+    }
+
+    /// Returns true if this expression contains no operations.
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+}
+
+/// An operation in a [`DebugLocationExpression`].
+///
+/// Operations evaluate on a signed integer stack. Read operations push canonical field element
+/// values as integers, arithmetic operations transform those values, and the final integer is
+/// converted back to a field element. Invalid arithmetic or field conversions make the location
+/// unavailable rather than wrapping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DebugLocationExpressionOp {
+    /// Push the value at this Miden operand-stack position (0 is the top).
+    ReadStack(u8),
+    /// Push the value stored at this Miden memory element address.
+    ReadMemory(u32),
+    /// Push the value stored at this signed FMP-relative local offset.
+    ReadLocal(i16),
+    /// Push an unsigned integer constant.
+    ConstU64(u64),
+    /// Push a signed integer constant.
+    ConstI64(i64),
+    /// Add an unsigned integer constant to the top value.
+    AddUnsigned(u64),
+    /// Pop two values and push `lhs + rhs`.
+    Add,
+    /// Pop two values and push `lhs - rhs`.
+    Sub,
+    /// Interpret the top value as a Wasm byte address, convert it to a Miden element address, and
+    /// push the value stored at that address.
+    DerefBytes,
+    /// Resolve and push a byte address relative to a runtime frame base.
+    FrameBaseAddress {
+        /// Resolved location containing the frame-base byte address.
+        base: DebugFrameBase,
+        /// Byte offset from the base.
+        byte_offset: i64,
+    },
+}
+
 /// Describes where a variable's value can be found during execution.
 ///
 /// This enum models the different ways a variable's value might be stored
@@ -172,6 +237,8 @@ pub enum DebugVarLocation {
         /// Byte offset from the base (may be positive or negative).
         byte_offset: i64,
     },
+    /// A compound location expressed entirely in Miden runtime coordinates.
+    Expression(DebugLocationExpression),
 }
 
 impl fmt::Display for DebugVarLocation {
@@ -189,6 +256,11 @@ impl fmt::Display for DebugVarLocation {
                 DebugFrameBase::Memory(address) => {
                     write!(f, "frame-base(mem[{address}]){byte_offset:+}")
                 },
+            },
+            Self::Expression(expression) => {
+                f.write_str("expr(")?;
+                f.debug_list().entries(expression.operations()).finish()?;
+                f.write_str(")")
             },
         }
     }
@@ -221,17 +293,12 @@ impl Serializable for DebugVarLocation {
             },
             Self::ResolvedFrameBase { base, byte_offset } => {
                 target.write_u8(5);
-                match base {
-                    DebugFrameBase::Local(offset) => {
-                        target.write_u8(0);
-                        target.write_bytes(&offset.to_le_bytes());
-                    },
-                    DebugFrameBase::Memory(address) => {
-                        target.write_u8(1);
-                        target.write_u32(*address);
-                    },
-                }
+                write_debug_frame_base(base, target);
                 target.write_bytes(&byte_offset.to_le_bytes());
+            },
+            Self::Expression(expression) => {
+                target.write_u8(6);
+                expression.write_into(target);
             },
         }
     }
@@ -253,22 +320,12 @@ impl Deserializable for DebugVarLocation {
             },
             4 => Ok(Self::Unavailable),
             5 => {
-                let base = match source.read_u8()? {
-                    0 => {
-                        let bytes = source.read_array::<2>()?;
-                        DebugFrameBase::Local(i16::from_le_bytes(bytes))
-                    },
-                    1 => DebugFrameBase::Memory(source.read_u32()?),
-                    tag => {
-                        return Err(DeserializationError::InvalidValue(format!(
-                            "invalid resolved debug frame-base tag: {tag}"
-                        )));
-                    },
-                };
+                let base = read_debug_frame_base(source)?;
                 let bytes = source.read_array::<8>()?;
                 let byte_offset = i64::from_le_bytes(bytes);
                 Ok(Self::ResolvedFrameBase { base, byte_offset })
             },
+            6 => Ok(Self::Expression(DebugLocationExpression::read_from(source)?)),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "invalid DebugVarLocation tag: {tag}"
             ))),
@@ -278,6 +335,122 @@ impl Deserializable for DebugVarLocation {
     fn min_serialized_size() -> usize {
         // `Unavailable` is encoded as a one-byte tag with no payload.
         u8::min_serialized_size()
+    }
+}
+
+impl Serializable for DebugLocationExpression {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.operations.len());
+        for operation in &self.operations {
+            operation.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for DebugLocationExpression {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let count = read_bounded_len(source, "debug location expression operations", 1)?;
+        let mut operations = Vec::with_capacity(count);
+        for _ in 0..count {
+            operations.push(DebugLocationExpressionOp::read_from(source)?);
+        }
+        Ok(Self::new(operations))
+    }
+
+    fn min_serialized_size() -> usize {
+        usize::min_serialized_size()
+    }
+}
+
+impl Serializable for DebugLocationExpressionOp {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::ReadStack(position) => {
+                target.write_u8(0);
+                target.write_u8(*position);
+            },
+            Self::ReadMemory(address) => {
+                target.write_u8(1);
+                target.write_u32(*address);
+            },
+            Self::ReadLocal(offset) => {
+                target.write_u8(2);
+                target.write_bytes(&offset.to_le_bytes());
+            },
+            Self::ConstU64(value) => {
+                target.write_u8(3);
+                target.write_u64(*value);
+            },
+            Self::ConstI64(value) => {
+                target.write_u8(4);
+                target.write_bytes(&value.to_le_bytes());
+            },
+            Self::AddUnsigned(value) => {
+                target.write_u8(5);
+                target.write_u64(*value);
+            },
+            Self::Add => target.write_u8(6),
+            Self::Sub => target.write_u8(7),
+            Self::DerefBytes => target.write_u8(8),
+            Self::FrameBaseAddress { base, byte_offset } => {
+                target.write_u8(9);
+                write_debug_frame_base(base, target);
+                target.write_bytes(&byte_offset.to_le_bytes());
+            },
+        }
+    }
+}
+
+impl Deserializable for DebugLocationExpressionOp {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            0 => Ok(Self::ReadStack(source.read_u8()?)),
+            1 => Ok(Self::ReadMemory(source.read_u32()?)),
+            2 => Ok(Self::ReadLocal(i16::from_le_bytes(source.read_array::<2>()?))),
+            3 => Ok(Self::ConstU64(source.read_u64()?)),
+            4 => Ok(Self::ConstI64(i64::from_le_bytes(source.read_array::<8>()?))),
+            5 => Ok(Self::AddUnsigned(source.read_u64()?)),
+            6 => Ok(Self::Add),
+            7 => Ok(Self::Sub),
+            8 => Ok(Self::DerefBytes),
+            9 => {
+                let base = read_debug_frame_base(source)?;
+                let byte_offset = i64::from_le_bytes(source.read_array::<8>()?);
+                Ok(Self::FrameBaseAddress { base, byte_offset })
+            },
+            tag => Err(DeserializationError::InvalidValue(format!(
+                "invalid DebugLocationExpressionOp tag: {tag}"
+            ))),
+        }
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size()
+    }
+}
+
+fn write_debug_frame_base<W: ByteWriter>(base: &DebugFrameBase, target: &mut W) {
+    match base {
+        DebugFrameBase::Local(offset) => {
+            target.write_u8(0);
+            target.write_bytes(&offset.to_le_bytes());
+        },
+        DebugFrameBase::Memory(address) => {
+            target.write_u8(1);
+            target.write_u32(*address);
+        },
+    }
+}
+
+fn read_debug_frame_base<R: ByteReader>(
+    source: &mut R,
+) -> Result<DebugFrameBase, DeserializationError> {
+    match source.read_u8()? {
+        0 => Ok(DebugFrameBase::Local(i16::from_le_bytes(source.read_array::<2>()?))),
+        1 => Ok(DebugFrameBase::Memory(source.read_u32()?)),
+        tag => Err(DeserializationError::InvalidValue(format!(
+            "invalid resolved debug frame-base tag: {tag}"
+        ))),
     }
 }
 
@@ -329,6 +502,18 @@ mod tests {
             "frame-base(FMP-3)+12"
         );
         assert_eq!(DebugVarLocation::Unavailable.to_string(), "unavailable");
+        assert_eq!(
+            DebugVarLocation::Expression(DebugLocationExpression::new(vec![
+                DebugLocationExpressionOp::FrameBaseAddress {
+                    base: DebugFrameBase::Local(-2),
+                    byte_offset: 4,
+                },
+                DebugLocationExpressionOp::AddUnsigned(8),
+                DebugLocationExpressionOp::DerefBytes,
+            ]))
+            .to_string(),
+            "expr([FrameBaseAddress { base: Local(-2), byte_offset: 4 }, AddUnsigned(8), DerefBytes])"
+        );
     }
 
     #[test]
@@ -347,6 +532,12 @@ mod tests {
                 base: DebugFrameBase::Memory(100),
                 byte_offset: -16,
             },
+            DebugVarLocation::Expression(DebugLocationExpression::new(vec![
+                DebugLocationExpressionOp::ReadStack(2),
+                DebugLocationExpressionOp::ConstI64(-4),
+                DebugLocationExpressionOp::Add,
+                DebugLocationExpressionOp::DerefBytes,
+            ])),
         ];
 
         for loc in &locations {
@@ -367,6 +558,20 @@ mod tests {
 
         assert_eq!(min_serialized_size, 1);
         assert_eq!(bytes.len(), min_serialized_size);
+    }
+
+    #[test]
+    fn debug_location_expression_rejects_unknown_operation() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(1);
+        bytes.write_u8(u8::MAX);
+
+        let mut reader = SliceReader::new(&bytes);
+        let err = DebugLocationExpression::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid DebugLocationExpressionOp tag"));
     }
 
     #[test]

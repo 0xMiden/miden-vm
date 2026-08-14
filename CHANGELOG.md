@@ -98,7 +98,7 @@
 
 #### Changes
 
-- Added explicit unavailable and tagged Miden frame-base debug variable locations, replacing private compiler/debugger expression encodings for new packages and bumping the package debug-info wire format to version 3.
+- Added explicit unavailable and tagged Miden frame-base debug variable locations, plus a structured Miden-runtime expression fallback for compound locations. This replaces private compiler/debugger expression encodings for new packages and bumps the package debug-info wire format to version 3.
 
 ## v0.29.1 (2026-08-11)
 
