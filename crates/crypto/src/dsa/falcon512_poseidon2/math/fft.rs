@@ -13,17 +13,51 @@ use super::{Inverse, field::FalconFelt, polynomial::Polynomial};
 /// 2n-th primitive root of unity.
 pub trait FastFft: Sized + Clone {
     type Field: Add + Mul + AddAssign + MulAssign + Neg + Sub + SubAssign;
+
+    /// Applies the FFT in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is not a supported power of two.
     fn fft_inplace(&mut self);
+
+    /// Returns a transformed clone.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the conditions described by [`Self::fft_inplace`].
     fn fft(&self) -> Self {
         let mut a = self.clone();
         a.fft_inplace();
         a
     }
 
+    /// Merges two half-size transforms.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inputs have different lengths or their combined length is not supported.
     fn merge_fft(a: &Self, b: &Self) -> Self;
+
+    /// Splits a transform into its even- and odd-degree parts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is less than two or is not a supported power of two.
     fn split_fft(&self) -> (Self, Self);
 
+    /// Applies the inverse FFT in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is not a supported power of two.
     fn ifft_inplace(&mut self);
+
+    /// Returns an inverse-transformed clone.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the conditions described by [`Self::ifft_inplace`].
     fn ifft(&self) -> Self {
         let mut a = self.clone();
         a.ifft_inplace();
@@ -2116,6 +2150,14 @@ mod tests {
         let mut values = [FalconFelt::new(1); 4];
         let roots = [FalconFelt::new(1); 2];
         FalconFelt::fft(&mut values, &roots);
+    }
+
+    #[test]
+    #[should_panic(expected = "root-table length 2")]
+    fn cyclotomic_ifft_rejects_a_short_root_table() {
+        let mut values = [FalconFelt::new(1); 4];
+        let roots = [FalconFelt::new(1); 2];
+        FalconFelt::ifft(&mut values, &roots, FELT_NINV_4);
     }
 
     #[test]

@@ -232,7 +232,7 @@ mod test {
     /// tests: a draw of exactly `RCDT[k]` must sample `k` (only the thresholds above index `k`
     /// exceed it), and `RCDT[k] - 1` must sample `k + 1`. The KAT vectors below only reach
     /// z0 in {0..3}, so this is what pins the table's lower fourteen thresholds. The expected
-    /// values are an independent copy: a change to either listing breaks the pairing.
+    /// thresholds are repeated here deliberately: changing either listing alone breaks the test.
     #[test]
     fn base_sampler_respects_every_rcdt_threshold_boundary() {
         const RCDT_PIN: [u128; 18] = [
@@ -276,8 +276,8 @@ mod test {
     /// across all rejection iterations (big-endian per 72-bit base draw); the replay applies the
     /// same per-draw reversal the upstream harness does, so this pins the base-sampler
     /// thresholds it reaches, the first-byte acceptance decisions, and the byte-consumption
-    /// order in one check. (Every vector decides on ber_exp's first comparison byte; the depth
-    /// test below covers the deeper comparisons.)
+    /// order in one check. Every vector decides on ber_exp's first comparison byte; the dedicated
+    /// depth test covers the deeper comparisons.
     #[test]
     fn sampler_z_matches_reference_known_answers() {
         #[rustfmt::skip]

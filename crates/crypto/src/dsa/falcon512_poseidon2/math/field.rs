@@ -167,12 +167,19 @@ impl CyclotomicFourier for FalconFelt {
     /// q - 1 = 3 * 2^12, so the 2-Sylow subgroup of Z_q* has order 2^12 = 4096, and 1331 generates
     /// it (a primitive 4096th root of unity). Squaring halves the order, so `12 - log2(n)`
     /// squarings yield a primitive n-th root.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is not a power of two in `1..=4096`.
     fn primitive_root_of_unity(n: usize) -> Self {
+        assert!(
+            n.is_power_of_two() && n <= 1 << 12,
+            "root order must be a power of two at most 4096, got {n}"
+        );
         let log2n = n.ilog2();
-        assert!(log2n <= 12);
         // 1331 is a primitive 2^12-th root of unity.
         let mut a = FalconFelt::new(1331);
-        let num_squarings = 12 - n.ilog2();
+        let num_squarings = 12 - log2n;
         for _ in 0..num_squarings {
             a *= a;
         }
@@ -309,6 +316,12 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "power of two at most 4096")]
+    fn primitive_root_rejects_an_unsupported_order() {
+        let _ = FalconFelt::primitive_root_of_unity(3);
     }
 
     #[test]
