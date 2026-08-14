@@ -40,7 +40,7 @@ mod glv;
 mod secp256k1;
 mod short_weierstrass;
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ZERO,
@@ -353,30 +353,15 @@ impl CurveId {
         }
     }
 
-    /// Returns named fixed point constants for this curve beyond identity/generator, e.g. a GLV
-    /// endomorphism image -- empty for curves with no such fixed derived points.
-    ///
-    /// Every entry here needs both (a) seeding into [`CurvePrecompile::init`]'s initial
-    /// deferred-DAG node set, so the point's digest is resolvable with no live registration, and
-    /// (b) a baked-in MASM constant/wrapper proc, emitted by `crates/lib/core/codegen`. Both
-    /// consumers read this single list so they cannot drift apart.
-    pub fn extra_points(self) -> Vec<(&'static str, CurvePoint)> {
+    /// Returns this curve's fixed GLV endomorphism, `None` for a curve with no such structure.
+    pub fn endomorphism(self) -> Option<Endomorphism> {
         match self {
-            Self::Secp256k1 => vec![("PHI_GENERATOR", phi_generator())],
-        }
-    }
-
-    /// Returns this curve's fixed GLV endomorphisms -- empty for curves with none. A slice, not
-    /// an `Option`: a higher-dimensional GLV curve would list several, each merging into the same
-    /// base's term the same way one does.
-    pub fn endomorphisms(self) -> &'static [Endomorphism] {
-        match self {
-            Self::Secp256k1 => &[Endomorphism {
+            Self::Secp256k1 => Some(Endomorphism {
                 beta_ptr: K1_BETA_PTR,
                 beta: SECP256K1_BETA,
                 lambda_ptr: K1_LAMBDA_PTR,
                 lambda: SECP256K1_LAMBDA,
-            }],
+            }),
         }
     }
 
@@ -690,7 +675,7 @@ impl CurvePrecompile {
         };
 
         let (curve, point, scalar) = Self::evaluate_msm_term(None, point, scalar, context)?;
-        if scalar == [0; 8] {
+        if scalar == [0; 8] || point == CurvePoint::Identity {
             return Err(DeferredError::InvalidPayload.into());
         }
         let mut acc = curve.mul_scalar(point, scalar)?;
@@ -698,7 +683,7 @@ impl CurvePrecompile {
         points.push(point);
         for &(point, scalar) in rest {
             let (_, point, scalar) = Self::evaluate_msm_term(Some(curve), point, scalar, context)?;
-            if scalar == [0; 8] || points.contains(&point) {
+            if scalar == [0; 8] || point == CurvePoint::Identity || points.contains(&point) {
                 return Err(DeferredError::InvalidPayload.into());
             }
             points.push(point);
@@ -821,13 +806,10 @@ impl Precompile for CurvePrecompile {
     }
 
     fn init(&self) -> Vec<Node> {
-        let mut nodes = Vec::with_capacity(CurveId::ALL.len() * 4);
+        let mut nodes = Vec::with_capacity(CurveId::ALL.len() * 2);
         for curve in CurveId::ALL {
             nodes.push(Self::identity_node(curve));
             Self::extend_init_nodes_with_point(&mut nodes, curve, curve.generator());
-            for (_, point) in curve.extra_points() {
-                Self::extend_init_nodes_with_point(&mut nodes, curve, point);
-            }
         }
         nodes
     }
@@ -1115,6 +1097,23 @@ mod tests {
         let node = Node::try_pair_list(
             CurvePrecompile::msm_tag(),
             vec![(generator.digest(), zero.digest())],
+        )
+        .expect("tag is curve-owned");
+
+        assert_invalid_payload(evaluate(&mut state, node));
+    }
+
+    #[test]
+    fn msm_rejects_identity_base_terms() {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let identity = CurvePrecompile::identity_node(curve);
+        let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
+        state.register(identity.clone()).expect("identity must register");
+        state.register(scalar.clone()).expect("scalar must register");
+        let node = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(identity.digest(), scalar.digest())],
         )
         .expect("tag is curve-owned");
 

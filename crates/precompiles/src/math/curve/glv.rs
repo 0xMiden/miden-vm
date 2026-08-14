@@ -25,11 +25,9 @@ pub const SECP256K1_BETA: Limbs = [
     0x719501ee, 0xc1396c28, 0x12f58995, 0x9cf04975, 0xac3434e9, 0x6e64479e, 0x657c0710, 0x7ae96a2b,
 ];
 
-/// The secp256k1 GLV endomorphism image of the generator, `φ(G) = (β·G_x mod p, G_y)`. `G` is
-/// fixed, so this is a compile-time-derivable point: `crates/lib/core/codegen` calls this to bake
-/// its digest into the generated `secp256k1.masm` as `PHI_GENERATOR_DIGEST`/`push_phi_generator`,
-/// the same way the generator and identity points are baked in, rather than every caller
-/// recomputing `β·G_x` with a live in-circuit multiplication.
+/// The secp256k1 GLV endomorphism image of the generator, `φ(G) = (β·G_x mod p, G_y)` — a test
+/// vector for cross-checking an in-circuit `φ(G)` computation (e.g. `intro_endo`'s value relation)
+/// against this independent host-side derivation.
 pub fn phi_generator() -> CurvePoint {
     CurvePoint::Affine {
         x: UintDomain::K1Base.mul(SECP256K1_BETA, SECP256K1_GENERATOR_X),

@@ -147,36 +147,6 @@ fn constant(value: Limbs, domain: UintDomain) -> ConstantMasm {
     }
 }
 
-/// Renders `curve.extra_points()` (identity/generator's siblings, e.g. a GLV endomorphism image)
-/// as `NAME_DIGEST` constant declarations. [`CurveId::extra_points`] is the single source of
-/// truth: [`CurvePrecompile::init`] seeds the same points into the deferred-DAG init node set, so
-/// the MASM constant and the runtime registration cannot drift apart.
-fn render_curve_extra_constants(curve: CurveId) -> String {
-    curve
-        .extra_points()
-        .into_iter()
-        .map(|(name, point)| {
-            let digest = CurvePrecompile::value_node(curve, point).digest();
-            format!("const {name}_DIGEST = {}\n", word_literal(digest_word(digest)))
-        })
-        .collect()
-}
-
-/// Renders `curve.extra_points()` as `push_name` wrapper procs (name lowercased), mirroring
-/// `GENERATOR_DIGEST`/`push_generator`.
-fn render_curve_extra_procs(curve: CurveId) -> String {
-    curve
-        .extra_points()
-        .into_iter()
-        .map(|(name, _)| {
-            format!(
-                "\n#! Pushes the registered digest of the precomputed `{name}` point constant.\npub proc push_{proc_name}\n    push.{name}_DIGEST\nend\n",
-                proc_name = name.to_lowercase(),
-            )
-        })
-        .collect()
-}
-
 fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
     let curve = config.curve;
     let op_tag = |op_id| word_literal(tag_word(CurvePrecompile::op_tag(op_id)));
@@ -206,8 +176,6 @@ fn render_curve(config: &CurveMasmConfig) -> Result<String, String> {
             "GENERATOR_DIGEST",
             word_literal(digest_word(CurvePrecompile::generator_node(curve).digest())),
         ),
-        ("EXTRA_CONSTANTS", render_curve_extra_constants(curve)),
-        ("EXTRA_PROCS", render_curve_extra_procs(curve)),
     ];
 
     render_template(CURVE_TEMPLATE, &replacements)

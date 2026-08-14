@@ -25,7 +25,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_precompiles::{CurveId, glv_decompose};
+use miden_precompiles::glv_decompose;
 
 use crate::{
     ec::msm::trace::EcExprPtr,
@@ -345,73 +345,36 @@ pub fn joint_wnaf_with_signed_tables(
     acc.expect("joint_wnaf needs a nonzero scalar")
 }
 
-/// Build `Σ kᵢ·Pᵢ` for a curve with a GLV endomorphism by decomposing each
-/// scalar ([`glv_decompose`]) into a signed pair `k ≡ ka + λ·kb (mod n)`,
-/// each half roughly half `k`'s bit-width, then driving **one** shared
-/// interleaved wNAF ladder ([`joint_wnaf_with_signed_tables`]) over the
-/// `2·terms.len()` resulting virtual bases: `Pᵢ`'s own table (`⟨Pᵢ×1⟩`) and
-/// its endomorphism table (`⟨Pᵢ×λ⟩` via [`Session::msm_intro_endo`], value
-/// `φ(Pᵢ)`) — each half's sign rides the digit selection, not the seed, so
-/// both tables stay positive-only and cacheable (see
-/// [`glv_joint_wnaf_with_tables`]).
+/// Build `Σ kᵢ·Pᵢ` for a curve with a GLV endomorphism by decomposing each scalar
+/// ([`glv_decompose`]) into a signed pair `k ≡ ka + λ·kb (mod n)`, each half roughly half `k`'s
+/// bit-width, then driving **one** shared interleaved wNAF ladder
+/// ([`joint_wnaf_with_signed_tables`]) over the `2·terms.len()` resulting virtual bases: `Pᵢ`'s own
+/// table (`⟨Pᵢ×1⟩`) and its endomorphism table (`⟨Pᵢ×λ⟩` via [`Session::msm_intro_endo`], value
+/// `φ(Pᵢ)`) — each half's sign rides the digit selection, not the seed, so both tables stay
+/// positive-only and cacheable.
 ///
-/// Because `intro_endo`'s term rides `Pᵢ` — not `φ(Pᵢ)` — `msm_combine`'s
-/// shared-base merge folds each pair's plain/endo legs back onto **one**
-/// term per real base, `⟨Pᵢ × (ka + λ·kb mod n)⟩`, for free: the caller's
-/// claim still names only the original `m` bases, at roughly half the
-/// ladder height of a plain `2·terms.len()`-base joint wNAF over the full
-/// scalar width. `φ(Pᵢ)`'s on-curve membership is proved in-circuit by
-/// `intro_endo`'s value relation (not trusted host advice), so a
-/// decomposed half landing on zero, or two virtual bases coinciding in
-/// value, are both harmless — a zero-magnitude table's digits are all
-/// zero (contributing nothing, same as any other zero column), and a
-/// coordinate collision is ordinary point-store dedup, not a forgery
-/// surface (see `glv.rs`'s β-orbit note, which is a MASM-side concern
-/// this in-circuit certification closes, not a prover-strategy one).
+/// Because `intro_endo`'s term rides `Pᵢ` — not `φ(Pᵢ)` — `msm_combine`'s shared-base merge folds
+/// each pair's plain/endo legs back onto **one** term per real base, `⟨Pᵢ × (ka + λ·kb mod n)⟩`,
+/// for free: the caller's claim still names only the original `m` bases, at roughly half the
+/// ladder height of a plain `2·terms.len()`-base joint wNAF over the full scalar width. `φ(Pᵢ)`'s
+/// on-curve membership is proved in-circuit by `intro_endo`'s value relation (not trusted host
+/// advice), so a decomposed half landing on zero, or two virtual bases coinciding in value, are
+/// both harmless — a zero-magnitude table's digits are all zero (contributing nothing, same as any
+/// other zero column), and a coordinate collision is ordinary point-store dedup, not a forgery
+/// surface.
 ///
-/// Builds each base's tables fresh. When a base recurs across many calls —
-/// the generator across a batch of signatures — build its tables once with
-/// [`wnaf_table`] / [`wnaf_table_endo`] and drive the same ladder with
-/// [`glv_joint_wnaf_with_tables`] instead.
+/// Takes already-built **positive-only** `(plain_table, endo_table)` pairs instead of building
+/// them per base — lets a caller reuse a recurring base's tables (built once via [`wnaf_table`] /
+/// [`wnaf_table_endo`]) across many MSM claims instead of rebuilding them per claim, the same way
+/// [`joint_wnaf_with_tables`] does for the non-GLV path. Each call still re-decomposes `k`
+/// ([`glv_decompose`]) since the split (and its signs) is scalar-specific; only the tables — which
+/// depend on the base alone — are shared.
 ///
-/// Returns the combined MSM expression. Panics if `terms` is empty, any
-/// scalar is zero, or `curve` has no GLV endomorphism.
-pub fn glv_joint_wnaf(
-    session: &mut Session,
-    curve: CurveId,
-    terms: &[(EcNode, U256)],
-    w: usize,
-) -> EcExprPtr {
-    assert!(!curve.endomorphisms().is_empty(), "glv_joint_wnaf needs a GLV endomorphism");
-    assert!(!terms.is_empty(), "an MSM needs at least one base");
-
-    let tables: Vec<(WnafTable, WnafTable)> = terms
-        .iter()
-        .map(|(p, _)| (wnaf_table(session, p, w), wnaf_table_endo(session, p, w)))
-        .collect();
-    let table_terms: Vec<(&WnafTable, Option<&WnafTable>, U256)> = tables
-        .iter()
-        .zip(terms)
-        .map(|((plain, endo), &(_, k))| (plain, Some(endo), k))
-        .collect();
-    glv_joint_wnaf_with_tables(session, &table_terms)
-}
-
-/// The interleaved GLV ladder behind [`glv_joint_wnaf`], taking already-built
-/// **positive-only** `(plain_table, endo_table)` pairs instead of building
-/// them per base — lets a caller reuse a recurring base's tables (built once
-/// via [`wnaf_table`] / [`wnaf_table_endo`]) across many MSM claims instead
-/// of rebuilding them per claim, the same way [`joint_wnaf_with_tables`]
-/// does for the non-GLV path. Each call still re-decomposes `k` ([`glv_decompose`])
-/// since the split (and its signs) is scalar-specific; only the tables —
-/// which depend on the base alone — are shared.
-///
-/// `terms` pairs each base's `(plain_table, endo_table, scalar)`. `endo_table`
-/// is `None` for a base with no endomorphism image — the point at infinity,
-/// whose GLV split is undefined by the `φ` coordinate formula — in which case
-/// the term rides its plain leg alone at the scalar's full (undecomposed)
-/// magnitude instead of a split half. Returns the combined MSM expression.
-/// Panics if `terms` is empty or any scalar is zero.
+/// `terms` pairs each base's `(plain_table, endo_table, scalar)`. `endo_table` is `None` for a
+/// base with no endomorphism image — the point at infinity, whose GLV split is undefined by the
+/// `φ` coordinate formula — in which case the term rides its plain leg alone at the scalar's full
+/// (undecomposed) magnitude instead of a split half. Returns the combined MSM expression. Panics
+/// if `terms` is empty or any scalar is zero.
 pub fn glv_joint_wnaf_with_tables(
     session: &mut Session,
     terms: &[(&WnafTable, Option<&WnafTable>, U256)],

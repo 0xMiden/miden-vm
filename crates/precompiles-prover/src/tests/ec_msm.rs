@@ -14,7 +14,7 @@ use std::{format, string::String};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
 use miden_core::{Felt, utils::Matrix};
-use miden_precompiles::{CurveId, CurvePoint};
+use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 
 use crate::{
     ec::msm::EcMsmAir,
@@ -22,8 +22,8 @@ use crate::{
     session::{
         EcNode, Session,
         strategies::{
-            glv_joint_wnaf, glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm,
-            wnaf_table, wnaf_table_endo,
+            glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table,
+            wnaf_table_endo,
         },
         verify_deferred,
     },
@@ -224,24 +224,18 @@ fn msm_intro_endo_value_matches_endomorphism_image() {
     let expr = s.msm_intro_endo(&g_pt);
     let (x, y) = s.msm_value_coords(expr);
 
-    let (_, phi_g) = CurveId::Secp256k1
-        .extra_points()
-        .into_iter()
-        .find(|&(name, _)| name == "PHI_GENERATOR")
-        .expect("secp256k1 has a PHI_GENERATOR extra point");
-    let CurvePoint::Affine { x: expected_x, y: expected_y } = phi_g else {
-        panic!("PHI_GENERATOR must be an affine point");
+    let CurvePoint::Affine { x: expected_x, y: expected_y } = phi_generator() else {
+        panic!("phi(G) must be an affine point");
     };
-    assert_eq!(x, from_limbs32(&expected_x), "intro_endo's φ(G).x must match PHI_GENERATOR");
-    assert_eq!(y, from_limbs32(&expected_y), "intro_endo's φ(G).y must match PHI_GENERATOR");
+    assert_eq!(x, from_limbs32(&expected_x), "intro_endo's φ(G).x must match phi_generator()");
+    assert_eq!(y, from_limbs32(&expected_y), "intro_endo's φ(G).y must match phi_generator()");
 }
 
-/// `glv_joint_wnaf`'s value for a genuinely large (not 1, not small) scalar
-/// `u·G`, cross-checked against `CurveId::mul_scalar`'s independent native
-/// reference — the real correctness check that the GLV split
-/// (`glv_decompose`), the two per-half wNAF ladders (plain + endomorphism),
-/// and `msm_combine`'s shared-base merge back onto `⟨G × u⟩` all land on
-/// the same value a plain double-and-add would.
+/// `glv_joint_wnaf_with_tables`'s value for a genuinely large (not 1, not small) scalar `u·G`,
+/// cross-checked against `CurveId::mul_scalar`'s independent native reference — the real
+/// correctness check that the GLV split (`glv_decompose`), the two per-half wNAF ladders (plain +
+/// endomorphism), and `msm_combine`'s shared-base merge back onto `⟨G × u⟩` all land on the same
+/// value a plain double-and-add would.
 #[test]
 fn glv_joint_wnaf_value_matches_native_mul_scalar() {
     let curve = CurveId::Secp256k1;
@@ -253,7 +247,9 @@ fn glv_joint_wnaf_value_matches_native_mul_scalar() {
 
     let mut s = Session::new();
     let g_pt = create(&mut s, gx, gy);
-    let expr = glv_joint_wnaf(&mut s, curve, &[(g_pt, u)], 5);
+    let plain = wnaf_table(&mut s, &g_pt, 5);
+    let endo = wnaf_table_endo(&mut s, &g_pt, 5);
+    let expr = glv_joint_wnaf_with_tables(&mut s, &[(&plain, Some(&endo), u)]);
     let (x, y) = s.msm_value_coords(expr);
 
     let expected = curve

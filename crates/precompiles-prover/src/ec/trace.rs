@@ -152,7 +152,7 @@ impl Default for EcStoreRequires {
         for curve in CurveId::ALL {
             let ptr = EcGroupPtr(curve.group_ptr());
             debug_assert_eq!(ptr.0 as usize, store.groups.len() + 1);
-            let (beta, lambda) = match curve.endomorphisms().first() {
+            let (beta, lambda) = match curve.endomorphism() {
                 Some(endo) => {
                     (UintPtr::from_addr(endo.beta_ptr), UintPtr::from_addr(endo.lambda_ptr))
                 },

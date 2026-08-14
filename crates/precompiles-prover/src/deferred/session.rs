@@ -319,7 +319,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         // Straus's 2^k subset-sum table), so an arbitrary-arity pair-list
         // never needs a term-count cap here.
         //
-        // GLV curves split each term's scalar in half (`glv_joint_wnaf`),
+        // GLV curves split each term's scalar in half (`glv_joint_wnaf_with_tables`),
         // trading ~half the ladder height for twice the virtual bases —
         // `msm_combine`'s shared-base merge folds each pair's plain/endo
         // legs back onto the caller's original term, so the claim below is
@@ -333,7 +333,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         // A base at infinity has no endomorphism image, so it skips the
         // endo table and rides `glv_joint_wnaf_with_tables`'s plain-only
         // leg instead of a GLV split.
-        let expr = if !curve.endomorphisms().is_empty() {
+        let expr = if curve.endomorphism().is_some() {
             for (base, _) in &expr_terms {
                 self.ensure_wnaf_table(base, MSM_WNAF_WINDOW);
                 if !self.session.is_pai(base) {

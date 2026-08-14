@@ -29,7 +29,7 @@ pub(crate) fn fixed_uints() -> impl Iterator<Item = (u32, u32, Limbs)> {
         .chain(CurveId::ALL.into_iter().flat_map(|curve| {
             let base_bound_ptr = curve.base_domain().bound_ptr();
             let scalar_bound_ptr = curve.scalar_domain().bound_ptr();
-            curve.endomorphisms().iter().flat_map(move |endo| {
+            curve.endomorphism().into_iter().flat_map(move |endo| {
                 [
                     (endo.beta_ptr, base_bound_ptr, endo.beta),
                     (endo.lambda_ptr, scalar_bound_ptr, endo.lambda),
@@ -50,7 +50,7 @@ pub(crate) fn fixed_uintval_msgs() -> impl Iterator<Item = UintValMsg<Felt>> {
 /// Verifier-side `EcGroup` consumes for the fixed curve groups.
 pub(crate) fn fixed_ecgroup_msgs() -> impl Iterator<Item = EcGroupMsg<Felt>> {
     CurveId::ALL.into_iter().map(|curve| {
-        let (beta_ptr, lambda_ptr) = match curve.endomorphisms().first() {
+        let (beta_ptr, lambda_ptr) = match curve.endomorphism() {
             Some(endo) => (endo.beta_ptr, endo.lambda_ptr),
             None => (0, 0),
         };
