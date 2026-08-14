@@ -194,6 +194,7 @@ impl<'a> EcRequire<'a> {
         }
 
         let (a, b, bound) = self.store.group_params(group);
+        let (beta, lambda) = self.store.group_glv_params(group);
         let (p_group, p_coords) = self.store.point_params(p);
         let (q_group, q_coords) = self.store.point_params(q);
         assert!(p_group == group && q_group == group, "add operands must belong to the group");
@@ -273,6 +274,8 @@ impl<'a> EcRequire<'a> {
                 bound,
                 a,
                 b,
+                beta,
+                lambda,
                 p,
                 q,
                 r,

@@ -27,17 +27,20 @@ const FELTS_PER_KERNEL_DIGEST = 4
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
 
+# Number of AIR instances contributing to the proof order.
+const NUM_MIDEN_AIRS = 3
+
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 5295691278992603729
-const RELATION_DIGEST_1 = 14372903089468495231
-const RELATION_DIGEST_2 = 14126114708199185335
-const RELATION_DIGEST_3 = 1962580870545051767
+const RELATION_DIGEST_0 = 6707657866347869898
+const RELATION_DIGEST_1 = 15003255403457090401
+const RELATION_DIGEST_2 = 3161728420253440800
+const RELATION_DIGEST_3 = 3925668149141025919
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 1518962395264624615
-const ACE_REGISTRY_ROOT_1 = 15784779067617049400
-const ACE_REGISTRY_ROOT_2 = 1581745292729420002
-const ACE_REGISTRY_ROOT_3 = 9887978513811317011
+const ACE_REGISTRY_ROOT_0 = 15494055359749385108
+const ACE_REGISTRY_ROOT_1 = 10378068431877225902
+const ACE_REGISTRY_ROOT_2 = 8906024671689956466
+const ACE_REGISTRY_ROOT_3 = 8201729358988149119
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -120,58 +123,105 @@ proc assert_shape_log
     drop
 end
 
-#! Derives the Lehmer proof-order tag for [Core, Chiplets, Poseidon2Permutation].
+#! Derives the Lehmer proof-order tag of the height-sorted proof order.
+#!
+#! The proof order sorts the AIRs by ascending log height; the canonical instance order
+#! breaks ties (a stable sort). For each canonical AIR k with log height h_k:
+#!
+#!   inv_k   = #{m < k : h_m > h_k}     inversions contributed by AIR k
+#!   after_k = #{m > k : h_m < h_k}
+#!   pos_k   = k - inv_k + after_k      position of AIR k in the proof order
+#!   tag    += inv_k * (NUM_MIDEN_AIRS - 1 - pos_k)!
+#!
+#! The comparisons are branch-free (flag products), so the derivation is a flat
+#! NUM_MIDEN_AIRS^2 comparison sweep plus one small factorial per AIR.
+#!
+#! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
+#! factorial argument never underflows the field.
+#!
+#! Adding AIRs needs three coordinated edits, none of which this procedure can detect on its
+#! own: NUM_MIDEN_AIRS here, the matching constant in `public_inputs.masm`, and the per-AIR
+#! log-height cells in `stark/constants.masm` — which this reads as one consecutive array and
+#! where only two spare cells remain before `MAIN_TRACE_COM_PTR` (so beyond 5 AIRs the memory
+#! map has to move).
+#!
+#! Input:  []
+#! Output: [tag]
 proc derive_order_tag
-    exec.core_le_chiplets
-    if.true
-        exec.chiplets_le_poseidon2_permutation
-        if.true
-            # Core, Chiplets, Poseidon2Permutation
-            push.0
-        else
-            exec.core_le_poseidon2_permutation
-            if.true
-                # Core, Poseidon2Permutation, Chiplets
-                push.1
-            else
-                # Poseidon2Permutation, Core, Chiplets
-                push.4
-            end
+    push.0.0
+    # => [k = 0, tag = 0]
+
+    repeat.NUM_MIDEN_AIRS
+        dup exec.constants::air_trace_length_logs_ptr add mem_load
+        # => [h_k, k, tag]
+
+        push.0.0 push.0
+        # => [m = 0, inv = 0, after = 0, h_k, k, tag]
+
+        repeat.NUM_MIDEN_AIRS
+            dup exec.constants::air_trace_length_logs_ptr add mem_load
+            # => [h_m, m, inv, after, h_k, k, tag]
+
+            # inv += (m < k) * (h_m > h_k)
+            dup dup.5 u32gt
+            dup.2 dup.7 u32lt
+            mul
+            # => [flag, h_m, m, inv, after, h_k, k, tag]
+            movup.3 add movdn.2
+            # => [h_m, m, inv', after, h_k, k, tag]
+
+            # after += (m > k) * (h_m < h_k)
+            dup dup.5 u32lt
+            dup.2 dup.7 u32gt
+            mul
+            # => [flag, h_m, m, inv, after, h_k, k, tag]
+            movup.4 add movdn.3
+            # => [h_m, m, inv, after', h_k, k, tag]
+
+            drop add.1
+            # => [m + 1, inv, after, h_k, k, tag]
         end
-    else
-        exec.core_le_poseidon2_permutation
-        if.true
-            # Chiplets, Core, Poseidon2Permutation
-            push.2
-        else
-            exec.chiplets_le_poseidon2_permutation
-            if.true
-                # Chiplets, Poseidon2Permutation, Core
-                push.3
-            else
-                # Poseidon2Permutation, Chiplets, Core
-                push.5
-            end
-        end
+        drop
+        # => [inv, after, h_k, k, tag]
+
+        # pos = k - inv + after
+        dup.3 dup.1 sub
+        movup.2 add
+        # => [pos, inv, h_k, k, tag]
+
+        # tag += inv * (NUM_MIDEN_AIRS - 1 - pos)!
+        push.NUM_MIDEN_AIRS sub.1 swap sub
+        exec.factorial
+        mul
+        # => [inv * weight, h_k, k, tag]
+        movup.3 add movdn.2
+        # => [h_k, k, tag']
+
+        drop add.1
+        # => [k + 1, tag']
     end
+    drop
+    # => [tag]
 end
 
-proc core_le_chiplets
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    u32lte
-end
-
-proc core_le_poseidon2_permutation
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    u32lte
-end
-
-proc chiplets_le_poseidon2_permutation
-    exec.constants::get_chiplets_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    u32lte
+#! Computes x! for small x.
+#!
+#! Input:  [x]
+#! Output: [x!]
+proc factorial
+    push.1 swap
+    # => [x, acc = 1]
+    dup push.0 neq
+    while.true
+        # => [x, acc] with x > 0
+        dup movup.2 mul
+        # => [acc * x, x]
+        swap sub.1
+        # => [x - 1, acc']
+        dup push.0 neq
+    end
+    drop
+    # => [acc]
 end
 
 proc store_relation_digest

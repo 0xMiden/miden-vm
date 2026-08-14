@@ -131,7 +131,6 @@ pub proc push_generator
     push.GENERATOR_DIGEST
 end
 
-
 #! Registers `lhs + rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]

@@ -36,6 +36,7 @@
 //! This precompile does not provide compressed point encodings, subgroup checks, signature
 //! semantics, or public API stability guarantees beyond this internal precompile contract.
 
+mod glv;
 mod secp256k1;
 mod short_weierstrass;
 
@@ -50,13 +51,22 @@ use miden_core::{
 };
 
 use self::secp256k1::Secp256k1;
-pub use self::secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID};
+pub use self::{
+    glv::{SECP256K1_BETA, SECP256K1_LAMBDA, glv_decompose, phi_generator, scalar_mul_mod_n},
+    secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID},
+};
 use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
 
 /// VM-owned store pointer for the secp256k1 curve coefficient `A`.
 pub const K1_A_PTR: u32 = 8;
 /// VM-owned store pointer for the secp256k1 curve coefficient `B`.
 pub const K1_B_PTR: u32 = 9;
+/// VM-owned store pointer for the secp256k1 GLV endomorphism base-field constant `β`
+/// (interned under the base-field bound).
+pub const K1_BETA_PTR: u32 = 10;
+/// VM-owned store pointer for the secp256k1 GLV endomorphism scalar `λ`
+/// (interned under the scalar-field bound).
+pub const K1_LAMBDA_PTR: u32 = 11;
 
 /// VM-owned store pointer for the secp256k1 group configuration.
 pub const K1_GROUP_PTR: u32 = 1;
@@ -88,6 +98,22 @@ pub fn curve_coefficients() -> [CurveCoefficient; 2] {
             value: <Secp256k1 as ShortWeierstrassSpec>::B,
         },
     ]
+}
+
+/// A curve's fixed GLV endomorphism data: the base-field constant `β` with `φ(x, y) = (β·x, y)`,
+/// and the scalar `λ` with `φ(P) = λ·P`. Both are VM-owned, protocol-fixed values — `β` interned
+/// under the curve's base-field bound, `λ` under its scalar-field bound — so the AIR can pin a
+/// claimed relation to them by pointer, never learning (or trusting a prover for) their values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Endomorphism {
+    /// VM-owned pointer for `β`, under the curve's base-field bound.
+    pub beta_ptr: u32,
+    /// Canonical value of `β`, little-endian u32 limbs.
+    pub beta: Limbs,
+    /// VM-owned pointer for `λ`, under the curve's scalar-field bound.
+    pub lambda_ptr: u32,
+    /// Canonical value of `λ`, little-endian u32 limbs.
+    pub lambda: Limbs,
 }
 
 /// Curve-generic point value.
@@ -324,6 +350,18 @@ impl CurveId {
     pub fn generator(self) -> CurvePoint {
         match self {
             Self::Secp256k1 => Secp256k1::generator(),
+        }
+    }
+
+    /// Returns this curve's fixed GLV endomorphism, `None` for a curve with no such structure.
+    pub fn endomorphism(self) -> Option<Endomorphism> {
+        match self {
+            Self::Secp256k1 => Some(Endomorphism {
+                beta_ptr: K1_BETA_PTR,
+                beta: SECP256K1_BETA,
+                lambda_ptr: K1_LAMBDA_PTR,
+                lambda: SECP256K1_LAMBDA,
+            }),
         }
     }
 
@@ -637,7 +675,7 @@ impl CurvePrecompile {
         };
 
         let (curve, point, scalar) = Self::evaluate_msm_term(None, point, scalar, context)?;
-        if scalar == [0; 8] {
+        if scalar == [0; 8] || point == CurvePoint::Identity {
             return Err(DeferredError::InvalidPayload.into());
         }
         let mut acc = curve.mul_scalar(point, scalar)?;
@@ -645,7 +683,7 @@ impl CurvePrecompile {
         points.push(point);
         for &(point, scalar) in rest {
             let (_, point, scalar) = Self::evaluate_msm_term(Some(curve), point, scalar, context)?;
-            if scalar == [0; 8] || points.contains(&point) {
+            if scalar == [0; 8] || point == CurvePoint::Identity || points.contains(&point) {
                 return Err(DeferredError::InvalidPayload.into());
             }
             points.push(point);
@@ -768,7 +806,7 @@ impl Precompile for CurvePrecompile {
     }
 
     fn init(&self) -> Vec<Node> {
-        let mut nodes = Vec::with_capacity(CurveId::ALL.len() * 4);
+        let mut nodes = Vec::with_capacity(CurveId::ALL.len() * 2);
         for curve in CurveId::ALL {
             nodes.push(Self::identity_node(curve));
             Self::extend_init_nodes_with_point(&mut nodes, curve, curve.generator());
@@ -1059,6 +1097,23 @@ mod tests {
         let node = Node::try_pair_list(
             CurvePrecompile::msm_tag(),
             vec![(generator.digest(), zero.digest())],
+        )
+        .expect("tag is curve-owned");
+
+        assert_invalid_payload(evaluate(&mut state, node));
+    }
+
+    #[test]
+    fn msm_rejects_identity_base_terms() {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let identity = CurvePrecompile::identity_node(curve);
+        let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
+        state.register(identity.clone()).expect("identity must register");
+        state.register(scalar.clone()).expect("scalar must register");
+        let node = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(identity.digest(), scalar.digest())],
         )
         .expect("tag is curve-owned");
 

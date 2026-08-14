@@ -11,5 +11,13 @@
 mod multi_air;
 mod recursive;
 
-pub use multi_air::build_multi_air_ace_circuit_for_order;
-pub use recursive::{RecursiveAceCircuit, build_recursive_verifier_ace_circuit};
+pub use multi_air::{
+    FactoredMultiAirCircuit, build_factored_multi_air_ace_circuit,
+    build_multi_air_ace_circuit_for_order,
+};
+#[cfg(feature = "std")]
+pub(crate) use recursive::shared_recursive_factory;
+pub use recursive::{
+    RecursiveAceCircuit, RecursiveAceCircuitFactory, RecursiveRegistryEntry,
+    build_recursive_verifier_ace_circuit, recursive_registry_entry,
+};

@@ -100,30 +100,7 @@ pub proc verify
     drop
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 
-    exec.prepare_verify_inputs
-    # => [U1, Q, U2, SIG_R, ...]
-
-    dupw.1
-    # => [Q, U1, Q, U2, SIG_R, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, SIG_R, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, SIG_R, ...]
-    if.true
-        movupw.2 swapw
-        # => [U1, U2, Q, SIG_R, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, Q, SIG_R, ...]
-        swapw dropw
-        # => [U1_PLUS_U2, SIG_R, ...]
-        exec.secp256k1::mul_scalar_generator
-    else
-        exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, SIG_R, ...]
-        exec.secp256k1::msm2
-    end
-    # => [VERIFY_POINT, SIG_R, ...]
-    exec.assert_x_eq_scalar_k1
+    exec.verify_digest_impl
     # => [...]
 end
 
@@ -226,6 +203,34 @@ proc load_keccak_digest_as_z
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 end
 
+#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
+#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
+#!
+#! Input:  [U1, Q, U2, ...]
+#! Output: [VERIFY_POINT, ...]
+proc verify_point_2base
+    dupw.1
+    # => [Q, U1, Q, U2, ...]
+    exec.secp256k1::push_generator
+    # => [G, Q, U1, Q, U2, ...]
+    exec.word::eq
+    # => [is_q_generator, U1, Q, U2, ...]
+    if.true
+        movupw.2 swapw
+        # => [U1, U2, Q, ...]
+        exec.k1_scalar::add
+        # => [U1_PLUS_U2, Q, ...]
+        swapw dropw
+        # => [U1_PLUS_U2, ...]
+        exec.secp256k1::mul_scalar_generator
+    else
+        exec.secp256k1::push_generator
+        # => [G, U1, Q, U2, ...]
+        exec.secp256k1::msm2
+    end
+    # => [VERIFY_POINT, ...]
+end
+
 #! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
@@ -234,26 +239,7 @@ end
 proc verify_digest_impl
     exec.prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
-
-    dupw.1
-    # => [Q, U1, Q, U2, SIG_R, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, SIG_R, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, SIG_R, ...]
-    if.true
-        movupw.2 swapw
-        # => [U1, U2, Q, SIG_R, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, Q, SIG_R, ...]
-        swapw dropw
-        # => [U1_PLUS_U2, SIG_R, ...]
-        exec.secp256k1::mul_scalar_generator
-    else
-        exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, SIG_R, ...]
-        exec.secp256k1::msm2
-    end
+    exec.verify_point_2base
     # => [VERIFY_POINT, SIG_R, ...]
     exec.assert_x_eq_scalar_k1
     # => [...]

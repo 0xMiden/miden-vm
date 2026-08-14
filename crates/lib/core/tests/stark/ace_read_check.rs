@@ -22,7 +22,6 @@ const OOD_EVALUATIONS_PTR: u32 = 3225419784;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;
 const AUXILIARY_ACE_INPUTS_PTR: u32 = 3225420336;
 const ACE_CIRCUIT_STREAM_PTR: u32 = 3225420376;
-const ACE_CIRCUIT_PTR: u32 = 3225420960;
 
 #[test]
 fn ace_read_pointers_match_masm_layout() {
@@ -51,13 +50,6 @@ fn ace_read_pointers_match_masm_layout() {
     assert_eq!(
         ACE_CIRCUIT_STREAM_PTR - AUXILIARY_ACE_INPUTS_PTR,
         2 * (layout.total_inputs - stark_vars) as u32
-    );
-
-    let encoded = circuit.to_ace().expect("encode multi-AIR ACE circuit");
-    assert_eq!(
-        ACE_CIRCUIT_PTR,
-        ACE_CIRCUIT_STREAM_PTR + 2 * encoded.num_constants() as u32,
-        "ACE EVAL pointer must follow the encoded constant section"
     );
 }
 

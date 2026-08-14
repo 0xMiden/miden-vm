@@ -100,7 +100,8 @@ where
         self.intern(NodeKind::Constant(value))
     }
 
-    /// Add an addition node (with constant folding).
+    /// Add an addition node with constant folding, add/sub cancellation, and negation
+    /// normalization.
     pub fn add(&mut self, a: NodeId, b: NodeId) -> NodeId {
         let a = self.resolve_node(a);
         let b = self.resolve_node(b);
@@ -113,11 +114,20 @@ where
         if self.is_zero(b) {
             return a;
         }
+        if let Some(result) = self.cancel_add(a, b) {
+            return result;
+        }
+        match (self.negated(a), self.negated(b)) {
+            (Some(a), None) => return self.sub(b, a),
+            (None, Some(b)) => return self.sub(a, b),
+            _ => {},
+        }
         let (l, r) = if a <= b { (a, b) } else { (b, a) };
         self.intern(NodeKind::Add(l, r))
     }
 
-    /// Add a subtraction node (with constant folding).
+    /// Add a subtraction node with constant folding, add/sub cancellation, and negation
+    /// normalization.
     pub fn sub(&mut self, a: NodeId, b: NodeId) -> NodeId {
         let a = self.resolve_node(a);
         let b = self.resolve_node(b);
@@ -126,6 +136,15 @@ where
         }
         if self.is_zero(b) {
             return a;
+        }
+        if a == b {
+            return self.constant(EF::ZERO);
+        }
+        if let Some(result) = self.cancel_sub(a, b) {
+            return result;
+        }
+        if let Some(b) = self.negated(b) {
+            return self.add(a, b);
         }
         self.intern(NodeKind::Sub(a, b))
     }
@@ -172,6 +191,41 @@ where
 
     fn is_one(&self, id: NodeId) -> bool {
         self.const_value(id).is_some_and(|v| v == EF::ONE)
+    }
+
+    fn negated(&self, id: NodeId) -> Option<NodeId> {
+        match self.nodes.get(id.index())? {
+            NodeKind::Neg(inner) => Some(*inner),
+            _ => None,
+        }
+    }
+
+    fn cancel_add(&self, a: NodeId, b: NodeId) -> Option<NodeId> {
+        for (term, other) in [(a, b), (b, a)] {
+            if let NodeKind::Sub(lhs, rhs) = self.nodes[term.index()]
+                && rhs == other
+            {
+                return Some(lhs);
+            }
+        }
+        None
+    }
+
+    fn cancel_sub(&self, a: NodeId, b: NodeId) -> Option<NodeId> {
+        if let NodeKind::Add(lhs, rhs) = self.nodes[a.index()] {
+            if lhs == b {
+                return Some(rhs);
+            }
+            if rhs == b {
+                return Some(lhs);
+            }
+        }
+        if let NodeKind::Sub(lhs, rhs) = self.nodes[b.index()]
+            && lhs == a
+        {
+            return Some(rhs);
+        }
+        None
     }
 
     fn resolve_node(&self, id: NodeId) -> NodeId {
@@ -378,6 +432,54 @@ mod tests {
 
         let rebuilt_dag = rebuilt.build(sum);
         assert_eq!(rebuilt_dag.root().index(), sum.index());
+    }
+
+    #[test]
+    fn addition_absorbs_one_negated_operand() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let neg_a = builder.neg(a);
+        let neg_b = builder.neg(b);
+
+        let root = builder.add(a, neg_b);
+        assert_eq!(root, builder.sub(a, b));
+        assert_eq!(builder.add(neg_a, b), builder.sub(b, a));
+
+        let mut dag = builder.build(root);
+        dag.compact();
+        assert_eq!(dag.nodes.len(), 3, "the absorbed negation must become unreachable");
+    }
+
+    #[test]
+    fn subtraction_absorbs_a_negated_rhs() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let neg_b = builder.neg(b);
+
+        let root = builder.sub(a, neg_b);
+        assert_eq!(root, builder.add(a, b));
+
+        let mut dag = builder.build(root);
+        dag.compact();
+        assert_eq!(dag.nodes.len(), 3, "the absorbed negation must become unreachable");
+    }
+
+    #[test]
+    fn addition_and_subtraction_cancel_inverse_terms() {
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let a = builder.input(InputKey::Public(0));
+        let b = builder.input(InputKey::Public(1));
+        let difference = builder.sub(a, b);
+        let sum = builder.add(a, b);
+
+        assert_eq!(builder.add(difference, b), a);
+        assert_eq!(builder.add(b, difference), a);
+        assert_eq!(builder.sub(sum, a), b);
+        assert_eq!(builder.sub(sum, b), a);
+        assert_eq!(builder.sub(a, difference), b);
+        assert_eq!(builder.sub(a, a), builder.constant(felt(0)));
     }
 
     #[test]
