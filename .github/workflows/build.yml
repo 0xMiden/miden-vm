@@ -31,8 +31,7 @@ jobs:
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}
           rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
-          rustup default ${{ matrix.toolchain }}
-          NO_STD_TARGET=${{ matrix.target }} make build-no-std
+          RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target
