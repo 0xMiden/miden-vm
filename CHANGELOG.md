@@ -91,7 +91,7 @@
 
 #### Changes
 
-- Validated and retained `DebugInfo` when reading untrusted packages, with bounds and safe handling for hostile data ([#3460](https://github.com/0xMiden/miden-vm/pull/3460)).
+- Validated and retained `DebugInfo` when reading untrusted packages, with bounded decoding for hostile data and an explicit unmetered decoder for analysis ([#3460](https://github.com/0xMiden/miden-vm/pull/3460)).
 
 ## v0.28.0 (2026-08-01)
 

@@ -53,6 +53,30 @@ struct WireDebugFunctionInfo {
     column: ColumnIndex,
 }
 
+#[derive(Clone, Copy)]
+struct PackageDebugInfoDecodeLimits {
+    payload_size: usize,
+    string_rows: usize,
+    string_size: usize,
+    type_rows: usize,
+}
+
+impl PackageDebugInfoDecodeLimits {
+    const BOUNDED: Self = Self {
+        payload_size: MAX_DEBUG_INFO_PAYLOAD_SIZE,
+        string_rows: MAX_DEBUG_INFO_STRING_ROWS,
+        string_size: MAX_DEBUG_INFO_STRING_SIZE,
+        type_rows: MAX_DEBUG_INFO_TYPE_ROWS,
+    };
+
+    const UNMETERED: Self = Self {
+        payload_size: usize::MAX,
+        string_rows: usize::MAX,
+        string_size: usize::MAX,
+        type_rows: usize::MAX,
+    };
+}
+
 // PACKAGE DEBUG INFO SERIALIZATION
 // ================================================================================================
 
@@ -109,8 +133,32 @@ impl Serializable for PackageDebugInfo {
 }
 
 #[cfg(target_endian = "little")]
-impl Deserializable for PackageDebugInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+impl PackageDebugInfo {
+    /// Deserializes package debug information without the fixed resource limits used for untrusted
+    /// input.
+    ///
+    /// This is intended for analysis and troubleshooting when the caller explicitly accepts the
+    /// allocation cost of the encoded data. It still validates lengths against the reader's
+    /// remaining input and allocation budget, and performs all normal wire-format validity checks.
+    /// Callers can supply a budgeted reader if they need a custom resource limit.
+    pub fn read_from_unmetered<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::UNMETERED)
+    }
+
+    /// Deserializes package debug information from `bytes` without the fixed resource limits used
+    /// for untrusted input.
+    ///
+    /// See [`Self::read_from_unmetered`].
+    pub fn read_from_bytes_unmetered(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        Self::read_from_unmetered(&mut miden_core::serde::SliceReader::new(bytes))
+    }
+
+    fn read_from_with_limits<R: ByteReader>(
+        source: &mut R,
+        limits: PackageDebugInfoDecodeLimits,
+    ) -> Result<Self, DeserializationError> {
         let version = source.read_u8()?;
         if version != DEBUG_INFO_VERSION {
             return Err(DeserializationError::InvalidValue(format!(
@@ -119,9 +167,10 @@ impl Deserializable for PackageDebugInfo {
         }
 
         let data_len = read_bounded_len(source, "package debug info", 1)?;
-        if data_len > MAX_DEBUG_INFO_PAYLOAD_SIZE {
+        if data_len > limits.payload_size {
             return Err(DeserializationError::InvalidValue(format!(
-                "package debug info payload size {data_len} exceeds limit {MAX_DEBUG_INFO_PAYLOAD_SIZE}"
+                "package debug info payload size {data_len} exceeds limit {}",
+                limits.payload_size,
             )));
         }
         let data = source.read_slice(data_len)?;
@@ -129,16 +178,21 @@ impl Deserializable for PackageDebugInfo {
         let mut source = PodSliceReader::new(aligned.as_slice());
 
         let strings_len = read_bounded_len(&mut source, "debug_info strings", 1)?;
-        if strings_len > MAX_DEBUG_INFO_STRING_ROWS {
+        if strings_len > limits.string_rows {
             return Err(DeserializationError::InvalidValue(format!(
-                "debug_info strings count {strings_len} exceeds limit {MAX_DEBUG_INFO_STRING_ROWS}"
+                "debug_info strings count {strings_len} exceeds limit {}",
+                limits.string_rows,
             )));
         }
         let mut strings = Vec::new();
         for _ in 0..strings_len {
-            strings.push(read_string(&mut source)?);
+            strings.push(read_string(&mut source, limits.string_size)?);
         }
-        let strings = IndexVec::try_from(strings).expect("limited debug string count fits in u32");
+        let strings = IndexVec::try_from(strings).map_err(|_| {
+            DeserializationError::InvalidValue(
+                "debug_info strings count exceeds the u32 index range".into(),
+            )
+        })?;
 
         let files_len = source.read_u32()?;
         let files = source.read_pod_rows::<DebugFileInfo>(files_len as usize, "debug files")?;
@@ -152,13 +206,18 @@ impl Deserializable for PackageDebugInfo {
             "debug_info types",
             DebugTypeInfo::min_serialized_size(),
         )?;
-        if types_len > MAX_DEBUG_INFO_TYPE_ROWS {
+        if types_len > limits.type_rows {
             return Err(DeserializationError::InvalidValue(format!(
-                "debug_info types count {types_len} exceeds limit {MAX_DEBUG_INFO_TYPE_ROWS}"
+                "debug_info types count {types_len} exceeds limit {}",
+                limits.type_rows,
             )));
         }
         let types = source.read_many_iter(types_len)?.collect::<Result<Vec<DebugTypeInfo>, _>>()?;
-        let types = IndexVec::try_from(types).expect("limited debug type count fits in u32");
+        let types = IndexVec::try_from(types).map_err(|_| {
+            DeserializationError::InvalidValue(
+                "debug_info types count exceeds the u32 index range".into(),
+            )
+        })?;
 
         let functions_len = source.read_u32()?;
         let functions = source.read_pod_rows_with::<WireDebugFunctionInfo, _, _>(
@@ -210,6 +269,13 @@ impl Deserializable for PackageDebugInfo {
             roots,
             error_messages,
         })
+    }
+}
+
+#[cfg(target_endian = "little")]
+impl Deserializable for PackageDebugInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::BOUNDED)
     }
 }
 
@@ -802,11 +868,14 @@ fn read_wire_felt(value: u64) -> Result<Felt, DeserializationError> {
     })
 }
 
-fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
+fn read_string<R: ByteReader>(
+    source: &mut R,
+    max_size: usize,
+) -> Result<Arc<str>, DeserializationError> {
     let len = read_bounded_len(source, "debug string bytes", 1)?;
-    if len > MAX_DEBUG_INFO_STRING_SIZE {
+    if len > max_size {
         return Err(DeserializationError::InvalidValue(alloc::format!(
-            "debug string size {len} exceeds limit {MAX_DEBUG_INFO_STRING_SIZE}"
+            "debug string size {len} exceeds limit {max_size}"
         )));
     }
     let bytes = source.read_slice(len)?;
@@ -1462,9 +1531,36 @@ mod tests {
         assert!(message.contains("package debug info"));
         assert!(message.contains("exceeds budget"));
 
+        let mut reader = FixedBudgetReader::new(&bytes, 1);
+        let error = PackageDebugInfo::read_from_unmetered(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("package debug info"));
+        assert!(message.contains("exceeds budget"));
+
         let mut reader = FixedBudgetReader::new(&bytes, bytes.len());
         let result = PackageDebugInfo::read_from(&mut reader).unwrap();
         assert!(result.nodes().is_empty());
+    }
+
+    #[test]
+    fn unmetered_package_debug_info_decode_ignores_fixed_limits() {
+        let oversized_string = "x".repeat(MAX_DEBUG_INFO_STRING_SIZE + 1);
+        let mut builder = PackageDebugInfoBuilder::default();
+        builder.add_string(oversized_string.clone());
+        let bytes = builder.build().to_bytes();
+
+        let error = PackageDebugInfo::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("debug string size"));
+        assert!(message.contains("exceeds limit"));
+
+        let decoded = PackageDebugInfo::read_from_bytes_unmetered(&bytes).unwrap();
+        assert_eq!(decoded.strings().len(), 1);
+        assert_eq!(decoded.strings()[DebugStringIdx::from(0)].as_ref(), oversized_string);
     }
 
     #[test]
