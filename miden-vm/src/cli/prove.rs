@@ -90,6 +90,17 @@ impl ProveCmd {
         println!("Prove program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
 
+        // determine file type based on extension
+        let ext = self
+            .program_file
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if !matches!(ext.as_str(), "masm" | "masp") {
+            return Err(Report::msg("The provided file must have a .masm or .masp extension"));
+        }
+
         // load libraries from files
         let libraries = Libraries::new(&self.library_paths)?;
 
@@ -102,14 +113,6 @@ impl ProveCmd {
                 kernel_path.display()
             )));
         }
-
-        // determine file type based on extension
-        let ext = self
-            .program_file
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
@@ -128,7 +131,7 @@ impl ProveCmd {
                 }
                 (program, package_debug_info, entrypoint_source_node, host)
             },
-            _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
+            _ => unreachable!("program file extension was validated above"),
         };
 
         let program_hash: [u8; 32] = program.hash().into();
