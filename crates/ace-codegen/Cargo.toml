@@ -19,8 +19,10 @@ testing = []
 [dependencies]
 miden-constraint-compiler = { workspace = true }
 miden-core = { workspace = true }
+miden-field = { workspace = true }
 miden-crypto = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["std"] }
+proptest.workspace = true

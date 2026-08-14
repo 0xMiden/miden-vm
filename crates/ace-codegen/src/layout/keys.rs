@@ -16,6 +16,13 @@ pub enum InputKey {
     AuxRandBeta,
     /// Challenge used to fold per-AIR constraint roots in proof order.
     MultiAirFoldBeta,
+    /// Fold coefficient for the AIR instance at the given index.
+    ///
+    /// Factored-emission-only: this key has no READ-layout slot. The factored emitter binds it
+    /// to a shuffle-section gate holding a power of [`InputKey::MultiAirFoldBeta`]; which power
+    /// is chosen per assembled circuit by the caller of
+    /// `FactoredAceCircuit::assemble`.
+    MultiAirFoldCoeff(usize),
     /// Preprocessed trace value at (offset, index).
     Preprocessed { offset: usize, index: usize },
     /// Main trace value at (offset, index).
@@ -79,6 +86,8 @@ impl InputKeyMapper<'_> {
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
+            // Factored-emission-only key: never present in the READ layout.
+            InputKey::MultiAirFoldCoeff(_) => None,
             InputKey::Preprocessed { offset, index } => match offset {
                 0 => layout.regions.preprocessed_curr.index(index),
                 1 => layout.regions.preprocessed_next.index(index),

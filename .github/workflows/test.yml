@@ -132,6 +132,24 @@ jobs:
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
 
+  check-pvm-registry:
+    name: check PVM ACE registry constants
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Check PVM registry constants for drift (full 10! recompute)
+        run: make check-pvm-registry
+
   run-examples:
     name: run masm examples
     runs-on: warp-ubuntu-latest-x64-8x

@@ -21,9 +21,10 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-core/std", "miden-crypto/std"]
+std = ["miden-core/std", "miden-crypto/std", "ruint/std"]
 
 [dependencies]
 # Miden dependencies
 miden-core.workspace = true
 miden-crypto.workspace = true
+ruint.workspace = true

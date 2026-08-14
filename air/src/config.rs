@@ -3,9 +3,9 @@
 //! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
 //! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec;
 
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
@@ -15,7 +15,7 @@ use miden_crypto::{
         rpo::RpoPermutation256,
         rpx::RpxPermutation256,
     },
-    merkle::MerkleTree,
+    merkle::{MerklePath, MerkleTree, NodeIndex},
     stark::{
         GenericStarkConfig,
         challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
@@ -30,7 +30,7 @@ use miden_crypto::{
     },
 };
 
-use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH};
+use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH, ProofOrder};
 
 // SHARED TYPES
 // ================================================================================================
@@ -116,25 +116,39 @@ pub fn pcs_params() -> PcsParams {
 /// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
 pub type RelationDigest = [Felt; 4];
 
+/// Bind a protocol version and ACE registry root into a relation digest.
+pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest {
+    let input = [
+        Felt::new_unchecked(protocol_id),
+        registry_root[0],
+        registry_root[1],
+        registry_root[2],
+        registry_root[3],
+    ];
+    let digest = Poseidon2::hash_elements(&input);
+    let elements = digest.as_elements();
+    [elements[0], elements[1], elements[2], elements[3]]
+}
+
 /// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(5295691278992603729),
-    Felt::new_unchecked(14372903089468495231),
-    Felt::new_unchecked(14126114708199185335),
-    Felt::new_unchecked(1962580870545051767),
+    Felt::new_unchecked(6707657866347869898),
+    Felt::new_unchecked(15003255403457090401),
+    Felt::new_unchecked(3161728420253440800),
+    Felt::new_unchecked(3925668149141025919),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(1518962395264624615),
-    Felt::new_unchecked(15784779067617049400),
-    Felt::new_unchecked(1581745292729420002),
-    Felt::new_unchecked(9887978513811317011),
+    Felt::new_unchecked(15494055359749385108),
+    Felt::new_unchecked(10378068431877225902),
+    Felt::new_unchecked(8906024671689956466),
+    Felt::new_unchecked(8201729358988149119),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -149,64 +163,84 @@ const _: () = assert!(
     "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
 );
 
-/// Leaves in the ACE circuit registry tree.
-///
-/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
-/// Inactive leaves are deterministic padding.
-pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
-    [
-        Felt::new_unchecked(15173775376017517731),
-        Felt::new_unchecked(17060787883775236642),
-        Felt::new_unchecked(10312199614991066810),
-        Felt::new_unchecked(9392681623159778270),
-    ],
-    [
-        Felt::new_unchecked(11196158180439972460),
-        Felt::new_unchecked(12611152378979260492),
-        Felt::new_unchecked(4182814750108927065),
-        Felt::new_unchecked(13193607488197256617),
-    ],
-    [
-        Felt::new_unchecked(10860557104621841186),
-        Felt::new_unchecked(3094532602596976361),
-        Felt::new_unchecked(17159863587394592259),
-        Felt::new_unchecked(473648936676637663),
-    ],
-    [
-        Felt::new_unchecked(15256300555678967793),
-        Felt::new_unchecked(4085454011309879133),
-        Felt::new_unchecked(7907865245912094959),
-        Felt::new_unchecked(18180782078565659964),
-    ],
-    [
-        Felt::new_unchecked(17759138428963217527),
-        Felt::new_unchecked(16630927310815206805),
-        Felt::new_unchecked(11661497490269156220),
-        Felt::new_unchecked(9328352955914878064),
-    ],
-    [
-        Felt::new_unchecked(11267126175745873149),
-        Felt::new_unchecked(9359003113379985808),
-        Felt::new_unchecked(3823810735281226285),
-        Felt::new_unchecked(1340512497265955003),
-    ],
-    [
-        Felt::new_unchecked(1422687632582465263),
-        Felt::new_unchecked(6762842649754512176),
-        Felt::new_unchecked(204555358186721414),
-        Felt::new_unchecked(14644894839315568530),
-    ],
-    [
-        Felt::new_unchecked(17922044667460564880),
-        Felt::new_unchecked(15528373781338840444),
-        Felt::new_unchecked(17550563904831590003),
-        Felt::new_unchecked(14149524031833665710),
-    ],
-];
+// NOTE: registry leaves are not checked in. They are recomputed per process from the AIR
+// (see `ace_registry_path`) and authenticated against `ACE_CIRCUIT_REGISTRY_ROOT`, which
+// is the registry commitment. Checking in the six active Miden VM leaves would be cheap but
+// redundant; recomputing them also keeps the Miden VM and PVM on one serving model.
 
-pub fn ace_circuit_registry_tree() -> MerkleTree {
-    let leaves = ACE_CIRCUIT_REGISTRY_LEAVES.iter().copied().map(Word::new).collect::<Vec<_>>();
-    MerkleTree::new(&leaves).expect("ACE circuit registry has power-of-two leaves")
+/// Authentication data for one ACE registry slot: its leaf and Merkle path.
+///
+/// This is the whole registry read surface — the MASM loader consumes exactly one
+/// `mtree_get(ACE_REGISTRY_ROOT, ORDER_TAG)`, so one `(leaf, path)` per proof is all a
+/// caller ever needs. How the registry is stored behind this call is an implementation
+/// detail, which is what lets the precompile VM's 10!-leaf registry swap in a different
+/// strategy without touching callers.
+///
+/// Returns `None` when `tag` does not address a slot of the depth-[`ACE_CIRCUIT_REGISTRY_DEPTH`]
+/// tree. Padding slots (tags at or above [`PROOF_ORDER_COUNT`]) resolve like any other slot;
+/// the MASM verifier's `assert_valid_order_tag` is what keeps them from being opened.
+pub fn ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
+    #[cfg(feature = "std")]
+    let tree = miden_vm_ace_registry();
+    #[cfg(not(feature = "std"))]
+    let tree = &build_miden_vm_ace_registry();
+    registry_path_in(tree, tag)
+}
+
+/// Leaf and path for `tag` in a caller-held registry tree.
+pub(crate) fn registry_path_in(tree: &MerkleTree, tag: u32) -> Option<(Word, MerklePath)> {
+    let index = NodeIndex::new(ACE_CIRCUIT_REGISTRY_DEPTH as u8, u64::from(tag)).ok()?;
+    let leaf = tree.get_node(index).ok()?;
+    let path = tree.get_path(index).ok()?;
+    Some((leaf, path))
+}
+
+/// The process-wide Miden VM ACE circuit registry, computed from the AIR on first use.
+///
+/// Leaves are recomputed (not checked in) and the resulting root is authenticated against
+/// the compiled-in [`ACE_CIRCUIT_REGISTRY_ROOT`] before anything can read the tree, so
+/// this cache carries no trust: drift between the AIR and the protocol constant fails
+/// here, loudly, instead of at every later `mtree_get` with an opaque store miss.
+#[cfg(feature = "std")]
+fn miden_vm_ace_registry() -> &'static MerkleTree {
+    static REGISTRY: std::sync::OnceLock<MerkleTree> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(|| build_miden_vm_ace_registry_with(crate::ace::shared_recursive_factory()))
+}
+
+/// Rebuilds the Miden VM's eight-leaf ACE registry and authenticates it against the protocol root.
+///
+/// `std` caches this tree process-wide; `no_std` callers rebuild it on demand so recursive advice
+/// generation remains available without global state or synchronization support.
+#[cfg(not(feature = "std"))]
+fn build_miden_vm_ace_registry() -> MerkleTree {
+    let factory = crate::ace::RecursiveAceCircuitFactory::new()
+        .expect("recursive-verifier ACE composition must build");
+    build_miden_vm_ace_registry_with(&factory)
+}
+
+/// Builds the eight-leaf registry from an existing factory and authenticates it against
+/// the protocol root, so callers holding a factory pay no second composition build.
+pub(crate) fn build_miden_vm_ace_registry_with(
+    factory: &crate::ace::RecursiveAceCircuitFactory,
+) -> MerkleTree {
+    let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
+    let mut leaves = vec![miden_ace_codegen::padding_leaf(); ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
+    for order in ProofOrder::variants() {
+        let leaf = factory
+            .leaf_for_order(&order, &mut buffer)
+            .expect("registry leaf must encode for every proof order");
+        leaves[order.tag() as usize] = leaf;
+    }
+    let tree = MerkleTree::new(&leaves).expect("ACE circuit registry has power-of-two leaves");
+    assert_eq!(
+        tree.root(),
+        Word::new(ACE_CIRCUIT_REGISTRY_ROOT),
+        "computed ACE registry root does not match ACE_CIRCUIT_REGISTRY_ROOT. If this \
+         protocol change is intentional, run `make regenerate-constraints` and record \
+         the break; otherwise inspect the unexpected registry drift before updating constants",
+    );
+    tree
 }
 
 /// Observes PCS protocol parameters into the challenger.
@@ -387,7 +421,8 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+    use miden_ace_codegen::padding_leaf;
+    use miden_core::{Felt, Word};
     use miden_crypto::{
         merkle::MerkleTree,
         stark::{challenger::CanObserve, pcs::PcsParams},
@@ -396,7 +431,6 @@ mod tests {
     use crate::{ProofOrder, ace};
 
     const PROTOCOL_ID: u64 = 1;
-    const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 
     #[derive(Default)]
@@ -423,13 +457,6 @@ mod tests {
         );
     }
 
-    fn padding_leaf(index: usize) -> Word {
-        Poseidon2::hash_elements(&[
-            Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN),
-            Felt::new_unchecked(index as u64),
-        ])
-    }
-
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
     ///
     /// If this test fails, regenerate with:
@@ -438,20 +465,28 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        assert_eq!(
-            super::ACE_CIRCUIT_REGISTRY_LEAVES.len(),
-            super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
-            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
-        );
-
-        let mut expected_leaves = (0..super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT)
-            .map(padding_leaf)
-            .collect::<Vec<_>>();
+        let mut expected_leaves = vec![padding_leaf(); super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
         let mut snapshot_lines = Vec::new();
         let mut expected_metadata = None;
 
+        let factory = ace::RecursiveAceCircuitFactory::new().unwrap();
+        let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
         for order in ProofOrder::variants() {
-            let circuit = ace::build_recursive_verifier_ace_circuit(&order).unwrap();
+            let circuit = factory.circuit_for_order(&order).unwrap();
+
+            // Dual-path leaf equality for EVERY order: the encode-only path (which the
+            // runtime registry uses) against the assembled-stream path. This catches
+            // encoding divergence between the two stream constructions; it is blind to
+            // hash-implementation faults, which hit both paths identically (they share
+            // the cached sponge states) — those are guarded by the one-shot builder
+            // sweep in air/tests/ace_codegen.rs and miden-crypto's packed-vs-scalar
+            // differential test.
+            assert_eq!(
+                factory.leaf_for_order(&order, &mut buffer).unwrap(),
+                circuit.commitment,
+                "encode-only registry leaf diverges from the assembled circuit for {}",
+                order.file_stem(),
+            );
             let metadata = (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len);
             if let Some(expected) = expected_metadata {
                 assert_eq!(metadata, expected, "ACE circuit metadata must be uniform");
@@ -475,18 +510,7 @@ mod tests {
             ));
         }
 
-        let actual_leaves = super::ACE_CIRCUIT_REGISTRY_LEAVES
-            .iter()
-            .copied()
-            .map(Word::new)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual_leaves.as_slice(),
-            expected_leaves.as_slice(),
-            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
-        );
-
-        let tree = MerkleTree::new(expected_leaves).expect("registry tree");
+        let tree = MerkleTree::new(&expected_leaves).expect("registry tree");
         let registry_root = tree.root();
         assert_eq!(
             Word::new(super::ACE_CIRCUIT_REGISTRY_ROOT),
@@ -494,10 +518,20 @@ mod tests {
             "ACE_CIRCUIT_REGISTRY_ROOT in config.rs is stale. Regenerate with: {REGEN_HINT}"
         );
 
-        let relation_input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
-            .chain(registry_root.iter().copied())
-            .collect();
-        let digest = Poseidon2::hash_elements(&relation_input);
+        // The path-shaped read surface must serve every slot — active and padding —
+        // with a leaf and path that verify against the compiled-in root.
+        for tag in 0..super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT as u32 {
+            let (leaf, path) = super::ace_registry_path(tag).expect("tag addresses a slot");
+            assert_eq!(leaf, expected_leaves[tag as usize], "leaf mismatch at tag {tag}");
+            let computed = path.compute_root(u64::from(tag), leaf).expect("path root computes");
+            assert_eq!(computed, registry_root, "path at tag {tag} does not verify");
+        }
+        assert!(
+            super::ace_registry_path(super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT as u32).is_none(),
+            "out-of-range tags must not resolve"
+        );
+
+        let digest = super::relation_digest(PROTOCOL_ID, &registry_root);
         let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!("{}\nrelation_digest: {:?}", snapshot_lines.join("\n"), expected);

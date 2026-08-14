@@ -2058,6 +2058,8 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-field",
+ "proptest",
  "thiserror",
 ]
 
@@ -2213,6 +2215,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
+ "miden-precompiles-prover",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
@@ -2515,6 +2518,7 @@ version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "ruint",
 ]
 
 [[package]]
@@ -2532,6 +2536,7 @@ dependencies = [
  "miden-precompiles",
  "miden-serde-utils",
  "rand 0.10.2",
+ "rayon",
  "ruint",
  "serde",
  "serde-wincode",
