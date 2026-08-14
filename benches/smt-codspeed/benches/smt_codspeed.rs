@@ -251,13 +251,14 @@ fn large_smt_rocksdb_benches(c: &mut Criterion) {
             );
         });
         group.bench_function(BenchmarkId::new("apply_mutations", size), |bench| {
+            // Tuple fields drop in declaration order, so the database must precede its directory.
             bench.iter_batched_ref(
                 || {
                     let (temp_dir, smt) = rocksdb_smt(4_096);
                     let mutations = smt.compute_mutations(entries(size, 10_000)).unwrap();
-                    (temp_dir, smt, Some(mutations))
+                    (smt, temp_dir, Some(mutations))
                 },
-                |(_temp_dir, smt, mutations)| {
+                |(smt, _temp_dir, mutations)| {
                     smt.apply_mutations(mutations.take().unwrap()).unwrap();
                     black_box(())
                 },
@@ -269,9 +270,9 @@ fn large_smt_rocksdb_benches(c: &mut Criterion) {
                 || {
                     let (temp_dir, smt) = rocksdb_smt(4_096);
                     let batch = entries(size, 10_000);
-                    (temp_dir, smt, batch)
+                    (smt, temp_dir, batch)
                 },
-                |(_temp_dir, smt, batch)| {
+                |(smt, _temp_dir, batch)| {
                     black_box(smt.insert_batch(std::mem::take(batch)).unwrap())
                 },
                 BatchSize::LargeInput,

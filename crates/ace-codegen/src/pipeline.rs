@@ -8,12 +8,19 @@
 
 use miden_constraint_compiler::ir::capture;
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::{BaseAir, LiftedAir};
+use miden_crypto::{
+    field::Field,
+    stark::air::{BaseAir, LiftedAir},
+};
 
 use crate::{
     AceError, EXT_DEGREE,
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir},
+    dag::{
+        AceDag, DagBuilder, NodeId, NodeKind, PeriodicColumnData, build_verifier_dag_from_ir,
+        normalize_dag,
+    },
+    factored::{FactoredAceCircuit, ShuffleEncodeBuffer, emit_factored_circuit},
     layout::{InputCounts, InputKey, InputLayout},
 };
 
@@ -178,6 +185,7 @@ where
     let root = builder.sub(accumulator, quotient_binding);
     let mut dag = builder.build(root);
     dag.compact();
+    let dag = normalize_dag(dag);
     emit_circuit(&dag, layout)
 }
 
@@ -267,7 +275,7 @@ fn max_period<F>(periodic_columns: &[Vec<F>]) -> usize {
     periodic_columns.iter().map(Vec::len).max().unwrap_or(1)
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct TraceOffsets {
     preprocessed: usize,
     main: usize,
@@ -282,6 +290,9 @@ fn reemit_air_root(
     offsets: TraceOffsets,
 ) -> (NodeId, NodeId) {
     debug_assert_eq!(source.root().index() + 1, source.nodes.len());
+    // The right operand is `Mul(q, v)` over quotient inputs, which AIR constraints cannot
+    // reference. It is therefore neither equal nor structurally related to the accumulator,
+    // so none of `DagBuilder::sub`'s simplifications can remove the final `Sub` node.
     let NodeKind::Sub(accumulator, quotient_binding) = source.nodes[source.root().index()] else {
         unreachable!("verifier DAGs always emit an accumulator - q*v root")
     };
@@ -352,4 +363,294 @@ where
         num_randomness,
         num_quotient_chunks: config.num_quotient_chunks,
     })
+}
+
+/// Multi-AIR ACE circuit factored into a per-order shuffle section and an order-invariant
+/// common section.
+///
+/// The common section is emitted once from the canonical (instance-order) DAG, which is what
+/// makes its encoding — and therefore `H(common)` — well-defined across proof orders; see the
+/// `factored` module for the section layout.
+#[derive(Debug, Clone)]
+pub struct FactoredMultiAirCircuit<EF> {
+    factored: FactoredAceCircuit<EF>,
+    /// Per-AIR aligned trace-block widths (the per-AIR increments of the offset accumulation),
+    /// indexed by instance index.
+    blocks: Vec<TraceOffsets>,
+}
+
+impl<EF: Field> FactoredMultiAirCircuit<EF> {
+    /// Return the input layout shared by every proof order.
+    pub fn layout(&self) -> &InputLayout {
+        self.factored.layout()
+    }
+
+    /// Number of shuffle-section ops (also the section length in stream felts).
+    pub fn num_shuffle_ops(&self) -> usize {
+        self.factored.num_shuffle_ops()
+    }
+
+    /// Number of AIR instances in the composition.
+    pub fn num_airs(&self) -> usize {
+        self.blocks.len()
+    }
+
+    /// Encode only this proof order's shuffle section into `buffer`.
+    ///
+    /// This is the registry path: it skips circuit assembly and the order-invariant
+    /// remainder of the stream, so a caller enumerating every ordering touches only the
+    /// per-order bytes. `buffer` may be reused across calls; the returned slice borrows it
+    /// (the borrow checker rules out overlapping calls), so hash the felts, then encode
+    /// the next order.
+    pub fn encode_shuffle_section_for_order<'a>(
+        &self,
+        proof_order: &[usize],
+        buffer: &'a mut ShuffleEncodeBuffer,
+    ) -> Result<&'a [Felt], AceError> {
+        let (srcs, exponents) = buffer.order_scratch();
+        self.shuffle_and_exponents(proof_order, srcs, exponents)?;
+        self.factored.encode_shuffle_section(buffer)
+    }
+
+    /// Fill `srcs` and `exponents` for one proof order, reusing their allocations.
+    fn shuffle_and_exponents(
+        &self,
+        proof_order: &[usize],
+        srcs: &mut Vec<usize>,
+        exponents: &mut Vec<usize>,
+    ) -> Result<(), AceError> {
+        let num_airs = self.blocks.len();
+        if proof_order.len() != num_airs {
+            return Err(AceError::InvalidInputLayout {
+                message: format!("proof_order must be a permutation of 0..{num_airs}"),
+            });
+        }
+
+        exponents.clear();
+        exponents.resize(num_airs, usize::MAX);
+        for (position, &air_index) in proof_order.iter().enumerate() {
+            let Some(exponent) = exponents.get_mut(air_index) else {
+                return Err(AceError::InvalidInputLayout {
+                    message: format!("proof_order must be a permutation of 0..{num_airs}"),
+                });
+            };
+            if *exponent != usize::MAX {
+                return Err(AceError::InvalidInputLayout {
+                    message: format!("proof_order must be a permutation of 0..{num_airs}"),
+                });
+            }
+            // The AIR at proof position `k` carries `beta^(N - 1 - k)` in the Horner fold.
+            *exponent = num_airs - 1 - position;
+        }
+
+        let proof_offsets = accumulate_block_offsets(&self.blocks, proof_order);
+        shuffled_slots(self.factored.layout(), &self.blocks, &proof_offsets, srcs)?;
+        Ok(())
+    }
+
+    /// Assemble the full circuit for one proof order.
+    ///
+    /// `proof_order` must be a permutation of `0..num_airs` listing instance indices in the
+    /// committed (height-sorted) trace order.
+    pub fn circuit_for_order(&self, proof_order: &[usize]) -> Result<AceCircuit<EF>, AceError> {
+        let mut srcs = Vec::new();
+        let mut coeff_exponents = Vec::new();
+        self.shuffle_and_exponents(proof_order, &mut srcs, &mut coeff_exponents)?;
+        self.factored.assemble(&srcs, &coeff_exponents)
+    }
+}
+
+/// Factored variant of [`build_multi_air_ace_circuit`].
+///
+/// Builds the canonical (instance-order) composition once; per-proof-order circuits are then
+/// assembled from it via [`FactoredMultiAirCircuit::circuit_for_order`]. The assembled circuit
+/// for a given proof order evaluates to the same value as the one produced by
+/// [`build_multi_air_ace_circuit`] for that order: the shuffle section routes proof-order READ
+/// slots and fold coefficients onto the canonical wires.
+pub fn build_factored_multi_air_ace_circuit<A>(
+    airs: &[A],
+    config: AceConfig,
+    trace_width_alignment: usize,
+) -> Result<FactoredMultiAirCircuit<QuadFelt>, AceError>
+where
+    A: LiftedAir<Felt, QuadFelt>,
+{
+    let num_airs = airs.len();
+    if num_airs == 0 || config.num_airs != num_airs {
+        return Err(AceError::InvalidInputLayout {
+            message: format!(
+                "multi-AIR composition requires a nonempty airs slice and matching num_airs; got \
+                 {} AIRs and num_airs {}",
+                num_airs, config.num_airs
+            ),
+        });
+    }
+    if trace_width_alignment == 0 {
+        return Err(AceError::InvalidInputLayout {
+            message: "trace width alignment must be nonzero".into(),
+        });
+    }
+
+    let sub_config = AceConfig { num_airs: 1, ..config };
+    let artifacts = build_ace_dags_for_airs(airs, sub_config)?;
+    let shared = artifacts[0].layout.counts;
+    if artifacts.iter().any(|air| air.layout.counts.num_public != shared.num_public) {
+        return Err(AceError::InvalidInputLayout {
+            message: "all AIRs must use the same public-value window".into(),
+        });
+    }
+
+    let mut blocks = Vec::with_capacity(num_airs);
+    for artifact in &artifacts {
+        let counts = artifact.layout.counts;
+        let aligned_aux = (counts.aux_width * EXT_DEGREE).next_multiple_of(trace_width_alignment);
+        if !aligned_aux.is_multiple_of(EXT_DEGREE) {
+            return Err(AceError::InvalidInputLayout {
+                message: "aligned auxiliary width must be divisible by the extension degree".into(),
+            });
+        }
+        blocks.push(TraceOffsets {
+            preprocessed: counts.preprocessed_width.next_multiple_of(trace_width_alignment),
+            main: counts.width.next_multiple_of(trace_width_alignment),
+            aux: aligned_aux / EXT_DEGREE,
+            boundary: counts.num_aux_boundary,
+        });
+    }
+
+    let canonical_order: Vec<usize> = (0..num_airs).collect();
+    let offsets = accumulate_block_offsets(&blocks, &canonical_order);
+    let totals = blocks.iter().fold(TraceOffsets::default(), |mut totals, block| {
+        totals.preprocessed += block.preprocessed;
+        totals.main += block.main;
+        totals.aux += block.aux;
+        totals.boundary += block.boundary;
+        totals
+    });
+
+    let counts = InputCounts {
+        preprocessed_width: totals.preprocessed,
+        width: totals.main,
+        aux_width: totals.aux,
+        num_aux_boundary: totals.boundary,
+        num_public: shared.num_public,
+        num_randomness: shared.num_randomness,
+        num_quotient_chunks: shared.num_quotient_chunks,
+    };
+    let layout = match config.layout {
+        LayoutKind::Native => InputLayout::new_multi_air(counts, num_airs),
+        LayoutKind::Masm => InputLayout::new_masm_multi_air(counts, num_airs),
+    };
+
+    // Re-emit in stable instance order; placement is canonical, and the fold coefficients are
+    // per-order shuffle-section gates rather than a structural Horner fold.
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let mut roots = Vec::with_capacity(num_airs);
+    for (air_index, artifacts) in artifacts.iter().enumerate() {
+        roots.push(reemit_air_root(&mut builder, &artifacts.dag, air_index, offsets[air_index]));
+    }
+    let quotient_binding = roots[0].1;
+    if roots.iter().any(|&(_, binding)| binding != quotient_binding) {
+        return Err(AceError::InvalidInputLayout {
+            message: "all AIR quotient bindings must use the same q*v node".into(),
+        });
+    }
+
+    let mut accumulator = None;
+    for (air_index, &(acc, _)) in roots.iter().enumerate() {
+        let coeff = builder.input(InputKey::MultiAirFoldCoeff(air_index));
+        let scaled = builder.mul(acc, coeff);
+        accumulator = Some(match accumulator {
+            None => scaled,
+            Some(previous) => builder.add(previous, scaled),
+        });
+    }
+    let accumulator = accumulator.expect("multi-AIR composition is nonempty");
+
+    // The encoded ACE circuit treats the final operation as its root.
+    let root = builder.sub(accumulator, quotient_binding);
+    let mut dag = builder.build(root);
+    dag.compact();
+    let dag = normalize_dag(dag);
+
+    let mut shuffle_dsts = Vec::new();
+    shuffled_slots(&layout, &blocks, &offsets, &mut shuffle_dsts)?;
+    let factored = emit_factored_circuit(&dag, layout, shuffle_dsts, num_airs)?;
+    Ok(FactoredMultiAirCircuit { factored, blocks })
+}
+
+/// Prefix-sum the per-AIR block widths in `order`; the result is indexed by instance index.
+fn accumulate_block_offsets(blocks: &[TraceOffsets], order: &[usize]) -> Vec<TraceOffsets> {
+    let mut offsets = vec![TraceOffsets::default(); blocks.len()];
+    let mut totals = TraceOffsets::default();
+    for &air_index in order {
+        offsets[air_index] = totals;
+        let block = blocks[air_index];
+        totals.preprocessed += block.preprocessed;
+        totals.main += block.main;
+        totals.aux += block.aux;
+        totals.boundary += block.boundary;
+    }
+    offsets
+}
+
+/// Enumerate the global input indices of every shuffled READ slot, per-AIR blocks placed at
+/// `offsets`, AIRs visited in canonical order.
+///
+/// Called with canonical offsets this yields the shuffle destinations; called with a proof
+/// order's offsets it yields the sources aligned element-wise with those destinations.
+fn shuffled_slots(
+    layout: &InputLayout,
+    blocks: &[TraceOffsets],
+    offsets: &[TraceOffsets],
+    slots: &mut Vec<usize>,
+) -> Result<(), AceError> {
+    slots.clear();
+    let mut push = |key: InputKey| -> Result<(), AceError> {
+        let index = layout.index(key).ok_or_else(|| AceError::InvalidInputLayout {
+            message: format!("shuffled slot {key:?} is missing from the layout"),
+        })?;
+        slots.push(index);
+        Ok(())
+    };
+
+    for row_offset in 0..2 {
+        for (block, air_offsets) in blocks.iter().zip(offsets) {
+            for column in 0..block.preprocessed {
+                push(InputKey::Preprocessed {
+                    offset: row_offset,
+                    index: air_offsets.preprocessed + column,
+                })?;
+            }
+        }
+    }
+    for row_offset in 0..2 {
+        for (block, air_offsets) in blocks.iter().zip(offsets) {
+            for column in 0..block.main {
+                push(InputKey::Main {
+                    offset: row_offset,
+                    index: air_offsets.main + column,
+                })?;
+            }
+        }
+    }
+    for row_offset in 0..2 {
+        for (block, air_offsets) in blocks.iter().zip(offsets) {
+            for column in 0..block.aux {
+                for coord in 0..EXT_DEGREE {
+                    push(InputKey::AuxCoord {
+                        offset: row_offset,
+                        index: air_offsets.aux + column,
+                        coord,
+                    })?;
+                }
+            }
+        }
+    }
+    for (block, air_offsets) in blocks.iter().zip(offsets) {
+        for value in 0..block.boundary {
+            push(InputKey::AuxBusBoundary(air_offsets.boundary + value))?;
+        }
+    }
+
+    Ok(())
 }

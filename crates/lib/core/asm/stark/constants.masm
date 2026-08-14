@@ -69,6 +69,8 @@ const FRI_QUERIES_ADDRESS_PTR = 3223322633
 const TRACE_LENGTH_LOG_PTR = 3223322634
 
 ### Per-AIR log heights, kept so MASM can derive proof order and lifted selectors.
+### The cells are CONSECUTIVE, one per AIR in canonical instance order, so
+### `air_trace_length_logs_ptr` can serve them as an array.
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
 const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR = 3223322637
@@ -245,11 +247,11 @@ const AUX_BUS_BOUNDARY_PTR = 3225420328       # OOD_EVALUATIONS_PTR + 544
 ###   slots 17-19: is_{first,last,transition}_poseidon2_permutation
 const AUXILIARY_ACE_INPUTS_PTR = 3225420336   # AUX_BUS_BOUNDARY_PTR + 8
 
-### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
+### Address at the start of the memory region holding the arithmetic circuit description.
+### The stream is factored as [constants | shuffle ops | common ops]: the per-order prefix
+### (constants + shuffle) and the order-invariant common section are hashed separately and
+### bound by the registry leaf merge(H_prefix, H_common).
 const ACE_CIRCUIT_STREAM_PTR = 3225420376     # AUXILIARY_ACE_INPUTS_PTR + 40
-
-### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420960            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (584 for multi-AIR)
 
 ## FRI
 ##
@@ -461,6 +463,14 @@ pub proc get_poseidon2_permutation_trace_length_log
     push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_load
 end
 
+#! Returns the base pointer of the per-AIR log-height cells.
+#!
+#! One cell per AIR, consecutive, in canonical instance order:
+#! [core, chiplets, poseidon2_permutation].
+pub proc air_trace_length_logs_ptr
+    push.CORE_TRACE_LENGTH_LOG_PTR
+end
+
 pub proc set_query_pow_bits
     push.QUERY_POW_BITS_PTR mem_store
 end
@@ -650,10 +660,6 @@ end
 
 pub proc ace_circuit_stream_ptr
     push.ACE_CIRCUIT_STREAM_PTR
-end
-
-pub proc get_arithmetic_circuit_ptr
-    push.ACE_CIRCUIT_PTR
 end
 
 pub proc fri_com_ptr

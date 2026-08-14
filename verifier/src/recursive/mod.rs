@@ -29,7 +29,7 @@ use alloc::{
 
 use miden_air::{
     MIDEN_AIR_COUNT, MidenMultiAir, ProofOrder, PublicInputs, Statement,
-    ace::build_recursive_verifier_ace_circuit, config,
+    ace::recursive_registry_entry, config,
 };
 use miden_core::{
     Felt, Word,
@@ -401,11 +401,15 @@ fn build_merkle_data(
         advice_map.extend(entries);
     }
 
-    let registry_tree = config::ace_circuit_registry_tree();
-    store.extend(registry_tree.inner_nodes());
-
-    let circuit = build_recursive_verifier_ace_circuit(proof_order).map_err(|_| {
+    // One factory serves the evaluated circuit and its registry authentication: the
+    // verifier reads one registry leaf, and seeding the complete registry would not
+    // scale to the precompile relation's `10!` orders.
+    let entry = recursive_registry_entry(proof_order).map_err(|_| {
         RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
+    })?;
+    let (circuit, leaf, path) = entry.into_parts();
+    store.add_merkle_path(u64::from(proof_order.tag()), leaf, path).map_err(|_| {
+        RecursiveVerifierInputsError::InvalidProofShape("ACE registry path could not be stored")
     })?;
     advice_map.push((circuit.commitment, circuit.instructions));
 
