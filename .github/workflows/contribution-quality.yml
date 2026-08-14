@@ -1,6 +1,7 @@
 name: Contribution Quality
 
-# Use pull_request_target so the workflow can safely comment/label on PRs.
+# This workflow reads pull request metadata from the base repository. It must never check out or
+# run code from the pull request.
 on:
   pull_request_target:
     types: [opened, reopened, edited, synchronize, ready_for_review]
@@ -20,29 +21,263 @@ on:
 permissions: {}
 
 jobs:
-  contribution-quality-reusable:
+  gate:
     if: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.user.login != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
       issues: write
-    uses: 0xMiden/.github/.github/workflows/contribution-quality.yml@38552ca595c5773dd361cdc479f349ef75831386
-    with:
-      pr_number: ${{ github.event.inputs.pr_number || '' }}
-      force_all: ${{ github.event.inputs.force_all || 'false' }}
-
-  gate:
-    runs-on: ubuntu-latest
-    needs: contribution-quality-reusable
-    if: always()
+      pull-requests: write
     steps:
-      - name: Mirror reusable workflow result
+      - name: Evaluate contribution quality
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          RESULT: ${{ needs.contribution-quality-reusable.result }}
-        run: |
-          if [ "$RESULT" = "success" ] || [ "$RESULT" = "skipped" ]; then
-            exit 0
-          fi
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number || '' }}
+          DISPATCH_FORCE_ALL: ${{ inputs.force_all || 'false' }}
+        with:
+          script: |
+            const isPullRequestEvent = Boolean(context.payload.pull_request);
+            const fromDispatch = context.payload?.inputs?.pr_number || process.env.DISPATCH_PR_NUMBER;
+            const prNumber = Number.parseInt(
+              isPullRequestEvent ? context.payload.pull_request.number : fromDispatch,
+              10,
+            );
+            if (!Number.isInteger(prNumber)) {
+              core.setFailed('pr_number is required for manual runs.');
+              return;
+            }
 
-          echo "Reusable contribution quality workflow concluded with $RESULT" >&2
-          exit 1
+            const forceAll = (
+              context.payload?.inputs?.force_all || process.env.DISPATCH_FORCE_ALL || 'false'
+            ).toLowerCase() === 'true';
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const author = pr.user?.login || '';
+            let permission = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: author,
+              });
+              permission = (data.permission || 'none').toLowerCase();
+            } catch (error) {
+              if (error.status !== 404) {
+                core.warning(`Failed to resolve collaborator permission for ${author}: ${error.message}`);
+              }
+            }
+
+            const trusted = ['admin', 'maintain', 'write'].includes(permission);
+            if (!forceAll && (trusted || pr.draft)) {
+              core.info(`Skipping author=${author} permission=${permission} draft=${pr.draft}.`);
+              return;
+            }
+
+            const allFiles = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const extension = (path) => {
+              const dot = path.lastIndexOf('.');
+              return dot >= 0 ? path.slice(dot).toLowerCase() : '';
+            };
+            const docs = new Set(['.md', '.rst', '.txt']);
+            const code = new Set([
+              '.rs', '.go', '.py', '.ts', '.tsx', '.js', '.jsx', '.java', '.kt', '.cpp', '.c',
+              '.hpp', '.hh', '.h', '.rb', '.swift', '.scala', '.php', '.sh', '.bash', '.zsh',
+              '.ps1', '.yaml', '.yml', '.toml', '.json',
+            ]);
+            const testPaths = [/^tests?\//i, /\/tests?\//i, /_test\./i, /\.spec\./i, /\.test\./i];
+
+            const changedLines = allFiles.reduce(
+              (total, file) => total + (file.additions || 0) + (file.deletions || 0),
+              0,
+            );
+            const onlyDocs = allFiles.length > 0 && allFiles.every(
+              (file) => docs.has(extension(file.filename)),
+            );
+            const onlyCode = allFiles.length > 0 && allFiles.every(
+              (file) => code.has(extension(file.filename)),
+            );
+            const touchesTests = allFiles.some(
+              (file) => testPaths.some((pattern) => pattern.test(file.filename)),
+            );
+
+            const summary = [pr.title, pr.body].filter(Boolean).join('\n');
+            const repository = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+            const issueNumbers = new Set();
+            const addIssueNumber = (repo, number) => {
+              if (number && (!repo || repo.toLowerCase() === repository)) {
+                issueNumbers.add(Number.parseInt(number, 10));
+              }
+            };
+
+            for (const match of summary.matchAll(
+              /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/(\d+)/ig,
+            )) {
+              addIssueNumber(`${match[1]}/${match[2]}`, match[3]);
+            }
+            for (const match of summary.matchAll(
+              /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/g,
+            )) {
+              addIssueNumber(match[1], match[2]);
+            }
+            for (const match of summary.matchAll(/(^|[^\w/])#(\d+)\b/gm)) {
+              addIssueNumber(repository, match[2]);
+            }
+
+            const linkedIssues = [];
+            const assignedIssues = [];
+            for (const issueNumber of [...issueNumbers].slice(0, 5)) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                });
+                if (issue.pull_request || issue.state !== 'open') {
+                  continue;
+                }
+                linkedIssues.push(issueNumber);
+                const assignees = (issue.assignees || []).map(
+                  (assignee) => assignee.login.toLowerCase(),
+                );
+                if (assignees.includes(author.toLowerCase())) {
+                  assignedIssues.push(issueNumber);
+                }
+              } catch (error) {
+                core.warning(`Failed to fetch issue #${issueNumber}: ${error.message}`);
+              }
+            }
+
+            const hasRationale = /(^|\n)#{0,3}\s*(rationale|why)\b/i.test(summary)
+              || /\bbecause\b/i.test(summary);
+            const trivialDocs = onlyDocs && changedLines <= 20 && allFiles.length <= 2;
+            const trivialCode = onlyCode && !touchesTests && changedLines <= 8
+              && allFiles.length <= 1;
+
+            const findings = [];
+            if (linkedIssues.length === 0) {
+              findings.push('Link a relevant open issue in the pull request description.');
+            } else if (assignedIssues.length === 0) {
+              findings.push('At least one linked open issue must be assigned to the pull request author.');
+            }
+            if (!hasRationale) {
+              findings.push('Add a short Rationale that explains why the change is needed.');
+            }
+            if (trivialDocs) {
+              findings.push('This appears to be a small documentation edit that maintainers may batch.');
+            }
+            if (trivialCode) {
+              findings.push('This appears to be a small code edit without tests that maintainers may batch.');
+            }
+
+            const closeUnassigned = assignedIssues.length === 0;
+            const marker = '<!-- contribution-quality-comment -->';
+            const legacyHeader = 'Automated check (CONTRIBUTING.md)';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existingComment = comments
+              .filter((comment) => {
+                const body = comment.body || '';
+                return comment.user?.type === 'Bot'
+                  && (body.includes(marker) || body.startsWith(legacyHeader));
+              })
+              .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))[0];
+
+            if (findings.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['quality-concern'],
+              });
+            } else {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: 'quality-concern',
+                });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+              }
+            }
+
+            let commentBody = '';
+            if (closeUnassigned) {
+              const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
+                + `/blob/${pr.base.ref}`
+                + '/CONTRIBUTING.md#contribution-quality';
+              commentBody = [
+                marker,
+                'This pull request was closed without review because none of the linked open issues',
+                `is assigned to @${author}.`,
+                '',
+                `Our [contribution guidelines](${policyUrl}) require contributions to link to an`,
+                'issue assigned to the author. Please ask to be assigned before opening a new',
+                'pull request.',
+              ].join('\n');
+            } else if (findings.length > 0) {
+              const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
+                + `/blob/${pr.base.ref}`
+                + '/CONTRIBUTING.md#contribution-quality';
+              commentBody = [
+                marker,
+                legacyHeader,
+                '',
+                'Findings:',
+                ...findings.map((finding) => `- ${finding}`),
+                '',
+                'Next steps:',
+                `- Read the [contribution quality guidelines](${policyUrl}).`,
+                '- If this is a false positive, ask a maintainer to review this check.',
+              ].join('\n');
+            }
+
+            if (commentBody) {
+              if (existingComment && existingComment.body !== commentBody) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body: commentBody,
+                });
+              } else if (!existingComment) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: commentBody,
+                });
+              }
+            } else if (existingComment) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+              });
+            }
+
+            if (closeUnassigned && pr.state !== 'closed') {
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                state: 'closed',
+              });
+            }
