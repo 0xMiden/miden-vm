@@ -6,11 +6,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{ZERO, events::EventName};
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -69,15 +65,11 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
     // Assertion from the original code: r_hi should always be zero for Falcon modulus
     assert_eq!(r_hi, ZERO);
 
-    let mut remainder_stack = AdviceStack::new();
     // MASM consumes the remainder after the quotient, with one `adv_push`.
-    remainder_stack.append_element(r_lo);
-    let remainder = AdviceMutation::extend_advice_stack(remainder_stack);
+    let remainder = AdviceMutation::extend_advice_stack_with([r_lo]);
 
-    let mut quotient_stack = AdviceStack::new();
     // MASM reads q_hi then q_lo with `adv_push adv_push`, so q_lo lands on top.
-    quotient_stack.append_elements([q_hi, q_lo]);
-    let quotient = AdviceMutation::extend_advice_stack(quotient_stack);
+    let quotient = AdviceMutation::extend_advice_stack_with([q_hi, q_lo]);
     Ok(vec![remainder, quotient])
 }
 

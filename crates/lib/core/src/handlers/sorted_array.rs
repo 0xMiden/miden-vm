@@ -1,11 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{Felt, Word, events::EventName, field::PrimeCharacteristicRing};
-use miden_processor::{
-    MemoryError, ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_processor::{MemoryError, ProcessorState, advice::AdviceMutation, event::EventError};
 
 /// Event name for the lowerbound_array operation.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =
@@ -118,10 +114,11 @@ fn push_lowerbound_result(
 
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
-        let mut advice_stack = AdviceStack::new();
         // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
-        advice_stack.append_elements([Felt::from_u32(addr_range.end), Felt::from_bool(false)]);
-        return Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)]);
+        return Ok(vec![AdviceMutation::extend_advice_stack_with([
+            Felt::from_u32(addr_range.end),
+            Felt::from_bool(false),
+        ])]);
     }
 
     // Helper function to get a word from memory and normalize it to the requested key size.
@@ -161,13 +158,11 @@ fn push_lowerbound_result(
         previous_word = word;
     }
 
-    let mut advice_stack = AdviceStack::new();
     // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
-    advice_stack.append_elements([
+    Ok(vec![AdviceMutation::extend_advice_stack_with([
         Felt::from_u32(result.unwrap_or(addr_range.end)),
         Felt::from_bool(was_key_found),
-    ]);
-    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
+    ])])
 }
 
 /// Selectively zeroizes the felts in a [`Word`] based on the provided [`KeySize`].
