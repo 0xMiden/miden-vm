@@ -53,6 +53,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 
 # Target triple used when producing release artifacts. Defaults to the host's triple.
 BUILD_TARGET             ?= $(shell rustc -vV | grep host | awk '{print $$2}')
+NO_STD_TARGET            ?= wasm32-unknown-unknown
 
 # Per-crate default features
 FEATURES_air             := testing
@@ -248,7 +249,7 @@ build: ## Builds with default parameters
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace \
+	$(BUILDDOCS) cargo build --no-default-features --target $(NO_STD_TARGET) --workspace \
 		--exclude miden-vm-blake3-bench \
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
