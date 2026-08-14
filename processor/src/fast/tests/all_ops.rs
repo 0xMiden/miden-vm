@@ -145,10 +145,13 @@ fn test_basic_block(
 //
 // `rstest` already numbers each `#[values(..)]` entry (the `_NN_` after each parameter name),
 // and that pair of indices alone uniquely identifies a test case, so we extract just the
-// indices instead of embedding the full Debug-formatted values. (insta additionally prepends
-// its own `<crate>__<module path>__` prefix to whatever name we return here, so the final
-// snapshot filename is `miden_processor__fast__tests__all_ops__case_NN_NN.snap` — still under
-// 55 characters, well within Windows' limit.)
+// indices instead of embedding the full Debug-formatted values. `insta` prepends its own
+// `<crate>__<module path>__` prefix to whatever explicit name we return here, so returning
+// just `case_NN_NN` yields a final snapshot filename of
+// `miden_processor__fast__tests__all_ops__case_NN_NN.snap` — still under 55 characters, well
+// within Windows' limit. (We must not include that prefix in the string ourselves: insta
+// already adds it, so doing so would double it up and no longer match the `.snap` files
+// actually checked into the repo.)
 #[fixture]
 fn testname() -> String {
     let full_name = std::thread::current().name().unwrap().replace("::", "__");
@@ -157,9 +160,7 @@ fn testname() -> String {
     let operations_idx = extract_index_after(&full_name, "operations_");
 
     match (stack_inputs_idx, operations_idx) {
-        (Some(a), Some(b)) => {
-            alloc::format!("miden_processor__fast__tests__all_ops__case_{a}_{b}")
-        },
+        (Some(a), Some(b)) => alloc::format!("case_{a}_{b}"),
         // Fall back to the full (verbose) name for any test that doesn't match the
         // expected `..._NN_vec..._NN_vec...` shape from the two `#[values(..)]`
         // parameters, so this fixture stays safe to reuse elsewhere.
