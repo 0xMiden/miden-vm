@@ -747,6 +747,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-field",
  "thiserror",
 ]
 
@@ -1042,6 +1043,7 @@ version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "ruint",
 ]
 
 [[package]]
@@ -1780,6 +1782,21 @@ dependencies = [
  "crypto-bigint",
  "hmac",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e99bff0393163bb25029a6af25d3d8d202ba5b5438a74d1bd8789f5c822970"
+dependencies = [
+ "ruint-macro",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
 
 [[package]]
 name = "rustc-hash"
