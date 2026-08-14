@@ -142,7 +142,7 @@ jobs:
                   repo: context.repo.repo,
                   issue_number: issueNumber,
                 });
-                if (issue.pull_request) {
+                if (issue.pull_request || issue.state !== 'open') {
                   continue;
                 }
                 linkedIssues.push(issueNumber);
@@ -165,9 +165,9 @@ jobs:
 
             const findings = [];
             if (linkedIssues.length === 0) {
-              findings.push('Link a relevant issue in the pull request description.');
+              findings.push('Link a relevant open issue in the pull request description.');
             } else if (assignedIssues.length === 0) {
-              findings.push('At least one linked issue must be assigned to the pull request author.');
+              findings.push('At least one linked open issue must be assigned to the pull request author.');
             }
             if (!hasRationale) {
               findings.push('Add a short Rationale that explains why the change is needed.');
@@ -179,10 +179,7 @@ jobs:
               findings.push('This appears to be a small code edit without tests that maintainers may batch.');
             }
 
-            const firstTime = ['FIRST_TIMER', 'FIRST_TIME_CONTRIBUTOR'].includes(
-              pr.author_association,
-            );
-            const closeUnassigned = firstTime && assignedIssues.length === 0;
+            const closeUnassigned = assignedIssues.length === 0;
             const marker = '<!-- contribution-quality-comment -->';
             const legacyHeader = 'Automated check (CONTRIBUTING.md)';
             const comments = await github.paginate(github.rest.issues.listComments, {
@@ -228,8 +225,8 @@ jobs:
                 + '/CONTRIBUTING.md#contribution-quality';
               commentBody = [
                 marker,
-                'This pull request was closed without review because it is a first contribution',
-                `and none of the linked issues is assigned to @${author}.`,
+                'This pull request was closed without review because none of the linked open issues',
+                `is assigned to @${author}.`,
                 '',
                 `Our [contribution guidelines](${policyUrl}) require contributions to link to an`,
                 'issue assigned to the author. Please ask to be assigned before opening a new',
@@ -248,7 +245,7 @@ jobs:
                 '',
                 'Next steps:',
                 `- Read the [contribution quality guidelines](${policyUrl}).`,
-                '- If this is a false positive, comment `/quality-review`.',
+                '- If this is a false positive, ask a maintainer to review this check.',
               ].join('\n');
             }
 
