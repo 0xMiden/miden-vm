@@ -288,8 +288,9 @@ impl Deserializable for SparseMerklePath {
 }
 
 /// A manual impl (instead of a derive) for the same reason as the [`Deserializable`] impl above:
-/// every deserialization route must go through [`SparseMerklePath::from_parts`], or untrusted
-/// input could construct a path whose mask is inconsistent with its node count and panics during
+/// every deserialization route must bound the node sequence while reading it and then go through
+/// [`SparseMerklePath::from_parts`]. Otherwise, untrusted input could allocate an unbounded node
+/// vector or construct a path whose mask is inconsistent with its node count and panics during
 /// iteration. Mirrors the field layout the `Serialize` derive produces.
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for SparseMerklePath {
@@ -301,11 +302,11 @@ impl<'de> serde::Deserialize<'de> for SparseMerklePath {
         #[serde(rename = "SparseMerklePath")]
         struct Raw {
             empty_nodes_mask: u64,
-            nodes: Vec<Word>,
+            nodes: super::BoundedVec<Word, { SMT_MAX_DEPTH as usize }>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        SparseMerklePath::from_parts(raw.empty_nodes_mask, raw.nodes)
+        SparseMerklePath::from_parts(raw.empty_nodes_mask, raw.nodes.0)
             .map_err(serde::de::Error::custom)
     }
 }

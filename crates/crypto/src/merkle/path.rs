@@ -247,8 +247,9 @@ impl Serializable for MerklePath {
 }
 
 /// A manual impl (instead of a derive) so serde deserialization enforces the same length bound
-/// as [`MerklePath::new`]; the derive would accept a node vector that exceeds the type's depth
-/// bound. Mirrors the field layout the `Serialize` derive produces.
+/// as [`MerklePath::new`] while reading the node sequence; the derive would materialize an
+/// unbounded node vector before validating it. Mirrors the field layout the `Serialize` derive
+/// produces.
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for MerklePath {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -258,17 +259,11 @@ impl<'de> serde::Deserialize<'de> for MerklePath {
         #[derive(serde::Deserialize)]
         #[serde(rename = "MerklePath")]
         struct Raw {
-            nodes: Vec<Word>,
+            nodes: super::BoundedVec<Word, { u8::MAX as usize }>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        if raw.nodes.len() > u8::MAX.into() {
-            return Err(serde::de::Error::custom(format_args!(
-                "MerklePath may have at most 255 items, found {}",
-                raw.nodes.len()
-            )));
-        }
-        Ok(MerklePath::new(raw.nodes))
+        Ok(MerklePath::new(raw.nodes.0))
     }
 }
 
