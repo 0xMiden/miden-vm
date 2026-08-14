@@ -437,33 +437,29 @@ fn advice_insert_hqword() {
     test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
 }
 
-/// Inserting exactly `max_adv_map_value_size` elements must succeed.
+/// Inserting a map value at the combined advice-provider boundary must succeed.
 #[test]
 fn test_adv_insert_mem_at_boundary() {
     let max_size = 8;
-    run_insert_mem_with_max_size(max_size as u32, max_size).unwrap();
+    run_insert_mem_with_max_value_elements(max_size as u32, max_size).unwrap();
 }
 
-/// Inserting one element over `max_adv_map_value_size` must be rejected.
+/// Inserting one element over the combined advice-provider boundary must be rejected.
 #[test]
 fn test_adv_insert_mem_over_boundary() {
     let max_size = 8;
-    let err = run_insert_mem_with_max_size((max_size + 1) as u32, max_size).unwrap_err();
+    let err = run_insert_mem_with_max_value_elements((max_size + 1) as u32, max_size).unwrap_err();
     let msg = format!("{err:?}");
-    assert!(
-        msg.contains("AdvMapValueSizeExceeded"),
-        "expected size-exceeded error, got: {msg}"
-    );
+    assert!(msg.contains("SizeBudgetExceeded"), "expected size-exceeded error, got: {msg}");
 }
 
 // HELPERS
 // ================================================================================================
 
-/// Helper that runs `adv.insert_mem` with a memory range of `range_len` elements and a custom
-/// `max_adv_map_value_size`.
-fn run_insert_mem_with_max_size(
+/// Runs `adv.insert_mem` with a budget sized for a map value of `max_value_elements`.
+fn run_insert_mem_with_max_value_elements(
     range_len: u32,
-    max_adv_map_value_size: usize,
+    max_value_elements: usize,
 ) -> Result<(), miden_processor::ExecutionError> {
     let start_addr: u32 = 0;
     let end_addr = start_addr + range_len;
@@ -489,7 +485,10 @@ fn run_insert_mem_with_max_size(
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
-    let options = ExecutionOptions::default().with_max_adv_map_value_size(max_adv_map_value_size);
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * 4 * 8;
+    let map_entry_bytes = (4 + max_value_elements) * 8;
+    let options =
+        ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
     FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
         .map_err(miden_processor::ExecutionError::advice_error_no_context)?
