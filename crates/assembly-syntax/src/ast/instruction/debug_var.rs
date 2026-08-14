@@ -293,7 +293,7 @@ impl Serializable for DebugVarLocation {
             },
             Self::ResolvedFrameBase { base, byte_offset } => {
                 target.write_u8(5);
-                write_debug_frame_base(base, target);
+                write_debug_frame_base(*base, target);
                 target.write_bytes(&byte_offset.to_le_bytes());
             },
             Self::Expression(expression) => {
@@ -394,7 +394,7 @@ impl Serializable for DebugLocationExpressionOp {
             Self::DerefBytes => target.write_u8(8),
             Self::FrameBaseAddress { base, byte_offset } => {
                 target.write_u8(9);
-                write_debug_frame_base(base, target);
+                write_debug_frame_base(*base, target);
                 target.write_bytes(&byte_offset.to_le_bytes());
             },
         }
@@ -429,7 +429,7 @@ impl Deserializable for DebugLocationExpressionOp {
     }
 }
 
-fn write_debug_frame_base<W: ByteWriter>(base: &DebugFrameBase, target: &mut W) {
+fn write_debug_frame_base<W: ByteWriter>(base: DebugFrameBase, target: &mut W) {
     match base {
         DebugFrameBase::Local(offset) => {
             target.write_u8(0);
@@ -437,7 +437,7 @@ fn write_debug_frame_base<W: ByteWriter>(base: &DebugFrameBase, target: &mut W) 
         },
         DebugFrameBase::Memory(address) => {
             target.write_u8(1);
-            target.write_u32(*address);
+            target.write_u32(address);
         },
     }
 }
