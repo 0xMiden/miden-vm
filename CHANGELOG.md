@@ -7,6 +7,8 @@
 
 #### Changes
 
+- Documented the `word("...")` and `event("...")` string-derived constant constructors and word
+  slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
 - [BREAKING] `UniqueNodes` entries are now keyed by tree position, and missing nodes mean canonical empty subtree roots. The `NodeValue` enum was removed ([#3620](https://github.com/0xMiden/miden-vm/pull/3620)).
 - [BREAKING] Hardened and documented Falcon math. `Polynomial::karatsuba` now requires equal, nonempty coefficient vectors with supported recursive lengths. Also fixed field canonicalization and polynomial division edge cases, enforced FFT size limits, and added reference and oracle tests for SamplerZ, FFT, and NTRU ([#3629](https://github.com/0xMiden/miden-vm/pull/3629)).
 - Changed CodSpeed benchmarks to exclude input setup and result cleanup from timed samples, so comparisons measure only the operation under test ([#3613](https://github.com/0xMiden/miden-vm/pull/3613)).
