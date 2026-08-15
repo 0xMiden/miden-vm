@@ -54,17 +54,21 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
 
     let buffered = {
         let mut host = DefaultHost::default();
-        let inputs = processor(stack, advice.clone())
-            .execute_trace_inputs_sync(&program, &mut host)
+        let execution_witness = processor(stack, advice.clone())
+            .execute_for_proving_sync(&program, &mut host)
             .unwrap();
-        build_trace(inputs).unwrap()
+        let (vm_witness, precompiles_witness) = execution_witness.into_parts();
+        assert!(precompiles_witness.is_none());
+        build_trace(vm_witness).unwrap()
     };
 
     let streamed = {
         let mut host = DefaultHost::default();
-        processor(stack, advice.clone())
+        let (trace, precompiles_witness) = processor(stack, advice.clone())
             .execute_and_build_trace_sync(&program, &mut host)
-            .unwrap()
+            .unwrap();
+        assert!(precompiles_witness.is_none());
+        trace
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());

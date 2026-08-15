@@ -28,11 +28,12 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default());
-    let trace_inputs = processor
-        .execute_trace_inputs_sync(&program, &mut host)
+    let witness = processor
+        .execute_for_proving_sync(&program, &mut host)
         .map_err(|e| MeasurementError::Execution(format!("{e}")))?;
+    let (vm_witness, _) = witness.into_parts();
     let trace =
-        build_trace(trace_inputs).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
+        build_trace(vm_witness).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
     let summary = trace.trace_len_summary();
     let chiplets = summary.chiplets_trace_len();
 

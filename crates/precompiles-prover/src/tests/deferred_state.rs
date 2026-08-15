@@ -5,11 +5,10 @@ use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     deferred::{
-        DeferredState, DeferredStateWire, Digest, Node as VmNode, PrecompileRegistry,
-        TRUE_DIGEST as VM_TRUE_DIGEST, TRUE_INDEX, Tag, WireEntry,
+        DeferredState, Digest, Node as VmNode, PrecompileRegistry, TRUE_DIGEST as VM_TRUE_DIGEST,
     },
     field::QuadFelt,
-    proof::{DeferredProof, HashFunction, StarkProof},
+    proof::{HashFunction, StarkProof},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
@@ -25,9 +24,13 @@ use crate::{
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, VerifyError, verify_deferred},
-    tests::bus_balance::session_stack_residual,
+    session::{Session, SessionTraces, VerifyError},
+    tests::{
+        SessionTracesTestExt, bus_balance::session_stack_residual,
+        verify_deferred as verify_session,
+    },
     transcript::poseidon2::P2Digest,
+    verify_deferred,
 };
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
@@ -46,8 +49,8 @@ struct SyntheticKeccakDeferredState {
 fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakDeferredState {
     let registry =
         Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
-    let mut state = DeferredState::new(registry, usize::MAX)
-        .expect("Keccak-only VM deferred state should initialize");
+    let mut state =
+        DeferredState::new(registry).expect("Keccak-only VM deferred state should initialize");
 
     let input_digest = state
         .register(VmNode::chunks_from_bytes(input))
@@ -178,7 +181,7 @@ fn k1_points() -> [(U256, U256); 3] {
 }
 
 fn all_node_vm_state() -> DeferredState {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("full precompile registry initializes");
 
     let curve = CurveId::Secp256k1;
@@ -237,13 +240,6 @@ fn translated_traces_check(state: &DeferredState) {
     traces.check();
 }
 
-fn uint_value_entry(domain: UintDomain, value: U256) -> WireEntry {
-    WireEntry::Data {
-        tag: UintPrecompile::value_tag(domain),
-        chunks: vec![to_limbs32(value).map(Felt::from_u32)],
-    }
-}
-
 #[test]
 fn synthetic_keccak_deferred_state_reconstructs_root() {
     let input: Vec<u8> = (0u8..33).collect();
@@ -293,25 +289,15 @@ fn session_public_root_matches_synthetic_deferred_state_for_all_supported_node_t
 
 #[test]
 fn empty_deferred_state_translates_to_true_root() {
-    let state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    let state = DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("full precompile registry initializes");
 
     translated_traces_check(&state);
 }
 
 #[test]
-fn prove_deferred_state_returns_empty_for_true_root() {
-    let state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
-        .expect("full precompile registry initializes");
-
-    let proof = prove_deferred_state(&state, HashFunction::Blake3_256).unwrap();
-
-    assert_eq!(proof, DeferredProof::Empty);
-}
-
-#[test]
 fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("full precompile registry initializes");
 
     for curve in CurveId::ALL {
@@ -335,55 +321,8 @@ fn deferred_session_translates_curve_claims_for_all_fixed_curves() {
 }
 
 #[test]
-fn deferred_session_translates_arbitrary_non_log_spine_truthy_root() {
-    let wire = DeferredStateWire {
-        entries: vec![
-            WireEntry::Join {
-                tag: Tag::AND,
-                lhs: TRUE_INDEX,
-                rhs: TRUE_INDEX,
-            },
-            WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 1 },
-        ],
-    };
-    let state =
-        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire, usize::MAX)
-            .expect("AND-only wire state rehydrates");
-
-    translated_traces_check(&state);
-}
-
-#[test]
-fn deferred_session_translates_shared_uint_intermediate() {
-    let domain = UintDomain::U256;
-    let wire = DeferredStateWire {
-        entries: vec![
-            uint_value_entry(domain, U256::from(5u8)),
-            uint_value_entry(domain, U256::from(7u8)),
-            WireEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
-                lhs: 1,
-                rhs: 2,
-            },
-            uint_value_entry(domain, U256::from(12u8)),
-            WireEntry::Join {
-                tag: UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID),
-                lhs: 3,
-                rhs: 4,
-            },
-            WireEntry::Join { tag: Tag::AND, lhs: 5, rhs: 5 },
-        ],
-    };
-    let state =
-        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire, usize::MAX)
-            .expect("shared uint wire state rehydrates");
-
-    translated_traces_check(&state);
-}
-
-#[test]
 fn deferred_state_rejects_msm_with_all_zero_scalars() {
-    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    let mut state = DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("full precompile registry initializes");
 
     let curve = CurveId::Secp256k1;
@@ -424,17 +363,17 @@ fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
-    let Some((stark, public_root)) = proof.as_stark() else {
-        panic!("precompile session should produce a deferred STARK proof");
-    };
-    assert_eq!(P2Digest::from(public_root), synthetic.root);
-    verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
+    assert_eq!(P2Digest::from(proof.1), synthetic.root);
+    verify_session(&proof).expect("Keccak deferred-state proof should verify");
 
     // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
+    let stark = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
+        .expect("Keccak deferred state should prove");
     let mut proof_bytes = stark.bytes().to_vec();
     proof_bytes.push(0);
-    let trailing = DeferredProof::stark(StarkProof::new(proof_bytes, stark.hash_fn()), public_root);
-    let err = verify_deferred(&trailing).expect_err("trailing proof bytes must be rejected");
+    let trailing = StarkProof::new(proof_bytes, stark.hash_fn());
+    let err = verify_deferred(&trailing, synthetic.vm_root)
+        .expect_err("trailing proof bytes must be rejected");
     assert!(matches!(
         err,
         VerifyError::Deserialization(wincode::error::ReadError::TrailingBytes)
@@ -447,12 +386,12 @@ fn prove_deferred_state_proves_non_empty_root() {
 
     let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
         .expect("Keccak deferred state should prove");
-    let Some((_, public_root)) = proof.as_stark() else {
-        panic!("non-empty deferred state should produce a STARK-backed proof");
-    };
 
-    assert_eq!(P2Digest::from(public_root), synthetic.root);
-    verify_deferred(&proof).expect("Keccak deferred-state proof should verify");
+    verify_deferred(&proof, synthetic.vm_root).expect("Keccak deferred-state proof should verify");
+    assert!(
+        verify_deferred(&proof, VM_TRUE_DIGEST).is_err(),
+        "the proof must be bound to the state's exact root",
+    );
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
@@ -477,11 +416,7 @@ fn prove_deferred_state_round_trips_for_every_hash_function() {
         for pass in 0..2 {
             let proof = prove_deferred_state(&synthetic.state, hash_fn)
                 .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should prove: {e}"));
-            let Some((_, public_root)) = proof.as_stark() else {
-                panic!("{hash_fn:?} pass {pass}: non-empty deferred state should be STARK-backed");
-            };
-            assert_eq!(P2Digest::from(public_root), synthetic.root, "{hash_fn:?} pass {pass}");
-            verify_deferred(&proof)
+            verify_deferred(&proof, synthetic.vm_root)
                 .unwrap_or_else(|e| panic!("{hash_fn:?} pass {pass} should verify: {e}"));
         }
     }
@@ -546,5 +481,5 @@ fn prove_deferred_state_round_trips_for_multi_block_keccak() {
     let synthetic = synthetic_keccak_state(&(0u8..200).collect::<Vec<u8>>());
     let proof = prove_deferred_state(&synthetic.state, HashFunction::Blake3_256)
         .expect("multi-block keccak session should prove");
-    verify_deferred(&proof).expect("multi-block keccak session should verify");
+    verify_deferred(&proof, synthetic.vm_root).expect("multi-block keccak session should verify");
 }

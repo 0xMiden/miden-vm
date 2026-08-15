@@ -3,19 +3,20 @@ use std::{hint::black_box, time::Duration};
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm_blake3_bench::{
-    BENCH_GROUP, Blake3Fixture, build_trace, execute_program, execute_trace_inputs,
-    prove_and_verify_once, prove_span_duration, prove_trace, repo_root_from_manifest,
+    BENCH_GROUP, Blake3Fixture, EXECUTE_FOR_PROVING_METRIC, build_trace, execute_for_proving,
+    execute_program, normalize_axis_name, prove_and_verify_once, prove_span_duration, prove_trace,
+    repo_root_from_manifest,
 };
 
 const ALL_AXES: [&str; 5] = [
     "execute_sync",
-    "execute_trace_inputs_sync",
+    EXECUTE_FOR_PROVING_METRIC,
     "build_trace",
     "prove_trace_sync",
     "e2e_prove",
 ];
 const PROOF_AXES: [&str; 2] = ["e2e_prove", "prove_trace_sync"];
-const LIGHT_AXES: [&str; 3] = ["execute_sync", "execute_trace_inputs_sync", "build_trace"];
+const LIGHT_AXES: [&str; 3] = ["execute_sync", EXECUTE_FOR_PROVING_METRIC, "build_trace"];
 
 fn env_usize(name: &str, default: usize) -> usize {
     match std::env::var(name) {
@@ -51,11 +52,11 @@ fn resolve_axes() -> Vec<&'static str> {
 
     let mut requested = Vec::new();
     for axis in raw.split(',').map(str::trim).filter(|axis| !axis.is_empty()) {
-        match axis {
+        match normalize_axis_name(axis) {
             "all" => requested.extend(ALL_AXES),
-            "e2e_prove" | "prove" | "prove_program_sync" => requested.push("e2e_prove"),
+            "e2e_prove" => requested.push("e2e_prove"),
             "execute_sync" => requested.push("execute_sync"),
-            "execute_trace_inputs_sync" => requested.push("execute_trace_inputs_sync"),
+            EXECUTE_FOR_PROVING_METRIC => requested.push(EXECUTE_FOR_PROVING_METRIC),
             "prove_trace_sync" => requested.push("prove_trace_sync"),
             "build_trace" => requested.push("build_trace"),
             _ => panic!(
@@ -116,10 +117,10 @@ fn blake3_bench(c: &mut Criterion) {
         if has_axis(&axes, "prove_trace_sync") {
             group.bench_function("prove_trace_sync", |b| {
                 b.iter_batched(
-                    || execute_trace_inputs(&fixture),
-                    |trace_inputs| {
-                        let trace_inputs = black_box(trace_inputs);
-                        black_box(prove_trace(trace_inputs))
+                    || execute_for_proving(&fixture),
+                    |execution_witness| {
+                        let execution_witness = black_box(execution_witness);
+                        black_box(prove_trace(execution_witness))
                     },
                     BatchSize::SmallInput,
                 );
@@ -144,19 +145,19 @@ fn blake3_bench(c: &mut Criterion) {
             });
         }
 
-        if has_axis(&axes, "execute_trace_inputs_sync") {
-            group.bench_function("execute_trace_inputs_sync", |b| {
-                b.iter_with_large_drop(|| black_box(execute_trace_inputs(&fixture)));
+        if has_axis(&axes, EXECUTE_FOR_PROVING_METRIC) {
+            group.bench_function(EXECUTE_FOR_PROVING_METRIC, |b| {
+                b.iter_with_large_drop(|| black_box(execute_for_proving(&fixture)));
             });
         }
 
         if has_axis(&axes, "build_trace") {
             group.bench_function("build_trace", |b| {
                 b.iter_batched(
-                    || execute_trace_inputs(&fixture),
-                    |trace_inputs| {
-                        let trace_inputs = black_box(trace_inputs);
-                        black_box(build_trace(trace_inputs))
+                    || execute_for_proving(&fixture),
+                    |execution_witness| {
+                        let execution_witness = black_box(execution_witness);
+                        black_box(build_trace(execution_witness))
                     },
                     BatchSize::SmallInput,
                 );

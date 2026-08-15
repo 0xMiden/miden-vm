@@ -6,7 +6,7 @@ use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPr
 use crate::deferred::session_from_deferred_state;
 
 fn state() -> DeferredState {
-    DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("precompile init must succeed")
 }
 

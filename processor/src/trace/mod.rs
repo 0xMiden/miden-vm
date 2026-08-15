@@ -6,10 +6,13 @@ use miden_air::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::deferred::DeferredState;
+use miden_core::{
+    deferred::{Digest, TRUE_DIGEST},
+    program::ExecutionClaim,
+};
 
 use crate::{
-    Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput, field::QuadFelt, utils::RowMajorMatrix,
 };
 
@@ -31,8 +34,9 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use execution_tracer::TraceGenerationContext;
+pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air::trace::RowIndex;
+pub use miden_core::deferred::PrecompileWitness;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
@@ -43,85 +47,104 @@ pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_
 pub(crate) use trace_state::ResolvedHasherOp;
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
-/// Inputs required to build an execution trace from pre-executed data.
+/// Complete in-memory witness produced by a traced program execution.
+///
+/// The processor constructs its VM witness and optional singleton precompile witness from the same
+/// execution output, so they retain the same deferred root. The aggregate may contain private and
+/// potentially large prover data.
 #[derive(Debug)]
-pub struct TraceBuildInputs {
-    trace_output: TraceBuildOutput,
-    trace_generation_context: TraceGenerationContext,
-    program_info: ProgramInfo,
+pub struct ExecutionWitness {
+    vm: VmWitness,
+    precompile: Option<PrecompileWitness>,
 }
 
-impl TraceBuildInputs {
+impl ExecutionWitness {
+    pub(crate) fn from_execution(
+        program_info: ProgramInfo,
+        stack_inputs: StackInputs,
+        execution_output: ExecutionOutput,
+        trace: TraceReplay,
+    ) -> Self {
+        let ExecutionOutput {
+            stack: stack_outputs,
+            advice: _,
+            memory: _,
+            deferred_state: precompiles,
+        } = execution_output;
+        let precompile_root = precompiles.root();
+        let vm = VmWitness {
+            program_info,
+            stack_inputs,
+            stack_outputs,
+            trace,
+            precompile_root,
+        };
+        let precompile = (precompile_root != TRUE_DIGEST).then(|| {
+            PrecompileWitness::new(precompiles)
+                .expect("a non-TRUE execution root must produce a singleton precompile witness")
+        });
+
+        Self { vm, precompile }
+    }
+
+    /// Returns the public claim associated with this witness.
+    pub fn claim(&self) -> ExecutionClaim {
+        self.vm.claim()
+    }
+
+    /// Consumes this witness and returns its supported low-level proving components.
+    ///
+    /// The [`VmWitness`] can be passed to [`build_trace`]. The optional [`PrecompileWitness`] is
+    /// present only when execution authenticated deferred precompile work.
+    pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
+        (self.vm, self.precompile)
+    }
+}
+
+/// Witness required to materialize and prove a VM execution trace.
+///
+/// This potentially large value contains private replay data and is consumed by trace-building and
+/// proving operations. The processor does not define a serialized representation for it.
+#[derive(Debug)]
+pub struct VmWitness {
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    trace: TraceReplay,
+    precompile_root: Digest,
+}
+
+impl VmWitness {
+    /// Returns the public claim associated with this witness.
+    pub fn claim(&self) -> ExecutionClaim {
+        ExecutionClaim::from_program_info(
+            self.program_info.clone(),
+            self.stack_inputs,
+            self.stack_outputs,
+        )
+    }
+
     /// Takes the hasher replay out, leaving an empty buffered one.
     ///
     /// The streaming path uses this to drop the replay's channel sender once execution has
     /// finished, so the concurrently running hasher builder sees its input stream end.
     #[cfg(feature = "std")]
     pub(crate) fn take_hasher_replay(&mut self) -> trace_state::HasherRequestReplay {
-        core::mem::take(&mut self.trace_generation_context.hasher_for_chiplet)
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct TraceBuildOutput {
-    stack_outputs: StackOutputs,
-    deferred_state: DeferredState,
-}
-
-impl TraceBuildOutput {
-    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
-        let ExecutionOutput {
-            stack,
-            advice: _,
-            memory: _,
-            deferred_state,
-        } = execution_output;
-
-        Self { stack_outputs: stack, deferred_state }
-    }
-}
-
-impl TraceBuildInputs {
-    pub(crate) fn from_execution(
-        program: &Program,
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-    ) -> Self {
-        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
-        let program_info = program.to_info();
-        Self {
-            trace_output,
-            trace_generation_context,
-            program_info,
-        }
+        core::mem::take(&mut self.trace.hasher_for_chiplet)
     }
 
-    /// Returns the stack outputs captured for the execution being replayed.
-    pub fn stack_outputs(&self) -> &StackOutputs {
-        &self.trace_output.stack_outputs
-    }
-
-    /// Returns the final deferred state captured for the execution being replayed.
-    pub fn deferred_state(&self) -> &DeferredState {
-        &self.trace_output.deferred_state
-    }
-
-    /// Returns the program info captured for the execution being replayed.
-    pub fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    /// Returns the trace replay context captured during execution.
-    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
-        &self.trace_generation_context
-    }
-
-    // Kept for tests that force invalid replay contexts without widening the public API.
+    /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
-        &mut self.trace_generation_context
+    pub(crate) fn trace_replay(&self) -> &TraceReplay {
+        &self.trace
+    }
+
+    // Kept for tests that force invalid replay data without widening the public API.
+    #[cfg(any(test, feature = "testing"))]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
+    pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
+        &mut self.trace
     }
 }
 
@@ -133,34 +156,36 @@ impl TraceBuildInputs {
 /// The trace consists of the following components:
 /// - Per-AIR trace matrices for Core, Chiplets, and Poseidon2Permutation.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state and final deferred state).
+/// - Information about the initial and final stack states and authenticated precompile root.
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
-pub struct ExecutionTrace {
+pub struct VmTrace {
     main_trace: MainTrace,
     program_info: ProgramInfo,
+    stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    deferred_state: DeferredState,
+    precompile_root: Digest,
     trace_len_summary: TraceLenSummary,
 }
 
-impl ExecutionTrace {
+impl VmTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     pub(crate) fn new_from_parts(
         program_info: ProgramInfo,
-        trace_output: TraceBuildOutput,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        precompile_root: Digest,
         main_trace: MainTrace,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
-        let TraceBuildOutput { stack_outputs, deferred_state } = trace_output;
-
         Self {
             main_trace,
             program_info,
+            stack_inputs,
             stack_outputs,
-            deferred_state,
+            precompile_root,
             trace_len_summary,
         }
     }
@@ -187,9 +212,9 @@ impl ExecutionTrace {
     pub fn public_inputs(&self) -> PublicInputs {
         PublicInputs::new(
             self.program_info.clone(),
-            self.init_stack_state(),
+            self.stack_inputs,
             self.stack_outputs,
-            self.deferred_state.root(),
+            self.precompile_root,
         )
     }
 
@@ -208,9 +233,9 @@ impl ExecutionTrace {
         &mut self.main_trace
     }
 
-    /// Returns the final deferred state generated during program execution.
-    pub fn deferred_state(&self) -> &DeferredState {
-        &self.deferred_state
+    /// Returns the authenticated root of the deferred precompile state.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
     }
 
     /// Returns the owned stack outputs required for proof packaging.
@@ -220,12 +245,7 @@ impl ExecutionTrace {
 
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
-        let mut result = [ZERO; MIN_STACK_DEPTH];
-        let row = RowIndex::from(0_u32);
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, row);
-        }
-        result.into()
+        self.stack_inputs
     }
 
     /// Returns the final state of the top 16 stack registers.

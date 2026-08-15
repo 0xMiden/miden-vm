@@ -338,8 +338,9 @@ fn test_trace_generation_at_fragment_boundaries(
         .expect("processor advice inputs should fit advice map limits");
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-        build_trace(trace_inputs).unwrap()
+        let vm_witness =
+            processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
+        build_trace(vm_witness).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -353,10 +354,11 @@ fn test_trace_generation_at_fragment_boundaries(
         .expect("processor advice inputs should fit advice map limits");
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-        assert!(trace_inputs.trace_generation_context().core_trace_contexts.len() == 1);
+        let vm_witness =
+            processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
+        assert!(vm_witness.trace_replay().core_trace_contexts.len() == 1);
 
-        build_trace(trace_inputs).unwrap()
+        build_trace(vm_witness).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -445,7 +447,7 @@ fn test_trace_generation_at_fragment_boundaries(
     }
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
-    // We use DeterministicTrace to produce stable Debug output, since ExecutionTrace contains
+    // We use DeterministicTrace to produce stable Debug output, since VmTrace contains
     // a MerkleStore backed by HashMap whose iteration order is non-deterministic.
     insta::assert_compact_debug_snapshot!(testname, DeterministicTrace(&trace_from_fragments));
 }
@@ -533,14 +535,15 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
 
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     assert!(
-        trace_inputs.trace_generation_context().core_trace_contexts.len() > 1,
+        vm_witness.trace_replay().core_trace_contexts.len() > 1,
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(trace_inputs).unwrap();
+    let trace = build_trace(vm_witness).unwrap();
     let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
@@ -568,11 +571,12 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
-    assert!(trace_inputs.trace_generation_context().core_trace_contexts.len() > 1);
+    assert!(vm_witness.trace_replay().core_trace_contexts.len() > 1);
 
-    let _ = build_trace(trace_inputs);
+    let _ = build_trace(vm_witness);
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -935,15 +939,16 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Clear the memory reads replay so the replay processor will fail when the DYN node tries to
     // read the callee hash from memory.
-    for ctx in &mut trace_inputs.trace_generation_context_mut().core_trace_contexts {
+    for ctx in &mut vm_witness.trace_replay_mut().core_trace_contexts {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(trace_inputs);
+    let result = build_trace(vm_witness);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -968,26 +973,27 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Inject a HashBasicBlock entry that references the executed program's forest (id 0 in the
     // store, which the tracer always populates with the entrypoint's forest) with a node ID that
     // is well past any node actually in the sparse forest.
     let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
     let forest_id = MastForestId::from(0u32);
-    trace_inputs
-        .trace_generation_context_mut()
+    vm_witness
+        .trace_replay_mut()
         .hasher_for_chiplet
         .record_raw(HasherOp::HashBasicBlock((forest_id, bogus_node_id, [ZERO; 4].into())));
 
-    let result = build_trace(trace_inputs);
+    let result = build_trace(vm_witness);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
     );
 }
 
-/// Where to tamper with a [`miden_core::mast::MastForestId`] in a [`TraceBuildInputs`].
+/// Where to tamper with a [`miden_core::mast::MastForestId`] in a [`VmWitness`].
 #[derive(Debug, Clone, Copy)]
 enum BadForestIdLocation {
     /// Replace the first fragment's `initial_mast_forest_id`.
@@ -1045,11 +1051,12 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
     if load_library {
         host.load_library(create_simple_library()).unwrap();
     }
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
-    let store_len = trace_inputs.trace_generation_context().mast_forest_store.len();
+    let store_len = vm_witness.trace_replay().mast_forest_store.len();
     let bogus_forest_id = MastForestId::from(store_len as u32);
-    let ctx = &mut trace_inputs.trace_generation_context_mut().core_trace_contexts[0];
+    let ctx = &mut vm_witness.trace_replay_mut().core_trace_contexts[0];
     match tamper_at {
         BadForestIdLocation::InitialForestId => {
             ctx.initial_mast_forest_id = bogus_forest_id;
@@ -1068,7 +1075,7 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
         },
     }
 
-    let result = build_trace(trace_inputs);
+    let result = build_trace(vm_witness);
     assert!(
         result.is_err(),
         "build_trace should return Err when a fragment carries a MastForestId out of range of \
@@ -1134,18 +1141,19 @@ fn test_build_trace_with_max_len_corner_cases(
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Compute the number of core trace rows generated, which includes the HALT row inserted by
     // `build_trace_with_max_len`.
-    let core_trace_len = trace_inputs.trace_generation_context().core_trace_contexts.len()
-        * trace_inputs.trace_generation_context().fragment_size
+    let core_trace_len = vm_witness.trace_replay().core_trace_contexts.len()
+        * vm_witness.trace_replay().fragment_size
         + 1;
 
     let max_trace_len = core_trace_len
         .checked_add_signed(max_trace_len_offset_from_core_trace_len)
         .unwrap();
-    let result = build_trace_with_max_len(trace_inputs, max_trace_len);
+    let result = build_trace_with_max_len(vm_witness, max_trace_len);
 
     assert_eq!(
         result.is_ok(),
@@ -1181,12 +1189,13 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
-    trace_inputs.trace_generation_context_mut().fragment_size = usize::MAX;
+    vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace_with_max_len(trace_inputs, usize::MAX);
+    let result = build_trace_with_max_len(vm_witness, usize::MAX);
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1213,12 +1222,13 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_max_len() {
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Note: the last fragment may have fewer rows than the fragment size, so this is really an
     // upper bound on the number of core trace rows
-    let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
-        * trace_inputs.trace_generation_context().fragment_size;
+    let core_trace_rows = vm_witness.trace_replay().core_trace_contexts.len()
+        * vm_witness.trace_replay().fragment_size;
 
     // Inject enough unique permutation requests so the Poseidon2 permutation trace exceeds
     // core_trace_rows. Each unique state adds one HASH_CYCLE_LEN cycle.
@@ -1226,17 +1236,14 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_max_len() {
     for i in 0..num_permutations {
         let mut state = [ZERO; 12];
         state[0] = Felt::from_u32(i as u32);
-        trace_inputs
-            .trace_generation_context_mut()
-            .hasher_for_chiplet
-            .record_permute_input(state);
+        vm_witness.trace_replay_mut().hasher_for_chiplet.record_permute_input(state);
     }
 
     // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
     // greater), but the Poseidon2 permutation trace will exceed it.
     let max_trace_len = core_trace_rows;
 
-    let result = build_trace_with_max_len(trace_inputs, max_trace_len);
+    let result = build_trace_with_max_len(vm_witness, max_trace_len);
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1261,12 +1268,13 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     )
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
-    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let mut vm_witness =
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
 
     // Clear core_trace_contexts to simulate an empty trace.
-    trace_inputs.trace_generation_context_mut().core_trace_contexts.clear();
+    vm_witness.trace_replay_mut().core_trace_contexts.clear();
 
-    let result = build_trace(trace_inputs);
+    let result = build_trace(vm_witness);
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1287,7 +1295,7 @@ fn build_trace_for_program(
     program: &Program,
     stack_inputs: &[Felt],
     fragment_size: usize,
-) -> ExecutionTrace {
+) -> VmTrace {
     let processor = FastProcessor::new_with_options(
         StackInputs::new(stack_inputs).unwrap(),
         AdviceInputs::default(),
@@ -1298,12 +1306,12 @@ fn build_trace_for_program(
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    let vm_witness = processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0;
 
-    build_trace(trace_inputs).unwrap()
+    build_trace(vm_witness).unwrap()
 }
 
-fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
+fn collect_end_flags(trace: &VmTrace) -> Vec<Word> {
     let main_trace = trace.main_trace();
 
     (0..main_trace.core_height())
@@ -1324,18 +1332,18 @@ fn read_opcode(main_trace: &MainTrace, row_idx: RowIndex) -> u8 {
     opcode as u8
 }
 
-/// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.
+/// Wrapper around `VmTrace` that produces deterministic `Debug` output.
 ///
-/// `ExecutionTrace` contains a `MerkleStore` backed by `HashMap`, whose iteration order is
+/// `VmTrace` contains a `MerkleStore` backed by `HashMap`, whose iteration order is
 /// non-deterministic. This wrapper formats the Merkle store nodes sorted by key, making the
 /// output stable across runs for snapshot testing.
-struct DeterministicTrace<'a>(&'a ExecutionTrace);
+struct DeterministicTrace<'a>(&'a VmTrace);
 
 impl core::fmt::Debug for DeterministicTrace<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let trace = self.0;
 
-        f.debug_struct("ExecutionTrace")
+        f.debug_struct("VmTrace")
             .field("main_trace", trace.main_trace())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())

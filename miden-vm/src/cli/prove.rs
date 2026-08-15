@@ -4,9 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
-use miden_vm::{
-    HashFunction, ProvingOptions, TraceProvingInputs, internal::InputFile, prove_from_trace_sync,
-};
+use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -72,18 +70,15 @@ impl ProveCmd {
         .map_err(|err| Report::msg(format!("{err}")))
     }
 
-    pub fn get_proof_options(&self) -> Result<ProvingOptions, Report> {
-        let hash_fn = HashFunction::try_from(self.hasher.as_str())
-            .map_err(|err| Report::msg(format!("{err}")))?;
-        let proving_options = match self.security.as_str() {
-            "96bits" => ProvingOptions::with_96_bit_security(hash_fn),
-            other => {
-                return Err(Report::msg(format!(
-                    "{other} is not a valid security setting. Currently only '96bits' is supported."
-                )));
-            },
-        };
-        Ok(proving_options)
+    pub fn get_hash_fn(&self) -> Result<HashFunction, Report> {
+        if self.security != "96bits" {
+            return Err(Report::msg(format!(
+                "{} is not a valid security setting. Currently only '96bits' is supported.",
+                self.security
+            )));
+        }
+
+        HashFunction::try_from(self.hasher.as_str()).map_err(|err| Report::msg(format!("{err}")))
     }
     pub fn execute(&self) -> Result<(), Report> {
         println!("===============================================================================");
@@ -143,15 +138,15 @@ impl ProveCmd {
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
 
         let execution_options = self.get_execution_options()?;
-        let proving_options = self.get_proof_options()?;
+        let hash_fn = self.get_hash_fn()?;
 
         // execute program and generate proof
         let processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
                 .map_err(|err| Report::msg(format!("{err}")))?;
-        let trace_inputs = match (package_debug_info.as_ref(), entrypoint_source_node) {
+        let witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
             (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-                .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+                .execute_for_proving_with_package_debug_info_at_source_node_sync(
                     &program,
                     debug_info,
                     entrypoint_source_node_id,
@@ -159,15 +154,17 @@ impl ProveCmd {
                 )
                 .wrap_err("Failed to execute program")?,
             (Some(debug_info), None) => processor
-                .execute_trace_inputs_with_package_debug_info_sync(&program, debug_info, &mut host)
+                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
                 .wrap_err("Failed to execute program")?,
             (None, _) => processor
-                .execute_trace_inputs_sync(&program, &mut host)
+                .execute_for_proving_sync(&program, &mut host)
                 .wrap_err("Failed to execute program")?,
         };
-        let (stack_outputs, proof) =
-            prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
-                .wrap_err("Failed to prove program")?;
+        let stack_outputs = *witness.claim().stack_outputs();
+        let proof = Prover::new()
+            .with_hash_fn(hash_fn)
+            .prove_full(witness)
+            .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
 

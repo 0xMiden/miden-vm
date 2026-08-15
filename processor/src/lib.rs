@@ -69,12 +69,12 @@ pub use host::{
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
-        InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs,
-        StackOutputs,
+        ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
+        StackInputs, StackOutputs,
     },
     serde, utils,
 };
-pub use trace::{TraceBuildInputs, TraceGenerationContext};
+pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};

@@ -112,30 +112,34 @@ async fn execute_async_matches_execute() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fast_processor_execute_for_trace_async_matches_sync() {
+async fn fast_processor_execute_for_proving_async_matches_sync() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new_unchecked(3)]).unwrap();
 
     let mut sync_host = DefaultHost::default();
-    let sync_trace_inputs = FastProcessor::new(stack_inputs)
-        .execute_trace_inputs_sync(&program, &mut sync_host)
+    let sync_witness = FastProcessor::new(stack_inputs)
+        .execute_for_proving_sync(&program, &mut sync_host)
         .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_trace_inputs = FastProcessor::new(stack_inputs)
-        .execute_trace_inputs(&program, &mut async_host)
+    let async_witness = FastProcessor::new(stack_inputs)
+        .execute_for_proving(&program, &mut async_host)
         .await
         .unwrap();
 
-    assert_eq!(sync_trace_inputs.stack_outputs(), async_trace_inputs.stack_outputs());
-    assert_eq!(
-        sync_trace_inputs.trace_generation_context().fragment_size,
-        async_trace_inputs.trace_generation_context().fragment_size
-    );
-    assert_eq!(
-        sync_trace_inputs.trace_generation_context().core_trace_contexts.len(),
-        async_trace_inputs.trace_generation_context().core_trace_contexts.len()
-    );
+    assert_eq!(sync_witness.claim().stack_outputs(), async_witness.claim().stack_outputs());
+    let (sync_vm_witness, _) = sync_witness.into_parts();
+    let (async_vm_witness, _) = async_witness.into_parts();
+    let sync_trace = miden_processor::trace::build_trace(sync_vm_witness).unwrap();
+    let async_trace = miden_processor::trace::build_trace(async_vm_witness).unwrap();
+
+    assert_eq!(sync_trace.public_inputs(), async_trace.public_inputs());
+    assert_eq!(sync_trace.trace_len_summary(), async_trace.trace_len_summary());
+    for (sync_column, async_column) in
+        sync_trace.main_trace().columns().zip(async_trace.main_trace().columns())
+    {
+        assert_eq!(sync_column, async_column);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

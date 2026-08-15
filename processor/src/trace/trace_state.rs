@@ -45,7 +45,7 @@ pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
     /// Continuation stack with forest references encoded as [`MastForestId`]s into the
-    /// `mast_forest_store` of the owning [`crate::TraceGenerationContext`].
+    /// `mast_forest_store` of the owning trace replay.
     pub continuation: ContinuationStack<MastForestId>,
     /// MAST forest active at the start of this fragment.
     pub initial_mast_forest_id: MastForestId,
@@ -332,14 +332,6 @@ pub struct BlockStackReplay {
 }
 
 impl BlockStackReplay {
-    /// Creates a new instance of `BlockStackReplay`.
-    pub fn new() -> Self {
-        Self {
-            node_start_parent_addr: VecDeque::new(),
-            node_end: VecDeque::new(),
-        }
-    }
-
     /// Records the node's parent address
     pub fn record_node_start_parent_addr(&mut self, parent_addr: Felt) {
         self.node_start_parent_addr.push_back(parent_addr);
@@ -463,8 +455,8 @@ pub struct ExecutionContextSystemInfo {
 /// a procedure not present in the current forest.
 ///
 /// The forest reference is stored as a [`MastForestId`] into the `mast_forest_store` of the
-/// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
-/// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
+/// trace replay that owns this data. This avoids holding a strong `Arc<MastForest>` reference per
+/// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
 #[derive(Debug, Default)]
 pub struct MastForestResolutionReplay {
@@ -1039,7 +1031,7 @@ pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
-    /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
+    /// `mast_forest_store` of the trace replay that owns this operation.
     HashBasicBlock((MastForestId, MastNodeId, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),

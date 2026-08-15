@@ -244,11 +244,9 @@ impl FastProcessor {
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
-    /// and any accumulated deferred state are preserved; only the remaining deferred-state
-    /// budget is updated to match the new options.
+    /// and any accumulated deferred state are preserved.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
-        self.deferred_state.set_max_elements(options.max_deferred_elements());
         self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
@@ -288,11 +286,8 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
-            deferred_state: DeferredState::new(
-                Arc::new(miden_precompiles::registry()),
-                options.max_deferred_elements(),
-            )
-            .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            deferred_state: DeferredState::new(Arc::new(miden_precompiles::registry()))
+                .map_err(AdviceError::DeferredStateInitializationFailed)?,
             package_debug_info: None,
             entrypoint_source_node: None,
             options,

@@ -101,13 +101,16 @@ cargo +nightly fuzz run operation_deserialize --fuzz-dir tools/miden-core-fuzz
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`execution_proof_deserialize`** — Tests `ExecutionProof::from_bytes` and `ExecutionProof::read_from_bytes`.
+**`execution_proof_deserialize`** — Tests registry-free canonical `ExecutionProof` decoding,
+including its passive deferred-state proof wire.
 
 ```bash
 cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`execution_proof_serde_deserialize`** — Tests `ExecutionProof` JSON deserialization via `serde_json`.
+**`execution_proof_serde_deserialize`** — Exercises derived-Serde parser robustness for
+`ExecutionProof`, `Vec<ExecutionProof>`, and `Option<ExecutionProof>`. It does not establish proof
+validity or claim allocation-bounded generic Serde.
 
 ```bash
 cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir tools/miden-core-fuzz
@@ -208,5 +211,4 @@ Where we expect malicious inputs to cause problems:
 
 1. **No panics** — Deserialization never panics on any input
 2. **No crashes** — No undefined behavior, buffer overflows, or memory corruption
-3. **Resource limits** — Excessive allocations rejected early
-4. **Validation completeness** — `UntrustedMastForest::validate()` catches all invalid forests
+3. **Validation completeness** — `UntrustedMastForest::validate()` catches all invalid forests

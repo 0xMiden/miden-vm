@@ -5,9 +5,10 @@ sidebar_position: 2
 
 # Deferred state semantics and API contract
 
-`DeferredState` is the host-side witness for deferred DAG verification and the deferred root
-commitment. It is not serialized directly: partial proofs carry `DeferredStateWire`; final non-empty
-proofs carry a precompile VM STARK proof for the exact deferred root.
+`DeferredState` is the host-side state used to evaluate a deferred DAG and maintain its root
+commitment. It is prover input, not cryptographic evidence. A deferred execution proof transports a
+passive `DeferredStateWire`; hydration into a singleton `PrecompileWitness` is a separate façade
+operation.
 
 The simplified state model is:
 
@@ -51,12 +52,12 @@ Registration stores and shape-checks a node in `nodes`, evaluates it immediately
 canonical result. False predicates and other semantic evaluation failures are reported by
 registration.
 
-## One remaining budget
+## One fixed ceiling
 
-`DeferredState::new(registry, max_elements)` initializes one total budget:
+`DeferredState::new(registry)` initializes one total budget from the library safety ceiling:
 
 ```text
-remaining_elements = max_elements
+remaining_elements = MAX_DEFERRED_ELEMENTS
 ```
 
 Initialization also installs the registry's `init()` constants, charging them against that same
@@ -130,67 +131,76 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 - pair-list entries emit pairs of child indices.
 
 The wire root is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the
-final entry. `from_wire(registry, wire, max_elements)` decodes untrusted wire, rejects non-canonical
-or dangling wire by requiring `state.to_wire() == wire`, then evaluates the implicit wire root to
-`Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the wire nodes.
+final entry. `from_wire(registry, wire)` decodes untrusted wire under `MAX_DEFERRED_ELEMENTS`,
+rejects non-canonical or dangling wire by requiring `state.to_wire() == wire`, then evaluates the
+implicit wire root to `Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the
+wire nodes.
 
-## Deferred proof root resolution
+## Proof obligations and composition
 
-`DeferredProof` carries the material needed to bind VM proof verification to a deferred root:
+`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `ExecutionProof::Complete`
+without a precompile proof; any other root yields `ExecutionProof::Deferred` with the `VmProof` and
+passive
+`DeferredStateWire`. Canonical proof decoding is registry-free and does not hydrate that wire.
+`Prover::prove_full` proves both stages directly from the in-memory execution witness.
 
-- `Empty` is final and resolves to `TRUE_DIGEST`.
-- `Wire` is partial/delegable material backed by canonical `DeferredStateWire`.
-- `Stark` is final: verification checks the precompile STARK proof against its embedded public root,
-  then returns that root.
+For delegated proving, call `miden_vm::precompile_witness_from_wire` explicitly. It applies the
+bundled registry, reconstructs the state, checks canonical wire structure, and evaluates the
+implicit root to `TRUE`. The result is a singleton witness suitable for
+`Prover::prove_precompile`.
 
-The public final verifier accepts only final deferred proof forms. It rejects `Wire`; wire-backed
-partial proofs are handled by the explicit `Verifier::verify_partial` path. Partial verification
-rehydrates the wire into a `DeferredState` with the standard precompile registry, verifies the VM
-STARK against the hydrated state's root, and returns the hydrated state. It rejects `Empty` and
-`Stark` because neither carries wire material to hydrate.
+`PrecompileWitness::merge` accepts a non-empty vector of singleton witnesses. It preserves exact
+input order and duplicate root multiplicity: `[one, one, two]` remains `[one, one, two]`. A
+one-input merge remains singleton; a multi-root result cannot be merged recursively. DAG nodes may
+be deduplicated, but root occurrences are not. The root count and merged hydrated state are bounded
+by
+the fixed `MAX_PRECOMPILE_ROOTS` and `MAX_DEFERRED_ELEMENTS` hard ceilings.
 
-The VM STARK public inputs are built with the resolved final root or hydrated partial root.
-High-level `miden-prover` proving APIs and the `miden-vm` proving facade produce final proofs by
-default: `Empty` when no precompile claims were logged, or `Stark` for non-empty deferred roots. The
-`miden-vm` facade exposes only final proving; callers that intentionally delegate or batch precompile
-proving use the explicit `miden-prover::prove_partial*` APIs to preserve `Wire` proof material, then
-`verify_partial` to validate and rehydrate that material before producing a final deferred proof.
+The resulting `PrecompileProof` carries the ordered roots. Their left reduction, beginning with the
+first root, is the statement verified by the aggregate precompile STARK. For one execution proof,
+coverage is membership of its single VM-authenticated root in that sequence. Verification is
+stateless and does not consume occurrences across calls, so one aggregate proof can complete each
+compatible deferred proof independently; sequence order and duplicates still determine the STARK
+statement.
 
-The current STARK-backed variant is exact-root only; batch-backed proofs need a separate proof form.
+`VmProof` and `PrecompileProof` are unvalidated transport records with public fields. `StarkProof`
+retains private fields and its existing constructor/accessor interface. `ExecutionProof::complete`
+only performs the `Deferred` to `Complete` transition and rejects an already-complete artifact.
+Public variants, canonical decoding, encoding, Serde, and completion may represent inconsistent
+artifacts; none establishes validity. `Verifier::verify_precompile` validates precompile-proof shape,
+expected-root membership, ordered aggregate folding, and the precompile STARK. It can validate a
+precompile artifact independently against an expected outstanding root and returns the artifact's
+security level. `Verifier::verify` owns execution-lifecycle validity, verifies the VM STARK, and
+reuses `verify_precompile` for complete proofs. A successful deferred verification returns only the
+authenticated outstanding VM root; a successful complete verification has no outstanding
+obligation.
 
-## Low-level framework API
 
-The preferred low-level `miden_core::deferred::DeferredState` surface is small. These APIs are
-framework APIs, not the public proof-verifier policy surface:
+## Transport and limits
 
-- `DeferredState::new(registry, max_elements)` for a state booted with precompile constants
-- `extend_precompiles(precompiles)` for additive setup
-- `registry()`
-- `root()`
-- `remaining_elements()`
-- `get_node(digest)` and `nodes() -> &BTreeMap<Digest, Node>` for registered-node inspection
-- `decode(tag)` for structural tag decoding
-- `register(node)` for inserting concrete node content
-- `evaluate_digest(digest)` for the canonical digest
-- `log_statement(stmt_digest)`
-- `to_wire()`
-- `from_wire(registry, wire, max_elements)`
+`ExecutionProof::to_bytes` is infallible. `ExecutionProof::read_from_bytes` checks canonical syntax,
+rejects trailing bytes, and remains registry-free. It preserves the represented lifecycle variant
+without validating cross-artifact consistency. `DeferredStateWire` is likewise passive until the
+bundled façade hydration step.
 
-Callers that have a concrete node should explicitly `register` it; they may call
-`evaluate_digest` on the returned digest when they need the canonical result, and then `get_node` if
-they need canonical node contents. Raw evaluation memoization and direct root mutation are not part
-of the public contract.
+Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
+`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
+`MAX_DEFERRED_ELEMENTS` for deferred wire. Hydration and witness merge also enforce the deferred
+state and root ceilings. These are library safety bounds, not configurable protocol, whole-envelope,
+file, network, or ingestion policy.
 
-## Scope note
+Proof and wire artifacts use derived Serde as a representation format. Generic Serde
+deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must
+not be treated as a hardened untrusted-input decoder.
 
-Deferred state is the proof-bound precompile witness model. VM execution accumulates a deferred
-root for logged precompile claims; `DeferredProof` explains why that root should be accepted.
-Final public verification accepts only final proof forms, resolving `Empty` or a verified `Stark`
-root before VM STARK verification. Wire-backed material is partial/delegable:
-`Verifier::verify_partial` rehydrates `Wire` under the built-in `miden_precompiles::registry()`,
-verifies the VM STARK against the hydrated root, and returns the hydrated state.
+The canonical representational minima are 2 bytes for `StarkProof`, 34 bytes for `VmProof`, and 3
+bytes for `PrecompileProof`, because an empty-root record remains transportable until verification.
+The shortest canonical singleton `PrecompileProof` is 35 bytes; a vector of two such records has a
+71-byte shortest encoding.
 
-The lower-level `DeferredState` APIs remain parameterized by `PrecompileRegistry` for framework
-construction, tests, and non-verifier wire validation. The default registry is empty, but the public
-VM/prover/verifier path installs the standard `miden_precompiles::registry()` policy and does not
-accept caller-supplied precompile registries.
+Recursive VM verification packages the unchanged proof stream under
+`proof_request_key(verifier_root, claim_commitment)`. The consumer derives the same key from the
+claim commitment and `verify_vm_proof` procedure root, fetches the stream with
+`adv.push_mapval`, and then invokes `verify_vm_proof`. Claim and kernel preimages remain
+separately content-addressed; no proof values are copied into claim memory. Recursive verification
+authenticates and returns the VM root but does not settle precompile work.

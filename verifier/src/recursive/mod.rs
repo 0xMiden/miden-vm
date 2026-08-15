@@ -1,16 +1,16 @@
 //! Building the advice a MASM recursive verifier consumes to verify a Miden VM proof.
 //!
 //! `exec.vm::verify_vm_proof` reads a STARK proof from the advice provider in a fixed
-//! order. This module is the producer side of that ABI: it destructures an [`ExecutionProof`]
-//! against its [`ExecutionClaim`] into the advice-stack stream, Merkle store, and advice-map
-//! entries the verifier consumes. The consumption order is exercised end to end by the
-//! recursive verification tests, which drive the real MASM verifier over this output.
+//! order. This module is the producer side of that ABI: it selects the VM component of an
+//! [`ExecutionProof`] and packages it against its [`ExecutionClaim`] into the advice-stack stream,
+//! the Merkle store, and the advice-map entries the verifier consumes. Its authenticated
+//! precompile root is part of the VM statement; a completed precompile STARK is not verified here.
 //!
 //! Before calling `verify_vm_proof`, the consumer places this proof stream on top of the advice
 //! stack:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   deferred root -> Miden AIR heights -> main commit -> aux commit ->
+//!   authenticated precompile root -> Miden AIR heights -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
@@ -23,7 +23,6 @@
 
 use alloc::{
     string::{String, ToString},
-    sync::Arc,
     vec::Vec,
 };
 
@@ -35,10 +34,9 @@ use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
     crypto::merkle::{MerklePath, MerkleStore, PartialMerkleTree},
-    deferred::{DEFAULT_MAX_DEFERRED_ELEMENTS, DeferredState, IntegrityError, TRUE_DIGEST},
     field::QuadFelt,
     program::{ExecutionClaim, proof_request_key},
-    proof::{DeferredProof, ExecutionProof, HashFunction},
+    proof::{ExecutionProof, HashFunction},
 };
 use miden_crypto::{
     field::BasedVectorSpace,
@@ -76,9 +74,8 @@ pub struct RecursiveVerifierInputs {
 impl RecursiveVerifierInputs {
     /// Builds a proof package addressed by the verifier and claim commitments.
     ///
-    /// The proof must be a Poseidon2 proof because the recursive verifier supports only
-    /// Poseidon2 STARKs. Wire-backed deferred state is hydrated with the standard precompile
-    /// registry and [`DEFAULT_MAX_DEFERRED_ELEMENTS`].
+    /// The VM component must be a Poseidon2 proof because the recursive verifier supports only
+    /// Poseidon2 STARKs.
     ///
     /// # Errors
     ///
@@ -122,7 +119,10 @@ fn build_verifier_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let stark = proof.miden_proof();
+    let vm = match proof {
+        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
+    };
+    let stark = &vm.proof;
     if stark.hash_fn() != HashFunction::Poseidon2 {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
     }
@@ -130,7 +130,7 @@ fn build_verifier_inputs(
         claim.to_program_info(),
         *claim.stack_inputs(),
         *claim.stack_outputs(),
-        resolve_deferred_root(proof.deferred_proof())?,
+        vm.precompile_root,
     );
 
     let claim_commitment = claim.commitment();
@@ -160,8 +160,6 @@ pub enum RecursiveVerifierInputsError {
     InvalidProofShape(&'static str),
     #[error("statement assembly error: {0}")]
     StatementAssembly(String),
-    #[error("deferred wire hydration failed: {0}")]
-    DeferredIntegrity(#[from] IntegrityError),
     #[error("recursive verification supports only Poseidon2 proofs, got {0:?}")]
     UnsupportedHashFunction(HashFunction),
     #[error("transcript error: {0}")]
@@ -176,23 +174,6 @@ type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
 struct MidenTraceHeights {
     instance_log_heights: [usize; MIDEN_AIR_COUNT],
     proof_order: ProofOrder,
-}
-
-/// Resolves the deferred root the outer VM statement binds, from the proof's deferred material:
-/// the canonical TRUE digest when no precompile claims were produced, the nested proof's public
-/// root when STARK-backed, and the hydrated wire's root for partial proofs (standard precompile
-/// registry, default deferred-element budget).
-fn resolve_deferred_root(deferred: &DeferredProof) -> Result<Word, RecursiveVerifierInputsError> {
-    match deferred {
-        DeferredProof::Empty => Ok(TRUE_DIGEST),
-        DeferredProof::Stark { public_root, .. } => Ok(*public_root),
-        DeferredProof::Wire(wire) => Ok(DeferredState::from_wire(
-            Arc::new(miden_precompiles::registry()),
-            wire,
-            DEFAULT_MAX_DEFERRED_ELEMENTS,
-        )?
-        .root()),
-    }
 }
 
 // ADVICE CONSTRUCTION
@@ -474,6 +455,7 @@ mod tests {
     use miden_core::{
         crypto::merkle::InnerNodeInfo,
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
+        proof::{StarkProof as CoreStarkProof, VmProof},
     };
 
     use super::*;
@@ -482,11 +464,13 @@ mod tests {
     /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
     #[test]
     fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
-        let proof = ExecutionProof::from_parts(
-            Vec::new(),
-            HashFunction::Blake3_256,
-            DeferredProof::empty(),
-        );
+        let proof = ExecutionProof::Complete {
+            vm: VmProof {
+                proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
+                precompile_root: Word::default(),
+            },
+            precompile: None,
+        };
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(Word::default(), KernelDescriptor::default()),
             StackInputs::default(),

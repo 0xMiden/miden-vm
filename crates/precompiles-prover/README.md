@@ -10,10 +10,10 @@ crate-private.
 
 ## What's here
 
-The implementation translates a VM `DeferredState` into the precompile prover's
-session representation, generates the chiplet traces for the supported deferred
-nodes, serializes the resulting STARK proof into `DeferredProof::Stark`, and
-verifies that proof against its public deferred root.
+The implementation translates one VM `DeferredState` into the precompile
+prover's session representation, generates the chiplet traces for the supported
+deferred nodes, serializes the resulting STARK proof, and verifies that proof
+against an explicit deferred root.
 
 ## Build
 
