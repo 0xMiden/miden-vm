@@ -223,15 +223,57 @@ version_cmp() {
     local right="$2"
 
     awk -v left="$left" -v right="$right" '
-        function core(version, parts) {
-            sub(/\+.*/, "", version)
-            split(version, prerelease_parts, "-")
-            split(prerelease_parts[1], parts, ".")
+        function is_numeric_ident(s) {
+            return (s ~ /^[0-9]+$/)
+        }
+
+        # Splits `version` (dropping any "+build" metadata) into its release-core components
+        # (major.minor.patch) into `parts`, and the dot-separated prerelease identifiers after
+        # the first "-", if any, into `pre_parts`. Returns the number of prerelease identifiers
+        # found (0 if `version` has no prerelease).
+        function split_version(version, parts, pre_parts,    core, dash_pos, pre_str) {
+            core = version
+            sub(/\+.*/, "", core)
+            dash_pos = index(core, "-")
+            if (dash_pos == 0) {
+                split(core, parts, ".")
+                return 0
+            }
+            split(substr(core, 1, dash_pos - 1), parts, ".")
+            pre_str = substr(core, dash_pos + 1)
+            return split(pre_str, pre_parts, ".")
+        }
+
+        # Compares two sets of prerelease identifiers per semver 2.0 precedence rules
+        # (spec section 11): identifiers are compared left to right; a pair of numeric
+        # identifiers compares numerically; a pair of non-numeric identifiers compares as
+        # strings (ASCII order); a numeric identifier always has lower precedence than a
+        # non-numeric one; and if all shared identifiers are equal, the set with fewer
+        # identifiers has lower precedence.
+        function compare_prerelease(left_arr, left_n, right_arr, right_n,    i, min_n, l, r, l_num, r_num) {
+            min_n = (left_n < right_n) ? left_n : right_n
+            for (i = 1; i <= min_n; i++) {
+                l = left_arr[i]
+                r = right_arr[i]
+                l_num = is_numeric_ident(l)
+                r_num = is_numeric_ident(r)
+                if (l_num && r_num) {
+                    if (l + 0 > r + 0) return 1
+                    if (l + 0 < r + 0) return -1
+                } else if (l_num != r_num) {
+                    return l_num ? -1 : 1
+                } else if (l != r) {
+                    return (l > r) ? 1 : -1
+                }
+            }
+            if (left_n > right_n) return 1
+            if (left_n < right_n) return -1
+            return 0
         }
 
         BEGIN {
-            core(left, left_parts)
-            core(right, right_parts)
+            left_pre_n = split_version(left, left_parts, left_pre)
+            right_pre_n = split_version(right, right_parts, right_pre)
 
             for (i = 1; i <= 3; i++) {
                 left_part = left_parts[i] + 0
@@ -248,7 +290,23 @@ version_cmp() {
                 }
             }
 
-            print 0
+            # Release cores are equal: per semver, a version without a prerelease always has
+            # higher precedence than one with a prerelease sharing the same core (e.g.
+            # "1.5.0" > "1.5.0-alpha.1").
+            if (left_pre_n == 0 && right_pre_n == 0) {
+                print 0
+                exit
+            }
+            if (left_pre_n == 0) {
+                print 1
+                exit
+            }
+            if (right_pre_n == 0) {
+                print -1
+                exit
+            }
+
+            print compare_prerelease(left_pre, left_pre_n, right_pre, right_pre_n)
         }
     '
 }
