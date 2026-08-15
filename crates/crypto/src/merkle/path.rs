@@ -158,16 +158,7 @@ impl DerefMut for MerklePath {
 
 impl FromIterator<Word> for MerklePath {
     fn from_iter<T: IntoIterator<Item = Word>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let capacity = iter.size_hint().0.min(u8::MAX as usize);
-        let mut nodes = Vec::with_capacity(capacity);
-
-        for node in iter {
-            assert!(nodes.len() < u8::MAX.into(), "MerklePath may have at most 255 items");
-            nodes.push(node);
-        }
-
-        Self::new(nodes)
+        Self::new(iter.into_iter().take(usize::from(u8::MAX) + 1).collect())
     }
 }
 
