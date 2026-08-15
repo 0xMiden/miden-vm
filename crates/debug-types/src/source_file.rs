@@ -649,10 +649,17 @@ impl SourceContent {
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        if line_src.len() < column_index {
-            return None;
-        }
-        let (pre, _) = line_src.split_at(column_index);
+        // `column_index` counts characters, not bytes -- see `location`, which derives
+        // it with `chars().count()`. Slicing at the raw byte index would panic when the
+        // column lands inside a multi-byte character, and would otherwise return the
+        // wrong offset for any line containing one.
+        let byte_offset = match line_src.char_indices().nth(column_index) {
+            Some((offset, _)) => offset,
+            // A column one past the last character addresses the end of the line.
+            None if line_src.chars().count() == column_index => line_src.len(),
+            None => return None,
+        };
+        let (pre, _) = line_src.split_at(byte_offset);
         let start = line_span.start;
         Some(start + ByteOffset::from_str_len(pre))
     }
@@ -1515,6 +1522,48 @@ end
                 .byte_slice(content.line_range(LineIndex(3)).expect("invalid line"))
                 .expect("invalid byte range"),
             "line4\n".as_bytes()
+        );
+    }
+
+    #[test]
+    fn line_column_to_offset_counts_characters_not_bytes() {
+        // `é` is two bytes, so byte offsets and character columns diverge after it.
+        const CONTENT: &str = "# héllo\npush.1\n";
+        let content = SourceContent::new("masm", "foo.masm", CONTENT);
+
+        // Columns past the multi-byte character must not land mid-codepoint. On the
+        // byte-indexed implementation this panicked with "byte index 4 is not a char
+        // boundary".
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(4)),
+            Some(ByteIndex(5)),
+            "column 4 is the character after 'é', at byte 5"
+        );
+
+        // `location` reports columns as character counts, so feeding one back to
+        // `line_column_to_offset` must round-trip to the byte index it came from.
+        let end_of_line = ByteIndex(8);
+        let loc = content.location(end_of_line).expect("location");
+        let column = ColumnIndex::from(loc.column);
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), column),
+            Some(end_of_line),
+            "location -> line_column_to_offset must round-trip"
+        );
+
+        // A column one past the last character addresses the end of the line, and
+        // anything beyond that is out of bounds.
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(8)),
+            Some(ByteIndex(9)),
+            "column 8 is the newline terminator's end"
+        );
+        assert_eq!(content.line_column_to_offset(LineIndex(0), ColumnIndex(9)), None);
+
+        // ASCII lines are unaffected.
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(1), ColumnIndex(4)),
+            Some(ByteIndex(13))
         );
     }
 }
