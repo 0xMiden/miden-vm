@@ -189,9 +189,14 @@ impl LocalPackageRegistry {
                     fs::File::open(&index_path).map_err(LocalRegistryError::IndexRead)?;
                 file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
             }
-            let contents = contents.trim();
+            // Hash with the same ASCII trim used by save_with_locked_operation. Unicode `trim()`
+            // strips more (e.g. NBSP, vertical tab), which would make later writes fail with
+            // WriteToStaleIndex even though the file was not modified. Parsing still uses `trim()`
+            // so a leading NBSP does not turn a valid index into a TOML error.
             index_checksum =
-                *miden_core::crypto::hash::Sha256::hash(contents.as_bytes()).as_bytes();
+                *miden_core::crypto::hash::Sha256::hash(contents.trim_ascii().as_bytes())
+                    .as_bytes();
+            let contents = contents.trim();
             if contents.is_empty() {
                 InMemoryPackageRegistry::default()
             } else {
@@ -1276,6 +1281,37 @@ mod tests {
             .expect_err("stale publish should fail before writing artifact bytes");
         assert!(matches!(error, LocalRegistryError::WriteToStaleIndex));
         assert_eq!(fs::read(&published.artifact_path).unwrap(), original_bytes);
+    }
+
+    #[test]
+    fn publish_succeeds_when_index_has_leading_trim_mismatch_whitespace() {
+        // `str::trim` removes these; `trim_ascii` does not. Before the checksums used the same
+        // trim, a reload followed by publish failed with WriteToStaleIndex.
+        for prefix in ["\u{00A0}".as_bytes(), b"\x0B"] {
+            let tempdir = TempDir::new().unwrap();
+            let mut registry = load_registry(&tempdir);
+
+            let package_path = tempdir.path().join("pkg.masp");
+            build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+            registry.publish(&package_path).unwrap();
+
+            let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
+            let original = fs::read(&index_path).unwrap();
+            let mut padded = prefix.to_vec();
+            padded.extend_from_slice(&original);
+            fs::write(&index_path, padded).unwrap();
+
+            let mut registry = load_registry(&tempdir);
+            let other_path = tempdir.path().join("other.masp");
+            build_package("other", "1.0.0", []).write_to_file(&other_path).unwrap();
+            let published = registry
+                .publish(&other_path)
+                .expect("index whitespace must not look like a stale write");
+
+            let loaded =
+                registry.load_package(&PackageId::from("other"), &published.version).unwrap();
+            assert_eq!(loaded.name, PackageId::from("other"));
+        }
     }
 
     #[test]
