@@ -294,21 +294,21 @@ pub fn generate_recursive_verifier_data(
             Some(kernel) => {
                 let context = miden_assembly::testing::TestContext::new();
                 let kernel = context.parse_kernel(source_file!(&context, kernel)).unwrap();
-                let kernel_lib = Assembler::new(context.source_manager())
+                let sources = context.sources();
+                let kernel_lib = Assembler::with_sources((*sources).clone())
                     .assemble_kernel("kernel", kernel, None)
-                    .value
                     .map(Arc::<Package>::from)
                     .unwrap();
                 let assembler =
-                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
+                    Assembler::with_sources_and_kernel((*sources).clone(), kernel_lib.clone())
+                        .unwrap();
                 let program: Program =
-                    assembler.assemble_program("program", source).value.unwrap().unwrap_program();
+                    assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
                 let program: Program = Assembler::default()
                     .assemble_program("program", source)
-                    .value
                     .unwrap()
                     .unwrap_program();
                 (program, None)

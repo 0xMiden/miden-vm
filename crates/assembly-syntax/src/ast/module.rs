@@ -10,7 +10,7 @@ use miden_core::{
     advice::AdviceMap,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceId, SourceSpan, Span, Spanned};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 use smallvec::SmallVec;
@@ -482,11 +482,7 @@ impl Module {
 
     /// Defines a procedure, raising an error if the procedure is invalid, or conflicts with a
     /// previous definition
-    pub fn define_procedure(
-        &mut self,
-        procedure: Procedure,
-        _source_manager: Arc<dyn SourceManager>,
-    ) -> Result<(), SemanticAnalysisError> {
+    pub fn define_procedure(&mut self, procedure: Procedure) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
         if let Some(prev) = self.get_declaration(procedure.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
@@ -517,12 +513,8 @@ impl Module {
 
 /// Parsing
 impl Module {
-    /// Parse a [Module], `name`, of the given [ModuleKind], from `source_file`.
-    pub fn parse(
-        name: impl AsRef<Path>,
-        source_file: Arc<SourceFile>,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> ModuleParseOutcome {
+    /// Parse a [Module] with `name` from `source`.
+    pub fn parse(name: impl AsRef<Path>, source_id: SourceId, source: &str) -> ModuleParseOutcome {
         let name = name.as_ref();
         let kind = if name.is_kernel_path() {
             Some(ModuleKind::Kernel)
@@ -530,15 +522,12 @@ impl Module {
             None
         };
         let mut parser = Self::parser(kind);
-        parser.parse(Some(name), source_file, source_manager)
+        parser.parse(Some(name), source_id, source)
     }
 
-    pub fn parse_kernel(
-        source_file: Arc<SourceFile>,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> ModuleParseOutcome {
+    pub fn parse_kernel(source_id: SourceId, source: &str) -> ModuleParseOutcome {
         let mut parser = Self::parser(Some(ModuleKind::Kernel));
-        parser.parse(Some(Path::KERNEL), source_file, source_manager)
+        parser.parse(Some(Path::KERNEL), source_id, source)
     }
 
     /// Get a [ModuleParser] for parsing modules of the provided [ModuleKind]

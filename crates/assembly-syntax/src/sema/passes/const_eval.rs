@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_core::{events::EventId, utils::hash_string_to_word};
-use miden_debug_types::{Span, Spanned};
+use miden_diagnostics::{Span, Spanned};
 
 use crate::{
     Felt,

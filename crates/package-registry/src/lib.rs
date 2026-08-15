@@ -14,13 +14,13 @@ mod version_requirement;
 use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use core::fmt;
 
-use miden_assembly_syntax::Report;
 pub use miden_assembly_syntax::{
-    debuginfo::Span,
     semver,
     semver::{Version as SemVer, VersionReq},
 };
 pub use miden_core::Word;
+use miden_diagnostics::Report;
+pub use miden_diagnostics::Span;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
 #[cfg(feature = "serde")]

@@ -13,8 +13,7 @@ use alloc::{
 };
 
 use miden_core::{Word, crypto::hash::Poseidon2};
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
-use miden_diagnostics::Outcome;
+use miden_diagnostics::{Outcome, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
@@ -35,14 +34,13 @@ use crate::{ast::*, parser::WordValue};
 ///   * Calls to imported procedures are resolved concretely
 /// * Semantic analysis is performed on the module to validate it
 pub fn analyze(
-    source: Arc<SourceFile>,
+    source_span: SourceSpan,
     kind: Option<ModuleKind>,
     path: Option<&Path>,
     forms: Vec<Form>,
-    source_manager: Arc<dyn SourceManager>,
-) -> Outcome<Option<Box<Module>>> {
+) -> Outcome<Box<Module>> {
     log::debug!(target: "sema", "starting semantic analysis for '{}' (kind = {kind:?})", path.map(Path::as_str).unwrap_or("None"));
-    let mut analyzer = AnalysisContext::new(source_manager);
+    let mut analyzer = AnalysisContext::new();
 
     let expected_path = match path {
         Some(path) => match normalize_namespace_path(path) {
@@ -52,15 +50,14 @@ pub fn analyze(
                     path: path.to_path_buf().into(),
                     err,
                 });
-                return analyzer.into_outcome(None);
+                return analyzer.into_outcome(Err(()));
             },
         },
         None => None,
     };
     let module_path = expected_path.as_deref().unwrap_or(Path::new(""));
-    let mut module = Box::new(
-        Module::new(kind.unwrap_or_default(), module_path).with_span(source.source_span()),
-    );
+    let mut module =
+        Box::new(Module::new(kind.unwrap_or_default(), module_path).with_span(source_span));
 
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();
@@ -103,7 +100,7 @@ pub fn analyze(
                             path: ns.inner().clone(),
                             err,
                         });
-                        return analyzer.into_outcome(None);
+                        return analyzer.into_outcome(Err(()));
                     },
                 };
                 if let Some(expected_path) = expected_path.as_deref()
@@ -162,7 +159,7 @@ pub fn analyze(
                     analyzer.error(SemanticAnalysisError::ImportDocstring { span: unused.span() });
                 }
                 if define_import(import, &mut module, &mut analyzer).is_err() {
-                    return analyzer.into_outcome(None);
+                    return analyzer.into_outcome(Err(()));
                 }
             },
             Form::Procedure(export) => {
@@ -170,7 +167,7 @@ pub fn analyze(
                 if define_procedure(export.with_docs(docs.take()), &mut module, &mut analyzer)
                     .is_err()
                 {
-                    return analyzer.into_outcome(None);
+                    return analyzer.into_outcome(Err(()));
                 }
             },
             Form::Begin(body)
@@ -183,7 +180,7 @@ pub fn analyze(
                     Procedure::new(body.span(), Visibility::Public, ProcedureName::main(), 0, body)
                         .with_docs(docs);
                 if define_procedure(procedure, &mut module, &mut analyzer).is_err() {
-                    return analyzer.into_outcome(None);
+                    return analyzer.into_outcome(Err(()));
                 }
             },
             Form::Begin(body) => {
@@ -217,7 +214,7 @@ pub fn analyze(
         } else {
             analyzer.error(SemanticAnalysisError::MissingNamespace);
             // If we don't have a namespace, we shouldn't proceed any further
-            return analyzer.into_outcome(None);
+            return analyzer.into_outcome(Err(()));
         }
     }
 
@@ -277,7 +274,7 @@ pub fn analyze(
     verify_exported_signature_type_visibility(&module, &mut analyzer);
 
     if analyzer.has_errors() {
-        return analyzer.into_outcome(None);
+        return analyzer.into_outcome(Err(()));
     }
 
     // Run item checks
@@ -290,7 +287,7 @@ pub fn analyze(
         }
     }
 
-    analyzer.into_outcome(Some(module))
+    analyzer.into_outcome(Ok(module))
 }
 
 fn normalize_namespace_path(path: &Path) -> Result<Arc<Path>, PathError> {
@@ -383,7 +380,7 @@ fn verify_exported_type_expr(
             }
         },
         TypeExpr::Ref(path) => {
-            let resolver = match LocalSymbolResolver::new(module, analyzer.source_manager()) {
+            let resolver = match LocalSymbolResolver::new(module) {
                 Ok(resolver) => resolver,
                 Err(_) => return,
             };
@@ -640,7 +637,7 @@ fn define_procedure(
     context: &mut AnalysisContext,
 ) -> Result<(), AnalysisAborted> {
     let name = procedure.name().clone();
-    if let Err(err) = module.define_procedure(procedure, context.source_manager()) {
+    if let Err(err) = module.define_procedure(procedure) {
         match err {
             SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors

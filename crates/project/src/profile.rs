@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 use core::borrow::Borrow;
 
-use miden_assembly_syntax::debuginfo::Spanned;
+use miden_diagnostics::Spanned;
 
 use crate::*;
 
@@ -60,12 +60,13 @@ impl Profile {
         }
     }
 
-    #[cfg(feature = "serde")]
-    pub fn from_ast(
+    #[cfg(all(feature = "std", feature = "serde"))]
+    pub(crate) fn from_ast(
         ast: &ast::Profile,
-        source: Arc<SourceFile>,
+        source_id: SourceId,
         inheritable: &[Profile],
-    ) -> Result<Self, Report> {
+        context: &mut ast::parsing::ValidationContext<'_>,
+    ) -> Option<Self> {
         use crate::ast::ProjectFileError;
 
         let ast::Profile {
@@ -78,18 +79,19 @@ impl Profile {
 
         let mut profile = match inherits.as_ref() {
             Some(parent) => {
-                if let Some(parent) = inheritable.iter().find(|p| p.name() == parent.inner()) {
-                    Profile::inherit(name.clone(), parent)
+                if let Some(inherited) =
+                    inheritable.iter().find(|p| p.name().as_ref() == parent.get_ref().as_ref())
+                {
+                    Profile::inherit(ast::parsing::lower_span(source_id, name.clone()), inherited)
                 } else {
-                    return Err(ProjectFileError::UnknownProfile {
-                        name: parent.inner().clone(),
-                        source_file: source,
-                        span: parent.span(),
-                    }
-                    .into_report());
+                    let _ = context.add(ProjectFileError::UnknownProfile {
+                        name: parent.get_ref().clone(),
+                        span: context.span_in(source_id, parent),
+                    });
+                    return None;
                 }
             },
-            None => Profile::new(name.clone()),
+            None => Profile::new(ast::parsing::lower_span(source_id, name.clone())),
         };
 
         if let Some(debug) = *debug {
@@ -101,10 +103,10 @@ impl Profile {
         }
 
         if !metadata.is_empty() {
-            profile.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
+            profile.extend(ast::parsing::lower_metadata(source_id, metadata));
         }
 
-        Ok(profile)
+        Some(profile)
     }
 
     /// Merge configuration from `other` into `self`.

@@ -3,9 +3,9 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Felt, Path, Word,
     ast::{SymbolResolutionError, constants::ConstEvalError},
-    debuginfo::SourceSpan,
     diagnostics::{Diagnostic, OwnedDiagnostic},
 };
+use miden_diagnostics::SourceSpan;
 
 /// Additional context for a linker error which should be rendered informationally.
 #[derive(Debug, Diagnostic)]

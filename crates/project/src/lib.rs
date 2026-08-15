@@ -17,15 +17,17 @@ mod target;
 mod tests;
 mod workspace;
 
+#[cfg(all(feature = "std", feature = "serde"))]
+use alloc::string::String;
+#[cfg(feature = "std")]
+use alloc::string::ToString;
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::debuginfo::{SourceSpan, Span};
-use miden_diagnostics::Diagnostic;
-pub use miden_diagnostics::Report;
-// Re-exported for consistency
-#[cfg(feature = "serde")]
-use miden_assembly_syntax::debuginfo::{SourceFile, SourceId};
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
+use miden_diagnostics::Diagnostic;
+pub use miden_diagnostics::{
+    Outcome, Report, SourceId, SourceKey, SourceMap, SourceProvider, SourceSpan, Span,
+};
 pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -48,6 +50,15 @@ pub type Metadata = Map<Span<Arc<str>>, Span<Value>>;
 ///
 /// This representation provides spans for the table name, and each entry in that table's metadata.
 pub type MetadataSet = Map<Span<Arc<str>>, Metadata>;
+
+#[cfg(feature = "serde")]
+pub(crate) type TomlSpan<T> = toml::Spanned<T>;
+
+#[cfg(feature = "serde")]
+pub(crate) type AstMetadata = Map<TomlSpan<Arc<str>>, TomlSpan<Value>>;
+
+#[cfg(feature = "serde")]
+pub(crate) type AstMetadataSet = Map<TomlSpan<Arc<str>>, AstMetadata>;
 
 /// Represents any Miden project type, i.e. either a workspace, or a standalone package.
 #[derive(Debug, Clone)]
@@ -106,18 +117,19 @@ impl Project {
     ///
     /// If the given manifest source belongs to a package within a larger workspace, this function
     /// will attempt to resolve the workspace and extract the package from it.
-    pub fn load(
-        path: impl AsRef<std::path::Path>,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
-    ) -> Result<Self, Report> {
+    pub fn load(path: impl AsRef<std::path::Path>, sources: &mut SourceMap) -> Outcome<Self> {
         let path = path.as_ref();
         let manifest_path = if path.is_dir() {
-            path.join("miden-project.toml").canonicalize().map_err(Report::msg)?
+            path.join("miden-project.toml").canonicalize()
         } else {
-            path.canonicalize().map_err(Report::msg)?
+            path.canonicalize()
+        };
+        let manifest_path = match manifest_path {
+            Ok(path) => path,
+            Err(error) => return Outcome::from_report(Report::msg(error)),
         };
 
-        Self::try_load_as_workspace_member(None, &manifest_path, source_manager)
+        Self::try_load_as_workspace_member(None, &manifest_path, sources)
     }
 
     /// Load a project manifest from `path`, expected to be named `name`
@@ -127,35 +139,42 @@ impl Project {
     pub fn load_project_reference(
         name: &str,
         path: impl AsRef<std::path::Path>,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
-    ) -> Result<Self, Report> {
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
         let path = path.as_ref();
         let manifest_path = if path.is_dir() {
-            path.join("miden-project.toml").canonicalize().map_err(Report::msg)?
+            path.join("miden-project.toml").canonicalize()
         } else {
-            path.canonicalize().map_err(Report::msg)?
+            path.canonicalize()
+        };
+        let manifest_path = match manifest_path {
+            Ok(path) => path,
+            Err(error) => return Outcome::from_report(Report::msg(error)),
         };
 
-        Self::try_load_as_workspace_member(Some(name), &manifest_path, source_manager)
+        Self::try_load_as_workspace_member(Some(name), &manifest_path, sources)
     }
 
     fn try_load_as_workspace_member(
         name: Option<&str>,
         manifest_path: impl AsRef<std::path::Path>,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
-    ) -> Result<Self, Report> {
-        use miden_assembly_syntax::debuginfo::SourceManagerExt;
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
+        use miden_diagnostics::DiagnosticCollector;
 
+        let mut diagnostics = DiagnosticCollector::new();
         let manifest_path = manifest_path.as_ref();
-        let ancestors = manifest_path
-            .parent()
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "manifest '{}' has no parent directory",
-                    manifest_path.display()
-                ))
-            })?
-            .ancestors();
+        let Some(parent) = manifest_path.parent() else {
+            let _ = diagnostics.add_report(Report::msg(format!(
+                "manifest '{}' has no parent directory",
+                manifest_path.display()
+            )));
+            return Outcome {
+                result: Err(()),
+                diagnostics: diagnostics.finish(),
+            };
+        };
+        let ancestors = parent.ancestors();
 
         let initial_package_dir = manifest_path.parent();
         for ancestor in ancestors {
@@ -164,13 +183,29 @@ impl Project {
                 continue;
             }
 
-            let source = source_manager.load_file(&workspace_manifest).map_err(Report::msg)?;
-
-            let contents = toml::from_str::<toml::Table>(source.as_str()).map_err(|err| {
-                Report::msg(format!("could not parse {}: {err}", workspace_manifest.display()))
-            })?;
+            let Ok(source) = std::fs::read_to_string(&workspace_manifest) else {
+                continue;
+            };
+            let Ok(contents) = toml::from_str::<toml::Table>(&source) else {
+                // The actual package/workspace loader below will report located parse errors for
+                // the requested manifest. A malformed unrelated ancestor is not authoritative.
+                if Some(ancestor) != initial_package_dir {
+                    break;
+                }
+                continue;
+            };
             if contents.contains_key("workspace") {
-                let workspace_file = ast::WorkspaceFile::parse(source.clone())?;
+                let workspace_file = match toml::from_str::<ast::WorkspaceFile>(&source) {
+                    Ok(file) => file,
+                    Err(_) => {
+                        let loaded = Workspace::load(&workspace_manifest, sources);
+                        let _ = diagnostics.merge(loaded.diagnostics);
+                        return Outcome {
+                            result: Err(()),
+                            diagnostics: diagnostics.finish(),
+                        };
+                    },
+                };
                 let is_workspace_manifest = manifest_path == workspace_manifest;
 
                 if !is_workspace_manifest
@@ -186,7 +221,14 @@ impl Project {
                     break;
                 }
 
-                let workspace = Workspace::load(source, source_manager)?;
+                let loaded = Workspace::load(&workspace_manifest, sources);
+                let _ = diagnostics.merge(loaded.diagnostics);
+                let Ok(workspace) = loaded.result else {
+                    return Outcome {
+                        result: Err(()),
+                        diagnostics: diagnostics.finish(),
+                    };
+                };
                 let package = if let Some(package) = workspace
                     .members()
                     .iter()
@@ -198,29 +240,99 @@ impl Project {
                     let Some(name) = name else {
                         break;
                     };
-                    workspace.get_member_by_name(name).ok_or_else(|| {
-                        Report::msg(format!(
+                    let Some(package) = workspace.get_member_by_name(name) else {
+                        let _ = diagnostics.add_report(Report::msg(format!(
                             "workspace '{}' does not contain a member named '{name}'",
                             workspace_manifest.display(),
-                        ))
-                    })?
+                        )));
+                        return Outcome {
+                            result: Err(()),
+                            diagnostics: diagnostics.finish(),
+                        };
+                    };
+                    package
                 } else {
                     break;
                 };
 
-                validate_package_name(name, &package)?;
+                if let Err(error) = validate_package_name(name, &package) {
+                    let _ = diagnostics.add_report(error);
+                    return Outcome {
+                        result: Err(()),
+                        diagnostics: diagnostics.finish(),
+                    };
+                }
 
-                return Ok(Self::WorkspacePackage { package, workspace: workspace.into() });
+                return Outcome {
+                    result: Ok(Self::WorkspacePackage { package, workspace: workspace.into() }),
+                    diagnostics: diagnostics.finish(),
+                };
             } else if Some(ancestor) != initial_package_dir {
                 break;
             }
         }
 
-        let source = source_manager.load_file(manifest_path).map_err(Report::msg)?;
-        let package = Package::load(source)?;
-        validate_package_name(name, &package)?;
-        Ok(Self::Package(package.into()))
+        let source = match std::fs::read_to_string(manifest_path) {
+            Ok(source) => source,
+            Err(error) => {
+                let _ = diagnostics.add_report(Report::msg(error));
+                return Outcome {
+                    result: Err(()),
+                    diagnostics: diagnostics.finish(),
+                };
+            },
+        };
+        let source_id =
+            match sources.insert(manifest_path.display().to_string(), source.clone(), None) {
+                Ok(source_id) => source_id,
+                Err(error) => {
+                    let _ = diagnostics.add_report(Report::msg(error));
+                    return Outcome {
+                        result: Err(()),
+                        diagnostics: diagnostics.finish(),
+                    };
+                },
+            };
+        let loaded = Package::load(source_id, &source, Some(manifest_path));
+        let _ = diagnostics.merge(loaded.diagnostics);
+        let Ok(package) = loaded.result else {
+            return Outcome {
+                result: Err(()),
+                diagnostics: diagnostics.finish(),
+            };
+        };
+        if let Err(error) = validate_package_name(name, &package) {
+            let _ = diagnostics.add_report(error);
+            return Outcome {
+                result: Err(()),
+                diagnostics: diagnostics.finish(),
+            };
+        }
+        Outcome {
+            result: Ok(Self::Package(package.into())),
+            diagnostics: diagnostics.finish(),
+        }
     }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+#[derive(Debug, thiserror::Error, Diagnostic)]
+enum ProjectLoadError {
+    #[error("dependency '{expected}' resolved to package '{actual}' at '{location}'")]
+    DependencyNameMismatchAtPath {
+        expected: String,
+        actual: String,
+        location: String,
+        #[label(primary, "package is declared as '{actual}'")]
+        span: SourceSpan,
+    },
+    #[error("dependency '{expected}' resolved to package '{actual}'")]
+    DependencyNameMismatch {
+        expected: String,
+        actual: String,
+        #[label(primary, "package is declared as '{actual}'")]
+        span: SourceSpan,
+    },
 }
 
 #[cfg(all(feature = "std", feature = "serde"))]
@@ -233,18 +345,18 @@ fn validate_package_name(expected_name: Option<&str>, package: &Package) -> Resu
     if &**actual_name.inner() == expected_name {
         Ok(())
     } else if let Some(location) = package.manifest_path() {
-        Err(Report::msg(format!(
-            "dependency '{}' resolved to package '{}' at '{}'",
-            expected_name,
-            actual_name.inner(),
-            location.display()
-        )))
+        Err(Report::new(ProjectLoadError::DependencyNameMismatchAtPath {
+            expected: expected_name.to_string(),
+            actual: actual_name.inner().to_string(),
+            location: location.display().to_string(),
+            span: actual_name.span(),
+        }))
     } else {
-        Err(Report::msg(format!(
-            "dependency '{}' resolved to package '{}'",
-            expected_name,
-            actual_name.inner(),
-        )))
+        Err(Report::new(ProjectLoadError::DependencyNameMismatch {
+            expected: expected_name.to_string(),
+            actual: actual_name.inner().to_string(),
+            span: actual_name.span(),
+        }))
     }
 }
 
@@ -259,11 +371,13 @@ fn workspace_declares_member(
     };
 
     workspace.workspace.members.iter().any(|member| {
-        let member_dir =
-            match absolutize_path(std::path::Path::new(member.inner().path()), workspace_root) {
-                Ok(member_dir) => member_dir,
-                Err(_) => return false,
-            };
+        let member_dir = match absolutize_path(
+            std::path::Path::new(member.get_ref().as_ref()),
+            workspace_root,
+        ) {
+            Ok(member_dir) => member_dir,
+            Err(_) => return false,
+        };
 
         member_dir.join("miden-project.toml") == manifest_path
     })

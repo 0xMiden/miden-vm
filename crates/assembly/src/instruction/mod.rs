@@ -1,6 +1,5 @@
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
-    debuginfo::{Span, Spanned},
     diagnostics::{Report, diagnostic},
     parser::{IntValue, PushValue},
 };
@@ -9,6 +8,7 @@ use miden_core::{
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
+use miden_diagnostics::{Span, Spanned};
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,

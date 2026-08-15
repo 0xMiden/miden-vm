@@ -199,6 +199,24 @@ fn cli_run_with_lib() {
 }
 
 #[test]
+fn cli_run_with_source_kernel_renders_kernel_location() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    let input_path = working_dir.path().join("program.inputs");
+    let kernel_path = working_dir.path().join("kernel.masm");
+    fs::write(&program_path, "begin syscall.fail end").unwrap();
+    fs::write(&input_path, r#"{"operand_stack":[]}"#).unwrap();
+    fs::write(&kernel_path, "pub proc fail assert end").unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run").arg(&program_path).arg("--kernel").arg(&kernel_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to execute program"))
+        .stderr(predicate::str::contains("kernel.masm"));
+}
+
+#[test]
 fn test_advmap_cli() {
     let working_dir = TempDir::new().unwrap();
     let mut cmd = bin_under_test(working_dir.path());

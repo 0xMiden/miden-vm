@@ -7,11 +7,11 @@ use alloc::{
 };
 use std::path::Path as FsPath;
 
-use miden_assembly_syntax::diagnostics::{DiagnosticCollector, Report};
+use miden_assembly_syntax::diagnostics::{DiagnosticCollector, Outcome, Report, SourceMap};
 use miden_core::{Word, utils::hash_string_to_word};
 use miden_package_registry::{PackageId, PackageRegistry, PackageRegistryAndProvider};
 use miden_project::{
-    Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
+    Package as ProjectPackage, Project, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
     Target,
 };
@@ -20,8 +20,6 @@ use super::{
     PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
     SourceProviderRegistry, providers::TargetAssemblyContext,
 };
-use crate::SourceManager;
-
 pub(super) enum Completion<T> {
     Complete(T),
     Incomplete,
@@ -32,7 +30,6 @@ pub(super) enum Completion<T> {
 
 pub(super) struct DependencyGraph {
     dependency_graph: ProjectDependencyGraph,
-    source_manager: Arc<dyn SourceManager>,
 }
 
 impl AsRef<ProjectDependencyGraph> for DependencyGraph {
@@ -46,32 +43,28 @@ impl DependencyGraph {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    pub fn from_project_path<S: PackageRegistry + ?Sized>(
-        manifest_path: impl AsRef<FsPath>,
+    pub fn from_loaded_project<S: PackageRegistry + ?Sized>(
+        project: Project,
         store: &S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, Report> {
-        let dependency_graph = ProjectDependencyGraphBuilder::new(store)
-            .with_source_manager(source_manager.clone())
-            .build_from_path(manifest_path)?;
-
-        Ok(Self { dependency_graph, source_manager })
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
+        ProjectDependencyGraphBuilder::new(store)
+            .build_project(project, sources)
+            .map(|dependency_graph| Self { dependency_graph })
     }
 
     pub fn from_project<S: PackageRegistry + ?Sized>(
         project: Arc<ProjectPackage>,
         store: &S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, Report> {
-        let dependency_graph_builder =
-            ProjectDependencyGraphBuilder::new(store).with_source_manager(source_manager.clone());
-        let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
-            dependency_graph_builder.build_from_path(manifest_path)?
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
+        let dependency_graph_builder = ProjectDependencyGraphBuilder::new(store);
+        if let Some(manifest_path) = project.manifest_path() {
+            dependency_graph_builder.build_from_path(manifest_path, sources)
         } else {
-            dependency_graph_builder.build(project)?
-        };
-
-        Ok(Self { dependency_graph, source_manager })
+            dependency_graph_builder.build(project, sources)
+        }
+        .map(|dependency_graph| Self { dependency_graph })
     }
 
     // PUBLIC ACCESSORS
@@ -98,6 +91,7 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
         diagnostics: &mut DiagnosticCollector,
     ) -> Result<Completion<Option<PackageBuildProvenance>>, Report> {
@@ -120,6 +114,7 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    sources,
                     source_provenance,
                     diagnostics,
                 )?;
@@ -131,6 +126,7 @@ impl DependencyGraph {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn expected_source_provenance(
         &self,
         package_id: &PackageId,
@@ -141,6 +137,7 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
         diagnostics: &mut DiagnosticCollector,
     ) -> Result<Completion<PackageBuildProvenance>, Report> {
@@ -153,6 +150,7 @@ impl DependencyGraph {
             manifest_path,
             source_provider,
             package_registry,
+            sources,
             source_provenance,
             &mut BTreeSet::new(),
             diagnostics,
@@ -175,6 +173,7 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
         visiting: &mut BTreeSet<PackageId>,
         diagnostics: &mut DiagnosticCollector,
@@ -184,6 +183,7 @@ impl DependencyGraph {
             profile_name,
             source_provider,
             package_registry,
+            sources,
             visiting,
             diagnostics,
         )?
@@ -218,18 +218,17 @@ impl DependencyGraph {
                 }))
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
-                let source_manager = self.source_manager.clone();
-                let context = TargetAssemblyContext::new(
+                let mut context = TargetAssemblyContext::new(
                     project.clone(),
                     manifest_path,
                     target,
                     profile,
                     &self.dependency_graph,
                     package_registry,
-                    source_manager,
+                    sources,
                 )?;
                 let Completion::Complete(source_hash) =
-                    self.compute_path_source_hash(&context, source_provider, diagnostics)?
+                    self.compute_path_source_hash(&mut context, source_provider, diagnostics)?
                 else {
                     return Ok(Completion::Incomplete);
                 };
@@ -248,6 +247,7 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         visiting: &mut BTreeSet<PackageId>,
         diagnostics: &mut DiagnosticCollector,
     ) -> Result<Completion<Word>, Report> {
@@ -284,6 +284,7 @@ impl DependencyGraph {
                     profile_name,
                     source_provider,
                     package_registry,
+                    sources,
                     visiting,
                     diagnostics,
                 )?
@@ -306,6 +307,7 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         visiting: &mut BTreeSet<PackageId>,
         diagnostics: &mut DiagnosticCollector,
     ) -> Result<Completion<String>, Report> {
@@ -326,12 +328,12 @@ impl DependencyGraph {
                 library_path: Some(_),
                 ..
             }) => {
-                let project = miden_project::Project::load_project_reference(
-                    package_id,
-                    manifest_path,
-                    &self.source_manager,
-                )
-                .map(|project| project.package())?;
+                let Outcome { result: project, diagnostics: emitted } =
+                    Project::load_project_reference(package_id, manifest_path, sources);
+                let _ = diagnostics.merge(emitted);
+                let Ok(project) = project.map(|project| project.package()) else {
+                    return Ok(Completion::Incomplete);
+                };
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -349,6 +351,7 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    sources,
                     None,
                     visiting,
                     diagnostics,
@@ -387,7 +390,7 @@ impl DependencyGraph {
     /// the information/metadata that should contribute to the hash.
     fn compute_path_source_hash(
         &self,
-        context: &TargetAssemblyContext<'_>,
+        context: &mut TargetAssemblyContext<'_>,
         source_provider: &SourceProviderRegistry,
         diagnostics: &mut DiagnosticCollector,
     ) -> Result<Completion<Word>, Report> {
@@ -406,7 +409,7 @@ impl DependencyGraph {
         };
         let outcome = source_provider.provide_source_provenance(context);
         let _ = diagnostics.merge(outcome.diagnostics);
-        let Some(source_provenance) = outcome.value else {
+        let Ok(source_provenance) = outcome.result else {
             return Ok(Completion::Incomplete);
         };
 

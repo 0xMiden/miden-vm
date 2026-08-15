@@ -1,6 +1,6 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::Assembler;
 use miden_core::{
     Felt, ZERO,
     mast::error_code_from_msg,
@@ -202,13 +202,11 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
 
     // Compile a program whose `u32assert2.err=...` text lowers to a stable error code.
     // Push 2^32 (invalid) and 1 (valid) so the assertion fails on the first element.
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program(
             "program",
             format!(r#"begin push.4294967296 push.1 u32assert2.err="{expected_message}" end"#),
         )
-        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -240,13 +238,11 @@ fn test_u32assert_err_wrapper_assembled() {
 
     // `u32assert.err=...` lowers to [Pad, U32assert2(err_code), Drop].
     // Push a value > u32::MAX so the assertion fires.
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program(
             "program",
             format!(r#"begin push.4294967296 u32assert.err="{expected_message}" end"#),
         )
-        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -275,15 +271,14 @@ fn test_u32assertw_err_wrapper_assembled() {
 
     // `u32assertw.err=...` lowers to two U32assert2(err_code) ops via `u32assertw`.
     // Push a word where the third element exceeds u32::MAX.
-    let source_manager = Arc::new(DefaultSourceManager::default());
     // Stack (top->bottom): 1 2 2^32 4 — element at position 2 is out of range
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program(
             "program",
             format!(
                 r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="{expected_message}" end"#
             ),
-        ).value
+        )
         .expect("program should assemble")
         .unwrap_program();
 

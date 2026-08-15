@@ -289,7 +289,6 @@ fn bench_one_scenario(
 
     let program = Assembler::default()
         .assemble_program("program", &source)
-        .value
         .expect("assemble emitted program")
         .unwrap_program();
 

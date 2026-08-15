@@ -8,7 +8,7 @@ use core::{
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 /// Represents the types of errors that can occur when parsing/validating an [Ident]
 #[derive(Debug, thiserror::Error)]
@@ -237,27 +237,6 @@ impl FromStr for Ident {
         Self::validate(s)?;
         let name = Arc::from(s.to_string().into_boxed_str());
         Ok(Self { span: SourceSpan::default(), name })
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for Ident {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Ident {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(name).map_err(serde::de::Error::custom)
     }
 }
 

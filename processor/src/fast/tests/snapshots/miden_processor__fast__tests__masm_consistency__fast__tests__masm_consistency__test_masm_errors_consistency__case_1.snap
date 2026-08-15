@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
-assertion_line: 368
 expression: fast_err
 ---
 OperationError {
@@ -19,7 +18,7 @@ OperationError {
             end: 0,
         },
     },
-    source_file: None,
+    sources: None,
     err: NotBinaryValue {
         context: If,
         value: 2,

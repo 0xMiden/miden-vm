@@ -7,8 +7,8 @@ use miden_assembly_syntax::{
         ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use super::{AdviceMap, Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
 
@@ -220,8 +220,7 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver =
-            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
+        let local_resolver = LocalSymbolResolver::new(container).map_err(Box::new)?;
         local_resolver.resolve(name).map_err(Box::new)
     }
 
@@ -232,8 +231,7 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver =
-            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
+        let local_resolver = LocalSymbolResolver::new(container).map_err(Box::new)?;
         local_resolver.resolve_path(path).map_err(Box::new)
     }
 }
@@ -255,7 +253,7 @@ struct LinkModuleIter<'a, 'b: 'a> {
 impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
-    fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
+    fn symbols(&self) -> Self::SymbolIter {
         let mut symbols = self
             .module
             .symbols
@@ -313,10 +311,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
         symbols.into_iter()
     }
 
-    fn checked_symbols(
-        &self,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self::SymbolIter, SymbolResolutionError> {
+    fn checked_symbols(&self) -> Result<Self::SymbolIter, SymbolResolutionError> {
         if self.module.symbols.len() > ItemIndex::MAX_ITEMS {
             let span = self
                 .module
@@ -326,7 +321,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                 .unwrap_or(SourceSpan::UNKNOWN);
             Err(SymbolResolutionError::too_many_items_in_module(span))
         } else {
-            Ok(self.symbols(source_manager))
+            Ok(self.symbols())
         }
     }
 }

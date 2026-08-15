@@ -5,40 +5,24 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+mod indices;
 mod location;
-mod selection;
-mod source_file;
-mod source_manager;
-mod span;
 
 #[cfg(feature = "arbitrary")]
 use alloc::vec;
 use alloc::{format, string::String, sync::Arc};
 
-use miden_crypto::utils::{
+use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "serde")]
-pub use serde_spanned;
 
-#[cfg(feature = "std")]
-pub use self::source_manager::SourceManagerExt;
 pub use self::{
-    location::{FileLineCol, Location},
-    selection::{Position, Selection},
-    source_file::{
-        ByteIndex, ByteOffset, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceContent,
-        SourceContentUpdateError, SourceFile, SourceFileRef, SourceLanguage,
-    },
-    source_manager::{
-        DEFAULT_SOURCE_NAMESPACE, DefaultSourceManager, SourceId, SourceKey, SourceManager,
-        SourceManagerError, SourceNamespace, SourceProvider, SourceRevision,
-    },
-    span::{SourceSpan, Span, Spanned, TextRange, TextRangeError},
+    indices::{ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber},
+    location::Location,
 };
 
 // URI
@@ -338,7 +322,7 @@ impl Arbitrary for Uri {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::utils::{Deserializable, DeserializationError, SliceReader};
+    use miden_serde_utils::{Deserializable, DeserializationError, SliceReader};
 
     use super::*;
 

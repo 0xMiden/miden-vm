@@ -26,6 +26,12 @@ features = ["std"]
 path = "../../crates/assembly"
 features = ["std"]
 
+[dependencies.miden-diagnostics]
+git = "https://github.com/0xMiden/miden-diagnostics"
+branch = "bitwalker/diagnostics-v1"
+default-features = false
+features = ["derive", "std"]
+
 [dependencies.miden-mast-package]
 path = "../../crates/mast-package"
 features = ["std"]

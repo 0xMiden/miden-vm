@@ -8,7 +8,7 @@ use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{MasmProgram, get_masm_program, get_masp_program},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -116,9 +116,19 @@ impl ProveCmd {
         let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, None, None, host),
             "masm" => {
-                let (program, package_debug_info, entrypoint_source_node, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_manager(source_manager);
+                let MasmProgram {
+                    program,
+                    package_debug_info,
+                    entrypoint_source_node,
+                    sources,
+                    kernel,
+                } = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
+                let mut host = host.with_source_provider(sources);
+                if let Some(kernel) = kernel {
+                    host.load_library(kernel)
+                        .into_diagnostic()
+                        .wrap_err("Failed to load kernel")?;
+                }
                 for library in libraries.libraries.iter().cloned() {
                     host.load_library(library)
                         .into_diagnostic()

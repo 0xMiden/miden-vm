@@ -1,6 +1,5 @@
 use miden_assembly_syntax::{
     ParsingError,
-    debuginfo::{SourceSpan, Span},
     diagnostics::{Report, diagnostic},
 };
 use miden_core::{
@@ -8,6 +7,7 @@ use miden_core::{
     events::SystemEvent,
     operations::Operation::{self, *},
 };
+use miden_diagnostics::{SourceSpan, Span};
 
 use super::{field_ops::append_pow2_op, push_u32_value};
 use crate::{

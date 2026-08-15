@@ -7,14 +7,15 @@ use alloc::{
 
 use miden_assembly_syntax::{
     ast::{DebugVarInfo, Instruction},
-    debuginfo::{Location, Span},
-    diagnostics::Report,
+    debuginfo::Location,
+    diagnostics::{Report, SourceProvider},
 };
 use miden_core::{
     Felt,
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
+use miden_diagnostics::Span;
 use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceVar};
 
 use crate::{
@@ -54,7 +55,6 @@ struct PendingAsmOp {
 /// The same basic block builder can be used to construct many blocks. It is expected that when the
 /// last basic block in a procedure's body is constructed [`Self::try_into_basic_block`] will be
 /// used.
-#[derive(Debug)]
 pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
     epilogue: Vec<Operation>,
@@ -65,6 +65,7 @@ pub struct BasicBlockBuilder<'a> {
     /// Debug variables attached to operations in this block.
     debug_vars: Vec<DebugSourceVar>,
     mast_forest_builder: &'a mut MastForestBuilder,
+    sources: &'a dyn SourceProvider,
 }
 
 /// Constructors
@@ -77,6 +78,7 @@ impl<'a> BasicBlockBuilder<'a> {
     pub(super) fn new(
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &'a mut MastForestBuilder,
+        sources: &'a dyn SourceProvider,
     ) -> Self {
         match wrapper {
             Some(wrapper) => Self {
@@ -86,6 +88,7 @@ impl<'a> BasicBlockBuilder<'a> {
                 asm_ops: Vec::new(),
                 debug_vars: Vec::new(),
                 mast_forest_builder,
+                sources,
             },
             None => Self {
                 ops: Default::default(),
@@ -94,6 +97,7 @@ impl<'a> BasicBlockBuilder<'a> {
                 asm_ops: Vec::new(),
                 debug_vars: Default::default(),
                 mast_forest_builder,
+                sources,
             },
         }
     }
@@ -157,7 +161,7 @@ impl BasicBlockBuilder<'_> {
         let span = instruction.span();
         self.pending_asm_op = Some(PendingAsmOp {
             op_start: self.ops.len(),
-            location: proc_ctx.source_manager().location(span).ok(),
+            location: Location::from_span(span, self.sources),
             context_name: proc_ctx.path().to_string(),
             op: instruction.to_string(),
         });

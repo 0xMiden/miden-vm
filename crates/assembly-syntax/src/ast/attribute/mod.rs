@@ -6,7 +6,7 @@ use core::fmt;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Spanned};
+use miden_diagnostics::{SourceSpan, Spanned};
 
 pub use self::{
     meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},

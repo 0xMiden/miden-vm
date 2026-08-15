@@ -1,21 +1,17 @@
-use core::{fmt, ops::Range};
+use core::ops::Range;
 
-use miden_crypto::utils::{
+use miden_diagnostics::{SourceProvider, SourceSpan, TextRange};
+use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
-use super::{
-    ByteIndex, Uri,
-    source_file::{ColumnNumber, LineNumber},
-};
+use super::{ByteIndex, Uri};
 
-/// A [Location] represents file and span information for portability across source managers
+/// A [Location] represents file and span information that is portable across source-provider
+/// sessions.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serialization_macros::serialization_test
@@ -44,6 +40,43 @@ impl Location {
     pub const fn range(&self) -> Range<ByteIndex> {
         self.start..self.end
     }
+
+    /// Resolves this portable location to a session span using `sources`.
+    pub fn to_span(&self, sources: &dyn SourceProvider) -> Option<SourceSpan> {
+        let source_id = sources.find_by_name(self.uri.as_str())?;
+        let source = sources.get(source_id)?;
+        let range = TextRange::new(self.start.to_u32(), self.end.to_u32()).ok()?;
+        if range.end() > source.byte_len
+            || source.text.is_some_and(|text| {
+                !text.is_char_boundary(range.start() as usize)
+                    || !text.is_char_boundary(range.end() as usize)
+            })
+        {
+            return None;
+        }
+
+        let span = SourceSpan::session(source_id, range);
+        Some(source.revision.map_or(span, |revision| span.with_revision(revision)))
+    }
+
+    /// Resolve a session span to a portable source location.
+    pub fn from_span(span: SourceSpan, sources: &dyn SourceProvider) -> Option<Self> {
+        let source = sources.get(span.source().id())?;
+        if span.revision().is_some_and(|revision| source.revision != Some(revision))
+            || span.range().end() > source.byte_len
+            || source.text.is_some_and(|text| {
+                !text.is_char_boundary(span.range().start() as usize)
+                    || !text.is_char_boundary(span.range().end() as usize)
+            })
+        {
+            return None;
+        }
+        Some(Self::new(
+            Uri::from(source.display_name),
+            ByteIndex::new(span.range().start()),
+            ByteIndex::new(span.range().end()),
+        ))
+    }
 }
 
 impl Serializable for Location {
@@ -63,75 +96,6 @@ impl Deserializable for Location {
     }
 }
 
-/// A [FileLineCol] represents traditional file/line/column information for use in rendering.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serialization_macros::serialization_test
-)]
-pub struct FileLineCol {
-    /// The path to the source file in which the relevant source code can be found
-    pub uri: Uri,
-    /// The one-indexed number of the line to which this location refers
-    pub line: LineNumber,
-    /// The one-indexed column of the line on which this location starts
-    pub column: ColumnNumber,
-}
-
-impl FileLineCol {
-    /// Creates a new [Location].
-    pub fn new(
-        uri: impl Into<Uri>,
-        line: impl Into<LineNumber>,
-        column: impl Into<ColumnNumber>,
-    ) -> Self {
-        Self {
-            uri: uri.into(),
-            line: line.into(),
-            column: column.into(),
-        }
-    }
-
-    /// Get the name (or path) of the source file
-    pub fn uri(&self) -> &Uri {
-        &self.uri
-    }
-
-    /// Returns the line of the location.
-    pub const fn line(&self) -> LineNumber {
-        self.line
-    }
-
-    /// Moves the column by the given offset.
-    pub fn move_column(&mut self, offset: i32) {
-        self.column += offset;
-    }
-}
-
-impl fmt::Display for FileLineCol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}@{}:{}]", self.uri, self.line, self.column)
-    }
-}
-
-impl Serializable for FileLineCol {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.uri.write_into(target);
-        self.line.write_into(target);
-        self.column.write_into(target);
-    }
-}
-
-impl Deserializable for FileLineCol {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let uri = Uri::read_from(source)?;
-        let line = LineNumber::read_from(source)?;
-        let column = ColumnNumber::read_from(source)?;
-        Ok(Self::new(uri, line, column))
-    }
-}
-
 #[cfg(feature = "arbitrary")]
 impl Arbitrary for Location {
     type Parameters = ();
@@ -147,14 +111,38 @@ impl Arbitrary for Location {
     }
 }
 
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for FileLineCol {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
+#[cfg(test)]
+mod tests {
+    use miden_diagnostics::{SourceMap, SourceNamespace, SourceRevision};
 
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<Uri>(), any::<LineNumber>(), any::<ColumnNumber>())
-            .prop_map(|(uri, line, column)| Self::new(uri, line, column))
-            .boxed()
+    use super::*;
+
+    #[test]
+    fn portable_locations_round_trip_through_a_source_provider() {
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(41));
+        let source_id = sources
+            .insert("memory:///unicode.masm", "a😀z", Some(SourceRevision(7)))
+            .unwrap();
+        let location =
+            Location::new(Uri::new("memory:///unicode.masm"), ByteIndex::new(1), ByteIndex::new(5));
+
+        let span = location.to_span(&sources).unwrap();
+        assert_eq!(span.source().id(), source_id);
+        assert_eq!(span.revision(), Some(SourceRevision(7)));
+        assert_eq!(Location::from_span(span, &sources), Some(location));
+    }
+
+    #[test]
+    fn portable_locations_reject_missing_and_non_boundary_ranges() {
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(42));
+        sources.insert("memory:///unicode.masm", "a😀z", None).unwrap();
+
+        let missing =
+            Location::new(Uri::new("memory:///missing.masm"), ByteIndex::new(0), ByteIndex::new(1));
+        assert!(missing.to_span(&sources).is_none());
+
+        let unaligned =
+            Location::new(Uri::new("memory:///unicode.masm"), ByteIndex::new(2), ByteIndex::new(3));
+        assert!(unaligned.to_span(&sources).is_none());
     }
 }

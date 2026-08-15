@@ -2,12 +2,13 @@
 mod context;
 mod pattern;
 
+use alloc::{string::String, sync::Arc};
+
+use miden_diagnostics::{DefaultFailurePolicy, Outcome, SourceMap, WarningsAsErrors};
+
 #[cfg(test)]
 pub use self::context::{SyntaxTestContext, TestFailure, render_diagnostic_set};
 pub use self::pattern::Pattern;
-
-use alloc::string::String;
-
 use crate::diagnostics::Report;
 
 /// Renders values accepted by the diagnostic assertion macros.
@@ -56,24 +57,14 @@ macro_rules! regex {
     };
 }
 
-/// Construct an [`::alloc::sync::Arc<miden_core::debuginfo::SourceFile>`] from a string literal or
-/// expression, such that emitted diagnostics reference the file and line on which the source file
-/// was constructed.
+/// Add source text to a test context and return it with its canonical source span.
 #[macro_export]
 macro_rules! source_file {
     ($context:expr, $source:literal) => {
-        $context.source_manager().load(
-            $crate::debuginfo::SourceLanguage::Masm,
-            concat!("test", line!()).into(),
-            $source.to_string(),
-        )
+        $context.add_source(concat!("test", line!()), $source.to_string())
     };
     ($context:expr, $source:expr) => {
-        $context.source_manager().load(
-            $crate::debuginfo::SourceLanguage::Masm,
-            concat!("test", line!()).into(),
-            $source.to_string(),
-        )
+        $context.add_source(concat!("test", line!()), $source.to_string())
     };
 }
 
@@ -123,15 +114,29 @@ macro_rules! assert_diagnostic_lines {
 #[macro_export]
 macro_rules! parse_module {
     ($context:expr, $source:expr) => {{
-        let source_file = $context.source_manager().load(
-            $crate::debuginfo::SourceLanguage::Masm,
-            concat!("test", line!()).into(),
-            ::alloc::string::String::from($source),
-        );
-        let mut parser = $crate::ast::Module::parser(None);
-        parser
-            .parse(None, source_file, $context.source_manager())
-            .value
+        $context
+            .parse_module_source_file(
+                $context
+                    .add_source(concat!("test", line!()), ::alloc::string::String::from($source)),
+            )
             .expect("failed to parse module")
     }};
+}
+
+pub fn assess_test_outcome<T>(
+    outcome: Outcome<T>,
+    sources: Arc<SourceMap>,
+    warnings_as_errors: bool,
+) -> Result<T, Report> {
+    let result = if warnings_as_errors {
+        outcome.into_result_with_policy(&WarningsAsErrors)
+    } else {
+        outcome.into_result_with_policy(&DefaultFailurePolicy)
+    };
+
+    match result {
+        ok @ Ok(_) => ok,
+        Err(report) if report.session_sources().is_some() => Err(report),
+        Err(report) => Err(report.attach_session_sources(sources)),
+    }
 }

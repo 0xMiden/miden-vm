@@ -6,7 +6,7 @@ use alloc::{
 use std::path::Path;
 
 #[cfg(all(feature = "std", feature = "serde"))]
-use miden_assembly_syntax::debuginfo::Spanned;
+use miden_diagnostics::{DiagnosticCollector, Spanned};
 use miden_mast_package::PackageId;
 
 #[cfg(all(feature = "std", feature = "serde"))]
@@ -281,45 +281,72 @@ impl Package {
 impl Package {
     /// Load a package from `source`, expected to be a standalone package-level `miden-project.toml`
     /// manifest.
-    pub fn load(source: Arc<SourceFile>) -> Result<Box<Self>, Report> {
-        Self::parse(source, None)
+    pub fn load(
+        source_id: SourceId,
+        source: &str,
+        manifest_path: Option<&Path>,
+    ) -> Outcome<Box<Self>> {
+        Self::parse(source_id, source, manifest_path, None)
     }
 
     /// Load a package from `source`, expected to be a package-level `miden-project.toml` manifest
     /// which is presumed to be a member of `workspace` for purposes of configuration inheritance.
-    pub fn load_from_workspace(
-        source: Arc<SourceFile>,
+    pub(crate) fn load_from_workspace(
+        source_id: SourceId,
+        source: &str,
+        manifest_path: Option<&Path>,
+        workspace_source_id: SourceId,
         workspace: &WorkspaceFile,
-    ) -> Result<Box<Self>, Report> {
-        Self::parse(source, Some(workspace))
+        workspace_manifest_path: Option<&Path>,
+    ) -> Outcome<Box<Self>> {
+        Self::parse(
+            source_id,
+            source,
+            manifest_path,
+            Some((workspace_source_id, workspace, workspace_manifest_path)),
+        )
     }
 
     fn parse(
-        source: Arc<SourceFile>,
-        workspace: Option<&WorkspaceFile>,
-    ) -> Result<Box<Self>, Report> {
-        let manifest_path = Path::new(source.uri().path());
-        let manifest_path = if manifest_path.try_exists().is_ok_and(|exists| exists) {
-            Some(manifest_path.to_path_buf().into_boxed_path())
-        } else {
-            None
-        };
+        source_id: SourceId,
+        source: &str,
+        manifest_path: Option<&Path>,
+        workspace: Option<(SourceId, &WorkspaceFile, Option<&Path>)>,
+    ) -> Outcome<Box<Self>> {
+        let mut diagnostics = DiagnosticCollector::new();
 
         // Parse the manifest into an AST for further processing
-        let package_ast = ast::ProjectFile::parse(source.clone())?;
+        let parsed = ast::ProjectFile::parse(source_id, source);
+        let _ = diagnostics.merge(parsed.diagnostics);
+        let Ok(package_ast) = parsed.result else {
+            return Outcome {
+                result: Err(()),
+                diagnostics: diagnostics.finish(),
+            };
+        };
+
+        let errors_before = diagnostics.counts().errors();
+        let mut context = ast::parsing::ValidationContext::new(source_id, &mut diagnostics);
+        let workspace_ast = workspace.map(|(id, file, _)| (id, file));
 
         // Extract metadata that can be inherited from the workspace manifest (if present)
-        let version = package_ast.get_or_inherit_version(source.clone(), workspace)?;
-        let description = package_ast.get_or_inherit_description(source.clone(), workspace)?;
+        let version = package_ast.get_or_inherit_version(&mut context, workspace_ast);
+        let description = package_ast.get_or_inherit_description(&mut context, workspace_ast);
 
         // Compute the set of initial profiles inheritable from the workspace level
         let mut profiles = Vec::default();
         profiles.push(Profile::default());
         profiles.push(Profile::release());
-        if let Some(workspace) = workspace {
-            for ast in workspace.profiles.iter() {
-                let profile = Profile::from_ast(ast, source.clone(), &profiles)?;
-                if let Some(prev) = profiles.iter_mut().find(|p| p.name() == ast.name.inner()) {
+        if let Some((workspace_source_id, workspace, _)) = workspace {
+            for profile_ast in workspace.profiles.iter() {
+                let Some(profile) =
+                    Profile::from_ast(profile_ast, workspace_source_id, &profiles, &mut context)
+                else {
+                    continue;
+                };
+                if let Some(prev) =
+                    profiles.iter_mut().find(|p| p.name() == profile_ast.name.get_ref())
+                {
                     *prev = profile;
                 } else {
                     profiles.push(profile);
@@ -331,21 +358,22 @@ impl Package {
         // profiles, but raising an error if the same profile is mentioned twice in the current
         // project file.
         let package_profiles_start = profiles.len();
-        for ast in package_ast.profiles.iter() {
-            let profile = Profile::from_ast(ast, source.clone(), &profiles)?;
+        for profile_ast in package_ast.profiles.iter() {
+            let Some(profile) = Profile::from_ast(profile_ast, source_id, &profiles, &mut context)
+            else {
+                continue;
+            };
 
             if let Some(prev_index) = profiles.iter().position(|p| p.name() == profile.name()) {
                 if prev_index < package_profiles_start {
                     profiles[prev_index].merge(&profile);
                 } else {
                     let prev = &profiles[prev_index];
-                    return Err(ProjectFileError::DuplicateProfile {
+                    let _ = context.add(ProjectFileError::DuplicateProfile {
                         name: prev.name().clone(),
-                        source_file: source,
                         span: profile.span(),
                         prev: prev.span(),
-                    }
-                    .into_report());
+                    });
                 }
             } else {
                 profiles.push(profile);
@@ -354,32 +382,130 @@ impl Package {
 
         // Extract project dependencies, using the workspace to resolve workspace-relative
         // dependencies
-        let dependencies = package_ast.extract_dependencies(source.clone(), workspace)?;
+        let dependencies = lower_dependencies(&package_ast, source_id, workspace, &mut context);
 
         // Extract the build targets for this project
-        let lib = package_ast.extract_library_target()?;
-        let bins = package_ast.extract_executable_targets();
+        let lib = package_ast.extract_library_target(&mut context);
+        let bins = package_ast.extract_executable_targets(&context);
 
-        let mut lints = workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default();
-        lints.extend(package_ast.config.lints.clone());
+        let mut lints = workspace
+            .map(|(id, ws, _)| ast::parsing::lower_metadata_set(id, &ws.workspace.config.lints))
+            .unwrap_or_default();
+        lints.extend(ast::parsing::lower_metadata_set(source_id, &package_ast.config.lints));
 
-        let mut metadata =
-            workspace.map(|ws| ws.workspace.package.metadata.clone()).unwrap_or_default();
-        metadata.extend(package_ast.package.detail.metadata.clone());
+        let mut metadata = workspace
+            .map(|(id, ws, _)| ast::parsing::lower_metadata_set(id, &ws.workspace.package.metadata))
+            .unwrap_or_default();
+        metadata.extend(ast::parsing::lower_metadata_set(
+            source_id,
+            &package_ast.package.detail.metadata,
+        ));
 
-        Ok(Box::new(Self {
-            manifest_path,
-            name: package_ast.package.name.map(Into::into),
-            version,
-            description,
-            dependencies,
-            lints,
-            metadata,
-            profiles,
-            lib,
-            bins,
-        }))
+        let result = if context.error_count() == errors_before {
+            Ok(Box::new(Self {
+                manifest_path: manifest_path.map(|path| path.to_path_buf().into_boxed_path()),
+                name: context.lower(package_ast.package.name.clone()).map(Into::into),
+                version: version.expect("successful lowering produced a version"),
+                description: description.expect("successful lowering produced a description"),
+                dependencies,
+                lints,
+                metadata,
+                profiles,
+                lib,
+                bins,
+            }))
+        } else {
+            Err(())
+        };
+
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
     }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn lower_dependencies(
+    package: &ast::ProjectFile,
+    source_id: SourceId,
+    workspace: Option<(SourceId, &WorkspaceFile, Option<&Path>)>,
+    context: &mut ast::parsing::ValidationContext<'_>,
+) -> Vec<Dependency> {
+    let mut dependencies = Vec::with_capacity(package.config.dependencies.len());
+    for dependency in package.config.dependencies.values() {
+        let spec = dependency.get_ref();
+        let (effective, effective_source_id, workspace_manifest_path) = if spec
+            .inherits_workspace_version()
+        {
+            let Some((workspace_source_id, workspace, workspace_manifest_path)) = workspace else {
+                let _ = context.add(ProjectFileError::InvalidPackageDependency {
+                    message: "this package is not in a workspace".into(),
+                    span: context.span(&spec.name),
+                });
+                continue;
+            };
+            let Some((_, effective)) = workspace
+                .workspace
+                .config
+                .dependencies
+                .iter()
+                .find(|(name, _)| name.get_ref().as_ref() == spec.name.get_ref().as_ref())
+            else {
+                let _ = context.add(ProjectFileError::InvalidPackageDependency {
+                    message: format!("'{}' is not a workspace dependency", spec.name.get_ref()),
+                    span: context.span(&spec.name),
+                });
+                continue;
+            };
+            (effective.get_ref(), workspace_source_id, workspace_manifest_path)
+        } else {
+            (spec, source_id, workspace.and_then(|(_, _, path)| path))
+        };
+
+        let scheme = match workspace {
+            Some((_, workspace, _)) => DependencyVersionScheme::try_from_ast_in_workspace(
+                effective,
+                effective_source_id,
+                workspace,
+                workspace_manifest_path,
+            ),
+            None => DependencyVersionScheme::try_from_ast(effective, effective_source_id),
+        };
+        let scheme = match scheme {
+            Ok(scheme) => scheme,
+            Err(error) => {
+                let _ = context.add(error);
+                continue;
+            },
+        };
+
+        let linkage = spec
+            .linkage
+            .as_ref()
+            .map(|value| (value, source_id))
+            .or_else(|| effective.linkage.as_ref().map(|value| (value, effective_source_id)));
+        let linkage = match linkage {
+            Some((value, linkage_source_id)) => match value.get_ref().parse::<Linkage>() {
+                Ok(linkage) => linkage,
+                Err(error) => {
+                    let _ = context.add(ProjectFileError::InvalidPackageDependency {
+                        message: error.to_string(),
+                        span: context.span_in(linkage_source_id, value),
+                    });
+                    continue;
+                },
+            },
+            None => Linkage::default(),
+        };
+
+        dependencies.push(Dependency::new(
+            ast::parsing::lower_span(source_id, spec.name.clone()),
+            scheme,
+            linkage,
+        ));
+    }
+    dependencies
 }
 
 #[cfg(feature = "serde")]
@@ -390,19 +516,33 @@ impl Package {
     /// manifest (if one exists) was written, i.e. it may emit keys that are optional or that
     /// contain default or inherited values.
     pub fn to_toml(&self) -> Result<String, Report> {
+        fn raw<T>(value: T) -> TomlSpan<T> {
+            TomlSpan::new(0..0, value)
+        }
+
+        fn raw_metadata(metadata: &Metadata) -> AstMetadata {
+            metadata
+                .iter()
+                .map(|(key, value)| (raw(key.inner().clone()), raw(value.inner().clone())))
+                .collect()
+        }
+
+        fn raw_metadata_set(metadata: &MetadataSet) -> AstMetadataSet {
+            metadata
+                .iter()
+                .map(|(key, value)| (raw(key.inner().clone()), raw_metadata(value)))
+                .collect()
+        }
+
         let manifest_ast = ast::ProjectFile {
-            source_file: None,
             package: ast::PackageTable {
-                name: self.name().map(PackageId::into_inner),
+                name: raw(self.name().inner().clone().into_inner()),
                 detail: ast::PackageDetail {
-                    version: Some(
-                        self.version().map(|v| ast::parsing::MaybeInherit::Value(v.clone())),
-                    ),
-                    description: self
-                        .description()
-                        .map(ast::parsing::MaybeInherit::Value)
-                        .map(Span::unknown),
-                    metadata: self.metadata.clone(),
+                    version: Some(raw(ast::parsing::MaybeInherit::Value(
+                        self.version().inner().to_string().into(),
+                    ))),
+                    description: self.description().map(ast::parsing::MaybeInherit::Value).map(raw),
+                    metadata: raw_metadata_set(&self.metadata),
                 },
             },
             config: ast::PackageConfig {
@@ -410,11 +550,11 @@ impl Package {
                     .dependencies()
                     .iter()
                     .map(|dep| {
-                        let name = Span::unknown(dep.name().clone());
+                        let name = raw(dep.name().clone());
                         let linkage = if matches!(dep.linkage(), Linkage::Dynamic) {
                             None
                         } else {
-                            Some(Span::unknown(dep.linkage()))
+                            Some(raw(Arc::from(dep.linkage().as_str())))
                         };
                         let spec = match dep.scheme() {
                             DependencyVersionScheme::Workspace { .. } => ast::DependencySpec {
@@ -430,9 +570,11 @@ impl Package {
                             DependencyVersionScheme::WorkspacePath { path, version } => {
                                 ast::DependencySpec {
                                     name: name.clone(),
-                                    version_or_digest: version.clone(),
+                                    version_or_digest: version
+                                        .as_ref()
+                                        .map(|version| raw(Arc::from(version.to_string()))),
                                     workspace: false,
-                                    path: Some(path.clone()),
+                                    path: Some(raw(Arc::from(path.inner().to_string()))),
                                     git: None,
                                     branch: None,
                                     rev: None,
@@ -441,7 +583,7 @@ impl Package {
                             },
                             DependencyVersionScheme::Registry(req) => ast::DependencySpec {
                                 name: name.clone(),
-                                version_or_digest: Some(req.clone()),
+                                version_or_digest: Some(raw(Arc::from(req.to_string()))),
                                 workspace: false,
                                 path: None,
                                 git: None,
@@ -452,9 +594,11 @@ impl Package {
                             DependencyVersionScheme::Path { path, version } => {
                                 ast::DependencySpec {
                                     name: name.clone(),
-                                    version_or_digest: version.clone(),
+                                    version_or_digest: version
+                                        .as_ref()
+                                        .map(|version| raw(Arc::from(version.to_string()))),
                                     workspace: false,
-                                    path: Some(path.clone()),
+                                    path: Some(raw(Arc::from(path.inner().to_string()))),
                                     git: None,
                                     branch: None,
                                     rev: None,
@@ -463,21 +607,20 @@ impl Package {
                             },
                             DependencyVersionScheme::Git { repo, revision, version } => {
                                 let (branch, rev) = match revision.inner() {
-                                    GitRevision::Branch(b) => {
-                                        (Some(Span::new(revision.span(), b.clone())), None)
-                                    },
-                                    GitRevision::Commit(c) => {
-                                        (None, Some(Span::new(revision.span(), c.clone())))
-                                    },
+                                    GitRevision::Branch(b) => (Some(raw(b.clone())), None),
+                                    GitRevision::Commit(c) => (None, Some(raw(c.clone()))),
                                 };
                                 ast::DependencySpec {
                                     name: name.clone(),
                                     version_or_digest: version.as_ref().map(|spanned| {
-                                        VersionRequirement::from(spanned.inner().clone())
+                                        raw(Arc::from(
+                                            VersionRequirement::from(spanned.inner().clone())
+                                                .to_string(),
+                                        ))
                                     }),
                                     workspace: false,
                                     path: None,
-                                    git: Some(repo.clone()),
+                                    git: Some(raw(Arc::from(repo.inner().to_string()))),
                                     branch,
                                     rev,
                                     linkage,
@@ -485,29 +628,29 @@ impl Package {
                             },
                         };
 
-                        (name, Span::unknown(spec))
+                        (name, raw(spec))
                     })
                     .collect(),
-                lints: self.lints.clone(),
+                lints: raw_metadata_set(&self.lints),
             },
             lib: self.lib.as_ref().map(|lib| {
-                Span::unknown(ast::LibTarget {
+                raw(ast::LibTarget {
                     kind: if matches!(lib.ty, TargetType::Library) {
                         None
                     } else {
-                        Some(Span::unknown(lib.ty))
+                        Some(raw(Arc::from(lib.ty.to_string())))
                     },
-                    namespace: Some(lib.namespace.as_ref().map(|path| path.as_str().into())),
-                    path: lib.path.clone(),
+                    namespace: Some(raw(Arc::from(lib.namespace.inner().as_str()))),
+                    path: raw(Arc::from(lib.path.inner().to_string())),
                 })
             }),
             bins: self
                 .bins
                 .iter()
                 .map(|bin| {
-                    Span::unknown(ast::BinTarget {
-                        name: Some(bin.name.clone()),
-                        path: bin.path.clone(),
+                    raw(ast::BinTarget {
+                        name: Some(raw(bin.name.inner().clone())),
+                        path: raw(Arc::from(bin.path.inner().to_string())),
                     })
                 })
                 .collect(),
@@ -516,10 +659,10 @@ impl Package {
                 .iter()
                 .map(|profile| ast::Profile {
                     inherits: None,
-                    name: Span::unknown(profile.name().clone()),
+                    name: raw(profile.name().clone()),
                     debug: Some(profile.should_emit_debug_info()),
                     trim_paths: Some(profile.should_trim_paths()),
-                    metadata: profile.metadata().clone(),
+                    metadata: raw_metadata(profile.metadata()),
                 })
                 .collect(),
         };

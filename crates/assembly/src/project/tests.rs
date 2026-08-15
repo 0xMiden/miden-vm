@@ -18,7 +18,7 @@ use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
 use super::*;
-use crate::testing::{TestContext, TestOutcomeExt, TestRegistry};
+use crate::testing::{TestContext, TestRegistry};
 
 #[test]
 fn builds_library_package_from_project_profiles() {
@@ -834,7 +834,7 @@ fn preassembled_dependency_bypasses_registry_semver_collision() {
     let mut context = TestContext::new();
 
     let registered_module = context
-        .parse_module(source_file!(
+        .parse_module_source_file(source_file!(
             context,
             r#"namespace deps::predep
 
@@ -2781,6 +2781,7 @@ end
 
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
+        .into_result()
         .expect_err("mutating the preassembled artifact after graph construction should fail");
     assert!(error.to_string().contains("no longer matches the dependency graph selection"));
 }
@@ -2852,6 +2853,7 @@ end
 
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
+        .into_result()
         .expect_err("tampered preassembled dependency MAST should fail validation");
     let error = error.to_string();
     assert!(error.contains("failed to decode package"));
@@ -2933,9 +2935,12 @@ end
     .unwrap();
     dep_v2.write_to_file(&dep_package_path).unwrap();
 
-    let error = project_assembler.assemble(ProjectTargetSelector::Library, "dev").expect_err(
-        "changing preassembled dependency metadata after graph construction should fail",
-    );
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .into_result()
+        .expect_err(
+            "changing preassembled dependency metadata after graph construction should fail",
+        );
     assert!(
         error
             .to_string()
@@ -3013,6 +3018,7 @@ end
 
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
+        .into_result()
         .expect_err("changing preassembled dependency kinds after graph construction should fail");
     assert!(
         error
@@ -3091,6 +3097,7 @@ end
 
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
+        .into_result()
         .expect_err("changing preassembled package kind after graph construction should fail");
     assert!(error.to_string().contains("no longer matches the dependency graph target kind"));
 }

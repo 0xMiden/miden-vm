@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
-assertion_line: 134
 expression: fast_stack_outputs
 ---
 Err(
@@ -20,7 +19,7 @@ Err(
                 end: 0,
             },
         },
-        source_file: None,
+        sources: None,
         err: UnalignedWordAccess {
             addr: 14,
             ctx: ContextId(

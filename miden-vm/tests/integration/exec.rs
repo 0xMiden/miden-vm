@@ -1,7 +1,6 @@
-use alloc::sync::Arc;
 use core::assert_matches;
 
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::Assembler;
 use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
 use miden_processor::{
     ExecutionOptions, FastProcessor, StackInputs,
@@ -22,13 +21,11 @@ fn advice_map_loaded_before_execution() {
     // compile and execute program
     let program_without_advice_map: Program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
 
     // Test `FastProcessor::execute_sync` fails if no advice map provided with the program
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host = DefaultHost::default();
     match FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),

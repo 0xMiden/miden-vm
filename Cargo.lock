@@ -2082,7 +2082,7 @@ dependencies = [
  "rustc_version 0.4.1",
  "semver 1.0.28",
  "serde",
- "serde_json",
+ "serde_spanned",
  "smallvec",
  "thiserror",
 ]
@@ -2091,7 +2091,6 @@ dependencies = [
 name = "miden-assembly-syntax-cst"
 version = "0.30.0"
 dependencies = [
- "miden-debug-types",
  "miden-diagnostics",
  "miden-rowan",
  "pretty_assertions",
@@ -2288,24 +2287,19 @@ dependencies = [
 name = "miden-debug-types"
 version = "0.30.0"
 dependencies = [
- "memchr",
- "miden-crypto",
  "miden-diagnostics",
- "miden-formatting",
+ "miden-serde-utils",
  "miden-test-serialization-macros",
- "miden-utils-sync",
- "paste",
  "proptest",
  "serde",
  "serde_json",
- "serde_spanned",
- "thiserror",
  "zerocopy",
 ]
 
 [[package]]
 name = "miden-diagnostics"
 version = "1.0.0-alpha.1"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#fcd84f80984989054a0855fd831f6e8fb35b3bfb"
 dependencies = [
  "annotate-snippets",
  "miden-diagnostics-macros",
@@ -2316,6 +2310,7 @@ dependencies = [
 [[package]]
 name = "miden-diagnostics-macros"
 version = "1.0.0-alpha.1"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#fcd84f80984989054a0855fd831f6e8fb35b3bfb"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2348,7 +2343,6 @@ version = "0.30.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
- "miden-debug-types",
  "serde",
  "tempfile",
  "thiserror",
@@ -2420,6 +2414,7 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
+ "miden-diagnostics",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "proptest",
@@ -2436,6 +2431,7 @@ version = "0.30.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
+ "miden-diagnostics",
  "miden-mast-package",
  "proptest",
  "pubgrub",
@@ -2449,8 +2445,8 @@ name = "miden-package-registry-local"
 version = "0.30.0"
 dependencies = [
  "clap",
- "miden-assembly-syntax",
  "miden-core",
+ "miden-diagnostics",
  "miden-mast-package",
  "miden-package-registry",
  "serde",
@@ -2527,7 +2523,6 @@ version = "0.30.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
- "miden-debug-types",
  "miden-diagnostics",
  "miden-mast-package",
  "miden-package-registry",
@@ -2551,6 +2546,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
+ "miden-diagnostics",
  "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",

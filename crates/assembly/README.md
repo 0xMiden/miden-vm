@@ -12,41 +12,31 @@ To assemble a program for the Miden VM from some Miden Assembly source code, you
 need to instantiate the assembler, and then call one of its provided assembly methods,
 e.g. `assemble_program`.
 
-The `assemble_program` method takes the source code of an executable module as a string, or
-file path, and either compiles it to an executable `Package`, or returns an error if the input
-is invalid in some way. The error type returned can be pretty-printed to show rich
-diagnostics about the source code from which an error is derived, when applicable,
-much like the Rust compiler.
+The `assemble_program` method takes the source code of an executable module as a string or file
+path and returns an `AssemblyOutcome`. The outcome keeps the optional executable `Package`
+separate from every diagnostic produced during assembly, so a successful value may coexist with
+warnings or informational diagnostics. Callers choose a failure policy and render the diagnostic
+set at their application boundary.
 
 ### Example
 
 ```rust,ignore
-use std::path::Path;
-use miden_assembly::{
-    Assembler,
-    debuginfo::{DefaultSourceManager, SourceManager},
-};
-use std::sync::Arc;
-
-let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+use miden_assembly::Assembler;
 
 // Instantiate a default, empty assembler
-let assembler = Assembler::new(source_manager.clone());
+let assembler = Assembler::new();
 
 // Emit an executable package, named `prg` which pushes values 3 and 5 onto the
 // stack and adds them
-let _ = assembler.assemble_program("prg", "begin push.3 push.5 add end")
-    .unwrap();
-
-// Note: assemble_program() consumes the assembler, so create a new one for the
-// next program
-let assembler2 = Assembler::new(source_manager.clone());
-
-// Emit a program from some source file on disk (requires the `std` feature).
-// Standalone source files must declare their module path, e.g. `namespace $exec`.
-let _ = assembler2.assemble_program("prg", Path::new("path/to/program.masm"))
-    .unwrap();
+let package = assembler
+    .assemble_program("prg", "begin push.3 push.5 add end")
+    .into_result()
+    .expect("valid program");
 ```
+
+`Outcome::into_result` applies the default errors-only policy. Applications which need to display
+warnings should inspect and emit the diagnostic set before consuming the outcome; the complete
+example below demonstrates that boundary.
 
 > **Note:** The default assembler provides no kernel or standard libraries, you must
 > explicitly add those using the various builder methods of `Assembler`, as
@@ -107,13 +97,8 @@ To link against the core library, you could do the following:
 
 ```rust,ignore
 # use miden_assembly::{Assembler, Linkage};
-# use miden_assembly::debuginfo::{DefaultSourceManager, SourceManager};
 # use miden_core_lib::CoreLibrary;
-# use std::sync::Arc;
-#
-# // Create a source manager
-# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-let assembler = Assembler::new(Arc::clone(&source_manager))
+let assembler = Assembler::new()
     .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
     .unwrap();
 ```
@@ -144,32 +129,35 @@ or by assembling a kernel from source, as shown below:
 # use miden_assembly::{
 #     Assembler, Path,
 #     ast::{Module, ModuleKind},
-#     debuginfo::{DefaultSourceManager, SourceManager},
 # };
-# use std::sync::Arc;
-#
-# // Create a source manager
-# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 
 // First, parse and assemble the kernel library
+let mut assembler = Assembler::new();
 let mut parser = Module::parser(Some(ModuleKind::Kernel));
-let kernel = parser.parse_str(
-    Some(Path::KERNEL),
-    "pub mod sub\n\npub proc foo add end",
-    source_manager.clone(),
-).unwrap();
-let submodule = parser.parse_str(
-    Some(Path::new("::$kernel::sub")),
-    "pub proc bar push.1 end",
-    source_manager.clone(),
-).unwrap();
+let kernel = parser
+    .parse_str(
+        Some(Path::KERNEL),
+        "pub mod sub\n\npub proc foo add end",
+        assembler.sources_mut(),
+    )
+    .into_result()
+    .expect("valid kernel root");
+let submodule = parser
+    .parse_str(
+        Some(Path::new("::$kernel::sub")),
+        "pub proc bar push.1 end",
+        assembler.sources_mut(),
+    )
+    .into_result()
+    .expect("valid kernel submodule");
 
-let kernel_lib = Assembler::new(source_manager.clone())
+let kernel_lib = assembler
     .assemble_kernel("my-kernel", kernel, [submodule])
-    .unwrap();
+    .into_result()
+    .expect("valid kernel package");
 
 // Create assembler with the kernel
-let assembler = Assembler::with_kernel(source_manager, kernel_lib.into()).unwrap();
+let assembler = Assembler::with_kernel(kernel_lib.into()).unwrap();
 ```
 
 > **Note:** Kernel submodules are library modules, i.e. they do not define
@@ -187,32 +175,34 @@ Programs compiled by this assembler will be able to make calls to the
 # use miden_assembly::{
 #     Assembler, Path,
 #     ast::{Module, ModuleKind},
-#     debuginfo::{DefaultSourceManager, SourceManager},
 # };
-# use std::sync::Arc;
-#
-# // Create a source manager
-# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 #
 # // First, parse and assemble the kernel library
+# let mut kernel_assembler = Assembler::new();
 # let mut parser = Module::parser(Some(ModuleKind::Kernel));
-# let kernel = parser.parse_str(
-#     Some(Path::KERNEL),
-#     "pub proc foo add end",
-#     source_manager.clone(),
-# ).unwrap();
-# let kernel_lib = Assembler::new(source_manager.clone())
+# let kernel = parser
+#     .parse_str(
+#         Some(Path::KERNEL),
+#         "pub proc foo add end",
+#         kernel_assembler.sources_mut(),
+#     )
+#     .into_result()
+#     .unwrap();
+# let kernel_lib = kernel_assembler
 #     .assemble_kernel("my-kernel", kernel, None)
+#     .into_result()
 #     .unwrap();
 #
 // Create assembler with the kernel and assemble program
-let _program = Assembler::with_kernel(source_manager, kernel_lib.into())
+let _program = Assembler::with_kernel(kernel_lib.into())
     .unwrap()
-    .assemble_program("prg", "
+    .assemble_program("prg", r#"
 begin
     syscall.foo
 end
-").unwrap();
+"#)
+    .into_result()
+    .expect("valid program");
 ```
 
 > **Note:** An unqualified `syscall` target is assumed to be defined in the kernel module.
@@ -235,35 +225,58 @@ together, let's look at one last example:
 use miden_assembly::{
     Assembler, Path,
     ast::{Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceManager},
+    diagnostics::{Outcome, SourceProvider, WarningsAsErrors},
 };
-use std::sync::Arc;
+
+fn finish<T>(
+    outcome: Outcome<Option<T>>,
+    sources: Option<&dyn SourceProvider>,
+) -> Result<T, Box<dyn std::error::Error>> {
+    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
+    if !outcome.diagnostics.is_empty() {
+        let rendered = match sources {
+            Some(sources) => outcome.diagnostics.prepare(sources)?,
+            None => outcome.diagnostics.prepare_attached()?,
+        };
+        let rendered = rendered.to_string();
+        eprintln!("{rendered}");
+    }
+    if failed {
+        return Err(std::io::Error::other("assembly diagnostics prevented compilation").into());
+    }
+    Ok(outcome.value.expect("successful assembly must produce a value"))
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Source code of the kernel module
     let kernel = "pub proc foo add end";
 
-    // Create a source manager
-    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-
     // First, parse and assemble the kernel library
+    let mut kernel_assembler = Assembler::new();
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
-    let kernel = parser.parse_str(Some(Path::KERNEL), kernel, source_manager.clone())?;
-    let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel("my-kernel", kernel, None)?;
+    let kernel_outcome = parser.parse_str(
+        Some(Path::KERNEL),
+        kernel,
+        kernel_assembler.sources_mut(),
+    );
+    let kernel = finish(kernel_outcome, Some(kernel_assembler.sources()))?;
+    let kernel_lib = finish(
+        kernel_assembler.assemble_kernel("my-kernel", kernel, None),
+        None,
+    )?;
 
     // Instantiate the assembler with multiple options at once
-    let assembler = Assembler::with_kernel(source_manager, kernel_lib.into()).unwrap();
+    let assembler = Assembler::with_kernel(kernel_lib.into())?;
     // If you wanted to link against the core library, you'd extend the above
     // with: `.with_package(miden_core_lib::CoreLibrary::default().package(), Linkage::Dynamic)?;`
 
     // Assemble our program
-    let _program = assembler.assemble_program("prg", "
+    let _program = finish(assembler.assemble_program("prg", "
 begin
     push.1.2
     syscall.foo
 end
-")?;
+"), None)?;
 
     Ok(())
 }

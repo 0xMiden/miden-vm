@@ -9,8 +9,7 @@ use core::{
     str::FromStr,
 };
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_diagnostics::{IntoDiagnostic, Report};
+use miden_diagnostics::{IntoDiagnostic, Report, SourceSpan, Span, Spanned};
 
 use crate::{
     Path, PathBuf,

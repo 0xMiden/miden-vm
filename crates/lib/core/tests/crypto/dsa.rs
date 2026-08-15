@@ -385,7 +385,6 @@ fn run_core_program_with_advice(
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to link core library")
         .assemble_program("core_ecdsa_k256_keccak_test", source)
-        .value
         .expect("failed to assemble core ECDSA test program")
         .unwrap_program();
 

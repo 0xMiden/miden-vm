@@ -11,12 +11,14 @@ use std::{
     process::Command,
 };
 
-use miden_assembly_syntax::debuginfo::{DefaultSourceManager, SourceManager, Uri};
+use miden_assembly_syntax::{
+    debuginfo::Uri,
+    diagnostics::{DiagnosticCollector, Outcome, Report, SourceMap},
+};
 use miden_core::{
     serde::Deserializable,
     utils::{DisplayHex, hash_string_to_word},
 };
-use miden_diagnostics::Report;
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,
@@ -273,7 +275,6 @@ impl CollectedDependencyNode {
 /// This type handles the details of constructing a [ProjectDependencyGraph] for a package.
 pub struct ProjectDependencyGraphBuilder<'a, R: PackageRegistry + ?Sized> {
     registry: &'a R,
-    source_manager: Arc<dyn SourceManager>,
     git_cache_root: PathBuf,
 }
 
@@ -285,17 +286,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             .map(PathBuf::from)
             .map(|path| path.join("git").join("checkouts"))
             .unwrap_or_else(|| std::env::temp_dir().join("midenup").join("git").join("checkouts"));
-        Self {
-            registry,
-            source_manager: Arc::new(DefaultSourceManager::default()),
-            git_cache_root,
-        }
-    }
-
-    /// Use the provided source manager for tracking source information of parsed files
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
-        self.source_manager = source_manager;
-        self
+        Self { registry, git_cache_root }
     }
 
     /// Override the default location of the Git checkout cache.
@@ -314,30 +305,94 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     pub fn build_from_path(
         &self,
         manifest_path: impl AsRef<Path>,
-    ) -> Result<ProjectDependencyGraph, Report> {
-        let loaded = self.load_package_from_manifest(manifest_path.as_ref())?;
-        self.build_from_loaded_package(loaded)
+        sources: &mut SourceMap,
+    ) -> Outcome<ProjectDependencyGraph> {
+        let mut diagnostics = DiagnosticCollector::new();
+        let loaded =
+            self.load_package_from_manifest(manifest_path.as_ref(), sources, &mut diagnostics);
+        let loaded = diagnostics.capture(loaded).flatten();
+        let result = loaded
+            .and_then(|loaded| {
+                let result = self.build_from_loaded_package(loaded, sources, &mut diagnostics);
+                diagnostics.capture(result).flatten()
+            })
+            .ok_or(());
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
     }
 
     /// Build a [ProjectDependencyGraph] for `package`
-    pub fn build(&self, package: Arc<Package>) -> Result<ProjectDependencyGraph, Report> {
-        let loaded = self.loaded_package_from_arc(package, None)?;
-        self.build_from_loaded_package(loaded)
+    pub fn build(
+        &self,
+        package: Arc<Package>,
+        sources: &mut SourceMap,
+    ) -> Outcome<ProjectDependencyGraph> {
+        let mut diagnostics = DiagnosticCollector::new();
+        let loaded = diagnostics.capture(self.loaded_package_from_arc(package, None));
+        let result = loaded
+            .and_then(|loaded| {
+                let result = self.build_from_loaded_package(loaded, sources, &mut diagnostics);
+                diagnostics.capture(result).flatten()
+            })
+            .ok_or(());
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
+    }
+
+    /// Build a [ProjectDependencyGraph] from an already-loaded project.
+    ///
+    /// This avoids loading the root manifest a second time when the caller also needs the loaded
+    /// project, while retaining workspace-root information needed to resolve workspace
+    /// dependencies.
+    pub fn build_project(
+        &self,
+        project: crate::Project,
+        sources: &mut SourceMap,
+    ) -> Outcome<ProjectDependencyGraph> {
+        let mut diagnostics = DiagnosticCollector::new();
+        let loaded = match project {
+            crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
+            crate::Project::WorkspacePackage { package, workspace } => {
+                let workspace_root = workspace.workspace_root().map(Path::to_path_buf);
+                self.loaded_package_from_arc(package, workspace_root)
+            },
+        };
+        let loaded = diagnostics.capture(loaded);
+        let result = loaded
+            .and_then(|loaded| {
+                let result = self.build_from_loaded_package(loaded, sources, &mut diagnostics);
+                diagnostics.capture(result).flatten()
+            })
+            .ok_or(());
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
     }
 
     fn build_from_loaded_package(
         &self,
         loaded: LoadedSourcePackage,
-    ) -> Result<ProjectDependencyGraph, Report> {
-        let graph = self.collect_dependency_graph(loaded)?;
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ProjectDependencyGraph>, Report> {
+        let Some(graph) = self.collect_dependency_graph(loaded, sources, diagnostics)? else {
+            return Ok(None);
+        };
         let selected = self.solve_dependency_graph(&graph)?;
-        self.materialize_dependency_graph(graph, &selected)
+        self.materialize_dependency_graph(graph, &selected).map(Some)
     }
 
     fn collect_dependency_graph(
         &self,
         loaded: LoadedSourcePackage,
-    ) -> Result<CollectedDependencyGraph, Report> {
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<CollectedDependencyGraph>, Report> {
         let root = loaded.package.name().into_inner();
         let mut graph = CollectedDependencyGraph {
             root,
@@ -345,14 +400,19 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             registry_requirements: BTreeMap::new(),
         };
         let mut visited = BTreeSet::new();
-        self.collect_source_package(
+        let Some(_) = self.collect_source_package(
             &mut graph,
             &mut visited,
             loaded,
             ProjectSourceOrigin::Root,
             true,
-        )?;
-        Ok(graph)
+            sources,
+            diagnostics,
+        )?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(graph))
     }
 
     fn collect_source_package(
@@ -362,7 +422,9 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         package: LoadedSourcePackage,
         origin: ProjectSourceOrigin,
         allow_missing_library: bool,
-    ) -> Result<PackageId, Report> {
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<PackageId>, Report> {
         let package_id = package.package.name().into_inner();
         let node = CollectedDependencyNode {
             graph_node: ProjectDependencyNode {
@@ -391,13 +453,17 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
 
         let is_new = graph.insert_node(node)?;
         if !is_new || !visited.insert(package_id.clone()) {
-            return Ok(package_id);
+            return Ok(Some(package_id));
         }
 
         let mut edges = Vec::new();
         let mut solver_dependencies = BTreeMap::new();
         for dependency in package.package.dependencies() {
-            let resolved = self.resolve_dependency(dependency, &package)?;
+            let Some(resolved) =
+                self.resolve_dependency(dependency, &package, sources, diagnostics)?
+            else {
+                return Ok(None);
+            };
             let dependency_name = resolved.name();
             edges.push(ProjectDependencyEdge {
                 dependency: dependency_name.clone(),
@@ -407,7 +473,18 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
 
             match resolved {
                 ResolvedDependencyNode::Source { package, origin } => {
-                    self.collect_source_package(graph, visited, package, origin, false)?;
+                    let Some(_) = self.collect_source_package(
+                        graph,
+                        visited,
+                        package,
+                        origin,
+                        false,
+                        sources,
+                        diagnostics,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
                 },
                 ResolvedDependencyNode::Local(node) => {
                     graph.insert_node(node)?;
@@ -419,7 +496,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         }
 
         graph.set_dependencies(&package_id, edges, solver_dependencies)?;
-        Ok(package_id)
+        Ok(Some(package_id))
     }
 
     fn solve_dependency_graph(
@@ -577,13 +654,15 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         &self,
         dependency: &Dependency,
         parent: &LoadedSourcePackage,
-    ) -> Result<ResolvedDependencyNode, Report> {
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<ResolvedDependencyNode>, Report> {
         match dependency.scheme() {
             DependencyVersionScheme::Registry(requirement) => {
-                Ok(ResolvedDependencyNode::Registry {
+                Ok(Some(ResolvedDependencyNode::Registry {
                     package: PackageId::from(dependency.name().clone()),
                     requirement: requirement.clone(),
-                })
+                }))
             },
             DependencyVersionScheme::Workspace { member, .. } => {
                 let workspace_root = parent.workspace_root.as_ref().ok_or_else(|| {
@@ -594,12 +673,20 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 })?;
                 let path = crate::absolutize_path(Path::new(member.path()), workspace_root)
                     .map_err(|error| Report::msg(error.to_string()))?;
-                let package = self.load_dependency_source(&path, dependency.name().as_ref())?;
+                let Some(package) = self.load_dependency_source(
+                    &path,
+                    dependency.name().as_ref(),
+                    sources,
+                    diagnostics,
+                )?
+                else {
+                    return Ok(None);
+                };
                 self.validate_source_dependency(dependency, &package.package)?;
-                Ok(ResolvedDependencyNode::Source {
+                Ok(Some(ResolvedDependencyNode::Source {
                     origin: ProjectSourceOrigin::Path,
                     package,
-                })
+                }))
             },
             DependencyVersionScheme::WorkspacePath { path, version } => {
                 let workspace_root = parent.workspace_root.as_ref().ok_or_else(|| {
@@ -616,10 +703,17 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                         dependency.name().as_ref(),
                         version.as_ref(),
                     )?;
-                    Ok(ResolvedDependencyNode::Local(node))
+                    Ok(Some(ResolvedDependencyNode::Local(node)))
                 } else {
-                    let package =
-                        self.load_dependency_source(&resolved_path, dependency.name().as_ref())?;
+                    let Some(package) = self.load_dependency_source(
+                        &resolved_path,
+                        dependency.name().as_ref(),
+                        sources,
+                        diagnostics,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
                     if let Some(requirement) = version.as_ref() {
                         self.ensure_version_satisfies(
                             dependency.name(),
@@ -627,10 +721,10 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                             Version::from(package.package.version().into_inner().clone()),
                         )?;
                     }
-                    Ok(ResolvedDependencyNode::Source {
+                    Ok(Some(ResolvedDependencyNode::Source {
                         origin: ProjectSourceOrigin::Path,
                         package,
-                    })
+                    }))
                 }
             },
             DependencyVersionScheme::Path { path, version } => {
@@ -647,10 +741,17 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                         dependency.name().as_ref(),
                         version.as_ref(),
                     )?;
-                    Ok(ResolvedDependencyNode::Local(node))
+                    Ok(Some(ResolvedDependencyNode::Local(node)))
                 } else {
-                    let package =
-                        self.load_dependency_source(&resolved_path, dependency.name().as_ref())?;
+                    let Some(package) = self.load_dependency_source(
+                        &resolved_path,
+                        dependency.name().as_ref(),
+                        sources,
+                        diagnostics,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
                     if let Some(requirement) = version.as_ref() {
                         self.ensure_version_satisfies(
                             dependency.name(),
@@ -658,16 +759,23 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                             Version::from(package.package.version().into_inner().clone()),
                         )?;
                     }
-                    Ok(ResolvedDependencyNode::Source {
+                    Ok(Some(ResolvedDependencyNode::Source {
                         origin: ProjectSourceOrigin::Path,
                         package,
-                    })
+                    }))
                 }
             },
             DependencyVersionScheme::Git { repo, revision, version } => {
                 let checkout = self.checkout_git_dependency(repo.inner(), revision)?;
-                let package = self
-                    .load_dependency_source(&checkout.manifest_path, dependency.name().as_ref())?;
+                let Some(package) = self.load_dependency_source(
+                    &checkout.manifest_path,
+                    dependency.name().as_ref(),
+                    sources,
+                    diagnostics,
+                )?
+                else {
+                    return Ok(None);
+                };
                 self.ensure_dependency_name(
                     dependency.name(),
                     package.package.name().into_inner().as_ref(),
@@ -680,7 +788,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                         package.package.version().into_inner(),
                     )?;
                 }
-                Ok(ResolvedDependencyNode::Source {
+                Ok(Some(ResolvedDependencyNode::Source {
                     origin: ProjectSourceOrigin::Git {
                         checkout_path: checkout.checkout_path,
                         repo: repo.inner().clone(),
@@ -688,7 +796,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                         revision: revision.inner().clone(),
                     },
                     package,
-                })
+                }))
             },
         }
     }
@@ -697,29 +805,43 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         &self,
         path: &Path,
         expected_name: &str,
-    ) -> Result<LoadedSourcePackage, Report> {
-        let loaded = self.load_project_reference(path, expected_name)?;
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<LoadedSourcePackage>, Report> {
+        let Some(loaded) =
+            self.load_project_reference(path, expected_name, sources, diagnostics)?
+        else {
+            return Ok(None);
+        };
         self.ensure_dependency_name(
             expected_name,
             loaded.package.name().into_inner().as_ref(),
             loaded.manifest_path.as_deref(),
         )?;
-        Ok(loaded)
+        Ok(Some(loaded))
     }
 
     fn load_project_reference(
         &self,
         path: &Path,
         expected_name: &str,
-    ) -> Result<LoadedSourcePackage, Report> {
-        let project =
-            crate::Project::load_project_reference(expected_name, path, &self.source_manager)?;
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<LoadedSourcePackage>, Report> {
+        let Outcome { result: project, diagnostics: emitted } =
+            crate::Project::load_project_reference(expected_name, path, sources);
+        let _ = diagnostics.merge(emitted);
+        let Ok(project) = project else {
+            return Ok(None);
+        };
 
         match project {
-            crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
+            crate::Project::Package(package) => {
+                self.loaded_package_from_arc(package, None).map(Some)
+            },
             crate::Project::WorkspacePackage { package, workspace } => {
                 let workspace_root = workspace.workspace_root().map(Path::to_path_buf);
-                self.loaded_package_from_arc(package, workspace_root)
+                self.loaded_package_from_arc(package, workspace_root).map(Some)
             },
         }
     }
@@ -727,14 +849,23 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
     fn load_package_from_manifest(
         &self,
         manifest_path: &Path,
-    ) -> Result<LoadedSourcePackage, Report> {
-        let project = crate::Project::load(manifest_path, &self.source_manager)?;
+        sources: &mut SourceMap,
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Option<LoadedSourcePackage>, Report> {
+        let Outcome { result: project, diagnostics: emitted } =
+            crate::Project::load(manifest_path, sources);
+        let _ = diagnostics.merge(emitted);
+        let Ok(project) = project else {
+            return Ok(None);
+        };
 
         match project {
-            crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
+            crate::Project::Package(package) => {
+                self.loaded_package_from_arc(package, None).map(Some)
+            },
             crate::Project::WorkspacePackage { package, workspace } => {
                 let workspace_root = workspace.workspace_root().map(Path::to_path_buf);
-                self.loaded_package_from_arc(package, workspace_root)
+                self.loaded_package_from_arc(package, workspace_root).map(Some)
             },
         }
     }
@@ -1097,13 +1228,11 @@ fn package_requirements(
 mod tests {
     use alloc::{boxed::Box, string::ToString};
     use core::assert_matches;
-    use std::{collections::BTreeMap, fs, sync::Arc};
+    use std::{collections::BTreeMap, fs};
 
-    use miden_assembly_syntax::{
-        ast::Path as AstPath,
-        debuginfo::{DefaultSourceManager, Span},
-    };
+    use miden_assembly_syntax::ast::Path as AstPath;
     use miden_core::{serde::Serializable, utils::hash_string_to_word};
+    use miden_diagnostics::{SourceNamespace, Span};
     use miden_mast_package::{Package as MastPackage, TargetType};
     use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
@@ -2169,12 +2298,48 @@ mod tests {
         fs::write(path, contents).unwrap();
     }
 
+    struct TestBuilder<'a, R: PackageRegistry + ?Sized> {
+        inner: ProjectDependencyGraphBuilder<'a, R>,
+        sources: SourceMap,
+    }
+
+    impl<R: PackageRegistry + ?Sized> TestBuilder<'_, R> {
+        fn build_from_path(
+            mut self,
+            manifest_path: impl AsRef<Path>,
+        ) -> Result<ProjectDependencyGraph, Report> {
+            let Outcome { result, diagnostics } =
+                self.inner.build_from_path(manifest_path, &mut self.sources);
+            if let Ok(graph) = result {
+                return Ok(graph);
+            }
+
+            let mut diagnostics = diagnostics.into_vec().into_iter();
+            let Some(diagnostic) = diagnostics.next() else {
+                return Err(Report::msg(
+                    "dependency graph construction failed without producing a diagnostic",
+                ));
+            };
+            Err(Report::new(diagnostic.diagnostic))
+        }
+
+        fn load_preassembled_dependency(
+            &self,
+            path: &Path,
+            expected_name: &str,
+            requirement: Option<&VersionRequirement>,
+        ) -> Result<CollectedDependencyNode, Report> {
+            self.inner.load_preassembled_dependency(path, expected_name, requirement)
+        }
+    }
+
     fn builder<'a, R: PackageRegistry + ?Sized>(
         registry: &'a R,
         git_cache_root: &Path,
-    ) -> ProjectDependencyGraphBuilder<'a, R> {
-        ProjectDependencyGraphBuilder::new(registry)
-            .with_git_cache_root(git_cache_root)
-            .with_source_manager(Arc::new(DefaultSourceManager::default()))
+    ) -> TestBuilder<'a, R> {
+        TestBuilder {
+            inner: ProjectDependencyGraphBuilder::new(registry).with_git_cache_root(git_cache_root),
+            sources: SourceMap::new(SourceNamespace::new_unchecked(91)),
+        }
     }
 }

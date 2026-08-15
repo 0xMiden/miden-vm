@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{Path, debuginfo::SourceSpan, diagnostics::Diagnostic};
+use miden_assembly_syntax::{Path, diagnostics::Diagnostic};
+use miden_diagnostics::SourceSpan;
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub(crate) enum AssemblerError {

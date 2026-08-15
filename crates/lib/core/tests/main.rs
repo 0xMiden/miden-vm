@@ -124,32 +124,27 @@ fn core_library_exports_crypto_wrappers() {
 
 #[test]
 fn core_packages_do_not_block_sibling_miden_namespaces() {
-    use std::sync::Arc;
-
     use miden_assembly::{
-        Assembler, DefaultSourceManager, Linkage,
+        Assembler, Linkage,
         ast::{Module, ModuleKind},
     };
     use miden_core_lib::CoreLibrary;
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut assembler = Assembler::new();
     let protocol_utils = Module::parser(Some(ModuleKind::Library))
         .parse_str(
             None,
             "namespace miden::protocol_utils\npub proc identity push.0 drop end",
-            source_manager.clone(),
+            assembler.sources_mut(),
         )
-        .value
         .expect("protocol utility module should parse");
 
-    let mut assembler = Assembler::new(source_manager);
     assembler
         .link_package(CoreLibrary::default().package(), Linkage::Dynamic)
         .expect("official Miden packages should link");
 
     assembler
         .assemble_library("miden-protocol-utils", protocol_utils, None::<Box<Module>>)
-        .value
         .expect("official packages must not claim the parent of miden::protocol_utils");
 }
 

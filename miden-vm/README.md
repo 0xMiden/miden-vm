@@ -81,7 +81,9 @@ let assembler = Assembler::default();
 let program = assembler.assemble_program(
     "prg",
     "begin push.3 push.5 add swap drop end",
-).unwrap();
+)
+.into_result()
+.expect("program should assemble");
 
 // use an empty list as initial stack
 let stack_inputs = StackInputs::default();
@@ -105,6 +107,10 @@ let output = FastProcessor::new_with_options(
 .execute_sync(&program.unwrap_program(), &mut host)
 .unwrap();
 ```
+
+Assembler entry points return an `Outcome`, keeping diagnostics separate from the optional value.
+The examples use `into_result()` to apply the default errors-only policy; applications that want to
+display successful warnings should emit the diagnostic set before consuming the outcome.
 
 ### Proving program execution
 
@@ -140,7 +146,8 @@ let assembler = Assembler::default();
 // this is our program, we compile it from assembly code
 let program = assembler
     .assemble_program("prg", "begin push.3 push.5 add swap drop end")
-    .unwrap()
+    .into_result()
+    .expect("program should assemble")
     .unwrap_program();
 
 // execute the program to produce a post-execution witness
@@ -257,7 +264,8 @@ let source = format!(
 let assembler = Assembler::default();
 let program = assembler
     .assemble_program("prg", &source)
-    .unwrap()
+    .into_result()
+    .expect("program should assemble")
     .unwrap_program();
 
 // initialize a default host (with an empty advice provider)

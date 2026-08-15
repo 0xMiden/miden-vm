@@ -1,9 +1,9 @@
 use miden_assembly_syntax::{
     Felt, ParsingError,
-    debuginfo::{SourceSpan, Span},
     diagnostics::{Report, diagnostic},
 };
 use miden_core::{events::SystemEvent, field::Field, operations::Operation::*};
+use miden_diagnostics::{SourceSpan, Span};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};

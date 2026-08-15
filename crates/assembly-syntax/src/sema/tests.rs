@@ -4,7 +4,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debug_types::{Span, Spanned};
+use miden_diagnostics::{Span, Spanned};
 
 use crate::{
     MAX_REPEAT_COUNT, Path,
@@ -147,7 +147,7 @@ fn assert_cross_kind_conflict(first: DefinitionKind, second: DefinitionKind) {
     let source = format!("{}\n{}\n", first.declaration(symbol), second.declaration(symbol));
     let message = format!("expected symbol conflict during analysis ({first:?} then {second:?})");
     let error = context.parse_module(&source).expect_err(&message);
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert_symbol_conflict(&error, symbol);
     assert!(rendered.contains("symbol conflict"));
     assert!(rendered.contains(symbol));
@@ -219,7 +219,7 @@ enum thing: u8 {}
     let error = context
         .parse_module(source)
         .expect_err("expected symbol conflict when enum name matches existing type");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert_symbol_conflict(&error, "thing");
     assert!(rendered.contains("symbol conflict"));
 }
@@ -230,7 +230,7 @@ fn repeat_count_zero_rejected_in_analysis() {
     let error = context
         .parse_program("begin repeat.0 nop end end")
         .expect_err("expected repeat.0 to be rejected during analysis");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -242,7 +242,7 @@ fn repeat_count_too_large_rejected_in_analysis() {
     let error = context
         .parse_program(&source)
         .expect_err("expected repeat count above limit to be rejected during analysis");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -261,7 +261,7 @@ fn repeat_count_constant_zero_rejected_in_analysis() {
     let error = context
         .parse_program("const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end")
         .expect_err("expected repeat.0 from constant to be rejected during analysis");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -284,20 +284,15 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
     let error = context.parse_program(&source).expect_err(
         "expected repeat count above limit from constant to be rejected during analysis",
     );
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("invalid repeat count"));
 }
 
 #[test]
 fn expected_path_is_used_when_namespace_is_omitted() {
     let context = SyntaxTestContext::default();
-    let mut parser = Module::parser(None);
     let module = context
-        .assess(parser.parse_str(
-            Some(Path::new("app::helpers")),
-            "pub proc helper\n    push.1\nend",
-            context.source_manager(),
-        ))
+        .parse_module_with_path(Path::new("app::helpers"), "pub proc helper\n    push.1\nend")
         .expect("expected parser-provided namespace to be applied");
 
     assert_eq!(module.path(), Path::new("::app::helpers"));
@@ -307,13 +302,11 @@ fn expected_path_is_used_when_namespace_is_omitted() {
 #[test]
 fn explicit_namespace_is_normalized_before_expected_path_check() {
     let context = SyntaxTestContext::default();
-    let mut parser = Module::parser(None);
     let module = context
-        .assess(parser.parse_str(
-            Some(Path::new("app::helpers")),
+        .parse_module_with_path(
+            Path::new("app::helpers"),
             "namespace app::helpers\n\npub proc helper\n    push.1\nend",
-            context.source_manager(),
-        ))
+        )
         .expect("expected matching relative namespace declaration to be accepted");
 
     assert_eq!(module.path(), Path::new("::app::helpers"));
@@ -322,16 +315,14 @@ fn explicit_namespace_is_normalized_before_expected_path_check() {
 #[test]
 fn explicit_namespace_conflict_still_reports_expected_path() {
     let context = SyntaxTestContext::default();
-    let mut parser = Module::parser(None);
     let error = context
-        .assess(parser.parse_str(
-            Some(Path::new("app::helpers")),
+        .parse_module_with_path(
+            Path::new("app::helpers"),
             "namespace other::helpers\n\npub proc helper\n    push.1\nend",
-            context.source_manager(),
-        ))
+        )
         .expect_err("expected mismatched namespace declaration to be rejected");
 
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("conflicting module namespace specification"));
     assert!(rendered.contains("expected '::app::helpers'"));
     assert!(rendered.contains("got '::other::helpers'"));
@@ -371,10 +362,8 @@ const BAD = (N + 1) + "hello"
 "#,
         )
         .expect_err("string operand in an arithmetic constant expression must be rejected");
-    let syntax_error = syntax_error(&error);
-    let operand = syntax_error
-        .errors
-        .iter()
+    let operand = error
+        .iter::<SemanticAnalysisError>()
         .find_map(|error| match error {
             SemanticAnalysisError::ConstEvalError(ConstEvalError::InvalidConstExprOperand {
                 operand,
@@ -382,13 +371,8 @@ const BAD = (N + 1) + "hello"
             }) => Some(*operand),
             _ => None,
         })
-        .expect("expected an invalid constant expression operand");
-    let operand_text = syntax_error
-        .source_file
-        .source_slice(operand)
-        .expect("invalid operand span should refer to the source");
-
-    assert_eq!(operand_text, r#""hello""#);
+        .expect("expected an invalid constant-expression operand diagnostic");
+    assert_eq!(error.source_slice(operand), Some(r#""hello""#));
 }
 
 #[test]
@@ -407,7 +391,7 @@ end
 ",
         )
         .expect_err("expected exported procedure signature to reject private local type");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("private type in exported procedure signature"));
 }
 
@@ -424,17 +408,16 @@ pub type PublicAlias = PrivateType
 ",
         )
         .expect_err("expected exported type alias to reject private type");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("private type in exported type declaration"));
 }
 
 #[test]
 fn exported_proc_signature_rejects_private_local_type_via_absolute_path() {
     let context = SyntaxTestContext::default();
-    let mut parser = Module::parser(None);
     let error = context
-        .assess(parser.parse_str(
-            Some(Path::new("wallet::memory")),
+        .parse_module_with_path(
+            Path::new("wallet::memory"),
             "
 type PrivateType = felt
 
@@ -442,12 +425,11 @@ pub proc check(value: ::wallet::memory::PrivateType)
     nop
 end
 ",
-            context.source_manager(),
-        ))
+        )
         .expect_err(
             "expected exported procedure signature to reject private local type via absolute path",
         );
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("private type in exported procedure signature"));
 }
 
@@ -847,7 +829,7 @@ pub use {foo} from dep
             "expected ImportDocstring warning, got: {error:?}",
         );
 
-        let rendered = format!("{}", error);
+        let rendered = format!("{error}");
         assert!(rendered.contains("imports and re-exports cannot have docstrings"), "{rendered}");
     }
 }

@@ -20,6 +20,7 @@ use miden_core::{
     program::Program,
     serde::{Deserializable, Serializable},
 };
+use miden_diagnostics::WrapErr;
 use miden_mast_package::{
     MastForest, Package, PackageExport, PackageModule, PackageSubmodule, ProcedureExport,
     TargetType,
@@ -37,12 +38,40 @@ use crate::{
     fmp::fmp_initialization_sequence,
     mast_forest_builder::MastForestBuilder,
     testing::{
-        TestContext, TestOutcomeExt, assert_diagnostic, assert_diagnostic_lines, parse_module,
-        regex, source_file,
+        TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
     },
 };
 
 type TestResult = Result<(), Report>;
+
+trait AssemblyTestSource {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report>;
+}
+
+impl AssemblyTestSource for Span<String> {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(context.parse_module_source_file(self)?)
+    }
+}
+
+impl AssemblyTestSource for &str {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(self)
+    }
+}
+
+impl AssemblyTestSource for Box<Module> {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(self)
+    }
+}
+
+fn assemble_source(
+    context: &TestContext,
+    source: impl AssemblyTestSource,
+) -> Result<Program, Report> {
+    source.assemble_with(context)
+}
 
 fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
     let mut reachable = BTreeSet::new();
@@ -70,6 +99,24 @@ fn assert_package_has_source_asm_ops(package: &Package, message: &str) {
     assert!(has_source_asm_ops, "{message}");
 }
 
+#[test]
+fn in_place_program_assembly_retains_parsed_sources() {
+    let mut assembler = Assembler::new();
+    let outcome = assembler.assemble_program_in_place("test", "begin push.1 end");
+
+    assert!(outcome.is_ok());
+    assert!(assembler.sources().find_by_name("<anonymous>").is_some());
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn assembler_defaults_use_distinct_source_namespaces() {
+    let first = Assembler::new();
+    let second = Assembler::new();
+
+    assert_ne!(first.sources().namespace(), second.sources().namespace());
+}
+
 mod package;
 
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
@@ -86,23 +133,21 @@ mod package;
 
 macro_rules! assert_assembler_diagnostic {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
-        let error = $context
-            .assemble($source)
+        let error = assemble_source(&$context, $source)
             .expect_err("expected diagnostic to be raised, but compilation succeeded");
         let rendered = format!(
             "{}",
-            error.display_with_sources($context.source_manager().as_ref())
+            error.display_with_sources($context.sources().as_ref())
         );
         assert_diagnostic_lines!(rendered, $($expected),*);
     }};
 
     ($context:ident, $source:expr, $($expected:expr),+) => {{
-        let error = $context
-            .assemble($source)
+        let error = assemble_source(&$context, $source)
             .expect_err("expected diagnostic to be raised, but compilation succeeded");
         let rendered = format!(
             "{}",
-            error.display_with_sources($context.source_manager().as_ref())
+            error.display_with_sources($context.sources().as_ref())
         );
         assert_diagnostic_lines!(rendered, $($expected),*);
     }};
@@ -115,15 +160,15 @@ macro_rules! assert_assembler_diagnostic {
 fn simple_instructions() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.0 assertz end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_madd end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_add3 end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -134,7 +179,7 @@ fn simple_instructions() -> TestResult {
 fn empty_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -143,7 +188,8 @@ fn empty_program() -> TestResult {
 fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
-    let err = context.assemble(source).expect_err("expected empty if block to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected empty if block to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected a non-empty `if` block");
     assert_diagnostic!(&err, "begin if.true end end");
 }
@@ -152,7 +198,7 @@ fn empty_if() {
 fn empty_if_true_then_branch() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true nop end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -163,7 +209,7 @@ fn empty_if_true_then_branch() -> TestResult {
 fn empty_while() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -174,7 +220,7 @@ fn empty_while() -> TestResult {
 fn empty_repeat() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -185,7 +231,7 @@ fn empty_repeat() -> TestResult {
 fn repeat_basic_blocks_merged() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin mul repeat.5 add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // Also ensure that dead code elimination works properly
@@ -200,7 +246,7 @@ fn repeat_basic_blocks_merged() -> TestResult {
 fn do_while_lowers_to_bare_loop() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin do push.1 while eq.0 end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     let forest = program.mast_forest();
 
     let num_loops = forest.nodes().iter().filter(|n| matches!(n, MastNode::Loop(_))).count();
@@ -225,7 +271,7 @@ fn do_while_lowers_to_bare_loop() -> TestResult {
 fn repeat_dynamic_iteration_count() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -234,7 +280,7 @@ fn repeat_dynamic_iteration_count() -> TestResult {
 fn single_basic_block() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -245,12 +291,12 @@ fn basic_block_and_simple_if_true() -> TestResult {
 
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.true add else mul end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.true add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -261,12 +307,12 @@ fn basic_block_and_simple_if_false() -> TestResult {
 
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.false add else mul end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.false add end end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -288,9 +334,9 @@ fn library_exports() -> Result<(), Report> {
     "#;
     let baz = parse_module!(&context, baz);
 
-    let lib1 = Assembler::new(context.source_manager())
+    let lib1 = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib1", baz, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     // build the second library
     let foo = r#"
@@ -340,10 +386,10 @@ fn library_exports() -> Result<(), Report> {
     "#;
     let root = parse_module!(&context, root);
 
-    let lib2 = Assembler::new(context.source_manager())
+    let lib2 = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib1), Linkage::Dynamic)?
         .assemble_library("lib2", root, [foo])
-        .into_test_result()?;
+        .into_result()?;
 
     let foo2 = Path::new("::lib2::foo::foo2");
     let foo3 = Path::new("::lib2::foo::foo3");
@@ -395,9 +441,9 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let foo = parse_module!(&context, foo);
-    let lib1 = Assembler::new(context.source_manager())
+    let lib1 = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib1", foo, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     // build the second library which defines the same procedure as the first one
     let bar = r#"
@@ -415,10 +461,10 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let bar = parse_module!(&context, bar);
-    let lib2 = Assembler::new(context.source_manager())
+    let lib2 = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib1), Linkage::Dynamic)?
         .assemble_library("lib2", bar, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.manifest.num_exports(), 2);
@@ -452,7 +498,7 @@ fn get_module_by_path() {
     let foo = parse_module!(&context, foo_source);
 
     // create the bundle with locations
-    let bundle = Assembler::new(context.source_manager())
+    let bundle = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", foo, None::<Box<Module>>)
         .unwrap();
 
@@ -480,8 +526,9 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
     let testing_module = parse_module!(&context, testing_module_source);
 
     // create the bundle with locations
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", testing_module, None::<Box<Module>>)
+        .into_result()
         .context("failed to assemble library from testing module")?;
 
     // get the vector of library procedure digests
@@ -527,7 +574,7 @@ fn simple_main_call() -> TestResult {
     let mut context = TestContext::default();
 
     // compile account module
-    let account_code = context.parse_module(source_file!(
+    let account_code = context.parse_module_source_file(source_file!(
         &context,
         "\
         namespace context::account
@@ -544,26 +591,32 @@ fn simple_main_call() -> TestResult {
     context.add_module(account_code)?;
 
     // compile note 1 program
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use context::account
         begin
           call.account::account_method_1
         end
         "
-    ))?;
+        ),
+    )?;
 
     // compile note 2 program
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use context::account
         begin
           call.account::account_method_2
         end
         "
-    ))?;
+        ),
+    )?;
     Ok(())
 }
 
@@ -620,15 +673,15 @@ end
         "
     );
 
-    let account_code1 = context.parse_module(account_code1_src)?;
-    let account_code2 = context.parse_module(account_code2_src)?;
+    let account_code1 = context.parse_module_source_file(account_code1_src)?;
+    let account_code2 = context.parse_module_source_file(account_code2_src)?;
     let main = context.parse_program(main_src)?;
 
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
     assembler
         .compile_and_statically_link_all([account_code1, account_code2])
-        .into_test_result()?;
-    assembler.assemble_program("main", main).into_test_result()?;
+        .into_result()?;
+    assembler.assemble_program("main", main).into_result()?;
 
     Ok(())
 }
@@ -640,7 +693,7 @@ end
 fn procref_call() -> TestResult {
     let mut context = TestContext::default();
     // compile first module
-    context.add_module(source_file!(
+    let module_one = context.parse_module_source_file(source_file!(
         &context,
         "
         namespace module::path::one
@@ -653,9 +706,10 @@ fn procref_call() -> TestResult {
             push.1.2
         end"
     ))?;
+    context.add_module(module_one)?;
 
     // compile second module
-    context.add_module(source_file!(
+    let module_two = context.parse_module_source_file(source_file!(
         &context,
         "
         namespace module::path::two
@@ -667,11 +721,14 @@ fn procref_call() -> TestResult {
             procref.one::aaa
         end"
     ))?;
+    context.add_module(module_two)?;
 
     // compile program with procref calls
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use module::path::two
 
         @locals(4)
@@ -684,7 +741,8 @@ fn procref_call() -> TestResult {
             procref.two::foo
             procref.baz
         end"
-    ))?;
+        ),
+    )?;
     Ok(())
 }
 
@@ -703,10 +761,11 @@ fn get_proc_name_of_unknown_module() -> TestResult {
         procref.two::bar
     end"
     );
-    let module1 = context.parse_module(module_source1)?;
+    let module1 = context.parse_module_source_file(module_source1)?;
 
-    let report = Assembler::new(context.source_manager())
+    let report = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", module1, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected unknown module error");
 
     assert_diagnostic!(&report, "undefined item 'module::path::two'");
@@ -730,7 +789,7 @@ fn simple_constant() -> TestResult {
         push.TEST_CONSTANT
     end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -754,7 +813,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -777,7 +836,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -796,7 +855,7 @@ begin
 end
 "#
     );
-    let _program = context.assemble(source)?;
+    let _program = assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -815,8 +874,7 @@ begin
 end
 "#
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected negative discriminant to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
 }
@@ -839,8 +897,7 @@ end
 "#
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected out-of-range felt discriminant to be rejected");
     assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
 }
@@ -855,8 +912,7 @@ fn constant_expression_overflow_is_rejected() {
             "const TOO_BIG = {modulus_minus_one} + {modulus_minus_one}\nbegin\n    push.TOO_BIG\nend\n"
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected constant expression overflow to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
 }
@@ -873,7 +929,7 @@ fn multiple_constants_push() -> TestResult {
     push.CONSTANT_1.64.CONSTANT_2.72 \
     end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -890,7 +946,7 @@ fn constant_numeric_expression() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -909,7 +965,7 @@ fn constant_alphanumeric_expression() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -926,7 +982,7 @@ fn constant_hexadecimal_value() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -943,7 +999,7 @@ fn constant_field_division() -> TestResult {
     end \
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -959,8 +1015,9 @@ fn constant_err_const_not_initialized() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected undefined constant diagnostic");
-    let rendered = format!("{}", err.display_with_sources(context.source_manager().as_ref()));
+    let err =
+        assemble_source(&context, source).expect_err("expected undefined constant diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
     assert_diagnostic!(&rendered, "undefined constant 'A'");
     assert_diagnostic!(
         &rendered,
@@ -980,8 +1037,8 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    let rendered = format!("{}", err.display_with_sources(context.source_manager().as_ref()));
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
     assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
     assert_diagnostic!(&rendered, "const TEST_CONSTANT = 5/0");
 
@@ -993,8 +1050,8 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    let rendered = format!("{}", err.display_with_sources(context.source_manager().as_ref()));
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
     assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
     assert_diagnostic!(&rendered, "const TEST_CONSTANT = 5//0");
 }
@@ -1015,8 +1072,8 @@ fn constant_err_div_by_zero_indirect() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    let rendered = format!("{}", err.display_with_sources(context.source_manager().as_ref()));
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
     assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
     assert_diagnostic!(&rendered, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 }
@@ -1033,6 +1090,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
         pub const DENOMINATOR = 0"
     );
 
+    let module_a = context.parse_module_source_file(module_a)?;
     context.add_module(module_a)?;
 
     let source = source_file!(
@@ -1047,8 +1105,8 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
-    let rendered = format!("{}", err.display_with_sources(context.source_manager().as_ref()));
+    let err = assemble_source(&context, source).expect_err("expected division by zero diagnostic");
+    let rendered = format!("{}", err.display_with_sources(context.sources().as_ref()));
     assert_diagnostic!(&rendered, "invalid constant expression: division by zero");
     assert_diagnostic!(&rendered, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 
@@ -1067,7 +1125,8 @@ fn constants_must_be_uppercase() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected lowercase constant diagnostic");
+    let err =
+        assemble_source(&context, source).expect_err("expected lowercase constant diagnostic");
     assert_diagnostic!(
         &err,
         "invalid identifier: only uppercase characters or underscores are allowed"
@@ -1088,7 +1147,8 @@ fn duplicate_constant_name() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected duplicate constant diagnostic");
+    let err =
+        assemble_source(&context, source).expect_err("expected duplicate constant diagnostic");
     assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
     assert_diagnostic!(&err, "conflict occurs here");
     assert_diagnostic!(&err, "previously defined here");
@@ -1106,7 +1166,7 @@ fn constant_must_be_valid_felt() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected invalid felt diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected invalid felt diagnostic");
     assert_diagnostic!(&err, "invalid syntax: unexpected trailing tokens in expression");
     assert_diagnostic!(&err, "unexpected trailing tokens in expression");
 }
@@ -1125,7 +1185,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "18446744073709551615");
 
@@ -1139,7 +1199,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "18446744069414584321");
 
@@ -1153,7 +1213,7 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    let err = assemble_source(&context, source).expect_err("expected felt overflow diagnostic");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(&err, "0xFFFFFFFF00000001");
 }
@@ -1170,8 +1230,7 @@ fn constants_defined_in_global_scope() {
     end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected block-local constants to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before top-level item");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -1266,7 +1325,7 @@ fn mem_operations_with_constants() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     // Define expected
     let expected = source_file!(
@@ -1310,7 +1369,7 @@ fn mem_operations_with_constants() -> TestResult {
     "
         )
     );
-    let expected_program = context.assemble(expected)?;
+    let expected_program = assemble_source(&context, expected)?;
     assert_eq!(expected_program.to_string(), program.to_string());
     Ok(())
 }
@@ -1517,7 +1576,7 @@ fn const_word_from_string() -> TestResult {
     "#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
 
@@ -1555,8 +1614,8 @@ fn const_event_from_string() -> TestResult {
         )
     );
 
-    let program1 = context.assemble(source1)?;
-    let program2 = context.assemble(source2)?;
+    let program1 = assemble_source(&context, source1)?;
+    let program2 = assemble_source(&context, source2)?;
     assert_eq!(program1.hash(), program2.hash());
 
     Ok(())
@@ -1581,7 +1640,7 @@ fn test_push_word_slice() -> TestResult {
     end
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -1600,7 +1659,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_range).is_err());
+    assert!(assemble_source(&context, source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
@@ -1612,7 +1671,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_empty_range).is_err());
+    assert!(assemble_source(&context, source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -1623,7 +1682,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    assert!(assemble_source(&context, source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -1633,7 +1692,7 @@ fn test_push_word_slice_invalid() {
     end
     "
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    assert!(assemble_source(&context, source_invalid_constant_type).is_err());
 }
 
 #[test]
@@ -1649,9 +1708,9 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
         "#;
     let a = parse_module!(&context, a);
 
-    let lib = Assembler::new(context.source_manager())
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", a, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     let program_source = source_file!(
         &context,
@@ -1665,11 +1724,12 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
             add
         end"
     );
+    let program_source = context.parse_program(program_source)?;
 
-    let program = Assembler::new(context.source_manager())
+    let program = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
         .assemble_program("program", program_source)
-        .into_test_result()?
+        .into_result()?
         .unwrap_program();
     insta::assert_snapshot!(program);
 
@@ -1691,15 +1751,11 @@ fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
             end
         "#
     );
-    let lib = Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        constants,
-        None::<Box<Module>>,
-    )?;
+    let lib = Assembler::new()
+        .assemble_library("lib", constants, None::<Box<Module>>)
+        .into_result()?;
 
-    let program = source_file!(
-        &context,
-        r#"
+    let program = r#"
             use {WORD_NUM_ELEMENTS} from lib::constants
 
             const OFFSET_1 = WORD_NUM_ELEMENTS + 1
@@ -1731,12 +1787,12 @@ fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
                 push.3
                 assert_eq
             end
-        "#
-    );
+        "#;
 
-    Assembler::new(context.source_manager())
+    Assembler::new()
         .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", program)?;
+        .assemble_program("program", program)
+        .into_result()?;
 
     Ok(())
 }
@@ -1758,35 +1814,31 @@ fn link_time_event_constants_must_be_event_hashes() -> TestResult {
             end
         "#
     );
-    let lib: Arc<Package> = Arc::from(Assembler::new(context.source_manager()).assemble_library(
-        "lib",
-        constants,
-        None::<Box<Module>>,
-    )?);
+    let lib: Arc<Package> = Arc::from(
+        Assembler::new()
+            .assemble_library("lib", constants, None::<Box<Module>>)
+            .into_result()?,
+    );
 
     for (instruction, constant) in
         [("emit", "INT"), ("emit", "WORD"), ("trace", "INT"), ("trace", "WORD")]
     {
-        let program = source_file!(
-            &context,
-            format!(
-                "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
-            )
+        let program = format!(
+            "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
         );
-        let err = Assembler::new(context.source_manager())
+        let err = Assembler::new()
             .with_package(lib.clone(), Linkage::Dynamic)?
             .assemble_program("program", program)
+            .into_result()
             .expect_err("imported event constant must be defined via event() hashing");
         assert_diagnostic!(&err, "expected an event name");
     }
 
-    let program = source_file!(
-        &context,
-        "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend"
-    );
-    Assembler::new(context.source_manager())
+    let program = "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend";
+    Assembler::new()
         .with_package(lib, Linkage::Dynamic)?
-        .assemble_program("program", program)?;
+        .assemble_program("program", program)
+        .into_result()?;
 
     Ok(())
 }
@@ -1803,9 +1855,9 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         "#;
     let a = parse_module!(&context, a);
 
-    let lib = Assembler::new(context.source_manager())
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", a, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     let source = source_file!(
         &context,
@@ -1817,10 +1869,12 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
             add
         end"
     );
+    let source = context.parse_program(source)?;
 
-    let error = Assembler::new(context.source_manager())
+    let error = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
         .assemble_program("program", source)
+        .into_result()
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic_lines!(
         error,
@@ -1842,21 +1896,8 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
 }
 
 #[test]
-fn link_time_const_evaluation_invalid_constant() -> TestResult {
+fn link_time_const_evaluation_invalid_constant() {
     let context = TestContext::default();
-    let a = r#"
-            namespace lib::a
-
-            pub proc f
-                push.1
-            end
-        "#;
-    let a = parse_module!(&context, a);
-
-    let lib = Assembler::new(context.source_manager())
-        .assemble_library("lib", a, None::<Box<Module>>)
-        .into_test_result()?;
-
     let source = source_file!(
         &context,
         "\
@@ -1865,10 +1906,8 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
         push.f
     end"
     );
-
-    let error = Assembler::new(context.source_manager())
-        .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", source)
+    let error = context
+        .parse_program(source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic_lines!(
@@ -1885,8 +1924,6 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
         "  = note: caused by: invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         "  = help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
-
-    Ok(())
 }
 
 // ASSERTIONS
@@ -1910,7 +1947,7 @@ fn assert_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -1934,7 +1971,7 @@ fn assertz_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -1958,7 +1995,7 @@ fn assert_eq_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -1982,7 +2019,7 @@ fn assert_eqw_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2006,7 +2043,7 @@ fn u32assert_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2030,7 +2067,7 @@ fn u32assert2_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2054,7 +2091,7 @@ fn u32assertw_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2129,7 +2166,7 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     end
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2150,7 +2187,7 @@ fn mtree_verify_with_code() -> TestResult {
     "
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2176,7 +2213,7 @@ fn nested_control_blocks() -> TestResult {
         push.3 add
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2199,7 +2236,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
     let context = TestContext::default();
     let source = nested_if_source(MAX_CONTROL_FLOW_NESTING);
     let source = source_file!(&context, source.as_str());
-    context.assemble(source)?;
+    assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -2208,8 +2245,7 @@ fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
     let source = nested_if_source(1_500);
     let source = source_file!(&context, source.as_str());
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic!(&error, "control-flow nesting depth exceeded");
 }
@@ -2224,7 +2260,7 @@ fn program_with_one_procedure() -> TestResult {
         &context,
         "proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2239,7 +2275,7 @@ fn program_with_nested_procedure() -> TestResult {
         proc bar push.5 exec.foo add end \
         begin push.2 push.4 add exec.foo push.11 exec.bar sub end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2261,7 +2297,7 @@ fn program_with_proc_locals() -> TestResult {
             exec.foo \
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     // Note: 18446744069414584317 == -4 (mod 2^64 - 2^32 + 1)
     insta::assert_snapshot!(program);
     Ok(())
@@ -2284,8 +2320,7 @@ begin
     exec.foo
 end"
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid procedure local reference to be rejected");
     assert_diagnostic!(&err, "invalid procedure local reference");
     assert_diagnostic!(&err, "the procedure local index referenced here is invalid");
@@ -2301,8 +2336,7 @@ fn program_with_exported_procedure() {
         "pub proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected exported program procedure to be rejected");
     assert_diagnostic!(&err, "invalid program: procedure exports are not allowed");
     assert_diagnostic!(&err, "perhaps you meant to use `proc` instead of `export`");
@@ -2316,7 +2350,7 @@ fn program_with_exported_procedure() {
 fn program_with_dynamic_code_execution() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dynexec end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2325,7 +2359,7 @@ fn program_with_dynamic_code_execution() -> TestResult {
 fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dyncall end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2338,8 +2372,7 @@ fn program_with_incorrect_mast_root_length() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin call.0x1234 end");
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected incorrect MAST root length to be rejected");
     assert_diagnostic!(&err, "invalid MAST root literal");
     assert_diagnostic!(&err, "begin call.0x1234 end");
@@ -2353,8 +2386,7 @@ fn program_with_invalid_mast_root_chars() {
         "begin call.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a21xyzb end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid MAST root chars to be rejected");
     assert_diagnostic!(&err, "invalid literal: expected 2, 4, 8, 16, or 64 hex digits");
     assert_diagnostic!(&err, "xyzb");
@@ -2368,8 +2400,7 @@ fn program_with_invalid_rpo_digest_call() {
         "begin call.0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid RPO digest call to be rejected");
     assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
     assert_diagnostic!(
@@ -2387,8 +2418,8 @@ fn program_with_phantom_mast_call() -> TestResult {
     );
     let ast = context.parse_program(source)?;
 
-    let assembler = Assembler::new(context.source_manager());
-    assembler.assemble_program("test", ast).into_test_result()?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    assembler.assemble_program("test", ast).into_result()?;
     Ok(())
 }
 
@@ -2409,9 +2440,11 @@ fn program_with_one_import_and_hex_call() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let ast =
-        context.parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))?;
-    let library = Assembler::new(context.source_manager())
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{PROCEDURE}")
+    ))?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -2429,7 +2462,7 @@ fn program_with_one_import_and_hex_call() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -2458,9 +2491,11 @@ fn program_with_two_imported_procs_with_same_mast_root() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let ast =
-        context.parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))?;
-    let library = Assembler::new(context.source_manager())
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{PROCEDURE}")
+    ))?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -2478,7 +2513,7 @@ fn program_with_two_imported_procs_with_same_mast_root() -> TestResult {
         end"#
         )
     );
-    context.assemble(source)?;
+    assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -2513,14 +2548,20 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{MODULE_BODY}")
+        ))
         .unwrap();
 
     let ref_ast = context
-        .parse_module(source_file!(&context, format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
+        ))
         .unwrap();
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy1", ast, [ref_ast])
         .unwrap();
 
@@ -2538,7 +2579,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2574,14 +2615,20 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{MODULE_BODY}")
+        ))
         .unwrap();
 
     let ref_ast = context
-        .parse_module(source_file!(&context, format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
+        ))
         .unwrap();
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy1", ast, [ref_ast])
         .unwrap();
 
@@ -2599,7 +2646,7 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2631,23 +2678,22 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     "#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     // We reference code in this module
-    let ref_ast = context.parse_module(source_file!(
+    let ref_ast = context.parse_module_source_file(source_file!(
         &context,
         format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
     ))?;
     // But only exports from this module are exposed by the library
-    let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))?;
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{MODULE_BODY}")
+    ))?;
 
     let dummy_library = {
-        let mut assembler = Assembler::new(source_manager);
-        assembler.compile_and_statically_link(ref_ast).into_test_result()?;
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+        assembler.compile_and_statically_link(ref_ast).into_result()?;
         Arc::<Package>::from(
-            assembler
-                .assemble_library("dummy1", ast, None::<Box<Module>>)
-                .into_test_result()?,
+            assembler.assemble_library("dummy1", ast, None::<Box<Module>>).into_result()?,
         )
     };
 
@@ -2666,7 +2712,7 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
 
@@ -2724,11 +2770,13 @@ fn module_alias() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{PROCEDURE}")
+        ))
         .unwrap();
-    let library = Assembler::new(source_manager)
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -2746,7 +2794,7 @@ fn module_alias() -> TestResult {
         end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // --- invalid module alias -----------------------------------------------
@@ -2761,8 +2809,7 @@ fn module_alias() -> TestResult {
             exec."bad name"::checked_add
         end"#
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid quoted module alias to be rejected");
     assert_diagnostic!(&err, "expected an alias name after `as`");
     assert_diagnostic!(&err, "bad name");
@@ -2789,11 +2836,13 @@ fn module_alias_unused_import() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{PROCEDURE}")
+        ))
         .unwrap();
-    let library = Assembler::new(source_manager)
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -2813,8 +2862,7 @@ fn module_alias_unused_import() -> TestResult {
         end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected unused duplicate import to be rejected");
     assert_diagnostic!(&err, "unused import");
     assert_diagnostic!(&err, "this import is never used and can be safely removed");
@@ -2903,7 +2951,7 @@ fn program_with_import_errors() {
 fn comment_simple() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin # simple comment \n push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2927,7 +2975,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
         push.3 add
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2936,7 +2984,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
 fn comment_before_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "# starting comment \n begin push.1 push.2 add end");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2945,7 +2993,7 @@ fn comment_before_program() -> TestResult {
 fn comment_after_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end # closing comment");
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2961,7 +3009,7 @@ begin
     push.A
 end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2976,7 +3024,7 @@ adv_map A(0x0200000000000000020000000000000002000000000000000200000000000000) = 
 begin push.A adv.push_mapval assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -2991,7 +3039,7 @@ adv_map A = [0x01]
 begin push.A adv.push_mapval assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -3006,7 +3054,7 @@ adv_map A(0x0200000000000000020000000000000002000000000000000200000000000000) = 
 begin adv.has_mapkey assert end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -3018,8 +3066,7 @@ begin adv.has_mapkey assert end"
 fn invalid_empty_program() {
     let context = TestContext::default();
     for _ in 0..2 {
-        let err = context
-            .assemble(source_file!(&context, "namespace foo"))
+        let err = assemble_source(&context, source_file!(&context, "namespace foo"))
             .expect_err("expected empty program to be rejected");
         assert_diagnostic!(&err, "unable to assemble program: source is not an executable module");
     }
@@ -3028,8 +3075,7 @@ fn invalid_empty_program() {
 #[test]
 fn invalid_program_unrecognized_token() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "none"))
+    let err = assemble_source(&context, source_file!(&context, "none"))
         .expect_err("expected unexpected top-level token to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -3039,8 +3085,7 @@ fn invalid_program_unrecognized_token() {
 #[test]
 fn invalid_program_unmatched_begin() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "begin add"))
+    let err = assemble_source(&context, source_file!(&context, "begin add"))
         .expect_err("expected unmatched begin to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `begin` block");
@@ -3050,8 +3095,7 @@ fn invalid_program_unmatched_begin() {
 #[test]
 fn invalid_program_invalid_top_level_token() {
     let context = TestContext::default();
-    let err = context
-        .assemble(source_file!(&context, "begin add end mul"))
+    let err = assemble_source(&context, source_file!(&context, "begin add end mul"))
         .expect_err("expected invalid top-level token to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -3064,8 +3108,7 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 
     for spelling in ["debug.stack.4", "debug.mem", "debug.local.0.2", "debug.adv_stack.4"] {
         let source = source_file!(&context, format!("begin {spelling} end"));
-        let error = context
-            .assemble(source)
+        let error = assemble_source(&context, source)
             .expect_err("removed debug.* instruction should be rejected");
         assert_diagnostic!(&error, "invalid instruction");
     }
@@ -3076,17 +3119,15 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResult {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use miden_assembly_syntax::{
-        ast::{
-            DebugVarInfo, DebugVarLocation, Instruction, Op,
-            types::{ArrayType, Type},
-        },
-        debuginfo::{SourceSpan, Span},
+    use miden_assembly_syntax::ast::{
+        DebugVarInfo, DebugVarLocation, Instruction, Op,
+        types::{ArrayType, Type},
     };
+    use miden_diagnostics::{SourceSpan, Span};
 
     let context = TestContext::default();
     let source = source_file!(&context, "begin nop end");
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     let entrypoint = module
         .procedures_mut()
         .find(|procedure| procedure.is_entrypoint())
@@ -3100,7 +3141,7 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
         .body_mut()
         .push(Op::Inst(Span::new(SourceSpan::default(), Instruction::DebugVar(debug_var))));
 
-    let assembled = catch_unwind(AssertUnwindSafe(|| context.assemble(module)));
+    let assembled = catch_unwind(AssertUnwindSafe(|| assemble_source(&context, module)));
     let err = assembled
         .expect("assembly panicked, expected a structured error")
         .expect_err("invalid debug variable type should be rejected");
@@ -3113,8 +3154,7 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
 fn invalid_proc_missing_end_unexpected_begin() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected procedure missing end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
@@ -3125,8 +3165,7 @@ fn invalid_proc_missing_end_unexpected_begin() {
 fn invalid_proc_missing_end_unexpected_proc() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul proc bar push.3 end begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected procedure missing end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
@@ -3137,8 +3176,7 @@ fn invalid_proc_missing_end_unexpected_proc() {
 fn invalid_proc_undefined_local() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul end begin push.1 exec.bar end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected undefined local proc to be rejected");
     assert_diagnostic!(&err, "undefined symbol reference");
     assert_diagnostic!(&err, "this symbol path could not be resolved");
@@ -3157,7 +3195,8 @@ fn missing_import() {
     end"#
     );
 
-    let err = context.assemble(source).expect_err("expected missing import to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing import to be rejected");
     assert_diagnostic!(&err, "invalid relative item path 'u64::add'");
     assert_diagnostic!(&err, "absolute, local, or qualified by an import or submodule");
     assert_diagnostic!(&err, "exec.u64::add");
@@ -3167,8 +3206,7 @@ fn missing_import() {
 fn invalid_proc_invalid_numeric_name() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc 123 add mul end begin push.1 exec.123 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected numeric procedure name to be rejected");
     assert_diagnostic!(&err, "expected a procedure name");
     assert_diagnostic!(&err, "unexpected token in block");
@@ -3179,8 +3217,7 @@ fn invalid_proc_duplicate_procedure_name() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "proc foo add mul end proc foo push.3 end begin push.1 end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected duplicate procedure name to be rejected");
     assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
     assert_diagnostic!(&err, "conflict occurs here");
@@ -3192,7 +3229,8 @@ fn invalid_proc_duplicate_procedure_name() {
 fn invalid_if_missing_end_no_else() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add if.true mul");
-    let err = context.assemble(source).expect_err("expected missing if end to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing if end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `if`");
     assert_diagnostic!(&err, "begin push.1 add if.true mul");
@@ -3202,12 +3240,14 @@ fn invalid_if_missing_end_no_else() {
 fn invalid_else_with_no_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add else mul end");
-    let err = context.assemble(source).expect_err("expected unmatched else to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
-    let err = context.assemble(source).expect_err("expected while-local else to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected while-local else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `while` before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
 }
@@ -3218,7 +3258,8 @@ fn invalid_unmatched_else_within_if_else() {
 
     let source =
         source_file!(&context, "begin push.1 if.true add else mul else push.1 end end end");
-    let err = context.assemble(source).expect_err("expected duplicate else to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected duplicate else to be rejected");
     assert_diagnostic!(&err, "expected `end` to close `if` before `else`");
     assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
     assert_diagnostic!(&err, "unexpected top-level token");
@@ -3229,9 +3270,8 @@ fn invalid_if_else_no_matching_end() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add if.true mul else add");
-    let err = context
-        .assemble(source)
-        .expect_err("expected missing if/else end to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected missing if/else end to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `if`");
     assert_diagnostic!(&err, "begin push.1 add if.true mul else add");
@@ -3243,15 +3283,15 @@ fn invalid_repeat() {
 
     // unmatched repeat
     let source = source_file!(&context, "begin push.1 add repeat.10 mul");
-    let err = context.assemble(source).expect_err("expected unmatched repeat to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched repeat to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `repeat`");
     assert_diagnostic!(&err, "begin push.1 add repeat.10 mul");
 
     // invalid iter count
     let source = source_file!(&context, "begin push.1 add repeat.23x3 mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected malformed repeat count to be rejected");
     assert_diagnostic!(&err, "invalid syntax: invalid instruction `x3` or malformed operands");
     assert_diagnostic!(&err, "begin push.1 add repeat.23x3 mul end end");
@@ -3271,8 +3311,7 @@ fn invalid_repeat() {
             "
         )
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected overflowing repeat count to be rejected");
     assert_diagnostic!(&err, "invalid immediate: value is larger than expected range");
     assert_diagnostic!(&err, "repeat.CONSTANT");
@@ -3282,8 +3321,8 @@ fn invalid_repeat() {
 fn invalid_repeat_count_zero() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.0 nop end end");
-    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
-    let rendered = format!("{}", error.display_with_sources(context.source_manager().as_ref()));
+    let error = assemble_source(&context, source).expect_err("expected repeat.0 to be rejected");
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -3303,8 +3342,8 @@ begin
     call.foo
 end"
     );
-    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
-    let rendered = format!("{}", error.display_with_sources(context.source_manager().as_ref()));
+    let error = assemble_source(&context, source).expect_err("expected repeat.0 to be rejected");
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -3313,10 +3352,9 @@ fn invalid_repeat_count_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat count above limit to be rejected");
-    let rendered = format!("{}", error.display_with_sources(context.source_manager().as_ref()));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -3325,10 +3363,9 @@ fn invalid_repeat_count_constant_zero() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat.0 from constant to be rejected");
-    let rendered = format!("{}", error.display_with_sources(context.source_manager().as_ref()));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -3340,10 +3377,9 @@ fn invalid_repeat_count_constant_too_large() {
         &context,
         format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end")
     );
-    let error = context
-        .assemble(source)
+    let error = assemble_source(&context, source)
         .expect_err("expected repeat count above limit from constant to be rejected");
-    let rendered = format!("{}", error.display_with_sources(context.source_manager().as_ref()));
+    let rendered = format!("{}", error.display_with_sources(context.sources().as_ref()));
     assert!(rendered.contains("invalid repeat count"));
 }
 
@@ -3574,21 +3610,20 @@ fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add while mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid while spelling to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
     assert_diagnostic!(&err, "begin push.1 add while mul end end");
 
     let source = source_file!(&context, "begin push.1 add while.abc mul end end");
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid while spelling to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
     assert_diagnostic!(&err, "begin push.1 add while.abc mul end end");
 
     let source = source_file!(&context, "begin push.1 add while.true mul");
-    let err = context.assemble(source).expect_err("expected unmatched while to be rejected");
+    let err =
+        assemble_source(&context, source).expect_err("expected unmatched while to be rejected");
     assert_diagnostic!(&err, "syntax error");
     assert_diagnostic!(&err, "expected `end` to close `while`");
     assert_diagnostic!(&err, "begin push.1 add while.true mul");
@@ -3601,7 +3636,7 @@ fn test_compiled_library() {
     let context = TestContext::new();
     let root = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib
@@ -3614,7 +3649,7 @@ fn test_compiled_library() {
     };
     let mod1 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib::mod1
@@ -3637,7 +3672,7 @@ fn test_compiled_library() {
 
     let mod2 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib::mod2
@@ -3657,14 +3692,14 @@ fn test_compiled_library() {
     };
 
     let compiled_library = {
-        let assembler = Assembler::new(context.source_manager());
+        let assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler.assemble_library("mylib", root, [mod1, mod2]).unwrap()
     };
 
     assert_eq!(compiled_library.manifest.num_exports(), 4);
 
     // Compile program that uses compiled library
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 
@@ -3694,7 +3729,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     let context = TestContext::new();
     let root = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test
 
@@ -3706,7 +3741,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     };
     let mod1 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod1
 
@@ -3721,7 +3756,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
 
     let mod2 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod2
 
@@ -3735,14 +3770,14 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     };
 
     let compiled_library = {
-        let assembler = Assembler::new(context.source_manager());
+        let assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler.assemble_library("test", root, [mod1, mod2]).unwrap()
     };
 
     assert_eq!(compiled_library.manifest.num_exports(), 2);
 
     // Compile program that uses compiled library
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 
@@ -3857,12 +3892,12 @@ fn mast_builder_acceptance_corpus() -> TestResult {
     ];
 
     for (case_name, source) in cases {
-        let program = context.assemble(source)?;
+        let program = assemble_source(&context, source)?;
         append_program_acceptance_summary(&mut summary, case_name, &program);
     }
 
     let mut static_context = TestContext::default();
-    static_context.add_module(source_file!(
+    let helper = static_context.parse_module_source_file(source_file!(
         &static_context,
         r#"
             namespace acceptance::helpers
@@ -3876,9 +3911,12 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             end
             "#
     ))?;
-    let static_program = static_context.assemble(source_file!(
+    static_context.add_module(helper)?;
+    let static_program = assemble_source(
         &static_context,
-        r#"
+        source_file!(
+            &static_context,
+            r#"
         use acceptance::helpers
 
         begin
@@ -3887,7 +3925,8 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             exec.helpers::inspect
         end
         "#
-    ))?;
+        ),
+    )?;
     append_program_acceptance_summary(&mut summary, "static_imports", &static_program);
 
     insta::assert_snapshot!("mast_builder_acceptance_corpus", summary);
@@ -3926,7 +3965,7 @@ fn vendoring() -> TestResult {
     let context = TestContext::new();
     let vendor_lib = {
         let mod1 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod1
 pub proc bar push.1 end pub proc prune push.2 end"
@@ -3939,7 +3978,7 @@ pub proc bar push.1 end pub proc prune push.2 end"
 
     let lib = {
         let mod2 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod2
 pub proc foo exec.::test::mod1::bar end"
@@ -3961,7 +4000,7 @@ pub proc foo exec.::test::mod1::bar end"
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
         let mod2 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::expected\npub proc foo push.1 end"
             ))
@@ -4126,17 +4165,18 @@ fn nested_blocks() -> Result<(), Report> {
 
     let context = TestContext::new();
     let assembler = {
-        let kernel_lib = Assembler::new(context.source_manager())
+        let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_kernel("kernel", context.parse_kernel(source_file!(&context, KERNEL))?, None)
             .map(Arc::<Package>::from)
             .unwrap();
 
         let dummy_module = context.parse_module(MODULE_PROCEDURE)?;
-        let dummy_library = Assembler::new(context.source_manager())
+        let dummy_library = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_library("dummy", dummy_module, None::<Box<Module>>)
             .unwrap();
 
-        let mut assembler = Assembler::with_kernel(context.source_manager(), kernel_lib)?;
+        let mut assembler =
+            Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), kernel_lib)?;
         assembler.link_package(Arc::from(dummy_library), Linkage::Dynamic).unwrap();
 
         assembler
@@ -4326,7 +4366,7 @@ fn emit_instruction_digest() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
 
@@ -4363,7 +4403,7 @@ fn trace_instruction_digest() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
 
@@ -4407,9 +4447,9 @@ fn emit_syntax_equivalence() {
         end
     "#;
 
-    let program1 = context.assemble(program1_source).unwrap();
-    let program2 = context.assemble(program2_source).unwrap();
-    let program3 = context.assemble(program3_source).unwrap();
+    let program1 = assemble_source(&context, program1_source).unwrap();
+    let program2 = assemble_source(&context, program2_source).unwrap();
+    let program3 = assemble_source(&context, program3_source).unwrap();
 
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();
@@ -4470,10 +4510,10 @@ fn trace_syntax_equivalence() {
         end
     "#;
 
-    let program1 = context.assemble(program1_source).unwrap();
-    let program2 = context.assemble(program2_source).unwrap();
-    let program3 = context.assemble(program3_source).unwrap();
-    let program4 = context.assemble(program4_source).unwrap();
+    let program1 = assemble_source(&context, program1_source).unwrap();
+    let program2 = assemble_source(&context, program2_source).unwrap();
+    let program3 = assemble_source(&context, program3_source).unwrap();
+    let program4 = assemble_source(&context, program4_source).unwrap();
 
     let digest1 = program1.hash();
     assert_eq!(digest1, program2.hash(), "constant and inline trace forms differ");
@@ -4509,7 +4549,7 @@ fn duplicate_procedure() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
     // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
     // procedure.
     assert_eq!(program.num_procedures(), 2);
@@ -4537,7 +4577,7 @@ fn distinguish_grandchildren_correctly() {
     end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let join_node = &program.mast_forest()[program.entrypoint()].unwrap_join();
 
@@ -4572,7 +4612,7 @@ fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
     let baz = context.parse_module(BAZ)?;
     let library = context.assemble_library("foo", None, root, [bar, baz]).unwrap();
 
-    let assembler = Assembler::new(context.source_manager())
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(library.into(), Linkage::Dynamic)
         .unwrap();
 
@@ -4608,7 +4648,7 @@ fn re_exports() -> Result<(), Report> {
     let baz = context.parse_module(BAZ)?;
     let library = context.assemble_library("foo", None, baz, [bar]).unwrap();
 
-    let assembler = Assembler::new(context.source_manager())
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(library.into(), Linkage::Dynamic)
         .unwrap();
 
@@ -4654,13 +4694,13 @@ fn module_ordering_can_be_arbitrary() -> Result<(), Report> {
     let b = context.parse_module(B)?;
     let c = context.parse_module(C)?;
 
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
     assembler
         .compile_and_statically_link(b)
-        .into_test_result()?
+        .into_result()?
         .compile_and_statically_link(a)
-        .into_test_result()?;
-    assembler.assemble_library("lib", c, None::<Box<Module>>).into_test_result()?;
+        .into_result()?;
+    assembler.assemble_library("lib", c, None::<Box<Module>>).into_result()?;
 
     Ok(())
 }
@@ -4698,16 +4738,16 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
         let external_helpers = context.parse_module(EXTERNAL_HELPERS)?;
         let kernel = context.parse_kernel(source_file!(&context, KERNEL)).unwrap();
 
-        let mut assembler = Assembler::new(context.source_manager());
-        assembler.compile_and_statically_link(external_helpers).into_test_result()?;
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+        assembler.compile_and_statically_link(external_helpers).into_result()?;
         assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
     assert_eq!(kernel_lib.to_kernel_descriptor().ok().map(|k| k.proc_hashes().len()), Some(1));
 
-    Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
+    Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel_lib))?
         .assemble_program("program", PROGRAM)
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -4715,16 +4755,16 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 #[test]
 fn regression_empty_kernel_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "pub const FOO = 1\n";
-    let err = Assembler::new(source_manager)
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_masm)).unwrap(),
             None,
         )
+        .into_result()
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
 }
@@ -4732,15 +4772,17 @@ fn regression_empty_kernel_is_rejected() {
 #[test]
 fn regression_empty_kernel_with_submodule_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "mod sub\n\npub const FOO = 1\n";
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo push.1 end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(source_manager)
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
 }
@@ -4765,9 +4807,12 @@ fn regression_reexport_of_kernel_procedure_from_kernel_submodule_is_rejected() {
     let submodule_masm =
         "namespace $kernel::sub\n\npub use {root} from $kernel\n\npub proc foo push.1 end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected kernel submodule re-exporting kernel syscall to be rejected");
     assert_diagnostic!(err, "invalid re-export of kernel syscall");
 }
@@ -4783,9 +4828,12 @@ fn regression_exec_of_kernel_procedure_is_rejected() {
     let kernel_masm = "pub mod sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n\npub proc other exec.root end";
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo exec.$kernel::root end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let err = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
+        .into_result()
         .expect_err("expected assembler to reject exec of syscall from within kernel submodule");
     assert_diagnostic!(err, "kernel procedure '::$kernel::root' can only be invoked via syscall");
 }
@@ -4798,12 +4846,14 @@ fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
     let submodule_masm = "namespace $kernel::sub\n\npub proc foo syscall.root end\n";
     let program_masm = "begin syscall.::$kernel::sub::foo end\n";
     let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
-    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
-    let _kernel = Assembler::new(context.source_manager())
+    let submodule = context
+        .parse_module_source_file(source_file!(&context, submodule_masm))
+        .unwrap();
+    let _kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel_module, [submodule])
         .expect("expected valid kernel");
     let err = context
-        .parse_module(source_file!(&context, program_masm))
+        .parse_module_source_file(source_file!(&context, program_masm))
         .expect_err("expected sema to reject syscall of non-syscall procedure");
     assert_diagnostic!(err, "invalid syscall: callee must be resolvable to kernel module");
 }
@@ -4812,7 +4862,7 @@ fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
 #[test]
 fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
     let context = TestContext::default();
-    let module = context.parse_module(source_file!(
+    let module = context.parse_module_source_file(source_file!(
         &context,
         "
             namespace issue_3035::repro
@@ -4824,9 +4874,9 @@ fn issue_3035_self_merge_does_not_grow_mast() -> TestResult {
             "
     ))?;
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", module, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
     let forest = library.mast_forest().as_ref().clone();
     assert!(
         forest
@@ -4897,7 +4947,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         exec.main
     end"#;
 
-    let program = context.assemble(program_source)?;
+    let program = assemble_source(&context, program_source)?;
     let original_forest = program.mast_forest().clone();
 
     // Core test: Merge the forest with itself
@@ -5033,7 +5083,7 @@ end
 #[test]
 fn public_item_import_exports_without_alias_symbol() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root
@@ -5041,7 +5091,7 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
         pub use {foo as bar} from dep
         "#
     ))?;
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -5052,9 +5102,9 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
         "#
     ))?;
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("pkg", root, [dep])
-        .into_test_result()?;
+        .into_result()?;
     let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert_eq!(exports.len(), 1);
@@ -5066,7 +5116,7 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 #[test]
 fn link_import_module_and_item_forms_resolve() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::math
@@ -5079,7 +5129,7 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5100,9 +5150,9 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
         "#
     ))?;
 
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [dep])
-        .into_test_result()?;
+        .into_result()?;
     let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert!(exports.contains(&Arc::from(Path::new("::app::entry"))));
@@ -5113,7 +5163,7 @@ fn link_import_module_and_item_forms_resolve() -> TestResult {
 #[test]
 fn link_import_single_segment_module_import_resolves() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace foo
@@ -5123,7 +5173,7 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5136,9 +5186,9 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [dep])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -5146,7 +5196,7 @@ fn link_import_single_segment_module_import_resolves() -> TestResult {
 #[test]
 fn link_import_item_form_rejects_submodule_target() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -5154,7 +5204,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         pub mod child
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep::child
@@ -5164,7 +5214,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5177,8 +5227,9 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [dep, child])
+        .into_result()
         .expect_err("item import of a submodule should be rejected");
 
     assert_diagnostic!(&err, "item import target '::dep::child' resolved to a module");
@@ -5189,7 +5240,7 @@ fn link_import_item_form_rejects_submodule_target() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_chain_resolves_order_independently() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -5197,7 +5248,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         pub const VALUE = 1
         "#
     ))?;
-    let mid = context.parse_module(source_file!(
+    let mid = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace mid
@@ -5205,7 +5256,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         pub use {VALUE as MID_VALUE} from dep
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5219,9 +5270,9 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [mid, dep])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -5229,7 +5280,7 @@ fn link_import_public_item_reexport_chain_resolves_order_independently() -> Test
 #[test]
 fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace dep
@@ -5239,7 +5290,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         end
         "#
     ))?;
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5254,7 +5305,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app::child
@@ -5263,9 +5314,9 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", root, [child, dep])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -5273,7 +5324,7 @@ fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
     let context = TestContext::new();
-    let a = context.parse_module(source_file!(
+    let a = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a
@@ -5281,7 +5332,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         pub use {B as A} from b
         "#
     ))?;
-    let b = context.parse_module(source_file!(
+    let b = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -5289,7 +5340,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         pub use {A as B} from a
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5303,8 +5354,9 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [a, b])
+        .into_result()
         .expect_err("public item re-export cycle should be rejected");
 
     assert_diagnostic!(&err, "import re-export cycle");
@@ -5315,7 +5367,7 @@ fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
 #[test]
 fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root
@@ -5324,7 +5376,7 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         pub use {B as A} from self::child
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace root::child
@@ -5332,7 +5384,7 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         pub use {A as B} from root
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace app
@@ -5346,8 +5398,9 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("app", consumer, [root, child])
+        .into_result()
         .expect_err("public item re-export cycle should be rejected");
 
     assert_diagnostic!(&err, "import re-export cycle");
@@ -5358,7 +5411,7 @@ fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected(
 #[test]
 fn package_module_surface_allows_downstream_import_of_root_module() -> TestResult {
     let context = TestContext::new();
-    let dep_root = context.parse_module(source_file!(
+    let dep_root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib
@@ -5366,7 +5419,7 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         pub mod api
         "#
     ))?;
-    let dep_api = context.parse_module(source_file!(
+    let dep_api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::api
@@ -5377,15 +5430,15 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         "#
     ))?;
 
-    let dep = Assembler::new(context.source_manager())
+    let dep = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dep", dep_root, [dep_api])
-        .into_test_result()?;
+        .into_result()?;
     assert!(dep.manifest.get_module(Path::new("::pkg::lib")).is_some());
     assert!(dep.manifest.get_module(Path::new("::pkg::lib::api")).is_some());
 
     let dep_bytes = dep.to_bytes();
     let dep = Arc::new(Package::read_from_bytes(&dep_bytes).map_err(Report::msg)?);
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace consumer
@@ -5398,10 +5451,10 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         "#
     ))?;
 
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(dep, Linkage::Static)?
         .assemble_library("consumer", consumer, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
     let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert!(exports.contains(&Arc::from(Path::new("::consumer::call"))));
@@ -5412,7 +5465,7 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
 #[test]
 fn package_module_surface_omits_private_submodules() -> TestResult {
     let context = TestContext::new();
-    let dep_root = context.parse_module(source_file!(
+    let dep_root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib
@@ -5421,7 +5474,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         mod internal
         "#
     ))?;
-    let dep_api = context.parse_module(source_file!(
+    let dep_api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::api
@@ -5433,7 +5486,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         end
         "#
     ))?;
-    let dep_internal = context.parse_module(source_file!(
+    let dep_internal = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::internal
@@ -5444,9 +5497,9 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         "#
     ))?;
 
-    let dep = Assembler::new(context.source_manager())
+    let dep = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dep", dep_root, [dep_api, dep_internal])
-        .into_test_result()?;
+        .into_result()?;
     let root_surface = dep
         .manifest
         .get_module(Path::new("::pkg::lib"))
@@ -5461,7 +5514,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
     assert!(dep.manifest.get_module(Path::new("::pkg::lib::internal")).is_none());
 
     let dep = Arc::new(Package::read_from_bytes(&dep.to_bytes()).map_err(Report::msg)?);
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace consumer
@@ -5474,10 +5527,10 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(dep, Linkage::Static)?
         .assemble_library("consumer", consumer, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -5487,7 +5540,7 @@ fn package_with_single_proc_export(
     export_path: &'static str,
     modules: impl IntoIterator<Item = PackageModule>,
 ) -> Result<Arc<Package>, Report> {
-    let seed = context.parse_module(source_file!(
+    let seed = context.parse_module_source_file(source_file!(
         context,
         r#"
         namespace seed
@@ -5497,9 +5550,9 @@ fn package_with_single_proc_export(
         end
         "#
     ))?;
-    let seed = Assembler::new(context.source_manager())
+    let seed = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("seed", seed, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
     let (node, digest) = seed
         .manifest
         .exports()
@@ -5531,7 +5584,9 @@ fn package_link_rejects_missing_module_surface_metadata() -> TestResult {
     let context = TestContext::new();
     let dep = package_with_single_proc_export(&context, "::dep::foo", [])?;
 
-    let err = match Assembler::new(context.source_manager()).with_package(dep, Linkage::Static) {
+    let err = match Assembler::with_sources(context.sources().as_ref().clone())
+        .with_package(dep, Linkage::Static)
+    {
         Ok(_) => panic!("compiled packages without module surfaces should be rejected"),
         Err(err) => err,
     };
@@ -5555,7 +5610,9 @@ fn package_link_rejects_incomplete_declared_submodule_surface_metadata() -> Test
         )],
     )?;
 
-    let err = match Assembler::new(context.source_manager()).with_package(dep, Linkage::Static) {
+    let err = match Assembler::with_sources(context.sources().as_ref().clone())
+        .with_package(dep, Linkage::Static)
+    {
         Ok(_) => panic!("compiled packages with incomplete module surfaces should be rejected"),
         Err(err) => err,
     };
@@ -5573,7 +5630,7 @@ fn package_link_rejects_incomplete_declared_submodule_surface_metadata() -> Test
 #[test]
 fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5586,8 +5643,9 @@ fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, None::<Box<Module>>)
+        .into_result()
         .expect_err("declared missing child module should be rejected");
 
     assert_diagnostic!(&err, "undefined module '::diag::root::missing'");
@@ -5598,7 +5656,7 @@ fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
 #[test]
 fn link_diagnostic_for_undeclared_child_module() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5608,7 +5666,7 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5619,8 +5677,9 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("undeclared child module should be rejected");
 
     assert_diagnostic!(&err, "module '::diag::root::child' is not declared");
@@ -5632,7 +5691,7 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
 #[test]
 fn link_diagnostic_for_private_submodule_import() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5644,7 +5703,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5654,7 +5713,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -5667,8 +5726,9 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("private submodule import should be rejected");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::child'");
@@ -5680,7 +5740,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
 #[test]
 fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5693,7 +5753,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         end
         "#
     ))?;
-    let internal = context.parse_module(source_file!(
+    let internal = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::internal
@@ -5704,7 +5764,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         end
         "#
     ))?;
-    let api = context.parse_module(source_file!(
+    let api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::api
@@ -5719,9 +5779,9 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [internal, api])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -5729,7 +5789,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
 #[test]
 fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5742,7 +5802,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         end
         "#
     ))?;
-    let parent = context.parse_module(source_file!(
+    let parent = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::parent
@@ -5750,7 +5810,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         mod hidden
         "#
     ))?;
-    let hidden = context.parse_module(source_file!(
+    let hidden = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::parent::hidden
@@ -5758,7 +5818,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         pub const VALUE = 1
         "#
     ))?;
-    let sibling = context.parse_module(source_file!(
+    let sibling = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::sibling
@@ -5771,8 +5831,9 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [parent, hidden, sibling])
+        .into_result()
         .expect_err("private nested submodule should not be visible to sibling of its parent");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::parent::hidden'");
@@ -5784,7 +5845,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
 #[test]
 fn link_diagnostic_for_module_reexport() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5796,7 +5857,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5806,7 +5867,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -5819,8 +5880,9 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("module re-export should be rejected");
 
     assert_diagnostic!(&err, "item import target '::diag::root::child' resolved to a module");
@@ -5832,7 +5894,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
 #[test]
 fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5844,7 +5906,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5855,7 +5917,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -5869,8 +5931,9 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("import through another import should be rejected");
 
     assert_diagnostic!(
@@ -5885,7 +5948,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
 #[test]
 fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let imported = context.parse_module(source_file!(
+    let imported = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep::child
@@ -5895,7 +5958,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         end
         "#
     ))?;
-    let global = context.parse_module(source_file!(
+    let global = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace child
@@ -5905,7 +5968,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -5919,8 +5982,9 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [imported, global])
+        .into_result()
         .expect_err("pub use through another import should be rejected before global lookup");
 
     assert_diagnostic!(&err, "import target 'child::p' cannot be resolved through import 'child'");
@@ -5932,7 +5996,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
 #[test]
 fn link_diagnostic_for_self_referential_module_import() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5944,7 +6008,7 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5957,8 +6021,9 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("module import of itself should be rejected");
 
     assert_diagnostic!(&err, "self-referential import of module 'diag::root::child'");
@@ -5970,7 +6035,7 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
 #[test]
 fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -5983,7 +6048,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -5994,8 +6059,9 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("same-scope submodule imports should be rejected even when aliased");
 
     assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
@@ -6007,7 +6073,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
 #[test]
 fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6020,7 +6086,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6031,8 +6097,9 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("self-relative same-scope submodule imports should be rejected");
 
     assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
@@ -6044,7 +6111,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
 #[test]
 fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6061,7 +6128,7 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6072,9 +6139,9 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6082,7 +6149,7 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
 #[test]
 fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6094,7 +6161,7 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6105,9 +6172,9 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6115,7 +6182,7 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
 #[test]
 fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6127,7 +6194,7 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6138,8 +6205,9 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("relative paths should not fall back to the global namespace");
 
     assert_diagnostic!(&err, "invalid relative item path 'diag::root::child::child_entry'");
@@ -6151,7 +6219,7 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
 #[test]
 fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep
@@ -6163,7 +6231,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep::child
@@ -6173,7 +6241,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -6186,9 +6254,9 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [dep, child])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6196,7 +6264,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
 #[test]
 fn self_relative_import_walks_public_submodules() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6210,7 +6278,7 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6221,9 +6289,9 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6231,7 +6299,7 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
 #[test]
 fn self_relative_import_rejects_private_descendant() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -6245,7 +6313,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -6253,7 +6321,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         mod hidden
         "#
     ))?;
-    let hidden = context.parse_module(source_file!(
+    let hidden = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child::hidden
@@ -6264,8 +6332,9 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child, hidden])
+        .into_result()
         .expect_err("private descendant import should be rejected");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::child::hidden'");
@@ -6276,7 +6345,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
 #[test]
 fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep
@@ -6287,7 +6356,7 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -6300,8 +6369,9 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [dep])
+        .into_result()
         .expect_err("subpath through item should be rejected");
 
     assert_diagnostic!(&err, "invalid symbol path");
@@ -6312,16 +6382,9 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
 
 #[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
-    use std::{
-        panic::{AssertUnwindSafe, catch_unwind},
-        sync::Arc,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use miden_assembly_syntax::Parse;
-
-    use crate::{Assembler, DefaultSourceManager};
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
 
     // Library module `b` exports a string constant and an alias to it.
     let module_b_src = r#"
@@ -6330,7 +6393,8 @@ namespace b
 pub const ERR1 = "oops"
 pub const ERR2 = ERR1
 "#;
-    let module_b = <&str as Parse>::parse(module_b_src, source_manager.clone())
+    let module_b = context
+        .parse_module_source_file(context.add_source("b.masm", module_b_src))
         .expect("module b parsing must succeed");
 
     // Executable module imports `ERR2` and uses it as an assertion error message.
@@ -6343,7 +6407,7 @@ end
 "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        let mut assembler = Assembler::new(source_manager);
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler
             .compile_and_statically_link(module_b)
             .expect("linking module b must succeed");
@@ -6379,7 +6443,7 @@ begin
     exec.main
 end"#
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -6417,7 +6481,7 @@ fn test_cross_module_constant_resolution() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -6430,7 +6494,7 @@ fn test_cross_module_constant_resolution() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -6443,9 +6507,9 @@ fn test_cross_module_constant_resolution() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("test", module_a, [module_b]).into_test_result()?;
+    let _ = assembler.assemble_library("test", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -6455,7 +6519,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -6468,7 +6532,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -6480,9 +6544,9 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_test_result()?;
+    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -6491,7 +6555,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -6503,7 +6567,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -6515,8 +6579,9 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -6528,7 +6593,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
 fn importing_private_constant_from_another_module_by_absolute_path_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -6540,7 +6605,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -6552,8 +6617,9 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private absolute constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -6565,7 +6631,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
 fn importing_private_type_from_another_module_is_rejected() -> TestResult {
     let context = TestContext::default();
 
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_a
@@ -6577,7 +6643,7 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module_b
@@ -6589,8 +6655,9 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module_a, [module_b])
+        .into_result()
         .expect_err("expected private type import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -6603,7 +6670,7 @@ fn public_item_import_reexporting_private_signature_is_rejected() {
     let context = TestContext::default();
 
     let module = context
-        .parse_module(source_file!(
+        .parse_module_source_file(source_file!(
             &context,
             r#"
                 namespace cycle::module_a
@@ -6619,8 +6686,9 @@ fn public_item_import_reexporting_private_signature_is_rejected() {
         ))
         .expect("private procedure signature should be valid before public re-export");
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected public re-export of private signature to be rejected");
 
     assert_diagnostic!(&err, "private type in exported procedure signature");
@@ -6632,7 +6700,7 @@ fn public_item_import_reexporting_private_type_is_rejected() {
     let context = TestContext::default();
 
     let module = context
-        .parse_module(source_file!(
+        .parse_module_source_file(source_file!(
             &context,
             r#"
                 namespace cycle::module_a
@@ -6644,8 +6712,9 @@ fn public_item_import_reexporting_private_type_is_rejected() {
         ))
         .expect("private type should be valid before public re-export");
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("library", module, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected public re-export of private type to be rejected");
 
     assert_diagnostic!(&err, "private type in exported type declaration");
@@ -6708,9 +6777,9 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
         "#
     );
 
-    let lib = Assembler::new(context.source_manager())
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dcrc", root, [a, b, c])
-        .into_test_result()?;
+        .into_result()?;
 
     let src = source_file!(
         &context,
@@ -6723,11 +6792,12 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
             end
         "#
     );
+    let src = context.parse_program(src)?;
 
-    let _program = Assembler::new(context.source_manager())
+    let _program = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib), Linkage::Dynamic)?
         .assemble_program("test", src)
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6770,9 +6840,9 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
         "#
     );
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("wallet", root, [memory, account])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -6791,12 +6861,14 @@ fn imported_main_alias_self_call_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program("test", program)
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_program("test", program)
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
     let err = assembled
         .unwrap()
+        .into_result()
         .expect_err("expected self-referential alias call to be rejected");
     assert_diagnostic!(&err, "found a cycle in the call graph");
     assert_diagnostic!(&err, "::$exec::$main");
@@ -6818,7 +6890,9 @@ fn rootless_call_cycle_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program("test", program)
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_program("test", program)
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6849,10 +6923,9 @@ fn cyclic_link_retry_is_structured_error_without_panicking() {
             "#
         ))
         .expect("program parsing must succeed");
-    let source_manager = context.source_manager();
 
     let first_attempt = catch_unwind(AssertUnwindSafe(|| {
-        let mut linker = Linker::new(source_manager.clone());
+        let mut linker = Linker::new();
         let first_err = linker
             .link([module.clone()], None::<Box<Module>>)
             .expect_err("expected cyclic program to be rejected on first link");
@@ -6901,7 +6974,9 @@ fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("cycle", a, [b])
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_library("cycle", a, [b])
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6943,7 +7018,9 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("cycle", a, [b])
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_library("cycle", a, [b])
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6961,7 +7038,7 @@ fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        context.parse_module(source_file!(
+        context.parse_module_source_file(source_file!(
             &context,
             "namespace m::n\n\npub use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000\n"
         ))
@@ -6980,7 +7057,7 @@ fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
 
     let context = TestContext::new();
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        context.parse_module(source_file!(
+        context.parse_module_source_file(source_file!(
             &context,
             r#"
                     namespace m::n
@@ -7027,29 +7104,23 @@ fn asm_import_direct_digest_invoke_assembles_without_source_import() {
 
 #[test]
 fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let program = r#"
         begin
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
         end
     "#;
 
-    let outcome = Module::parser(None).parse_str(None, program, source_manager);
-    assert!(!outcome.diagnostics.assess(&WarningsAsErrors));
-    outcome.value.expect("expected direct digest invocation to produce a module");
+    let source = context.add_source("program.masm", program);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected direct digest invocation to produce a module");
 }
 
 #[test]
 fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let program = r#"
         proc helper
             exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
@@ -7060,18 +7131,14 @@ fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
         end
     "#;
 
-    Assembler::new(source_manager)
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_program("program", program)
         .expect("expected direct digest invocation in helper proc to assemble");
 }
 
 #[test]
 fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -7079,19 +7146,17 @@ fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings
         use external::module as foo
     "#;
 
-    let outcome = Module::parser(None).parse_str(None, module, source_manager);
-    assert!(!outcome.diagnostics.assess(&WarningsAsErrors));
-    outcome.value.expect("expected forward-declared import to produce a module");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
 fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are_errors()
 {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -7101,9 +7166,11 @@ fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_wa
         use external::module as foo
     "#;
 
-    let outcome = Module::parser(None).parse_str(None, module, source_manager);
-    assert!(!outcome.diagnostics.assess(&WarningsAsErrors));
-    outcome.value.expect("expected forward-declared import to produce a module");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
@@ -7127,11 +7194,7 @@ fn kernel_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are
 
 #[test]
 fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
-    use std::sync::Arc;
-
-    use crate::DefaultSourceManager;
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
     let module = r#"
         namespace m
 
@@ -7139,9 +7202,11 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
         use external::module as foo
     "#;
 
-    let outcome = Module::parser(None).parse_str(None, module, source_manager);
-    assert!(!outcome.diagnostics.assess(&WarningsAsErrors));
-    outcome.value.expect("expected forward-declared import to produce a module");
+    let source = context.add_source("module.masm", module);
+    let _module = Module::parser(None)
+        .parse(None, source.span().source().id(), source.inner())
+        .into_result_with_policy(&WarningsAsErrors)
+        .expect("expected forward-declared import to produce a module");
 }
 
 #[test]
@@ -7157,7 +7222,7 @@ fn asm_import_source_digest_import_is_rejected_without_panicking() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::default().assemble_program("program", program)
+        Assembler::default().assemble_program("program", program).into_result()
     }));
 
     assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
@@ -7173,8 +7238,9 @@ fn invoking_local_type_alias_returns_error_instead_of_panicking() {
 
     let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
 
-    let result =
-        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program("program", masm)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::default().assemble_program("program", masm).into_result()
+    }));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");
@@ -7210,18 +7276,22 @@ pub proc fun(in: foo)
     push.1
 end"
     );
-    let lib = context.parse_module(lib_src).expect("library module parsing must succeed");
-    let library = Assembler::new(context.source_manager())
+    let lib = context
+        .parse_module_source_file(lib_src)
+        .expect("library module parsing must succeed");
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", lib, None::<Box<Module>>)
         .expect("library assembly must succeed");
 
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
     assembler
         .link_package(Arc::from(library), Linkage::Dynamic)
         .expect("library linking must succeed");
 
     let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
-    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program("program", program)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        assembler.assemble_program("program", program).into_result()
+    }));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");
@@ -7234,7 +7304,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
     // Module A defines and exports a constant
-    let module_a = context.parse_module(source_file!(
+    let module_a = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::"module::a"
@@ -7256,7 +7326,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     ))?;
 
     // Module B imports Module A and defines a constant using it
-    let module_b = context.parse_module(source_file!(
+    let module_b = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace cycle::module::b
@@ -7271,9 +7341,9 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
-    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_test_result()?;
+    let _ = assembler.assemble_library("cycle", module_a, [module_b]).into_result()?;
 
     Ok(())
 }
@@ -7292,14 +7362,10 @@ end
             assembler.link_package(lib.clone(), Linkage::Static)?;
         }
 
-        assembler
-            .assemble_program("program", program_source)
-            .into_test_result()
-            .map(|_| ())
+        assembler.assemble_program("program", program_source).into_result().map(|_| ())
     }
 
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let legit_mod = context
         .parse_module(
@@ -7321,11 +7387,11 @@ pub proc add add.2 end"##,
         )
         .expect("module must parse and analyse");
 
-    let legit_lib = Assembler::new(source_manager.clone())
+    let legit_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("legit", legit_mod, None::<Box<Module>>)
         .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
-    let attacker_lib = Assembler::new(source_manager)
+    let attacker_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("legit", attacker_mod, None::<Box<Module>>)
         .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
@@ -7342,7 +7408,6 @@ pub proc add add.2 end"##,
 #[test]
 fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
     let legit_mod = context
         .parse_module("namespace ::foo::bar\n\npub proc add add.1 end")
         .expect("module must parse and analyse");
@@ -7354,8 +7419,9 @@ pub proc add add.2 end"##,
         )
         .expect("module must parse and analyse");
 
-    let err = Assembler::new(source_manager)
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", legit_mod, [attacker_mod])
+        .into_result()
         .expect_err("expected duplicate canonical export paths to be rejected during assembly");
     assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
 }
@@ -7374,7 +7440,7 @@ end
 "#,
         )
         .expect("base module parsing must succeed");
-    let base = Assembler::new(context.source_manager())
+    let base = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", module, None::<Box<Module>>)
         .expect("base library assembly must succeed");
     let (node, digest) = base
@@ -7415,10 +7481,11 @@ fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResu
         end
         "#,
     )?;
-    let lib = Assembler::new(context.source_manager().clone())
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", lib_module, None::<Box<Module>>)
+        .into_result()
         .map(Arc::<Package>::from)?;
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(lib, Linkage::Static)?
         .assemble_program(
             "program",
@@ -7430,7 +7497,7 @@ fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResu
             end
             "#,
         )
-        .into_test_result()?;
+        .into_result()?;
 
     let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
     let entrypoint = package
@@ -7465,7 +7532,7 @@ end
 "#,
         )
         .expect("base module parsing must succeed");
-    let base = Assembler::new(context.source_manager())
+    let base = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", module, None::<Box<Module>>)
         .expect("base library assembly must succeed");
     let (node, digest) = base
@@ -7511,7 +7578,7 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace $kernel::lib
@@ -7522,9 +7589,9 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
             "#
     ))?;
 
-    let _ = Assembler::new(context.source_manager())
+    let _ = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel, [lib])
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -7550,7 +7617,7 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace userspace
@@ -7577,17 +7644,18 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager())
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel, None)
-        .into_test_result()?;
+        .into_result()?;
     let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
     let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
 
-    let mut assembler = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?;
-    assembler.compile_and_statically_link(lib).into_test_result()?;
+    let mut assembler =
+        Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel))?;
+    assembler.compile_and_statically_link(lib).into_result()?;
     let program = assembler
-        .assemble_program("program", source)
-        .into_test_result()?
+        .assemble_program("program", source.inner().as_str())
+        .into_result()?
         .unwrap_program();
 
     let mast = {
@@ -7624,7 +7692,7 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     ))?;
 
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
             namespace userspace
@@ -7644,17 +7712,19 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager())
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel("kernel", kernel, None)
-        .into_test_result()?;
-    let lib = Assembler::new(context.source_manager())
+        .into_result()?;
+    let lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("lib", lib, None::<Box<Module>>)
-        .into_test_result()?;
+        .into_result()?;
 
-    let error = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?
-        .with_package(Arc::from(lib), Linkage::Static)?
-        .assemble_program("program", source)
-        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+    let error =
+        Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), Arc::from(kernel))?
+            .with_package(Arc::from(lib), Linkage::Static)?
+            .assemble_program("program", source.inner().as_str())
+            .into_result()
+            .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic!(&error, "invalid syscall: callee must be resolvable to kernel module");
     assert_diagnostic!(&error, "syscall.userspace::bar");
@@ -7667,7 +7737,6 @@ fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -7675,7 +7744,7 @@ pub proc k1
 end
 "#;
 
-    let kernel_lib = Assembler::new(source_manager.clone())
+    let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -7683,8 +7752,11 @@ end
         )
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
-        .expect("test package should be valid");
+    let assembler = Assembler::with_sources_and_kernel(
+        context.sources().as_ref().clone(),
+        Arc::from(kernel_lib),
+    )
+    .expect("test package should be valid");
 
     let program_src = r#"
 proc dup
@@ -7706,7 +7778,6 @@ end
 #[test]
 fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configured() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -7714,7 +7785,7 @@ pub proc k1
 end
 "#;
 
-    let kernel_lib = Assembler::new(source_manager.clone())
+    let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -7722,8 +7793,11 @@ end
         )
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
-        .expect("test kernel should be valid");
+    let assembler = Assembler::with_sources_and_kernel(
+        context.sources().as_ref().clone(),
+        Arc::from(kernel_lib),
+    )
+    .expect("test kernel should be valid");
 
     let program_src = r#"
 begin
@@ -7733,6 +7807,7 @@ end
 
     let err = assembler
         .assemble_program("program", program_src)
+        .into_result()
         .expect_err("expected unknown digest syscall to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -7740,7 +7815,7 @@ end
 #[test]
 fn syscall_without_kernel_is_rejected_at_assembly_time() {
     let context = TestContext::default();
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     let program_src = r#"
 begin
@@ -7750,6 +7825,7 @@ end
 
     let err = assembler
         .assemble_program("program", program_src)
+        .into_result()
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -7757,7 +7833,6 @@ end
 #[test]
 fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
     let context = TestContext::default();
-    let source_manager = context.source_manager();
 
     let kernel_src = r#"
 pub proc k1
@@ -7765,7 +7840,7 @@ pub proc k1
 end
 "#;
 
-    let kernel = Assembler::new(source_manager.clone())
+    let kernel = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
@@ -7791,10 +7866,14 @@ end
     ];
 
     for (kind, program_src) in cases {
-        let err = Assembler::with_kernel(source_manager.clone(), Arc::clone(&kernel))
-            .expect("test kernel should be valid")
-            .assemble_program("program", program_src)
-            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        let err = Assembler::with_sources_and_kernel(
+            context.sources().as_ref().clone(),
+            Arc::clone(&kernel),
+        )
+        .expect("test kernel should be valid")
+        .assemble_program("program", program_src)
+        .into_result()
+        .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
         assert_diagnostic!(err, "syscall");
     }
 }
@@ -7804,7 +7883,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     let context = TestContext::default();
 
     // The name of this library is `lib::lib` on purpose
-    let lib = context.parse_module(source_file!(
+    let lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace lib::lib
@@ -7815,13 +7894,13 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let lib = assembler.assemble_library("lib", lib, None::<Box<Module>>).into_test_result()?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let lib = assembler.assemble_library("lib", lib, None::<Box<Module>>).into_result()?;
 
     // This import's default alias is `lib`, which is also the first component of its global
     // target. That must still resolve globally rather than being mistaken for an import-through-
     // import attempt.
-    let assembler = Assembler::new(context.source_manager());
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
     let _ = assembler
         .with_package(Arc::from(lib), Linkage::Static)?
         .assemble_program(
@@ -7834,7 +7913,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
         end
         "#,
         )
-        .into_test_result()?;
+        .into_result()?;
 
     Ok(())
 }
@@ -7844,7 +7923,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
 fn test_linking_recursive_expansion() -> TestResult {
     let context = TestContext::default();
 
-    let a_lib = context.parse_module(source_file!(
+    let a_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a
@@ -7856,7 +7935,7 @@ fn test_linking_recursive_expansion() -> TestResult {
         "#
     ))?;
 
-    let b_lib = context.parse_module(source_file!(
+    let b_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -7868,8 +7947,8 @@ fn test_linking_recursive_expansion() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_test_result()?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_result()?;
 
     Ok(())
 }
@@ -7879,7 +7958,7 @@ fn test_linking_recursive_expansion() -> TestResult {
 fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     let context = TestContext::default();
 
-    let a_lib = context.parse_module(source_file!(
+    let a_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace a::a
@@ -7891,7 +7970,7 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         "#
     ))?;
 
-    let b_lib = context.parse_module(source_file!(
+    let b_lib = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace b
@@ -7903,8 +7982,8 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         "#
     ))?;
 
-    let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_test_result()?;
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    let _ = assembler.assemble_library("lib", a_lib, [b_lib]).into_result()?;
 
     Ok(())
 }
@@ -7927,14 +8006,14 @@ fn assemble_library_with_num_locals(
           "
     );
 
-    let mut module = context.parse_module(source)?;
+    let mut module = context.parse_module_source_file(source)?;
     for proc in module.procedures_mut() {
         proc.set_num_locals(num_locals);
     }
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", module, None::<Box<Module>>)
-        .into_test_result()
+        .into_result()
 }
 
 #[test]
@@ -8001,11 +8080,10 @@ fn test_entrypoint_with_locals_via_constructor_panics() {
         Procedure::new(SourceSpan::default(), Visibility::Public, ProcedureName::main(), 4, body);
 
     let mut module = Module::new_executable();
-    module
-        .define_procedure(main, context.source_manager())
-        .expect("failed to define entrypoint");
+    module.define_procedure(main).expect("failed to define entrypoint");
 
-    let _ = Assembler::new(context.source_manager()).assemble_program("test", module);
+    let _ = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_program("test", module);
 }
 
 /// Pins the cycle cost of every instruction documented in
@@ -8086,7 +8164,8 @@ fn field_operation_cycle_costs_match_docs() {
         let context = TestContext::default();
         let body = core::iter::repeat_n(instruction, copies).collect::<Vec<_>>().join("\n    ");
         let source = source_file!(&context, format!("begin\n    {body}\nend"));
-        let program = Assembler::new(context.source_manager())
+        let source = context.parse_program(source).expect("source should parse");
+        let program = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_program("program", source)
             .expect("assembly failed")
             .unwrap_program();

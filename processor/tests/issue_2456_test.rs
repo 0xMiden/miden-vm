@@ -7,10 +7,6 @@ use miden_processor::{
 
 #[test]
 fn test_issue_2456_statically_linked_library_call() {
-    use std::sync::Arc;
-
-    use miden_assembly::DefaultSourceManager;
-
     let test_module_source = "
         namespace test::module_1
 
@@ -21,13 +17,11 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let mut assembler = Assembler::new(source_manager);
+    let mut assembler = Assembler::new();
 
     let library = assembler
         .clone()
         .assemble_library("library", test_module_source, None::<Box<miden_assembly::ast::Module>>)
-        .value
         .unwrap();
 
     // This program calls a procedure from a statically linked library.
@@ -42,7 +36,7 @@ fn test_issue_2456_statically_linked_library_call() {
     ";
 
     assembler.link_package(library.into(), miden_assembly::Linkage::Static).unwrap();
-    let program = assembler.assemble_program("program", source).value.unwrap().unwrap_program();
+    let program = assembler.assemble_program("program", source).unwrap().unwrap_program();
 
     // Execute the program. This should succeed after static linking.
     let stack_inputs = StackInputs::default();

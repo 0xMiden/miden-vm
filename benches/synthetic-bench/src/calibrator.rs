@@ -23,8 +23,8 @@ pub const CALIBRATION_ITERS: u64 = 1000;
 pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let outcome = Assembler::default().assemble_program("program", source);
     let program = outcome
-        .value
-        .ok_or_else(|| MeasurementError::Assembly(format!("{:?}", outcome.diagnostics)))?
+        .into_result()
+        .map_err(|report| MeasurementError::Assembly(report.to_string()))?
         .unwrap_program();
 
     let mut host = DefaultHost::default();

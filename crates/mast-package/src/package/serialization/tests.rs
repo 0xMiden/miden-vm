@@ -25,6 +25,7 @@ use miden_core::{
     },
     utils::IndexVec,
 };
+use miden_diagnostics::Span;
 
 use super::{
     MAGIC_PACKAGE, PACKAGE_BYTE_READ_BUDGET_MULTIPLIER, Package, PackageManifest, Section, VERSION,
@@ -585,9 +586,7 @@ fn package_manifest_deserialization_rejects_malformed_quoted_constant_leaf() {
         bad.clone(),
         PackageExport::Constant(crate::ConstantExport {
             path: bad,
-            value: miden_assembly_syntax::ast::ConstantValue::Int(
-                miden_debug_types::Span::unknown(1u32.into()),
-            ),
+            value: miden_assembly_syntax::ast::ConstantValue::Int(Span::unknown(1u32.into())),
         }),
     )]);
 

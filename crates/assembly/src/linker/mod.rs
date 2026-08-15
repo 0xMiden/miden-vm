@@ -63,10 +63,10 @@ use miden_assembly_syntax::{
         self, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
         Path, SymbolResolution, Visibility, types,
     },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::{ItemInfo, ModuleDescriptor},
 };
 use miden_core::{Word, advice::AdviceMap, program::KernelDescriptor};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 use miden_mast_package::Package as MastPackage;
 use smallvec::{SmallVec, smallvec};
 
@@ -197,15 +197,19 @@ pub struct Linker {
     /// This is always provided, with an empty kernel being the default.
     kernel: KernelDescriptor,
     kernel_package: Option<Arc<MastPackage>>,
-    /// The source manager to use when emitting diagnostics.
-    source_manager: Arc<dyn SourceManager>,
+}
+
+impl Default for Linker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
 /// Constructors
 impl Linker {
-    /// Instantiate a new [Linker], using the provided [SourceManager] to resolve source info.
-    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
+    /// Instantiate a new [Linker].
+    pub fn new() -> Self {
         Self {
             libraries: Default::default(),
             static_libraries: Default::default(),
@@ -215,7 +219,6 @@ impl Linker {
             kernel_index: None,
             kernel: Default::default(),
             kernel_package: None,
-            source_manager,
         }
     }
 
@@ -437,13 +440,10 @@ impl Linker {
     /// Returns a new [Linker] instantiated from the provided kernel and kernel info module.
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
-    pub fn with_kernel(
-        source_manager: Arc<dyn SourceManager>,
-        kernel_package: Arc<MastPackage>,
-    ) -> Result<Self, Report> {
+    pub fn with_kernel(kernel_package: Arc<MastPackage>) -> Result<Self, Report> {
         log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
-        let mut linker = Self::new(source_manager);
+        let mut linker = Self::new();
         linker.link_with_kernel(kernel_package)?;
 
         Ok(linker)
@@ -1097,10 +1097,10 @@ mod tests {
             Ident, InvocationTarget, InvokeKind, ItemIndex, Path, SymbolResolutionError,
             Visibility, types,
         },
-        debuginfo::{SourceSpan, Span},
         module::{ItemInfo, TypeInfo},
     };
     use miden_core::Felt;
+    use miden_diagnostics::{SourceSpan, Span};
 
     use super::*;
     use crate::{
@@ -1112,7 +1112,6 @@ mod tests {
     #[test]
     fn failed_kernel_link_restores_kernel_state() {
         let context = TestContext::default();
-        let source_manager = context.source_manager();
         let kernel_source = r#"
                 pub proc a
                     call.b
@@ -1124,7 +1123,7 @@ mod tests {
                 "#;
 
         let userspace = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 r#"
                     namespace userspace
@@ -1136,7 +1135,7 @@ mod tests {
             ))
             .expect("userspace module parsing must succeed");
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         let userspace_index = linker
             .link([userspace], None)
             .expect("userspace module must link successfully")
@@ -1184,11 +1183,9 @@ mod tests {
 
     #[test]
     fn link_library_keeps_same_interface_libraries_with_distinct_forest_commitments() {
-        use crate::testing::TestOutcomeExt;
-
         let context = TestContext::default();
         let module = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 r#"
                 namespace lib
@@ -1199,7 +1196,7 @@ mod tests {
                 "#
             ))
             .expect("library module should parse");
-        let package: Arc<MastPackage> = Assembler::new(context.source_manager())
+        let package: Arc<MastPackage> = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_library("lib", module, None::<Box<Module>>)
             .expect("library should assemble")
             .into();
@@ -1211,7 +1208,7 @@ mod tests {
         assert_eq!(package.interface_digest().unwrap(), with_advice.interface_digest().unwrap());
         assert_ne!(package.mast_forest().commitment(), with_advice.mast_forest().commitment());
 
-        let mut linker = Linker::new(context.source_manager());
+        let mut linker = Linker::new();
         linker
             .link_library(LinkLibrary::from_package(package).with_linkage(Linkage::Static))
             .expect("first library should link");
@@ -1225,8 +1222,7 @@ mod tests {
 
     #[test]
     fn oversized_link_module_resolution_returns_structured_error() {
-        let context = TestContext::default();
-        let mut linker = Linker::new(context.source_manager());
+        let mut linker = Linker::new();
         let module_id = ModuleIndex::new(0);
         let path = Arc::<Path>::from(Path::new("::m::huge"));
         let mut symbols = Vec::with_capacity(ItemIndex::MAX_ITEMS + 1);
@@ -1289,7 +1285,7 @@ mod tests {
     fn analysis_mode_commits_cycle_and_reports_procedure_paths() {
         let context = TestContext::default();
         let module = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 r#"
                 namespace proj
@@ -1318,7 +1314,7 @@ mod tests {
             ))
             .expect("cyclic module must parse");
 
-        let mut linker = Linker::new(context.source_manager());
+        let mut linker = Linker::new();
         let analysis = linker
             .link_analysis([module], None)
             .expect("analysis link must not reject a static cycle");
@@ -1376,7 +1372,7 @@ mod tests {
     fn analysis_mode_reports_no_cycle_for_acyclic_graph() {
         let context = TestContext::default();
         let module = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 r#"
                 namespace proj
@@ -1392,7 +1388,7 @@ mod tests {
             ))
             .expect("acyclic module must parse");
 
-        let mut linker = Linker::new(context.source_manager());
+        let mut linker = Linker::new();
         let analysis = linker
             .link_analysis([module], None)
             .expect("analysis link must succeed for an acyclic graph");
@@ -1414,7 +1410,7 @@ mod tests {
     fn strict_mode_rejects_cycle_and_rolls_back() {
         let context = TestContext::default();
         let module = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 r#"
                 namespace proj
@@ -1430,7 +1426,7 @@ mod tests {
             ))
             .expect("cyclic module must parse");
 
-        let mut linker = Linker::new(context.source_manager());
+        let mut linker = Linker::new();
         let err = linker
             .link([module], None)
             .expect_err("strict linking must reject a static cycle before MAST is built");
@@ -1465,7 +1461,7 @@ mod tests {
         for mode in [LinkMode::Strict, LinkMode::Analysis] {
             let context = TestContext::default();
             let module = context
-                .parse_module(source_file!(
+                .parse_module_source_file(source_file!(
                     &context,
                     r#"
                     namespace proj
@@ -1481,7 +1477,7 @@ mod tests {
                 ))
                 .expect("module with an unresolved call must parse");
             let support = context
-                .parse_module(source_file!(
+                .parse_module_source_file(source_file!(
                     &context,
                     r#"
                     namespace support
@@ -1493,7 +1489,7 @@ mod tests {
                 ))
                 .expect("support module must parse");
 
-            let mut linker = Linker::new(context.source_manager());
+            let mut linker = Linker::new();
             let err = match mode {
                 LinkMode::Strict => linker.link([module], [support]).map(drop),
                 LinkMode::Analysis => linker.link_analysis([module], [support]).map(drop),

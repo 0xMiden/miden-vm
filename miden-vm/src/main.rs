@@ -4,6 +4,7 @@ use std::ffi::{OsStr, OsString};
 
 use clap::{FromArgMatches, Parser, Subcommand};
 use miden_assembly::diagnostics::Report;
+use miden_vm::diagnostics::{ExitWithOutcome, Outcome};
 #[cfg(feature = "tracing-forest")]
 use tracing_forest::ForestLayer;
 #[cfg(not(feature = "tracing-forest"))]
@@ -103,13 +104,20 @@ pub enum Actions {
 
 /// CLI entry point
 impl Cli {
-    pub fn execute(&self) -> Result<(), Report> {
-        match &self.action {
-            Actions::Compile(compile) => compile.execute(),
-            Actions::Bundle(compile) => compile.execute(),
+    pub fn execute(&self) -> Outcome<()> {
+        let result = match &self.action {
+            Actions::Compile(compile) => return compile.execute(),
+            Actions::Bundle(compile) => return compile.execute(),
             Actions::Prove(prove) => prove.execute(),
             Actions::Run(run) => run.execute(),
             Actions::Verify(verify) => verify.execute(),
+        };
+        match result {
+            Ok(()) => Outcome {
+                result: Ok(()),
+                diagnostics: Default::default(),
+            },
+            Err(report) => Outcome::from_report(report),
         }
     }
 
@@ -120,12 +128,15 @@ impl Cli {
 }
 
 /// Executable entry point
-pub fn main() -> Result<(), Report> {
+pub fn main() -> ExitWithOutcome {
     // read command-line args
     let cli = <MidenVmCli as clap::CommandFactory>::command();
     let matches = cli.get_matches();
     let parsed = MidenVmCli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
-    let cli: Cli = parsed.try_into()?;
+    let cli: Cli = match parsed.try_into() {
+        Ok(cli) => cli,
+        Err(report) => return Outcome::from_report(report).into_exit(),
+    };
 
     initialize_diagnostics();
 
@@ -154,7 +165,7 @@ pub fn main() -> Result<(), Report> {
     }
 
     // execute cli action
-    cli.execute()
+    cli.execute().into_exit()
 }
 
 fn initialize_diagnostics() {

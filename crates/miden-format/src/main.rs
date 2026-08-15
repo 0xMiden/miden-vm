@@ -6,7 +6,6 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::Arc,
 };
 
 use clap::Parser;
@@ -16,20 +15,18 @@ use miden_assembly_syntax_cst::{
     Outcome,
     diagnostics::{
         DiagnosticSet, EmissionFailure, Emitter, IoEmissionError, PanicHookOptions, PrepareError,
-        StderrEmitter, install_panic_hook,
+        SourceId, SourceMap, SourceMapError, SourceNamespace, StderrEmitter, install_panic_hook,
     },
-    parse_source_file,
-};
-use miden_debug_types::{
-    DefaultSourceManager, SourceFile, SourceLanguage, SourceManager, SourceManagerError,
-    SourceManagerExt, Uri,
+    parse,
 };
 
 use self::{config::Config, formatter::format_syntax};
 
 #[derive(Debug)]
 struct Input {
-    source: Arc<SourceFile>,
+    source_id: SourceId,
+    source: String,
+    display_name: String,
     path: Option<PathBuf>,
 }
 
@@ -67,8 +64,14 @@ enum CliError {
         #[source]
         source: io::Error,
     },
-    #[error("failed to write formatted source to '{path}': not a valid file path")]
-    InvalidSourceUri { path: String },
+    #[error("failed to read source from '{path}': {source}")]
+    ReadFile {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
+    #[error("input '{display_name}' has no filesystem output path")]
+    MissingOutputPath { display_name: String },
     #[error("failed to read source from stdin: {0}")]
     ReadStdin(#[source] io::Error),
     #[error("failed to write formatted source to stdout: {0}")]
@@ -80,7 +83,7 @@ enum CliError {
     #[error(transparent)]
     Config(#[from] config::ConfigError),
     #[error(transparent)]
-    SourceManagerError(#[from] SourceManagerError),
+    SourceMap(#[from] SourceMapError),
     #[error(transparent)]
     WalkDir(#[from] walkdir::Error),
     #[error("failed to prepare syntax diagnostics: {0}")]
@@ -103,7 +106,9 @@ fn run() -> Result<(), CliError> {
     let _ = install_panic_hook(PanicHookOptions::default());
 
     let cli = Cli::parse();
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = SourceMap::new(
+        SourceNamespace::fresh().expect("source namespace space should not be exhausted"),
+    );
 
     let config = if let Ok(cwd) = std::env::current_dir() {
         let path = cwd.join("miden-format.toml");
@@ -120,21 +125,25 @@ fn run() -> Result<(), CliError> {
         cli.config.clone().unwrap_or_default()
     };
 
-    let inputs = collect_inputs(&cli, &source_manager)?;
+    let inputs = collect_inputs(&cli, &mut sources)?;
 
     let mut has_syntax_errors = false;
     let mut formatted_inputs = Vec::with_capacity(inputs.len());
     for input in inputs {
-        let Outcome { value: parse, diagnostics } = parse_source_file(input.source.clone());
+        let Outcome { result: parsed, diagnostics } = parse(input.source_id, &input.source);
         if !diagnostics.is_empty() {
-            emit_diagnostics(&diagnostics, input.source.as_ref())?;
+            emit_diagnostics(&diagnostics, &sources)?;
         }
+        let Ok(parsed) = parsed else {
+            has_syntax_errors = true;
+            continue;
+        };
         if diagnostics.has_errors() {
             has_syntax_errors = true;
             continue;
         }
 
-        formatted_inputs.push((input, format_syntax(&config, &parse.syntax())));
+        formatted_inputs.push((input, format_syntax(&config, &parsed.syntax())));
     }
 
     if has_syntax_errors {
@@ -144,9 +153,8 @@ fn run() -> Result<(), CliError> {
     if cli.check {
         let mut mismatches = Vec::new();
         for (input, formatted) in &formatted_inputs {
-            let source = &input.source;
-            if source.as_str() != formatted {
-                mismatches.push(source.uri());
+            if input.source != *formatted {
+                mismatches.push(input.display_name.as_str());
             }
         }
 
@@ -168,8 +176,7 @@ fn run() -> Result<(), CliError> {
     }
 
     for (input, formatted) in formatted_inputs {
-        let source = &input.source;
-        if source.as_str() == formatted {
+        if input.source == formatted {
             continue;
         }
 
@@ -323,7 +330,7 @@ fn output_path_for_input(input: &Input) -> Result<&Path, CliError> {
     input
         .path
         .as_deref()
-        .ok_or_else(|| CliError::InvalidSourceUri { path: input.source.uri().to_string() })
+        .ok_or_else(|| CliError::MissingOutputPath { display_name: input.display_name.clone() })
 }
 
 fn unique_temp_suffix() -> u128 {
@@ -353,15 +360,21 @@ fn render_diagnostics(
     emitter.into_inner()
 }
 
-fn collect_inputs(cli: &Cli, source_manager: &dyn SourceManager) -> Result<Vec<Input>, CliError> {
+fn collect_inputs(cli: &Cli, sources: &mut SourceMap) -> Result<Vec<Input>, CliError> {
     let mut inputs = Vec::with_capacity(cli.paths.len());
 
     if cli.stdin {
         let path = cli.stdin_filepath.clone().unwrap_or_else(|| PathBuf::from("<stdin>"));
         let mut source = String::new();
         io::stdin().read_to_string(&mut source).map_err(CliError::ReadStdin)?;
-        let source = source_manager.load(SourceLanguage::Masm, Uri::from(path.as_path()), source);
-        inputs.push(Input { source, path: None });
+        let display_name = path.display().to_string();
+        let source_id = sources.insert(display_name.clone(), source.clone(), None)?;
+        inputs.push(Input {
+            source_id,
+            source,
+            display_name,
+            path: None,
+        });
         return Ok(inputs);
     }
 
@@ -383,36 +396,44 @@ fn collect_inputs(cli: &Cli, source_manager: &dyn SourceManager) -> Result<Vec<I
                     continue;
                 }
                 let path = entry.path().to_path_buf();
-                let source = source_manager.load_file(&path)?;
-                inputs.push(Input { source, path: Some(path) });
+                inputs.push(read_input(&path, sources)?);
             }
         } else {
-            let source = source_manager.load_file(path)?;
-            inputs.push(Input { source, path: Some(path.clone()) });
+            inputs.push(read_input(path, sources)?);
         }
     }
 
     Ok(inputs)
 }
 
+fn read_input(path: &Path, sources: &mut SourceMap) -> Result<Input, CliError> {
+    let source = fs::read_to_string(path)
+        .map_err(|source| CliError::ReadFile { path: path.display().to_string(), source })?;
+    let display_name = path.display().to_string();
+    let source_id = sources.insert(display_name.clone(), source.clone(), None)?;
+    Ok(Input {
+        source_id,
+        source,
+        display_name,
+        path: Some(path.to_path_buf()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{io::ErrorKind, path::Path};
+    use std::io::ErrorKind;
 
     use super::*;
 
     #[test]
     fn parse_diagnostics_include_source_context() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let source = source_manager.load(
-            SourceLanguage::Masm,
-            Uri::from(Path::new("snippet.masm")),
-            "begin".to_string(),
-        );
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(2));
+        let source = "begin".to_string();
+        let source_id = sources.insert("snippet.masm", source.clone(), None).unwrap();
 
-        let outcome = parse_source_file(source.clone());
+        let outcome = parse(source_id, &source);
         assert!(outcome.diagnostics.has_errors());
-        let rendered = render_diagnostics(&outcome.diagnostics, source.as_ref());
+        let rendered = render_diagnostics(&outcome.diagnostics, &sources);
 
         assert!(rendered.contains("snippet.masm"));
         assert!(rendered.contains("begin"));
@@ -586,14 +607,16 @@ mod tests {
 
     #[test]
     fn output_path_uses_original_path_instead_of_source_uri_round_trip() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let source = source_manager.load(
-            SourceLanguage::Masm,
-            Uri::new("file:///source-uri.masm"),
-            "begin\nend\n".to_string(),
-        );
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(3));
+        let source = "begin\nend\n".to_string();
+        let source_id = sources.insert("file:///source-uri.masm", source.clone(), None).unwrap();
         let path = PathBuf::from("original-path.masm");
-        let input = Input { source, path: Some(path.clone()) };
+        let input = Input {
+            source_id,
+            source,
+            display_name: "file:///source-uri.masm".to_string(),
+            path: Some(path.clone()),
+        };
 
         assert_eq!(output_path_for_input(&input).unwrap(), path.as_path());
     }

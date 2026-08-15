@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
-use core::fmt;
+use core::{cell::RefCell, fmt};
 
-use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
 use miden_diagnostics::{
-    AnnotateRenderer, DefaultFailurePolicy, DiagnosticSet, FailurePolicy, Outcome, WarningsAsErrors,
+    AnnotateRenderer, DefaultFailurePolicy, DiagnosticSet, Outcome, SourceMap, SourceNamespace,
+    SourceProvider, SourceSpan, Span, TextRange, WarningsAsErrors,
 };
 
 use crate::{
@@ -13,44 +13,32 @@ use crate::{
 
 /// The result adapter used by syntax tests while public parser APIs expose [`Outcome`].
 pub struct TestOutcome<T> {
-    outcome: Outcome<Option<T>>,
-    source_manager: Arc<dyn SourceManager>,
+    outcome: Outcome<T>,
+    sources: Arc<SourceMap>,
     warnings_as_errors: bool,
 }
 
 impl<T> TestOutcome<T> {
-    fn new(
-        outcome: Outcome<Option<T>>,
-        source_manager: Arc<dyn SourceManager>,
-        warnings_as_errors: bool,
-    ) -> Self {
-        Self {
-            outcome,
-            source_manager,
-            warnings_as_errors,
-        }
+    fn new(outcome: Outcome<T>, sources: Arc<SourceMap>, warnings_as_errors: bool) -> Self {
+        Self { outcome, sources, warnings_as_errors }
     }
 
     fn is_failure(&self) -> bool {
-        let policy: &dyn FailurePolicy = if self.warnings_as_errors {
-            &WarningsAsErrors
+        if self.warnings_as_errors {
+            self.outcome.is_err_with_policy(&WarningsAsErrors)
         } else {
-            &DefaultFailurePolicy
-        };
-        self.outcome.value.is_none() || self.outcome.diagnostics.assess(policy)
+            self.outcome.is_err_with_policy(&DefaultFailurePolicy)
+        }
     }
 
     #[track_caller]
     pub fn expect(self, message: &str) -> T {
-        if self.is_failure() {
-            panic!("{message}:\n{}", self.render());
-        }
-        self.outcome.value.expect("a successful parse must produce a value")
+        self.outcome.expect(message)
     }
 
     #[track_caller]
     pub fn unwrap(self) -> T {
-        self.expect("expected parsing to succeed")
+        self.outcome.unwrap()
     }
 
     #[track_caller]
@@ -61,7 +49,7 @@ impl<T> TestOutcome<T> {
         if self.is_failure() {
             op(self.into_failure())
         } else {
-            self.outcome.value.expect("a successful parse must produce a value")
+            self.outcome.result.expect("a successful parse must produce a value")
         }
     }
 
@@ -77,14 +65,10 @@ impl<T> TestOutcome<T> {
         self.is_failure()
     }
 
-    fn render(&self) -> String {
-        render_diagnostic_set(&self.outcome.diagnostics, self.source_manager.as_ref())
-    }
-
     fn into_failure(self) -> TestFailure {
         TestFailure {
             diagnostics: self.outcome.diagnostics,
-            source_manager: self.source_manager,
+            sources: self.sources,
         }
     }
 }
@@ -92,7 +76,7 @@ impl<T> TestOutcome<T> {
 /// Diagnostics from a failed test parse, with the source universe needed for rendering.
 pub struct TestFailure {
     diagnostics: DiagnosticSet,
-    source_manager: Arc<dyn SourceManager>,
+    sources: Arc<SourceMap>,
 }
 
 impl TestFailure {
@@ -108,8 +92,9 @@ impl TestFailure {
         self.diagnostics.iter().filter_map(|entry| entry.diagnostic.downcast_ref::<T>())
     }
 
-    pub fn source_slice(&self, span: miden_diagnostics::SourceSpan) -> Option<&str> {
-        self.source_manager.source_slice(span).ok()
+    pub fn source_slice(&self, span: SourceSpan) -> Option<&str> {
+        let source = self.sources.get(span.source().id())?;
+        source.text?.get(span.range().into_slice_index())
     }
 }
 
@@ -121,14 +106,11 @@ impl fmt::Debug for TestFailure {
 
 impl fmt::Display for TestFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&render_diagnostic_set(&self.diagnostics, self.source_manager.as_ref()))
+        formatter.write_str(&render_diagnostic_set(&self.diagnostics, self.sources.as_ref()))
     }
 }
 
-pub fn render_diagnostic_set(
-    diagnostics: &DiagnosticSet,
-    sources: &dyn miden_diagnostics::SourceProvider,
-) -> String {
+pub fn render_diagnostic_set(diagnostics: &DiagnosticSet, sources: &dyn SourceProvider) -> String {
     let prepared = diagnostics.prepare(sources).expect("diagnostics should prepare");
     let renderer = AnnotateRenderer::default();
     let mut output = String::new();
@@ -141,7 +123,7 @@ pub fn render_diagnostic_set(
 
 /// A [SyntaxTestContext] provides common functionality for all syntax-related tests.
 pub struct SyntaxTestContext {
-    source_manager: Arc<dyn SourceManager>,
+    sources: RefCell<SourceMap>,
     warnings_as_errors: bool,
 }
 
@@ -158,7 +140,7 @@ impl SyntaxTestContext {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
         Self {
-            source_manager: Arc::new(DefaultSourceManager::default()),
+            sources: RefCell::new(SourceMap::new(SourceNamespace::new_unchecked(1))),
             warnings_as_errors: false,
         }
     }
@@ -169,76 +151,70 @@ impl SyntaxTestContext {
     }
 
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.source_manager.clone()
+    pub fn sources(&self) -> Arc<SourceMap> {
+        Arc::new(self.sources.borrow().clone())
     }
 
-    pub fn assess<T>(&self, outcome: Outcome<Option<T>>) -> TestOutcome<T> {
-        TestOutcome::new(outcome, self.source_manager(), self.warnings_as_errors)
+    pub fn add_source(&self, name: impl Into<String>, text: impl Into<String>) -> Span<String> {
+        let text = text.into();
+        let source_id = self
+            .sources
+            .borrow_mut()
+            .insert(name, text.clone(), None)
+            .expect("test source must fit in the source map");
+        let range = TextRange::try_from_usize(0, text.len()).expect("validated source length");
+        Span::new(SourceSpan::session(source_id, range), text)
+    }
+
+    pub fn assess<T>(&self, outcome: Outcome<T>) -> TestOutcome<T> {
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
-    pub fn parse_forms(&self, source: Arc<SourceFile>) -> TestOutcome<Vec<Form>> {
-        TestOutcome::new(
-            crate::parser::parse_forms(source),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+    pub fn parse_forms(&self, source: Span<String>) -> TestOutcome<Vec<Form>> {
+        let outcome = crate::parser::parse_forms(source.span().source().id(), source.inner());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
     pub fn parse_program(&self, source: &str) -> TestOutcome<Box<Module>> {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
-        TestOutcome::new(
-            parser.parse_str(Some(Path::EXEC), source, self.source_manager()),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+        let outcome = parser.parse_str(Some(Path::EXEC), source, &mut self.sources.borrow_mut());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
-    pub fn parse_program_source_file(
-        &self,
-        source_file: Arc<SourceFile>,
-    ) -> TestOutcome<Box<Module>> {
+    pub fn parse_program_source_file(&self, source: Span<String>) -> TestOutcome<Box<Module>> {
         let mut parser = Module::parser(Some(ModuleKind::Executable));
-        TestOutcome::new(
-            parser.parse(None, source_file, self.source_manager()),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+        let outcome = parser.parse(None, source.span().source().id(), source.inner());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
     pub fn parse_kernel(&self, source: &str) -> TestOutcome<Box<Module>> {
         let mut parser = Module::parser(Some(ModuleKind::Kernel));
-        TestOutcome::new(
-            parser.parse_str(None, source, self.source_manager()),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+        let outcome = parser.parse_str(None, source, &mut self.sources.borrow_mut());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
     pub fn parse_module(&self, source: &str) -> TestOutcome<Box<Module>> {
         let mut parser = Module::parser(None);
-        TestOutcome::new(
-            parser.parse_str(None, source, self.source_manager()),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+        let outcome = parser.parse_str(None, source, &mut self.sources.borrow_mut());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]
-    pub fn parse_module_source_file(
-        &self,
-        source_file: Arc<SourceFile>,
-    ) -> TestOutcome<Box<Module>> {
+    pub fn parse_module_with_path(&self, path: &Path, source: &str) -> TestOutcome<Box<Module>> {
         let mut parser = Module::parser(None);
-        TestOutcome::new(
-            parser.parse(None, source_file, self.source_manager()),
-            self.source_manager(),
-            self.warnings_as_errors,
-        )
+        let outcome = parser.parse_str(Some(path), source, &mut self.sources.borrow_mut());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
+    }
+
+    #[track_caller]
+    pub fn parse_module_source_file(&self, source: Span<String>) -> TestOutcome<Box<Module>> {
+        let mut parser = Module::parser(None);
+        let outcome = parser.parse(None, source.span().source().id(), source.inner());
+        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 }

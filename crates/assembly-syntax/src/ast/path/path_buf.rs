@@ -667,40 +667,4 @@ mod tests {
         let result = Path::validate("#foo::bar");
         assert_matches!(result, Err(PathError::InvalidComponent(IdentError::InvalidChars { .. })));
     }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_deserialize_path_buf_canonicalizes_redundant_quotes() {
-        let path: PathBuf = serde_json::from_str(r#""\"foo\"::\"bar\"""#)
-            .expect("path deserialization must succeed");
-        assert_eq!(path.as_str(), "foo::bar");
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_deserialize_path_buf_preserves_required_quotes() {
-        let path: PathBuf = serde_json::from_value(serde_json::Value::String(String::from(
-            "::foo::\"miden::base/account@0.1.0\"",
-        )))
-        .expect("path deserialization must succeed");
-        assert_eq!(path.as_str(), "::foo::\"miden::base/account@0.1.0\"");
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_deserialize_path_buf_rejects_overflow_after_canonicalization() {
-        let component = format!("{}-", "a".repeat(254));
-        let mut source = String::new();
-        for i in 0..255 {
-            if i > 0 {
-                source.push_str("::");
-            }
-            source.push_str(&component);
-        }
-
-        let err = serde_json::from_value::<PathBuf>(serde_json::Value::String(source))
-            .expect_err("deserialization must fail when canonicalization exceeds u16::MAX bytes");
-        let message = format!("{err}");
-        assert!(message.contains("too long"), "unexpected error: {message}");
-    }
 }

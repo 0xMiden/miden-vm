@@ -75,7 +75,6 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
 
@@ -117,7 +116,6 @@ fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> Executi
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
     let mut host = DefaultHost::default()
@@ -304,7 +302,6 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
@@ -348,7 +345,6 @@ fn print_mem_rejects_oversized_range() {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
@@ -392,7 +388,6 @@ fn print_mem_rejects_full_range() {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
@@ -596,7 +591,6 @@ fn debug_handlers_compose_with_default_core_handlers() {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
 
@@ -670,7 +664,6 @@ fn noop_debug_handlers_run_print_stack_without_output() {
         .expect("failed to load core library");
     let program = assembler
         .assemble_program("program", source)
-        .value
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {

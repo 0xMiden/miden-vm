@@ -3,7 +3,7 @@ mod symbol_table;
 
 use alloc::sync::Arc;
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use self::symbol_table::LocalSymbolTable;
 pub use self::{
@@ -65,26 +65,17 @@ impl Spanned for SymbolResolution {
 ///
 /// This is used as a low-level symbol resolution primitive in the linker as well.
 pub struct LocalSymbolResolver {
-    source_manager: Arc<dyn SourceManager>,
     symbols: LocalSymbolTable,
 }
 
 impl LocalSymbolResolver {
-    /// Create a new resolver using the provided [SymbolTable] and [SourceManager].
-    pub fn new<S>(
-        symbols: S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, SymbolResolutionError>
+    /// Create a new resolver using the provided [SymbolTable].
+    pub fn new<S>(symbols: S) -> Result<Self, SymbolResolutionError>
     where
         S: SymbolTable,
     {
-        let symbols = LocalSymbolTable::new(symbols, source_manager.clone())?;
-        Ok(Self { source_manager, symbols })
-    }
-
-    #[inline]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.source_manager.clone()
+        let symbols = LocalSymbolTable::new(symbols)?;
+        Ok(Self { symbols })
     }
 
     /// Try to resolve `name` to an item, either local or external

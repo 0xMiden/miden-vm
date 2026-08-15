@@ -141,7 +141,6 @@ fn assemble_recursive_program(source: &str) -> Program {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("link core library")
         .assemble_program("recursive_verifier", source)
-        .value
         .expect("assemble recursive verifier")
         .unwrap_program()
 }

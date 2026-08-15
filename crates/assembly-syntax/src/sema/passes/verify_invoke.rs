@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::ops::ControlFlow;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use crate::{
     PathBuf,

@@ -5,7 +5,7 @@ mod value;
 use alloc::string::String;
 use core::fmt;
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 pub use self::{
     eval::{ConstEnvironment, ConstEvalCycleDetected, ConstEvalError},

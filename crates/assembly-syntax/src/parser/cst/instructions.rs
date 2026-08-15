@@ -9,8 +9,7 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Instruction as CstInstruction},
     rowan,
 };
-use miden_debug_types::{SourceSpan, Span};
-use miden_diagnostics::TextRange;
+use miden_diagnostics::{SourceSpan, Span, TextRange};
 
 use super::{
     context::LoweringContext,

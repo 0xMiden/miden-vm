@@ -9,7 +9,7 @@ use miden_assembly_syntax_cst::{
     },
     rowan,
 };
-use miden_debug_types::SourceSpan;
+use miden_diagnostics::SourceSpan;
 
 use super::{
     context::LoweringContext, fragments::lower_u32_immediate_token,
@@ -95,13 +95,13 @@ fn lower_operation(
     }
 }
 
-fn enter_control_flow(span: SourceSpan, nesting_depth: usize) -> Result<usize, ParsingError> {
+fn enter_control_flow(span: SourceSpan, nesting_depth: usize) -> BlockLoweringResult<usize> {
     let nesting_depth = nesting_depth + 1;
     if nesting_depth > MAX_CONTROL_FLOW_NESTING {
-        return Err(ParsingError::ControlFlowNestingDepthExceeded {
+        return Err(Box::new(ParsingError::ControlFlowNestingDepthExceeded {
             span,
             max_depth: MAX_CONTROL_FLOW_NESTING,
-        });
+        }));
     }
     Ok(nesting_depth)
 }

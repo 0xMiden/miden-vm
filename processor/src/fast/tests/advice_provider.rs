@@ -143,18 +143,16 @@ fn test_advice_provider() {
     ";
 
     let (program, kernel_lib) = {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
+        let mut sources = new_source_map();
+        let kernel = parse_kernel_source(&mut sources, kernel_source);
 
-        let kernel_lib = Assembler::new(source_manager.clone())
+        let kernel_lib = Assembler::with_sources(sources.clone())
             .assemble_kernel("kernel", kernel, None)
-            .value
             .map(Arc::<Package>::from)
             .unwrap();
-        let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+        let program = Assembler::with_kernel(kernel_lib.clone())
             .unwrap()
             .assemble_program("program", program_source)
-            .value
             .unwrap()
             .unwrap_program();
 

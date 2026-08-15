@@ -30,11 +30,8 @@ mod tests;
 pub use miden_assembly_syntax::{
     ModuleParser, Path, PathBuf, ast,
     ast::{GlobalItemIndex, ModuleIndex},
-    debuginfo::{
-        self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
-    },
-    diagnostics,
-    diagnostics::{Report, report},
+    debuginfo, diagnostics,
+    diagnostics::{Report, SourceId, SourceMap, SourceProvider, SourceSpan, Span, Spanned, report},
     module,
 };
 /// Syntax components for the Miden Assembly AST
@@ -52,7 +49,7 @@ pub use self::project::{
     TargetAssemblyContext,
 };
 pub use self::{
-    assembler::{Assembler, AssemblyOutcome},
+    assembler::Assembler,
     linker::Linkage,
     procedure::{Procedure, ProcedureContext},
 };

@@ -7,27 +7,17 @@
 
 #![no_main]
 
-use std::sync::Arc;
-
 use libfuzzer_sys::fuzz_target;
-use miden_assembly_syntax::debuginfo::{SourceFile, SourceId, SourceLanguage};
-use miden_project::{
-    Uri,
-    ast::{MidenProject, PackageConfig, PackageTable, ProjectFile, WorkspaceFile},
-};
+use miden_diagnostics::{SourceId, SourceNamespace};
+use miden_project::ast::{MidenProject, PackageConfig, PackageTable, ProjectFile, WorkspaceFile};
 
 fuzz_target!(|data: &[u8]| {
     // Try to parse the data as a TOML string
     if let Ok(toml_str) = core::str::from_utf8(data) {
-        let source_file = Arc::new(SourceFile::new(
-            SourceId::default(),
-            SourceLanguage::Other("toml"),
-            Uri::new("fuzz://miden-project.toml"),
-            toml_str,
-        ));
+        let source_id = SourceId::new(SourceNamespace::new_unchecked(1), 0);
 
         // Exercise the production manifest parser, including validation and source-span setup.
-        let _ = MidenProject::parse(source_file);
+        let _ = MidenProject::parse(source_id, toml_str);
 
         // Attempt to parse as MidenProject AST (workspace or package manifest)
         let _ = toml::from_str::<MidenProject>(toml_str);

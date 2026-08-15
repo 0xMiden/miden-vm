@@ -1,6 +1,6 @@
 use core::ops::ControlFlow;
 
-use miden_debug_types::Spanned;
+use miden_diagnostics::Spanned;
 
 use crate::{
     MAX_REPEAT_COUNT,

@@ -258,10 +258,8 @@ fn test_memory_element_limit_enforced_during_execution() {
         mem_storew_be.8
     end
     ";
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program("program", program_source)
-        .value
         .expect("program should assemble")
         .unwrap_program();
 
@@ -302,10 +300,8 @@ fn test_memory_element_limit_enforced_via_with_options() {
         mem_storew_be.8
     end
     ";
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
+    let program = Assembler::new()
         .assemble_program("program", program_source)
-        .value
         .expect("program should assemble")
         .unwrap_program();
 

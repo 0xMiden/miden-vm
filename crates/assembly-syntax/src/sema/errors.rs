@@ -1,8 +1,7 @@
 use alloc::{boxed::Box, sync::Arc};
 use core::fmt;
 
-use miden_debug_types::SourceSpan;
-use miden_diagnostics::Diagnostic;
+use miden_diagnostics::{Diagnostic, SourceSpan};
 
 use crate::{
     Path,

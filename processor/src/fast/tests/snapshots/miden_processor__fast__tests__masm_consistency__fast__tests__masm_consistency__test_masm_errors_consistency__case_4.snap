@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
-assertion_line: 368
 expression: fast_err
 ---
 ProcedureNotFound {
@@ -19,7 +18,7 @@ ProcedureNotFound {
             end: 0,
         },
     },
-    source_file: None,
+    sources: None,
     root_digest: Word(
         [
             0,

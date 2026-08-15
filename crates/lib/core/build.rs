@@ -7,12 +7,11 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    Assembler, Report,
+    Assembler, Report, SourceMap,
     ast::{self, Module},
-    debuginfo::DefaultSourceManager,
     diagnostics::{
-        Emitter, IntoDiagnostic, Outcome, PanicHookOptions, SourceProvider, StderrEmitter,
-        WarningsAsErrors, install_panic_hook,
+        Emitter, ExitWithOutcome, IntoDiagnostic, Outcome, PanicHookOptions, SourceNamespace,
+        StderrEmitter, WarningsAsErrors, install_panic_hook,
     },
 };
 // CONSTANTS
@@ -67,22 +66,6 @@ fn markdown_file_name(ns: &miden_assembly_syntax::Path) -> String {
     buf
 }
 
-fn finish_build_outcome<T>(
-    outcome: Outcome<Option<T>>,
-    sources: &dyn SourceProvider,
-) -> Result<T, Report> {
-    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
-    if !outcome.diagnostics.is_empty() {
-        let prepared = outcome.diagnostics.prepare(sources).map_err(Report::from_error)?;
-        StderrEmitter::default().emit_set(&prepared).map_err(Report::from_error)?;
-    }
-    if failed {
-        Err(Report::msg("diagnostics prevented core library assembly"))
-    } else {
-        Ok(outcome.value.expect("a successful outcome must contain a value"))
-    }
-}
-
 // LIBCORE DOCUMENTATION
 // ================================================================================================
 
@@ -104,26 +87,22 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
 
     // Find all .masm
     let namespace = Arc::<MasmPath>::from(MasmPath::new("::miden::core"));
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let outcome = parser::read_modules_from_root(
+    let mut sources = SourceMap::new(SourceNamespace::new_unchecked(1));
+    let Outcome { result, diagnostics } = parser::read_modules_from_root(
         asm_dir.join("mod.masm"),
         Some(namespace),
         Some(ModuleKind::Library),
-        source_manager.clone(),
-    )
-    .unwrap_or_else(|err| panic!("{}", err.display()));
-    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
-    if !outcome.diagnostics.is_empty() {
-        let prepared = outcome
-            .diagnostics
-            .prepare(source_manager.as_ref())
-            .expect("core library diagnostics should prepare");
+        &mut sources,
+    );
+    if result.is_err() || diagnostics.assess(&WarningsAsErrors) {
+        let prepared = diagnostics
+            .prepare(&sources)
+            .expect("could not prepare core library diagnostics");
         StderrEmitter::default()
             .emit_set(&prepared)
-            .expect("core library diagnostics should emit");
+            .expect("could not emit core library diagnostics");
     }
-    assert!(!failed, "core library source diagnostics prevented documentation generation");
-    let (root, support) = outcome.value.expect("successful module loading must produce modules");
+    let (root, support) = result.expect("successful module loading must produce modules");
 
     // Render the modules into markdown
     for module in core::slice::from_ref(&root).iter().chain(support.iter()) {
@@ -236,7 +215,7 @@ fn reexport_target_docs(
 
 /// Assemble the core and precompiles sources as separate packages and serialize both into the
 /// `assets` folder.
-fn main() -> Result<(), Report> {
+fn main() -> ExitWithOutcome {
     // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
     // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
@@ -257,23 +236,38 @@ fn main() -> Result<(), Report> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
     let precompiles_asm_dir = asm_dir.join("precompiles");
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;
-
-    let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
-    let assembler = Assembler::default();
-    let mut project_assembler =
-        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
-    let core_package = finish_build_outcome(
-        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release"),
-        source_manager.as_ref(),
-    )?;
-
-    core_package.write_masp_file(build_dir.join(PKG_OUT_DIR)).into_diagnostic()?;
-
-    // Generate documentation
-    if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
-        build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
+    if let Err(err) = miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir) {
+        return Outcome::<(), _>::from_report(Report::msg(err)).into_exit();
     }
 
-    Ok(())
+    let assembler = Assembler::new();
+    let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
+    let selector = miden_assembly::ProjectTargetSelector::Library;
+    let outcome = assembler
+        .for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)
+        .and_then(|mut project_assembler, collector| {
+            let Outcome { result, diagnostics } = project_assembler.assemble(selector, "release");
+            collector.merge(diagnostics);
+            result
+        });
+    if outcome.is_err_with_policy(&WarningsAsErrors) {
+        return outcome.map(|_| ()).into_exit();
+    }
+
+    outcome
+        .and_then(|core_package, collector| {
+            collector.capture(
+                core_package.write_masp_file(build_dir.join(PKG_OUT_DIR)).into_diagnostic(),
+            );
+
+            Ok(())
+        })
+        .and_then(|_, collector| {
+            // Generate documentation
+            if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
+                collector.capture(build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic());
+            }
+            Ok(())
+        })
+        .into_exit()
 }

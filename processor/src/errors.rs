@@ -1,19 +1,20 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
+use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
+use miden_debug_types::Location;
+use miden_diagnostics::{Diagnostic, Report, SharedSourceProvider, SourceSpan};
+use miden_mast_package::{
+    PackageDebugInfoError,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
+
 use crate::{
     BaseHost, ContextId, Felt, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
     utils::to_hex,
-};
-use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
-use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
-use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_diagnostics::{Diagnostic, Report};
-use miden_mast_package::{
-    PackageDebugInfoError,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 
 // EXECUTION ERROR
@@ -26,14 +27,14 @@ pub enum ExecutionError {
     AceChipError {
         #[label("this call failed")]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         error: AceError,
     },
     #[error("{err}")]
     AdviceError {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         #[diagnostic_source]
         err: Box<AdviceError>,
     },
@@ -46,7 +47,7 @@ pub enum ExecutionError {
     EventError {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         event_id: EventId,
         event_name: Option<EventName>,
         #[note]
@@ -57,7 +58,7 @@ pub enum ExecutionError {
     DeferredError {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         err: PrecompileError,
     },
     #[error("failed to execute the program for internal reason: {0}")]
@@ -76,7 +77,7 @@ pub enum ExecutionError {
     MemoryError {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         #[diagnostic_source]
         err: MemoryError,
     },
@@ -91,7 +92,7 @@ pub enum ExecutionError {
     OperationError {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         #[diagnostic_source]
         err: OperationError,
     },
@@ -101,7 +102,7 @@ pub enum ExecutionError {
     ProcedureNotFound {
         #[label]
         label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
+        sources: Option<SharedSourceProvider>,
         root_digest: Word,
     },
     #[error("failed to generate STARK proof: {0}")]
@@ -117,39 +118,36 @@ impl ExecutionError {
     pub fn advice_error_no_context(err: AdviceError) -> Self {
         Self::AdviceError {
             label: SourceSpan::UNKNOWN,
-            source_file: None,
+            sources: None,
             err: Box::new(err),
         }
     }
 
     /// Returns the source provider associated with this diagnostic occurrence, if available.
-    ///
-    /// The diagnostic's spans use the session source universe, so callers rendering this error
-    /// should pass the returned file to `miden_diagnostics` as the session source provider.
-    pub fn source_file(&self) -> Option<&SourceFile> {
-        self.source_file_arc().map(Arc::as_ref)
+    pub fn source_provider(&self) -> Option<&SharedSourceProvider> {
+        self.shared_source_provider()
     }
 
     /// Converts this execution failure into a report that retains any source provider required by
     /// its session spans.
     pub fn into_report(self) -> Report {
-        let source_file = self.source_file_arc().cloned();
+        let sources = self.shared_source_provider().cloned();
         let report = Report::new(self);
-        match source_file {
-            Some(source_file) => report.attach_session_sources(source_file),
+        match sources {
+            Some(sources) => report.attach_session_sources(sources),
             None => report,
         }
     }
 
-    fn source_file_arc(&self) -> Option<&Arc<SourceFile>> {
+    fn shared_source_provider(&self) -> Option<&SharedSourceProvider> {
         match self {
-            Self::AceChipError { source_file, .. }
-            | Self::AdviceError { source_file, .. }
-            | Self::EventError { source_file, .. }
-            | Self::DeferredError { source_file, .. }
-            | Self::MemoryError { source_file, .. }
-            | Self::OperationError { source_file, .. }
-            | Self::ProcedureNotFound { source_file, .. } => source_file.as_ref(),
+            Self::AceChipError { sources, .. }
+            | Self::AdviceError { sources, .. }
+            | Self::EventError { sources, .. }
+            | Self::DeferredError { sources, .. }
+            | Self::MemoryError { sources, .. }
+            | Self::OperationError { sources, .. }
+            | Self::ProcedureNotFound { sources, .. } => sources.as_ref(),
             _ => None,
         }
     }
@@ -297,7 +295,7 @@ pub enum CryptoError {
 /// - The error needs both a human-readable message and optional diagnostic help
 ///
 /// **Avoid duplicating error context.** Context is added by the extension traits,
-/// so do NOT add `label` or `source_file` fields to the variant.
+/// so do NOT add `label` or `sources` fields to the variant.
 ///
 /// **Pattern at call sites:**
 /// ```ignore
@@ -414,8 +412,8 @@ impl OperationError {
     /// This is useful when working with `ControlFlow` or other non-`Result` return types
     /// where the `OperationResultExt::map_exec_err` extension trait cannot be used directly.
     pub fn with_context(self) -> ExecutionError {
-        let (label, source_file) = get_label_and_source_file();
-        ExecutionError::OperationError { label, source_file, err: self }
+        let (label, sources) = unknown_source_context();
+        ExecutionError::OperationError { label, sources, err: self }
     }
 
     /// Wraps this error with package-owned source-occurrence execution context.
@@ -428,11 +426,11 @@ impl OperationError {
         host: &(dyn BaseHost + '_),
         op_idx: Option<usize>,
     ) -> ExecutionError {
-        let (label, source_file) =
-            label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
+        let (label, sources) =
+            resolve_source_context_from_location(context.assembly_location(op_idx).as_ref(), host);
         ExecutionError::OperationError {
             label,
-            source_file,
+            sources,
             err: self.with_package_debug_info(context.debug_info()),
         }
     }
@@ -530,22 +528,19 @@ impl<'a> PackageSourceDebugContext<'a> {
     }
 }
 
-fn label_and_source_file_from_location(
+fn resolve_source_context_from_location(
     location: Option<&Location>,
     host: &(dyn BaseHost + '_),
-) -> (SourceSpan, Option<Arc<SourceFile>>) {
-    location.map_or_else(
-        || (SourceSpan::UNKNOWN, None),
-        |location| host.get_label_and_source_file(location),
-    )
+) -> (SourceSpan, Option<SharedSourceProvider>) {
+    location.map_or_else(|| (SourceSpan::UNKNOWN, None), |location| host.resolve_location(location))
 }
 
-/// Computes the label and source file for error context.
+/// Computes an unknown source context for errors without debug location metadata.
 ///
 /// This function is called by the extension traits to compute source location
 /// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
 /// acceptable.
-fn get_label_and_source_file() -> (SourceSpan, Option<Arc<SourceFile>>) {
+fn unknown_source_context() -> (SourceSpan, Option<SharedSourceProvider>) {
     (SourceSpan::UNKNOWN, None)
 }
 
@@ -554,8 +549,8 @@ fn get_label_and_source_file() -> (SourceSpan, Option<Arc<SourceFile>>) {
 /// This is useful when working with `ControlFlow` or other non-`Result` return types
 /// where the extension traits cannot be used directly.
 pub fn advice_error_with_context(err: AdviceError) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+    let (label, sources) = unknown_source_context();
+    ExecutionError::AdviceError { label, sources, err: Box::new(err) }
 }
 
 /// Wraps an `AdviceError` with package-owned source-occurrence execution context.
@@ -565,9 +560,9 @@ pub fn advice_error_with_package_source_context(
     host: &(dyn BaseHost + '_),
     op_idx: Option<usize>,
 ) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
-    ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+    let (label, sources) =
+        resolve_source_context_from_location(context.assembly_location(op_idx).as_ref(), host);
+    ExecutionError::AdviceError { label, sources, err: Box::new(err) }
 }
 
 /// Wraps an `EventError` with execution context to produce an `ExecutionError`.
@@ -579,10 +574,10 @@ pub fn event_error_with_context(
     event_id: EventId,
     event_name: Option<EventName>,
 ) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
+    let (label, sources) = unknown_source_context();
     ExecutionError::EventError {
         label,
-        source_file,
+        sources,
         event_id,
         event_name,
         error,
@@ -598,11 +593,11 @@ pub fn event_error_with_package_source_context(
     event_id: EventId,
     event_name: Option<EventName>,
 ) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
+    let (label, sources) =
+        resolve_source_context_from_location(context.assembly_location(op_idx).as_ref(), host);
     ExecutionError::EventError {
         label,
-        source_file,
+        sources,
         event_id,
         event_name,
         error,
@@ -611,8 +606,8 @@ pub fn event_error_with_package_source_context(
 
 /// Creates a `ProcedureNotFound` error with execution context.
 pub fn procedure_not_found_with_context(root_digest: Word) -> ExecutionError {
-    let (label, source_file) = get_label_and_source_file();
-    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
+    let (label, sources) = unknown_source_context();
+    ExecutionError::ProcedureNotFound { label, sources, root_digest }
 }
 
 /// Creates a `ProcedureNotFound` error with package-owned source-occurrence execution context.
@@ -621,9 +616,9 @@ pub fn procedure_not_found_with_package_source_context(
     context: PackageSourceDebugContext<'_>,
     host: &(dyn BaseHost + '_),
 ) -> ExecutionError {
-    let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(None).as_ref(), host);
-    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
+    let (label, sources) =
+        resolve_source_context_from_location(context.assembly_location(None).as_ref(), host);
+    ExecutionError::ProcedureNotFound { label, sources, root_digest }
 }
 
 /// Creates a `MalformedMastForestInHost` operation error with execution context.
@@ -696,8 +691,8 @@ impl<T> MapExecErr<T> for Result<T, OperationError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::OperationError { label, sources, err })
             },
         }
     }
@@ -709,8 +704,8 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::OperationError { label, sources, err })
             },
         }
     }
@@ -728,8 +723,8 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
                 Err(err.with_package_source_context(context, host, Some(op_idx)))
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::OperationError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::OperationError { label, sources, err })
             },
         }
     }
@@ -742,7 +737,7 @@ impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
             Ok(v) => Ok(v),
             Err(err) => Err(ExecutionError::OperationError {
                 label: SourceSpan::UNKNOWN,
-                source_file: None,
+                sources: None,
                 err,
             }),
         }
@@ -767,7 +762,7 @@ impl<T> MapExecErrNoCtx<T> for Result<T, AdviceError> {
             Ok(v) => Ok(v),
             Err(err) => Err(ExecutionError::AdviceError {
                 label: SourceSpan::UNKNOWN,
-                source_file: None,
+                sources: None,
                 err: Box::new(err),
             }),
         }
@@ -781,8 +776,8 @@ impl<T> MapExecErr<T> for Result<T, MemoryError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::MemoryError { label, sources, err })
             },
         }
     }
@@ -794,8 +789,8 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::MemoryError { label, sources, err })
             },
         }
     }
@@ -810,15 +805,15 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
         match (self, context) {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
+                let (label, sources) = resolve_source_context_from_location(
                     context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
-                Err(ExecutionError::MemoryError { label, source_file, err })
+                Err(ExecutionError::MemoryError { label, sources, err })
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
-                Err(ExecutionError::MemoryError { label, source_file, err })
+                let (label, sources) = unknown_source_context();
+                Err(ExecutionError::MemoryError { label, sources, err })
             },
         }
     }
@@ -831,19 +826,19 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                     SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
+                        ExecutionError::DeferredError { label, sources, err }
                     },
                 })
             },
@@ -857,19 +852,19 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                     SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
+                        ExecutionError::DeferredError { label, sources, err }
                     },
                 })
             },
@@ -886,39 +881,39 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
         match (self, context) {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
+                let (label, sources) = resolve_source_context_from_location(
                     context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                     SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
+                        ExecutionError::DeferredError { label, sources, err }
                     },
                 })
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     SystemEventError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     SystemEventError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     SystemEventError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                     SystemEventError::Deferred(err) => {
-                        ExecutionError::DeferredError { label, source_file, err }
+                        ExecutionError::DeferredError { label, sources, err }
                     },
                 })
             },
@@ -933,14 +928,14 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     IoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, sources, err },
                     IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     // Execution errors are already fully formed with their own message.
                     IoError::Execution(boxed_err) => *boxed_err,
@@ -960,30 +955,30 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
             (Ok(v), _) => Ok(v),
             (Err(IoError::Execution(boxed_err)), _) => Err(*boxed_err),
             (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
+                let (label, sources) = resolve_source_context_from_location(
                     context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
                     IoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, sources, err },
                     IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     IoError::Execution(_) => unreachable!("handled above"),
                 })
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     IoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
-                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, sources, err },
                     IoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                     IoError::Execution(_) => unreachable!("handled above"),
                 })
@@ -999,13 +994,13 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                 })
             },
@@ -1022,29 +1017,29 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
         match (self, context) {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
+                let (label, sources) = resolve_source_context_from_location(
                     context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => ExecutionError::OperationError {
                         label,
-                        source_file,
+                        sources,
                         err: err.with_package_debug_info(context.debug_info()),
                     },
                 })
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     CryptoError::Advice(err) => {
-                        ExecutionError::AdviceError { label, source_file, err: Box::new(err) }
+                        ExecutionError::AdviceError { label, sources, err: Box::new(err) }
                     },
                     CryptoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                        ExecutionError::OperationError { label, sources, err }
                     },
                 })
             },
@@ -1059,13 +1054,13 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
+                        ExecutionError::AceChipError { label, sources, error }
                     },
                     AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                 })
             },
@@ -1082,27 +1077,27 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
         match (self, context) {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
-                let (label, source_file) = label_and_source_file_from_location(
+                let (label, sources) = resolve_source_context_from_location(
                     context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
                     AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
+                        ExecutionError::AceChipError { label, sources, error }
                     },
                     AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                 })
             },
             (Err(err), None) => {
-                let (label, source_file) = get_label_and_source_file();
+                let (label, sources) = unknown_source_context();
                 Err(match err {
                     AceEvalError::Ace(error) => {
-                        ExecutionError::AceChipError { label, source_file, error }
+                        ExecutionError::AceChipError { label, sources, error }
                     },
                     AceEvalError::Memory(err) => {
-                        ExecutionError::MemoryError { label, source_file, err }
+                        ExecutionError::MemoryError { label, sources, err }
                     },
                 })
             },
@@ -1116,16 +1111,20 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
 #[cfg(test)]
 mod error_assertions {
     use alloc::sync::Arc;
+    use core::num::NonZeroU32;
 
     use miden_core::mast::MastNodeId;
-    use miden_debug_types::{
-        ByteIndex, DEFAULT_SOURCE_NAMESPACE, SourceId, SourceLanguage, TextRange, Uri,
-    };
+    use miden_debug_types::{ByteIndex, Uri};
+    use miden_diagnostics::{SourceId, SourceMap, SourceNamespace, TextRange};
     use miden_mast_package::debug_info::{
         DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder,
     };
 
     use super::*;
+
+    fn test_source_id(local: u32) -> SourceId {
+        SourceId::new(SourceNamespace::new(NonZeroU32::new(1).unwrap()), local)
+    }
 
     /// Asserts at compile time that the passed error has Send + Sync + 'static bounds.
     fn _assert_error_is_send_sync_static<E: core::error::Error + Send + Sync + 'static>(_: E) {}
@@ -1136,7 +1135,7 @@ mod error_assertions {
 
     #[test]
     fn execution_error_remains_compact() {
-        assert!(core::mem::size_of::<ExecutionError>() < 128);
+        assert!(size_of::<ExecutionError>() < 128);
     }
 
     fn debug_asm_op(
@@ -1170,16 +1169,14 @@ mod error_assertions {
 
     #[test]
     fn execution_error_report_retains_session_sources() {
-        let source_id = SourceId::new(DEFAULT_SOURCE_NAMESPACE, 0);
-        let source = Arc::new(SourceFile::new(
-            source_id,
-            SourceLanguage::Masm,
-            Uri::new("memory:///execution-error.masm"),
-            "begin\n    call.missing\nend",
-        ));
+        let mut source_map = SourceMap::new(SourceNamespace::new(NonZeroU32::MIN));
+        let source_id = source_map
+            .insert("memory:///execution-error.masm", "begin\n    call.missing\nend", None)
+            .unwrap();
+        let sources = SharedSourceProvider::from(Arc::new(source_map));
         let error = ExecutionError::ProcedureNotFound {
             label: SourceSpan::session(source_id, TextRange::new(10, 22).unwrap()),
-            source_file: Some(source),
+            sources: Some(sources),
             root_digest: Word::default(),
         };
 
@@ -1195,10 +1192,10 @@ mod error_assertions {
     }
 
     impl BaseHost for RecordingHost {
-        fn get_label_and_source_file(
+        fn resolve_location(
             &self,
             location: &Location,
-        ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        ) -> (SourceSpan, Option<SharedSourceProvider>) {
             assert_eq!(location, &self.expected_location);
             (self.returned_span, None)
         }
@@ -1233,10 +1230,7 @@ mod error_assertions {
         let debug_info = *builder.build();
         let host = RecordingHost {
             expected_location: location_b,
-            returned_span: SourceSpan::session(
-                SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
-                TextRange::new(20, 24).unwrap(),
-            ),
+            returned_span: SourceSpan::session(test_source_id(7), TextRange::new(20, 24).unwrap()),
         };
         let context = PackageSourceDebugContext::new(&debug_info, source_b);
 
@@ -1245,9 +1239,9 @@ mod error_assertions {
         let err = OperationError::DivideByZero.with_package_source_context(context, &host, Some(0));
 
         match err {
-            ExecutionError::OperationError { label, source_file, err } => {
+            ExecutionError::OperationError { label, sources, err } => {
                 assert_eq!(label, host.returned_span);
-                assert!(source_file.is_none());
+                assert!(sources.is_none());
                 assert!(matches!(err, OperationError::DivideByZero));
             },
             err => panic!("expected operation error, got {err:?}"),
@@ -1266,10 +1260,7 @@ mod error_assertions {
                 ByteIndex::new(0),
                 ByteIndex::new(0),
             ),
-            returned_span: SourceSpan::session(
-                SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
-                TextRange::new(20, 24).unwrap(),
-            ),
+            returned_span: SourceSpan::session(test_source_id(7), TextRange::new(20, 24).unwrap()),
         };
         let context = PackageSourceDebugContext::new(&debug_info, source_node_id);
 
@@ -1281,9 +1272,9 @@ mod error_assertions {
         );
 
         match err {
-            ExecutionError::AdviceError { label, source_file, err } => {
+            ExecutionError::AdviceError { label, sources, err } => {
                 assert_eq!(label, SourceSpan::UNKNOWN);
-                assert!(source_file.is_none());
+                assert!(sources.is_none());
                 assert!(matches!(*err, AdviceError::StackReadFailed));
             },
             err => panic!("expected advice error, got {err:?}"),
@@ -1309,7 +1300,7 @@ mod error_assertions {
                     ByteIndex::new(0),
                 ),
                 returned_span: SourceSpan::session(
-                    SourceId::new(DEFAULT_SOURCE_NAMESPACE, 7),
+                    test_source_id(7),
                     TextRange::new(20, 24).unwrap(),
                 ),
             },
@@ -1320,11 +1311,11 @@ mod error_assertions {
         match err {
             ExecutionError::OperationError {
                 label,
-                source_file,
+                sources,
                 err: OperationError::FailedAssertion { err_msg, .. },
             } => {
                 assert_eq!(label, SourceSpan::UNKNOWN);
-                assert!(source_file.is_none());
+                assert!(sources.is_none());
                 assert_eq!(err_msg.as_deref(), Some("some error message"));
             },
             err => panic!("expected failed assertion operation error, got {err:?}"),

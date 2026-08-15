@@ -1,12 +1,10 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
     vec::Vec,
 };
 
-use miden_debug_types::{SourceManager, Span, Spanned};
-use miden_diagnostics::{DiagnosticCollector, Outcome};
+use miden_diagnostics::{DiagnosticCollector, Outcome, Span, Spanned};
 
 use super::SemanticAnalysisError;
 use crate::ast::{
@@ -21,7 +19,12 @@ pub struct AnalysisContext {
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     diagnostics: DiagnosticCollector,
-    source_manager: Arc<dyn SourceManager>,
+}
+
+impl Default for AnalysisContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl constants::ConstEnvironment for AnalysisContext {
@@ -66,20 +69,14 @@ impl constants::ConstEnvironment for AnalysisContext {
 }
 
 impl AnalysisContext {
-    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new() -> Self {
         Self {
             constants: Default::default(),
             cached_constant_values: Default::default(),
             imported: Default::default(),
             procedures: Default::default(),
             diagnostics: DiagnosticCollector::new(),
-            source_manager,
         }
-    }
-
-    #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.source_manager.clone()
     }
 
     pub fn register_procedure_name(&mut self, name: ProcedureName) {
@@ -172,9 +169,9 @@ impl AnalysisContext {
     }
 
     /// Finalize semantic analysis without applying an application-level failure policy.
-    pub fn into_outcome<T>(self, value: T) -> Outcome<T> {
+    pub fn into_outcome<T>(self, result: Result<T, ()>) -> Outcome<T> {
         Outcome {
-            value,
+            result,
             diagnostics: self.diagnostics.finish(),
         }
     }
@@ -185,6 +182,8 @@ mod tests {
     use alloc::{boxed::Box, sync::Arc};
     use core::cell::Cell;
 
+    use miden_diagnostics::{SourceSpan, Span};
+
     use super::AnalysisContext;
     use crate::{
         Path, PathBuf,
@@ -192,7 +191,6 @@ mod tests {
             Constant, ConstantExpr, ConstantOp, ConstantValue, Ident, Visibility,
             constants::{self, eval::CachedConstantValue},
         },
-        debuginfo::{DefaultSourceManager, SourceSpan, Span},
         parser::IntValue,
     };
 
@@ -288,8 +286,7 @@ mod tests {
 
     #[test]
     fn semantic_const_eval_memoizes_shared_subexpressions() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let mut context = AnalysisContext::new(source_manager);
+        let mut context = AnalysisContext::new();
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.

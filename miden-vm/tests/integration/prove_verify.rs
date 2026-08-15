@@ -1,8 +1,6 @@
 //! Integration tests for the public proving lifecycle and recursive-verifier regressions.
 
-use alloc::sync::Arc;
-
-use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, program::ExecutionClaim, proof::ExecutionProof, utils::bytes_to_packed_u32_elements,
 };
@@ -31,13 +29,12 @@ fn assert_prove_verify(
 ) {
     let program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
     let stack_inputs = stack_inputs_from_ints([0, 1]);
     let advice_inputs = AdviceInputs::default();
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host = DefaultHost::default();
+
     println!("Proving with {hash_name}...");
     let witness =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())

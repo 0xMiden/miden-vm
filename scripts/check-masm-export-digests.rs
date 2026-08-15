@@ -521,7 +521,10 @@ mod tests {
 }
 
 mod current {
-    use miden_assembly_current::{Assembler, ProjectTargetSelector};
+    use miden_assembly_current::{
+        Assembler, ProjectTargetSelector,
+        diagnostics::{DiagnosticSet, Outcome, WarningsAsErrors},
+    };
     use miden_assembly_syntax_current::prettier::PrettyPrint;
     use miden_core_lib_current::CoreLibrary;
     use miden_mast_package_current::{Package, PackageExport};
@@ -541,6 +544,29 @@ mod current {
             })?;
 
         collect_package_exports(package.as_ref())
+    }
+
+    fn value_from_outcome<T>(outcome: Outcome<Option<T>>, context: String) -> Result<T, String> {
+        let Outcome { value, diagnostics } = outcome;
+        let failed = value.is_none() || diagnostics.assess(&WarningsAsErrors);
+        if !diagnostics.is_empty() {
+            let rendered = render_diagnostics(&diagnostics);
+            if failed {
+                return Err(format!("{context}:\n{rendered}"));
+            }
+            eprintln!("{rendered}");
+        }
+
+        value.ok_or_else(|| format!("{context}: no value or diagnostic was produced"))
+    }
+
+    fn render_diagnostics(diagnostics: &DiagnosticSet) -> String {
+        diagnostics
+            .prepare_attached()
+            .map(|prepared| prepared.to_string())
+            .unwrap_or_else(|error| {
+                format!("{diagnostics:?}\n(diagnostic rendering failed: {error})")
+            })
     }
 
     fn collect_package_exports(package: &Package) -> Result<Exports, String> {

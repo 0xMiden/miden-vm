@@ -4,29 +4,23 @@ use alloc::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    parsing::{MaybeInherit, SetSourceId, Validate},
+    parsing::{MaybeInherit, ValidationContext},
     *,
 };
-use crate::{Map, MetadataSet, SemVer, SourceId, Span, Uri};
+use crate::{AstMetadataSet, Map, TomlSpan};
+#[cfg(feature = "std")]
+use crate::{Span, Uri};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageTable {
     /// The name of this package
-    pub name: Span<Arc<str>>,
+    pub name: TomlSpan<Arc<str>>,
     /// Additional package information, optionally inheritable from a parent workspace (if present)
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub detail: PackageDetail,
-}
-
-impl SetSourceId for PackageTable {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { name, detail } = self;
-        name.set_source_id(source_id);
-        detail.set_source_id(source_id);
-    }
 }
 
 /// Package properties which may be inherited from a parent workspace
@@ -35,138 +29,14 @@ impl SetSourceId for PackageTable {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageDetail {
     /// The semantic version assigned to this package
-    #[cfg_attr(
-        feature = "serde",
-        serde(
-            default,
-            serialize_with = "semver_serde::serialize",
-            deserialize_with = "semver_serde::deserialize",
-            skip_serializing_if = "Option::is_none"
-        )
-    )]
-    pub version: Option<Span<MaybeInherit<SemVer>>>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub version: Option<TomlSpan<MaybeInherit<Arc<str>>>>,
     /// An (optional) brief description of this project
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub description: Option<Span<MaybeInherit<Arc<str>>>>,
+    pub description: Option<TomlSpan<MaybeInherit<Arc<str>>>>,
     /// Custom metadata which can be used by third-party/downstream tooling
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
-    pub metadata: MetadataSet,
-}
-
-#[cfg(feature = "serde")]
-mod semver_serde {
-    use alloc::string::{String, ToString};
-    use core::{fmt, marker::PhantomData};
-
-    use serde::{
-        Serialize,
-        de::{self, MapAccess, Visitor},
-        ser::SerializeMap,
-    };
-
-    use super::{MaybeInherit, SemVer, Span};
-
-    pub fn serialize<S>(
-        value: &Option<Span<MaybeInherit<SemVer>>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match value.as_deref() {
-            None => serializer.serialize_none(),
-            Some(MaybeInherit::Inherit) => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("workspace", &true)?;
-                map.end()
-            },
-            Some(MaybeInherit::Value(version)) => version.to_string().serialize(serializer),
-        }
-    }
-
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<Span<MaybeInherit<SemVer>>>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct SemVerVisitor(PhantomData<()>);
-
-        impl<'de> Visitor<'de> for SemVerVisitor {
-            type Value = Option<Span<MaybeInherit<SemVer>>>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a semantic version or { workspace = true }")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                value
-                    .parse()
-                    .map(|version| Some(Span::unknown(MaybeInherit::Value(version))))
-                    .map_err(|error: miden_assembly_syntax::VersionError| {
-                        E::custom(error.to_string())
-                    })
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                self.visit_str(&value)
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let workspace = map
-                    .next_entry::<String, bool>()?
-                    .ok_or_else(|| de::Error::missing_field("workspace"))?;
-                if workspace.0 != "workspace" {
-                    return Err(de::Error::unknown_field(&workspace.0, &["workspace"]));
-                }
-                if !workspace.1 {
-                    return Err(de::Error::custom("the 'workspace' field may only be true"));
-                }
-                if map.next_entry::<String, de::IgnoredAny>()?.is_some() {
-                    return Err(de::Error::custom("unexpected field in inherited version"));
-                }
-                Ok(Some(Span::unknown(MaybeInherit::Inherit)))
-            }
-        }
-
-        deserializer.deserialize_any(SemVerVisitor(PhantomData))
-    }
-
-    #[test]
-    fn inherited_version_roundtrips() {
-        let detail = super::PackageDetail {
-            version: Some(Span::unknown(MaybeInherit::Inherit)),
-            ..Default::default()
-        };
-
-        let encoded = toml::to_string(&detail).unwrap();
-        assert_eq!(encoded, "[version]\nworkspace = true\n");
-
-        let decoded: super::PackageDetail = toml::from_str(&encoded).unwrap();
-        assert!(matches!(decoded.version.as_deref(), Some(MaybeInherit::Inherit)));
-    }
-}
-
-impl SetSourceId for PackageDetail {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { version, description, metadata } = self;
-        if let Some(version) = version.as_mut() {
-            version.set_source_id(source_id);
-        }
-        if let Some(description) = description.as_mut() {
-            description.set_source_id(source_id);
-        }
-        metadata.set_source_id(source_id);
-    }
+    pub metadata: AstMetadataSet,
 }
 
 /// Package configuration which can be defined at both the workspace and package level
@@ -183,28 +53,17 @@ pub struct PackageConfig {
             skip_serializing_if = "Map::is_empty"
         )
     )]
-    pub dependencies: Map<Span<Arc<str>>, Span<DependencySpec>>,
+    pub dependencies: Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>,
     /// Linter configuration/overrides for this package/workspace
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
-    pub lints: MetadataSet,
-}
-
-impl SetSourceId for PackageConfig {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { dependencies, lints } = self;
-        dependencies.set_source_id(source_id);
-        lints.set_source_id(source_id);
-    }
+    pub lints: AstMetadataSet,
 }
 
 /// Represents the `miden-project.toml` structure of an individual package
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ProjectFile {
-    /// The original source file this was parsed from, if applicable/known
-    #[cfg_attr(feature = "serde", serde(skip, default))]
-    pub source_file: Option<Arc<SourceFile>>,
     /// Contents of the `[package]` table
     pub package: PackageTable,
     /// Contents of tables shared with workspace-level `miden-project.toml`, e.g. `[dependencies]`
@@ -213,13 +72,13 @@ pub struct ProjectFile {
     pub config: PackageConfig,
     /// The library target of this project, if applicable
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub lib: Option<Span<LibTarget>>,
+    pub lib: Option<TomlSpan<LibTarget>>,
     /// The binary targets of this project, if applicable
     #[cfg_attr(
         feature = "serde",
         serde(default, rename = "bin", skip_serializing_if = "Vec::is_empty")
     )]
-    pub bins: Vec<Span<BinTarget>>,
+    pub bins: Vec<TomlSpan<BinTarget>>,
     /// The set of build profiles defined in this file
     #[cfg_attr(
         feature = "serde",
@@ -233,6 +92,169 @@ pub struct ProjectFile {
     pub profiles: Vec<Profile>,
 }
 
+#[cfg(feature = "serde")]
+mod serialization {
+    use serde::{
+        Deserialize, Deserializer,
+        de::{Error, MapAccess, Visitor},
+    };
+
+    use super::*;
+
+    impl<'de> Deserialize<'de> for PackageTable {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct PackageTableVisitor;
+
+            impl<'de> Visitor<'de> for PackageTableVisitor {
+                type Value = PackageTable;
+
+                fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    formatter.write_str("a package table")
+                }
+
+                fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+                where
+                    M: MapAccess<'de>,
+                {
+                    let mut name = None;
+                    let mut version = None;
+                    let mut description = None;
+                    let mut metadata = None;
+                    while let Some(key) = access.next_key::<String>()? {
+                        match key.as_str() {
+                            "name" => set_once(&mut name, access.next_value()?, "name")?,
+                            "version" => set_once(&mut version, access.next_value()?, "version")?,
+                            "description" => {
+                                set_once(&mut description, access.next_value()?, "description")?
+                            },
+                            "metadata" => {
+                                set_once(&mut metadata, access.next_value()?, "metadata")?
+                            },
+                            _ => {
+                                return Err(M::Error::unknown_field(
+                                    &key,
+                                    &["name", "version", "description", "metadata"],
+                                ));
+                            },
+                        }
+                    }
+
+                    Ok(PackageTable {
+                        name: name.ok_or_else(|| M::Error::missing_field("name"))?,
+                        detail: PackageDetail {
+                            version,
+                            description,
+                            metadata: metadata.unwrap_or_default(),
+                        },
+                    })
+                }
+            }
+
+            deserializer.deserialize_map(PackageTableVisitor)
+        }
+    }
+
+    struct ProfileList(Vec<Profile>);
+
+    impl<'de> Deserialize<'de> for ProfileList {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            profile::serialization::deserialize(deserializer).map(Self)
+        }
+    }
+
+    struct DependencyMap(Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>);
+
+    impl<'de> Deserialize<'de> for DependencyMap {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            dependency::deserialize_dependency_map(deserializer).map(Self)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for ProjectFile {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct ProjectFileVisitor;
+
+            impl<'de> Visitor<'de> for ProjectFileVisitor {
+                type Value = ProjectFile;
+
+                fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    formatter.write_str("a project manifest")
+                }
+
+                fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+                where
+                    M: MapAccess<'de>,
+                {
+                    let mut package = None;
+                    let mut dependencies = None;
+                    let mut lints = None;
+                    let mut lib = None;
+                    let mut bins = None;
+                    let mut profiles = None;
+                    while let Some(key) = access.next_key::<String>()? {
+                        match key.as_str() {
+                            "package" => set_once(&mut package, access.next_value()?, "package")?,
+                            "dependencies" => {
+                                let value = access.next_value::<DependencyMap>()?.0;
+                                set_once(&mut dependencies, value, "dependencies")?;
+                            },
+                            "lints" => set_once(&mut lints, access.next_value()?, "lints")?,
+                            "lib" => set_once(&mut lib, access.next_value()?, "lib")?,
+                            "bin" => set_once(&mut bins, access.next_value()?, "bin")?,
+                            "profile" => {
+                                let value = access.next_value::<ProfileList>()?.0;
+                                set_once(&mut profiles, value, "profile")?;
+                            },
+                            _ => {
+                                return Err(M::Error::unknown_field(
+                                    &key,
+                                    &["package", "dependencies", "lints", "lib", "bin", "profile"],
+                                ));
+                            },
+                        }
+                    }
+
+                    Ok(ProjectFile {
+                        package: package.ok_or_else(|| M::Error::missing_field("package"))?,
+                        config: PackageConfig {
+                            dependencies: dependencies.unwrap_or_default(),
+                            lints: lints.unwrap_or_default(),
+                        },
+                        lib,
+                        bins: bins.unwrap_or_default(),
+                        profiles: profiles.unwrap_or_default(),
+                    })
+                }
+            }
+
+            deserializer.deserialize_map(ProjectFileVisitor)
+        }
+    }
+
+    fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
+    where
+        E: Error,
+    {
+        if slot.replace(value).is_some() {
+            Err(E::duplicate_field(field))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Parsing
 #[cfg(feature = "serde")]
 impl ProjectFile {
@@ -243,184 +265,116 @@ impl ProjectFile {
     ///
     /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
     ///   up to the caller to compute the concrete property values and validate them at that point.
-    pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use parsing::{SetSourceId, Validate};
-
-        let source_id = source.id();
-
-        // Parse the unvalidated project from source
-        let mut package = toml::from_str::<Self>(source.as_str()).map_err(|err| {
-            let span = err
-                .span()
-                .map(|span| {
-                    let start = span.start as u32;
-                    let end = span.end as u32;
-                    SourceSpan::session(
-                        source_id,
-                        TextRange::new(start, end).expect("invalid TOML error span"),
-                    )
-                })
-                .unwrap_or_default();
-            ProjectFileError::ParseError {
-                message: err.message().to_string(),
-                source_file: source.clone(),
-                span,
-            }
-            .into_report()
-        })?;
-
-        package.source_file = Some(source.clone());
-        package.set_source_id(source_id);
-
-        package.validate(source)?;
-
-        Ok(package)
+    pub fn parse(source_id: SourceId, source: &str) -> Outcome<Self> {
+        parse_typed(source_id, source, Self::validate)
     }
 
-    pub fn get_or_inherit_version(
+    #[cfg(feature = "std")]
+    pub(crate) fn get_or_inherit_version(
         &self,
-        source: Arc<SourceFile>,
-        workspace: Option<&WorkspaceFile>,
-    ) -> Result<Span<SemVer>, Report> {
-        use core::num::NonZeroU32;
-
+        context: &mut ValidationContext<'_>,
+        workspace: Option<(SourceId, &WorkspaceFile)>,
+    ) -> Option<Span<crate::SemVer>> {
         let Some(version) = self.package.detail.version.as_ref() else {
-            let one = NonZeroU32::new(1).unwrap();
-            let span = source
-                .line_column_to_span(one.into(), one.into())
-                .unwrap_or(source.source_span());
-            return Err(
-                ProjectFileError::MissingVersion { source_file: source, span }.into_report()
-            );
+            let _ = context
+                .add(ProjectFileError::MissingVersion { span: context.span(&self.package.name) });
+            return None;
         };
-        match version.inner() {
-            MaybeInherit::Value(value) => Ok(Span::new(version.span(), value.clone())),
+        match version.get_ref() {
+            MaybeInherit::Value(value) => match value.parse::<crate::SemVer>() {
+                Ok(value) => Some(Span::new(context.span(version), value)),
+                Err(error) => {
+                    let _ = context.add(ProjectFileError::InvalidPackageVersion {
+                        message: error.to_string(),
+                        span: context.span(version),
+                    });
+                    None
+                },
+            },
             MaybeInherit::Inherit => match workspace {
-                Some(workspace) => {
-                    if let Some(version) = workspace.workspace.package.version.as_ref() {
-                        Ok(version.as_ref().map(|inherit| inherit.unwrap_value().clone()))
-                    } else {
-                        Err(ProjectFileError::MissingWorkspaceVersion {
-                            source_file: source,
-                            span: version.span(),
+                Some((workspace_source_id, workspace)) => {
+                    if let Some(workspace_version) = workspace.workspace.package.version.as_ref() {
+                        let value = workspace_version.get_ref().unwrap_value();
+                        match value.parse::<crate::SemVer>() {
+                            Ok(value) => Some(Span::new(
+                                context.span_in(workspace_source_id, workspace_version),
+                                value,
+                            )),
+                            Err(error) => {
+                                let _ = context.add(ProjectFileError::InvalidPackageVersion {
+                                    message: error.to_string(),
+                                    span: context.span_in(workspace_source_id, workspace_version),
+                                });
+                                None
+                            },
                         }
-                        .into_report())
+                    } else {
+                        let _ = context.add(ProjectFileError::MissingWorkspaceVersion {
+                            span: context.span(version),
+                        });
+                        None
                     }
                 },
-                None => Err(ProjectFileError::NotAWorkspace {
-                    source_file: source,
-                    span: version.span(),
-                }
-                .into_report()),
+                None => {
+                    let _ = context
+                        .add(ProjectFileError::NotAWorkspace { span: context.span(version) });
+                    None
+                },
             },
         }
     }
 
-    pub fn get_or_inherit_description(
+    #[cfg(feature = "std")]
+    pub(crate) fn get_or_inherit_description(
         &self,
-        source: Arc<SourceFile>,
-        workspace: Option<&WorkspaceFile>,
-    ) -> Result<Option<Arc<str>>, Report> {
+        context: &mut ValidationContext<'_>,
+        workspace: Option<(SourceId, &WorkspaceFile)>,
+    ) -> Result<Option<Arc<str>>, ()> {
         match self.package.detail.description.as_ref() {
             None => Ok(None),
-            Some(desc) => match desc.inner() {
+            Some(desc) => match desc.get_ref() {
                 MaybeInherit::Value(value) => Ok(Some(value.clone())),
                 MaybeInherit::Inherit => match workspace {
-                    Some(workspace) => Ok(workspace
+                    Some((_workspace_source_id, workspace)) => Ok(workspace
                         .workspace
                         .package
                         .description
                         .as_ref()
-                        .map(|d| d.inner().unwrap_value().clone())),
-                    None => Err(ProjectFileError::NotAWorkspace {
-                        source_file: source,
-                        span: desc.span(),
-                    }
-                    .into_report()),
+                        .map(|d| d.get_ref().unwrap_value().clone())),
+                    None => {
+                        let _ = context
+                            .add(ProjectFileError::NotAWorkspace { span: context.span(desc) });
+                        Err(())
+                    },
                 },
             },
         }
     }
 
-    pub fn extract_dependencies(
+    #[cfg(feature = "std")]
+    pub(crate) fn extract_library_target(
         &self,
-        source: Arc<SourceFile>,
-        workspace: Option<&WorkspaceFile>,
-    ) -> Result<Vec<crate::Dependency>, Report> {
-        use crate::{Dependency, DependencyVersionScheme};
-
-        let mut dependencies = Vec::with_capacity(self.config.dependencies.len());
-        for dependency in self.config.dependencies.values() {
-            if dependency.inherits_workspace_version() {
-                if let Some(workspace) = workspace {
-                    match workspace.workspace.config.dependencies.get(&dependency.name) {
-                        Some(dep) => {
-                            debug_assert!(!dep.inherits_workspace_version());
-
-                            let version = DependencyVersionScheme::try_from_in_workspace(
-                                dep.as_ref(),
-                                workspace,
-                            )
-                            .map_err(|err| err.into_report(source.clone()))?;
-                            // Prefer the linkage requested by the package, but defer to the
-                            // workspace if one is not specified at the package level. Use the
-                            // default linkage mode if non is specified
-                            let linkage = dependency
-                                .linkage
-                                .as_deref()
-                                .copied()
-                                .or(dep.linkage.as_deref().copied())
-                                .unwrap_or_default();
-                            dependencies.push(Dependency::new(dep.name.clone(), version, linkage));
-                        },
-                        None => {
-                            return Err(ProjectFileError::InvalidPackageDependency {
-                                source_file: source,
-                                message: format!(
-                                    "'{}' is not a workspace dependency",
-                                    dependency.name
-                                ),
-                                span: dependency.span(),
-                            }
-                            .into_report());
-                        },
-                    }
-                } else {
-                    return Err(ProjectFileError::InvalidPackageDependency {
-                        source_file: source,
-                        message: "this package is not in a workspace".into(),
-                        span: dependency.span(),
-                    }
-                    .into_report());
-                }
-            } else {
-                let linkage = dependency.linkage.as_deref().copied().unwrap_or_default();
-                dependencies.push(Dependency::new(
-                    dependency.name.clone(),
-                    DependencyVersionScheme::try_from(dependency.as_ref())
-                        .map_err(|err| err.into_report(source.clone()))?,
-                    linkage,
-                ));
-            }
-        }
-
-        Ok(dependencies)
-    }
-
-    pub fn extract_library_target(&self) -> Result<Option<Span<crate::Target>>, Report> {
+        context: &mut ValidationContext<'_>,
+    ) -> Option<Span<crate::Target>> {
         use miden_assembly_syntax::Path as MasmPath;
 
         use crate::TargetType;
 
         if self.lib.is_none() && self.bins.is_empty() {
             let project_name = &self.package.name;
-            let span = project_name.span();
-            let namespace: Span<Arc<MasmPath>> = Span::new(
-                span,
-                MasmPath::new(project_name.inner()).to_absolute().map_err(Report::msg)?.into(),
-            );
-            let name = project_name.clone();
-            return Ok(Some(Span::new(
+            let span = context.span(project_name);
+            let namespace = match MasmPath::new(project_name.get_ref()).to_absolute() {
+                Ok(path) => Span::new(span, Arc::from(path)),
+                Err(error) => {
+                    let _ = context.add(ProjectFileError::InvalidTargetNamespace {
+                        message: error.to_string(),
+                        span,
+                    });
+                    return None;
+                },
+            };
+            let name = Span::new(span, project_name.get_ref().clone());
+            return Some(Span::new(
                 span,
                 crate::Target {
                     ty: TargetType::Library,
@@ -428,61 +382,84 @@ impl ProjectFile {
                     namespace,
                     path: Span::new(span, Uri::new("mod.masm")),
                 },
-            )));
+            ));
         }
 
-        let Some(lib) = self.lib.as_ref() else {
-            return Ok(None);
-        };
+        let lib = self.lib.as_ref()?;
+        let lib_span = context.span(lib);
+        let lib = lib.get_ref();
 
-        let kind = lib.kind.as_deref().copied().unwrap_or(TargetType::Library);
+        let kind = lib
+            .kind
+            .as_ref()
+            .and_then(|kind| kind.get_ref().parse().ok())
+            .unwrap_or(TargetType::Library);
         let name = lib
             .namespace
-            .clone()
-            .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
+            .as_ref()
+            .map(|name| Span::new(context.span(name), name.get_ref().clone()))
+            .unwrap_or_else(|| Span::new(lib_span, self.package.name.get_ref().clone()));
         let namespace = match kind {
-            TargetType::Kernel => Span::new(lib.span(), MasmPath::kernel_path().into()),
+            TargetType::Kernel => Span::new(lib_span, MasmPath::kernel_path().into()),
             _ => {
                 let ns = lib
                     .namespace
-                    .clone()
-                    .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
+                    .as_ref()
+                    .map(|name| Span::new(context.span(name), name.get_ref().clone()))
+                    .unwrap_or_else(|| Span::new(lib_span, self.package.name.get_ref().clone()));
                 let path = MasmPath::new(ns.inner());
-                let abs = path.to_absolute().map_err(Report::msg)?;
-                Span::new(ns.span(), abs.into())
+                match path.to_absolute() {
+                    Ok(abs) => Span::new(ns.span(), abs.into()),
+                    Err(error) => {
+                        let _ = context.add(ProjectFileError::InvalidTargetNamespace {
+                            message: error.to_string(),
+                            span: ns.span(),
+                        });
+                        return None;
+                    },
+                }
             },
         };
-        Ok(Some(Span::new(
-            lib.span(),
+        Some(Span::new(
+            lib_span,
             crate::Target {
                 ty: kind,
                 name,
                 namespace,
-                path: lib.path.clone(),
+                path: Span::new(context.span(&lib.path), Uri::new(lib.path.get_ref().clone())),
             },
-        )))
+        ))
     }
 
-    pub fn extract_executable_targets(&self) -> Vec<Span<crate::Target>> {
+    #[cfg(feature = "std")]
+    pub(crate) fn extract_executable_targets(
+        &self,
+        context: &ValidationContext<'_>,
+    ) -> Vec<Span<crate::Target>> {
         use miden_assembly_syntax::Path as MasmPath;
 
         use crate::TargetType;
 
         let mut bins = Vec::with_capacity(self.bins.len());
         for target in self.bins.iter() {
-            let span = target.span();
+            let span = context.span(target);
+            let target = target.get_ref();
             let name = target
                 .name
-                .clone()
-                .unwrap_or_else(|| Span::new(target.span(), self.package.name.inner().clone()));
-            let namespace = Span::new(target.span(), Arc::from(MasmPath::exec_path()));
+                .as_ref()
+                .map(|name| Span::new(context.span(name), name.get_ref().clone()))
+                .unwrap_or_else(|| Span::new(span, self.package.name.get_ref().clone()));
+            let namespace = Span::new(span, Arc::from(MasmPath::exec_path()));
             bins.push(Span::new(
                 span,
                 crate::Target {
                     ty: TargetType::Executable,
                     name,
                     namespace,
-                    path: target.path.clone(),
+                    path: Span::new(
+                        context.span(&target.path),
+                        Uri::new(target.path.get_ref().clone()),
+                    ),
                 },
             ));
         }
@@ -491,70 +468,104 @@ impl ProjectFile {
     }
 }
 
-impl SetSourceId for ProjectFile {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self {
-            source_file: _,
-            package,
-            config,
-            lib,
-            bins,
-            profiles,
-        } = self;
-        package.set_source_id(source_id);
-        config.set_source_id(source_id);
-        if let Some(lib) = lib.as_mut() {
-            lib.set_source_id(source_id);
-        }
-        bins.set_source_id(source_id);
-        profiles.set_source_id(source_id);
-    }
-}
-
-impl Validate for ProjectFile {
-    fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
+impl ProjectFile {
+    pub(super) fn validate(&self, context: &mut ValidationContext<'_>) {
         use miden_assembly_syntax::ast;
 
         // Validate the project
         // 1. Package name must be a valid identifier
-        ast::Ident::validate(&self.package.name).map_err(|err| {
-            ProjectFileError::InvalidProjectName {
-                source_file: source.clone(),
+        if let Err(err) = ast::Ident::validate(self.package.name.get_ref()) {
+            let _ = context.add(ProjectFileError::InvalidProjectName {
                 message: err.to_string(),
-                span: self.package.name.span(),
+                span: context.span(&self.package.name),
+            });
+        }
+
+        // Parse every non-inherited scalar independently so one bad field does not obscure other
+        // actionable errors in the same manifest.
+        if let Some(version_span) = self.package.detail.version.as_ref()
+            && let MaybeInherit::Value(version) = version_span.get_ref()
+            && let Err(error) = version.parse::<crate::SemVer>()
+        {
+            let _ = context.add(ProjectFileError::InvalidPackageVersion {
+                message: error.to_string(),
+                span: context.span(version_span),
+            });
+        }
+
+        for dependency in self.config.dependencies.values() {
+            let spec = dependency.get_ref();
+            if !spec.inherits_workspace_version()
+                && let Err(error) =
+                    crate::DependencyVersionScheme::try_from_ast(spec, context.source_id())
+            {
+                let _ = context.add(error);
             }
-            .into_report()
-        })?;
+            if let Some(linkage) = spec.linkage.as_ref()
+                && let Err(error) = linkage.get_ref().parse::<crate::Linkage>()
+            {
+                let _ = context.add(ProjectFileError::InvalidPackageDependency {
+                    message: error.to_string(),
+                    span: context.span(linkage),
+                });
+            }
+        }
 
         // 2. All build targets must have unique paths (if present) and names (and namespaces must
         //    be valid)
         let mut invalid_config = Vec::<BuildTargetDiagnostic>::default();
 
-        let mut target_paths = BTreeMap::<Span<Uri>, Option<BuildTargetDiagnostic>>::default();
-        let mut target_names = BTreeMap::<Span<Arc<str>>, Option<BuildTargetDiagnostic>>::default();
+        let mut target_paths =
+            BTreeMap::<Arc<str>, (SourceSpan, Option<BuildTargetDiagnostic>)>::default();
+        let mut target_names =
+            BTreeMap::<Arc<str>, (SourceSpan, Option<BuildTargetDiagnostic>)>::default();
         if let Some(lib) = self.lib.as_ref() {
-            if let Some(kind) = lib.kind.as_ref()
-                && !kind.is_library()
+            let lib = lib.get_ref();
+            if let Some(namespace) = lib.namespace.as_ref()
+                && let Err(error) =
+                    miden_assembly_syntax::Path::new(namespace.get_ref()).to_absolute()
             {
-                invalid_config
-                    .push(BuildTargetDiagnostic::InvalidLibraryTarget { span: kind.span() });
+                let _ = context.add(ProjectFileError::InvalidTargetNamespace {
+                    message: error.to_string(),
+                    span: context.span(namespace),
+                });
             }
-            target_paths.insert(lib.path.clone(), None);
+            if let Some(kind) = lib.kind.as_ref() {
+                match kind.get_ref().parse::<crate::TargetType>() {
+                    Ok(parsed) if !parsed.is_library() => {
+                        invalid_config.push(BuildTargetDiagnostic::InvalidLibraryTarget {
+                            span: context.span(kind),
+                        })
+                    },
+                    Ok(_) => {},
+                    Err(error) => {
+                        let _ = context.add(ProjectFileError::InvalidTargetType {
+                            message: error.to_string(),
+                            span: context.span(kind),
+                        });
+                    },
+                }
+            }
+            let path = &lib.path;
+            target_paths.insert(path.get_ref().clone(), (context.span(path), None));
         }
 
         for target in self.bins.iter() {
             use alloc::collections::btree_map::Entry;
 
             // 2a. Check for conflicting paths
-            let span = target.span();
-            match target_paths.entry(target.path.clone()) {
+            let span = context.span(target);
+            let target = target.get_ref();
+            let path = &target.path;
+            let path_span = context.span(path);
+            match target_paths.entry(path.get_ref().clone()) {
                 Entry::Vacant(entry) => {
-                    entry.insert(None);
+                    entry.insert((path_span, None));
                 },
                 Entry::Occupied(mut entry) => {
-                    let path_span = target.path.span();
                     let path = entry.key().clone();
-                    match entry.get_mut() {
+                    let (first_span, diagnostic) = entry.get_mut();
+                    match diagnostic {
                         Some(error) => {
                             error.add_conflict(path_span);
                         },
@@ -563,7 +574,7 @@ impl Validate for ProjectFile {
                                 "the path for this target, `{path}`, conflicts with other targets"
                             );
                             *opt = Some(BuildTargetDiagnostic::target_conflict(
-                                path.span(),
+                                *first_span,
                                 message,
                                 path_span,
                             ));
@@ -573,29 +584,30 @@ impl Validate for ProjectFile {
             }
 
             // 2b. Check for name conflicts
-            let name = target
-                .name
-                .clone()
-                .unwrap_or_else(|| Span::new(target.span(), self.package.name.inner().clone()));
+            let name = target.name.as_ref();
+            let (name, name_span) = name.map_or_else(
+                || (self.package.name.get_ref().clone(), span),
+                |name| (name.get_ref().clone(), context.span(name)),
+            );
             match target_names.entry(name) {
                 Entry::Vacant(entry) => {
-                    entry.insert(None);
+                    entry.insert((name_span, None));
                 },
                 Entry::Occupied(mut entry) => {
-                    let ns_span = target.name.as_ref().map(Span::span).unwrap_or(span);
                     let ns = entry.key().clone();
-                    match entry.get_mut() {
+                    let (first_span, diagnostic) = entry.get_mut();
+                    match diagnostic {
                         Some(error) => {
-                            error.add_conflict(ns_span);
+                            error.add_conflict(name_span);
                         },
                         opt => {
                             let message = format!(
                                 "the name for this target, `{ns}`, conflicts with other targets"
                             );
                             *opt = Some(BuildTargetDiagnostic::target_conflict(
-                                ns.span(),
+                                *first_span,
                                 message,
-                                ns_span,
+                                name_span,
                             ));
                         },
                     }
@@ -603,17 +615,11 @@ impl Validate for ProjectFile {
             }
         }
 
-        invalid_config.extend(target_paths.into_values().flatten());
-        invalid_config.extend(target_names.into_values().flatten());
+        invalid_config.extend(target_paths.into_values().filter_map(|(_, error)| error));
+        invalid_config.extend(target_names.into_values().filter_map(|(_, error)| error));
 
-        if !invalid_config.is_empty() {
-            return Err(ProjectFileError::InvalidBuildTargets {
-                source_file: source,
-                related: invalid_config,
-            }
-            .into_report());
+        for diagnostic in invalid_config {
+            let _ = context.add(diagnostic);
         }
-
-        Ok(())
     }
 }

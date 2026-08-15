@@ -1,8 +1,9 @@
 use alloc::string::String;
 
-use crate::{
-    ast::{AttributeSet, Constant, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility},
-    debuginfo::{SourceSpan, Span, Spanned},
+use miden_diagnostics::{SourceSpan, Span, Spanned};
+
+use crate::ast::{
+    AttributeSet, Constant, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility,
 };
 
 // MODULE ITEM

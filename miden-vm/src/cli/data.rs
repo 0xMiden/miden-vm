@@ -6,19 +6,21 @@ use std::{
 };
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Path as LibraryPath, SourceManager,
+    Assembler, Path as LibraryPath, SourceMap,
     ast::{Module, ModuleKind},
-    diagnostics::{Report, WrapErr},
+    diagnostics::{Report, SourceNamespace, WrapErr},
     serde::Deserializable,
 };
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
+use miden_vm::{
+    ExecutionProof, Program, StackOutputs, Word,
+    diagnostics::{DiagnosticCollector, Outcome},
+    serde::SliceReader,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{field::Empty, instrument};
-
-use super::utils::finish_assembly_outcome;
 
 // HELPERS
 // ================================================================================================
@@ -96,76 +98,91 @@ impl OutputFile {
 // PROGRAM FILE
 // ================================================================================================
 
-pub struct ProgramFile<S: SourceManager = DefaultSourceManager> {
+pub struct ProgramFile {
     ast: Box<Module>,
-    source_manager: Arc<S>,
+    sources: SourceMap,
 }
 
 impl ProgramFile {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile].
-    pub fn read(path: impl AsRef<Path>) -> Result<Self, Report> {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        Self::read_with(path, source_manager)
+    pub fn read(path: impl AsRef<Path>) -> Outcome<Self> {
+        let namespace = SourceNamespace::fresh()
+            .expect("failed to allocate a source namespace for the program file");
+        Self::read_with(path, SourceMap::new(namespace))
     }
-}
 
-/// Helper methods to interact with masm program file.
-impl<S> ProgramFile<S>
-where
-    S: SourceManager + 'static,
-{
-    /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
-    /// provided [miden_assembly::SourceManager] implementation.
-    #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
-    pub fn read_with(path: impl AsRef<Path>, source_manager: Arc<S>) -> Result<Self, Report> {
+    /// Reads the MASM file using an existing source session.
+    #[instrument(name = "read_program_file", skip(sources), fields(path = %path.as_ref().display()))]
+    pub fn read_with(path: impl AsRef<Path>, mut sources: SourceMap) -> Outcome<Self> {
         // parse the program into an AST
         let path = path.as_ref();
         let mut parser = Module::parser(Some(ModuleKind::Executable));
-        let ast = finish_assembly_outcome(
-            parser.parse_file(Some(LibraryPath::exec_path()), path, source_manager.clone()),
-            source_manager.as_ref(),
-            "Failed to parse program file",
-        )?;
+        let Outcome { result, diagnostics } =
+            parser.parse_file(Some(LibraryPath::exec_path()), path, &mut sources);
+        let diagnostics = diagnostics.attach_session_sources(Arc::new(sources.clone()));
+        let result = result.map(|ast| Self { ast, sources });
 
-        Ok(Self { ast, source_manager })
+        Outcome { result, diagnostics }
     }
 
     /// Compiles this program file into an executable [Package].
     #[instrument(name = "compile_package", skip_all)]
-    pub fn compile_package<I>(&self, libraries: I) -> Result<Box<Package>, Report>
+    pub fn compile_package<I>(&self, libraries: I) -> Outcome<Box<Package>>
     where
         I: IntoIterator<Item = Arc<Package>>,
     {
-        let mut assembler = Assembler::new(self.source_manager.clone());
-        assembler
-            .link_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
-            .wrap_err("Failed to load core library")?;
+        let mut diagnostics = DiagnosticCollector::default();
+        let mut assembler = Assembler::with_sources(self.sources.clone());
+        let mut linked = diagnostics
+            .capture(
+                assembler
+                    .link_package(
+                        CoreLibrary::default().package(),
+                        miden_assembly::Linkage::Dynamic,
+                    )
+                    .wrap_err("Failed to load core library"),
+            )
+            .is_some();
 
         for library in libraries {
-            assembler
-                .link_package(library, miden_assembly::Linkage::Dynamic)
-                .wrap_err("Failed to load libraries")?;
+            linked &= diagnostics
+                .capture(
+                    assembler
+                        .link_package(library, miden_assembly::Linkage::Dynamic)
+                        .wrap_err("Failed to load libraries"),
+                )
+                .is_some();
         }
 
-        finish_assembly_outcome(
-            assembler.assemble_program("program", self.ast.clone()),
-            self.source_manager.as_ref(),
-            "Failed to compile program",
-        )
+        let result = if linked {
+            let Outcome { result, diagnostics: program_diags } =
+                assembler.assemble_program("program", self.ast.clone());
+
+            diagnostics.merge(program_diags);
+
+            result
+        } else {
+            Err(())
+        };
+
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
     }
 
     /// Compiles this program file into a [Program].
     #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
+    pub fn compile<I>(&self, libraries: I) -> Outcome<Program>
     where
         I: IntoIterator<Item = Arc<Package>>,
     {
-        Ok(self.compile_package(libraries)?.unwrap_program())
+        self.compile_package(libraries).map(|pkg| pkg.unwrap_program())
     }
 
-    /// Returns the source manager for this program file.
-    pub fn source_manager(&self) -> &Arc<S> {
-        &self.source_manager
+    /// Returns the source session for this program file.
+    pub fn sources(&self) -> &SourceMap {
+        &self.sources
     }
 
     /// Returns a reference to the AST module.

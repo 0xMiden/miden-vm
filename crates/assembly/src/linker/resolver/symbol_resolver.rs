@@ -2,10 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
     ast::{InvocationTarget, InvokeKind, Path, SymbolResolution},
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::ItemInfo,
 };
 use miden_core::Word;
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use crate::{
     GlobalItemIndex, LinkerError, ModuleIndex,
@@ -182,16 +182,6 @@ impl<'a> SymbolResolver<'a> {
                 unreachable!("link-time namespace resolution should produce exact ids")
             },
         }
-    }
-
-    #[inline(always)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
-        &self.graph.source_manager
-    }
-
-    #[inline(always)]
-    pub fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
-        self.graph.source_manager.clone()
     }
 
     #[inline(always)]

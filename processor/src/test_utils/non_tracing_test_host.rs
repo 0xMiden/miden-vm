@@ -1,6 +1,7 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
-use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 
 use crate::{
     BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
@@ -20,16 +21,12 @@ use crate::{
 pub struct NonTracingTestHost {
     /// Regular host event IDs received via [`SyncHost::on_event`], in emission order.
     pub events: Vec<u64>,
-    source_manager: Arc<DefaultSourceManager>,
 }
 
 #[cfg(test)]
 impl NonTracingTestHost {
     pub fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            source_manager: Arc::new(DefaultSourceManager::default()),
-        }
+        Self { events: Vec::new() }
     }
 }
 
@@ -42,13 +39,8 @@ impl Default for NonTracingTestHost {
 
 #[cfg(test)]
 impl BaseHost for NonTracingTestHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        (SourceSpan::UNKNOWN, None)
     }
 }
 
@@ -97,7 +89,6 @@ mod tests {
         );
         let program: Program = Assembler::default()
             .assemble_program("program", &source)
-            .value
             .unwrap()
             .unwrap_program();
         let mut host = NonTracingTestHost::default();

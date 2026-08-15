@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use miden_assembly::Assembler;
-use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
     LoadedMastForest, ProcessorState, Word,
@@ -22,10 +21,7 @@ impl YieldingAsyncHost {
 }
 
 impl BaseHost for YieldingAsyncHost {
-    fn get_label_and_source_file(
-        &self,
-        _location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
         (SourceSpan::UNKNOWN, None)
     }
 }
@@ -69,7 +65,6 @@ fn simple_program() -> miden_processor::Program {
             end
             "#,
         )
-        .value
         .expect("program should compile")
         .unwrap_program()
 }
@@ -113,7 +108,6 @@ async fn proving_supports_witnesses_from_async_only_host_events() {
     let event_id = event_name.to_event_id().as_u64();
     let program = Assembler::default()
         .assemble_program("program", format!("begin push.{event_id} emit drop end"))
-        .value
         .expect("program should compile")
         .unwrap_program();
 

@@ -1,7 +1,6 @@
 use alloc::string::{String, ToString};
 use core::{fmt, str::FromStr};
 
-use miden_assembly_syntax::debuginfo::Span;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

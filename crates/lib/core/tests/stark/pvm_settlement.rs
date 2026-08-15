@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use miden_assembly::{Assembler, Linkage};
+use miden_assembly::{Assembler, Linkage, SourceSpan, diagnostics::SharedSourceProvider};
 use miden_core::{
     Felt, Word,
     deferred::{DeferredState, PrecompileWitness, PrecompileWitnessError},
@@ -11,7 +11,7 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, PrecompileProof},
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
-use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_debug_types::Location;
 use miden_precompiles_prover::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
@@ -80,6 +80,7 @@ fn prove_deferred_ecdsa_execution(
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("core library must link")
         .assemble_program("ecdsa_deferred_settlement", source)
+        .into_result()
         .expect("ECDSA settlement fixture must assemble")
         .unwrap_program();
     let mut host = DefaultHost::default()
@@ -183,6 +184,7 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("core library must link")
         .assemble_program("async_pvm_settlement", source)
+        .into_result()
         .expect("async settlement program must assemble")
         .unwrap_program()
 }
@@ -211,11 +213,8 @@ impl PvmSettlementHost {
 }
 
 impl BaseHost for PvmSettlementHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        BaseHost::get_label_and_source_file(&self.inner, location)
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        BaseHost::resolve_location(&self.inner, location)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {

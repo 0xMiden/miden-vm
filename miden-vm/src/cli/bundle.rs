@@ -1,14 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Linkage, PathBuf as LibraryPath, ast,
+    Assembler, Linkage, PathBuf as LibraryPath, ast,
     diagnostics::{IntoDiagnostic, Report},
 };
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-
-use super::utils::finish_assembly_outcome;
+use miden_vm::diagnostics::{DiagnosticCollector, Outcome};
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -40,56 +39,97 @@ pub struct BundleCmd {
 }
 
 impl BundleCmd {
-    pub fn execute(&self) -> Result<(), Report> {
+    pub fn execute(&self) -> Outcome<()> {
         println!("============================================================");
         println!("Build library");
         println!("============================================================");
 
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let mut assembler = Assembler::new(source_manager.clone());
+        let mut assembler = Assembler::new();
 
         if !self.root.is_file() {
-            return Err(Report::msg("`root` must be a '.masm' file."));
+            return Outcome::from_report(Report::msg("`root` must be a '.masm' file."));
         }
 
         // write the masp output
+        let mut collector = DiagnosticCollector::default();
         let output_file = match &self.output {
             Some(output) => output,
             None => {
-                let parent =
-                    &self.root.parent().ok_or("Invalid output path").map_err(Report::msg)?;
-                &parent.join("out").with_extension(Package::EXTENSION)
+                let parent = collector
+                    .capture(self.root.parent().ok_or("Invalid output path").map_err(Report::msg));
+                if let Some(parent) = parent {
+                    &parent.join("out").with_extension(Package::EXTENSION)
+                } else {
+                    return Outcome {
+                        result: Err(()),
+                        diagnostics: collector.finish(),
+                    };
+                }
             },
         };
 
         if self.kernel {
-            assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
+            if collector
+                .capture(assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic))
+                .is_none()
+            {
+                return Outcome {
+                    result: Err(()),
+                    diagnostics: collector.finish(),
+                };
+            }
             let namespace = match self.namespace.as_deref() {
                 Some(ns) => ns,
                 None => ast::Path::KERNEL_PATH,
             };
-            let library = finish_assembly_outcome(
-                assembler.assemble_kernel_from_root(namespace, &self.root),
-                source_manager.as_ref(),
-                "Failed to assemble kernel library",
-            )?;
-            library.write_to_file(output_file).into_diagnostic()?;
-            println!("Built kernel library {} from {}", library.name, self.root.display());
+            assembler.assemble_kernel_from_root(namespace, &self.root).and_then(
+                |package, collector| {
+                    let result = collector
+                        .capture(package.write_to_file(output_file).into_diagnostic())
+                        .ok_or(());
+                    if result.is_ok() {
+                        println!(
+                            "Built kernel library {} from {}",
+                            package.name,
+                            self.root.display()
+                        );
+                    }
+                    result
+                },
+            )
         } else {
             let library_namespace = match self.namespace.as_ref() {
-                Some(ns) => Some(LibraryPath::new(ns).into_diagnostic()?),
+                Some(ns) => match collector.capture(LibraryPath::new(ns).into_diagnostic()) {
+                    Some(path) => Some(path),
+                    None => {
+                        return Outcome {
+                            result: Err(()),
+                            diagnostics: collector.finish(),
+                        };
+                    },
+                },
                 None => None,
             };
-            assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-            let library = finish_assembly_outcome(
-                assembler.assemble_library_from_root(&self.root, library_namespace.as_deref()),
-                source_manager.as_ref(),
-                "Failed to assemble library",
-            )?;
-            library.write_to_file(output_file).into_diagnostic()?;
-            println!("Built package '{}'", library.name);
+            if collector
+                .capture(assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic))
+                .is_none()
+            {
+                return Outcome {
+                    result: Err(()),
+                    diagnostics: collector.finish(),
+                };
+            }
+            assembler
+                .assemble_library_from_root(&self.root, library_namespace.as_deref())
+                .and_then(|package, collector| {
+                    let result = collector
+                        .capture(package.write_to_file(output_file).into_diagnostic())
+                        .ok_or(());
+                    if result.is_ok() {
+                        println!("Built package '{}'", package.name);
+                    }
+                    result
+                })
         }
-
-        Ok(())
     }
 }

@@ -9,10 +9,10 @@ use miden_assembly_syntax::{
         constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
         types,
     },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     diagnostics::{OwnedDiagnostic, diagnostic},
     module::ItemInfo,
 };
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
 pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
@@ -151,10 +151,6 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
 }
 
 impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
-    #[inline]
-    fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.resolver.source_manager_arc()
-    }
     #[inline]
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> LinkerError {
         LinkerError::from(err)

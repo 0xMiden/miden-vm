@@ -1,7 +1,4 @@
-use miden_assembly_syntax::{
-    debuginfo::{SourceManager as _, Spanned},
-    diagnostics::{DiagnosticCollector, Outcome},
-};
+use miden_assembly_syntax::diagnostics::{Outcome, SourceProvider, Spanned};
 
 use super::*;
 
@@ -14,94 +11,76 @@ impl ProjectSourceProvider for MasmSourceProvider {
 
     fn provide_sources(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> AssemblyOutcome<ProjectSourceInputs> {
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceInputs> {
         let TargetAssemblyContext {
-            target,
-            resolved_target_root,
-            source_manager,
-            ..
+            target, resolved_target_root, sources, ..
         } = context;
 
         let namespace = target.namespace.inner().clone();
         let kind = target_root_module_kind(target.ty);
-        let mut diagnostics = DiagnosticCollector::new();
-        let Some(outcome) =
-            diagnostics.capture(miden_assembly_syntax::parser::read_modules_from_root(
-                resolved_target_root,
-                Some(namespace),
-                Some(kind),
-                source_manager.clone(),
-            ))
-        else {
-            return Outcome {
-                value: None,
-                diagnostics: diagnostics.finish(),
-            };
-        };
-        let _ = diagnostics.merge(outcome.diagnostics);
+        let outcome = miden_assembly_syntax::parser::read_modules_from_root(
+            resolved_target_root,
+            Some(namespace),
+            Some(kind),
+            sources,
+        );
 
-        Outcome {
-            value: outcome.value.map(|(root, support)| ProjectSourceInputs { root, support }),
-            diagnostics: diagnostics.finish(),
-        }
+        outcome.map(|(root, support)| ProjectSourceInputs { root, support })
     }
 
     fn provide_source_provenance(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> AssemblyOutcome<ProjectSourceProvenanceInputs> {
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceProvenanceInputs> {
         let root_path = context.resolved_target_root.as_ref();
         let namespace = context.target.namespace.inner().clone();
         let kind = target_root_module_kind(context.target.ty);
-        let mut diagnostics = DiagnosticCollector::new();
-        let Some(outcome) =
-            diagnostics.capture(miden_assembly_syntax::parser::read_modules_from_root(
-                root_path,
-                Some(namespace),
-                Some(kind),
-                context.source_manager.clone(),
-            ))
-        else {
-            return Outcome {
-                value: None,
-                diagnostics: diagnostics.finish(),
-            };
-        };
-        let _ = diagnostics.merge(outcome.diagnostics);
-        let Some((root, support_modules)) = outcome.value else {
-            return Outcome {
-                value: None,
-                diagnostics: diagnostics.finish(),
-            };
+        let Outcome { result, diagnostics } = miden_assembly_syntax::parser::read_modules_from_root(
+            root_path,
+            Some(namespace),
+            Some(kind),
+            context.sources,
+        );
+
+        let Ok((root, support_modules)) = result else {
+            return Outcome { result: Err(()), diagnostics };
         };
 
         let root = {
-            let source_file = context
-                .source_manager
-                .get_file(root.span().source().id())
+            let source = context
+                .sources
+                .get(root.span().source().id())
                 .expect("a parsed module must retain its registered source file");
             SourceFileProvenance {
-                path: source_file.uri().to_path().unwrap().into_boxed_path(),
-                content: source_file.as_str().to_string().into_boxed_str(),
+                path: PathBuf::from(source.display_name).into_boxed_path(),
+                content: source
+                    .text
+                    .expect("parsed source text must be retained")
+                    .to_string()
+                    .into_boxed_str(),
             }
         };
 
         let mut support = Vec::with_capacity(support_modules.len());
         for module in support_modules.iter() {
-            let source_file = context
-                .source_manager
-                .get_file(module.span().source().id())
+            let source = context
+                .sources
+                .get(module.span().source().id())
                 .expect("a parsed module must retain its registered source file");
             support.push(SourceFileProvenance {
-                path: source_file.uri().to_path().unwrap().into_boxed_path(),
-                content: source_file.as_str().to_string().into_boxed_str(),
+                path: PathBuf::from(source.display_name).into_boxed_path(),
+                content: source
+                    .text
+                    .expect("parsed source text must be retained")
+                    .to_string()
+                    .into_boxed_str(),
             });
         }
 
         Outcome {
-            value: Some(ProjectSourceProvenanceInputs { root, support }),
-            diagnostics: diagnostics.finish(),
+            result: Ok(ProjectSourceProvenanceInputs { root, support }),
+            diagnostics,
         }
     }
 }

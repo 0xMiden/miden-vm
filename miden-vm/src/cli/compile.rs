@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{IntoDiagnostic, WrapErr};
+use miden_vm::diagnostics::{DiagnosticCollector, Outcome};
 
 use super::data::{Libraries, ProgramFile};
 
@@ -20,20 +21,53 @@ pub struct CompileCmd {
 }
 
 impl CompileCmd {
-    pub fn execute(&self) -> Result<(), Report> {
+    pub fn execute(&self) -> Outcome<()> {
         println!("============================================================");
         println!("Compile program");
         println!("============================================================");
 
         // load the program from file and parse it
-        let program = ProgramFile::read(&self.assembly_file)?;
+        let program = ProgramFile::read(&self.assembly_file);
+        if program.is_err() {
+            return program.map(|_| ());
+        }
 
         // load libraries from files
-        let libraries = Libraries::new(&self.library_paths)?;
+        let mut collector = DiagnosticCollector::default();
+        let libraries = match Libraries::new(&self.library_paths) {
+            Ok(libs) => libs,
+            Err(err) => {
+                collector.merge(program.diagnostics);
+                collector.add_report(err);
+                return Outcome {
+                    result: Err(()),
+                    diagnostics: collector.finish(),
+                };
+            },
+        };
+        let Outcome { result: Ok(program), diagnostics } = program else {
+            unreachable!();
+        };
+        collector.merge(diagnostics);
 
         // compile the program
         // Note: assembler debug mode is always enabled (issue #1821)
-        let compiled_program = program.compile(libraries.libraries.iter().cloned())?;
+        let compiled_program = program.compile(libraries.libraries.iter().cloned());
+        if compiled_program.is_err() {
+            collector.merge(compiled_program.diagnostics);
+            return Outcome {
+                result: Err(()),
+                diagnostics: collector.finish(),
+            };
+        }
+        let Outcome {
+            result: Ok(compiled_program),
+            diagnostics,
+        } = compiled_program
+        else {
+            unreachable!();
+        };
+        collector.merge(diagnostics);
 
         // report program hash to user
         let program_hash: [u8; 32] = compiled_program.hash().into();
@@ -48,9 +82,15 @@ impl CompileCmd {
             out_file
         });
 
-        compiled_program
-            .write_to_file(out_path)
-            .into_diagnostic()
-            .wrap_err("Failed to write the compiled file")
+        let result = collector
+            .capture(
+                compiled_program
+                    .write_to_file(out_path)
+                    .into_diagnostic()
+                    .wrap_err("Failed to write the compiled file"),
+            )
+            .ok_or(());
+
+        Outcome { result, diagnostics: collector.finish() }
     }
 }

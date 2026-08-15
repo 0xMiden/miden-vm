@@ -1,14 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
 
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
-use crate::{
-    Felt,
-    ast::*,
-    debuginfo::{SourceSpan, Span, Spanned},
-    diagnostics::Diagnostic,
-    parser::IntValue,
-};
+use crate::{Felt, ast::*, diagnostics::Diagnostic, parser::IntValue};
 
 /// An error raised during evaluation of a constant expression
 #[derive(Debug, thiserror::Error, Diagnostic)]

@@ -249,7 +249,6 @@ fn run_core_program(source: &str) -> Result<ExecutionOutput, ExecutionError> {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to link core library")
         .assemble_program("core_hash_compat_test", source)
-        .value
         .expect("failed to assemble core hash compatibility test program")
         .unwrap_program();
 

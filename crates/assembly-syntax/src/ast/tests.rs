@@ -1,7 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_debug_types::{SourceSpan, Span};
-use miden_diagnostics::Report;
+use miden_diagnostics::{SourceSpan, Span};
 use pretty_assertions::assert_eq;
 
 use crate::{
@@ -402,44 +401,20 @@ macro_rules! assert_forms {
 }
 
 macro_rules! assert_parse_diagnostic {
-    ($source:expr, $expected:literal) => {{
-        let source = $source.clone();
-        let outcome = crate::parser::parse_forms(source.clone());
-        assert!(
-            outcome.value.is_none(),
-            "expected diagnostic to be raised, but parsing succeeded"
-        );
-        let rendered = crate::testing::render_diagnostic_set(&outcome.diagnostics, source.as_ref());
-        assert_diagnostic!(rendered, $expected);
-    }};
-
-    ($source:expr, $expected:expr) => {{
-        let source = $source.clone();
-        let outcome = crate::parser::parse_forms(source.clone());
-        assert!(
-            outcome.value.is_none(),
-            "expected diagnostic to be raised, but parsing succeeded"
-        );
-        let rendered = crate::testing::render_diagnostic_set(&outcome.diagnostics, source.as_ref());
-        assert_diagnostic!(rendered, $expected);
+    ($context:expr, $source:expr, $expected:expr) => {{
+        let error = $context
+            .parse_forms($source.clone())
+            .expect_err("expected diagnostic to be raised, but parsing succeeded");
+        assert_diagnostic!(error, $expected);
     }};
 }
 
 macro_rules! assert_parse_diagnostic_lines {
-    ($source:expr, $($expected:literal),+) => {{
-        let source = $source.clone();
-        let outcome = crate::parser::parse_forms(source.clone());
-        assert!(outcome.value.is_none(), "expected diagnostic to be raised, but parsing succeeded");
-        let rendered = crate::testing::render_diagnostic_set(&outcome.diagnostics, source.as_ref());
-        assert_diagnostic_lines!(rendered, $($expected),*);
-    }};
-
-    ($source:expr, $($expected:expr),+) => {{
-        let source = $source.clone();
-        let outcome = crate::parser::parse_forms(source.clone());
-        assert!(outcome.value.is_none(), "expected diagnostic to be raised, but parsing succeeded");
-        let rendered = crate::testing::render_diagnostic_set(&outcome.diagnostics, source.as_ref());
-        assert_diagnostic_lines!(rendered, $($expected),*);
+    ($context:expr, $source:expr, $($expected:expr),+) => {{
+        let error = $context
+            .parse_forms($source.clone())
+            .expect_err("expected diagnostic to be raised, but parsing succeeded");
+        assert_diagnostic_lines!(error, $($expected),*);
     }};
 }
 
@@ -481,7 +456,7 @@ macro_rules! assert_program_diagnostic_lines {
 
 /// Tests the AST parsing
 #[test]
-fn test_ast_parsing_program_simple() -> Result<(), Report> {
+fn test_ast_parsing_program_simple() {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(&context, "begin push.0 assertz add.1 end");
@@ -492,12 +467,10 @@ fn test_ast_parsing_program_simple() -> Result<(), Report> {
     ));
 
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_program_push() -> Result<(), Report> {
+fn test_ast_parsing_program_push() {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(
@@ -563,18 +536,20 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
         &context,
         "begin push.0x00000000000000001000000000000000200000000000000030000000000000004000000000000000 end"
     );
-    assert_parse_diagnostic!(source_too_long, "long hex strings must contain exactly 64 digits");
+    assert_parse_diagnostic!(
+        context,
+        source_too_long,
+        "long hex strings must contain exactly 64 digits"
+    );
 
     // Push a hexadecimal string containing less than 4 values
     let source_too_long =
         source_file!(&context, "begin push.0x00000000000000001000000000000000 end");
-    assert_parse_diagnostic!(source_too_long, "expected 2, 4, 8, 16, or 64 hex digits");
-
-    Ok(())
+    assert_parse_diagnostic!(context, source_too_long, "expected 2, 4, 8, 16, or 64 hex digits");
 }
 
 #[test]
-fn test_ast_parsing_program_u32() -> Result<(), Report> {
+fn test_ast_parsing_program_u32() {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(
@@ -609,12 +584,10 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
     ));
 
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_program_proc() -> Result<(), Report> {
+fn test_ast_parsing_program_proc() {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(
@@ -640,12 +613,10 @@ fn test_ast_parsing_program_proc() -> Result<(), Report> {
         begin!(exec!(foo), exec!(bar))
     );
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_module() -> Result<(), Report> {
+fn test_ast_parsing_module() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -657,31 +628,28 @@ fn test_ast_parsing_module() -> Result<(), Report> {
     );
     let forms = module!(export!(foo, 1, block!(inst!(LocLoad(0u16.into())))));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_adv_ops() -> Result<(), Report> {
+fn test_ast_parsing_adv_ops() {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin adv_push adv_pushw adv_loadw end");
     let forms = module!(begin!(inst!(AdvPush), inst!(AdvPushW), inst!(AdvLoadW)));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_adv_injection() -> Result<(), Report> {
+fn test_ast_parsing_adv_injection() {
     use super::SystemEventNode::*;
 
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin adv.push_mapval adv.insert_mem end");
     let forms = module!(begin!(inst!(SysEvent(PushMapVal)), inst!(SysEvent(InsertMem))));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
+fn test_ast_parsing_deferred_advice() {
     use super::SystemEventNode::*;
 
     let context = SyntaxTestContext::new();
@@ -697,32 +665,29 @@ fn test_ast_parsing_deferred_advice() -> Result<(), Report> {
         inst!(SysEvent(DeferredEvaluatePayload))
     ));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_bitwise_counters() -> Result<(), Report> {
+fn test_ast_parsing_bitwise_counters() {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin u32clz u32ctz u32clo u32cto end");
     let forms = module!(begin!(inst!(U32Clz), inst!(U32Ctz), inst!(U32Clo), inst!(U32Cto)));
 
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_ilog2() -> Result<(), Report> {
+fn test_ast_parsing_ilog2() {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin push.8 ilog2 end");
     let forms =
         module!(begin!(inst!(Push(Immediate::Value(Span::unknown(8u8.into())))), inst!(ILog2)));
 
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_use() -> Result<(), Report> {
+fn test_ast_parsing_use() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -735,11 +700,10 @@ fn test_ast_parsing_use() -> Result<(), Report> {
     let forms = module!(import!("miden::core::abc::foo"), begin!(exec!(foo::bar)));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
     // TODO: Assert fully-resolved name is `std::abc::foo::bar`
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
+fn test_ast_parsing_module_nested_if() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -785,11 +749,10 @@ fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
         )
     ));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
+fn test_ast_parsing_module_sequential_if() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -830,7 +793,6 @@ fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
     ));
 
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
@@ -865,7 +827,7 @@ fn test_ast_parsing_while_if_body() {
 }
 
 #[test]
-fn test_ast_parsing_attributes() -> Result<(), Report> {
+fn test_ast_parsing_attributes() {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(
@@ -922,8 +884,6 @@ fn test_ast_parsing_attributes() -> Result<(), Report> {
         begin!(exec!(foo), exec!(bar), exec!(baz))
     );
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-
-    Ok(())
 }
 
 // INVALID BODY TESTS
@@ -942,8 +902,12 @@ fn test_use_in_proc_body() {
     end"#
     );
 
-    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
-    assert_parse_diagnostic!(source, "expected an import path");
+    assert_parse_diagnostic!(
+        context,
+        source,
+        "expected `end` to close procedure before top-level item"
+    );
+    assert_parse_diagnostic!(context, source, "expected an import path");
 }
 
 #[test]
@@ -952,6 +916,7 @@ fn test_unterminated_proc() {
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
 
     assert_parse_diagnostic_lines!(
+        context,
         source,
         "error: syntax error",
         regex!(r#" --> test[\d]+:1:18"#),
@@ -967,6 +932,7 @@ fn test_unterminated_if() {
     let source = source_file!(&context, "proc foo add mul if.true add.2 begin push.1 end");
 
     assert_parse_diagnostic_lines!(
+        context,
         source,
         "error: syntax error",
         regex!(r#" --> test[\d]+:1:32"#),
@@ -987,6 +953,7 @@ fn test_invalid_mapvaln_pad() {
     let source = source_file!(&context, "begin adv.push_mapvaln.3 end");
 
     assert_parse_diagnostic_lines!(
+        context,
         source,
         "error: invalid padding value for the `adv.push_mapvaln` instruction: 3",
         regex!(r#" --> test[\d]+:1:24"#),
@@ -1002,7 +969,7 @@ fn test_invalid_mapvaln_pad() {
 // ================================================================================================
 
 #[test]
-fn test_ast_parsing_simple_docs() -> Result<(), Report> {
+fn test_ast_parsing_simple_docs() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -1016,7 +983,6 @@ fn test_ast_parsing_simple_docs() -> Result<(), Report> {
 
     let forms = module!(doc!("proc doc\n"), export!(foo, 1, block!(inst!(LocLoad(0u16.into())))));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
@@ -1031,11 +997,11 @@ fn locals_overflow_rejected() {
     end"#
     );
 
-    assert_parse_diagnostic!(source, "number of locals exceeds the maximum of 65532");
+    assert_parse_diagnostic!(context, source, "number of locals exceeds the maximum of 65532");
 }
 
 #[test]
-fn locals_max_valid_accepted() -> Result<(), Report> {
+fn locals_max_valid_accepted() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -1047,7 +1013,6 @@ fn locals_max_valid_accepted() -> Result<(), Report> {
     );
 
     context.parse_forms(source).expect("expected forms to parse");
-    Ok(())
 }
 
 #[test]
@@ -1147,7 +1112,7 @@ fn test_ast_parsing_module_docs_fail() {
     let error = context
         .parse_module_source_file(source)
         .expect_err("expected docs-only source to produce an unused-docstring warning");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("warning: unused docstring"), "{rendered}");
     assert!(rendered.contains("#! orphaned module doc"), "{rendered}");
 
@@ -1296,7 +1261,7 @@ fn test_ast_parsing_module_docs_fail() {
     let error = context
         .parse_module_source_file(source)
         .expect_err("expected docs-only source to produce unused-docstring warnings");
-    let rendered = format!("{}", error);
+    let rendered = format!("{error}");
     assert!(rendered.contains("#! malformed doc"), "{rendered}");
 
     let source = source_file!(
@@ -1411,7 +1376,7 @@ fn assert_parsing_line_unmatched_begin() {
         add
         mul"
     );
-    assert_parse_diagnostic!(source, "expected `end` to close `begin` block");
+    assert_parse_diagnostic!(context, source, "expected `end` to close `begin` block");
 }
 
 #[test]
@@ -1424,7 +1389,7 @@ fn assert_parsing_line_extra_param() {
           add.1.2
         end"
     );
-    assert_parse_diagnostic!(source, "invalid instruction `add` or malformed operands");
+    assert_parse_diagnostic!(context, source, "invalid instruction `add` or malformed operands");
 }
 
 #[test]
@@ -1466,6 +1431,7 @@ fn assert_parsing_line_invalid_op() {
     end"
     );
     assert_parse_diagnostic!(
+        context,
         source,
         "invalid instruction `u32widening_mulx` or malformed operands"
     );
@@ -1483,7 +1449,7 @@ fn assert_parsing_line_unexpected_token() {
 
     mul"
     );
-    assert_parse_diagnostic!(source, "unexpected top-level token");
+    assert_parse_diagnostic!(context, source, "unexpected top-level token");
 }
 
 /// This test evaluates that we get the expected formatted Miden Assembly output when parsing some
@@ -1783,7 +1749,7 @@ end"#
 // ================================================================================================
 
 #[test]
-fn test_type_declarations() -> Result<(), Report> {
+fn test_type_declarations() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -1804,11 +1770,10 @@ type Hash = [u8; 32]
         type_alias!(Hash, array_ty!(Type::U8, 32))
     );
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_enum_declarations() -> Result<(), Report> {
+fn test_enum_declarations() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -1831,11 +1796,10 @@ enum Tag : u8 {
         variant!(D, const_add!(const_ref!(C), const_int!(1u8)))
     ));
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }
 
 #[test]
-fn test_type_signatures() -> Result<(), Report> {
+fn test_type_signatures() {
     let context = SyntaxTestContext::new();
     let source = source_file!(
         &context,
@@ -1882,5 +1846,4 @@ end
         )
     );
     assert_eq!(context.parse_forms(source).expect("expected forms to parse"), forms);
-    Ok(())
 }

@@ -4,7 +4,7 @@ use std::string::{String, ToString};
 use std::{boxed::Box, path::Path};
 
 #[cfg(all(feature = "std", feature = "serde"))]
-use miden_assembly_syntax::debuginfo::SourceManager;
+use miden_diagnostics::DiagnosticCollector;
 
 use crate::*;
 
@@ -63,82 +63,137 @@ impl Workspace {
 /// Parsing
 #[cfg(all(feature = "std", feature = "serde"))]
 impl Workspace {
-    /// Load a [Workspace] from `source`, using the provided `source_manager` when loading the
-    /// sources of workspace members.
-    pub fn load(
-        source: Arc<SourceFile>,
-        source_manager: &dyn SourceManager,
-    ) -> Result<Box<Self>, Report> {
-        use miden_assembly_syntax::debuginfo::SourceManagerExt;
-
+    /// Load a [Workspace] from `manifest_path`, registering the manifest and all member manifests
+    /// in `sources`.
+    pub fn load(manifest_path: impl AsRef<Path>, sources: &mut SourceMap) -> Outcome<Box<Self>> {
         use crate::ast::ProjectFileError;
 
-        let file = ast::WorkspaceFile::parse(source.clone())?;
-
-        let manifest_uri = source.content().uri();
-        let manifest_path = if manifest_uri.scheme().is_none_or(|scheme| scheme == "file") {
-            Some(Path::new(manifest_uri.path()).to_path_buf().into_boxed_path())
-        } else {
-            None
+        let mut diagnostics = DiagnosticCollector::new();
+        let manifest_path = manifest_path.as_ref();
+        let source = match std::fs::read_to_string(manifest_path) {
+            Ok(source) => source,
+            Err(error) => {
+                let _ = diagnostics.add_report(Report::msg(format!(
+                    "failed to load workspace manifest '{}': {error}",
+                    manifest_path.display()
+                )));
+                return Outcome {
+                    result: Err(()),
+                    diagnostics: diagnostics.finish(),
+                };
+            },
+        };
+        let source_id =
+            match sources.insert(manifest_path.display().to_string(), source.clone(), None) {
+                Ok(source_id) => source_id,
+                Err(error) => {
+                    let _ = diagnostics.add_report(Report::msg(format!(
+                        "failed to register workspace manifest '{}': {error}",
+                        manifest_path.display()
+                    )));
+                    return Outcome {
+                        result: Err(()),
+                        diagnostics: diagnostics.finish(),
+                    };
+                },
+            };
+        let parsed = ast::WorkspaceFile::parse(source_id, &source);
+        let _ = diagnostics.merge(parsed.diagnostics);
+        let Ok(file) = parsed.result else {
+            return Outcome {
+                result: Err(()),
+                diagnostics: diagnostics.finish(),
+            };
         };
 
         let members = file.workspace.members.clone();
 
         let mut workspace = Box::new(Workspace {
-            manifest_path,
+            manifest_path: Some(manifest_path.to_path_buf().into_boxed_path()),
             members: Vec::with_capacity(members.len()),
         });
         let mut seen_member_names = Map::<String, SourceSpan>::default();
 
         for member in members {
+            let member_span = ast::parsing::source_span(source_id, member.span());
             let Some(workspace_root) = workspace.workspace_root() else {
-                return Err(ProjectFileError::LoadWorkspaceMemberFailed {
-                    source_file: source.clone(),
+                let _ = diagnostics.add(ProjectFileError::LoadWorkspaceMemberFailed {
                     message: "cannot load workspace members for virtual workspace manifest: manifest path must be resolvable".into(),
-                    span: member.span(),
-                }
-                .into_report());
+                    span: member_span,
+                });
+                continue;
             };
-            let relative_path = Path::new(member.as_str());
-            let member_dir = absolutize_path(relative_path, workspace_root).map_err(|err| {
-                ProjectFileError::LoadWorkspaceMemberFailed {
-                    source_file: source.clone(),
-                    message: err.to_string(),
-                    span: member.span(),
-                }
-                .into_report()
-            })?;
+            let relative_path = Path::new(member.get_ref().as_ref());
+            let member_dir = match absolutize_path(relative_path, workspace_root) {
+                Ok(member_dir) => member_dir,
+                Err(error) => {
+                    let _ = diagnostics.add(ProjectFileError::LoadWorkspaceMemberFailed {
+                        message: error.to_string(),
+                        span: member_span,
+                    });
+                    continue;
+                },
+            };
             if member_dir.strip_prefix(workspace_root).is_err() {
-                return Err(ProjectFileError::LoadWorkspaceMemberFailed {
-                    source_file: source.clone(),
+                let _ = diagnostics.add(ProjectFileError::LoadWorkspaceMemberFailed {
                     message: "workspace members must be located within the workspace root".into(),
-                    span: member.span(),
-                }
-                .into_report());
+                    span: member_span,
+                });
+                continue;
             }
-            let manifest_path = member_dir.join("miden-project.toml");
-            let member_manifest = source_manager.load_file(&manifest_path).map_err(|err| {
-                ProjectFileError::LoadWorkspaceMemberFailed {
-                    source_file: source.clone(),
-                    message: err.to_string(),
-                    span: member.span(),
-                }
-                .into_report()
-            })?;
-            let package = Package::load_from_workspace(member_manifest, &file)?;
+            let member_manifest_path = member_dir.join("miden-project.toml");
+            let member_manifest = match std::fs::read_to_string(&member_manifest_path) {
+                Ok(source) => source,
+                Err(error) => {
+                    let _ = diagnostics.add(ProjectFileError::LoadWorkspaceMemberFailed {
+                        message: error.to_string(),
+                        span: member_span,
+                    });
+                    continue;
+                },
+            };
+            let member_source_id = match sources.insert(
+                member_manifest_path.display().to_string(),
+                member_manifest.clone(),
+                None,
+            ) {
+                Ok(source_id) => source_id,
+                Err(error) => {
+                    let _ = diagnostics.add(ProjectFileError::LoadWorkspaceMemberFailed {
+                        message: error.to_string(),
+                        span: member_span,
+                    });
+                    continue;
+                },
+            };
+            let loaded = Package::load_from_workspace(
+                member_source_id,
+                &member_manifest,
+                Some(&member_manifest_path),
+                source_id,
+                &file,
+                Some(manifest_path),
+            );
+            let _ = diagnostics.merge(loaded.diagnostics);
+            let Ok(package) = loaded.result else {
+                continue;
+            };
             let package_name = package.name().inner().to_string();
-            if let Some(prev) = seen_member_names.insert(package_name.clone(), member.span()) {
-                return Err(ProjectFileError::DuplicateWorkspaceMember {
+            if let Some(prev) = seen_member_names.insert(package_name.clone(), member_span) {
+                let _ = diagnostics.add(ProjectFileError::DuplicateWorkspaceMember {
                     name: package_name,
-                    source_file: source.clone(),
-                    span: member.span(),
+                    span: member_span,
                     prev,
-                }
-                .into_report());
+                });
+                continue;
             }
             workspace.members.push(Arc::from(package));
         }
 
-        Ok(workspace)
+        let result = (diagnostics.counts().errors() == 0).then_some(workspace).ok_or(());
+        Outcome {
+            result,
+            diagnostics: diagnostics.finish(),
+        }
     }
 }

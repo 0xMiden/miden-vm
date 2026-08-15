@@ -1,4 +1,4 @@
-use miden_debug_types::SourceSpan;
+use miden_diagnostics::SourceSpan;
 
 use crate::{ast::ItemIndex, diagnostics::Diagnostic};
 

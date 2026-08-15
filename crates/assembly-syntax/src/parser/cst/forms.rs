@@ -10,8 +10,7 @@ use miden_assembly_syntax_cst::ast::{
     Item as CstItem, Namespace as CstNamespace, Procedure as CstProcedure,
     Submodule as CstSubmodule, TypeDecl as CstTypeDecl,
 };
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_diagnostics::TextRange;
+use miden_diagnostics::{SourceSpan, Span, Spanned, TextRange};
 
 use super::{
     blocks::lower_required_block,
@@ -110,7 +109,8 @@ fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usi
 
 /// Returns true when `item` begins on the first line in the source file.
 fn starts_at_file_beginning(context: &LoweringContext<'_>, item: &CstItem) -> bool {
-    context.source_file().location(item_span(context, item)).line().to_u32() == 1
+    let start = item_span(context, item).range().start() as usize;
+    context.source().get(..start).is_some_and(|prefix| !prefix.contains('\n'))
 }
 
 /// Returns true when the source text between `lhs` and `rhs` contains a blank line.
@@ -121,8 +121,8 @@ fn has_blank_line_between(context: &LoweringContext<'_>, lhs: &CstItem, rhs: &Cs
     let lhs = item_span(context, lhs);
     let rhs = item_span(context, rhs);
     let between = context
-        .source_file()
-        .source_slice(lhs.range().end() as usize..rhs.range().start() as usize)
+        .source()
+        .get(lhs.range().end() as usize..rhs.range().start() as usize)
         .expect("doc spans should produce valid interstitial text");
     count_line_breaks(between) > 1
 }

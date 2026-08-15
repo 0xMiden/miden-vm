@@ -1,8 +1,10 @@
 use alloc::{string::ToString, sync::Arc};
 use core::{fmt, iter::FusedIterator};
 
+use miden_diagnostics::Span;
+
 use super::{Path, PathError};
-use crate::{ast::Ident, debuginfo::Span};
+use crate::ast::Ident;
 
 // PATH COMPONENT
 // ================================================================================================

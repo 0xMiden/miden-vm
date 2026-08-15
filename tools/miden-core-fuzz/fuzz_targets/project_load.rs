@@ -14,7 +14,7 @@ use std::{
 };
 
 use libfuzzer_sys::fuzz_target;
-use miden_assembly_syntax::debuginfo::{DefaultSourceManager, SourceManagerExt};
+use miden_diagnostics::{SourceMap, SourceNamespace};
 use miden_project::{Package, Project};
 
 const MAX_MANIFEST_LEN: usize = 40 * 1024;
@@ -59,20 +59,20 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    let source_manager = DefaultSourceManager::default();
+    let mut sources = SourceMap::new(SourceNamespace::new_unchecked(1));
 
     match scenario_index(data, 5) {
-        0 => load_standalone_package(&tree, &source_manager, manifest),
-        1 => load_standalone_project(&tree, &source_manager, manifest),
-        2 => load_fuzzed_workspace(&tree, &source_manager, manifest),
-        3 => load_inherited_workspace_member(&tree, &source_manager, manifest),
-        _ => load_project_reference(&tree, &source_manager, manifest),
+        0 => load_standalone_package(&tree, &mut sources, manifest),
+        1 => load_standalone_project(&tree, &mut sources, manifest),
+        2 => load_fuzzed_workspace(&tree, &mut sources, manifest),
+        3 => load_inherited_workspace_member(&tree, &mut sources, manifest),
+        _ => load_project_reference(&tree, &mut sources, manifest),
     }
 });
 
 fn load_standalone_package(
     tree: &TempProjectTree,
-    source_manager: &DefaultSourceManager,
+    sources: &mut SourceMap,
     manifest: &str,
 ) {
     let manifest_path = tree.path("standalone/miden-project.toml");
@@ -80,14 +80,16 @@ fn load_standalone_package(
         return;
     }
 
-    if let Ok(source) = source_manager.load_file(&manifest_path) {
-        let _ = Package::load(source);
+    if let Ok(source) = fs::read_to_string(&manifest_path)
+        && let Ok(source_id) = sources.insert(manifest_path.display().to_string(), source.clone(), None)
+    {
+        let _ = Package::load(source_id, &source, Some(&manifest_path));
     }
 }
 
 fn load_standalone_project(
     tree: &TempProjectTree,
-    source_manager: &DefaultSourceManager,
+    sources: &mut SourceMap,
     manifest: &str,
 ) {
     let manifest_path = tree.path("standalone/miden-project.toml");
@@ -96,15 +98,15 @@ fn load_standalone_project(
     }
 
     if scenario_index(manifest.as_bytes(), 2) == 0 {
-        let _ = Project::load(tree.path("standalone"), source_manager);
+        let _ = Project::load(tree.path("standalone"), sources);
     } else {
-        let _ = Project::load(&manifest_path, source_manager);
+        let _ = Project::load(&manifest_path, sources);
     }
 }
 
 fn load_fuzzed_workspace(
     tree: &TempProjectTree,
-    source_manager: &DefaultSourceManager,
+    sources: &mut SourceMap,
     manifest: &str,
 ) {
     let workspace_manifest = tree.path("fuzzed-workspace/miden-project.toml");
@@ -135,15 +137,15 @@ end
     }
 
     if scenario_index(manifest.as_bytes(), 2) == 0 {
-        let _ = Project::load(tree.path("fuzzed-workspace"), source_manager);
+        let _ = Project::load(tree.path("fuzzed-workspace"), sources);
     } else {
-        let _ = Project::load(&workspace_manifest, source_manager);
+        let _ = Project::load(&workspace_manifest, sources);
     }
 }
 
 fn load_inherited_workspace_member(
     tree: &TempProjectTree,
-    source_manager: &DefaultSourceManager,
+    sources: &mut SourceMap,
     manifest: &str,
 ) {
     let member_manifest = write_inherited_workspace(tree, manifest);
@@ -152,15 +154,15 @@ fn load_inherited_workspace_member(
     };
 
     if scenario_index(manifest.as_bytes(), 2) == 0 {
-        let _ = Project::load(tree.path("inherited-workspace/app"), source_manager);
+        let _ = Project::load(tree.path("inherited-workspace/app"), sources);
     } else {
-        let _ = Project::load(&member_manifest, source_manager);
+        let _ = Project::load(&member_manifest, sources);
     }
 }
 
 fn load_project_reference(
     tree: &TempProjectTree,
-    source_manager: &DefaultSourceManager,
+    sources: &mut SourceMap,
     manifest: &str,
 ) {
     if write_inherited_workspace(tree, manifest).is_err() {
@@ -172,10 +174,10 @@ fn load_project_reference(
         let _ = Project::load_project_reference(
             "app",
             tree.path("inherited-workspace"),
-            source_manager,
+            sources,
         );
     } else {
-        let _ = Project::load_project_reference("app", &workspace_manifest, source_manager);
+        let _ = Project::load_project_reference("app", &workspace_manifest, sources);
     }
 }
 

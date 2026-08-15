@@ -3,16 +3,18 @@ mod graph;
 
 #[cfg(feature = "std")]
 use alloc::format;
-use alloc::sync::Arc;
+#[cfg(feature = "serde")]
+use alloc::string::ToString;
+use alloc::{string::String, sync::Arc};
 use core::fmt;
 
-use miden_assembly_syntax::debuginfo::Spanned;
-#[cfg(feature = "serde")]
-use miden_diagnostics::SourceKey;
+use miden_diagnostics::Spanned;
 pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 pub use self::graph::*;
+#[cfg(feature = "serde")]
+use crate::Word;
 use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri};
 
 /// Represents a project/package dependency declaration
@@ -179,94 +181,101 @@ pub enum InvalidDependencySpecError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[error("invalid dependency version requirement: {message}")]
+    InvalidVersionRequirement {
+        message: String,
+        #[label(primary, "{message}")]
+        span: SourceSpan,
+    },
 }
 
 #[cfg(feature = "serde")]
-impl InvalidDependencySpecError {
-    pub(crate) fn into_report(mut self, source_file: Arc<crate::SourceFile>) -> crate::Report {
-        let source_id = source_file.id();
-        let attach = |span: &mut SourceSpan| span.set_source_key(SourceKey::Attached(source_id));
-        match &mut self {
-            Self::NotAWorkspace { span }
-            | Self::GitWithDigest { span }
-            | Self::MissingGitRevision { span }
-            | Self::MissingVersion { span } => attach(span),
-            Self::ConflictingGitRevision { first, second } => {
-                attach(first);
-                attach(second);
-            },
-        }
-        crate::Report::new(self).attach_sources(source_file.slice(0..u32::MAX))
-    }
-}
+impl DependencyVersionScheme {
+    pub(crate) fn try_from_ast(
+        ast: &crate::ast::DependencySpec,
+        source_id: crate::SourceId,
+    ) -> Result<Self, InvalidDependencySpecError> {
+        use crate::ast::parsing::source_span;
 
-#[cfg(feature = "serde")]
-impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
-    type Error = InvalidDependencySpecError;
-
-    fn try_from(ast: Span<&crate::ast::DependencySpec>) -> Result<Self, Self::Error> {
+        let ast_span = source_span(source_id, ast.name.span());
         if ast.inherits_workspace_version() {
-            return Err(InvalidDependencySpecError::NotAWorkspace { span: ast.span() });
+            return Err(InvalidDependencySpecError::NotAWorkspace { span: ast_span });
         }
+
+        let version = ast
+            .version_or_digest
+            .as_ref()
+            .map(|version| parse_version_requirement(version, source_id))
+            .transpose()?;
 
         if ast.is_host_resolved() {
-            ast.version()
-                .cloned()
+            version
                 .map(Self::Registry)
-                .ok_or(InvalidDependencySpecError::MissingVersion { span: ast.span() })
+                .ok_or(InvalidDependencySpecError::MissingVersion { span: ast_span })
         } else if ast.is_git() {
-            let version = match ast.version() {
+            let version = match version {
                 Some(VersionRequirement::Digest(digest)) => {
                     return Err(InvalidDependencySpecError::GitWithDigest { span: digest.span() });
                 },
                 Some(VersionRequirement::Exact(_)) => {
-                    return Err(InvalidDependencySpecError::GitWithDigest { span: ast.span() });
+                    return Err(InvalidDependencySpecError::GitWithDigest { span: ast_span });
                 },
-                Some(VersionRequirement::Semantic(v)) => Some(v.clone()),
+                Some(VersionRequirement::Semantic(v)) => Some(v),
                 None => None,
             };
-            if let Some(branch) = ast.branch.as_ref()
-                && let Some(rev) = ast.rev.as_ref()
-            {
+            if let (Some(branch), Some(rev)) = (ast.branch.as_ref(), ast.rev.as_ref()) {
                 return Err(InvalidDependencySpecError::ConflictingGitRevision {
-                    first: branch.span(),
-                    second: rev.span(),
+                    first: source_span(source_id, branch.span()),
+                    second: source_span(source_id, rev.span()),
                 });
             }
             let revision = ast
                 .branch
                 .as_ref()
-                .map(|branch| Span::new(branch.span(), GitRevision::Branch(branch.inner().clone())))
-                .or_else(|| {
-                    ast.rev
-                        .as_ref()
-                        .map(|rev| Span::new(rev.span(), GitRevision::Commit(rev.inner().clone())))
+                .map(|branch| {
+                    Span::new(
+                        source_span(source_id, branch.span()),
+                        GitRevision::Branch(branch.get_ref().clone()),
+                    )
                 })
-                .ok_or_else(|| InvalidDependencySpecError::MissingGitRevision {
-                    span: ast.span(),
-                })?;
+                .or_else(|| {
+                    ast.rev.as_ref().map(|rev| {
+                        Span::new(
+                            source_span(source_id, rev.span()),
+                            GitRevision::Commit(rev.get_ref().clone()),
+                        )
+                    })
+                })
+                .ok_or(InvalidDependencySpecError::MissingGitRevision { span: ast_span })?;
+            let git = ast.git.as_ref().expect("git spec has a repository");
             Ok(Self::Git {
-                repo: ast.git.clone().unwrap(),
+                repo: Span::new(
+                    source_span(source_id, git.span()),
+                    Uri::new(git.get_ref().clone()),
+                ),
                 revision,
                 version,
             })
         } else {
+            let path = ast.path.as_ref().expect("path spec has a path");
             Ok(Self::Path {
-                path: ast.path.clone().unwrap(),
-                version: ast.version_or_digest.clone(),
+                path: Span::new(
+                    source_span(source_id, path.span()),
+                    Uri::new(path.get_ref().clone()),
+                ),
+                version,
             })
         }
     }
-}
 
-#[cfg(feature = "serde")]
-impl DependencyVersionScheme {
     /// Parse a dependency spec into [DependencyVersionScheme], taking into account workspace
     /// context.
     #[cfg(feature = "std")]
-    pub fn try_from_in_workspace(
-        spec: Span<&crate::ast::DependencySpec>,
+    pub(crate) fn try_from_ast_in_workspace(
+        spec: &crate::ast::DependencySpec,
+        source_id: crate::SourceId,
         workspace: &crate::ast::WorkspaceFile,
+        workspace_manifest_path: Option<&std::path::Path>,
     ) -> Result<Self, InvalidDependencySpecError> {
         use std::path::Path;
 
@@ -275,22 +284,19 @@ impl DependencyVersionScheme {
         // If the dependency is a path dependency, check if the path refers to any of the workspace
         // members, and if so, convert the dependency version scheme to `Workspace` to aid in
         // dependency resolution
-        match Self::try_from(spec)? {
+        match Self::try_from_ast(spec, source_id)? {
             Self::Path { path: uri, version } => {
-                let workspace_path = workspace
-                    .source_file
-                    .as_ref()
-                    .map(|file| Path::new(file.content().uri().path()));
                 if uri.scheme().is_none_or(|scheme| scheme == "file")
-                    && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
+                    && let Some(workspace_path) =
+                        workspace_manifest_path.and_then(|path| path.canonicalize().ok())
                     && let Some(workspace_root) = workspace_path.parent()
                     && let Ok(resolved_uri) = absolutize_path(Path::new(uri.path()), workspace_root)
                 {
                     let is_member = workspace.workspace.members.iter().any(|member| {
-                        let member_path = member.path();
-                        uri.path() == member_path
+                        let member_path = member.get_ref();
+                        uri.path() == member_path.as_ref()
                             || uri.path() == format!("{member_path}/miden-project.toml")
-                            || absolutize_path(Path::new(member_path), workspace_root)
+                            || absolutize_path(Path::new(member_path.as_ref()), workspace_root)
                                 .ok()
                                 .is_some_and(|member_dir| {
                                     resolved_uri == member_dir
@@ -309,38 +315,40 @@ impl DependencyVersionScheme {
             scheme => Ok(scheme),
         }
     }
+}
 
-    #[cfg(not(feature = "std"))]
-    pub fn try_from_in_workspace(
-        spec: Span<&crate::ast::DependencySpec>,
-        workspace: &crate::ast::WorkspaceFile,
-    ) -> Result<Self, InvalidDependencySpecError> {
-        use alloc::format;
+#[cfg(feature = "serde")]
+fn parse_version_requirement(
+    value: &crate::TomlSpan<Arc<str>>,
+    source_id: crate::SourceId,
+) -> Result<VersionRequirement, InvalidDependencySpecError> {
+    use core::str::FromStr;
 
-        match Self::try_from(spec)? {
-            Self::Path { path: uri, version } => {
-                let workspace_path =
-                    workspace.source_file.as_ref().map(|file| file.content().uri().path());
-                if uri.scheme().is_none_or(|scheme| scheme == "file") &&
-                    let Some(workspace_root) = workspace_path.and_then(|p| p.strip_suffix("miden-project.toml")) &&
-                    // Make sure the uri is relative to workspace root
-                    (!workspace_root.is_empty() && !(uri.path().starts_with('/') || uri.path().starts_with("..")))
-                {
-                    let is_member = workspace.workspace.members.iter().any(|member| {
-                        let member_path = member.path();
-                        uri.path() == member_path
-                            || uri.path() == format!("{member_path}/miden-project.toml")
-                    });
-                    if is_member {
-                        Ok(Self::Workspace { member: uri.clone(), version })
-                    } else {
-                        Ok(Self::WorkspacePath { path: uri.clone(), version })
-                    }
-                } else {
-                    Ok(Self::Path { path: uri, version })
-                }
-            },
-            scheme => Ok(scheme),
-        }
+    let span = crate::ast::parsing::source_span(source_id, value.span());
+    let raw = value.get_ref().as_ref();
+    if raw == "*" {
+        return Ok(VersionRequirement::Semantic(Span::new(span, VersionReq::STAR)));
     }
+    if let Some((version, digest)) = raw.split_once('#') {
+        let version = version.parse::<SemVer>().map_err(|error| {
+            InvalidDependencySpecError::InvalidVersionRequirement {
+                message: error.to_string(),
+                span,
+            }
+        })?;
+        let digest = Word::parse(digest).map_err(|error| {
+            InvalidDependencySpecError::InvalidVersionRequirement {
+                message: error.to_string(),
+                span,
+            }
+        })?;
+        return Ok(VersionRequirement::Exact(Version::new(version, digest)));
+    }
+    if let Ok(digest) = Word::parse(raw) {
+        return Ok(VersionRequirement::Digest(Span::new(span, digest)));
+    }
+    let requirement = VersionReq::from_str(raw).map_err(|error| {
+        InvalidDependencySpecError::InvalidVersionRequirement { message: error.to_string(), span }
+    })?;
+    Ok(VersionRequirement::Semantic(Span::new(span, requirement)))
 }

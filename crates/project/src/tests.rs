@@ -1,41 +1,37 @@
+use alloc::string::ToString;
 use core::assert_matches;
 use std::{boxed::Box, fs, path::Path, sync::Arc};
 
-use miden_assembly_syntax::{
-    Path as MasmPath,
-    debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt},
-};
-use miden_diagnostics::Report;
+use miden_assembly_syntax::Path as MasmPath;
+use miden_diagnostics::{SourceMap, SourceNamespace};
 use tempfile::TempDir;
 
 use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace};
 
 struct TestContext {
-    pub source_manager: Arc<dyn SourceManager>,
+    pub sources: SourceMap,
 }
 
 impl Default for TestContext {
     fn default() -> Self {
         Self {
-            source_manager: Arc::new(DefaultSourceManager::default()),
+            sources: SourceMap::new(SourceNamespace::new_unchecked(92)),
         }
     }
 }
 
 impl TestContext {
-    pub fn load_workspace(&self, path: impl AsRef<Path>) -> Result<Box<Workspace>, Report> {
-        let path = path.as_ref();
-        let source_file = self.source_manager.load_file(path).map_err(Report::msg)?;
-        Workspace::load(source_file, &self.source_manager)
+    pub fn load_workspace(&mut self, path: impl AsRef<Path>) -> Box<Workspace> {
+        Workspace::load(path, &mut self.sources).expect("workspace should load")
     }
 }
 
 #[test]
-fn can_load_protocol_example_project() -> Result<(), Report> {
+fn can_load_protocol_example_project() {
     const MANIFEST_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/examples/protocol/miden-project.toml");
-    let context = TestContext::default();
-    let workspace = context.load_workspace(MANIFEST_PATH)?;
+    let mut context = TestContext::default();
+    let workspace = context.load_workspace(MANIFEST_PATH);
 
     assert_eq!(workspace.members().len(), 3);
 
@@ -100,8 +96,6 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-utils");
     assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member, .. } if member.path() == "utils");
     assert_eq!(userspace_project.dependencies()[1].linkage(), Linkage::Dynamic);
-
-    Ok(())
 }
 
 #[test]
@@ -124,15 +118,15 @@ path = "mod.masm"
     )
     .unwrap();
 
-    let context = TestContext::default();
-    let err = Project::load(&manifest_path, &context.source_manager)
-        .expect_err("invalid namespace must be reported instead of panicking");
+    let mut context = TestContext::default();
+    let outcome = Project::load(&manifest_path, &mut context.sources);
+    let err = outcome.into_result().expect_err("project should fail to load").to_string();
 
-    assert!(format!("{err}").contains("invalid item path component"));
+    assert!(err.contains("invalid item path component"));
 }
 
 #[test]
-fn workspace_dev_override_is_used_for_child_profile_inheritance() -> Result<(), Report> {
+fn workspace_dev_override_is_used_for_child_profile_inheritance() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace-profile");
     let app_dir = root.join("app");
@@ -165,21 +159,19 @@ inherits = "dev"
     )
     .unwrap();
 
-    let context = TestContext::default();
+    let mut context = TestContext::default();
     let Project::WorkspacePackage { package, workspace: _ } =
-        Project::load(&app_manifest_path, &context.source_manager)?
+        Project::load(&app_manifest_path, &mut context.sources).expect("project should load")
     else {
         panic!("expected workspace package")
     };
     let child = package.profiles().iter().find(|p| p.name().as_ref() == "child").unwrap();
 
     assert!(!child.should_emit_debug_info());
-
-    Ok(())
 }
 
 #[test]
-fn workspace_package_version_can_be_inherited_with_dotted_key_syntax() -> Result<(), Report> {
+fn workspace_package_version_can_be_inherited_with_dotted_key_syntax() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace-version");
     let app_dir = root.join("app");
@@ -206,20 +198,18 @@ version.workspace = true
     )
     .unwrap();
 
-    let context = TestContext::default();
+    let mut context = TestContext::default();
     let Project::WorkspacePackage { package, workspace: _ } =
-        Project::load(&app_dir, &context.source_manager)?
+        Project::load(&app_dir, &mut context.sources).expect("project should load")
     else {
         panic!("expected workspace package")
     };
 
     assert_eq!(format!("{}", package.version()), "0.1.0");
-
-    Ok(())
 }
 
 #[test]
-fn load_project_reference_keeps_non_member_workspace_paths_authoritative() -> Result<(), Report> {
+fn load_project_reference_keeps_non_member_workspace_paths_authoritative() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
     fs::create_dir_all(&root).unwrap();
@@ -264,18 +254,17 @@ path = "lib.masm"
     .unwrap();
     fs::write(vendor_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
 
-    let context = TestContext::default();
-    let project = Project::load_project_reference("dep", &vendor_dir, &context.source_manager)?;
+    let mut context = TestContext::default();
+    let project = Project::load_project_reference("dep", &vendor_dir, &mut context.sources)
+        .expect("project should load");
 
     assert!(!project.is_workspace_member());
     assert_eq!(project.manifest_path(), Some(vendor_manifest.as_path()));
     assert_eq!(format!("{}", project.package().version()), "9.0.0");
-
-    Ok(())
 }
 
 #[test]
-fn load_package_ignores_broken_workspace_members_when_not_a_member() -> Result<(), Report> {
+fn load_package_ignores_broken_workspace_members_when_not_a_member() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
     let vendor_dir = root.join("vendor").join("dep");
@@ -304,17 +293,16 @@ path = "lib.masm"
     fs::write(vendor_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
     let vendor_manifest = vendor_manifest.canonicalize().unwrap();
 
-    let context = TestContext::default();
-    let project = Project::load(&vendor_manifest, &context.source_manager)?;
+    let mut context = TestContext::default();
+    let project =
+        Project::load(&vendor_manifest, &mut context.sources).expect("project should load");
 
     assert!(!project.is_workspace_member());
     assert_eq!(project.manifest_path(), Some(vendor_manifest.as_path()));
-
-    Ok(())
 }
 
 #[test]
-fn load_project_reference_resolves_workspace_manifest_file_inputs() -> Result<(), Report> {
+fn load_project_reference_resolves_workspace_manifest_file_inputs() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
     let dep_dir = root.join("dep");
@@ -344,15 +332,13 @@ path = "lib.masm"
     fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
     let dep_manifest = dep_manifest.canonicalize().unwrap();
 
-    let context = TestContext::default();
-    let project =
-        Project::load_project_reference("dep", &workspace_manifest, &context.source_manager)?;
+    let mut context = TestContext::default();
+    let project = Project::load_project_reference("dep", &workspace_manifest, &mut context.sources)
+        .expect("project should load");
 
     assert!(project.is_workspace_member());
     assert_eq!(project.manifest_path(), Some(dep_manifest.as_path()));
     assert_eq!(format!("{}", project.package().version()), "1.2.3");
-
-    Ok(())
 }
 
 #[test]
@@ -374,14 +360,16 @@ path = "lib.masm"
     .unwrap();
     fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
 
-    let context = TestContext::default();
-    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
-        .expect_err("package name mismatch should be rejected");
+    let mut context = TestContext::default();
+    let outcome = Project::load_project_reference("expected", &dep_dir, &mut context.sources);
+    let err = outcome
+        .into_result()
+        .expect_err("package name mismatch should be rejected")
+        .to_string();
 
-    assert!(
-        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
-        "{err}"
-    );
+    assert!(err.contains("dependency 'expected' resolved to package 'actual'"), "{err}");
+    assert!(err.contains("name = \"actual\""), "{err}");
+    assert!(err.contains("package is declared as 'actual'"), "{err}");
 }
 
 #[test]
@@ -412,14 +400,16 @@ path = "lib.masm"
     .unwrap();
     fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
 
-    let context = TestContext::default();
-    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
-        .expect_err("workspace member package name mismatch should be rejected");
+    let mut context = TestContext::default();
+    let outcome = Project::load_project_reference("expected", &dep_dir, &mut context.sources);
+    let err = outcome
+        .into_result()
+        .expect_err("workspace member package name mismatch should be rejected")
+        .to_string();
 
-    assert!(
-        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
-        "{err}"
-    );
+    assert!(err.contains("dependency 'expected' resolved to package 'actual'"), "{err}");
+    assert!(err.contains("name = \"actual\""), "{err}");
+    assert!(err.contains("package is declared as 'actual'"), "{err}");
 }
 
 #[test]
@@ -467,10 +457,12 @@ path = "lib.masm"
     .unwrap();
     fs::write(second_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
 
-    let context = TestContext::default();
-    let error = context
-        .load_workspace(root.join("miden-project.toml"))
-        .expect_err("duplicate member package names should be rejected");
+    let mut context = TestContext::default();
+    let outcome = Workspace::load(root.join("miden-project.toml"), &mut context.sources);
+    let error = outcome
+        .into_result()
+        .expect_err("duplicate member package names should be rejected")
+        .to_string();
 
-    assert!(format!("{error}").contains("duplicate"), "{error}");
+    assert!(error.contains("duplicate"), "{error}");
 }

@@ -26,8 +26,8 @@ pub(super) fn maybe_use_caller_error_context<F>(
 ) -> ExecutionError {
     if matches!(
         original_err,
-        ExecutionError::ProcedureNotFound { source_file: Some(_), .. }
-            | ExecutionError::OperationError { source_file: Some(_), .. }
+        ExecutionError::ProcedureNotFound { sources: Some(_), .. }
+            | ExecutionError::OperationError { sources: Some(_), .. }
     ) {
         return original_err;
     }

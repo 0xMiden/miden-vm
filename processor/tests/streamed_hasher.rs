@@ -49,7 +49,6 @@ fn processor(stack: &[u64], advice: AdviceInputs) -> FastProcessor {
 fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: &AdviceInputs) {
     let program = Assembler::default()
         .assemble_program("test", program_src)
-        .value
         .unwrap()
         .unwrap_program();
 
@@ -170,11 +169,7 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     };
     let subscriber = Registry::default().with(layer);
 
-    let program = Assembler::default()
-        .assemble_program("test", PROGRAM)
-        .value
-        .unwrap()
-        .unwrap_program();
+    let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
         processor(&[1], AdviceInputs::default())

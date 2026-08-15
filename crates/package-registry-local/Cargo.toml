@@ -19,9 +19,9 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-miden-assembly-syntax.workspace = true
 miden-core.workspace = true
-miden-mast-package.workspace = true
+miden-diagnostics.workspace = true
+miden-mast-package = { workspace = true, features = ["serde"] }
 miden-package-registry = { workspace = true, features = ["resolver", "serde"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["std"] }

@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, DefaultSourceManager,
+    Assembler,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
@@ -10,10 +10,7 @@ use miden_vm::{
     ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile, serde::Deserializable,
 };
 
-use super::{
-    data::{OutputFile, ProgramHash, ProofFile},
-    utils::finish_assembly_outcome,
-};
+use super::data::{OutputFile, ProgramHash, ProofFile};
 
 #[derive(Debug, Clone, Parser)]
 #[command(about = "Verify a Miden program")]
@@ -142,14 +139,10 @@ fn load_kernel_descriptor(kernel_path: &PathBuf) -> Result<KernelDescriptor, Rep
         },
         "masm" => {
             // Compile kernel from assembly source
-            let source_manager = Arc::new(DefaultSourceManager::default());
-            finish_assembly_outcome(
-                Assembler::new(source_manager.clone())
-                    .assemble_kernel_from_root("kernel", kernel_path),
-                source_manager.as_ref(),
-                "Failed to compile kernel",
-            )
-            .map(Arc::<Package>::from)?
+            Assembler::new()
+                .assemble_kernel_from_root("kernel", kernel_path)
+                .into_result()
+                .map(Arc::<Package>::from)?
         },
         _ => {
             return Err(Report::msg(format!(

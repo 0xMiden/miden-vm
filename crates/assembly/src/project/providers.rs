@@ -3,7 +3,7 @@ mod masm;
 use alloc::borrow::Cow;
 use core::ops::ControlFlow;
 
-use miden_assembly_syntax::debuginfo::SourceManager;
+use miden_assembly_syntax::diagnostics::SourceMap;
 use miden_package_registry::PackageRegistryAndProvider;
 use miden_project::ProjectDependencyGraph;
 
@@ -30,8 +30,8 @@ pub struct TargetAssemblyContext<'a> {
     pub profile: &'a Profile,
     /// The dependency graph computed for this assembly session
     pub dependency_graph: &'a ProjectDependencyGraph,
-    /// The current source manager
-    pub source_manager: Arc<dyn SourceManager>,
+    /// Sources loaded during the current assembly session.
+    pub sources: &'a mut SourceMap,
     /// The current package store of the assembler
     pub package_registry: &'a dyn PackageRegistryAndProvider,
 }
@@ -44,7 +44,7 @@ impl<'a> TargetAssemblyContext<'a> {
         profile: &'a Profile,
         dependency_graph: &'a ProjectDependencyGraph,
         package_registry: &'a dyn PackageRegistryAndProvider,
-        source_manager: Arc<dyn SourceManager>,
+        sources: &'a mut SourceMap,
     ) -> Result<Self, Report> {
         let project_root = manifest_path.parent().ok_or_else(|| {
             Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
@@ -71,7 +71,7 @@ impl<'a> TargetAssemblyContext<'a> {
             target,
             profile,
             dependency_graph,
-            source_manager,
+            sources,
             package_registry,
         })
     }
@@ -82,7 +82,7 @@ impl<'a> TargetAssemblyContext<'a> {
         profile: &'a Profile,
         dependency_graph: &'a ProjectDependencyGraph,
         package_registry: &'a dyn PackageRegistryAndProvider,
-        source_manager: Arc<dyn SourceManager>,
+        sources: &'a mut SourceMap,
     ) -> Result<Self, Report> {
         let target_path = target.path.to_path().ok_or_else(|| {
             Report::msg(format!(
@@ -105,7 +105,7 @@ impl<'a> TargetAssemblyContext<'a> {
             target,
             profile,
             dependency_graph,
-            source_manager,
+            sources,
             package_registry,
         })
     }
@@ -132,19 +132,15 @@ pub trait ProjectSourceProvider {
     /// being assembled.
     fn provide_sources(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> AssemblyOutcome<ProjectSourceInputs>;
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceInputs>;
 
     /// Same as `provide_sources`, but allows the provider to interrupt the build and exit early
     fn provide_sources_interruptible(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> AssemblyOutcome<ControlFlow<(), ProjectSourceInputs>> {
-        let Outcome { value, diagnostics } = self.provide_sources(context);
-        Outcome {
-            value: value.map(ControlFlow::Continue),
-            diagnostics,
-        }
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ControlFlow<(), ProjectSourceInputs>> {
+        self.provide_sources(context).map(ControlFlow::Continue)
     }
 
     /// Called to request the source files that are inputs to assembly of the current target, so
@@ -162,8 +158,8 @@ pub trait ProjectSourceProvider {
     /// dependency lock file if present (e.g. `Cargo.toml`).
     fn provide_source_provenance(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> AssemblyOutcome<ProjectSourceProvenanceInputs>;
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceProvenanceInputs>;
 
     /// Called after a project target - whose sources were provided via this trait- has been
     /// assembled to a package, so that the provider can do any language-specific post-processing

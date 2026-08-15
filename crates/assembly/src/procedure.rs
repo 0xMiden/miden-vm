@@ -2,10 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
     ast::{Path, Visibility, types::FunctionType},
-    debuginfo::{SourceManager, SourceSpan, Spanned},
     diagnostics::Report,
 };
 use miden_core::Word;
+use miden_diagnostics::{SourceSpan, Spanned};
 
 use super::{
     GlobalItemIndex,
@@ -18,7 +18,6 @@ use super::{
 
 /// Information about a procedure currently being compiled.
 pub struct ProcedureContext {
-    source_manager: Arc<dyn SourceManager>,
     gid: GlobalItemIndex,
     is_program_entrypoint: bool,
     span: SourceSpan,
@@ -39,10 +38,8 @@ impl ProcedureContext {
         visibility: Visibility,
         signature: Option<Arc<FunctionType>>,
         is_kernel: bool,
-        source_manager: Arc<dyn SourceManager>,
     ) -> Self {
         Self {
-            source_manager,
             gid,
             is_program_entrypoint,
             span: SourceSpan::UNKNOWN,
@@ -114,11 +111,6 @@ impl ProcedureContext {
     /// Returns true if the procedure is being assembled for a kernel.
     pub fn is_kernel(&self) -> bool {
         self.is_kernel
-    }
-
-    #[inline(always)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
-        self.source_manager.as_ref()
     }
 }
 

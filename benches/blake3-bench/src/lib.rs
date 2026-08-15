@@ -10,10 +10,11 @@ use miden_vm::{
     FastProcessor, HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
     advice::AdviceInputs,
     assembly::{
-        DefaultSourceManager, Path as LibraryPath,
+        Path as LibraryPath, SourceMap,
         ast::{Module, ModuleKind},
         package::debug_info::{DebugSourceNodeId, PackageDebugInfo},
     },
+    diagnostics::WarningsAsErrors,
     internal::InputFile,
     trace,
 };
@@ -47,7 +48,7 @@ pub struct Blake3Fixture {
     pub advice_inputs: AdviceInputs,
     pub debug_info: Option<PackageDebugInfo>,
     pub entrypoint_source_node: Option<DebugSourceNodeId>,
-    source_manager: Arc<DefaultSourceManager>,
+    sources: Arc<SourceMap>,
 }
 
 impl Blake3Fixture {
@@ -56,22 +57,21 @@ impl Blake3Fixture {
         let input_file = InputFile::read(&None, &program_path)
             .unwrap_or_else(|err| panic!("failed to read Blake3 inputs: {err}"));
 
-        let source_manager = Arc::new(DefaultSourceManager::default());
+        let mut assembler = Assembler::new();
         let mut parser = Module::parser(Some(ModuleKind::Executable));
         let ast = parser
-            .parse_file(Some(LibraryPath::exec_path()), &program_path, source_manager.clone())
-            .value
-            .unwrap_or_else(|| {
+            .parse_file(Some(LibraryPath::exec_path()), &program_path, assembler.sources_mut())
+            .into_result_with_policy(&WarningsAsErrors)
+            .unwrap_or_else(|_| {
                 panic!("failed to parse Blake3 program at {}", program_path.display())
             });
 
-        let mut assembler = Assembler::new(source_manager.clone());
+        let sources = Arc::new(assembler.sources().clone());
         assembler
             .link_package(CoreLibrary::default().package(), miden_vm::assembly::Linkage::Dynamic)
             .expect("failed to load core library");
         let package = assembler
             .assemble_program("program", ast)
-            .value
             .expect("failed to assemble Blake3 benchmark program");
         let debug_info = package.debug_info().expect("failed to read Blake3 debug info");
         let entrypoint_source_node = package.entrypoint_source_node();
@@ -83,7 +83,7 @@ impl Blake3Fixture {
             advice_inputs: input_file.parse_advice_inputs().expect("failed to parse advice inputs"),
             debug_info,
             entrypoint_source_node,
-            source_manager,
+            sources,
         }
     }
 }
@@ -107,8 +107,8 @@ pub fn default_host() -> DefaultHost {
         .expect("failed to load core library into host")
 }
 
-fn host_for_fixture(fixture: &Blake3Fixture) -> DefaultHost<DefaultSourceManager> {
-    default_host().with_source_manager(fixture.source_manager.clone())
+fn host_for_fixture(fixture: &Blake3Fixture) -> DefaultHost {
+    default_host().with_source_provider(fixture.sources.clone())
 }
 
 pub fn execute_for_proving(fixture: &Blake3Fixture) -> ExecutionWitness {

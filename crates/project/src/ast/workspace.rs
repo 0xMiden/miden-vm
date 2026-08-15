@@ -1,17 +1,16 @@
 use super::{
-    parsing::{MaybeInherit, SetSourceId, Validate},
+    parsing::{MaybeInherit, ValidationContext},
     *,
 };
-use crate::{SourceId, Span, Uri};
 
 /// Represents the contents of the `[workspace]` table
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct WorkspaceTable {
     /// The relative paths of all workspace members
     #[cfg_attr(feature = "serde", serde(default))]
-    pub members: Vec<Span<Uri>>,
+    pub members: Vec<crate::TomlSpan<Arc<str>>>,
     /// The contents of the `[workspace.package]` table
     #[cfg_attr(feature = "serde", serde(default))]
     pub package: PackageDetail,
@@ -20,12 +19,91 @@ pub struct WorkspaceTable {
     pub config: PackageConfig,
 }
 
-impl SetSourceId for WorkspaceTable {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { members, package, config } = self;
-        members.set_source_id(source_id);
-        package.set_source_id(source_id);
-        config.set_source_id(source_id);
+#[cfg(feature = "serde")]
+mod serialization {
+    use serde::{
+        Deserialize, Deserializer,
+        de::{Error, MapAccess, Visitor},
+    };
+
+    use super::*;
+    use crate::{Map, TomlSpan};
+
+    struct DependencyMap(Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>);
+
+    impl<'de> Deserialize<'de> for DependencyMap {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            dependency::deserialize_dependency_map(deserializer).map(Self)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for WorkspaceTable {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            struct WorkspaceTableVisitor;
+
+            impl<'de> Visitor<'de> for WorkspaceTableVisitor {
+                type Value = WorkspaceTable;
+
+                fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    formatter.write_str("a workspace table")
+                }
+
+                fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+                where
+                    M: MapAccess<'de>,
+                {
+                    let mut members = None;
+                    let mut package = None;
+                    let mut dependencies = None;
+                    let mut lints = None;
+                    while let Some(key) = access.next_key::<String>()? {
+                        match key.as_str() {
+                            "members" => set_once(&mut members, access.next_value()?, "members")?,
+                            "package" => set_once(&mut package, access.next_value()?, "package")?,
+                            "dependencies" => {
+                                let value = access.next_value::<DependencyMap>()?.0;
+                                set_once(&mut dependencies, value, "dependencies")?;
+                            },
+                            "lints" => set_once(&mut lints, access.next_value()?, "lints")?,
+                            _ => {
+                                return Err(M::Error::unknown_field(
+                                    &key,
+                                    &["members", "package", "dependencies", "lints"],
+                                ));
+                            },
+                        }
+                    }
+
+                    Ok(WorkspaceTable {
+                        members: members.unwrap_or_default(),
+                        package: package.unwrap_or_default(),
+                        config: PackageConfig {
+                            dependencies: dependencies.unwrap_or_default(),
+                            lints: lints.unwrap_or_default(),
+                        },
+                    })
+                }
+            }
+
+            deserializer.deserialize_map(WorkspaceTableVisitor)
+        }
+    }
+
+    fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
+    where
+        E: Error,
+    {
+        if slot.replace(value).is_some() {
+            Err(E::duplicate_field(field))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -34,9 +112,6 @@ impl SetSourceId for WorkspaceTable {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct WorkspaceFile {
-    /// The source file this was parsed from, if applicable/known
-    #[cfg_attr(feature = "serde", serde(skip, default))]
-    pub source_file: Option<Arc<SourceFile>>,
     /// The contents of the `[workspace]` table
     pub workspace: WorkspaceTable,
     /// The contents of the `[profile]` table
@@ -62,91 +137,59 @@ impl WorkspaceFile {
     /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
     ///   up to the caller to compute the concrete property values and validate them at that point.
     #[cfg(feature = "serde")]
-    pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use parsing::{SetSourceId, Validate};
-
-        let source_id = source.id();
-
-        // Parse the unvalidated project from source
-        let mut workspace = toml::from_str::<Self>(source.as_str()).map_err(|err| {
-            let span = err
-                .span()
-                .map(|span| {
-                    let start = span.start as u32;
-                    let end = span.end as u32;
-                    SourceSpan::session(
-                        source_id,
-                        TextRange::new(start, end).expect("invalid TOML error span"),
-                    )
-                })
-                .unwrap_or_default();
-            ProjectFileError::ParseError {
-                message: err.message().to_string(),
-                source_file: source.clone(),
-                span,
-            }
-            .into_report()
-        })?;
-
-        workspace.source_file = Some(source.clone());
-        workspace.set_source_id(source_id);
-        workspace.validate(source)?;
-
-        Ok(workspace)
+    pub fn parse(source_id: SourceId, source: &str) -> Outcome<Self> {
+        parse_typed(source_id, source, Self::validate)
     }
 }
 
-impl SetSourceId for WorkspaceFile {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { source_file: _, workspace, profiles } = self;
-        workspace.set_source_id(source_id);
-        profiles.set_source_id(source_id);
-    }
-}
-
-impl Validate for WorkspaceFile {
-    fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
+impl WorkspaceFile {
+    pub(super) fn validate(&self, context: &mut ValidationContext<'_>) {
         // Validate that none of the package detail fields try to inherit from a workspace
         if let Some(span) = self.workspace.package.version.as_ref().and_then(|v| {
-            if matches!(v.inner(), MaybeInherit::Inherit) {
-                Some(v.span())
+            if matches!(v.get_ref(), MaybeInherit::Inherit) {
+                Some(context.span(v))
             } else {
                 None
             }
         }) {
-            return Err(ProjectFileError::NotAWorkspace { source_file: source, span }.into_report());
+            let _ = context.add(ProjectFileError::NotAWorkspace { span });
         }
 
         if let Some(description) = self.workspace.package.description.as_ref()
-            && matches!(description.inner(), MaybeInherit::Inherit)
+            && matches!(description.get_ref(), MaybeInherit::Inherit)
         {
-            return Err(ProjectFileError::NotAWorkspace {
-                source_file: source,
-                span: description.span(),
-            }
-            .into_report());
+            let _ =
+                context.add(ProjectFileError::NotAWorkspace { span: context.span(description) });
         }
 
         // Validate that workspace-level dependencies are all valid at that level
         for dependency in self.workspace.config.dependencies.values() {
-            if dependency.inherits_workspace_version() {
-                let label = if dependency.version().is_none()
-                    && !dependency.is_git()
-                    && !dependency.is_path()
-                {
+            let spec = dependency.get_ref();
+            if spec.inherits_workspace_version() {
+                let label = if spec.version().is_none() && !spec.is_git() && !spec.is_path() {
                     "expected 'version', 'digest', or 'path' here"
                 } else {
                     "cannot use the 'workspace' option in a workspace-level dependency spec"
                 };
-                return Err(ProjectFileError::InvalidWorkspaceDependency {
-                    source_file: source,
+                let _ = context.add(ProjectFileError::InvalidWorkspaceDependency {
                     message: label.into(),
-                    span: dependency.span(),
-                }
-                .into_report());
+                    span: context.span(&spec.name),
+                });
+                continue;
+            }
+            if let Err(error) =
+                crate::DependencyVersionScheme::try_from_ast(spec, context.source_id())
+            {
+                let _ = context.add(error);
+            }
+            if let Some(linkage) = spec.linkage.as_ref()
+                && let Err(error) = linkage.get_ref().parse::<crate::Linkage>()
+            {
+                let _ = context.add(ProjectFileError::InvalidWorkspaceDependency {
+                    message: error.to_string(),
+                    span: context.span(linkage),
+                });
             }
         }
-
-        Ok(())
     }
 }

@@ -20,32 +20,21 @@ ignored = ["serde_json"]
 [features]
 default = ["std"]
 std = [
-    "memchr/std",
     "miden-diagnostics/std",
-    "miden-formatting/std",
-    "miden-utils-sync/std",
     "proptest?/std",
     "serde/std",
-    "serde_spanned?/std",
-    "thiserror/std",
 ]
 arbitrary = ["std", "dep:proptest"]
-serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
+serde = ["dep:serde"]
 
 [dependencies]
 # Miden dependencies
-miden-crypto.workspace = true
+miden-serde-utils.workspace = true
 miden-diagnostics.workspace = true
-miden-formatting.workspace = true
-miden-utils-sync.workspace = true
 
 # External dependencies
-memchr = { version = "2.7", default-features = false }
-paste.workspace = true
 proptest = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-serde_spanned = { version = "1.0", optional = true, default-features = false }
-thiserror.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]

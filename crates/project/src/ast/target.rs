@@ -1,4 +1,4 @@
-use crate::{ast::parsing::SetSourceId, *};
+use crate::{TomlSpan, *};
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -8,12 +8,12 @@ pub struct LibTarget {
     ///
     /// Defaults to `library`
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub kind: Option<Span<TargetType>>,
+    pub kind: Option<TomlSpan<Arc<str>>>,
     /// The optional namespace override for modules parsed from this target
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub namespace: Option<Span<Arc<str>>>,
+    pub namespace: Option<TomlSpan<Arc<str>>>,
     /// The relative path from the project manifest to the root source file for this target
-    pub path: Span<Uri>,
+    pub path: TomlSpan<Arc<str>>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,31 +26,7 @@ pub struct BinTarget {
     ///
     /// All binary target names must be unique in a project.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub name: Option<Span<Arc<str>>>,
+    pub name: Option<TomlSpan<Arc<str>>>,
     /// The relative path from the project manifest to the root source file for this target
-    pub path: Span<Uri>,
-}
-
-impl SetSourceId for LibTarget {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        if let Some(kind) = self.kind.as_mut() {
-            kind.set_source_id(source_id);
-        }
-
-        if let Some(ns) = self.namespace.as_mut() {
-            ns.set_source_id(source_id);
-        }
-
-        self.path.set_source_id(source_id);
-    }
-}
-
-impl SetSourceId for BinTarget {
-    fn set_source_id(&mut self, source_id: SourceId) {
-        if let Some(ns) = self.name.as_mut() {
-            ns.set_source_id(source_id);
-        }
-
-        self.path.set_source_id(source_id);
-    }
+    pub path: TomlSpan<Arc<str>>,
 }

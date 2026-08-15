@@ -26,7 +26,6 @@ impl PrecompileFixture {
             .with_package(core_lib.package(), miden_vm::assembly::Linkage::Dynamic)
             .expect("failed to link core library")
             .assemble_program("precompile_workload", source.as_str())
-            .value
             .expect("failed to assemble precompile benchmark program")
             .unwrap_program();
 

@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::Report;
+use miden_diagnostics::Report;
 use miden_mast_package::Package as MastPackage;
 
 use crate::{

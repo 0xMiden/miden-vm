@@ -1,6 +1,9 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::debuginfo::SourceManager;
+use miden_assembly_syntax::{
+    debuginfo::{ColumnNumber, LineNumber, Uri},
+    diagnostics::SourceProvider,
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -752,7 +755,7 @@ impl MastForestBuilder {
         &mut self,
         gid: GlobalItemIndex,
         procedure: Procedure,
-        source_manager: &dyn SourceManager,
+        sources: &dyn SourceProvider,
     ) -> Result<(), Report> {
         // Check if an entry is already in this cache slot.
         //
@@ -801,7 +804,7 @@ impl MastForestBuilder {
         }
 
         self.record_procedure_root_ref(procedure.body_node_ref());
-        self.record_procedure_debug_info(&procedure, source_manager)?;
+        self.record_procedure_debug_info(&procedure, sources)?;
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
 
         self.procedures.insert(gid, procedure);
@@ -812,13 +815,17 @@ impl MastForestBuilder {
     fn record_procedure_debug_info(
         &mut self,
         procedure: &Procedure,
-        source_manager: &dyn SourceManager,
+        sources: &dyn SourceProvider,
     ) -> Result<(), Report> {
         use miden_assembly_syntax::ast::types::Type;
 
-        if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
+        let span = *procedure.span();
+        if let (Some(source), Some(line_column)) = (
+            sources.get(span.source().id()),
+            sources.line_column(span.source().id(), span.range().start()),
+        ) {
             let source_ref = self.latest_source_ref_for_node_ref(procedure.body_node_ref());
-            let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
+            let file_idx = self.debug_info.add_file(Uri::from(source.display_name), None);
             let name_idx = self.debug_info.add_string(procedure.path().as_str());
             let type_idx = if let Some(signature) = procedure.signature() {
                 Some(self.debug_info.register_debug_type(
@@ -833,8 +840,8 @@ impl MastForestBuilder {
                 source_ref,
                 name_idx,
                 file_idx,
-                file_line_col.line,
-                file_line_col.column,
+                LineNumber::new(line_column.line().to_u32()).expect("line is one-based"),
+                ColumnNumber::new(line_column.column().to_u32()).expect("column is one-based"),
                 procedure.mast_root(),
             );
             let func_info = if let Some(type_idx) = type_idx {

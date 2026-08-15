@@ -9,7 +9,7 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
     rowan,
 };
-use miden_debug_types::{SourceFile, SourceSpan, Span};
+use miden_diagnostics::{SourceSpan, Span};
 
 use crate::{Path, ast, parser::ParsingError};
 
@@ -19,13 +19,18 @@ use crate::{Path, ast, parser::ParsingError};
 /// and provides the small set of span-aware conversion helpers needed by the lowering modules.
 pub(super) struct LoweringContext<'a> {
     parse: CstParse,
+    source: &'a str,
     interned: &'a mut BTreeSet<Arc<str>>,
 }
 
 impl<'a> LoweringContext<'a> {
     /// Creates a new lowering context for `parse`.
-    pub(super) fn new(parse: CstParse, interned: &'a mut BTreeSet<Arc<str>>) -> Self {
-        Self { parse, interned }
+    pub(super) fn new(
+        parse: CstParse,
+        source: &'a str,
+        interned: &'a mut BTreeSet<Arc<str>>,
+    ) -> Self {
+        Self { parse, source, interned }
     }
 
     /// Returns the underlying CST parse being lowered.
@@ -33,17 +38,17 @@ impl<'a> LoweringContext<'a> {
         &self.parse
     }
 
-    /// Returns the source file associated with the CST parse.
-    pub(super) fn source_file(&self) -> &SourceFile {
-        self.parse.source()
+    /// Returns the source text associated with the CST parse.
+    pub(super) fn source(&self) -> &str {
+        self.source
     }
 
     /// Returns the exact source text covered by `span`.
     ///
     /// All spans used by CST lowering are expected to come from the same source file as the parse.
     pub(super) fn source_text(&self, span: SourceSpan) -> &str {
-        self.source_file()
-            .source_slice(span.range().into_slice_index())
+        self.source
+            .get(span.range().into_slice_index())
             .expect("cst spans should always refer to valid source slices")
     }
 

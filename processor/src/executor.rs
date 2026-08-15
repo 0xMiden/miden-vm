@@ -113,7 +113,6 @@ mod tests {
     async fn program_executor_default_impl_runs_via_trait() {
         let program = Assembler::default()
             .assemble_program("program", "begin push.3 swap drop end")
-            .value
             .unwrap()
             .unwrap_program();
 
@@ -153,7 +152,6 @@ mod tests {
     async fn program_executor_default_falls_back_when_no_source_node() {
         let program = Assembler::default()
             .assemble_program("program", "begin push.3 swap drop end")
-            .value
             .unwrap()
             .unwrap_program();
 

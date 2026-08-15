@@ -1,8 +1,6 @@
-use miden_assembly_syntax::{
-    debuginfo::{SourceSpan, Spanned},
-    diagnostics::{Report, diagnostic},
-};
+use miden_assembly_syntax::diagnostics::{Report, diagnostic};
 use miden_core::{Felt, WORD_SIZE, operations::Operation::*};
+use miden_diagnostics::{SourceSpan, Spanned};
 
 use super::{BasicBlockBuilder, push_u32_value};
 use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};

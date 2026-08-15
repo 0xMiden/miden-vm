@@ -40,7 +40,6 @@ pub fn run_precompile_program_with_stack(
         .expect("failed to link core library package");
     let program = assembler
         .assemble_program("precompile_test", source)
-        .value
         .expect("failed to assemble precompile test program")
         .unwrap_program();
 

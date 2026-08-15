@@ -15,11 +15,7 @@ use alloc::{
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
 use miden_assembly::Linkage;
-pub use miden_assembly::{
-    Path,
-    debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
-    diagnostics::Report,
-};
+pub use miden_assembly::{Path, diagnostics::Report};
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
@@ -32,9 +28,10 @@ use miden_core::{
     events::{EventName, SystemEvent},
 };
 use miden_diagnostics::{
-    AnnotateRenderer, DefaultFailurePolicy, Diagnostic, LayeredSourceProvider, LineColumn, Outcome,
-    OwnedDiagnostic, PreparedDiagnostic, Source, SourceId, SourceProvider, prepare_ref,
+    AnnotateRenderer, LayeredSourceProvider, LineColumn, PreparedDiagnostic, Source,
+    SourceNamespace, SourceProvider, prepare_ref,
 };
+pub use miden_diagnostics::{SourceId, SourceMap};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
@@ -89,41 +86,10 @@ impl SourceProvider for EmptySourceProvider {
 
 static EMPTY_SOURCE_PROVIDER: EmptySourceProvider = EmptySourceProvider;
 
-#[derive(Debug, Diagnostic)]
-#[diagnostic(message = "test compilation produced diagnostics")]
-struct TestCompilationDiagnostics {
-    #[related]
-    diagnostics: Vec<OwnedDiagnostic>,
-}
-
-fn require_test_outcome<T>(
-    outcome: Outcome<Option<T>>,
-    sources: Arc<dyn SourceManager>,
-) -> Result<T, Report> {
-    if !outcome.diagnostics.assess(&DefaultFailurePolicy)
-        && let Some(value) = outcome.value
-    {
-        return Ok(value);
-    }
-
-    let diagnostics = outcome
-        .diagnostics
-        .into_vec()
-        .into_iter()
-        .map(|entry| entry.diagnostic)
-        .collect::<Vec<_>>();
-    let report = if diagnostics.is_empty() {
-        Report::msg("test compilation failed without producing a diagnostic")
-    } else {
-        Report::new(TestCompilationDiagnostics { diagnostics })
-    };
-    Err(report.attach_session_sources(sources))
-}
-
 fn render_execution_error(error: &ExecutionError) -> String {
     let snapshot = prepare_ref(error).expect("diagnostic should prepare");
     let sources = error
-        .source_file()
+        .source_provider()
         .map_or(&EMPTY_SOURCE_PROVIDER as &dyn SourceProvider, |source| source);
     let prepared = PreparedDiagnostic {
         snapshot,
@@ -179,15 +145,15 @@ end
 
 /// Key for the process-local compile cache, keyed by all inputs that affect compilation output.
 ///
-/// The source manager identity is included so cached programs keep their debug/source mapping local
-/// to the test context that produced them.
+/// The source map identity is included so cached programs keep their debug/source mapping local to
+/// the test context that produced them.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 struct CompileCacheKey {
-    source_manager: usize,
+    source_map: usize,
     source: SourceCacheKey,
     kernel_source: Option<SourceCacheKey>,
-    add_modules: Vec<(String, String)>,
+    add_modules: Vec<(String, SourceCacheKey)>,
     library_digests: Vec<Word>,
 }
 
@@ -307,16 +273,16 @@ macro_rules! assert_assembler_diagnostic {
 /// - Execution error test: check that running a program compiled from the given source causes an
 ///   ExecutionError which contains the specified substring.
 pub struct Test {
-    pub source_manager: Arc<DefaultSourceManager>,
-    pub source: Arc<SourceFile>,
-    pub kernel_source: Option<Arc<SourceFile>>,
+    pub sources: Arc<SourceMap>,
+    pub source: SourceId,
+    pub kernel_source: Option<SourceId>,
     pub stack_inputs: StackInputs,
     pub advice_inputs: AdviceInputs,
     pub in_tracing_mode: bool,
     pub libraries: Vec<Arc<Package>>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub trace_handlers: Vec<(EventName, Arc<dyn TraceHandler>)>,
-    pub add_modules: Vec<(Arc<Path>, String)>,
+    pub add_modules: Vec<(Arc<Path>, SourceId)>,
 }
 
 impl Test {
@@ -324,11 +290,13 @@ impl Test {
     // --------------------------------------------------------------------------------------------
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
-    pub fn new(name: &str, source: &str, in_tracing_mode: bool) -> Self {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
+    pub fn new(name: &str, source: impl ToString, in_tracing_mode: bool) -> Self {
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(1));
+        let source = sources
+            .insert(name, source.to_string(), None)
+            .expect("test source must fit in the source map");
         Self {
-            source_manager,
+            sources: Arc::new(sources),
             source,
             kernel_source: None,
             stack_inputs: StackInputs::default(),
@@ -356,11 +324,11 @@ impl Test {
         kernel_name: impl Into<String>,
         kernel_source: impl ToString,
     ) -> Self {
-        self.kernel_source = Some(self.source_manager.load(
-            SourceLanguage::Masm,
-            kernel_name.into().into(),
-            kernel_source.to_string(),
-        ));
+        self.kernel_source = Some(
+            Arc::make_mut(&mut self.sources)
+                .insert(kernel_name, kernel_source.to_string(), None)
+                .expect("test kernel source must fit in the source map"),
+        );
         self
     }
 
@@ -417,7 +385,17 @@ impl Test {
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         let path = path.as_ref();
         let source = module_source(path, source);
-        self.add_modules.push((path.into(), source));
+        let source_id = Arc::make_mut(&mut self.sources)
+            .insert(path.to_string(), source, None)
+            .expect("test module source must fit in the source map");
+        self.add_modules.push((path.into(), source_id));
+    }
+
+    fn source_text(&self, source_id: SourceId) -> &str {
+        self.sources
+            .get(source_id)
+            .and_then(|source| source.text)
+            .expect("test source ID must resolve to source text")
     }
 
     /// Add a handler for a specific event when running the `Host`.
@@ -486,7 +464,7 @@ impl Test {
     ) {
         // compile the program
         let (program, host, _debug_info) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
+        let mut host = host;
 
         // execute the test
         let processor = new_vm_default_processor(
@@ -588,49 +566,46 @@ impl Test {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        let (mut assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+        let (mut assembler, kernel_lib) = if let Some(kernel_source_id) = self.kernel_source {
             let mut parser = Module::parser(Some(ModuleKind::Kernel));
-            let kernel = require_test_outcome(
-                parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone()),
-                self.source_manager.clone(),
-            )?;
-            let kernel_lib = require_test_outcome(
-                Assembler::new(self.source_manager.clone()).assemble_kernel("kernel", kernel, None),
-                self.source_manager.clone(),
-            )
-            .map(Arc::<Package>::from)?;
-
+            let kernel = parser
+                .parse(Some(Path::KERNEL), kernel_source_id, self.source_text(kernel_source_id))
+                .into_result()
+                .map_err(|report| report.attach_session_sources(self.sources.clone()))?;
+            let kernel_lib = Assembler::with_sources(self.sources.as_ref().clone())
+                .assemble_kernel("kernel", kernel, None)
+                .into_result()
+                .map(Arc::<Package>::from)
+                .map_err(|err| err.attach_session_sources(self.sources.clone()))?;
             (
-                Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
+                Assembler::with_sources_and_kernel(
+                    self.sources.as_ref().clone(),
+                    kernel_lib.clone(),
+                )?,
                 Some(kernel_lib),
             )
         } else {
-            (Assembler::new(self.source_manager.clone()), None)
+            (Assembler::with_sources(self.sources.as_ref().clone()), None)
         };
 
-        for (path, source) in &self.add_modules {
-            let module = require_test_outcome(
-                Module::parser(None).parse_str(
-                    Some(path.as_ref()),
-                    source,
-                    self.source_manager.clone(),
-                ),
-                self.source_manager.clone(),
-            )?;
-            require_test_outcome(
-                assembler.compile_and_statically_link(module),
-                self.source_manager.clone(),
-            )?;
+        for (path, source_id) in &self.add_modules {
+            Module::parser(None)
+                .parse(Some(path.as_ref()), *source_id, self.source_text(*source_id))
+                .into_result()
+                .and_then(|module| assembler.compile_and_statically_link(module).into_result())
+                .map_err(|report| report.attach_session_sources(self.sources.clone()))?;
         }
         // Debug mode is now always enabled
         for package in &self.libraries {
             assembler.link_package(package.clone(), Linkage::Dynamic)?;
         }
 
-        let package = require_test_outcome(
-            assembler.assemble_program("program", self.source.clone()),
-            self.source_manager.clone(),
-        )?;
+        let mut parser = Module::parser(Some(ModuleKind::Executable));
+        let package = parser
+            .parse(None, self.source, self.source_text(self.source))
+            .into_result()
+            .and_then(|program| assembler.assemble_program("program", program).into_result())
+            .map_err(|report| report.attach_session_sources(self.sources.clone()))?;
         let debug_info = package
             .debug_info()
             .map_err(|err| Report::msg(format!("failed to decode test debug info: {err}")))?;
@@ -683,7 +658,7 @@ impl Test {
         const FRAGMENT_SIZE: usize = 1 << 16;
 
         let (program, host, debug_info) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
+        let mut host = host;
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let fast_stack_result = {
@@ -721,7 +696,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
         let (program, host, debug_info) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
+        let mut host = host;
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let processor = new_vm_default_processor(
@@ -832,7 +807,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     fn get_program_and_host(&self) -> (Program, DefaultHost, Option<PackageDebugInfo>) {
         let (program, kernel, debug_info) = self.compile().expect("Failed to compile test source.");
-        let mut host = DefaultHost::default();
+        let mut host = DefaultHost::default().with_source_provider(self.sources.clone());
         if let Some(kernel) = kernel {
             host.load_library(kernel.mast_forest()).unwrap();
         }
@@ -899,7 +874,7 @@ impl Test {
         }
 
         let (program, host, debug_info) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
+        let mut host = host;
         let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
         let compare_error_diagnostics = debug_info.is_none();
 
@@ -930,13 +905,20 @@ impl Test {
     #[cfg(all(feature = "std", not(target_family = "wasm")))]
     fn compile_cache_key(&self) -> CompileCacheKey {
         CompileCacheKey {
-            source_manager: Arc::as_ptr(&self.source_manager) as usize,
-            source: SourceCacheKey::from_source_file(self.source.as_ref()),
-            kernel_source: self.kernel_source.as_deref().map(SourceCacheKey::from_source_file),
+            source_map: Arc::as_ptr(&self.sources) as usize,
+            source: SourceCacheKey::from_source(self.sources.as_ref(), self.source),
+            kernel_source: self
+                .kernel_source
+                .map(|source_id| SourceCacheKey::from_source(self.sources.as_ref(), source_id)),
             add_modules: self
                 .add_modules
                 .iter()
-                .map(|(path, source)| (path.to_string(), source.clone()))
+                .map(|(path, source_id)| {
+                    (
+                        path.to_string(),
+                        SourceCacheKey::from_source(self.sources.as_ref(), *source_id),
+                    )
+                })
                 .collect(),
             library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
         }
@@ -965,7 +947,8 @@ mod tests {
         let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
 
         assert!(result.is_ok(), "invalid kernel source caused Test::compile() to panic");
-        assert!(result.unwrap().is_err(), "invalid kernel source should return an error");
+        let report = result.unwrap().expect_err("invalid kernel source should return an error");
+        assert!(report.session_sources().is_some());
     }
 
     #[test]
@@ -976,7 +959,19 @@ mod tests {
         let result = catch_unwind(AssertUnwindSafe(|| test.compile()));
 
         assert!(result.is_ok(), "invalid extra module source caused Test::compile() to panic");
-        assert!(result.unwrap().is_err(), "invalid extra module source should return an error");
+        let report =
+            result.unwrap().expect_err("invalid extra module source should return an error");
+        assert!(report.session_sources().is_some());
+    }
+
+    #[test]
+    fn execution_errors_retain_test_sources() {
+        let error = Test::new("main", "begin assert end", true)
+            .execute_for_output()
+            .expect_err("assert should fail with the default zero stack");
+
+        assert!(error.source_provider().is_some());
+        assert!(render_execution_error(&error).contains("main"));
     }
 
     #[test]
@@ -1029,10 +1024,11 @@ mod tests {
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 impl SourceCacheKey {
-    fn from_source_file(source_file: &SourceFile) -> Self {
+    fn from_source(sources: &SourceMap, source_id: SourceId) -> Self {
+        let source = sources.get(source_id).expect("cached test source ID must resolve");
         Self {
-            uri: source_file.uri().as_str().to_string(),
-            source: source_file.as_str().to_string(),
+            uri: source.display_name.to_string(),
+            source: source.text.expect("cached test source must have text").to_string(),
         }
     }
 }

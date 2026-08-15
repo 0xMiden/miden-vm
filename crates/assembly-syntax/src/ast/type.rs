@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 use midenc_hir_type::{AddressSpace, Type, TypeRepr};
 
 use super::{
@@ -28,7 +28,6 @@ const MAX_TYPE_EXPR_NESTING: usize = 256;
 /// can mutate its own state as necessary during resolution (e.g. to manage a cache, or other side
 /// table-like data structures).
 pub trait TypeResolver<E> {
-    fn source_manager(&self) -> Arc<dyn SourceManager>;
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
     /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
@@ -1181,31 +1180,22 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{string::ToString, sync::Arc};
     use core::str::FromStr;
 
-    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
+    use miden_diagnostics::{SourceId, SourceSpan};
 
     use super::*;
     use crate::{ast::Form, prettier::PrettyPrint};
 
-    struct DummyResolver {
-        source_manager: Arc<dyn SourceManager>,
-    }
+    struct DummyResolver;
 
     impl DummyResolver {
         fn new() -> Self {
-            Self {
-                source_manager: Arc::new(DefaultSourceManager::default()),
-            }
+            Self
         }
     }
 
     impl TypeResolver<SymbolResolutionError> for DummyResolver {
-        fn source_manager(&self) -> Arc<dyn SourceManager> {
-            self.source_manager.clone()
-        }
-
         fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
             err
         }
@@ -1253,18 +1243,9 @@ mod tests {
         expr
     }
 
-    fn test_source_file(source: &str) -> Arc<SourceFile> {
-        Arc::new(SourceFile::new(
-            SourceId::default(),
-            SourceLanguage::Masm,
-            Uri::new("memory:///type-expr-test.masm"),
-            source.to_string().into_boxed_str(),
-        ))
-    }
-
     fn parse_type_alias_expr(source: &str) -> TypeExpr {
-        let mut forms = crate::parser::parse_forms(test_source_file(source))
-            .value
+        let mut forms = crate::parser::parse_forms(SourceId::UNKNOWN, source)
+            .result
             .expect("type alias should parse");
         assert_eq!(forms.len(), 1, "expected exactly one parsed form");
         match forms.pop().expect("expected parsed form") {

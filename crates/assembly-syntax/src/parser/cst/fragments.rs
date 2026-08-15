@@ -16,8 +16,7 @@ use miden_assembly_syntax_cst::{
     rowan,
 };
 use miden_core::{Felt, field::PrimeField64};
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_diagnostics::TextRange;
+use miden_diagnostics::{SourceSpan, Span, Spanned, TextRange};
 
 use super::context::LoweringContext;
 use crate::{
@@ -1386,14 +1385,14 @@ fn close_text(kind: SyntaxKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeSet, string::ToString, sync::Arc};
+    use alloc::collections::BTreeSet;
+    use core::num::NonZeroU32;
 
     use miden_assembly_syntax_cst::{
         ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
-        parse_source_file,
+        parse,
     };
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
-    use miden_diagnostics::Outcome;
+    use miden_diagnostics::{Outcome, SourceId, SourceNamespace, SourceSpan, Span};
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -1411,7 +1410,8 @@ pub proc foo(a: felt, b: ptr<u8, addrspace(byte)>) -> (ok: i1, value: [u32; 4])
 end
 ",
         );
-        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        let Outcome { result: parse, diagnostics } = parse(TEST_SOURCE_ID, source);
+        let parse = parse.unwrap();
         assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1425,7 +1425,7 @@ end
         let signature = procedure.signature().expect("signature");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(parse, &mut interned);
+        let mut context = LoweringContext::new(parse, source, &mut interned);
         let signature = lower_function_type_from_signature(&mut context, &signature)
             .expect("signature lowering should succeed");
 
@@ -1434,24 +1434,18 @@ end
             ast::FunctionType::new(
                 ast::types::CallConv::Fast,
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
-                        ast::types::Type::Felt
-                    )),
+                    ast::TypeExpr::Primitive(Span::unknown(ast::types::Type::Felt)),
                     ast::TypeExpr::Ptr(
-                        ast::PointerType::new(ast::TypeExpr::Primitive(
-                            miden_debug_types::Span::unknown(ast::types::Type::U8),
-                        ))
+                        ast::PointerType::new(ast::TypeExpr::Primitive(Span::unknown(
+                            ast::types::Type::U8
+                        ),))
                         .with_address_space(ast::types::AddressSpace::Byte),
                     ),
                 ],
                 vec![
-                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
-                        ast::types::Type::I1
-                    )),
+                    ast::TypeExpr::Primitive(Span::unknown(ast::types::Type::I1)),
                     ast::TypeExpr::Array(ast::ArrayType::new(
-                        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
-                            ast::types::Type::U32
-                        )),
+                        ast::TypeExpr::Primitive(Span::unknown(ast::types::Type::U32)),
                         4,
                     )),
                 ],
@@ -1463,7 +1457,8 @@ end
     fn lowers_named_type_alias_bodies_from_cst_tokens() {
         let source =
             test_source_file("type Point = struct { x: u32, y: ptr<u8, addrspace(byte)> }\n");
-        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        let Outcome { result: parse, diagnostics } = parse(TEST_SOURCE_ID, source);
+        let parse = parse.unwrap();
         assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1477,7 +1472,7 @@ end
         let body = type_decl.body().expect("type body");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(parse, &mut interned);
+        let mut context = LoweringContext::new(parse, source, &mut interned);
         let ty = lower_type_expr_from_alias_body(&mut context, &body)
             .expect("type lowering should succeed");
 
@@ -1487,19 +1482,17 @@ end
                 None,
                 [
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: SourceSpan::UNKNOWN,
                         name: ast::Ident::new("x").unwrap(),
-                        ty: ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
-                            ast::types::Type::U32,
-                        )),
+                        ty: ast::TypeExpr::Primitive(Span::unknown(ast::types::Type::U32,)),
                     },
                     ast::StructField {
-                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        span: SourceSpan::UNKNOWN,
                         name: ast::Ident::new("y").unwrap(),
                         ty: ast::TypeExpr::Ptr(
-                            ast::PointerType::new(ast::TypeExpr::Primitive(
-                                miden_debug_types::Span::unknown(ast::types::Type::U8),
-                            ))
+                            ast::PointerType::new(ast::TypeExpr::Primitive(Span::unknown(
+                                ast::types::Type::U8
+                            ),))
                             .with_address_space(ast::types::AddressSpace::Byte),
                         ),
                     },
@@ -1518,7 +1511,8 @@ proc foo
 end
 ",
         );
-        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        let Outcome { result: parse, diagnostics } = parse(TEST_SOURCE_ID, source);
+        let parse = parse.unwrap();
         assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1532,7 +1526,7 @@ end
         let attribute = procedure.attributes().next().expect("attribute");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(parse, &mut interned);
+        let mut context = LoweringContext::new(parse, source, &mut interned);
         let attribute =
             lower_attribute(&mut context, &attribute).expect("attribute lowering should succeed");
 
@@ -1570,7 +1564,8 @@ end
     #[test]
     fn lowers_advice_map_decls_from_cst_tokens() {
         let source = test_source_file("adv_map TABLE([1, 2, 3, 4]) = [5, 6, 7]\n");
-        let Outcome { value: parse, diagnostics } = parse_source_file(source);
+        let Outcome { result: parse, diagnostics } = parse(TEST_SOURCE_ID, source);
+        let parse = parse.unwrap();
         assert!(diagnostics.is_empty(), "unexpected CST diagnostics");
 
         let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
@@ -1583,7 +1578,7 @@ end
             .expect("advice map");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(parse, &mut interned);
+        let mut context = LoweringContext::new(parse, source, &mut interned);
         let entry = lower_advice_map_decl(&mut context, &advice_map)
             .expect("advice-map lowering should succeed");
 
@@ -1607,12 +1602,9 @@ end
         );
     }
 
-    fn test_source_file(source: &str) -> Arc<SourceFile> {
-        Arc::new(SourceFile::new(
-            SourceId::UNKNOWN,
-            SourceLanguage::Masm,
-            Uri::new("memory:///cst-fragments-test.masm"),
-            source.to_string().into_boxed_str(),
-        ))
+    const TEST_SOURCE_ID: SourceId = SourceId::new(SourceNamespace::new(NonZeroU32::MIN), 0);
+
+    fn test_source_file(source: &str) -> &str {
+        source
     }
 }

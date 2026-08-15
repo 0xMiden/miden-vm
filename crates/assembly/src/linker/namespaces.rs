@@ -8,8 +8,8 @@ use alloc::{
 use miden_assembly_syntax::{
     Path, PathBuf,
     ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
-    debuginfo::{SourceSpan, Span, Spanned},
 };
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use super::{Linker, LinkerError, ModuleSource, errors::PrivateSubmoduleDefinition};
 
@@ -933,32 +933,28 @@ fn item_path(linker: &Linker, item: GlobalItemIndex) -> Arc<Path> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::boxed::Box;
 
-    use miden_assembly_syntax::{
-        Parse, Path,
-        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
-    };
+    use miden_assembly_syntax::{Path, diagnostics::Span};
 
     use super::*;
-    use crate::testing::TestOutcomeExt;
+    use crate::testing::TestContext;
 
     fn parse_module(
-        source_manager: Arc<dyn SourceManager>,
+        context: &TestContext,
         name: &str,
         source: &str,
     ) -> Box<miden_assembly_syntax::ast::Module> {
-        source_manager
-            .load(SourceLanguage::Masm, name.into(), source.to_string())
-            .parse(source_manager)
+        context
+            .parse_module_source_file(context.add_source(name, source))
             .expect("module should parse")
     }
 
     #[test]
     fn namespace_graph_records_items_imports_and_public_submodule_edges() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace ::root
@@ -973,7 +969,7 @@ mod tests {
             "#,
         );
         let mut child = parse_module(
-            source_manager.clone(),
+            &context,
             "child.masm",
             r#"
                 namespace ::root::child
@@ -982,7 +978,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         let root_id = linker.link_module(&mut root).expect("root link should succeed");
         let child_id = linker.link_module(&mut child).expect("child link should succeed");
 
@@ -1000,9 +996,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_rejects_declared_missing_child_module() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace ::root
@@ -1011,7 +1007,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut root).expect("root link should succeed");
 
         let err = NamespaceGraph::build(&linker).expect_err("missing child should fail");
@@ -1020,23 +1016,23 @@ mod tests {
 
     #[test]
     fn namespace_graph_rejects_undeclared_child_module() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace ::root
             "#,
         );
         let mut child = parse_module(
-            source_manager.clone(),
+            &context,
             "child.masm",
             r#"
                 namespace ::root::child
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut root).expect("root link should succeed");
         linker.link_module(&mut child).expect("child link should succeed");
 
@@ -1046,9 +1042,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_resolves_module_and_item_imports_independently() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut imported = parse_module(
-            source_manager.clone(),
+            &context,
             "imported.masm",
             r#"
                 namespace lib::mod
@@ -1057,7 +1053,7 @@ mod tests {
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1067,7 +1063,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         let imported_id = linker.link_module(&mut imported).expect("imported link should succeed");
         let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
 
@@ -1080,9 +1076,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_resolves_code_paths_through_imported_modules() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut imported = parse_module(
-            source_manager.clone(),
+            &context,
             "imported.masm",
             r#"
                 namespace lib::mod
@@ -1091,7 +1087,7 @@ mod tests {
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1100,7 +1096,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut imported).expect("imported link should succeed");
         let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
 
@@ -1120,9 +1116,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_resolves_absolute_code_paths_globally() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut imported = parse_module(
-            source_manager.clone(),
+            &context,
             "imported.masm",
             r#"
                 namespace real::mod
@@ -1131,7 +1127,7 @@ mod tests {
             "#,
         );
         let mut global = parse_module(
-            source_manager.clone(),
+            &context,
             "global.masm",
             r#"
                 namespace lib
@@ -1140,7 +1136,7 @@ mod tests {
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1149,7 +1145,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut imported).expect("imported link should succeed");
         let global_id = linker.link_module(&mut global).expect("global link should succeed");
         let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
@@ -1170,9 +1166,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_resolves_absolute_code_paths_to_public_item_reexports() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut dep = parse_module(
-            source_manager.clone(),
+            &context,
             "dep.masm",
             r#"
                 namespace dep
@@ -1181,7 +1177,7 @@ mod tests {
             "#,
         );
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace root
@@ -1190,7 +1186,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         let dep_id = linker.link_module(&mut dep).expect("dep link should succeed");
         let root_id = linker.link_module(&mut root).expect("root link should succeed");
 
@@ -1210,9 +1206,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_rejects_private_submodule_import() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace root
@@ -1221,14 +1217,14 @@ mod tests {
             "#,
         );
         let mut child = parse_module(
-            source_manager.clone(),
+            &context,
             "child.masm",
             r#"
                 namespace root::child
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1237,7 +1233,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut root).expect("root link should succeed");
         linker.link_module(&mut child).expect("child link should succeed");
         linker.link_module(&mut consumer).expect("consumer link should succeed");
@@ -1249,9 +1245,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_rejects_module_reexport() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace root
@@ -1260,14 +1256,14 @@ mod tests {
             "#,
         );
         let mut child = parse_module(
-            source_manager.clone(),
+            &context,
             "child.masm",
             r#"
                 namespace root::child
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1276,7 +1272,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut root).expect("root link should succeed");
         linker.link_module(&mut child).expect("child link should succeed");
         linker.link_module(&mut consumer).expect("consumer link should succeed");
@@ -1288,9 +1284,9 @@ mod tests {
 
     #[test]
     fn namespace_graph_rejects_imports_through_other_imports() {
-        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let context = TestContext::default().with_warnings_as_errors(false);
         let mut root = parse_module(
-            source_manager.clone(),
+            &context,
             "root.masm",
             r#"
                 namespace root
@@ -1299,7 +1295,7 @@ mod tests {
             "#,
         );
         let mut child = parse_module(
-            source_manager.clone(),
+            &context,
             "child.masm",
             r#"
                 namespace root::child
@@ -1308,7 +1304,7 @@ mod tests {
             "#,
         );
         let mut consumer = parse_module(
-            source_manager.clone(),
+            &context,
             "consumer.masm",
             r#"
                 namespace app
@@ -1318,7 +1314,7 @@ mod tests {
             "#,
         );
 
-        let mut linker = Linker::new(source_manager);
+        let mut linker = Linker::new();
         linker.link_module(&mut root).expect("root link should succeed");
         linker.link_module(&mut child).expect("child link should succeed");
         linker.link_module(&mut consumer).expect("consumer link should succeed");

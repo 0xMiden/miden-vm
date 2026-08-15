@@ -35,7 +35,6 @@ fn test_trace_event_handling() {
 
     let program: Program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
@@ -68,7 +67,6 @@ fn test_unhandled_trace_does_not_raise_error() {
     let trace_name = "test::trace::unhandled";
     let program: Program = Assembler::default()
         .assemble_program("program", trace_emit_program(trace_name))
-        .value
         .unwrap()
         .unwrap_program();
 
@@ -101,7 +99,6 @@ fn test_trace_handler_registry() {
     );
     let program: Program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
 
@@ -140,7 +137,6 @@ fn test_trace_event_from_stack() {
     end";
     let program: Program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
 
@@ -176,7 +172,6 @@ fn test_trace_event_manual_emit() {
     );
     let program: Program = Assembler::default()
         .assemble_program("program", source)
-        .value
         .unwrap()
         .unwrap_program();
 

@@ -152,7 +152,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
 }
 
 impl<'a, 'b: 'a> VisitMut<RewriteBreak> for ModuleRewriter<'a, 'b> {
-    fn visit_mut_inst(&mut self, inst: &mut Span<ast::Instruction>) -> ControlFlow<LinkerError> {
+    fn visit_mut_inst(&mut self, inst: &mut Span<ast::Instruction>) -> ControlFlow<RewriteBreak> {
         match &mut **inst {
             ast::Instruction::EmitImm(event) | ast::Instruction::TraceImm(event) => {
                 if let ast::EventImmediate::Name(name) = event {
@@ -172,7 +172,7 @@ impl<'a, 'b: 'a> VisitMut<RewriteBreak> for ModuleRewriter<'a, 'b> {
 
         visit::visit_mut_inst(self, inst)
     }
-    fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<LinkerError> {
+    fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<RewriteBreak> {
         log::debug!(target: "linker", "  | visiting {}", procedure.name());
         self.invoked.clear();
         self.invoked.extend(procedure.invoked().cloned());

@@ -1,8 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, ops::Range};
 
-use miden_debug_types::SourceSpan;
-use miden_diagnostics::Diagnostic;
+use miden_diagnostics::{Diagnostic, SourceSpan};
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -330,7 +329,7 @@ pub enum ParsingError {
     )]
     UndefinedSubmodule {
         name: crate::ast::Ident,
-        basename: alloc::boxed::Box<str>,
+        basename: Box<str>,
         directory: Box<miden_debug_types::Uri>,
         #[label]
         span: SourceSpan,

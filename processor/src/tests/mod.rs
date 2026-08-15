@@ -4,9 +4,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::num::NonZeroU32;
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Path, PathBuf,
+    Assembler, Path, PathBuf,
     ast::{Module, ModuleKind},
     testing::{Pattern, TestContext, regex, source_file},
 };
@@ -14,10 +15,11 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, error_code_from_msg},
 };
-use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
+use miden_debug_types::Location;
 use miden_diagnostics::{
-    AnnotateRenderer, Diagnostic, LayeredSourceProvider, LineColumn, PreparedDiagnostic, Source,
-    SourceId, SourceProvider, prepare_ref,
+    AnnotateRenderer, Diagnostic, LayeredSourceProvider, LineColumn, PreparedDiagnostic,
+    SharedSourceProvider, Source, SourceId, SourceMap, SourceNamespace, SourceProvider, SourceSpan,
+    prepare_ref,
 };
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
@@ -54,6 +56,10 @@ impl SourceProvider for EmptySourceProvider {
 
 static EMPTY_SOURCE_PROVIDER: EmptySourceProvider = EmptySourceProvider;
 
+fn new_source_map() -> SourceMap {
+    SourceMap::new(SourceNamespace::new(NonZeroU32::new(2).unwrap()))
+}
+
 fn render_diagnostic(diagnostic: &dyn Diagnostic, sources: &dyn SourceProvider) -> String {
     let snapshot = prepare_ref(diagnostic).expect("diagnostic should prepare");
     let prepared = PreparedDiagnostic {
@@ -74,7 +80,7 @@ impl ExecutionDiagnostic for crate::ExecutionError {
     }
 
     fn source_provider(&self) -> Option<&dyn SourceProvider> {
-        self.source_file().map(|source| source as &dyn SourceProvider)
+        crate::ExecutionError::source_provider(self).map(|source| source as &dyn SourceProvider)
     }
 }
 
@@ -84,7 +90,8 @@ impl ExecutionDiagnostic for miden_utils_testing::ExecutionError {
     }
 
     fn source_provider(&self) -> Option<&dyn SourceProvider> {
-        self.source_file().map(|source| source as &dyn SourceProvider)
+        miden_utils_testing::ExecutionError::source_provider(self)
+            .map(|source| source as &dyn SourceProvider)
     }
 }
 
@@ -129,26 +136,25 @@ impl EventHandler for DuplicateMapMutationHandler {
     }
 }
 
-fn parse_library_module(
-    source_manager: Arc<dyn SourceManager>,
-    module_name: &str,
-    body: &str,
-) -> Box<Module> {
+fn parse_library_module(sources: &mut SourceMap, module_name: &str, body: &str) -> Box<Module> {
     let path = PathBuf::new(module_name).unwrap();
     let source = format!("namespace {module_name}\n{body}");
     let mut parser = Module::parser(None);
     parser
-        .parse_str(Some(path.as_path()), source, source_manager)
-        .value
+        .parse_str(Some(path.as_path()), source, sources)
         .expect("library module should parse")
 }
 
-fn parse_kernel_module(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
+fn parse_kernel_module(sources: &mut SourceMap, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser
-        .parse_str(Some(Path::KERNEL), source, source_manager)
-        .value
+        .parse_str(Some(Path::KERNEL), source, sources)
         .expect("kernel module should parse")
+}
+
+fn parse_program_module(sources: &mut SourceMap, source: impl ToString) -> Box<Module> {
+    let mut parser = Module::parser(Some(ModuleKind::Executable));
+    parser.parse_str(None, source, sources).expect("program module should parse")
 }
 
 macro_rules! build_test {
@@ -170,18 +176,14 @@ macro_rules! build_test_by_mode {
 }
 
 struct MalformedMastForestHost {
-    source_manager: Arc<DefaultSourceManager>,
+    sources: Arc<SourceMap>,
     mast_forest: Arc<MastForest>,
 }
 
 impl BaseHost for MalformedMastForestHost {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        let sources = SharedSourceProvider::from(self.sources.clone());
+        (location.to_span(&sources).unwrap_or(SourceSpan::UNKNOWN), Some(sources))
     }
 }
 
@@ -229,7 +231,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     let (lib_1, lib_2) = {
         let dummy_library_source =
             source_file!(&test_context, "namespace foo::bar\n\npub proc foo add end");
-        let module = test_context.parse_module(dummy_library_source).unwrap();
+        let module = test_context.parse_module_source_file(dummy_library_source).unwrap();
         let mut lib_2 = test_context
             .assemble_library("lib2", None, module, None::<Box<Module>>)
             .unwrap();
@@ -312,20 +314,20 @@ fn test_diagnostic_advice_map_key_not_found_2() {
 #[test]
 fn test_diagnostic_host_event_error_uses_emit_location() {
     let event = EventName::new("test::host_event_error");
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let source = format!(
         "
         begin
             push.1 emit.event(\"{event}\")
         end"
     );
-    let package = Assembler::new(source_manager.clone())
-        .assemble_program("program", source)
-        .value
+    let module = parse_program_module(&mut sources, source);
+    let package = Assembler::with_sources(sources.clone())
+        .assemble_program("program", module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
@@ -352,20 +354,20 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
     let trace = EventName::new("test::host_trace_error");
     let trace_id = trace.to_event_id();
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let source = format!(
         "
         begin
             trace.event(\"{trace}\")
         end"
     );
-    let package = Assembler::new(source_manager.clone())
-        .assemble_program("program", source)
-        .value
+    let module = parse_program_module(&mut sources, source);
+    let package = Assembler::with_sources(sources.clone())
+        .assemble_program("program", module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
     host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
         .unwrap();
 
@@ -391,20 +393,20 @@ fn test_diagnostic_host_trace_error_uses_trace_location() {
 #[test]
 fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     let event = EventName::new("test::host_event_advice_error");
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
     let source = format!(
         "
         begin
             push.1 emit.event(\"{event}\")
         end"
     );
-    let package = Assembler::new(source_manager.clone())
-        .assemble_program("program", source)
-        .value
+    let module = parse_program_module(&mut sources, source);
+    let package = Assembler::with_sources(sources.clone())
+        .assemble_program("program", module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
@@ -1003,7 +1005,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
 
 #[test]
 fn test_diagnostic_procedure_not_found_call() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
 
     let lib_module = {
         let module_name = "foo::bar";
@@ -1012,7 +1014,7 @@ fn test_diagnostic_procedure_not_found_call() {
             push.1
         end
     ";
-        parse_library_module(source_manager.clone(), module_name, src)
+        parse_library_module(&mut sources, module_name, src)
     };
 
     let program_source = "
@@ -1023,21 +1025,20 @@ fn test_diagnostic_procedure_not_found_call() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
+    let library = Assembler::with_sources(sources.clone())
         .assemble_library("lib", lib_module, None::<Box<Module>>)
-        .value
         .unwrap();
 
-    let package = Assembler::new(source_manager.clone())
+    let program_module = parse_program_module(&mut sources, program_source);
+    let package = Assembler::with_sources(sources.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
-        .value
+        .assemble_program("program", program_module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
 
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -1058,7 +1059,7 @@ fn test_diagnostic_procedure_not_found_call() {
 
 #[test]
 fn test_diagnostic_procedure_not_found_join() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
 
     let lib_module = {
         let module_name = "foo::bar";
@@ -1067,7 +1068,7 @@ fn test_diagnostic_procedure_not_found_join() {
             push.1
         end
     ";
-        parse_library_module(source_manager.clone(), module_name, src)
+        parse_library_module(&mut sources, module_name, src)
     };
 
     let program_source = "
@@ -1079,21 +1080,20 @@ fn test_diagnostic_procedure_not_found_join() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
+    let library = Assembler::with_sources(sources.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
-        .value
         .unwrap();
 
-    let package = Assembler::new(source_manager.clone())
+    let program_module = parse_program_module(&mut sources, program_source);
+    let package = Assembler::with_sources(sources.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
-        .value
+        .assemble_program("program", program_module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
 
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -1116,7 +1116,7 @@ fn test_diagnostic_procedure_not_found_join() {
 
 #[test]
 fn test_diagnostic_procedure_not_found_loop() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
 
     let lib_module = {
         let module_name = "foo::bar";
@@ -1125,7 +1125,7 @@ fn test_diagnostic_procedure_not_found_loop() {
             push.1
         end
     ";
-        parse_library_module(source_manager.clone(), module_name, src)
+        parse_library_module(&mut sources, module_name, src)
     };
 
     let program_source = "
@@ -1139,21 +1139,20 @@ fn test_diagnostic_procedure_not_found_loop() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
+    let library = Assembler::with_sources(sources.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
-        .value
         .unwrap();
 
-    let package = Assembler::new(source_manager.clone())
+    let program_module = parse_program_module(&mut sources, program_source);
+    let package = Assembler::with_sources(sources.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
-        .value
+        .assemble_program("program", program_module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
 
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -1175,7 +1174,7 @@ fn test_diagnostic_procedure_not_found_loop() {
 
 #[test]
 fn test_diagnostic_procedure_not_found_split() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
 
     let lib_module = {
         let module_name = "foo::bar";
@@ -1184,7 +1183,7 @@ fn test_diagnostic_procedure_not_found_split() {
             push.1
         end
     ";
-        parse_library_module(source_manager.clone(), module_name, src)
+        parse_library_module(&mut sources, module_name, src)
     };
 
     let program_source = "
@@ -1200,21 +1199,20 @@ fn test_diagnostic_procedure_not_found_split() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
+    let library = Assembler::with_sources(sources.clone())
         .assemble_library("library", lib_module, None::<Box<Module>>)
-        .value
         .unwrap();
 
-    let package = Assembler::new(source_manager.clone())
+    let program_module = parse_program_module(&mut sources, program_source);
+    let package = Assembler::with_sources(sources.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
-        .value
+        .assemble_program("program", program_module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
 
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
@@ -1238,16 +1236,16 @@ fn test_diagnostic_procedure_not_found_split() {
 
 #[test]
 fn test_diagnostic_malformed_mast_forest_in_host() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let package = Assembler::new(source_manager.clone())
-        .assemble_program(
-            "program",
-            "
+    let mut sources = new_source_map();
+    let module = parse_program_module(
+        &mut sources,
+        "
             begin
                 dyncall
             end",
-        )
-        .value
+    );
+    let package = Assembler::with_sources(sources.clone())
+        .assemble_program("program", module)
         .unwrap();
     let debug_info = package.debug_info().unwrap().unwrap();
     let program = package.unwrap_program();
@@ -1259,7 +1257,7 @@ fn test_diagnostic_malformed_mast_forest_in_host() {
     malformed_forest.make_root(unexpected_root);
 
     let mut host = MalformedMastForestHost {
-        source_manager,
+        sources: Arc::new(sources),
         mast_forest: malformed_forest.into(),
     };
 
@@ -1454,7 +1452,7 @@ fn test_diagnostic_not_u32_value() {
 
 #[test]
 fn test_diagnostic_syscall_target_not_in_kernel() {
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = new_source_map();
 
     let kernel_source = "
         pub proc dummy_proc
@@ -1468,18 +1466,16 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         end
     ";
 
-    let kernel = parse_kernel_module(source_manager.clone(), kernel_source);
-    let kernel_library = Assembler::new(source_manager.clone())
+    let kernel = parse_kernel_module(&mut sources, kernel_source);
+    let kernel_library = Assembler::with_sources(sources.clone())
         .assemble_kernel("kernel", kernel, None)
-        .value
         .unwrap();
 
     let program = {
-        let package = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
-            .unwrap()
-            .assemble_program("program", program_source)
-            .value
-            .unwrap();
+        let mut assembler = Assembler::with_kernel(kernel_library.into()).unwrap();
+        let program_module = parse_program_module(assembler.sources_mut(), program_source);
+        sources = assembler.sources().clone();
+        let package = assembler.assemble_program("program", program_module).unwrap();
         let debug_info = package.debug_info().unwrap().unwrap();
         let program = package.unwrap_program();
 
@@ -1494,7 +1490,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         )
     };
 
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(Arc::new(sources));
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())

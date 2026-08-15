@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_debug_types::{SourceFile, SourceId, SourceSpan};
-use miden_diagnostics::SourceKey;
+use miden_diagnostics::{SourceId, SourceKey, SourceSpan};
 
 use crate::syntax::SyntaxKind;
 
@@ -38,17 +37,18 @@ impl<'input> Token<'input> {
     }
 }
 
-/// Tokenizes a source-managed MASM file into a lossless token stream.
-pub fn tokenize(source: &SourceFile) -> Vec<Token<'_>> {
-    Lexer::new(source).collect()
+/// Tokenizes MASM source text into a lossless token stream with spans in `source_id`.
+pub fn tokenize(source_id: SourceId, input: &str) -> Vec<Token<'_>> {
+    Lexer::new(source_id, input).collect()
 }
 
 /// Tokenizes a raw string using [`SourceId::UNKNOWN`] spans.
 ///
 /// This is primarily useful in tests and standalone helpers. Production callers should prefer
-/// [`tokenize`] so spans remain attached to a real [`SourceFile`].
-pub fn tokenize_text(input: &str) -> Vec<Token<'_>> {
-    Lexer::from_raw_parts(SourceId::UNKNOWN, input).collect()
+/// [`tokenize`] with a source ID allocated by their session source map.
+#[cfg(test)]
+pub(crate) fn tokenize_text(input: &str) -> Vec<Token<'_>> {
+    Lexer::new(SourceId::UNKNOWN, input).collect()
 }
 
 /// An iterator over lossless MASM tokens.
@@ -62,15 +62,8 @@ pub struct Lexer<'input> {
 }
 
 impl<'input> Lexer<'input> {
-    /// Creates a lexer over a source-managed MASM file.
-    pub fn new(source: &'input SourceFile) -> Self {
-        Self::from_raw_parts(source.id(), source.as_str())
-    }
-
     /// Creates a lexer from raw text and an explicit source id.
-    ///
-    /// This is the lowest-level constructor used by [`tokenize_text`] and parser test helpers.
-    pub fn from_raw_parts(source_id: SourceId, input: &'input str) -> Self {
+    pub fn new(source_id: SourceId, input: &'input str) -> Self {
         Self { input, source_id, offset: 0 }
     }
 
@@ -336,10 +329,9 @@ impl<'input> Iterator for Lexer<'input> {
 
 #[cfg(test)]
 mod tests {
-    use std::{string::ToString, sync::Arc, vec::Vec};
+    use std::{string::ToString, vec::Vec};
 
-    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
-    use miden_diagnostics::{SourceKey, SourceNamespace, SourceSpan};
+    use miden_diagnostics::{SourceId, SourceKey, SourceNamespace, SourceSpan};
     use pretty_assertions::assert_eq;
 
     use super::{tokenize, tokenize_text};
@@ -438,23 +430,19 @@ mod tests {
 
     #[test]
     fn tracks_source_spans_when_tokenizing_source_files() {
-        let source = Arc::new(SourceFile::new(
-            SourceId::new(SourceNamespace::new_unchecked(1), 7),
-            SourceLanguage::Masm,
-            Uri::new("memory:///lexer-span-test.masm"),
-            "proc foo\n".to_string().into_boxed_str(),
-        ));
+        let source_id = SourceId::new(SourceNamespace::new_unchecked(1), 7);
+        let source = "proc foo\n";
 
-        let tokens = tokenize(source.as_ref());
+        let tokens = tokenize(source_id, source);
         assert_eq!(tokens[0].text(), "proc");
         assert_eq!(
             tokens[0].span(),
-            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, 0..4).unwrap()
+            SourceSpan::try_from_range(SourceKey::Session(source_id), None, 0..4).unwrap()
         );
         assert_eq!(tokens[2].text(), "foo");
         assert_eq!(
             tokens[2].span(),
-            SourceSpan::try_from_range(SourceKey::Session(source.id()), None, 5..8).unwrap()
+            SourceSpan::try_from_range(SourceKey::Session(source_id), None, 5..8).unwrap()
         );
     }
 }

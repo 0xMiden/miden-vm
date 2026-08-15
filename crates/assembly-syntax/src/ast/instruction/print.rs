@@ -416,7 +416,7 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 #[cfg(test)]
 mod tests {
     use miden_core::crypto::hash::Poseidon2;
-    use miden_debug_types::Span;
+    use miden_diagnostics::Span;
 
     use crate::{
         Felt,

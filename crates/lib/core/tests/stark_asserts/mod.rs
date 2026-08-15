@@ -3,6 +3,7 @@
 // The VM wrapper validates AIR shape before calling the generic verifier. The generic
 // validate_inputs procedure only checks memory-resident security parameters.
 
+use miden_assembly::{SourceMap, Span, diagnostics::SourceNamespace};
 use miden_core::Felt;
 use miden_processor::ExecutionOutput;
 #[cfg(feature = "arbitrary")]
@@ -406,7 +407,6 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     use std::{
         collections::BTreeMap,
         path::{Path, PathBuf},
-        sync::Arc,
     };
 
     use miden_assembly::{
@@ -418,7 +418,6 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
                 eval::{self, CachedConstantValue},
             },
         },
-        debuginfo::{DefaultSourceManager, SourceFile, SourceSpan, Span},
     };
 
     /// `(name, offset from the declared address, extent in felts)`.
@@ -547,10 +546,6 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     impl ConstEnvironment for LocalConstantEnv<'_> {
         type Error = ConstEvalError;
 
-        fn get_source_file_for(&self, _span: SourceSpan) -> Option<Arc<SourceFile>> {
-            None
-        }
-
         fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
             Ok(self.constants.get(name.as_str()).copied().map(CachedConstantValue::Miss))
         }
@@ -579,8 +574,10 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         let module_path: MasmPathBuf =
             "audit::layout".parse().expect("valid synthetic module path");
         let mut parser = ModuleParser::default();
+        let mut sources = SourceMap::new(SourceNamespace::new_unchecked(1));
         let module = parser
-            .parse_file(Some(&module_path), path, Arc::new(DefaultSourceManager::default()))
+            .parse_file(Some(&module_path), path, &mut sources)
+            .into_result()
             .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
 
         let mut env = LocalConstantEnv {

@@ -114,7 +114,8 @@ miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-
 miden-verifier          = { path = "./verifier", version = "0.30", default-features = false }
 
 # Miden crates
-miden-formatting = { version = "0.1", default-features = false }
+miden-diagnostics = { git = "https://github.com/0xMiden/miden-diagnostics", branch = "bitwalker/diagnostics-v1", default-features = false, features = ["derive"] }
+miden-formatting  = { version = "0.1", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
@@ -196,7 +197,6 @@ p3-uni-stark     = { version = "0.6.3", default-features = false }
 p3-util          = { version = "0.6.3", default-features = false }
 
 loom = "0.7"
-miden-diagnostics = { path = "../miden-diagnostics/crates/diagnostics", default-features = false, features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"

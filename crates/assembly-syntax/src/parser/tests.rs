@@ -1,10 +1,9 @@
-use alloc::{string::String, sync::Arc};
-use core::assert_matches;
+use alloc::string::String;
+use core::{assert_matches, num::NonZeroU32};
 
-use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 use miden_diagnostics::{
-    AnnotateRenderer, DefaultFailurePolicy, DiagnosticSet, Outcome, SourceProvider,
-    WarningsAsErrors,
+    DefaultFailurePolicy, DiagnosticSet, Outcome, SourceId, SourceMap, SourceNamespace,
+    SourceProvider, WarningsAsErrors,
 };
 
 use super::*;
@@ -13,13 +12,14 @@ use crate::{
     ast::{Form, Immediate, Instruction, Op, Visibility},
 };
 
-fn test_source_file(source: &str) -> Arc<SourceFile> {
-    Arc::new(SourceFile::new(
-        SourceId::default(),
-        SourceLanguage::Masm,
-        Uri::new("memory:///parser-test.masm"),
-        source.to_string().into_boxed_str(),
-    ))
+const TEST_SOURCE_NAMESPACE: SourceNamespace = SourceNamespace::new(NonZeroU32::MIN);
+
+fn test_source_file(source: &str) -> SourceMap {
+    let mut sources = SourceMap::new(TEST_SOURCE_NAMESPACE);
+    sources
+        .insert("memory:///parser-test.masm", source, None)
+        .expect("test source must fit in the source map");
+    sources
 }
 
 #[cfg(feature = "std")]
@@ -67,88 +67,64 @@ fn collect_masm_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>
 }
 
 #[cfg(feature = "std")]
-fn load_source_file(path: &std::path::Path) -> Arc<SourceFile> {
+fn load_source_file(path: &std::path::Path) -> SourceMap {
     use std::fs;
 
     let source = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-    Arc::new(SourceFile::new(
-        SourceId::default(),
-        SourceLanguage::Masm,
-        Uri::new(format!("file://{}", path.display())),
-        source.into_boxed_str(),
-    ))
+    let mut sources = SourceMap::new(TEST_SOURCE_NAMESPACE);
+    sources
+        .insert(format!("file://{}", path.display()), source, None)
+        .expect("test source must fit in the source map");
+    sources
 }
 
 fn render_diagnostic_set(diagnostics: &DiagnosticSet, sources: &dyn SourceProvider) -> String {
-    let prepared = diagnostics.prepare(sources).expect("diagnostics should prepare");
-    let renderer = AnnotateRenderer::default();
-    let mut output = String::new();
-    for diagnostic in &prepared {
-        output.push_str(&renderer.render(diagnostic).expect("diagnostic should render"));
-        output.push('\n');
-    }
-    output
+    diagnostics.prepare(sources).expect("diagnostics should prepare").to_string()
 }
 
 struct TestParseOutcome<T> {
-    outcome: Outcome<Option<T>>,
-    source: Arc<SourceFile>,
+    outcome: Outcome<T>,
+    sources: SourceMap,
 }
 
 impl<T> TestParseOutcome<T> {
     fn expect(self, message: &str) -> T {
-        self.outcome.value.unwrap_or_else(|| panic!("{message}"))
+        self.outcome.expect(message)
     }
 
     fn expect_err(self, message: &str) -> TestParseFailure {
-        if self.outcome.value.is_some() {
+        if self.outcome.result.is_ok() {
             panic!("{message}");
         }
         TestParseFailure {
             diagnostics: self.outcome.diagnostics,
-            source: self.source,
+            sources: self.sources,
         }
     }
 
     fn is_err(&self) -> bool {
-        self.outcome.value.is_none()
+        self.outcome.result.is_err()
     }
 }
 
 struct TestParseFailure {
     diagnostics: DiagnosticSet,
-    source: Arc<SourceFile>,
+    sources: SourceMap,
 }
 
 fn render_diagnostics(failure: &TestParseFailure) -> String {
-    render_diagnostic_set(&failure.diagnostics, failure.source.as_ref())
+    render_diagnostic_set(&failure.diagnostics, &failure.sources)
 }
 
-fn parse_forms(source: Arc<SourceFile>) -> TestParseOutcome<Vec<ast::Form>> {
-    let outcome = super::parse_forms(source.clone());
-    TestParseOutcome { outcome, source }
+fn parse_forms(sources: SourceMap) -> TestParseOutcome<Vec<Form>> {
+    let source_id = SourceId::new(TEST_SOURCE_NAMESPACE, 0);
+    let source = sources.get(source_id).and_then(|source| source.text).expect("test source");
+    let outcome = super::parse_forms(source_id, source);
+    TestParseOutcome { outcome, sources }
 }
 
-trait ExpectOutcome<T> {
-    fn expect(self, message: &str) -> T;
-    fn expect_err(self, message: &str) -> DiagnosticSet;
-}
-
-impl<T> ExpectOutcome<T> for Outcome<Option<T>> {
-    fn expect(self, message: &str) -> T {
-        self.value.unwrap_or_else(|| panic!("{message}"))
-    }
-
-    fn expect_err(self, message: &str) -> DiagnosticSet {
-        if self.value.is_some() {
-            panic!("{message}");
-        }
-        self.diagnostics
-    }
-}
-
-fn assert_parses(source: Arc<SourceFile>) {
+fn assert_parses(source: SourceMap) {
     parse_forms(source).expect("parser should succeed");
 }
 
@@ -172,39 +148,35 @@ fn temp_parser_dir(test_name: &str) -> std::path::PathBuf {
 fn overlong_path_component_is_rejected_without_panic() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use crate::debuginfo::DefaultSourceManager;
-
     let big_component = "a".repeat(u16::MAX as usize);
     let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = SourceMap::new(TEST_SOURCE_NAMESPACE);
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        ModuleParser::new(None).parse_str(None, source, source_manager.clone())
+        ModuleParser::new(None).parse_str(None, source, &mut sources)
     }));
 
     assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
     let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
-    let rendered = render_diagnostic_set(&err, source_manager.as_ref());
+    let rendered = render_diagnostic_set(&err, &sources);
     assert!(rendered.contains("invalid item path: too long (max 65535 bytes)"), "{rendered}");
 }
 
 #[test]
 fn module_parser_preserves_warning_diagnostics_with_a_usable_module() {
-    use crate::debuginfo::DefaultSourceManager;
-
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut sources = SourceMap::new(TEST_SOURCE_NAMESPACE);
     let outcome = ModuleParser::new(Some(ast::ModuleKind::Library)).parse_str(
         Some(Path::new("example")),
         "use foo\n",
-        source_manager.clone(),
+        &mut sources,
     );
 
-    assert!(outcome.value.is_some(), "warnings must not discard the parsed module");
+    assert!(outcome.result.is_ok(), "warnings must not discard the parsed module");
     assert_eq!(outcome.diagnostics.counts().warnings(), 1);
     assert!(!outcome.diagnostics.assess(&DefaultFailurePolicy));
     assert!(outcome.diagnostics.assess(&WarningsAsErrors));
 
-    let rendered = render_diagnostic_set(&outcome.diagnostics, source_manager.as_ref());
+    let rendered = render_diagnostic_set(&outcome.diagnostics, &sources);
     assert!(rendered.contains("unused import"), "{rendered}");
     assert!(rendered.contains("use foo"), "{rendered}");
 }
@@ -213,8 +185,6 @@ fn module_parser_preserves_warning_diagnostics_with_a_usable_module() {
 #[cfg(feature = "std")]
 fn read_modules_from_root_walks_valid_submodule_tree() {
     use std::fs;
-
-    use crate::debuginfo::DefaultSourceManager;
 
     let dir = temp_parser_dir("walks-valid-submodule-tree");
     let root_path = dir.join("root.masm");
@@ -245,9 +215,8 @@ end
     )
     .unwrap_or_else(|error| panic!("failed to write {}: {error}", child_path.display()));
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let parsed = read_modules_from_root(&root_path, None, None, source_manager)
-        .expect("valid root module tree should be readable");
+    let mut sources = SourceMap::new(TEST_SOURCE_NAMESPACE);
+    let parsed = read_modules_from_root(&root_path, None, None, &mut sources);
     let (root, support) = parsed
         .expect("valid root module with one declared submodule should parse without panicking");
 
@@ -667,6 +636,8 @@ fn control_flow_nesting_depth_exceeded_during_lowering() {
     source.push_str("end\n");
 
     let error = parse_forms(test_source_file(&source))
+        .outcome
+        .into_result()
         .expect_err("lowering should reject control-flow nesting beyond the configured limit");
     crate::assert_diagnostic!(error, "control-flow nesting depth exceeded");
 }
@@ -1076,7 +1047,7 @@ end
 ",
     );
 
-    let parsed = catch_unwind(AssertUnwindSafe(|| parse_forms(source.clone())));
+    let parsed = catch_unwind(AssertUnwindSafe(|| parse_forms(source)));
     assert!(parsed.is_ok(), "parser panicked for oversized bit-size");
 
     let cst = parsed.unwrap().expect_err("expected invalid bit-size error");
@@ -1257,11 +1228,11 @@ fn parser_rejects_debug_instructions() {
 #[test]
 fn deeply_nested_control_flow_lowers_on_the_default_test_stack() {
     let mut source = String::from("begin\n");
-    for _ in 0..=256 {
+    for _ in 0..MAX_CONTROL_FLOW_NESTING {
         source.push_str("push.1\nif.true\n");
     }
     source.push_str("push.1\n");
-    for _ in 0..=256 {
+    for _ in 0..MAX_CONTROL_FLOW_NESTING {
         source.push_str("end\n");
     }
     source.push_str("end\n");

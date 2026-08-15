@@ -1,12 +1,8 @@
-#[cfg(feature = "serde")]
-use alloc::string::String;
 use alloc::{boxed::Box, string::ToString};
 use core::fmt;
 
 #[cfg(all(feature = "arbitrary", test))]
 use miden_core::serde::{Deserializable, Serializable};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 
 // TARGET TYPE
 // ================================================================================================
@@ -107,40 +103,6 @@ impl core::str::FromStr for TargetType {
             "note" => Ok(Self::Note),
             "tx-script" | "transaction-script" => Ok(Self::TransactionScript),
             s => Err(InvalidTargetTypeError::Name(s.to_string().into_boxed_str())),
-        }
-    }
-}
-
-// SERIALIZATION
-// ================================================================================================
-
-#[cfg(feature = "serde")]
-impl Serialize for TargetType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if serializer.is_human_readable() {
-            serializer.serialize_str(self.as_str())
-        } else {
-            serializer.serialize_u8(*self as u8)
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TargetType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        if deserializer.is_human_readable() {
-            String::deserialize(deserializer)?
-                .parse::<Self>()
-                .map_err(|err| DeError::custom(err.to_string()))
-        } else {
-            let tag = u8::deserialize(deserializer)?;
-            Self::try_from(tag).map_err(|err| DeError::custom(err.to_string()))
         }
     }
 }

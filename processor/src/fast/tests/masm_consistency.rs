@@ -236,29 +236,26 @@ fn test_masm_consistency(
     #[case] stack_inputs: Vec<Felt>,
 ) {
     let (program, kernel_lib) = {
-        let source_manager = Arc::new(DefaultSourceManager::default());
+        let mut sources = new_source_map();
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
-                let kernel_lib = Assembler::new(source_manager.clone())
+                let kernel = parse_kernel_source(&mut sources, kernel_source);
+                let kernel_lib = Assembler::with_sources(sources.clone())
                     .assemble_kernel("kernel", kernel, None)
-                    .value
                     .map(Arc::<Package>::from)
                     .unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                let program = Assembler::with_kernel(kernel_lib.clone())
                     .unwrap()
                     .assemble_program("program", program_source)
-                    .value
                     .unwrap()
                     .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program = Assembler::new(source_manager)
+                let program = Assembler::new()
                     .assemble_program("program", program_source)
-                    .value
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -325,29 +322,26 @@ fn test_masm_errors_consistency(
     #[case] stack_inputs: Vec<Felt>,
 ) {
     let (program, kernel_lib) = {
-        let source_manager = Arc::new(DefaultSourceManager::default());
+        let mut sources = new_source_map();
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
-                let kernel_lib = Assembler::new(source_manager.clone())
+                let kernel = parse_kernel_source(&mut sources, kernel_source);
+                let kernel_lib = Assembler::with_sources(sources.clone())
                     .assemble_kernel("kernel", kernel, None)
-                    .value
                     .map(Arc::<Package>::from)
                     .unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                let program = Assembler::with_kernel(kernel_lib.clone())
                     .unwrap()
                     .assemble_program("program", program_source)
-                    .value
                     .unwrap()
                     .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program = Assembler::new(source_manager)
+                let program = Assembler::new()
                     .assemble_program("program", program_source)
-                    .value
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -409,14 +403,10 @@ fn test_log_deferred_correctness() {
     let expected_out_cap: Word = hasher_state[8..12].try_into().unwrap();
 
     let program_source = "begin log_deferred end";
-    let program = {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        Assembler::new(source_manager)
-            .assemble_program("program", program_source)
-            .value
-            .unwrap()
-            .unwrap_program()
-    };
+    let program = Assembler::new()
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
