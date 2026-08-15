@@ -26,7 +26,6 @@ use crate::helpers::masm_store_felts;
 
 // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
 const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
-const VERIFY_EXPECTED_WIRE_ENTRIES: usize = 36;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 const MESSAGE_PTR: u32 = 128;
 
@@ -38,7 +37,6 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     assert_deferred_state_round_trips(&output);
 
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    assert_eq!(wire.entries.len(), VERIFY_EXPECTED_WIRE_ENTRIES);
     assert_eq!(wire.to_bytes().len(), VERIFY_EXPECTED_WIRE_BYTES);
 }
 
@@ -54,13 +52,8 @@ fn core_ecdsa_k256_keccak_verify_glv_claim_proves_and_verifies() {
 
     let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
         .expect("the GLV-decomposed deferred claims must be provable");
-    let verified_root =
-        verify_deferred(&proof).expect("the GLV-decomposed deferred proof must verify");
-    assert_eq!(
-        verified_root,
-        output.deferred_state.root(),
-        "verified root must match the root the main VM committed",
-    );
+    verify_deferred(&proof, output.deferred_state.root())
+        .expect("the GLV-decomposed deferred proof must verify against the committed root");
 }
 
 #[test]
@@ -120,9 +113,9 @@ fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
 
         let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
             .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
-        let verified_root = verify_deferred(&proof)
-            .unwrap_or_else(|_| panic!("{name}: the fallback's deferred proof must verify"));
-        assert_eq!(verified_root, output.deferred_state.root(), "{name}");
+        verify_deferred(&proof, output.deferred_state.root()).unwrap_or_else(|_| {
+            panic!("{name}: the fallback's deferred proof must verify against the committed root")
+        });
     }
 }
 
@@ -483,7 +476,7 @@ fn run_core_program_with_advice(
 fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
     let registry = Arc::new(miden_precompiles::registry());
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX)
+    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire)
         .expect("deferred wire must rehydrate under miden-precompiles registry");
     assert_eq!(
         rehydrated.root(),

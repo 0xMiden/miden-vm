@@ -39,7 +39,7 @@ use miden_core::{
     utils::{Matrix, RowMajorMatrix},
 };
 
-use super::{ExecutionTrace, Felt, build_trace_from_ops, rand_array};
+use super::{Felt, VmTrace, build_trace_from_ops, rand_array};
 use crate::operation::Operation;
 
 const CONTROLLER_OFFSET: usize = CHIPLET_CONTROLLER_OFFSET;
@@ -160,7 +160,7 @@ fn controller_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut Con
 }
 
 fn assert_trace_constraints_reject(
-    trace: &ExecutionTrace,
+    trace: &VmTrace,
     core_matrix: RowMajorMatrix<Felt>,
     chip_matrix: RowMajorMatrix<Felt>,
     poseidon2_matrix: RowMajorMatrix<Felt>,

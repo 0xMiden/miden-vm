@@ -878,8 +878,7 @@ mod tests {
     };
 
     fn state() -> DeferredState {
-        DeferredState::new(Arc::new(crate::registry()), usize::MAX)
-            .expect("precompile init must succeed")
+        DeferredState::new(Arc::new(crate::registry())).expect("precompile init must succeed")
     }
 
     fn evaluate(state: &mut DeferredState, node: Node) -> Result<Node, PrecompileError> {

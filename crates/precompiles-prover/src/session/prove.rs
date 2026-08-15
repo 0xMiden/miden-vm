@@ -5,16 +5,14 @@
 //! cross-chiplet LogUp identity — `Σ σ = 0` — in
 //! [`MultiAir::eval_external`].
 //! [`SessionTraces::prove_stark`] produces a core-compatible serialized
-//! [`StarkProof`](miden_core::proof::StarkProof), while [`SessionTraces::prove`]
-//! returns the core deferred-proof envelope used by VM proof composition.
+//! [`StarkProof`](miden_core::proof::StarkProof).
 
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    deferred::DeferredRoot,
     field::{Field, PrimeCharacteristicRing, QuadFelt},
-    proof::{DeferredProof, HashFunction, StarkProof},
+    proof::{HashFunction, StarkProof},
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{
@@ -31,11 +29,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_wincode::SerdeCompat;
 
 use super::preprocessed_cache;
-
-const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
 use crate::{
-    ProveError,
+    MAX_STARK_PROOF_BYTES, ProveError,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
@@ -256,15 +251,6 @@ impl SessionTraces {
         check_constraints(&self.prover_statement(), test_challenger());
     }
 
-    /// Prove the precompile session with the default production-style hash function,
-    /// returning a STARK-backed deferred proof for the session's exact deferred root.
-    /// Consumes the bundle so the main traces move into the prover statement rather
-    /// than being cloned.
-    pub fn prove(self) -> DeferredProof {
-        self.prove_deferred(DEFAULT_HASH_FUNCTION)
-            .expect("prove precompile session with default hash function")
-    }
-
     /// Prove the whole stack and return a core-compatible serialized STARK
     /// proof envelope using the requested hash function.
     ///
@@ -274,7 +260,7 @@ impl SessionTraces {
     /// the bundle so the main traces move into the prover statement rather
     /// than being cloned.
     #[tracing::instrument("prove_stark", skip_all)]
-    pub fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
+    pub(crate) fn prove_stark(self, hash_fn: HashFunction) -> Result<StarkProof, ProveError> {
         let params = precompile_pcs_params();
         match hash_fn {
             HashFunction::Blake3_256 => {
@@ -303,16 +289,6 @@ impl SessionTraces {
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }
-    }
-
-    /// Prove the precompile session and wrap the serialized STARK proof in the core
-    /// deferred-proof envelope together with the exact deferred root it proves. Consumes
-    /// the bundle so the main traces move into the prover statement rather than being
-    /// cloned.
-    pub fn prove_deferred(self, hash_fn: HashFunction) -> Result<DeferredProof, ProveError> {
-        let public_root: DeferredRoot = self.public_root().as_array().into();
-        let proof = self.prove_stark(hash_fn)?;
-        Ok(DeferredProof::stark(proof, public_root))
     }
 
     fn prove_stark_with_config<SC>(
@@ -345,26 +321,18 @@ impl SessionTraces {
     }
 }
 
-/// Verify a STARK-backed deferred proof produced by this crate and return the verified deferred
-/// root.
-///
-/// The proof must be a [`DeferredProof::Stark`] variant. Its `public_root` is used as the
-/// precompile STARK public input; only after that proof verifies is the root returned to callers.
-pub fn verify_deferred(proof: &DeferredProof) -> Result<DeferredRoot, VerifyError> {
-    match proof {
-        DeferredProof::Stark { proof, public_root } => {
-            verify_stark(proof, P2Digest::from(*public_root))?;
-            Ok(*public_root)
-        },
-        DeferredProof::Empty | DeferredProof::Wire(_) => Err(VerifyError::InvalidDeferredProof),
-    }
-}
-
 /// Verify a core serialized STARK proof envelope against a public root.
 ///
 /// `Ok(())` iff the verifier accepts, including the `Σ σ = 0`
 /// cross-chiplet identity via `eval_external`.
-pub fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), VerifyError> {
+pub(crate) fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), VerifyError> {
+    if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
+        return Err(VerifyError::ProofTooLarge {
+            size: proof.bytes().len(),
+            max: MAX_STARK_PROOF_BYTES,
+        });
+    }
+
     let params = precompile_pcs_params();
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
@@ -405,13 +373,6 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as LmcsTrait>::Commitment: DeserializeOwned,
 {
-    if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
-        return Err(VerifyError::ProofTooLarge {
-            size: proof_bytes.len(),
-            max: MAX_STARK_PROOF_BYTES,
-        });
-    }
-
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
@@ -452,9 +413,6 @@ pub enum VerifyError {
     /// identity didn't close).
     #[error(transparent)]
     Verifier(#[from] VerifierError),
-    /// The deferred proof variant is not STARK-backed.
-    #[error("deferred proof is not STARK-backed")]
-    InvalidDeferredProof,
 }
 
 #[cfg(test)]

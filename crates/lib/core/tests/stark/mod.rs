@@ -8,9 +8,9 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_mast_package::Package;
-use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
+use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, Program, ProgramInfo};
 use miden_utils_testing::{
-    AdviceInputs, ProvingOptions, prove_sync,
+    AdviceInputs, Prover,
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
@@ -302,17 +302,12 @@ pub fn generate_recursive_verifier_data(
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    let options = ProvingOptions::new(HashFunction::Poseidon2);
-
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .unwrap();
+    let processor =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .unwrap();
+    let witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = Prover::new().with_hash_fn(HashFunction::Poseidon2).prove(witness).unwrap();
 
     let program_info = ProgramInfo::from(program);
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);

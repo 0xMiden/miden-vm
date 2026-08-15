@@ -11,9 +11,13 @@ extern crate std;
 
 use alloc::string::{String, ToString};
 
-use miden_core::deferred::{DeferredState, TRUE_DIGEST};
-pub use miden_core::proof::{DeferredProof, HashFunction, StarkProof};
-pub use session::{VerifyError, verify_deferred};
+use miden_core::deferred::DeferredState;
+pub(crate) use miden_core::proof::MAX_STARK_PROOF_BYTES;
+pub use miden_core::{
+    deferred::DeferredRoot,
+    proof::{HashFunction, StarkProof},
+};
+pub use session::VerifyError;
 
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace;
@@ -32,19 +36,11 @@ pub(crate) mod transcript;
 pub(crate) mod uint;
 pub(crate) mod utils;
 
-/// Proves the precompile claims accumulated in `state`.
-///
-/// Empty states produce [`DeferredProof::Empty`]. Non-empty states are translated into the private
-/// precompile-prover session representation, finalized, and proved as [`DeferredProof::Stark`]
-/// for `state.root()`.
+/// Proves the precompile claims accumulated in `state` against its exact deferred root.
 pub fn prove_deferred_state(
     state: &DeferredState,
     hash_fn: HashFunction,
-) -> Result<DeferredProof, ProveDeferredStateError> {
-    if state.root() == TRUE_DIGEST {
-        return Ok(DeferredProof::Empty);
-    }
-
+) -> Result<StarkProof, ProveDeferredStateError> {
     let deferred = {
         let _span = tracing::info_span!("build_session").entered();
         deferred::session_from_deferred_state(state)?
@@ -53,7 +49,12 @@ pub fn prove_deferred_state(
         let _span = tracing::info_span!("build_trace").entered();
         deferred.session.finish(deferred.root)
     };
-    Ok(traces.prove_deferred(hash_fn)?)
+    Ok(traces.prove_stark(hash_fn)?)
+}
+
+/// Verifies a precompile STARK against an explicit deferred root.
+pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<(), VerifyError> {
+    session::verify_stark(proof, transcript::poseidon2::P2Digest::from(public_root))
 }
 
 /// Errors produced while proving deferred precompile claims from VM deferred state.
@@ -92,6 +93,28 @@ pub enum ProveError {
 }
 
 pub(crate) mod deferred;
+
+#[cfg(test)]
+mod limit_tests {
+    use alloc::vec;
+
+    use miden_core::{deferred::TRUE_DIGEST, proof::HashFunction};
+
+    use super::*;
+
+    #[test]
+    fn verify_deferred_enforces_fixed_stark_proof_size_ceiling() {
+        let proof = StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Blake3_256);
+
+        assert!(matches!(
+            verify_deferred(&proof, TRUE_DIGEST),
+            Err(VerifyError::ProofTooLarge {
+                size,
+                max: MAX_STARK_PROOF_BYTES,
+            }) if size == MAX_STARK_PROOF_BYTES + 1
+        ));
+    }
+}
 
 #[cfg(test)]
 mod tests;

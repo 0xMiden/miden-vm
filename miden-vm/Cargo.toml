@@ -56,13 +56,21 @@ path = "tests/integration/main.rs"
 arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
+executable = [
+    "dep:clap",
+    "dep:hex",
+    "dep:tracing-subscriber",
+    "internal",
+    "serde",
+    "std",
+]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
     "miden-core-lib/std",
     "miden-processor/std",
+    "miden-precompiles/std",
     "miden-prover/std",
     "miden-verifier/std",
     "proptest?/std",
@@ -81,6 +89,7 @@ miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
+miden-precompiles.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies

@@ -146,8 +146,11 @@ impl<
         Self::new(coefficients)
     }
 
-    /// Computes the galois adjoint of the polynomial in the cyclotomic ring F\[ X \] / < X^n + 1 >
-    /// , which corresponds to f(x^2).
+    /// Computes the Galois adjoint of the polynomial in the cyclotomic ring
+    /// F\[ X \] / < X^n + 1 >: the map f(X) -> f(-X), negating the odd-degree coefficients.
+    ///
+    /// Together with [`Self::lift_next_cyclotomic`], which computes f(X^2), this implements the
+    /// field-norm identity NTRU solving relies on: N(f)(X^2) = f(X) * f(-X).
     pub fn galois_adjoint(&self) -> Self {
         Self::new(
             self.coefficients
@@ -377,7 +380,25 @@ impl<F: Mul<Output = F> + Sub<Output = F> + AddAssign + Zero + Div<Output = F> +
     Polynomial<F>
 {
     /// Multiply two polynomials using Karatsuba's divide-and-conquer algorithm.
+    ///
+    /// Both coefficient vectors must have the same nonzero length `n`, and `n` must stay even
+    /// under repeated halving until it reaches the recursion's base case (`n <= 8`); any power of
+    /// two qualifies, and Falcon only multiplies power-of-two lengths.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient vectors have different lengths, are empty, or have a length that
+    /// reaches an odd value above eight while being repeatedly halved.
     pub fn karatsuba(&self, other: &Self) -> Self {
+        assert_eq!(
+            self.coefficients.len(),
+            other.coefficients.len(),
+            "karatsuba operands must have equal coefficient counts",
+        );
+        assert!(
+            karatsuba_length_is_supported(self.coefficients.len()),
+            "karatsuba operand length must be nonzero and stay even down to the base case (e.g. a power of two)",
+        );
         Polynomial::new(vector_karatsuba(&self.coefficients, &other.coefficients))
     }
 }
@@ -446,17 +467,27 @@ where
 {
     type Output = Polynomial<F>;
 
+    /// Polynomial long division.
+    ///
+    /// Each step divides the remainder's leading coefficient by the denominator's; that quotient
+    /// must cancel the remainder's leading term. This is automatic for exact field
+    /// implementations such as `FalconFelt`; it can fail for non-field coefficient types (e.g.
+    /// integers, where a step may not divide evenly) and for IEEE floats (where
+    /// `(a / b) * b` can leave a nonzero residue).
+    ///
+    /// # Panics
+    /// Panics if `denominator` is zero, or if a step's leading term does not cancel — with a
+    /// non-field `F` the loop would otherwise repeat forever on an unchanged remainder.
     fn div(self, denominator: Self) -> Self::Output {
-        if denominator.is_zero() {
-            panic!();
-        }
+        assert!(!denominator.is_zero(), "cannot divide a polynomial by the zero polynomial");
         if self.is_zero() {
             return Self::zero();
         }
         let mut remainder = self;
         let mut quotient = Polynomial::<F>::zero();
         while remainder.degree().unwrap() >= denominator.degree().unwrap() {
-            let shift = remainder.degree().unwrap() - denominator.degree().unwrap();
+            let degree_before = remainder.degree().unwrap();
+            let shift = degree_before - denominator.degree().unwrap();
             let quotient_coefficient = remainder.lc() / denominator.lc();
             let monomial = Self::constant(quotient_coefficient).shift(shift);
             quotient += monomial.clone();
@@ -464,9 +495,30 @@ where
             if remainder.is_zero() {
                 break;
             }
+            assert!(
+                remainder.degree().unwrap() < degree_before,
+                "inexact polynomial division: the leading-coefficient quotient did not cancel the leading term"
+            );
         }
         quotient
     }
+}
+
+/// True when `n` is nonzero and halves down to [`vector_karatsuba`]'s base case without passing
+/// through an odd intermediate length. An odd split overruns the output buffer (the cross term
+/// spills past `2n - 1` entries), and a zero length underflows the base case's `n + n - 1`
+/// product size.
+const fn karatsuba_length_is_supported(mut n: usize) -> bool {
+    if n == 0 {
+        return false;
+    }
+    while n > 8 {
+        if n % 2 == 1 {
+            return false;
+        }
+        n /= 2;
+    }
+    true
 }
 
 fn vector_karatsuba<
@@ -650,6 +702,8 @@ impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 #[cfg(test)]
 mod tests {
+    use proptest::{collection::vec, prelude::*};
+
     use super::{FalconFelt, N, Polynomial};
     use crate::rand::test_utils::prng_array;
 
@@ -660,6 +714,113 @@ mod tests {
         let nonzero = Polynomial::new(vec![1, 2, 3]);
         let result = zero / nonzero;
         assert!(result.is_zero());
+    }
+
+    #[test]
+    fn div_exact_integer_division_returns_quotient() {
+        // (x + 1)(x + 2) = x^2 + 3x + 2 divides evenly at every step.
+        let numerator = Polynomial::new(vec![2i64, 3, 1]);
+        let denominator = Polynomial::new(vec![1i64, 1]);
+        assert_eq!((numerator / denominator).coefficients, vec![2, 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "inexact polynomial division")]
+    fn div_inexact_integer_division_panics_instead_of_looping() {
+        // 3 / 2 truncates to 1, leaving remainder 1 that no further step can reduce; without the
+        // progress check this repeated forever.
+        let numerator = Polynomial::new(vec![3i64]);
+        let denominator = Polynomial::new(vec![2i64]);
+        let _ = numerator / denominator;
+    }
+
+    #[test]
+    #[should_panic(expected = "zero polynomial")]
+    fn div_by_zero_panics_with_message() {
+        use num::Zero;
+        let numerator = Polynomial::new(vec![1i64]);
+        let _ = numerator / Polynomial::<i64>::zero();
+    }
+
+    #[test]
+    fn karatsuba_agrees_with_mul_for_representative_admissible_shapes() {
+        // Powers of two (the live Falcon shapes) plus the accepted non-power-of-two lengths,
+        // which halve evenly to the base case and would otherwise have no output coverage.
+        for n in [2i64, 4, 8, 16, 32, 10, 20, 24] {
+            let f = Polynomial::new((0..n).map(|i| i * i - 7 * i + 3).collect());
+            let g = Polynomial::new((0..n).map(|i| 5 * i - 11).collect());
+            let schoolbook = f.clone() * g.clone();
+            assert_eq!(f.karatsuba(&g), schoolbook, "karatsuba disagrees at n = {n}");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn karatsuba_agrees_with_mul_for_admissible_operands(
+            (left, right) in (1usize..=8, 0u32..=6).prop_flat_map(|(base, doublings)| {
+                let len = base << doublings;
+                (vec(-1_000i64..=1_000, len), vec(-1_000i64..=1_000, len))
+            }),
+        ) {
+            let left = Polynomial::new(left);
+            let right = Polynomial::new(right);
+            prop_assert_eq!(left.karatsuba(&right), left * right);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "karatsuba operand length")]
+    fn karatsuba_rejects_empty_operands() {
+        let empty = Polynomial::<i64>::new(vec![]);
+        let _ = empty.karatsuba(&empty.clone());
+    }
+
+    #[test]
+    fn karatsuba_length_support_matches_the_recursion_shape() {
+        use super::karatsuba_length_is_supported;
+        for supported in [1usize, 2, 5, 8, 10, 20, 24, 64, 512] {
+            assert!(karatsuba_length_is_supported(supported), "{supported} must be supported");
+        }
+        for unsupported in [0usize, 9, 11, 17, 18, 34, 513] {
+            assert!(
+                !karatsuba_length_is_supported(unsupported),
+                "{unsupported} must be unsupported"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "karatsuba operand length")]
+    fn karatsuba_rejects_odd_lengths_above_the_base_case() {
+        let f = Polynomial::new(vec![1i64; 9]);
+        let _ = f.karatsuba(&f.clone());
+    }
+
+    #[test]
+    #[should_panic(expected = "equal coefficient counts")]
+    fn karatsuba_rejects_unequal_lengths() {
+        let f = Polynomial::new(vec![1i64; 8]);
+        let g = Polynomial::new(vec![1i64; 4]);
+        let _ = f.karatsuba(&g);
+    }
+
+    #[test]
+    fn galois_adjoint_negates_odd_degree_coefficients() {
+        let f = Polynomial::new(vec![1i64, 2, 3, 4]);
+        assert_eq!(f.galois_adjoint().coefficients, vec![1, -2, 3, -4]);
+    }
+
+    #[test]
+    fn galois_adjoint_product_with_self_is_even() {
+        // f(X) * f(-X) is an even function, so before any cyclotomic reduction every odd-degree
+        // coefficient of the product vanishes -- the property the NTRU field norm relies on.
+        let f = Polynomial::new(vec![3i64, -1, 4, 1, -5, 9, -2, 6]);
+        let product = f.clone() * f.galois_adjoint();
+        for (degree, c) in product.coefficients.iter().enumerate() {
+            if degree % 2 == 1 {
+                assert_eq!(*c, 0, "odd-degree coefficient {degree} must vanish");
+            }
+        }
     }
 
     #[test]

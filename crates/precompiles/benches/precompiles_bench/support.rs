@@ -1,8 +1,8 @@
-use miden_core::Felt;
+use miden_core::{Felt, program::ExecutionClaim};
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
-    Assembler, DefaultHost, ExecutionOptions, ExecutionProof, HashFunction, Program,
-    ProvingOptions, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
+    Assembler, DefaultHost, ExecutionOptions, ExecutionProof, FastProcessor, HashFunction, Program,
+    Prover, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
 };
 
 use self::input_generation::generate_advice_inputs;
@@ -91,15 +91,20 @@ pub fn prove_once_with_hash(
     let mut host = DefaultHost::default()
         .with_library(&CoreLibrary::default())
         .expect("failed to load core library into host");
-    miden_vm::prove_sync(
-        &fixture.program,
+    let witness = FastProcessor::new_with_options(
         fixture.stack_inputs,
         fixture.advice_inputs.clone(),
-        &mut host,
         execution_options(),
-        ProvingOptions::with_96_bit_security(hash_fn),
     )
-    .expect("failed to prove precompile benchmark")
+    .expect("failed to initialize precompile benchmark processor")
+    .execute_for_proving_sync(&fixture.program, &mut host)
+    .expect("failed to execute precompile benchmark");
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = Prover::new()
+        .with_hash_fn(hash_fn)
+        .prove_full(witness)
+        .expect("failed to prove precompile benchmark");
+    (stack_outputs, proof)
 }
 
 pub fn verify_once(
@@ -107,12 +112,13 @@ pub fn verify_once(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) {
-    let claim = miden_vm::ExecutionClaim::from_program_info(
+    let claim = ExecutionClaim::from_program_info(
         fixture.program.to_info(),
         fixture.stack_inputs,
         stack_outputs,
     );
-    Verifier::new()
-        .verify(&proof, &claim)
+    let outcome = Verifier::new()
+        .verify(&claim, &proof)
         .expect("failed to verify precompile benchmark proof");
+    assert!(outcome.is_complete(), "prove_full must settle all precompile work");
 }

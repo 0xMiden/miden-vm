@@ -25,9 +25,8 @@ use crate::{
             glv_joint_wnaf_with_tables, joint_naf, joint_wnaf, straus, wnaf_msm, wnaf_table,
             wnaf_table_endo,
         },
-        verify_deferred,
     },
-    tests::check_local_inputs,
+    tests::{SessionTracesTestExt, check_local_inputs, verify_deferred},
     transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
 };
 

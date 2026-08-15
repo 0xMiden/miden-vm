@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeId},
-    program::{KernelDescriptor, MIN_STACK_DEPTH, Program, StackOutputs},
+    program::{KernelDescriptor, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
 };
 use miden_mast_package::debug_info::{
     DebugSourceGraphLookupError, DebugSourceNodeId, PackageDebugInfo,
@@ -16,8 +16,10 @@ use super::{
     external::maybe_use_caller_error_context,
     step::{BreakReason, NeverStopper, ResumeContext, StepStopper},
 };
+#[cfg(feature = "std")]
+use crate::PrecompileWitness;
 use crate::{
-    ExecutionError, ExecutionOutput, Host, LoadedMastForest, Stopper, SyncHost, TraceBuildInputs,
+    ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
     continuation_stack::ContinuationStack,
     errors::{
         MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
@@ -141,17 +143,20 @@ impl FastProcessor {
     /// live stream of requests while execution is still running, hiding its cost behind the
     /// (inherently sequential) execution itself.
     ///
-    /// Produces the same trace as `execute_trace_inputs_sync` followed by
-    /// [`crate::trace::build_trace`].
+    /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
+    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional precompile
+    /// witness is returned separately because [`crate::trace::VmTrace`] retains only its
+    /// authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
         self,
         program: &Program,
         host: &mut impl SyncHost,
-    ) -> Result<crate::trace::ExecutionTrace, ExecutionError> {
+    ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
         use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 
+        let stack_inputs = self.initial_stack_inputs();
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),
@@ -174,8 +179,11 @@ impl FastProcessor {
             // drops the stream's sender, unblocking the builder before the scope's join.
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
 
-            let mut inputs = match execution_output {
-                Ok(output) => Self::trace_build_inputs_from_parts(program, output, tracer),
+            let (mut vm_witness, precompiles_witness) = match execution_output {
+                Ok(output) => {
+                    Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
+                        .into_parts()
+                },
                 Err(err) => {
                     // Dropping the tracer drops the stream's sender; the builder then sees
                     // end-of-input and finishes, letting the scope join it cleanly. The
@@ -193,18 +201,18 @@ impl FastProcessor {
                 },
             };
             // End the stream before joining the builder.
-            drop(inputs.take_hasher_replay());
+            drop(vm_witness.take_hasher_replay());
             let hasher = match hasher.join() {
                 Ok(result) => result?,
                 Err(panic) => std::panic::resume_unwind(panic),
             };
 
-            build_trace_with_prebuilt_hasher(inputs, hasher)
+            let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher)?;
+            Ok((trace, precompiles_witness))
         })
     }
 
-    /// Executes the given program synchronously and returns the bundled trace inputs required by
-    /// [`crate::trace::build_trace`].
+    /// Executes the given program synchronously and returns its complete post-execution witness.
     ///
     /// # Example
     /// ```
@@ -217,36 +225,44 @@ impl FastProcessor {
     ///     .unwrap_program();
     /// let mut host = DefaultHost::default();
     ///
-    /// let trace_inputs = FastProcessor::new(StackInputs::default())
-    ///     .execute_trace_inputs_sync(&program, &mut host)
+    /// let execution_witness = FastProcessor::new(StackInputs::default())
+    ///     .execute_for_proving_sync(&program, &mut host)
     ///     .unwrap();
-    /// let trace = miden_processor::trace::build_trace(trace_inputs).unwrap();
+    /// let (vm_witness, _) = execution_witness.into_parts();
+    /// let trace = miden_processor::trace::build_trace(vm_witness).unwrap();
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
-    #[instrument(name = "execute_trace_inputs_sync", skip_all)]
-    pub fn execute_trace_inputs_sync(
+    #[instrument(name = "execute_for_proving_sync", skip_all)]
+    pub fn execute_for_proving_sync(
         self,
         program: &Program,
         host: &mut impl SyncHost,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
         );
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
     /// Executes the given program synchronously with package-owned source/debug context and returns
-    /// the bundled trace inputs required by [`crate::trace::build_trace`].
-    #[instrument(name = "execute_trace_inputs_with_package_debug_info_sync", skip_all)]
-    pub fn execute_trace_inputs_with_package_debug_info_sync(
+    /// its complete post-execution witness.
+    #[instrument(name = "execute_for_proving_with_package_debug_info_sync", skip_all)]
+    pub fn execute_for_proving_with_package_debug_info_sync(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         host: &mut impl SyncHost,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -258,23 +274,28 @@ impl FastProcessor {
             host,
             &mut tracer,
         )?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
     /// Executes the given program synchronously with package-owned source/debug context rooted at
-    /// `entrypoint_source_node_id` and returns the bundled trace inputs required by
-    /// [`crate::trace::build_trace`].
+    /// `entrypoint_source_node_id` and returns its complete post-execution witness.
     #[instrument(
-        name = "execute_trace_inputs_with_package_debug_info_at_source_node_sync",
+        name = "execute_for_proving_with_package_debug_info_at_source_node_sync",
         skip_all
     )]
-    pub fn execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+    pub fn execute_for_proving_with_package_debug_info_at_source_node_sync(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl SyncHost,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -286,35 +307,47 @@ impl FastProcessor {
             host,
             &mut tracer,
         )?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
-    /// Async variant of [`Self::execute_trace_inputs_sync`] for async hosts.
+    /// Async variant of [`Self::execute_for_proving_sync`] for async hosts.
     #[inline(always)]
-    #[instrument(name = "execute_trace_inputs", skip_all)]
-    pub async fn execute_trace_inputs(
+    #[instrument(name = "execute_for_proving", skip_all)]
+    pub async fn execute_for_proving(
         self,
         program: &Program,
         host: &mut impl Host,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
         );
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
-    /// Async variant of [`Self::execute_trace_inputs_with_package_debug_info_sync`].
+    /// Async variant of [`Self::execute_for_proving_with_package_debug_info_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_trace_inputs_with_package_debug_info", skip_all)]
-    pub async fn execute_trace_inputs_with_package_debug_info(
+    #[instrument(name = "execute_for_proving_with_package_debug_info", skip_all)]
+    pub async fn execute_for_proving_with_package_debug_info(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         host: &mut impl Host,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -328,21 +361,27 @@ impl FastProcessor {
                 &mut tracer,
             )
             .await?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
     /// Async variant of
-    /// [`Self::execute_trace_inputs_with_package_debug_info_at_source_node_sync`].
+    /// [`Self::execute_for_proving_with_package_debug_info_at_source_node_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    #[instrument(name = "execute_trace_inputs_with_package_debug_info_at_source_node", skip_all)]
-    pub async fn execute_trace_inputs_with_package_debug_info_at_source_node(
+    #[instrument(name = "execute_for_proving_with_package_debug_info_at_source_node", skip_all)]
+    pub async fn execute_for_proving_with_package_debug_info_at_source_node(
         self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
         entrypoint_source_node_id: DebugSourceNodeId,
         host: &mut impl Host,
-    ) -> Result<TraceBuildInputs, ExecutionError> {
+    ) -> Result<ExecutionWitness, ExecutionError> {
+        let stack_inputs = self.initial_stack_inputs();
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
@@ -356,7 +395,12 @@ impl FastProcessor {
                 &mut tracer,
             )
             .await?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        Ok(Self::execution_witness_from_parts(
+            program,
+            stack_inputs,
+            execution_output,
+            tracer,
+        ))
     }
 
     /// Executes the given program with the provided tracer using an async host.
@@ -627,18 +671,26 @@ impl FastProcessor {
         )
     }
 
-    /// Pairs execution output with the trace inputs captured by the tracer.
+    /// Pairs execution output with the initial inputs and replay witness captured during execution.
     #[inline(always)]
-    fn trace_build_inputs_from_parts(
+    fn execution_witness_from_parts(
         program: &Program,
+        stack_inputs: StackInputs,
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
-    ) -> TraceBuildInputs {
-        TraceBuildInputs::from_execution(
-            program,
+    ) -> ExecutionWitness {
+        ExecutionWitness::from_execution(
+            program.to_info(),
+            stack_inputs,
             execution_output,
-            tracer.into_trace_generation_context(),
+            tracer.into_trace_replay(),
         )
+    }
+
+    /// Returns the current top 16 stack elements in public input order.
+    #[inline(always)]
+    fn initial_stack_inputs(&self) -> StackInputs {
+        core::array::from_fn(|idx| self.stack_get(idx)).into()
     }
 
     pub(super) fn source_aware_continuation_stack(

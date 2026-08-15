@@ -37,7 +37,7 @@ use miden_utils_testing::rand::rand_value;
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
     event::{NoopEventHandler, TraceError},
-    trace::{ExecutionTrace, build_trace},
+    trace::{VmTrace, build_trace},
 };
 
 // CONSTANTS
@@ -1635,8 +1635,9 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     )
     .unwrap();
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    let trace = build_trace(trace_inputs).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = build_trace(vm_witness).unwrap();
 
     // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().core_trace_len();
@@ -1665,8 +1666,9 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    let trace = build_trace(trace_inputs).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = build_trace(vm_witness).unwrap();
 
     // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().core_trace_len();
@@ -1678,7 +1680,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 }
 
 /// Extracts the decoder trace columns from the execution trace.
-fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
+fn extract_decoder_trace(trace: &VmTrace) -> DecoderTrace {
     use miden_air::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     let main_segment = trace.main_trace();
@@ -1689,7 +1691,7 @@ fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
 }
 
 /// Extracts the system trace columns from the execution trace.
-fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
+fn extract_system_trace(trace: &VmTrace) -> SystemTrace {
     use miden_air::trace::SYS_TRACE_WIDTH;
 
     let main_segment = trace.main_trace();

@@ -27,6 +27,7 @@ std = [
     "miden-debug-types/std",
     "miden-precompiles-prover/std",
     "miden-processor/std",
+    "thiserror/std",
 ]
 
 [dependencies]
@@ -40,9 +41,11 @@ miden-crypto.workspace = true
 # External dependencies
 serde.workspace = true
 serde-wincode.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true
 miden-debug-types.workspace = true
+miden-verifier = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
