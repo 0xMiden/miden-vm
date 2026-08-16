@@ -106,9 +106,9 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::FastProcessor::execute_trace_inputs`]
-/// execution mode needs to build a [`crate::TraceGenerationContext`] which records information
-/// necessary to build the trace at each clock cycle, while the
+/// the program is executed. For example, the [`crate::FastProcessor::execute_for_proving`]
+/// execution mode needs to build a private trace replay which records information necessary to
+/// build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
 /// essentially by recording the processor state at each clock cycle. For this purpose, the
 /// [`Self::execute_impl`] method takes in [`Tracer`] argument that abstracts away the "information
@@ -151,7 +151,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
-///    
+///
 ///             // As per `InternalBreakReason::Emit` documentation, we call `finish_emit_op_execution`
 ///             // to complete the execution of the Emit operation.
 ///             finish_emit_op_execution(...);
@@ -159,7 +159,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::LoadMastForestFromDyn { callee_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
-///    
+///
 ///             // As per `InternalBreakReason::LoadMastForestFromDyn` documentation, we call
 ///             // `finish_load_mast_forest_from_dyn_start` to complete the execution of the operation.
 ///             finish_load_mast_forest_from_dyn_start(...);
@@ -167,7 +167,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::LoadMastForestFromExternal { external_node_id, procedure_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
-///    
+///
 ///             // As per `InternalBreakReason::LoadMastForestFromExternal` documentation, we call
 ///             // `finish_load_mast_forest_from_external_start` to complete the execution of the operation.
 ///             finish_load_mast_forest_from_external_start(...);

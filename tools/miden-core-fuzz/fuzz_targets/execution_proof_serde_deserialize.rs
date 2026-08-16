@@ -1,6 +1,8 @@
-//! Fuzz target for ExecutionProof serde deserialization.
+//! Fuzz target for `ExecutionProof` Serde parser robustness.
 //!
-//! Run with: cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir tools/miden-core-fuzz
+//! This target does not establish proof validity or claim allocation-bounded generic Serde.
+//! Run with: cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir
+//! tools/miden-core-fuzz
 
 #![no_main]
 

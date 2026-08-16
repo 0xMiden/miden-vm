@@ -1,5 +1,7 @@
 use alloc::{string::String, vec::Vec};
 
+use miden_ace_codegen::{ceil_log2, factorial, order_from_tag, order_tag};
+
 use crate::MidenAir;
 
 /// Supported AIRs in instance order.
@@ -105,47 +107,14 @@ impl ProofOrder {
     /// Decode a Lehmer rank into its AIR permutation.
     fn from_rank(rank: usize) -> Self {
         debug_assert!(rank < PROOF_ORDER_COUNT);
-        debug_assert!(u32::try_from(rank).is_ok());
-
-        let tag = rank as u32;
-        let mut rank = rank;
-        let mut remaining = AIRS.to_vec();
+        let tag = u32::try_from(rank).expect("proof-order tags fit in u32");
+        let instance_order = order_from_tag(tag, MIDEN_AIR_COUNT).expect("rank is in range");
         let mut airs = [AIRS[0]; MIDEN_AIR_COUNT];
-
-        for (i, slot) in airs.iter_mut().enumerate() {
-            let factor = factorial(MIDEN_AIR_COUNT - 1 - i);
-            // The next Lehmer digit selects an AIR from the remaining ordered list.
-            let index = rank / factor;
-            rank %= factor;
-            *slot = remaining.remove(index);
+        for (slot, index) in airs.iter_mut().zip(instance_order) {
+            *slot = AIRS[index];
         }
-
         Self { airs, tag }
     }
-}
-
-/// Compute `n!`.
-const fn factorial(n: usize) -> usize {
-    let mut result = 1;
-    let mut factor = 2;
-    while factor <= n {
-        result *= factor;
-        factor += 1;
-    }
-    result
-}
-
-/// Return the smallest `d` such that `2^d >= value`.
-const fn ceil_log2(value: usize) -> usize {
-    assert!(value > 0, "ceil_log2 is undefined for zero");
-
-    let mut value = value - 1;
-    let mut result = 0;
-    while value > 0 {
-        value >>= 1;
-        result += 1;
-    }
-    result
 }
 
 /// Assert that `airs` contains every supported AIR exactly once.
@@ -158,26 +127,46 @@ fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     }
 }
 
-/// Return the Lehmer rank of an AIR permutation relative to [`AIRS`].
+/// Return the registry tag of an AIR permutation relative to [`AIRS`].
+///
+/// Delegates to the shared Lehmer ranking so this registry and the precompile VM registry
+/// index their leaves by exactly the same rule.
 fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
-    let mut rank = 0;
-    for i in 0..airs.len() {
-        // Lehmer digit: number of smaller instance indices to the right of position `i`.
-        let smaller_after = airs[i + 1..]
-            .iter()
-            .filter(|air| air.instance_index() < airs[i].instance_index())
-            .count();
-        rank += smaller_after as u32 * factorial(airs.len() - 1 - i) as u32;
-    }
-    rank
+    let instance_order: Vec<usize> = airs.iter().map(|air| air.instance_index()).collect();
+    order_tag(&instance_order)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// `variants()` gets its tags from the decoder, so round-trip through `ProofOrder::new`
+    /// to exercise the encoder independently.
     #[test]
-    fn air_registry_order_matches_instance_indices() {
+    fn lehmer_encoder_inverts_the_decoder_for_every_tag() {
+        for tag in 0..PROOF_ORDER_COUNT as u32 {
+            let order = ProofOrder::from_tag(tag).expect("tag in range");
+            let airs: [MidenAir; MIDEN_AIR_COUNT] =
+                order.airs().try_into().expect("order holds one AIR per slot");
+            assert_eq!(
+                ProofOrder::new(airs).tag(),
+                tag,
+                "encoder does not invert the decoder at tag {tag}"
+            );
+        }
+    }
+
+    /// `AIRS` fixes proof-order tie-breaks, registry tags, and the relation digest. Pin it
+    /// independently of `instance_index`; intentional changes require regenerated protocol
+    /// constants and a breaking changelog entry.
+    #[test]
+    fn air_instance_order_is_protocol_pinned() {
+        const PINNED: [MidenAir; MIDEN_AIR_COUNT] =
+            [MidenAir::Core, MidenAir::Chiplets, MidenAir::Poseidon2Permutation];
+        assert_eq!(
+            AIRS, PINNED,
+            "AIRS instance order moved; regenerate protocol constants for an intentional change"
+        );
         for (index, air) in AIRS.iter().copied().enumerate() {
             assert_eq!(air.instance_index(), index);
         }

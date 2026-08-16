@@ -35,7 +35,7 @@ std = [
     "miden-utils-sync/std",
 ]
 testing = ["arbitrary"]
-constraints-tools = ["std", "dep:miden-air", "dep:miden-constraint-compiler"]
+constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden-constraint-compiler"]
 
 [dependencies]
 # Miden dependencies
@@ -46,6 +46,7 @@ miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 miden-air = { workspace = true, optional = true }
+miden-ace-codegen = { workspace = true, optional = true }
 miden-constraint-compiler = { workspace = true, optional = true }
 
 # External dependencies
@@ -58,6 +59,7 @@ miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core-lib-codegen = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
+miden-precompiles-prover = { workspace = true, features = ["std"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 num = { workspace = true }

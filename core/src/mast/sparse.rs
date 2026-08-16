@@ -18,9 +18,9 @@ use crate::{
 // MAST FOREST ID
 // ================================================================================================
 
-// `MastForestId` is an opaque handle to a [`MastForest`] in some forest store such as the
-// `TraceGenerationContext::mast_forest_store`. It is not a content-derived or stable identity for a
-// forest, and must not be compared or reused across stores or trace contexts. It is analogous to
+// `MastForestId` is an opaque handle to a [`MastForest`] in some forest store such as an execution
+// trace replay's `mast_forest_store`. It is not a content-derived or stable identity for a forest,
+// and must not be compared or reused across stores or trace contexts. It is analogous to
 // `MastNodeId`, which is meaningful only within one forest's node store.
 newtype_id!(MastForestId);
 

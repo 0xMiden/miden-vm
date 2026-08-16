@@ -22,7 +22,7 @@ use tracing::{info_span, instrument};
 
 use super::{
     chiplets::Chiplets,
-    execution_tracer::TraceGenerationContext,
+    execution_tracer::TraceReplay,
     trace_state::{
         AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
         ExecutionReplay, HasherRequestReplay, KernelReplay, MemoryWritesReplay, RangeCheckerReplay,
@@ -34,7 +34,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     trace::{
-        ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
+        ChipletsLengths, TraceLenSummary, VmTrace, VmWitness,
         chiplets::{Ace, Bitwise, Hasher, KernelRom, Memory},
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
@@ -81,16 +81,17 @@ mod tests;
 ///     .unwrap_program();
 /// let mut host = DefaultHost::default();
 ///
-/// let trace_inputs = FastProcessor::new(StackInputs::default())
-///     .execute_trace_inputs_sync(&program, &mut host)
+/// let execution_witness = FastProcessor::new(StackInputs::default())
+///     .execute_for_proving_sync(&program, &mut host)
 ///     .unwrap();
-/// let trace = miden_processor::trace::build_trace(trace_inputs).unwrap();
+/// let (vm_witness, _) = execution_witness.into_parts();
+/// let trace = miden_processor::trace::build_trace(vm_witness).unwrap();
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
 #[instrument(name = "build_trace", skip_all)]
-pub fn build_trace(inputs: TraceBuildInputs) -> Result<ExecutionTrace, ExecutionError> {
-    build_trace_with_max_len(inputs, MAX_TRACE_LEN)
+pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
+    build_trace_with_max_len(witness, MAX_TRACE_LEN)
 }
 
 /// Same as [`build_trace`], but with a custom hard cap.
@@ -98,10 +99,10 @@ pub fn build_trace(inputs: TraceBuildInputs) -> Result<ExecutionTrace, Execution
 /// When the trace would go over `max_trace_len`, this returns
 /// [`ExecutionError::TraceLenExceeded`].
 pub fn build_trace_with_max_len(
-    inputs: TraceBuildInputs,
+    witness: VmWitness,
     max_trace_len: usize,
-) -> Result<ExecutionTrace, ExecutionError> {
-    build_trace_inner(inputs, None, max_trace_len)
+) -> Result<VmTrace, ExecutionError> {
+    build_trace_inner(witness, None, max_trace_len)
 }
 
 /// Same as [`build_trace`], but with a hasher chiplet that was already built — used by the
@@ -109,24 +110,26 @@ pub fn build_trace_with_max_len(
 /// (`FastProcessor::execute_and_build_trace_sync`, std-only).
 #[cfg(feature = "std")]
 pub(crate) fn build_trace_with_prebuilt_hasher(
-    inputs: TraceBuildInputs,
+    witness: VmWitness,
     prebuilt_hasher: Hasher,
-) -> Result<ExecutionTrace, ExecutionError> {
-    build_trace_inner(inputs, Some(prebuilt_hasher), MAX_TRACE_LEN)
+) -> Result<VmTrace, ExecutionError> {
+    build_trace_inner(witness, Some(prebuilt_hasher), MAX_TRACE_LEN)
 }
 
 fn build_trace_inner(
-    inputs: TraceBuildInputs,
+    witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
     max_trace_len: usize,
-) -> Result<ExecutionTrace, ExecutionError> {
-    let TraceBuildInputs {
-        trace_output,
-        trace_generation_context,
+) -> Result<VmTrace, ExecutionError> {
+    let VmWitness {
         program_info,
-    } = inputs;
+        stack_inputs,
+        stack_outputs,
+        trace,
+        precompile_root,
+    } = witness;
 
-    let TraceGenerationContext {
+    let TraceReplay {
         core_trace_contexts,
         mast_forest_store,
         range_checker_replay,
@@ -137,7 +140,7 @@ fn build_trace_inner(
         ace_replay,
         fragment_size,
         max_stack_depth,
-    } = trace_generation_context;
+    } = trace;
 
     // Before any trace generation, check that the number of core trace rows doesn't exceed the
     // maximum trace length. This is a necessary check to avoid OOM panics during trace generation,
@@ -155,9 +158,7 @@ fn build_trace_inner(
     }
 
     if core_trace_contexts.is_empty() {
-        return Err(ExecutionError::Internal(
-            "no trace fragments provided in the trace generation context",
-        ));
+        return Err(ExecutionError::Internal("no trace fragments provided in the trace witness"));
     }
 
     let chiplets = info_span!("initialize_chiplets").in_scope(|| {
@@ -245,9 +246,11 @@ fn build_trace_inner(
         )
     };
 
-    Ok(ExecutionTrace::new_from_parts(
+    Ok(VmTrace::new_from_parts(
         program_info,
-        trace_output,
+        stack_inputs,
+        stack_outputs,
+        precompile_root,
         main_trace,
         trace_len_summary,
     ))
@@ -362,12 +365,12 @@ fn generate_core_trace_row_major(
     push_halt_opcode_row(
         &mut core_trace_data,
         total_core_trace_rows,
-        system_rows.last().ok_or(ExecutionError::Internal(
-            "no trace fragments provided in the trace generation context",
-        ))?,
-        stack_rows.last().ok_or(ExecutionError::Internal(
-            "no trace fragments provided in the trace generation context",
-        ))?,
+        system_rows
+            .last()
+            .ok_or(ExecutionError::Internal("no trace fragments provided in the trace witness"))?,
+        stack_rows
+            .last()
+            .ok_or(ExecutionError::Internal("no trace fragments provided in the trace witness"))?,
     );
 
     Ok(core_trace_data)

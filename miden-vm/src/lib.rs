@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![doc = include_str!("../README.md")]
 
+extern crate alloc;
+
 // EXPORTS
 // ================================================================================================
 
@@ -10,30 +12,37 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::{
+    deferred::{DeferredStateWire, PrecompileWitnessError},
     program::ExecutionClaim,
-    proof::{DeferredProof, ExecutionProof, HashFunction, StarkProof},
+    proof::{
+        ExecutionProof, ExecutionProofError, HashFunction, PrecompileProof, StarkProof, VmProof,
+    },
 };
 pub use miden_processor::{
-    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
-    FutureMaybeSend, Host, KernelDescriptor, Program, ProgramInfo, StackInputs, SyncHost,
-    TraceBuildInputs, TraceGenerationContext, ZERO, advice, crypto, field, operation::Operation,
-    serde, trace, trace::ExecutionTrace, utils,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
+    FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,
+    ProgramExecutor, ProgramInfo, StackInputs, SyncHost, VmWitness, ZERO, advice, crypto, field,
+    operation::Operation, serde, trace, trace::VmTrace, utils,
 };
-pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
-#[cfg(not(target_family = "wasm"))]
-pub use miden_prover::{prove_from_trace_sync, prove_sync};
-pub use miden_verifier::{Unsettled, VerificationError, Verifier};
+pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
+pub use miden_verifier::{VerificationError, VerificationOutcome, Verifier};
+
+/// Hydrates a passive deferred-state wire using the standard bundled precompile registry.
+///
+/// This is the public factory for precompile witnesses produced outside local execution. It
+/// validates the wire under the facade's installed precompiles before constructing the witness.
+pub fn precompile_witness_from_wire(
+    wire: &DeferredStateWire,
+) -> Result<PrecompileWitness, PrecompileWitnessError> {
+    let state = miden_core::deferred::DeferredState::from_wire(
+        alloc::sync::Arc::new(miden_precompiles::registry()),
+        wire,
+    )?;
+    PrecompileWitness::new(state)
+}
 
 // (private) exports
 // ================================================================================================
 
 #[cfg(feature = "internal")]
 pub mod internal;
-
-/// Verifies a final Miden proof of the given execution claim.
-///
-/// Wire-backed deferred proofs are partial/delegable proof material and are rejected here; use
-/// [`Verifier::verify_partial`] to verify and hydrate wire-backed partial proofs.
-pub fn verify(proof: &ExecutionProof, claim: &ExecutionClaim) -> Result<u32, VerificationError> {
-    miden_verifier::verify(proof, claim)
-}

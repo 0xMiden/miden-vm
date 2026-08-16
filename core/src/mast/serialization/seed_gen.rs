@@ -1,6 +1,6 @@
 //! Test helper for generating fuzz corpus seeds.
 //!
-//! Run with: cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+//! Run with: cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
 
 use alloc::{sync::Arc, vec::Vec};
 use std::println;
@@ -8,16 +8,16 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
+    deferred::{DeferredState, DeferredStateWire, Node, TRUE_DIGEST},
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{DeferredProof, ExecutionProof, HashFunction},
+    proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof},
     serde::{ByteWriter, Serializable},
 };
 
 /// Generates seed corpus files for fuzzing.
-/// Run with: cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+/// Run with: cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
 #[test]
 #[ignore = "run manually to generate fuzz seeds"]
 fn generate_fuzz_seeds() {
@@ -260,31 +260,18 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Deferred-state wire seeds. Partial ExecutionProofs can carry this compact witness so
-    // delegated provers can later produce a precompile VM STARK proof for the same root.
+    // Deferred-state wire seeds. A deferred execution proof carries this passive wire so a
+    // delegated prover can hydrate it later and produce a precompile STARK proof for its root.
     {
         let empty = DeferredStateWire::default();
         write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
 
-        let tag = Tag::from_word([
-            Felt::new_unchecked(7),
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-        ]);
-        let wire = DeferredStateWire {
-            entries: vec![
-                WireEntry::Data {
-                    tag,
-                    chunks: vec![[Felt::new_unchecked(1); 8]],
-                },
-                WireEntry::Data {
-                    tag,
-                    chunks: vec![[Felt::new_unchecked(2); 8], [Felt::new_unchecked(3); 8]],
-                },
-                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
-            ],
-        };
+        let mut state = DeferredState::default();
+        let statement = state
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .expect("framework statement should register");
+        state.log_statement(statement).expect("framework statement should log");
+        let wire = state.to_wire().expect("framework state should encode as wire");
         write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
 
         let mut oversized_entry_count = Vec::new();
@@ -306,52 +293,84 @@ fn generate_fuzz_seeds() {
                 "all_entries_wire.json",
                 &wire_json,
             );
+
+            let vm = |precompile_root, marker| VmProof {
+                proof: StarkProof::new(vec![marker], HashFunction::Rpo256),
+                precompile_root,
+            };
+            let precompile = |roots| PrecompileProof {
+                proof: StarkProof::new(vec![2], HashFunction::Rpo256),
+                roots,
+            };
+            let deferred = ExecutionProof::Deferred { vm: vm(statement, 1), precompile: wire };
+            let complete_without_precompile =
+                ExecutionProof::Complete { vm: vm(TRUE_DIGEST, 3), precompile: None };
+            let complete_with_precompile = ExecutionProof::Complete {
+                vm: vm(statement, 4),
+                precompile: Some(precompile(vec![statement])),
+            };
+            let empty_roots = ExecutionProof::Complete {
+                vm: vm(statement, 5),
+                precompile: Some(precompile(Vec::new())),
+            };
+            let duplicate_roots = ExecutionProof::Complete {
+                vm: vm(statement, 6),
+                precompile: Some(precompile(vec![statement, statement])),
+            };
+            let true_root = ExecutionProof::Complete {
+                vm: vm(statement, 7),
+                precompile: Some(precompile(vec![TRUE_DIGEST])),
+            };
+
+            for (name, proof) in [
+                ("deferred_non_empty_wire.json", &deferred),
+                ("complete_without_precompile.json", &complete_without_precompile),
+                ("complete_with_precompile.json", &complete_with_precompile),
+                ("invalid_empty_roots.json", &empty_roots),
+                ("duplicate_roots.json", &duplicate_roots),
+                ("invalid_true_root.json", &true_root),
+            ] {
+                let json = serde_json::to_vec(proof)
+                    .expect("failed to serialize synthetic execution proof seed");
+                write_seed("execution_proof_serde_deserialize", name, &json);
+            }
+
+            let proofs = vec![
+                deferred.clone(),
+                complete_without_precompile,
+                complete_with_precompile,
+                empty_roots,
+                duplicate_roots,
+                true_root,
+            ];
+            let proofs_json = serde_json::to_vec(&proofs)
+                .expect("failed to serialize execution proof vector seed");
+            write_seed("execution_proof_serde_deserialize", "proof_vector.json", &proofs_json);
+            let option_json = serde_json::to_vec(&Some(deferred))
+                .expect("failed to serialize execution proof option seed");
+            write_seed("execution_proof_serde_deserialize", "proof_option.json", &option_json);
+            write_seed("execution_proof_serde_deserialize", "proof_option_none.json", b"null");
         }
     }
 
-    // Execution proof seed (minimal)
+    // Execution proof seed (minimal complete proof with no precompile obligation).
     {
-        let proof =
-            ExecutionProof::from_parts(Vec::new(), HashFunction::Rpo256, DeferredProof::empty());
-        write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
+        let stark = StarkProof::new(Vec::new(), HashFunction::Rpo256);
+        let vm = VmProof {
+            proof: stark,
+            precompile_root: TRUE_DIGEST,
+        };
+        let proof = ExecutionProof::Complete { vm, precompile: None };
+        let proof = proof.to_bytes();
+        write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
     }
 
-    // Execution proof seeds for malicious length-prefix deserialization.
+    // Execution proof seed for malicious VM STARK length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_u8(1); // Complete execution proof discriminant.
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
-
-        let mut oversized_deferred_wire_entries_len = Vec::new();
-        oversized_deferred_wire_entries_len.write_usize(0);
-        oversized_deferred_wire_entries_len.write_u8(HashFunction::Blake3_256 as u8);
-        oversized_deferred_wire_entries_len.write_u8(DeferredProof::WIRE_TAG);
-        oversized_deferred_wire_entries_len.write_usize(usize::MAX);
-        write_seed(
-            "execution_proof_deserialize",
-            "oversized_deferred_wire_entries_len.bin",
-            &oversized_deferred_wire_entries_len,
-        );
-    }
-
-    // Execution proof seed with many small deferred-wire entries.
-    {
-        let deferred_wire = DeferredStateWire {
-            entries: (0..64)
-                .map(|idx| WireEntry::Join {
-                    tag: Tag::AND,
-                    lhs: if idx == 0 { TRUE_INDEX } else { idx },
-                    rhs: TRUE_INDEX,
-                })
-                .collect(),
-        };
-        let proof =
-            ExecutionProof::from_parts(vec![1, 2, 3], HashFunction::Blake3_256, deferred_wire);
-        write_seed(
-            "execution_proof_deserialize",
-            "many_minimal_deferred_wire_entries.bin",
-            &proof.to_bytes(),
-        );
     }
 
     println!("\nSeed corpus generated in ../tools/miden-core-fuzz/corpus");

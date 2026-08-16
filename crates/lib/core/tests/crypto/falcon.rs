@@ -518,12 +518,12 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let trace_inputs =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
-            .expect("processor advice inputs should fit advice map limits")
-            .execute_trace_inputs_sync(&program, &mut host)
-            .expect("failed to execute");
-    let trace = miden_processor::trace::build_trace(trace_inputs).expect("failed to build trace");
+    let witness = FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+        .expect("processor advice inputs should fit advice map limits")
+        .execute_for_proving_sync(&program, &mut host)
+        .expect("failed to execute");
+    let (vm_witness, _) = witness.into_parts();
+    let trace = miden_processor::trace::build_trace(vm_witness).expect("failed to build trace");
     trace.check_constraints();
 }
 

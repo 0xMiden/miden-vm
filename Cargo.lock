@@ -2058,6 +2058,8 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
+ "miden-field",
+ "proptest",
  "thiserror",
 ]
 
@@ -2213,6 +2215,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
+ "miden-precompiles-prover",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
@@ -2272,6 +2275,7 @@ dependencies = [
  "rocksdb",
  "seq-macro",
  "serde",
+ "serde_json",
  "sha2",
  "sha3",
  "shake",
@@ -2515,6 +2519,7 @@ version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
+ "ruint",
 ]
 
 [[package]]
@@ -2532,6 +2537,7 @@ dependencies = [
  "miden-precompiles",
  "miden-serde-utils",
  "rand 0.10.2",
+ "rayon",
  "ruint",
  "serde",
  "serde-wincode",
@@ -2598,8 +2604,10 @@ dependencies = [
  "miden-debug-types",
  "miden-precompiles-prover",
  "miden-processor",
+ "miden-verifier",
  "serde",
  "serde-wincode",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -2723,7 +2731,6 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-precompiles",
  "miden-precompiles-prover",
  "miden-serde-utils",
  "serde",
@@ -2743,6 +2750,7 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-mast-package",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-serde-macros",
@@ -2796,7 +2804,6 @@ dependencies = [
  "miden-core",
  "miden-core-lib",
  "miden-processor",
- "miden-prover",
  "miden-verifier",
  "miden-vm",
  "serde",

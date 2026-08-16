@@ -40,19 +40,19 @@ use crate::{
 struct StateSnapshot {
     state: CoreTraceState,
     /// Continuation stack with forest references already translated to [`MastForestId`]s into the
-    /// `mast_forest_store` of the [`TraceGenerationContext`] being built.
+    /// `mast_forest_store` of the [`TraceReplay`] being built.
     continuation_stack: ContinuationStack<MastForestId>,
     /// The active forest at the start of this fragment, in `mast_forest_store`.
     initial_mast_forest_id: MastForestId,
 }
 
-// TRACE GENERATION CONTEXT
+// TRACE REPLAY
 // ================================================================================================
 
 #[derive(Debug)]
-pub struct TraceGenerationContext {
+pub(crate) struct TraceReplay {
     /// The list of trace fragment contexts built during execution.
-    pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
+    pub(crate) core_trace_contexts: Vec<CoreTraceFragmentContext>,
 
     /// Sparse MAST forests, one per source [`MastForest`] visited during execution.
     ///
@@ -60,24 +60,24 @@ pub struct TraceGenerationContext {
     /// original [`MastNodeId`]s of the source forest. References from `CoreTraceFragmentContext`,
     /// `MastForestResolutionReplay`, and `HasherOp::HashBasicBlock` are encoded as
     /// [`MastForestId`]s into this vector.
-    pub mast_forest_store: Vec<Arc<SparseMastForest>>,
+    pub(crate) mast_forest_store: Vec<Arc<SparseMastForest>>,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
-    pub range_checker_replay: RangeCheckerReplay,
-    pub memory_writes: MemoryWritesReplay,
-    pub bitwise_replay: BitwiseReplay,
-    pub hasher_for_chiplet: HasherRequestReplay,
-    pub kernel_replay: KernelReplay,
-    pub ace_replay: AceReplay,
+    pub(crate) range_checker_replay: RangeCheckerReplay,
+    pub(crate) memory_writes: MemoryWritesReplay,
+    pub(crate) bitwise_replay: BitwiseReplay,
+    pub(crate) hasher_for_chiplet: HasherRequestReplay,
+    pub(crate) kernel_replay: KernelReplay,
+    pub(crate) ace_replay: AceReplay,
 
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
-    pub fragment_size: usize,
+    pub(crate) fragment_size: usize,
 
     /// The maximum number of field elements allowed on the operand stack in an active execution
     /// context.
-    pub max_stack_depth: usize,
+    pub(crate) max_stack_depth: usize,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -131,12 +131,12 @@ pub struct ExecutionTracer {
     ///
     /// Each builder accumulates the [`MastNodeId`]s of nodes visited inside its source forest
     /// during execution, and is finalized into an [`Arc<SparseMastForest>`] in
-    /// [`Self::into_trace_generation_context`].
+    /// [`Self::into_trace_replay`].
     mast_forest_builders: Vec<SparseMastForestBuilder>,
 
     /// Maps a source forest's `Arc::as_ptr` identity to its [`MastForestId`] in
     /// `mast_forest_builders` (and, by construction, the eventual id in
-    /// `TraceGenerationContext::mast_forest_store`).
+    /// `TraceReplay::mast_forest_store`).
     ///
     /// Pointer identity is sound here because the trace-generation flow never crosses a process
     /// boundary: the tracer builds the store and the replay processor consumes it in the same
@@ -280,10 +280,10 @@ impl ExecutionTracer {
         translated
     }
 
-    /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
-    /// during execution.
+    /// Converts the `ExecutionTracer` into a [`TraceReplay`] using the data accumulated during
+    /// execution.
     #[inline(always)]
-    pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
+    pub(crate) fn into_trace_replay(mut self) -> TraceReplay {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
@@ -296,7 +296,7 @@ impl ExecutionTracer {
             .map(|builder| Arc::new(builder.finalize()))
             .collect();
 
-        TraceGenerationContext {
+        TraceReplay {
             core_trace_contexts: self.fragment_contexts,
             mast_forest_store,
             range_checker_replay: self.range_checker,

@@ -9,12 +9,14 @@ use super::helpers::{
 
 const IN_PTR: u32 = 128;
 const OUT_PTR: u32 = 256;
+const DIGEST_FELTS: usize = 8;
+const BYTES_PER_FELT: usize = 4;
 
 #[test]
 fn keccak_hash_1_chunk_mem_writes_expected_digest() {
     let input: Vec<u8> = (0u8..32).collect();
 
-    let keccak = run_hash_mem("keccak256", "hash_1_chunk_mem", &input, 8)
+    let keccak = run_hash_mem("keccak256", "hash_1_chunk_mem", &input, 0)
         .expect("keccak256::hash_1_chunk_mem must execute");
     assert_eq!(keccak, pack_digest(&Keccak256::hash(&input)));
 }
@@ -23,7 +25,7 @@ fn keccak_hash_1_chunk_mem_writes_expected_digest() {
 fn keccak_hash_bytes_mem_handles_short_preimages() {
     let input = b"hash wrapper coverage";
 
-    let keccak = run_hash_mem("keccak256", "hash_bytes_mem", input, 8)
+    let keccak = run_hash_mem("keccak256", "hash_bytes_mem", input, 0)
         .expect("keccak256::hash_bytes_mem must execute");
     assert_eq!(keccak, pack_digest(&Keccak256::hash(input)));
 }
@@ -35,16 +37,44 @@ fn keccak_hash_2_chunks_mem_hashes_concatenated_inputs() {
     let mut preimage = left;
     preimage.extend_from_slice(&right);
 
-    let output = run_hash_mem("keccak256", "hash_2_chunks_mem", &preimage, 8)
+    let output = run_hash_mem("keccak256", "hash_2_chunks_mem", &preimage, 0)
         .expect("keccak256::hash_2_chunks_mem must execute");
     assert_eq!(output, pack_digest(&Keccak256::hash(&preimage)));
 }
 
+/// The wrapper must accept preimage memory that was never written to, matching the in-VM rule
+/// that unwritten memory reads as zero.
+#[test]
+fn keccak_hash_bytes_mem_hashes_never_written_region() {
+    const UNWRITTEN_FELTS: usize = 8;
+    let preimage = vec![0u8; UNWRITTEN_FELTS * BYTES_PER_FELT];
+
+    let output = run_hash_mem("keccak256", "hash_bytes_mem", &[], UNWRITTEN_FELTS)
+        .expect("keccak256::hash_bytes_mem must execute");
+    assert_eq!(output, pack_digest(&Keccak256::hash(&preimage)));
+}
+
+/// Same as above, but the preimage starts with non-zero elements that are written to memory, so
+/// only its tail relies on unwritten memory.
+#[test]
+fn keccak_hash_2_chunks_mem_hashes_never_written_tail() {
+    const UNWRITTEN_FELTS: usize = 8;
+    let written: Vec<u8> = (1u8..=32).collect();
+    let mut preimage = written.clone();
+    preimage.resize(written.len() + UNWRITTEN_FELTS * BYTES_PER_FELT, 0);
+
+    let output = run_hash_mem("keccak256", "hash_2_chunks_mem", &written, UNWRITTEN_FELTS)
+        .expect("keccak256::hash_2_chunks_mem must execute");
+    assert_eq!(output, pack_digest(&Keccak256::hash(&preimage)));
+}
+
+/// Hashes `input` followed by `trailing_zero_felts` zero elements which the test program does not
+/// write to memory, so that they rely on zero-initialized VM memory.
 fn run_hash_mem(
     module: &str,
     proc: &str,
     input: &[u8],
-    output_len: usize,
+    trailing_zero_felts: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let input_felts = bytes_to_packed_u32_elements(input);
     let stores = masm_store_felts(&input_felts, IN_PTR);
@@ -58,12 +88,12 @@ fn run_hash_mem(
             exec.::miden::precompiles::hashes::{module}::{proc}
         end
         "#,
-        len_bytes = input.len(),
+        len_bytes = input.len() + trailing_zero_felts * BYTES_PER_FELT,
     );
 
     let output = run_precompile_program(&source)?;
     assert_deferred_state_round_trips(&output);
-    Ok(read_memory_felts(&output, OUT_PTR, output_len))
+    Ok(read_memory_felts(&output, OUT_PTR, DIGEST_FELTS))
 }
 
 fn pack_digest(bytes: &[u8]) -> Vec<Felt> {

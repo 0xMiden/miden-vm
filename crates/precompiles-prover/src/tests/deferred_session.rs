@@ -6,7 +6,7 @@ use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPr
 use crate::deferred::session_from_deferred_state;
 
 fn state() -> DeferredState {
-    DeferredState::new(Arc::new(miden_precompiles::registry()), usize::MAX)
+    DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("precompile init must succeed")
 }
 
@@ -123,6 +123,23 @@ fn deferred_session_inputs_reject_duplicate_base_msm() {
 
     let msm = curve_msm_node(vec![(generator.clone(), two), (generator, three)]);
     assert!(state.register(msm).is_err(), "duplicate-base MSM must be rejected");
+}
+
+#[test]
+fn deferred_session_inputs_reject_identity_base_msm() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let identity = CurvePrecompile::identity_node(curve);
+    let generator = CurvePrecompile::generator_node(curve);
+    let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(17));
+    let two = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
+    state.register(identity.clone()).expect("identity must register");
+    state.register(generator.clone()).expect("generator must register");
+    state.register(one.clone()).expect("scalar must register");
+    state.register(two.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(identity, one), (generator, two)]);
+    assert!(state.register(msm).is_err(), "identity-base MSM must be rejected");
 }
 
 #[test]

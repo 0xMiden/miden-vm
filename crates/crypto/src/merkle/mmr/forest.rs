@@ -319,9 +319,30 @@ impl Forest {
     /// Returns the smallest tree's root element as an [InOrderIndex].
     ///
     /// This function takes the smallest tree in this forest, "pretends" that it is a subtree of a
-    /// fully balanced binary tree, and returns the the in-order index of that balanced tree's root
+    /// fully balanced binary tree, and returns the in-order index of that balanced tree's root
     /// node.
-    pub fn root_in_order_index(&self) -> InOrderIndex {
+    ///
+    /// If the forest cannot be empty, use [`root_in_order_index_unchecked`] for performance.
+    ///
+    /// [`root_in_order_index_unchecked`]: Self::root_in_order_index_unchecked
+    pub fn root_in_order_index(&self) -> Option<InOrderIndex> {
+        if self.is_empty() {
+            return None;
+        }
+
+        Some(self.root_in_order_index_unchecked())
+    }
+
+    /// Returns the smallest tree's root element as an [InOrderIndex].
+    ///
+    /// See [`root_in_order_index`](Self::root_in_order_index) for details.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the forest is empty, which has no trees and therefore no root index.
+    pub fn root_in_order_index_unchecked(&self) -> InOrderIndex {
+        assert!(!self.is_empty(), "the empty forest has no root in-order index");
+
         // Count total size of all trees in the forest.
         let nodes = self.num_nodes();
 
@@ -339,7 +360,27 @@ impl Forest {
     }
 
     /// Returns the in-order index of the rightmost element (the smallest tree).
-    pub fn rightmost_in_order_index(&self) -> InOrderIndex {
+    ///
+    /// If the forest cannot be empty, use [`rightmost_in_order_index_unchecked`] for performance.
+    ///
+    /// [`rightmost_in_order_index_unchecked`]: Self::rightmost_in_order_index_unchecked
+    pub fn rightmost_in_order_index(&self) -> Option<InOrderIndex> {
+        if self.is_empty() {
+            return None;
+        }
+
+        Some(self.rightmost_in_order_index_unchecked())
+    }
+
+    /// Returns the in-order index of the rightmost element (the smallest tree).
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the forest is empty, which has no elements and therefore no rightmost
+    /// index.
+    pub fn rightmost_in_order_index_unchecked(&self) -> InOrderIndex {
+        assert!(!self.is_empty(), "the empty forest has no rightmost in-order index");
+
         // Count total size of all trees in the forest.
         let nodes = self.num_nodes();
 
@@ -600,5 +641,43 @@ impl DoubleEndedIterator for TreeSizeIterator {
             self.inner = self.inner.without_trees(tree);
             Some(tree)
         }
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::Forest;
+
+    #[test]
+    fn in_order_index_accessors_return_none_on_the_empty_forest() {
+        assert_eq!(Forest::empty().root_in_order_index(), None);
+        assert_eq!(Forest::empty().rightmost_in_order_index(), None);
+    }
+
+    #[test]
+    fn in_order_index_accessors_agree_with_unchecked_on_nonempty_forests() {
+        for leaves in [1usize, 2, 3, 7, 8] {
+            let forest = Forest::new(leaves).unwrap();
+            assert_eq!(forest.root_in_order_index(), Some(forest.root_in_order_index_unchecked()));
+            assert_eq!(
+                forest.rightmost_in_order_index(),
+                Some(forest.rightmost_in_order_index_unchecked())
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "no root in-order index")]
+    fn root_in_order_index_unchecked_panics_on_the_empty_forest() {
+        let _ = Forest::empty().root_in_order_index_unchecked();
+    }
+
+    #[test]
+    #[should_panic(expected = "no rightmost in-order index")]
+    fn rightmost_in_order_index_unchecked_panics_on_the_empty_forest() {
+        let _ = Forest::empty().rightmost_in_order_index_unchecked();
     }
 }

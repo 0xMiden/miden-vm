@@ -24,7 +24,7 @@ use miden_air::{
 use miden_core::field::QuadFelt;
 use miden_utils_testing::rand::rand_array;
 
-use super::{ExecutionTrace, Felt};
+use super::{Felt, VmTrace};
 
 // INTERACTION LOG
 // ================================================================================================
@@ -48,7 +48,7 @@ pub(super) struct InteractionLog {
 impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
-    pub fn new(trace: &ExecutionTrace) -> Self {
+    pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
         let chip_periodic = MidenAir::Chiplets.periodic_columns();
         let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();

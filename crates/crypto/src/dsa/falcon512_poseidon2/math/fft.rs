@@ -13,17 +13,51 @@ use super::{Inverse, field::FalconFelt, polynomial::Polynomial};
 /// 2n-th primitive root of unity.
 pub trait FastFft: Sized + Clone {
     type Field: Add + Mul + AddAssign + MulAssign + Neg + Sub + SubAssign;
+
+    /// Applies the FFT in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is not a supported power of two.
     fn fft_inplace(&mut self);
+
+    /// Returns a transformed clone.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the conditions described by [`Self::fft_inplace`].
     fn fft(&self) -> Self {
         let mut a = self.clone();
         a.fft_inplace();
         a
     }
 
+    /// Merges two half-size transforms.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inputs have different lengths or their combined length is not supported.
     fn merge_fft(a: &Self, b: &Self) -> Self;
+
+    /// Splits a transform into its even- and odd-degree parts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is less than two or is not a supported power of two.
     fn split_fft(&self) -> (Self, Self);
 
+    /// Applies the inverse FFT in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coefficient count is not a supported power of two.
     fn ifft_inplace(&mut self);
+
+    /// Returns an inverse-transformed clone.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the conditions described by [`Self::ifft_inplace`].
     fn ifft(&self) -> Self {
         let mut a = self.clone();
         a.ifft_inplace();
@@ -72,7 +106,8 @@ where
         rev
     }
 
-    /// Computes the first n powers of the 2nd root of unity, and put them in bit-reversed order.
+    /// Computes the first n powers of a primitive 2n-th root of unity, and puts them in
+    /// bit-reversed order.
     #[allow(dead_code)]
     fn bitreversed_powers(n: usize) -> Vec<Self> {
         let psi = Self::primitive_root_of_unity(2 * n);
@@ -86,8 +121,8 @@ where
         array
     }
 
-    /// Computes the first n powers of the 2nd root of unity, invert them, and put them in
-    /// bit-reversed order.
+    /// Computes the first n powers of the inverse of a primitive 2n-th root of unity, and puts
+    /// them in bit-reversed order.
     #[allow(dead_code)]
     fn bitreversed_powers_inverse(n: usize) -> Vec<Self> {
         let psi = Self::primitive_root_of_unity(2 * n).inverse_or_zero();
@@ -126,8 +161,14 @@ where
     ///    `Self::bitreversed_powers(psi, n)` for this purpose, but this trait implementation is not
     ///    const. For the performance benefit you want a precompiled array, which you can get if you
     ///    can get by implementing the same method and marking it "const".
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` is empty, its length is not a power of two, or `psi_rev` is too short for
+    /// the transform.
     fn fft(a: &mut [Self], psi_rev: &[Self]) {
         let n = a.len();
+        assert_supported_transform_size(n, psi_rev.len());
         let mut t = n;
         let mut m = 1;
         while m < n {
@@ -162,8 +203,14 @@ where
     ///    trait implementation is not const. For the performance benefit you want a precompiled
     ///    array, which you can get if you can get by implementing the same methods and marking them
     ///    "const".
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` is empty, its length is not a power of two, or `psi_inv_rev` is too short for
+    /// the transform.
     fn ifft(a: &mut [Self], psi_inv_rev: &[Self], ninv: Self) {
         let n = a.len();
+        assert_supported_transform_size(n, psi_inv_rev.len());
         let mut t = 1;
         let mut m = n;
         while m > 1 {
@@ -188,7 +235,15 @@ where
         }
     }
 
+    /// Splits a transform into the transforms of its even- and odd-degree coefficients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` has fewer than two elements, its length is not a power of two, or
+    /// `psi_inv_rev` is too short for the transform.
     fn split_fft(f: &[Self], psi_inv_rev: &[Self]) -> (Vec<Self>, Vec<Self>) {
+        assert!(f.len() >= 2, "split_fft requires at least two coefficients, got {}", f.len());
+        assert_supported_transform_size(f.len(), psi_inv_rev.len());
         let n_over_2 = f.len() / 2;
         let mut f0 = vec![Self::zero(); n_over_2];
         let mut f1 = vec![Self::zero(); n_over_2];
@@ -202,10 +257,18 @@ where
         (f0, f1)
     }
 
+    /// Merges transforms of even- and odd-degree coefficients into one transform.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inputs have different lengths or their combined length is not a power of two
+    /// supported by `psi_rev`.
     fn merge_fft(f0: &[Self], f1: &[Self], psi_rev: &[Self]) -> Vec<Self> {
+        assert_eq!(f0.len(), f1.len(), "merge_fft operands must have equal coefficient counts");
         let n_over_2 = f0.len();
-        let n = 2 * n_over_2;
-        let mut f = vec![Self::zero(); n];
+        let output_len = n_over_2.checked_mul(2).expect("merge_fft output length overflow");
+        assert_supported_merge_size(output_len, psi_rev.len());
+        let mut f = vec![Self::zero(); output_len];
         for i in 0..n_over_2 {
             let two_i = i * 2;
             f[two_i] = f0[i] + psi_rev[n_over_2 + i] * f1[i];
@@ -248,23 +311,28 @@ impl CyclotomicFourier for Complex64 {
     }
 }
 
+fn assert_supported_transform_size(n: usize, table_len: usize) {
+    assert!(
+        n.is_power_of_two() && n <= table_len,
+        "unsupported transform size n = {n}: must be a power of two at most the root-table length {table_len}"
+    );
+}
+
+fn assert_supported_merge_size(output_len: usize, table_len: usize) {
+    assert!(
+        output_len.is_power_of_two() && output_len <= table_len,
+        "unsupported merge output size {output_len}: must be a power of two at most the root-table length {table_len}"
+    );
+}
+
 impl FastFft for Polynomial<Complex64> {
     type Field = Complex64;
     fn fft_inplace(&mut self) {
-        let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         Complex64::fft(&mut self.coefficients, &COMPLEX_BITREVERSED_POWERS);
     }
 
     fn ifft_inplace(&mut self) {
         let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         let psi_inv_rev: Vec<Complex64> =
             COMPLEX_BITREVERSED_POWERS.iter().map(|c| Complex64::new(c.re, -c.im)).collect();
         let ninv = Complex64::new(1.0 / (n as f64), 0.0);
@@ -272,11 +340,6 @@ impl FastFft for Polynomial<Complex64> {
     }
 
     fn merge_fft(a: &Self, b: &Self) -> Self {
-        let n = a.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         Self {
             coefficients: Self::Field::merge_fft(
                 &a.coefficients,
@@ -287,11 +350,6 @@ impl FastFft for Polynomial<Complex64> {
     }
 
     fn split_fft(&self) -> (Self, Self) {
-        let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         let psi_inv_rev: Vec<Complex64> =
             COMPLEX_BITREVERSED_POWERS.iter().map(|c| Complex64::new(c.re, -c.im)).collect();
         let (a, b) = Self::Field::split_fft(&self.coefficients, &psi_inv_rev);
@@ -303,20 +361,12 @@ impl FastFft for Polynomial<FalconFelt> {
     type Field = FalconFelt;
 
     fn fft_inplace(&mut self) {
-        let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         FalconFelt::fft(&mut self.coefficients, &FELT_BITREVERSED_POWERS);
     }
 
     fn ifft_inplace(&mut self) {
         let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
+        assert_supported_transform_size(n, FELT_BITREVERSED_POWERS_INVERSE.len());
         let ninv = match n {
             1 => FELT_NINV_1,
             2 => FELT_NINV_2,
@@ -334,11 +384,6 @@ impl FastFft for Polynomial<FalconFelt> {
     }
 
     fn merge_fft(a: &Self, b: &Self) -> Self {
-        let n = a.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         Self {
             coefficients: Self::Field::merge_fft(
                 &a.coefficients,
@@ -349,11 +394,6 @@ impl FastFft for Polynomial<FalconFelt> {
     }
 
     fn split_fft(&self) -> (Self, Self) {
-        let n = self.coefficients.len();
-        debug_assert!(
-            (1..=512).contains(&n),
-            "unsupported: n = {n} not a power of 2 or larger than 512"
-        );
         let (a, b) = Self::Field::split_fft(&self.coefficients, &FELT_BITREVERSED_POWERS_INVERSE);
         (Self { coefficients: a }, Self { coefficients: b })
     }
@@ -1915,3 +1955,218 @@ const FELT_NINV_64: FalconFelt = FalconFelt::new(12097);
 const FELT_NINV_128: FalconFelt = FalconFelt::new(12193);
 const FELT_NINV_256: FalconFelt = FalconFelt::new(12241);
 const FELT_NINV_512: FalconFelt = FalconFelt::new(12265);
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use num::One;
+    use num_complex::Complex64;
+
+    use super::{
+        COMPLEX_BITREVERSED_POWERS, CyclotomicFourier, FELT_BITREVERSED_POWERS,
+        FELT_BITREVERSED_POWERS_INVERSE, FELT_NINV_1, FELT_NINV_2, FELT_NINV_4, FELT_NINV_8,
+        FELT_NINV_16, FELT_NINV_32, FELT_NINV_64, FELT_NINV_128, FELT_NINV_256, FELT_NINV_512,
+        FalconFelt, FastFft, Polynomial,
+    };
+    use crate::rand::test_utils::prng_array;
+
+    /// Deterministic pseudorandom polynomial over the Falcon field.
+    fn random_felt_poly(n: usize, seed: u8) -> Polynomial<FalconFelt> {
+        let bytes: [u8; 1024] = prng_array([seed; 32]);
+        Polynomial::new(
+            bytes[..2 * n]
+                .chunks(2)
+                .map(|ch| FalconFelt::new(i16::from_le_bytes([ch[0], ch[1]])))
+                .collect(),
+        )
+    }
+
+    /// Deterministic pseudorandom polynomial with small real coefficients.
+    fn random_complex_poly(n: usize, seed: u8) -> Polynomial<Complex64> {
+        let bytes: [u8; 512] = prng_array([seed; 32]);
+        Polynomial::new(
+            bytes[..n]
+                .iter()
+                .map(|&b| Complex64::new((b as f64 - 127.5) / 32.0, 0.0))
+                .collect(),
+        )
+    }
+
+    /// The precompiled Falcon-field tables must equal what the generic trait derivation produces
+    /// from the primitive root — the same self-check idiom that guards hand-copied constants
+    /// elsewhere in the codebase.
+    #[test]
+    fn felt_tables_match_their_generic_derivation() {
+        assert_eq!(FELT_BITREVERSED_POWERS.to_vec(), FalconFelt::bitreversed_powers(512));
+        assert_eq!(
+            FELT_BITREVERSED_POWERS_INVERSE.to_vec(),
+            FalconFelt::bitreversed_powers_inverse(512)
+        );
+    }
+
+    #[test]
+    fn complex_table_matches_its_generic_derivation() {
+        let derived = Complex64::bitreversed_powers(512);
+        for (i, (table, fresh)) in COMPLEX_BITREVERSED_POWERS.iter().zip(&derived).enumerate() {
+            assert!(
+                (table.re - fresh.re).abs() < 1e-12 && (table.im - fresh.im).abs() < 1e-12,
+                "table entry {i} deviates from its derivation"
+            );
+        }
+    }
+
+    /// Transform sizes below 512 reuse prefixes of the 512-entry tables; this is what makes that
+    /// sound: the first n entries of a larger bit-reversed power table are exactly the
+    /// bit-reversed table of order n.
+    #[test]
+    fn table_prefixes_serve_smaller_transform_sizes() {
+        for log2n in 0..=9usize {
+            let n = 1 << log2n;
+            assert_eq!(
+                FELT_BITREVERSED_POWERS[..n].to_vec(),
+                FalconFelt::bitreversed_powers(n),
+                "prefix property fails at n = {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn ninv_constants_invert_their_transform_sizes() {
+        for (n, ninv) in [
+            (1i16, FELT_NINV_1),
+            (2, FELT_NINV_2),
+            (4, FELT_NINV_4),
+            (8, FELT_NINV_8),
+            (16, FELT_NINV_16),
+            (32, FELT_NINV_32),
+            (64, FELT_NINV_64),
+            (128, FELT_NINV_128),
+            (256, FELT_NINV_256),
+            (512, FELT_NINV_512),
+        ] {
+            assert_eq!(FalconFelt::new(n) * ninv, FalconFelt::one(), "wrong inverse for n = {n}");
+        }
+    }
+
+    #[test]
+    fn felt_fft_round_trips_at_every_supported_size() {
+        // Every power of two through 512, so each size's inverse-constant dispatch arm is
+        // exercised (a wrong NINV constant at any single size fails here).
+        for log2n in 0..=9u8 {
+            let n = 1usize << log2n;
+            let f = random_felt_poly(n, 20 + log2n);
+            assert_eq!(f.fft().ifft(), f, "fft/ifft round trip failed at n = {n}");
+        }
+    }
+
+    #[test]
+    fn complex_fft_round_trips_within_float_tolerance() {
+        for (n, seed) in [(8usize, 5u8), (512, 6)] {
+            let f = random_complex_poly(n, seed);
+            let round_tripped = f.fft().ifft();
+            for (a, b) in f.coefficients.iter().zip(&round_tripped.coefficients) {
+                assert!(
+                    (a.re - b.re).abs() < 1e-9 && (a.im - b.im).abs() < 1e-9,
+                    "complex round trip deviates at n = {n}"
+                );
+            }
+        }
+    }
+
+    /// The convolution theorem over Z_q[X]/(X^n + 1): pointwise multiplication in the transform
+    /// domain must match schoolbook multiplication followed by negacyclic reduction. This
+    /// exercises the transforms, both tables, and the ninv constants against an independent
+    /// oracle in one identity.
+    #[test]
+    fn felt_fft_multiplication_matches_negacyclic_schoolbook() {
+        for (n, seed) in [(8usize, 7u8), (64, 8), (512, 9)] {
+            let f = random_felt_poly(n, seed);
+            let g = random_felt_poly(n, seed.wrapping_add(100));
+            let via_fft = f.fft().hadamard_mul(&g.fft()).ifft();
+            let via_schoolbook = (f * g).reduce_by_cyclotomic(n);
+            assert_eq!(via_fft, via_schoolbook, "convolution theorem fails at n = {n}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported merge output size")]
+    fn merge_fft_rejects_halves_that_would_overrun_the_root_tables() {
+        // Two 512-entry halves would produce a 1024-point transform and index root-table
+        // entry 512 -- past the precompiled tables.
+        let half = random_felt_poly(512, 12);
+        let _ = Polynomial::<FalconFelt>::merge_fft(&half, &half.clone());
+    }
+
+    #[test]
+    #[should_panic(expected = "equal coefficient counts")]
+    fn merge_fft_rejects_unequal_halves() {
+        // A longer right half would otherwise be silently truncated by the merge walk.
+        let a = random_felt_poly(8, 16);
+        let b = random_felt_poly(16, 17);
+        let _ = Polynomial::<FalconFelt>::merge_fft(&a, &b);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least two coefficients")]
+    fn split_fft_rejects_a_single_coefficient() {
+        // A length-1 split would return two empty halves, silently losing the value.
+        let f = random_felt_poly(1, 30);
+        let _ = f.split_fft();
+    }
+
+    /// Characterizes split_fft against an independent construction: for
+    /// f(X) = f0(X^2) + X*f1(X^2), splitting FFT(f) must yield (FFT(f0), FFT(f1)) where f0/f1
+    /// are the even/odd coefficient halves. A pure split/merge round trip could conceal
+    /// compensating defects in the two directions; this cannot.
+    #[test]
+    fn split_fft_yields_the_even_and_odd_coefficient_transforms() {
+        for (n, seed) in [(8usize, 31u8), (512, 32)] {
+            let f = random_felt_poly(n, seed);
+            let even =
+                Polynomial::new(f.coefficients.iter().copied().step_by(2).collect::<Vec<_>>());
+            let odd = Polynomial::new(
+                f.coefficients.iter().copied().skip(1).step_by(2).collect::<Vec<_>>(),
+            );
+            let (f0, f1) = f.fft().split_fft();
+            assert_eq!(f0, even.fft(), "split's first half is not FFT(even) at n = {n}");
+            assert_eq!(f1, odd.fft(), "split's second half is not FFT(odd) at n = {n}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported transform size")]
+    fn fft_rejects_non_power_of_two_sizes() {
+        let mut f = Polynomial::new(vec![FalconFelt::new(1); 3]);
+        f.fft_inplace();
+    }
+
+    #[test]
+    #[should_panic(expected = "root-table length 2")]
+    fn cyclotomic_fft_rejects_a_short_root_table() {
+        let mut values = [FalconFelt::new(1); 4];
+        let roots = [FalconFelt::new(1); 2];
+        FalconFelt::fft(&mut values, &roots);
+    }
+
+    #[test]
+    #[should_panic(expected = "root-table length 2")]
+    fn cyclotomic_ifft_rejects_a_short_root_table() {
+        let mut values = [FalconFelt::new(1); 4];
+        let roots = [FalconFelt::new(1); 2];
+        FalconFelt::ifft(&mut values, &roots, FELT_NINV_4);
+    }
+
+    #[test]
+    fn felt_split_merge_round_trips_in_the_transform_domain() {
+        for (n, seed) in [(8usize, 10u8), (512, 11)] {
+            let f_hat = random_felt_poly(n, seed).fft();
+            let (even, odd) = f_hat.split_fft();
+            let merged = Polynomial::<FalconFelt>::merge_fft(&even, &odd);
+            assert_eq!(merged, f_hat, "split/merge round trip failed at n = {n}");
+        }
+    }
+}

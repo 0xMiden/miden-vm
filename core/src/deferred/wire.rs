@@ -1,16 +1,15 @@
 //! Compact wire format for deferred-state witnesses.
 //!
-//! Partial proofs carry a canonical, topologically ordered stream of the explicit DAG entries
-//! needed to justify a deferred root before a precompile VM STARK proof is produced. Wire index 0
-//! is reserved for the implicit TRUE node; entry `i` has wire index `i + 1`, and structural child
-//! references may only point to TRUE or earlier entries. Empty wire opens [`TRUE_DIGEST`];
+//! This passive transport format is a canonical, topologically ordered stream of the explicit DAG
+//! entries needed to reconstruct a deferred state without hydrating it during proof decoding.
+//! Wire index 0 is reserved for the implicit TRUE node; entry `i` has wire index `i + 1`, and
+//! structural child references may only point to TRUE or earlier entries. Empty wire opens
+//! [`TRUE_DIGEST`];
 //! otherwise the root is the digest of the final entry.
 //!
 //! Rehydration decodes the untrusted stream into ordinary [`DeferredState`] nodes, rejects
 //! non-canonical/dangling wire by comparing with [`DeferredState::to_wire`], and finally evaluates
-//! the implicit root to repopulate evaluation memos. This supports explicit partial verification:
-//! public final verification rejects `DeferredProof::Wire`, while the partial verifier rehydrates
-//! it and verifies the VM proof against the resulting root.
+//! the implicit root to repopulate evaluation memos.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -23,8 +22,8 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DataChunk, DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError,
-    PrecompileRegistry, TRUE_DIGEST, Tag,
+    DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType,
+    PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
     Felt, ZERO,
@@ -38,7 +37,32 @@ use crate::{
 // ================================================================================================
 
 /// Reserved index for the always-known [`super::TRUE_DIGEST`] / [`super::Node::TRUE`] node.
-pub const TRUE_INDEX: u32 = 0;
+const TRUE_INDEX: u32 = 0;
+
+const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / Tag::FELT_LEN;
+
+fn reserve_wire_elements(
+    remaining_elements: &mut usize,
+    requested_elements: usize,
+) -> Result<(), DeserializationError> {
+    *remaining_elements = remaining_elements.checked_sub(requested_elements).ok_or_else(|| {
+        DeserializationError::InvalidValue(format!(
+            "deferred wire exceeds the {MAX_DEFERRED_ELEMENTS} element limit"
+        ))
+    })?;
+    Ok(())
+}
+
+fn reserve_wire_payload(
+    remaining_elements: &mut usize,
+    payload_count: usize,
+) -> Result<(), DeserializationError> {
+    let payload_elements =
+        payload_count.checked_mul(Node::DATA_CHUNK_FELT_LEN).ok_or_else(|| {
+            DeserializationError::InvalidValue("deferred wire element count overflow".into())
+        })?;
+    reserve_wire_elements(remaining_elements, payload_elements)
+}
 
 // WIRE ENTRY
 // ================================================================================================
@@ -49,8 +73,8 @@ pub const TRUE_INDEX: u32 = 0;
 /// reference `TRUE_INDEX` or an earlier entry. Pair-list pairs store structural child references in
 /// payload order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum WireEntry {
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub(crate) enum WireEntry {
     /// Raw data payload interpreted by the tag's precompile.
     ///
     /// Rehydration requires at least one chunk. A tag's precompile may assign value semantics to a
@@ -69,13 +93,11 @@ pub enum WireEntry {
 ///
 /// The root is implicit: empty `entries` opens [`TRUE_DIGEST`], otherwise the root is the digest of
 /// the last entry. Accepted wire must be topologically ordered, root-last, duplicate-free,
-/// canonical, and semantically valid under the installed [`PrecompileRegistry`]. Wire-backed
-/// deferred proofs are partial material: public final verification rejects them, and explicit
-/// partial verification rehydrates them before checking the VM proof.
+/// canonical, and semantically valid under the installed [`PrecompileRegistry`] when rehydrated.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct DeferredStateWire {
-    pub entries: Vec<WireEntry>,
+    entries: Vec<WireEntry>,
 }
 
 impl DeferredStateWire {
@@ -90,10 +112,10 @@ impl DeferredStateWire {
     pub(crate) fn rehydrate(
         &self,
         precompiles: Arc<PrecompileRegistry>,
-        max_elements: usize,
     ) -> Result<DeferredState, IntegrityError> {
+        self.validate_element_limit()?;
         let (entries, root) = WireDecoder::new(self, precompiles.as_ref())?.decode()?;
-        let mut state = DeferredState::new(Arc::clone(&precompiles), max_elements)?;
+        let mut state = DeferredState::new(Arc::clone(&precompiles))?;
 
         // Register entries in strict topological wire order. Structural children have already been
         // decoded to earlier digests, so ordinary DeferredState registration enforces the
@@ -120,6 +142,28 @@ impl DeferredStateWire {
 
         Ok(state)
     }
+
+    fn validate_element_limit(&self) -> Result<(), IntegrityError> {
+        let mut remaining_elements = MAX_DEFERRED_ELEMENTS;
+        for entry in &self.entries {
+            let payload_count = match entry {
+                WireEntry::Data { chunks, .. } => chunks.len(),
+                WireEntry::Join { .. } => 1,
+                WireEntry::PairList { pairs, .. } => pairs.len(),
+            };
+            let payload_elements = payload_count
+                .checked_mul(Node::DATA_CHUNK_FELT_LEN)
+                .and_then(|elements| Tag::FELT_LEN.checked_add(elements))
+                .ok_or(IntegrityError::InvalidStructure)?;
+            remaining_elements = remaining_elements.checked_sub(payload_elements).ok_or(
+                IntegrityError::DeferredStateTooLarge {
+                    num_elements: payload_elements,
+                    max: remaining_elements,
+                },
+            )?;
+        }
+        Ok(())
+    }
 }
 
 // INTEGRITY ERROR
@@ -142,7 +186,7 @@ pub enum IntegrityError {
     /// The root evaluated, but not to the canonical TRUE node.
     #[error("deferred root evaluated to a non-TRUE canonical form")]
     RootNotTrue,
-    /// Rehydrating the wire would exceed the configured deferred-state budget.
+    /// Rehydrating the wire would exceed the fixed deferred-state budget.
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
 }
@@ -480,36 +524,8 @@ impl Serializable for WireEntry {
 
 impl Deserializable for WireEntry {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let discriminant = source.read_u8()?;
-        match discriminant {
-            0 => {
-                let tag = Tag::read_from(source)?;
-                let chunk_count = source.read_usize()?;
-                let chunks = source
-                    .read_many_iter::<WireDataChunk>(chunk_count)?
-                    .map(|chunk| chunk.map(|chunk| chunk.0))
-                    .collect::<Result<_, _>>()?;
-                Ok(Self::Data { tag, chunks })
-            },
-            1 => {
-                let tag = Tag::read_from(source)?;
-                let lhs = source.read_u32()?;
-                let rhs = source.read_u32()?;
-                Ok(Self::Join { tag, lhs, rhs })
-            },
-            2 => {
-                let tag = Tag::read_from(source)?;
-                let pair_count = source.read_usize()?;
-                let pairs = source
-                    .read_many_iter::<WirePair>(pair_count)?
-                    .map(|pair| pair.map(|pair| pair.0))
-                    .collect::<Result<_, _>>()?;
-                Ok(Self::PairList { tag, pairs })
-            },
-            other => Err(DeserializationError::InvalidValue(format!(
-                "invalid deferred wire entry discriminant: {other}"
-            ))),
-        }
+        let mut remaining_elements = MAX_DEFERRED_ELEMENTS;
+        read_wire_entry(source, &mut remaining_elements)
     }
 
     fn min_serialized_size() -> usize {
@@ -557,13 +573,68 @@ impl Serializable for DeferredStateWire {
 impl Deserializable for DeferredStateWire {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let entry_count = source.read_usize()?;
-        let entries = source.read_many_iter::<WireEntry>(entry_count)?.collect::<Result<_, _>>()?;
+        if entry_count > MAX_WIRE_ENTRIES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "deferred wire contains {entry_count} entries, maximum is {MAX_WIRE_ENTRIES}"
+            )));
+        }
+
+        let mut remaining_elements = MAX_DEFERRED_ELEMENTS;
+        let mut entries = Vec::with_capacity(entry_count);
+        for _ in 0..entry_count {
+            entries.push(read_wire_entry(source, &mut remaining_elements)?);
+        }
         Ok(Self { entries })
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
         Self::read_from(&mut reader)
+    }
+
+    fn min_serialized_size() -> usize {
+        usize::min_serialized_size()
+    }
+}
+
+fn read_wire_entry<R: ByteReader>(
+    source: &mut R,
+    remaining_elements: &mut usize,
+) -> Result<WireEntry, DeserializationError> {
+    let discriminant = source.read_u8()?;
+    match discriminant {
+        0 => {
+            reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
+            let tag = Tag::read_from(source)?;
+            let chunk_count = source.read_usize()?;
+            reserve_wire_payload(remaining_elements, chunk_count)?;
+            let chunks = source
+                .read_many_iter::<WireDataChunk>(chunk_count)?
+                .map(|chunk| chunk.map(|chunk| chunk.0))
+                .collect::<Result<_, _>>()?;
+            Ok(WireEntry::Data { tag, chunks })
+        },
+        1 => {
+            reserve_wire_elements(remaining_elements, Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN)?;
+            let tag = Tag::read_from(source)?;
+            let lhs = source.read_u32()?;
+            let rhs = source.read_u32()?;
+            Ok(WireEntry::Join { tag, lhs, rhs })
+        },
+        2 => {
+            reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
+            let tag = Tag::read_from(source)?;
+            let pair_count = source.read_usize()?;
+            reserve_wire_payload(remaining_elements, pair_count)?;
+            let pairs = source
+                .read_many_iter::<WirePair>(pair_count)?
+                .map(|pair| pair.map(|pair| pair.0))
+                .collect::<Result<_, _>>()?;
+            Ok(WireEntry::PairList { tag, pairs })
+        },
+        other => Err(DeserializationError::InvalidValue(format!(
+            "invalid deferred wire entry discriminant: {other}"
+        ))),
     }
 }
 
@@ -631,6 +702,19 @@ mod tests {
     }
 
     #[test]
+    fn empty_wire_vector_decodes_with_exact_canonical_budget() {
+        let wires = alloc::vec![DeferredStateWire::default(), DeferredStateWire::default()];
+        let bytes = wires.to_bytes();
+
+        assert_eq!(DeferredStateWire::min_serialized_size(), 1);
+        assert_eq!(bytes.len(), 3);
+        assert_eq!(
+            Vec::<DeferredStateWire>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap(),
+            wires
+        );
+    }
+
+    #[test]
     fn wire_decoder_accepts_exact_framework_chunks_data() {
         let registry = PrecompileRegistry::new();
         let chunks = alloc::vec![felts(10), felts(20)];
@@ -644,11 +728,45 @@ mod tests {
     }
 
     #[test]
+    fn empty_wire_rehydrates_with_the_fixed_deferred_element_limit() {
+        let state = DeferredState::from_wire(
+            Arc::new(PrecompileRegistry::new()),
+            &DeferredStateWire::default(),
+        )
+        .unwrap();
+
+        assert_eq!(state.num_elements(), 0);
+        assert_eq!(state.remaining_elements(), MAX_DEFERRED_ELEMENTS);
+    }
+
+    #[test]
+    fn in_memory_wire_element_limit_accepts_exact_and_rejects_next_entry() {
+        let join = WireEntry::Join {
+            tag: Tag::AND,
+            lhs: TRUE_INDEX,
+            rhs: TRUE_INDEX,
+        };
+        let join_elements = Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN;
+        let join_count = MAX_DEFERRED_ELEMENTS / join_elements;
+        let mut entries = alloc::vec![join; join_count];
+        entries.push(WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() });
+        let mut wire = DeferredStateWire { entries };
+
+        wire.validate_element_limit().unwrap();
+
+        wire.entries.push(WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() });
+        assert!(matches!(
+            wire.validate_element_limit(),
+            Err(IntegrityError::DeferredStateTooLarge { .. })
+        ));
+    }
+
+    #[test]
     fn rehydration_rejects_empty_data_and_pair_list_entries() {
         let empty_data =
             wire(alloc::vec![WireEntry::Data { tag: Tag::CHUNKS, chunks: Vec::new() }]);
         assert!(matches!(
-            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &empty_data, usize::MAX,),
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &empty_data),
             Err(IntegrityError::InvalidStructure)
         ));
 
@@ -660,7 +778,6 @@ mod tests {
             DeferredState::from_wire(
                 Arc::new(PrecompileRegistry::new().with_precompile(PairListFixture)),
                 &empty_pairs,
-                usize::MAX,
             ),
             Err(IntegrityError::InvalidStructure)
         ));
@@ -702,6 +819,42 @@ mod tests {
         assert_wire_round_trips(DeferredStateWire::default());
     }
 
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_wire_round_trips_without_changing_the_representation() {
+        let wire = wire(alloc::vec![
+            WireEntry::Data {
+                tag: tag(1),
+                chunks: alloc::vec![felts(10)]
+            },
+            WireEntry::Join { tag: tag(2), lhs: 1, rhs: TRUE_INDEX },
+            WireEntry::PairList {
+                tag: tag(3),
+                pairs: alloc::vec![(1, TRUE_INDEX)],
+            },
+        ]);
+        let encoded = serde_json::to_vec(&wire).unwrap();
+
+        assert_eq!(serde_json::from_slice::<DeferredStateWire>(&encoded).unwrap(), wire);
+    }
+
+    #[test]
+    fn wire_encoder_omits_nodes_unreachable_from_root() {
+        let mut state = DeferredState::default();
+        let orphan = state.register(Node::chunks(alloc::vec![[ZERO; 8]]).unwrap()).unwrap();
+        state.log_statement(TRUE_DIGEST).unwrap();
+
+        assert!(state.get_node(&orphan).is_some());
+        assert_eq!(
+            state.to_wire().unwrap().entries,
+            alloc::vec![WireEntry::Join {
+                tag: Tag::AND,
+                lhs: TRUE_INDEX,
+                rhs: TRUE_INDEX,
+            }]
+        );
+    }
+
     #[test]
     fn wire_encoder_handles_deep_roots_iteratively() {
         let mut state = DeferredState::default();
@@ -722,7 +875,7 @@ mod tests {
             })
         );
         assert_eq!(
-            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &wire, usize::MAX)
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &wire)
                 .unwrap()
                 .root(),
             root
@@ -737,7 +890,19 @@ mod tests {
 
     #[test]
     fn wire_rejects_over_budget_entry_count() {
-        assert!(DeferredStateWire::read_from_bytes(&encoded_entry_count(usize::MAX)).is_err());
+        assert!(
+            DeferredStateWire::read_from_bytes(&encoded_entry_count(MAX_WIRE_ENTRIES + 1)).is_err()
+        );
+    }
+
+    #[test]
+    fn wire_element_budget_accepts_exact_limit_and_rejects_one_more() {
+        let mut exact = MAX_DEFERRED_ELEMENTS;
+        reserve_wire_elements(&mut exact, MAX_DEFERRED_ELEMENTS).unwrap();
+        assert_eq!(exact, 0);
+
+        let mut oversized = MAX_DEFERRED_ELEMENTS;
+        assert!(reserve_wire_elements(&mut oversized, MAX_DEFERRED_ELEMENTS + 1).is_err());
     }
 
     #[test]

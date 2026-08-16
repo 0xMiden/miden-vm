@@ -82,9 +82,10 @@ fn build_trace(c: &mut Criterion) {
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let trace_inputs =
-                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
-                            let trace = trace::build_trace(trace_inputs).unwrap();
+                            let witness =
+                                processor.execute_for_proving(&program, &mut host).await.unwrap();
+                            let (vm_witness, _) = witness.into_parts();
+                            let trace = trace::build_trace(vm_witness).unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,

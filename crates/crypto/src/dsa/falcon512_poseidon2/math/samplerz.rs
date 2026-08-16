@@ -95,7 +95,14 @@ fn ber_exp<R: Rng>(x: f64, ccs: f64, rng: &mut R) -> bool {
 }
 
 /// Samples an integer from the Gaussian distribution with given mean (mu) and standard deviation
-/// (sigma).
+/// (sigma) -- SamplerZ, Algorithm 15 of the Falcon specification (which uses Algorithms 12-14).
+///
+/// `sigma_min / sigma` scales the acceptance probability, which helps make the running time
+/// independent of sigma; `sigma` must lie in [sigma_min, SIGMA_MAX = 1.8205].
+///
+/// Byte-consumption contract with `rng` (pinned by the reference known-answer test below): each
+/// rejection-loop attempt draws 9 bytes for the base sampler, 1 byte for the sign, then
+/// [`ber_exp`] draws up to 8 further bytes one at a time, most significant comparison first.
 pub(crate) fn sampler_z<R: Rng>(mu: f64, sigma: f64, sigma_min: f64, rng: &mut R) -> i16 {
     const SIGMA_MAX: f64 = 1.8205;
     const INV_2SIGMA_MAX_SQ: f64 = 1f64 / (2f64 * SIGMA_MAX * SIGMA_MAX);
@@ -127,7 +134,179 @@ pub(crate) fn sampler_z<R: Rng>(mu: f64, sigma: f64, sigma_min: f64, rng: &mut R
 
 #[cfg(test)]
 mod test {
-    use super::approx_exp;
+    use alloc::vec::Vec;
+
+    use rand::rand_core::{Infallible, TryRng, utils};
+
+    use super::{approx_exp, base_sampler, ber_exp, sampler_z};
+
+    /// Replays a fixed byte string, panicking if the sampler requests more bytes than the vector
+    /// provides.
+    struct ReplayRng {
+        bytes: Vec<u8>,
+        cursor: usize,
+    }
+
+    impl ReplayRng {
+        fn from_bytes(bytes: Vec<u8>) -> Self {
+            Self { bytes, cursor: 0 }
+        }
+
+        fn new(hex: &str) -> Self {
+            let bytes = hex::decode(hex).expect("KAT randomness must be valid hexadecimal");
+            Self { bytes, cursor: 0 }
+        }
+
+        fn fill(&mut self, dest: &mut [u8]) {
+            let end = self.cursor + dest.len();
+            assert!(end <= self.bytes.len(), "sampler requested more bytes than the KAT provides");
+            dest.copy_from_slice(&self.bytes[self.cursor..end]);
+            // Convention bridge: the upstream KAT file serializes each 72-bit base-sampler draw
+            // big-endian (first hex byte most significant). The samplers themselves -- falcon.py,
+            // the C reference's `(hi << 64) | lo`, and this port -- all treat the last of the 9
+            // drawn bytes as most significant, and falcon.py's own KAT harness performs exactly
+            // this per-draw reversal before feeding its sampler. The 1-byte sign and ber_exp
+            // draws are order-invariant.
+            if dest.len() == 9 {
+                dest.reverse();
+            }
+            self.cursor = end;
+        }
+    }
+
+    impl TryRng for ReplayRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            utils::next_word_via_fill::<u32, _>(self)
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            utils::next_u64_via_u32(self)
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+            self.fill(dest);
+            Ok(())
+        }
+    }
+
+    /// Drives ber_exp's lexicographic comparison to every depth from 1 to 8: with the first
+    /// k - 1 comparison bytes tying z's, the decision lands on byte k. The KAT vectors all
+    /// decide on the first byte, so without this a corruption confined to a deeper comparison
+    /// byte survives every other test in the crate (mutation-confirmed).
+    #[test]
+    fn ber_exp_decides_at_every_comparison_depth() {
+        // Parameters chosen so s = floor(x / ln 2) = 0 and every comparison byte of z is
+        // strictly interior; the assert below makes any platform float drift loud instead of
+        // silently weakening the test.
+        let (x, ccs) = (0.3f64, 0.7f64);
+        let z = (approx_exp(x, ccs) << 1) - 1;
+        let z_bytes = z.to_be_bytes().to_vec();
+        assert!(
+            z_bytes.iter().all(|&b| b > 0x00 && b < 0xff),
+            "test parameters must give interior comparison bytes: {z_bytes:?}"
+        );
+
+        for depth in 1..=8usize {
+            let mut accept = z_bytes[..depth - 1].to_vec();
+            accept.push(z_bytes[depth - 1] - 1);
+            let mut rng = ReplayRng::from_bytes(accept);
+            assert!(ber_exp(x, ccs, &mut rng), "must accept at depth {depth}");
+            assert_eq!(rng.cursor, depth, "accept must consume exactly {depth} bytes");
+
+            let mut reject = z_bytes[..depth - 1].to_vec();
+            reject.push(z_bytes[depth - 1] + 1);
+            let mut rng = ReplayRng::from_bytes(reject);
+            assert!(!ber_exp(x, ccs, &mut rng), "must reject at depth {depth}");
+            assert_eq!(rng.cursor, depth, "reject must consume exactly {depth} bytes");
+        }
+
+        // A full eight-byte tie leaves w = 0, which rejects.
+        let mut rng = ReplayRng::from_bytes(z_bytes);
+        assert!(!ber_exp(x, ccs, &mut rng), "a full tie must reject");
+        assert_eq!(rng.cursor, 8);
+    }
+
+    /// Boundary check for every RCDT threshold, in the spirit of the C reference's sampler
+    /// tests: a draw of exactly `RCDT[k]` must sample `k` (only the thresholds above index `k`
+    /// exceed it), and `RCDT[k] - 1` must sample `k + 1`. The KAT vectors below only reach
+    /// z0 in {0..3}, so this is what pins the table's lower fourteen thresholds. The expected
+    /// thresholds are repeated here deliberately: changing either listing alone breaks the test.
+    #[test]
+    fn base_sampler_respects_every_rcdt_threshold_boundary() {
+        const RCDT_PIN: [u128; 18] = [
+            3024686241123004913666,
+            1564742784480091954050,
+            636254429462080897535,
+            199560484645026482916,
+            47667343854657281903,
+            8595902006365044063,
+            1163297957344668388,
+            117656387352093658,
+            8867391802663976,
+            496969357462633,
+            20680885154299,
+            638331848991,
+            14602316184,
+            247426747,
+            3104126,
+            28824,
+            198,
+            1,
+        ];
+
+        let draw = |u: u128| {
+            let mut bytes = [0u8; 9];
+            bytes.copy_from_slice(&u.to_le_bytes()[..9]);
+            base_sampler(bytes)
+        };
+
+        assert_eq!(draw(0), 18, "u = 0 lies below every threshold");
+        assert_eq!(draw((1u128 << 72) - 1), 0, "the maximal draw lies above every threshold");
+        for (k, threshold) in RCDT_PIN.into_iter().enumerate() {
+            assert_eq!(draw(threshold), k as i16, "u = RCDT[{k}] must sample {k}");
+            assert_eq!(draw(threshold - 1), k as i16 + 1, "u = RCDT[{k}] - 1 must sample {k}+1");
+        }
+    }
+
+    /// Known-answer vectors for SamplerZ from the Falcon reference material
+    /// (tprest/falcon.py, `scripts/samplerz_KAT512.py`, mirroring the vectors accompanying the
+    /// specification). `octets` is the upstream KAT serialization of the randomness consumed
+    /// across all rejection iterations (big-endian per 72-bit base draw); the replay applies the
+    /// same per-draw reversal the upstream harness does, so this pins the base-sampler
+    /// thresholds it reaches, the first-byte acceptance decisions, and the byte-consumption
+    /// order in one check. Every vector decides on ber_exp's first comparison byte; the dedicated
+    /// depth test covers the deeper comparisons.
+    #[test]
+    fn sampler_z_matches_reference_known_answers() {
+        #[rustfmt::skip]
+        let kats: [(f64, f64, f64, &str, i16); 8] = [
+            (-91.90471153063714, 1.7037990414754918, 1.2778336969128337,
+             "0FC5442FF043D66E91D1EACAC64EA5450A22941EDC6C", -92),
+            (-8.322564895434937, 1.7037990414754918, 1.2778336969128337,
+             "F4DA0F8D8444D1A77265C2EF6F98BBBB4BEE7DB8D9B3", -8),
+            (-19.096516109216804, 1.7035823083824078, 1.2778336969128334,
+             "DB47F6D7FB9B19F25C36D6B9334D477A8BC0BE68145D", -20),
+            (-11.335543982423326, 1.7035823083824078, 1.2778336969128334,
+             "AE41B4F5209665C74D00DCC1A8168A7BB516B3190CB42C1DED26CD52AED770ECA7DD334E0547BCC3C163CE0B", -12),
+            (7.9386734193997555, 1.6984647769450156, 1.2778336969128337,
+             "31054166C1012780C603AE9B833CEC73F2F41CA5807CC89C92158834632F9B1555", 8),
+            (-28.990850086867255, 1.6984647769450156, 1.2778336969128337,
+             "737E9D68A50A06DBBC6477", -30),
+            (-9.071257914091655, 1.6980782114808988, 1.2778336969128339,
+             "A98DDD14BF0BF22061D632", -10),
+            (-43.88754568839566, 1.6980782114808988, 1.2778336969128339,
+             "3CBF6818A68F7AB9991514", -41),
+        ];
+
+        for (mu, sigma, sigma_min, octets, expected_z) in kats {
+            let mut rng = ReplayRng::new(octets);
+            let z = sampler_z(mu, sigma, sigma_min, &mut rng);
+            assert_eq!(z, expected_z, "wrong sample for mu = {mu}");
+            assert_eq!(rng.cursor, rng.bytes.len(), "sampler left unused KAT bytes for mu = {mu}");
+        }
+    }
 
     #[test]
     fn test_approx_exp() {

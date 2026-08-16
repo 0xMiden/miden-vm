@@ -20,6 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
+        target: [wasm32-unknown-unknown, wasm32-wasip1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,9 +30,8 @@ jobs:
       - name: Build for no-std
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}
-          rustup +${{ matrix.toolchain }} target add wasm32-unknown-unknown
-          rustup default ${{ matrix.toolchain }}
-          make build-no-std
+          rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
+          RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target
@@ -61,12 +61,10 @@ jobs:
         run: |
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
-      - name: Install cargo-binstall
+      - name: Install wasmtime
         uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
-          tool: cargo-binstall
-      - name: Install wasmtime
-        run: cargo binstall --no-confirm --strategies crate-meta-data wasmtime-cli@45.0.2
+          tool: wasmtime-cli@45.0.2
       - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128
         run: make test-wasm-simd
 

@@ -336,22 +336,22 @@ fn test_forest_to_root_index() {
 
     // When there is a single tree in the forest, the index is equivalent to the number of
     // leaves in that tree, which is `2^n`.
-    assert_eq!(Forest::new(0b0001).unwrap().root_in_order_index(), idx(1));
-    assert_eq!(Forest::new(0b0010).unwrap().root_in_order_index(), idx(2));
-    assert_eq!(Forest::new(0b0100).unwrap().root_in_order_index(), idx(4));
-    assert_eq!(Forest::new(0b1000).unwrap().root_in_order_index(), idx(8));
+    assert_eq!(Forest::new(0b0001).unwrap().root_in_order_index_unchecked(), idx(1));
+    assert_eq!(Forest::new(0b0010).unwrap().root_in_order_index_unchecked(), idx(2));
+    assert_eq!(Forest::new(0b0100).unwrap().root_in_order_index_unchecked(), idx(4));
+    assert_eq!(Forest::new(0b1000).unwrap().root_in_order_index_unchecked(), idx(8));
 
-    assert_eq!(Forest::new(0b0011).unwrap().root_in_order_index(), idx(5));
-    assert_eq!(Forest::new(0b0101).unwrap().root_in_order_index(), idx(9));
-    assert_eq!(Forest::new(0b1001).unwrap().root_in_order_index(), idx(17));
-    assert_eq!(Forest::new(0b0111).unwrap().root_in_order_index(), idx(13));
-    assert_eq!(Forest::new(0b1011).unwrap().root_in_order_index(), idx(21));
-    assert_eq!(Forest::new(0b1111).unwrap().root_in_order_index(), idx(29));
+    assert_eq!(Forest::new(0b0011).unwrap().root_in_order_index_unchecked(), idx(5));
+    assert_eq!(Forest::new(0b0101).unwrap().root_in_order_index_unchecked(), idx(9));
+    assert_eq!(Forest::new(0b1001).unwrap().root_in_order_index_unchecked(), idx(17));
+    assert_eq!(Forest::new(0b0111).unwrap().root_in_order_index_unchecked(), idx(13));
+    assert_eq!(Forest::new(0b1011).unwrap().root_in_order_index_unchecked(), idx(21));
+    assert_eq!(Forest::new(0b1111).unwrap().root_in_order_index_unchecked(), idx(29));
 
-    assert_eq!(Forest::new(0b0110).unwrap().root_in_order_index(), idx(10));
-    assert_eq!(Forest::new(0b1010).unwrap().root_in_order_index(), idx(18));
-    assert_eq!(Forest::new(0b1100).unwrap().root_in_order_index(), idx(20));
-    assert_eq!(Forest::new(0b1110).unwrap().root_in_order_index(), idx(26));
+    assert_eq!(Forest::new(0b0110).unwrap().root_in_order_index_unchecked(), idx(10));
+    assert_eq!(Forest::new(0b1010).unwrap().root_in_order_index_unchecked(), idx(18));
+    assert_eq!(Forest::new(0b1100).unwrap().root_in_order_index_unchecked(), idx(20));
+    assert_eq!(Forest::new(0b1110).unwrap().root_in_order_index_unchecked(), idx(26));
 }
 
 #[test]
@@ -362,26 +362,26 @@ fn test_forest_to_rightmost_index() {
 
     for forest in 1..256 {
         assert!(
-            Forest::new(forest).unwrap().rightmost_in_order_index().inner() % 2 == 1,
+            Forest::new(forest).unwrap().rightmost_in_order_index_unchecked().inner() % 2 == 1,
             "Leaves are always odd"
         );
     }
 
-    assert_eq!(Forest::new(0b0001).unwrap().rightmost_in_order_index(), idx(1));
-    assert_eq!(Forest::new(0b0010).unwrap().rightmost_in_order_index(), idx(3));
-    assert_eq!(Forest::new(0b0011).unwrap().rightmost_in_order_index(), idx(5));
-    assert_eq!(Forest::new(0b0100).unwrap().rightmost_in_order_index(), idx(7));
-    assert_eq!(Forest::new(0b0101).unwrap().rightmost_in_order_index(), idx(9));
-    assert_eq!(Forest::new(0b0110).unwrap().rightmost_in_order_index(), idx(11));
-    assert_eq!(Forest::new(0b0111).unwrap().rightmost_in_order_index(), idx(13));
-    assert_eq!(Forest::new(0b1000).unwrap().rightmost_in_order_index(), idx(15));
-    assert_eq!(Forest::new(0b1001).unwrap().rightmost_in_order_index(), idx(17));
-    assert_eq!(Forest::new(0b1010).unwrap().rightmost_in_order_index(), idx(19));
-    assert_eq!(Forest::new(0b1011).unwrap().rightmost_in_order_index(), idx(21));
-    assert_eq!(Forest::new(0b1100).unwrap().rightmost_in_order_index(), idx(23));
-    assert_eq!(Forest::new(0b1101).unwrap().rightmost_in_order_index(), idx(25));
-    assert_eq!(Forest::new(0b1110).unwrap().rightmost_in_order_index(), idx(27));
-    assert_eq!(Forest::new(0b1111).unwrap().rightmost_in_order_index(), idx(29));
+    assert_eq!(Forest::new(0b0001).unwrap().rightmost_in_order_index_unchecked(), idx(1));
+    assert_eq!(Forest::new(0b0010).unwrap().rightmost_in_order_index_unchecked(), idx(3));
+    assert_eq!(Forest::new(0b0011).unwrap().rightmost_in_order_index_unchecked(), idx(5));
+    assert_eq!(Forest::new(0b0100).unwrap().rightmost_in_order_index_unchecked(), idx(7));
+    assert_eq!(Forest::new(0b0101).unwrap().rightmost_in_order_index_unchecked(), idx(9));
+    assert_eq!(Forest::new(0b0110).unwrap().rightmost_in_order_index_unchecked(), idx(11));
+    assert_eq!(Forest::new(0b0111).unwrap().rightmost_in_order_index_unchecked(), idx(13));
+    assert_eq!(Forest::new(0b1000).unwrap().rightmost_in_order_index_unchecked(), idx(15));
+    assert_eq!(Forest::new(0b1001).unwrap().rightmost_in_order_index_unchecked(), idx(17));
+    assert_eq!(Forest::new(0b1010).unwrap().rightmost_in_order_index_unchecked(), idx(19));
+    assert_eq!(Forest::new(0b1011).unwrap().rightmost_in_order_index_unchecked(), idx(21));
+    assert_eq!(Forest::new(0b1100).unwrap().rightmost_in_order_index_unchecked(), idx(23));
+    assert_eq!(Forest::new(0b1101).unwrap().rightmost_in_order_index_unchecked(), idx(25));
+    assert_eq!(Forest::new(0b1110).unwrap().rightmost_in_order_index_unchecked(), idx(27));
+    assert_eq!(Forest::new(0b1111).unwrap().rightmost_in_order_index_unchecked(), idx(29));
 }
 
 #[test]

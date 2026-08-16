@@ -5,7 +5,9 @@ use std::{
     process::Command,
 };
 
-use miden_vm_blake3_bench::{BENCH_GROUP, PRIMARY_METRIC, SpanRecord};
+use miden_vm_blake3_bench::{
+    BENCH_GROUP, EXECUTE_FOR_PROVING_METRIC, PRIMARY_METRIC, SpanRecord, normalize_axis_name,
+};
 
 use crate::model::{BenchmarkResult, Metric};
 
@@ -69,7 +71,7 @@ fn select_primary_metric(
         PRIMARY_METRIC,
         "prove_trace_sync",
         "build_trace",
-        "execute_trace_inputs_sync",
+        EXECUTE_FOR_PROVING_METRIC,
         "execute_sync",
     ]
     .into_iter()
@@ -138,24 +140,14 @@ pub(crate) fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<Strin
     if axes.is_empty() || axes.iter().any(|axis| axis == "all") {
         return None;
     }
-    Some(
-        axes.into_iter()
-            .map(|axis| {
-                if matches!(axis.as_str(), "prove" | "prove_program_sync") {
-                    PRIMARY_METRIC.to_string()
-                } else {
-                    axis
-                }
-            })
-            .collect(),
-    )
+    Some(axes.into_iter().map(|axis| normalize_axis_name(&axis).to_string()).collect())
 }
 
 fn report_span_metric_name(name: &str) -> Option<String> {
     match name {
-        "execute_trace_inputs_with_package_debug_info_sync"
-        | "execute_trace_inputs_with_package_debug_info_at_source_node_sync" => {
-            Some("execute_trace_inputs_sync".to_string())
+        "execute_for_proving_with_package_debug_info_sync"
+        | "execute_for_proving_with_package_debug_info_at_source_node_sync" => {
+            Some(EXECUTE_FOR_PROVING_METRIC.to_string())
         },
         "build aux traces" => Some("build_aux_trace".to_string()),
         "to_core_chiplets_matrices" => Some("to_row_major_matrix".to_string()),
@@ -208,7 +200,7 @@ pub(crate) fn metric_name_from_estimate_path(criterion_root: &Path, path: &Path)
         return None;
     }
     if parts.first().is_some_and(|part| part == BENCH_GROUP) {
-        return parts.last().cloned();
+        return parts.last().map(|name| normalize_axis_name(name).to_string());
     }
     Some(parts.join("/"))
 }

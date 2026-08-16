@@ -37,6 +37,10 @@ const MAX_BIG_POLY_COEFFICIENT_SIZE: i16 = (1 << (WIDTH_BIG_POLY_COEFFICIENT - 1
 
 pub trait Inverse: Copy + Zero + MulAssign + One {
     /// Gets the inverse of a, or zero if it is zero.
+    ///
+    /// Only the exact-field implementations (e.g. [`FalconFelt`]) honor the zero-maps-to-zero
+    /// convention; the `f64` and `Complex64` implementations return non-finite values for zero
+    /// instead. Their Falcon call sites only ever invert nonzero denominators.
     fn inverse_or_zero(self) -> Self;
 
     /// Gets the inverses of a batch of elements, and skip over any that are zero.
@@ -321,4 +325,92 @@ fn xgcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 /// [-bound, bound].
 fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16) -> bool {
     polynomial.to_balanced_values().iter().all(|c| *c <= bound && *c >= -bound)
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use num::{BigInt, FromPrimitive, One, Zero};
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+
+    use super::{
+        FalconFelt, Inverse, MODULUS, Polynomial, check_coefficients_bound, ntru_gen, xgcd,
+    };
+
+    /// `ntru_gen` returns the secret-key basis rows `[g, -f, G, -F]`; the NTRU equation
+    /// `f*G - g*F = q (mod X^n + 1)` is then exactly `a*d - b*c = q` on the returned
+    /// quadruple `[a, b, c, d]`. Schoolbook `Mul` is the oracle here, independent of the
+    /// karatsuba path `ntru_solve` itself uses.
+    #[test]
+    fn ntru_gen_output_satisfies_the_ntru_equation() {
+        for (n, seed_byte) in [(64usize, 7u8), (128, 11)] {
+            let mut rng = ChaCha20Rng::from_seed([seed_byte; 32]);
+            let [a, b, c, d] = ntru_gen(n, &mut rng).map(|p| p.map(|&c| c as i64));
+
+            let determinant = (a * d - b * c).reduce_by_cyclotomic(n);
+            assert_eq!(
+                determinant,
+                Polynomial::new(vec![MODULUS as i64]),
+                "basis determinant must equal q for n = {n}",
+            );
+        }
+    }
+
+    /// The identity `ntru_solve` recurses on: lifting the half-size field norm back up must agree
+    /// with multiplying `f` by its Galois adjoint, `N(f)(X^2) = f(X) * f(-X) (mod X^n + 1)`.
+    #[test]
+    fn field_norm_lift_matches_galois_adjoint_product() {
+        let n = 8;
+        let f = Polynomial::new(
+            [3i64, -1, 4, 1, -5, 9, -2, 6]
+                .iter()
+                .map(|&c| BigInt::from_i64(c).unwrap())
+                .collect(),
+        );
+
+        let lifted_norm = f.field_norm().lift_next_cyclotomic();
+        let adjoint_product = (f.clone() * f.galois_adjoint()).reduce_by_cyclotomic(n);
+        assert_eq!(lifted_norm, adjoint_product);
+    }
+
+    #[test]
+    fn xgcd_satisfies_bezout_identity() {
+        let big = |v: i64| BigInt::from_i64(v).unwrap();
+        for (a, b) in [(240, 46), (46, 240), (17, 5), (12, 18), (0, 9), (9, 0), (1, 1)] {
+            let (g, u, v) = xgcd(&big(a), &big(b));
+            assert_eq!(u.clone() * big(a) + v.clone() * big(b), g, "Bezout failed for ({a}, {b})");
+            if a != 0 && b != 0 {
+                assert!(
+                    (big(a) % g.clone()).is_zero() && (big(b) % g.clone()).is_zero(),
+                    "gcd does not divide both operands for ({a}, {b})"
+                );
+            }
+        }
+        // Coprimality is what ntru_solve's base case checks against One.
+        let (g, ..) = xgcd(&big(17), &big(5));
+        assert!(g.is_one());
+    }
+
+    #[test]
+    fn batch_inverse_or_zero_matches_individual_inverses_and_skips_zeros() {
+        let batch: Vec<FalconFelt> =
+            [5i16, 0, 1, 12288, 0, 7, 42].iter().map(|&v| FalconFelt::new(v)).collect();
+        let batch_inverses = FalconFelt::batch_inverse_or_zero(&batch);
+        assert_eq!(batch.len(), batch_inverses.len());
+        for (element, inverse) in batch.iter().zip(&batch_inverses) {
+            assert_eq!(element.inverse_or_zero(), *inverse);
+        }
+    }
+
+    #[test]
+    fn check_coefficients_bound_is_inclusive() {
+        let poly = Polynomial::new(vec![3i16, -3, 0]);
+        assert!(check_coefficients_bound(&poly, 3));
+        assert!(!check_coefficients_bound(&poly, 2));
+    }
 }

@@ -51,7 +51,9 @@ on:
         default: "200,15,3"
         type: string
       bench_axes:
-        description: "Comma-separated axes: all, execute_trace_inputs_sync, build_trace, prove_trace_sync, e2e_prove."
+        description: >-
+          Comma-separated axes: all, execute_for_proving_sync, build_trace, prove_trace_sync,
+          e2e_prove. The legacy execute_trace_inputs_sync spelling is also accepted.
         required: false
         default: "all"
         type: string

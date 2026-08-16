@@ -17,10 +17,12 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
+    "dep:rayon",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
 ]
+registry-tools = ["std", "dep:rayon"]
 std = [
     "dep:miden-ace-codegen",
     "miden-air/std",
@@ -33,6 +35,7 @@ std = [
 
 [dependencies]
 miden-ace-codegen = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
@@ -46,6 +49,11 @@ serde-wincode.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wincode.workspace = true
+
+[[bin]]
+name = "pvm-registry-regen"
+path = "src/bin/pvm_registry_regen.rs"
+required-features = ["registry-tools"]
 
 [dev-dependencies]
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit
