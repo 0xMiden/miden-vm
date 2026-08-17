@@ -2883,6 +2883,7 @@ dependencies = [
 name = "miden-wasm-event-handlers"
 version = "0.30.0"
 dependencies = [
+ "criterion",
  "miden-assembly",
  "miden-event-handler-abi",
  "miden-mast-package",
