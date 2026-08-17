@@ -649,10 +649,18 @@ impl SourceContent {
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        if line_src.len() < column_index {
-            return None;
-        }
-        let (pre, _) = line_src.split_at(column_index);
+        // `column_index` counts characters, matching `location` (which computes columns via
+        // `chars().count()`) -- not bytes. Using it directly as a byte offset, as this used to
+        // via `split_at`, is wrong for any line containing multi-byte UTF-8 characters: it
+        // silently returns an offset that's short by the accumulated extra bytes of any
+        // multi-byte characters before it, and panics outright whenever that byte offset lands
+        // inside a multi-byte character instead of on a char boundary.
+        let byte_len = match line_src.char_indices().nth(column_index) {
+            Some((offset, _)) => offset,
+            None if column_index == line_src.chars().count() => line_src.len(),
+            None => return None,
+        };
+        let pre = &line_src[..byte_len];
         let start = line_span.start;
         Some(start + ByteOffset::from_str_len(pre))
     }
@@ -1516,5 +1524,57 @@ end
                 .expect("invalid byte range"),
             "line4\n".as_bytes()
         );
+    }
+
+    /// Regression test: `line_column_to_offset` must count columns in characters, matching
+    /// `location`'s inverse (which reports columns via `chars().count()`), not bytes. Before the
+    /// fix, requesting a column that fell inside or after a multi-byte UTF-8 character either
+    /// panicked (splitting mid-character) or silently returned the wrong offset.
+    #[test]
+    fn source_content_line_column_to_offset_multibyte_utf8() {
+        // "héllo\n": h(1 byte) é(2 bytes) l l o(1 byte each) \n(1 byte)
+        // = 6 characters, 7 bytes. `line_range` includes the trailing "\n" in the line's byte
+        // span, so it counts as the line's 6th character (column index 5).
+        const CONTENT: &str = "héllo\n";
+        let content = SourceContent::new("text", "test.txt", CONTENT);
+
+        // column -> expected byte offset, for every character position within the line
+        // (including the trailing "\n"). Column 2 ("l", right after "é") is the case that
+        // used to land mid-character: "h" is 1 byte and "é" is 2, so it must be byte 3, not
+        // byte 2.
+        let expected = [(0, 0u32), (1, 1), (2, 3), (3, 4), (4, 5), (5, 6)];
+        for (column, expected_byte) in expected {
+            let offset = content
+                .line_column_to_offset(LineIndex(0), ColumnIndex(column))
+                .unwrap_or_else(|| panic!("column {column} should be in bounds"));
+            assert_eq!(offset.to_u32(), expected_byte, "wrong byte offset for column {column}");
+        }
+
+        // One past the last character (the position right after "\n") is still in bounds and
+        // lands at the byte length of the line.
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(6)).unwrap().to_u32(),
+            7
+        );
+        // Anything further is out of bounds: must return None, not panic and not silently
+        // return an in-bounds-looking offset.
+        assert!(content.line_column_to_offset(LineIndex(0), ColumnIndex(7)).is_none());
+
+        // location() is the inverse of line_column_to_offset(); round-tripping through both
+        // must return to the same character column for every character position covered above
+        // (this stays within line 0's own characters, including "é" and the "l" that follows
+        // it -- column 6 is excluded since that byte offset is also the start of the next
+        // line, which location() resolves to line 1 rather than "end of line 0").
+        for (column, _) in expected {
+            let offset = content.line_column_to_offset(LineIndex(0), ColumnIndex(column)).unwrap();
+            let loc = content.location(offset).unwrap();
+            // `location` reports a one-indexed `ColumnNumber`; convert back to a zero-indexed
+            // `ColumnIndex` to compare against the column we asked for.
+            assert_eq!(
+                ColumnIndex::from(loc.column).to_u32(),
+                column,
+                "round-trip mismatch at column {column}"
+            );
+        }
     }
 }
