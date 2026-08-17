@@ -5,6 +5,7 @@ use alloc::{
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
+
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},

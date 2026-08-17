@@ -227,7 +227,6 @@ fn generate_fuzz_seeds() {
         // Invalid seed: duplicate hashes should deserialize to Err (never panic).
         let duplicate_kernel = KernelDescriptor::from_hashes_unchecked(vec![b, a, a]);
         write_seed("kernel_deserialize", "duplicate_kernel.bin", &duplicate_kernel.to_bytes());
-
     }
 
     // Stack IO seeds
@@ -273,7 +272,6 @@ fn generate_fuzz_seeds() {
             "oversized_entry_count.bin",
             &oversized_entry_count,
         );
-
     }
 
     // Execution proof seed (minimal complete proof with no precompile obligation).
