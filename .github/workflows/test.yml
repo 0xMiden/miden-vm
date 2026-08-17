@@ -24,7 +24,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -47,7 +47,7 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -124,7 +124,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -184,7 +184,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: cargo-hack
       - name: Check all feature combinations
