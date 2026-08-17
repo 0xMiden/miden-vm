@@ -34,6 +34,7 @@ members = [
     "crates/utils-diagnostics",
     "crates/utils-indexing",
     "crates/utils-sync",
+    "crates/wasm-event-handlers",
     "miden-vm",
     "crates/precompiles",
     "crates/stark/vm",
@@ -103,6 +104,7 @@ miden-package-registry  = { path = "./crates/package-registry", version = "1.0.0
 miden-precompiles-stark = { path = "./crates/stark/precompiles", version = "1.0.0-rc.1", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1", default-features = false }
 miden-processor         = { path = "./processor", version = "1.0.0-rc.1", default-features = false }
+miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "1.0.0-rc.1", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", default-features = false }
 miden-prover            = { path = "./prover", version = "1.0.0-rc.1", default-features = false }
@@ -216,6 +218,8 @@ wycheproof-ng-core = { version = "0.2.0", default-features = false }
 wycheproof-ng-dh = { version = "0.2.0", default-features = false }
 wycheproof-ng-ecdsa = { version = "0.2.0", default-features = false }
 wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
+wasmi = { version = "1.1", default-features = false }
+wat = { version = "1.0" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
