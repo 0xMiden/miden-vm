@@ -68,6 +68,10 @@ pub enum WasmHandlerLoadError {
         /// The offending event name.
         event: EventName,
     },
+
+    /// The package's `event_handlers` section is malformed.
+    #[error("invalid 'event_handlers' package section")]
+    Section(#[from] miden_mast_package::EventHandlerSectionError),
 }
 
 /// An error raised while a handler runs. Converted into the boxed

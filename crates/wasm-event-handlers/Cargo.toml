@@ -19,11 +19,12 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-processor/std", "thiserror/std", "wasmi/std"]
+std = ["miden-mast-package/std", "miden-processor/std", "thiserror/std", "wasmi/std"]
 
 [dependencies]
 # Miden dependencies
 miden-event-handler-abi.workspace = true
+miden-mast-package.workspace = true
 miden-processor.workspace = true
 
 # External dependencies
@@ -31,4 +32,5 @@ thiserror.workspace = true
 wasmi.workspace = true
 
 [dev-dependencies]
+miden-assembly.workspace = true
 wat.workspace = true

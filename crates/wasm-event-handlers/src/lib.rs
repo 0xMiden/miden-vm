@@ -31,6 +31,8 @@ extern crate std;
 mod error;
 mod host;
 mod module;
+mod package;
 
 pub use error::WasmHandlerLoadError;
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
+pub use package::{handlers_from_package, host_library_from_package};
