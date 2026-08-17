@@ -29,7 +29,9 @@ use crate::{
 /// traps the handler, which discards all buffered mutations.
 #[derive(Debug, Clone)]
 pub struct WasmHandlerLimits {
-    /// The fuel budget for one call. Roughly one unit per executed Wasm instruction.
+    /// The fuel budget for one call. Roughly one unit per executed Wasm instruction; host calls
+    /// charge additional fuel in proportion to the field elements they move (and per Merkle
+    /// node hashed), so the budget bounds the total work a handler causes.
     pub fuel: u64,
     /// The maximum size of the guest linear memory, in bytes.
     pub max_memory_bytes: usize,
