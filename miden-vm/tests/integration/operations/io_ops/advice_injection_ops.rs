@@ -453,6 +453,13 @@ fn test_adv_insert_mem_over_boundary() {
     assert!(msg.contains("SizeBudgetExceeded"), "expected size-exceeded error, got: {msg}");
 }
 
+/// Re-inserting an unchanged map value at the boundary must remain a no-op.
+#[test]
+fn test_adv_insert_mem_reinsert_at_boundary() {
+    let max_size = 8;
+    run_insert_mem_twice_with_max_value_elements(max_size as u32, max_size).unwrap();
+}
+
 // HELPERS
 // ================================================================================================
 
@@ -460,6 +467,21 @@ fn test_adv_insert_mem_over_boundary() {
 fn run_insert_mem_with_max_value_elements(
     range_len: u32,
     max_value_elements: usize,
+) -> Result<(), miden_processor::ExecutionError> {
+    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 1)
+}
+
+fn run_insert_mem_twice_with_max_value_elements(
+    range_len: u32,
+    max_value_elements: usize,
+) -> Result<(), miden_processor::ExecutionError> {
+    run_insert_mem_with_max_value_elements_and_repeats(range_len, max_value_elements, 2)
+}
+
+fn run_insert_mem_with_max_value_elements_and_repeats(
+    range_len: u32,
+    max_value_elements: usize,
+    repeats: usize,
 ) -> Result<(), miden_processor::ExecutionError> {
     let start_addr: u32 = 0;
     let end_addr = start_addr + range_len;
@@ -470,13 +492,17 @@ fn run_insert_mem_with_max_value_elements(
         .collect::<Vec<_>>()
         .join(" ");
 
+    let insert = format!(
+        r#"push.{end_addr} push.{start_addr}
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop"#,
+    );
+    let inserts = core::iter::repeat_n(insert, repeats).collect::<Vec<_>>().join(" ");
     let source = format!(
         r#"begin
             {mem_stores}
-            push.{end_addr} push.{start_addr}
-            push.1.2.3.4
-            adv.insert_mem
-            dropw drop drop
+            {inserts}
         end"#,
     );
 

@@ -115,8 +115,11 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     }
 
     let addr_range = start_addr as u32..end_addr as u32;
+    let key = processor.stack_get_word(1);
 
-    processor.advice.check_map_value_allocation(addr_range.len())?;
+    if !processor.advice.contains_map_key(&key) {
+        processor.advice.check_map_value_allocation(addr_range.len())?;
+    }
 
     let ctx = processor.ctx;
 
@@ -124,7 +127,6 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
         .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))
         .collect();
 
-    let key = processor.stack_get_word(1);
     processor.advice.insert_into_map(key, values)?;
     Ok(())
 }
