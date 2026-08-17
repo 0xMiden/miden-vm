@@ -216,11 +216,8 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
         .func_wrap(
             IMPORT_MODULE,
             host_fn::STACK_GET,
-            |mut caller: Caller<'_, HostCtx>, pos: u32, out: u32| {
-                let felt = state(&caller)?.get_stack_item(pos as usize);
-                let mem = memory(&mut caller)?;
-                write_felts(mem.data_mut(&mut caller), out, &[felt])?;
-                Ok(OK)
+            |caller: Caller<'_, HostCtx>, pos: u32| -> Result<u64, wasmi::Error> {
+                Ok(state(&caller)?.get_stack_item(pos as usize).as_canonical_u64())
             },
         )
         .expect("no duplicate host function definitions");
@@ -228,12 +225,17 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
     linker
         .func_wrap(
             IMPORT_MODULE,
-            host_fn::STACK_GET_WORD,
-            |mut caller: Caller<'_, HostCtx>, start_pos: u32, out: u32| {
-                let word = state(&caller)?.get_stack_word(start_pos as usize);
+            host_fn::STACK_READ,
+            |mut caller: Caller<'_, HostCtx>, start_pos: u32, out: u32, count: u32| {
                 let mem = memory(&mut caller)?;
-                write_felts(mem.data_mut(&mut caller), out, &[word[0], word[1], word[2], word[3]])?;
-                Ok(OK)
+                // Reject a bad output range before collecting, so `count` is bounded by the
+                // guest memory size when the collection allocates.
+                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+                let state = state(&caller)?;
+                let felts: Vec<Felt> = (0..count as usize)
+                    .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx)))
+                    .collect();
+                write_felts(mem.data_mut(&mut caller), out, &felts)
             },
         )
         .expect("no duplicate host function definitions");
@@ -270,8 +272,34 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
         .expect("no duplicate host function definitions");
 
     linker
+        .func_wrap(
+            IMPORT_MODULE,
+            host_fn::MEM_READ,
+            |mut caller: Caller<'_, HostCtx>, addr: u32, out: u32, count: u32| {
+                let mem = memory(&mut caller)?;
+                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+                if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
+                    return Ok(Status::OutOfBounds.as_raw());
+                }
+                let state = state(&caller)?;
+                let ctx = state.ctx();
+                let mut felts = Vec::with_capacity(count as usize);
+                for idx in 0..count {
+                    match state.get_mem_value(ctx, addr + idx) {
+                        Some(felt) => felts.push(felt),
+                        // The whole range must be written; use `mem_get` for per-cell checks.
+                        None => return Ok(Status::Uninit.as_raw()),
+                    }
+                }
+                write_felts(mem.data_mut(&mut caller), out, &felts)?;
+                Ok(OK)
+            },
+        )
+        .expect("no duplicate host function definitions");
+
+    linker
         .func_wrap(IMPORT_MODULE, host_fn::ADV_STACK_LEN, |caller: Caller<'_, HostCtx>| {
-            state(&caller).map(|state| state.advice_provider().stack().len() as u32)
+            state(&caller).map(|state| state.advice_provider().stack_len() as u32)
         })
         .expect("no duplicate host function definitions");
 
@@ -280,16 +308,19 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::ADV_STACK_READ,
             |mut caller: Caller<'_, HostCtx>, offset: u32, out: u32, count: u32| {
-                let stack = state(&caller)?.advice_provider().stack();
+                let mem = memory(&mut caller)?;
+                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+                let provider = state(&caller)?.advice_provider();
                 let start = offset as usize;
                 let Some(end) = start.checked_add(count as usize) else {
                     return Ok(Status::OutOfBounds.as_raw());
                 };
-                if end > stack.len() {
+                if end > provider.stack_len() {
                     return Ok(Status::OutOfBounds.as_raw());
                 }
-                let mem = memory(&mut caller)?;
-                write_felts(mem.data_mut(&mut caller), out, &stack[start..end])?;
+                let felts: Vec<Felt> =
+                    provider.stack_iter().skip(start).take(count as usize).copied().collect();
+                write_felts(mem.data_mut(&mut caller), out, &felts)?;
                 Ok(OK)
             },
         )
@@ -351,7 +382,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
                     .data_mut()
                     .mutations
                     .push(AdviceMutation::extend_advice_stack_with(felts));
-                Ok(OK)
+                Ok(())
             },
         )
         .expect("no duplicate host function definitions");
@@ -368,7 +399,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
                 let mut map = AdviceMap::default();
                 map.insert(key, values);
                 caller.data_mut().mutations.push(AdviceMutation::extend_map(map));
-                Ok(OK)
+                Ok(())
             },
         )
         .expect("no duplicate host function definitions");
@@ -403,7 +434,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
                     }
                 }
                 caller.data_mut().mutations.push(AdviceMutation::extend_merkle_store(nodes));
-                Ok(OK)
+                Ok(())
             },
         )
         .expect("no duplicate host function definitions");

@@ -23,18 +23,19 @@ const EVENT: EventName = EventName::new("test::wasm::handler");
 /// Imports for every host function, so each fixture also checks that all signatures resolve.
 const IMPORTS: &str = r#"
   (import "miden:event/v1" "stack_depth" (func $stack_depth (result i32)))
-  (import "miden:event/v1" "stack_get" (func $stack_get (param i32 i32) (result i32)))
-  (import "miden:event/v1" "stack_get_word" (func $stack_get_word (param i32 i32) (result i32)))
+  (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
+  (import "miden:event/v1" "stack_read" (func $stack_read (param i32 i32 i32)))
   (import "miden:event/v1" "clk" (func $clk (result i64)))
   (import "miden:event/v1" "ctx" (func $ctx (result i32)))
   (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
+  (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "adv_stack_len" (func $adv_stack_len (result i32)))
   (import "miden:event/v1" "adv_stack_read" (func $adv_stack_read (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "adv_map_value_len" (func $adv_map_value_len (param i32 i32) (result i32)))
   (import "miden:event/v1" "adv_map_value_read" (func $adv_map_value_read (param i32 i32 i32) (result i32)))
-  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32) (result i32)))
-  (import "miden:event/v1" "adv_map_insert" (func $adv_map_insert (param i32 i32 i32) (result i32)))
-  (import "miden:event/v1" "merkle_store_extend" (func $merkle_store_extend (param i32 i32) (result i32)))
+  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
+  (import "miden:event/v1" "adv_map_insert" (func $adv_map_insert (param i32 i32 i32)))
+  (import "miden:event/v1" "merkle_store_extend" (func $merkle_store_extend (param i32 i32)))
   (import "miden:event/v1" "fail" (func $fail (param i32 i32)))
 "#;
 
@@ -110,8 +111,8 @@ fn data_bytes(values: &[u64]) -> String {
 #[test]
 fn stack_item_echoed_to_advice_stack() {
     let wat_src = fixture(
-        "(drop (call $stack_get (i32.const 1) (i32.const 0)))
-         (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))",
+        "(i64.store (i32.const 0) (call $stack_get (i32.const 1)))
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let processor = processor_with_stack(&[5, 7]);
@@ -124,8 +125,8 @@ fn stack_item_echoed_to_advice_stack() {
 #[test]
 fn stack_word_inserted_into_advice_map() {
     let wat_src = fixture(
-        "(drop (call $stack_get_word (i32.const 1) (i32.const 0)))
-         (drop (call $adv_map_insert (i32.const 0) (i32.const 0) (i32.const 4)))",
+        "(call $stack_read (i32.const 1) (i32.const 0) (i32.const 4))
+         (call $adv_map_insert (i32.const 0) (i32.const 0) (i32.const 4))",
     );
     let module = load(&wat_src);
     let processor = processor_with_stack(&[1, 2, 3, 4, 5]);
@@ -138,12 +139,49 @@ fn stack_word_inserted_into_advice_map() {
 }
 
 #[test]
+fn stack_read_batches_elements() {
+    // Read three elements starting below the top, including positions past the stack depth.
+    let wat_src = fixture(
+        "(call $stack_read (i32.const 1) (i32.const 0) (i32.const 3))
+         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
+    );
+    let module = load(&wat_src);
+    let processor = processor_with_stack(&[9, 8]);
+    let state = processor.state();
+    let expected = [state.get_stack_item(1), state.get_stack_item(2), state.get_stack_item(3)];
+
+    let mutations = run(&module, &processor).expect("handler succeeds");
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn mem_read_reports_uninit_and_out_of_bounds() {
+    // Fresh memory: a batch over unwritten cells is Uninit; a range past the u32 address space
+    // is OutOfBounds.
+    let wat_src = fixture(
+        "(i64.store (i32.const 0)
+             (i64.extend_i32_u (call $mem_read (i32.const 0) (i32.const 16) (i32.const 2))))
+         (i64.store (i32.const 8)
+             (i64.extend_i32_u (call $mem_read (i32.const -1) (i32.const 16) (i32.const 2))))
+         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = [
+        Felt::new_unchecked(Status::Uninit.as_raw() as u64),
+        Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64),
+    ];
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
 fn clk_ctx_and_depth_are_visible() {
     let wat_src = fixture(
         "(i64.store (i32.const 0) (call $clk))
          (i64.store (i32.const 8) (i64.extend_i32_u (call $ctx)))
          (i64.store (i32.const 16) (i64.extend_i32_u (call $stack_depth)))
-         (drop (call $adv_stack_extend (i32.const 0) (i32.const 3)))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
     );
     let module = load(&wat_src);
     let processor = processor();
@@ -163,7 +201,7 @@ fn mem_get_reports_uninitialized_memory() {
     let wat_src = fixture(
         "(i64.store (i32.const 0)
              (i64.extend_i32_u (call $mem_get (i32.const 0) (i32.const 8))))
-         (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let processor = processor();
@@ -179,7 +217,7 @@ fn advice_stack_roundtrip() {
         "(local $len i32)
          (local.set $len (call $adv_stack_len))
          (drop (call $adv_stack_read (i32.const 0) (i32.const 0) (local.get $len)))
-         (drop (call $adv_stack_extend (i32.const 0) (local.get $len)))",
+         (call $adv_stack_extend (i32.const 0) (local.get $len))",
     );
     let module = load(&wat_src);
     let advice_stack: AdviceStack = [7u64, 8, 9].into_iter().map(Felt::new_unchecked).collect();
@@ -202,7 +240,7 @@ fn advice_stack_read_out_of_bounds_status() {
                      (i32.const 0)
                      (i32.const 8)
                      (i32.add (call $adv_stack_len) (i32.const 1)))))
-         (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let processor = processor();
@@ -229,7 +267,7 @@ fn advice_map_value_read_after_len() {
         &items,
         "(drop (call $adv_map_value_len (i32.const 0) (i32.const 32)))
          (drop (call $adv_map_value_read (i32.const 0) (i32.const 48) (i32.const 8)))
-         (drop (call $adv_stack_extend (i32.const 48) (i32.const 3)))",
+         (call $adv_stack_extend (i32.const 48) (i32.const 3))",
     );
     let module = load(&wat_src);
     let processor = FastProcessor::new(StackInputs::default())
@@ -246,7 +284,7 @@ fn advice_map_missing_key_status() {
     let wat_src = fixture(
         "(i64.store (i32.const 40)
              (i64.extend_i32_u (call $adv_map_value_len (i32.const 0) (i32.const 32))))
-         (drop (call $adv_stack_extend (i32.const 40) (i32.const 1)))",
+         (call $adv_stack_extend (i32.const 40) (i32.const 1))",
     );
     let module = load(&wat_src);
     let processor = processor();
@@ -267,8 +305,7 @@ fn merkle_store_accepts_consistent_node() {
         felts.extend((0..4).map(|idx| word[idx].as_canonical_u64()));
     }
     let items = format!("(data (i32.const 0) \"{}\")", data_bytes(&felts));
-    let wat_src =
-        fixture_with(&items, "(drop (call $merkle_store_extend (i32.const 0) (i32.const 1)))");
+    let wat_src = fixture_with(&items, "(call $merkle_store_extend (i32.const 0) (i32.const 1))");
     let module = load(&wat_src);
     let processor = processor();
 
@@ -286,7 +323,7 @@ fn stateless_across_calls() {
            (func (export \"handler\")
              (global.set $count (i64.add (global.get $count) (i64.const 1)))
              (i64.store (i32.const 0) (global.get $count))
-             (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))))"
+             (call $adv_stack_extend (i32.const 0) (i32.const 1))))"
     );
     let module = load(&wat_src);
     let processor = processor();
@@ -305,7 +342,7 @@ fn stateless_across_calls() {
 fn non_canonical_felt_from_guest_is_rejected() {
     let wat_src = fixture(
         "(i64.store (i32.const 0) (i64.const -1))
-         (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))",
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
     );
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
@@ -315,7 +352,7 @@ fn non_canonical_felt_from_guest_is_rejected() {
 #[test]
 fn out_of_bounds_pointer_is_rejected() {
     // Offset 65536 is one past the single 64 KiB memory page.
-    let wat_src = fixture("(drop (call $adv_stack_extend (i32.const 65536) (i32.const 1)))");
+    let wat_src = fixture("(call $adv_stack_extend (i32.const 65536) (i32.const 1))");
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
     assert!(err.contains("pointer range"), "unexpected error: {err}");
@@ -342,8 +379,7 @@ fn merkle_store_rejects_inconsistent_node() {
         felts.extend((0..4).map(|idx| word[idx].as_canonical_u64()));
     }
     let items = format!("(data (i32.const 0) \"{}\")", data_bytes(&felts));
-    let wat_src =
-        fixture_with(&items, "(drop (call $merkle_store_extend (i32.const 0) (i32.const 1)))");
+    let wat_src = fixture_with(&items, "(call $merkle_store_extend (i32.const 0) (i32.const 1))");
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
     assert!(err.contains("digest"), "unexpected error: {err}");
@@ -364,7 +400,7 @@ fn fail_reports_the_guest_message() {
 #[test]
 fn mutations_before_fail_are_discarded() {
     let wat_src = fixture(
-        "(drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))
+        "(call $adv_stack_extend (i32.const 0) (i32.const 1))
          (call $fail (i32.const 0) (i32.const 4))",
     );
     let module = load(&wat_src);
@@ -390,7 +426,7 @@ fn memory_growth_is_capped() {
 
 #[test]
 fn mutation_size_limit_is_enforced() {
-    let wat_src = fixture("(drop (call $adv_stack_extend (i32.const 0) (i32.const 5)))");
+    let wat_src = fixture("(call $adv_stack_extend (i32.const 0) (i32.const 5))");
     let limits = WasmHandlerLimits {
         max_mutation_felts: 4,
         ..Default::default()
@@ -466,20 +502,32 @@ fn reserved_event_names_are_rejected() {
 }
 
 #[test]
-fn abi_version_mismatch_is_rejected() {
+fn abi_version_policy_is_enforced() {
     let wasm = wat::parse_str("(module)").expect("valid WAT");
-    let err = WasmHandlerModule::new(
-        &wasm,
-        ABI_VERSION + 1,
-        vec![(EVENT, "handler".to_string())],
-        WasmHandlerLimits::default(),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, WasmHandlerLoadError::AbiVersionMismatch { declared, supported }
-            if declared == ABI_VERSION + 1 && supported == ABI_VERSION),
-        "unexpected error: {err}"
-    );
+    let load = |version: u32| {
+        WasmHandlerModule::new(
+            &wasm,
+            version,
+            vec![(EVENT, "handler".to_string())],
+            WasmHandlerLimits::default(),
+        )
+    };
+
+    // Newer-than-supported and zero versions are rejected; version bumps are additive, so every
+    // version from 1 through ABI_VERSION is accepted (module validation runs after the check).
+    for bad in [0, ABI_VERSION + 1] {
+        let err = load(bad).unwrap_err();
+        assert!(
+            matches!(err, WasmHandlerLoadError::AbiVersionMismatch { declared, supported }
+                if declared == bad && supported == ABI_VERSION),
+            "unexpected error: {err}"
+        );
+    }
+    for good in 1..=ABI_VERSION {
+        // The manifest export is missing, so passing the version check surfaces BadExport.
+        let err = load(good).unwrap_err();
+        assert!(matches!(err, WasmHandlerLoadError::BadExport { .. }), "unexpected error: {err}");
+    }
 }
 
 #[test]

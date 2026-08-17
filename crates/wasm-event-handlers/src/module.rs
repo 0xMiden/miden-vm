@@ -86,7 +86,9 @@ impl WasmHandlerModule {
         manifest: Vec<(EventName, String)>,
         limits: WasmHandlerLimits,
     ) -> Result<Self, WasmHandlerLoadError> {
-        if abi_version != ABI_VERSION {
+        // ABI version bumps are additive only, so every version from 1 up to the version this
+        // crate implements is acceptable. See `miden_event_handler_abi::ABI_VERSION`.
+        if abi_version == 0 || abi_version > ABI_VERSION {
             return Err(WasmHandlerLoadError::AbiVersionMismatch {
                 declared: abi_version,
                 supported: ABI_VERSION,

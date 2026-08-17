@@ -10,13 +10,6 @@ fn status(raw: i32) -> Status {
     }
 }
 
-/// Checks that a host call returned `Status::Ok`; any other status ends the handler.
-fn expect_ok(raw: i32, what: &str) {
-    if !status(raw).is_ok() {
-        fail(what);
-    }
-}
-
 // QUERIES
 // ================================================================================================
 
@@ -28,15 +21,19 @@ pub fn stack_depth() -> u32 {
 /// Returns the operand-stack element at `pos`. Position `0` holds the event ID; positions past
 /// the stack depth read as zero.
 pub fn stack_get(pos: u32) -> RawFelt {
-    let mut out = RawFelt::new(0);
-    expect_ok(unsafe { guest::stack_get(pos, &mut out) }, "stack_get failed");
-    out
+    RawFelt::new(unsafe { guest::stack_get(pos) })
+}
+
+/// Reads the `out.len()` operand-stack elements at positions `start_pos..start_pos + out.len()`,
+/// ordered from the top of the stack down. Positions past the stack depth read as zero.
+pub fn stack_read(start_pos: u32, out: &mut [RawFelt]) {
+    unsafe { guest::stack_read(start_pos, out.as_mut_ptr(), out.len() as u32) }
 }
 
 /// Returns the word at operand-stack positions `start_pos..start_pos + 4`.
 pub fn stack_get_word(start_pos: u32) -> RawWord {
     let mut out = RawWord::default();
-    expect_ok(unsafe { guest::stack_get_word(start_pos, &mut out) }, "stack_get_word failed");
+    stack_read(start_pos, &mut out.0);
     out
 }
 
@@ -58,6 +55,20 @@ pub fn mem_get(addr: u32) -> Option<RawFelt> {
         Status::Ok => Some(out),
         Status::Uninit => None,
         _ => fail("mem_get failed"),
+    }
+}
+
+/// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of the current
+/// context.
+///
+/// Returns [`Status::OutOfBounds`] when the range goes past the `u32` address space and
+/// [`Status::Uninit`] when any cell in the range was never written; `out` is unchanged in both
+/// cases. Use [`mem_get`] for a per-cell presence check.
+pub fn mem_read(addr: u32, out: &mut [RawFelt]) -> Status {
+    let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), out.len() as u32) };
+    match status(raw) {
+        result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
+        _ => fail("mem_read failed"),
     }
 }
 
@@ -108,27 +119,18 @@ pub fn adv_map_value_read(key: &RawWord, out: &mut [RawFelt]) -> Option<usize> {
 
 /// Buffers elements to extend the advice stack, ordered from the new top of the stack down.
 pub fn adv_stack_extend(vals: &[RawFelt]) {
-    expect_ok(
-        unsafe { guest::adv_stack_extend(vals.as_ptr(), vals.len() as u32) },
-        "adv_stack_extend failed",
-    );
+    unsafe { guest::adv_stack_extend(vals.as_ptr(), vals.len() as u32) }
 }
 
 /// Buffers an advice-map insertion of `vals` under `key`.
 pub fn adv_map_insert(key: &RawWord, vals: &[RawFelt]) {
-    expect_ok(
-        unsafe { guest::adv_map_insert(key, vals.as_ptr(), vals.len() as u32) },
-        "adv_map_insert failed",
-    );
+    unsafe { guest::adv_map_insert(key, vals.as_ptr(), vals.len() as u32) }
 }
 
 /// Buffers inner nodes to extend the Merkle store. Every node must satisfy
 /// `value == hash(left, right)`.
 pub fn merkle_store_extend(nodes: &[RawMerkleNode]) {
-    expect_ok(
-        unsafe { guest::merkle_store_extend(nodes.as_ptr(), nodes.len() as u32) },
-        "merkle_store_extend failed",
-    );
+    unsafe { guest::merkle_store_extend(nodes.as_ptr(), nodes.len() as u32) }
 }
 
 // FAILURE
