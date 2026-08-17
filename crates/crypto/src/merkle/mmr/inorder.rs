@@ -131,8 +131,14 @@ impl Deserializable for InOrderIndex {
     fn read_from<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, crate::utils::DeserializationError> {
+        // In-order indices are one-based; writing the decoded value straight into the field
+        // would let untrusted bytes construct the invalid index zero, which the traversal
+        // operations assume cannot exist.
         let idx = source.read_usize()?;
-        Ok(InOrderIndex { idx })
+        let idx = NonZeroUsize::new(idx).ok_or_else(|| {
+            crate::utils::DeserializationError::InvalidValue("InOrderIndex must be nonzero".into())
+        })?;
+        Ok(InOrderIndex::new(idx))
     }
 }
 
@@ -150,10 +156,21 @@ impl From<InOrderIndex> for usize {
 
 #[cfg(test)]
 mod test {
+    use alloc::vec::Vec;
+
     use proptest::prelude::*;
 
     use super::InOrderIndex;
-    use crate::utils::{Deserializable, Serializable};
+    use crate::utils::{ByteWriter, Deserializable, Serializable};
+
+    /// The index is one-based; untrusted bytes encoding zero must be rejected rather than
+    /// silently constructing an index the traversal operations assume cannot exist.
+    #[test]
+    fn deserialization_rejects_the_zero_index() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        assert!(InOrderIndex::read_from_bytes(&bytes).is_err());
+    }
 
     proptest! {
         #[test]

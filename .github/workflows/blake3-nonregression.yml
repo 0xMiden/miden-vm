@@ -51,7 +51,9 @@ on:
         default: "200,15,3"
         type: string
       bench_axes:
-        description: "Comma-separated axes: all, execute_trace_inputs_sync, build_trace, prove_trace_sync, e2e_prove."
+        description: >-
+          Comma-separated axes: all, execute_for_proving_sync, build_trace, prove_trace_sync,
+          e2e_prove. The legacy execute_trace_inputs_sync spelling is also accepted.
         required: false
         default: "all"
         type: string
@@ -92,7 +94,7 @@ jobs:
           rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Prepare benchmark directories
         id: dirs

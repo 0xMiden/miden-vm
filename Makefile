@@ -21,7 +21,9 @@ help:
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
+	@printf "  make check-pvm-registry          # Check PVM ACE registry constants\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
+	@printf "  make regenerate-pvm-registry     # Regenerate PVM ACE registry constants\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -38,7 +40,7 @@ DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
 FAST_TEST_FEATURES       := concurrent,testing
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
@@ -51,6 +53,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 
 # Target triple used when producing release artifacts. Defaults to the host's triple.
 BUILD_TARGET             ?= $(shell rustc -vV | grep host | awk '{print $$2}')
+NO_STD_TARGET            ?= wasm32-unknown-unknown
 
 # Per-crate default features
 FEATURES_air             := testing
@@ -246,7 +249,7 @@ build: ## Builds with default parameters
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace \
+	$(BUILDDOCS) cargo build --no-default-features --target $(NO_STD_TARGET) --workspace \
 		--exclude miden-vm-blake3-bench \
 		--exclude miden-vm-synthetic-bench \
 		--exclude miden-crypto-smt-codspeed-bench \
@@ -304,6 +307,14 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM circuit + evaluator)
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
+
+.PHONY: regenerate-pvm-registry
+regenerate-pvm-registry: ## Regenerate the PVM ACE registry constants (~2 min; protocol break)
+	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --write
+
+.PHONY: check-pvm-registry
+check-pvm-registry: ## Check the PVM ACE registry constants for drift (full recompute)
+	cargo run --release --package miden-precompiles-prover --features registry-tools --bin pvm-registry-regen -- --check
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in constraint artifacts for drift
@@ -429,5 +440,5 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing
-	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture

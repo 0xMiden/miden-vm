@@ -1,5 +1,5 @@
 mod crypto_ops;
-mod decorators;
+mod events;
 mod ext2_ops;
 mod field_ops;
 mod fri_ops;

@@ -6,8 +6,9 @@ use miden_assembly::{
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
-use miden_prover::serde::Deserializable;
-use miden_vm::{KernelDescriptor, ProgramInfo, internal::InputFile};
+use miden_vm::{
+    ExecutionClaim, KernelDescriptor, ProgramInfo, internal::InputFile, serde::Deserializable,
+};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
 
@@ -75,13 +76,22 @@ impl VerifyCmd {
 
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
-        let claim =
-            miden_vm::ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-        miden_vm::verify(&proof, &claim)
+        let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+        let outcome = miden_vm::Verifier::new()
+            .verify(&claim, &proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
+        if let Some(root) = outcome.outstanding_precompile_root() {
+            return Err(Report::msg(format!(
+                "Program proof is valid but incomplete; outstanding precompile root: {root}"
+            )));
+        }
 
-        println!("Verification complete in {} ms", now.elapsed().as_millis());
+        println!(
+            "Verification complete in {} ms. Security level: {} bits",
+            now.elapsed().as_millis(),
+            outcome.security_level()
+        );
 
         Ok(())
     }

@@ -24,8 +24,8 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use crate::{
     math::{U256, from_hex},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, verify_deferred},
-    tests::bus_balance::session_stack_residual,
+    session::{Session, SessionTraces},
+    tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::eval::{
         COL_A_PTR, COL_B_PTR, COL_BOUND_PTR, COL_IS_EC_CREATE, COL_IS_EC_OP, COL_IS_EC_PAI,
         COL_IS_SUB, COL_LHS_BEGIN, COL_PTR, COL_RHS_BEGIN, DIGEST_WIDTH,

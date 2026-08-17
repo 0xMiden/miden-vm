@@ -79,6 +79,22 @@ fn prove_rejects_missing_inferred_inputs_file() {
 }
 
 #[test]
+fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("miden-vm-cli-invalid-prove-extension-test.txt");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "The provided file must have a .masm or .masp extension",
+        ))
+        .stderr(predicate::str::contains("Failed to open input file").not());
+}
+
+#[test]
 fn cli_bundle_debug() {
     let working_dir = TempDir::new().unwrap();
     let output_file = working_dir.path().join("cli_bundle_debug.masp");

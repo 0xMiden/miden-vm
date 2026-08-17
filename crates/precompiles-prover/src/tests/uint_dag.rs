@@ -22,8 +22,8 @@ use super::uint::random_uint_below;
 use crate::{
     math::{U256, add_reduce, from_limbs32, mac_reduce},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, statements::horner_sign_paths, verify_deferred},
-    tests::bus_balance::session_stack_residual,
+    session::{Session, SessionTraces, statements::horner_sign_paths},
+    tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::{
         eval::{
             COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,

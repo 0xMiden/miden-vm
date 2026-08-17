@@ -26,11 +26,12 @@ use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration}
 
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
+use miden_core::program::ExecutionClaim;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
 use miden_vm::{
-    Assembler, ExecutionClaim, HashFunction, Program, ProgramInfo, ProvingOptions, Verifier,
+    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, Prover, StackOutputs, Verifier,
     prove_sync,
 };
 use miden_vm_synthetic_bench::{
@@ -112,6 +113,23 @@ fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) 
     )
     .expect("processor advice inputs should fit advice map limits");
     (host, program.clone(), processor)
+}
+
+fn execute_and_prove(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut DefaultHost,
+) -> (StackOutputs, ExecutionProof) {
+    prove_sync(
+        &Prover::new().with_hash_fn(BENCH_HASH),
+        program,
+        stack_inputs,
+        advice_inputs,
+        host,
+        ExecutionOptions::default(),
+    )
+    .expect("execute and prove program")
 }
 
 fn resolve_snapshot_paths() -> Vec<PathBuf> {
@@ -283,8 +301,8 @@ fn bench_one_scenario(
 
     // Four axes per scenario:
     //   exec       -- FastProcessor::execute_sync (no trace data)
-    //   trace_prep -- FastProcessor::execute_trace_inputs_sync (the input to prove_from_trace_sync)
-    //   prove      -- prove_sync (= trace_prep + STARK prove)
+    //   trace_prep -- FastProcessor::execute_for_proving_sync (post-execution witness creation)
+    //   prove      -- configured prove_sync with overlapped trace construction
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {
@@ -313,7 +331,7 @@ fn bench_one_scenario(
                         processor
                             .take()
                             .unwrap()
-                            .execute_trace_inputs_sync(program, host)
+                            .execute_for_proving_sync(program, host)
                             .expect("trace_prep"),
                     )
                 },
@@ -332,17 +350,12 @@ fn bench_one_scenario(
                     (host, program.clone(), Some(stack), Some(advice))
                 },
                 |(host, program, stack, advice)| {
-                    black_box(
-                        prove_sync(
-                            program,
-                            stack.take().unwrap(),
-                            advice.take().unwrap(),
-                            host,
-                            ExecutionOptions::default(),
-                            ProvingOptions::new(BENCH_HASH),
-                        )
-                        .expect("prove"),
-                    )
+                    black_box(execute_and_prove(
+                        program,
+                        stack.take().unwrap(),
+                        advice.take().unwrap(),
+                        host,
+                    ))
                 },
                 BatchSize::PerIteration,
             );
@@ -351,22 +364,19 @@ fn bench_one_scenario(
 
     if axes.contains("verify") {
         let mut host = DefaultHost::default();
-        let (stack_outputs, proof) = prove_sync(
-            &program,
-            StackInputs::default(),
-            AdviceInputs::default(),
-            &mut host,
-            ExecutionOptions::default(),
-            ProvingOptions::new(BENCH_HASH),
-        )
-        .expect("prove for verify setup");
+        let (stack_outputs, proof) =
+            execute_and_prove(&program, StackInputs::default(), AdviceInputs::default(), &mut host);
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::from(program.clone()),
             StackInputs::default(),
             stack_outputs,
         );
         group.bench_function("verify", |b| {
-            b.iter(|| black_box(Verifier::new().verify(&proof, &claim).expect("verify")));
+            b.iter(|| {
+                let outcome = Verifier::new().verify(&claim, &proof).expect("verify");
+                assert!(outcome.is_complete());
+                black_box(outcome.security_level())
+            });
         });
     }
 

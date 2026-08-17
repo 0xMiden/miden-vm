@@ -325,3 +325,313 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
         assert_eq!(tree_root, ir_root, "roots differ");
     }
 }
+
+#[test]
+fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
+    use miden_air::{
+        ProofOrder,
+        ace::{RecursiveAceCircuitFactory, build_recursive_verifier_ace_circuit},
+    };
+    use miden_core::crypto::hash::Poseidon2;
+
+    // The loader's two `repeat` counts are generated from this split, so pin it to the real
+    // constants+shuffle boundary instead of trusting the value the struct reports.
+    let factored = miden_air::ace::build_factored_multi_air_ace_circuit(AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    })
+    .expect("factored circuit");
+    let expected_prefix_len = factored
+        .circuit_for_order(&ProofOrder::instance_order())
+        .expect("canonical circuit")
+        .to_ace()
+        .expect("encoded circuit")
+        .num_constants()
+        * EXT_DEGREE
+        + factored.num_shuffle_ops();
+
+    let factory = RecursiveAceCircuitFactory::new().expect("factory");
+    let mut reference: Option<(usize, Vec<_>)> = None;
+    for order in ProofOrder::variants() {
+        let circuit = build_recursive_verifier_ace_circuit(&order).expect("recursive ACE circuit");
+        let resumed = factory.circuit_for_order(&order).expect("factory circuit");
+        assert_eq!(resumed, circuit, "factory diverges for {}", order.file_stem());
+
+        // Both segments must be proper adv_pipe-aligned stream slices.
+        assert_eq!(
+            circuit.shuffle_prefix_len, expected_prefix_len,
+            "stream prefix must end exactly at the shuffle/common boundary"
+        );
+        assert!(circuit.shuffle_prefix_len.is_multiple_of(8));
+        assert!(circuit.shuffle_prefix_len < circuit.stream_len);
+        assert_eq!(circuit.stream_len, circuit.instructions.len());
+
+        // The registry leaf binds both segment digests.
+        let (prefix, common) = circuit.instructions.split_at(circuit.shuffle_prefix_len);
+        assert_eq!(circuit.shuffle_commitment, Poseidon2::hash_elements(prefix));
+        assert_eq!(circuit.common_commitment, Poseidon2::hash_elements(common));
+        assert_eq!(
+            circuit.commitment,
+            Poseidon2::merge(&[circuit.shuffle_commitment, circuit.common_commitment])
+        );
+
+        // The common section must be byte-identical across proof orders; only the
+        // shuffle section may differ.
+        match &reference {
+            None => reference = Some((circuit.shuffle_prefix_len, common.to_vec())),
+            Some((prefix_len, common_reference)) => {
+                assert_eq!(circuit.shuffle_prefix_len, *prefix_len);
+                assert_eq!(
+                    common,
+                    common_reference,
+                    "common section differs for {}",
+                    order.file_stem()
+                );
+            },
+        }
+    }
+}
+
+/// Recompute each AIR's aligned block widths in the combined READ layout.
+///
+/// Deliberately independent of the codegen: widths come straight from the AIR definitions and
+/// the documented LMCS alignment, so this cross-checks the production placement rather than
+/// mirroring it.
+fn air_block_widths() -> [(usize, usize, usize); MIDEN_AIR_COUNT] {
+    const LMCS_ALIGNMENT: usize = 8;
+    let mut widths = [(0usize, 0usize, 0usize); MIDEN_AIR_COUNT];
+    for air in AIRS {
+        let aux_coords = <MidenAir as LiftedAir<Felt, QuadFelt>>::aux_width(&air) * EXT_DEGREE;
+        widths[air.instance_index()] = (
+            <MidenAir as BaseAir<Felt>>::width(&air).next_multiple_of(LMCS_ALIGNMENT),
+            aux_coords.next_multiple_of(LMCS_ALIGNMENT) / EXT_DEGREE,
+            <MidenAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(&air),
+        );
+    }
+    widths
+}
+
+/// Start of each AIR's main/aux/boundary block when the blocks are concatenated in `order`.
+fn air_block_offsets(
+    widths: &[(usize, usize, usize); MIDEN_AIR_COUNT],
+    order: &miden_air::ProofOrder,
+) -> [(usize, usize, usize); MIDEN_AIR_COUNT] {
+    let mut offsets = [(0usize, 0usize, 0usize); MIDEN_AIR_COUNT];
+    let (mut main, mut aux, mut boundary) = (0usize, 0usize, 0usize);
+    for air in order.airs().iter().copied() {
+        let i = air.instance_index();
+        offsets[i] = (main, aux, boundary);
+        main += widths[i].0;
+        aux += widths[i].1;
+        boundary += widths[i].2;
+    }
+    offsets
+}
+
+/// Solve for polynomial coefficients (ascending degree) from `(point, value)` samples.
+fn interpolate_coefficients(samples: &[(QuadFelt, QuadFelt)]) -> Vec<QuadFelt> {
+    let n = samples.len();
+    let mut matrix: Vec<Vec<QuadFelt>> = samples
+        .iter()
+        .map(|&(x, y)| {
+            let mut row = Vec::with_capacity(n + 1);
+            let mut power = QuadFelt::ONE;
+            for _ in 0..n {
+                row.push(power);
+                power *= x;
+            }
+            row.push(y);
+            row
+        })
+        .collect();
+
+    for col in 0..n {
+        let pivot = (col..n)
+            .find(|&r| matrix[r][col] != QuadFelt::ZERO)
+            .expect("sample points must be distinct");
+        matrix.swap(col, pivot);
+        let inv = matrix[col][col].inverse();
+        for value in matrix[col].iter_mut() {
+            *value *= inv;
+        }
+        let pivot_row = matrix[col].clone();
+        for (row, values) in matrix.iter_mut().enumerate() {
+            if row == col {
+                continue;
+            }
+            let factor = values[col];
+            if factor == QuadFelt::ZERO {
+                continue;
+            }
+            for (target, &source) in values.iter_mut().zip(pivot_row.iter()).skip(col) {
+                *target -= source * factor;
+            }
+        }
+    }
+
+    (0..n).map(|row| matrix[row][n]).collect()
+}
+
+#[test]
+fn factored_circuits_reproduce_the_canonical_fold_for_every_proof_order() {
+    use miden_air::{AIRS, ProofOrder, ace::build_factored_multi_air_ace_circuit};
+
+    // Every proof order gets its own registry leaf, but end-to-end tests only ever produce a
+    // couple of them, so a per-order routing or fold-weight error would otherwise ship unseen.
+    // For each order this reconstructs the expected evaluation from the canonical circuit alone:
+    // the per-AIR accumulators are recovered by interpolating the canonical evaluation in the
+    // fold challenge, and each order must then reproduce the fold those accumulators imply.
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    };
+    let factored = build_factored_multi_air_ace_circuit(config).expect("factored circuit");
+    let layout = factored.layout().clone();
+
+    let widths = air_block_widths();
+    let canonical_offsets = air_block_offsets(&widths, &ProofOrder::instance_order());
+
+    // Canonical slot -> proof slot for every value the shuffle must route. Derived per AIR from
+    // block offsets, so it does not depend on the codegen's slot enumeration order.
+    let routing = |order: &ProofOrder| -> Vec<(usize, usize)> {
+        let proof_offsets = air_block_offsets(&widths, order);
+        let mut pairs = Vec::new();
+        let mut push = |canonical: InputKey, proof: InputKey| {
+            pairs.push((
+                layout.index(canonical).expect("canonical slot"),
+                layout.index(proof).expect("proof slot"),
+            ));
+        };
+        for air in AIRS {
+            let i = air.instance_index();
+            let (main_w, aux_w, boundary_w) = widths[i];
+            let (canonical_main, canonical_aux, canonical_boundary) = canonical_offsets[i];
+            let (proof_main, proof_aux, proof_boundary) = proof_offsets[i];
+            for offset in 0..2 {
+                for column in 0..main_w {
+                    push(
+                        InputKey::Main { offset, index: canonical_main + column },
+                        InputKey::Main { offset, index: proof_main + column },
+                    );
+                }
+                for column in 0..aux_w {
+                    for coord in 0..EXT_DEGREE {
+                        push(
+                            InputKey::AuxCoord {
+                                offset,
+                                index: canonical_aux + column,
+                                coord,
+                            },
+                            InputKey::AuxCoord { offset, index: proof_aux + column, coord },
+                        );
+                    }
+                }
+            }
+            for value in 0..boundary_w {
+                push(
+                    InputKey::AuxBusBoundary(canonical_boundary + value),
+                    InputKey::AuxBusBoundary(proof_boundary + value),
+                );
+            }
+        }
+        pairs
+    };
+
+    // Zero the quotient openings so the shared `q * v` binding drops out and the evaluation is
+    // exactly the fold of the per-AIR accumulators.
+    let mut base: Vec<QuadFelt> = fill_inputs(&layout);
+    for chunk in 0..layout.counts.num_quotient_chunks {
+        for offset in 0..2 {
+            for coord in 0..EXT_DEGREE {
+                let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
+                base[layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
+            }
+        }
+    }
+
+    let beta_slot = layout.index(InputKey::MultiAirFoldBeta).expect("fold beta slot");
+    let canonical_circuit = factored
+        .circuit_for_order(&ProofOrder::instance_order())
+        .expect("canonical circuit");
+    let eval_at =
+        |circuit: &miden_ace_codegen::AceCircuit<QuadFelt>, inputs: &[QuadFelt], beta: QuadFelt| {
+            let mut inputs = inputs.to_vec();
+            inputs[beta_slot] = beta;
+            circuit.eval(&inputs).expect("circuit eval")
+        };
+
+    // Recover the per-AIR accumulators: the canonical evaluation is
+    // `sum_j acc_j * beta^(N - 1 - j)`, a degree-(N-1) polynomial in beta.
+    let points: Vec<QuadFelt> =
+        (1..=MIDEN_AIR_COUNT).map(|i| QuadFelt::from_u64(i as u64)).collect();
+    let samples: Vec<(QuadFelt, QuadFelt)> = points
+        .iter()
+        .map(|&beta| (beta, eval_at(&canonical_circuit, &base, beta)))
+        .collect();
+    let coefficients = interpolate_coefficients(&samples);
+    // `acc_j` sits at degree `N - 1 - j`.
+    let acc: Vec<QuadFelt> =
+        (0..MIDEN_AIR_COUNT).map(|j| coefficients[MIDEN_AIR_COUNT - 1 - j]).collect();
+
+    // Guard the interpolation itself: an unmodelled beta dependence would break this.
+    let probe = QuadFelt::from_u64(97);
+    let predicted_canonical: QuadFelt = (0..MIDEN_AIR_COUNT)
+        .map(|j| acc[j] * probe.exp_u64((MIDEN_AIR_COUNT - 1 - j) as u64))
+        .sum();
+    assert_eq!(
+        eval_at(&canonical_circuit, &base, probe),
+        predicted_canonical,
+        "canonical evaluation is not the expected fold of per-AIR accumulators"
+    );
+    assert!(
+        acc.iter().all(|value| *value != QuadFelt::ZERO),
+        "degenerate accumulators would make this test vacuous"
+    );
+
+    for order in ProofOrder::variants() {
+        let circuit = factored.circuit_for_order(&order).expect("ordered circuit");
+
+        // Place each AIR's values where the proof order puts them.
+        let mut inputs = base.clone();
+        for (canonical_slot, proof_slot) in routing(&order) {
+            inputs[proof_slot] = base[canonical_slot];
+        }
+
+        // The AIR at proof position k carries beta^(N - 1 - k).
+        let mut exponent = [0usize; MIDEN_AIR_COUNT];
+        for (position, air) in order.airs().iter().copied().enumerate() {
+            exponent[air.instance_index()] = MIDEN_AIR_COUNT - 1 - position;
+        }
+
+        for &beta in points.iter().chain(core::iter::once(&probe)) {
+            let expected: QuadFelt =
+                (0..MIDEN_AIR_COUNT).map(|j| acc[j] * beta.exp_u64(exponent[j] as u64)).sum();
+            assert_eq!(
+                eval_at(&circuit, &inputs, beta),
+                expected,
+                "{} does not reproduce the canonical accumulators folded in proof order",
+                order.file_stem()
+            );
+        }
+    }
+}
+
+/// The registry-entry constructor checks circuit-to-leaf coherence. This test checks that
+/// every served leaf and path authenticate under the protocol root.
+#[test]
+fn registry_entry_paths_authenticate_under_the_protocol_root() {
+    use miden_air::{ProofOrder, ace::recursive_registry_entry, config::ACE_CIRCUIT_REGISTRY_ROOT};
+
+    for order in ProofOrder::variants() {
+        let entry = recursive_registry_entry(&order).expect("registry entry must build");
+        let (_, leaf, path) = entry.into_parts();
+        assert_eq!(
+            path.compute_root(u64::from(order.tag()), leaf)
+                .expect("path must fold to a root"),
+            miden_core::Word::new(ACE_CIRCUIT_REGISTRY_ROOT),
+            "the served path must authenticate the leaf under the protocol root"
+        );
+    }
+}

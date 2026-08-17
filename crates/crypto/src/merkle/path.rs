@@ -15,7 +15,7 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// Indexing into this type starts at the deepest part of the path and gets shallower. That is,
 /// the node at index `0` is deeper than the node at index `self.len() - 1`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MerklePath {
     nodes: Vec<Word>,
 }
@@ -27,8 +27,12 @@ impl MerklePath {
     /// Creates a new Merkle path from a list of nodes.
     ///
     /// The list must be in order of deepest to shallowest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than 255 nodes are provided.
     pub fn new(nodes: Vec<Word>) -> Self {
-        assert!(nodes.len() <= u8::MAX.into(), "MerklePath may have at most 256 items");
+        assert!(nodes.len() <= u8::MAX.into(), "MerklePath may have at most 255 items");
         Self { nodes }
     }
 
@@ -47,7 +51,7 @@ impl MerklePath {
 
     /// Returns the depth in which this Merkle path proof is valid.
     pub fn depth(&self) -> u8 {
-        self.nodes.len() as u8
+        u8::try_from(self.nodes.len()).expect("MerklePath may have at most 255 items")
     }
 
     /// Returns a reference to the [MerklePath]'s nodes, in order of deepest to shallowest.
@@ -131,14 +135,12 @@ impl From<Vec<Word>> for MerklePath {
 
 impl From<&[Word]> for MerklePath {
     fn from(path: &[Word]) -> Self {
-        Self::new(path.to_vec())
+        path.iter().copied().collect()
     }
 }
 
 impl Deref for MerklePath {
-    // we use `Vec` here instead of slice so we can call vector mutation methods directly from the
-    // merkle path (example: `Vec::remove`).
-    type Target = Vec<Word>;
+    type Target = [Word];
 
     fn deref(&self) -> &Self::Target {
         &self.nodes
@@ -156,7 +158,7 @@ impl DerefMut for MerklePath {
 
 impl FromIterator<Word> for MerklePath {
     fn from_iter<T: IntoIterator<Item = Word>>(iter: T) -> Self {
-        Self::new(iter.into_iter().collect())
+        Self::new(iter.into_iter().take(usize::from(u8::MAX) + 1).collect())
     }
 }
 
@@ -171,7 +173,7 @@ impl IntoIterator for MerklePath {
 
 /// An iterator over internal nodes of a [MerklePath]. See [`MerklePath::authenticated_nodes()`]
 pub struct InnerNodeIterator<'a> {
-    nodes: &'a Vec<Word>,
+    nodes: &'a [Word],
     index: NodeIndex,
     value: Word,
 }
@@ -240,9 +242,30 @@ pub struct RootPath {
 
 impl Serializable for MerklePath {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        assert!(self.nodes.len() <= u8::MAX.into(), "Length enforced in the constructor");
+        // Keep the wire-format length prefix safe if an internal construction path ever violates
+        // the type invariant.
+        assert!(self.nodes.len() <= u8::MAX.into(), "MerklePath may have at most 255 items");
         target.write_u8(self.nodes.len() as u8);
         target.write_many(&self.nodes);
+    }
+}
+
+/// Bounds the node sequence while reading it, then constructs the path through
+/// [`MerklePath::new`]. The helper preserves the field layout produced by `Serialize`.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MerklePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename = "MerklePath")]
+        struct Raw {
+            nodes: super::BoundedVec<Word, { u8::MAX as usize }>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(MerklePath::new(raw.nodes.0))
     }
 }
 
@@ -289,7 +312,44 @@ impl Deserializable for RootPath {
 
 #[cfg(test)]
 mod tests {
-    use crate::merkle::{MerklePath, int_to_node};
+    use crate::{
+        merkle::{MerklePath, int_to_node},
+        utils::Serializable,
+    };
+
+    #[test]
+    #[should_panic(expected = "MerklePath may have at most 255 items")]
+    fn new_rejects_more_than_255_nodes() {
+        let _ = MerklePath::new(vec![int_to_node(0); u8::MAX as usize + 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "MerklePath may have at most 255 items")]
+    fn from_iter_caps_allocation_and_rejects_excess_nodes() {
+        // Model an attacker-controlled size hint without materializing the input.
+        let nodes = (0..usize::MAX).map(|_| int_to_node(0));
+        let _ = MerklePath::from_iter(nodes);
+    }
+
+    #[test]
+    #[should_panic(expected = "MerklePath may have at most 255 items")]
+    fn depth_rejects_an_internally_invalid_length() {
+        // Public construction rejects this state; construct it directly to exercise the
+        // defense-in-depth check in `depth()`.
+        let path = MerklePath {
+            nodes: vec![int_to_node(0); u8::MAX as usize + 1],
+        };
+        let _ = path.depth();
+    }
+
+    #[test]
+    #[should_panic(expected = "MerklePath may have at most 255 items")]
+    fn serialization_rejects_an_internally_invalid_length() {
+        let path = MerklePath {
+            nodes: vec![int_to_node(0); u8::MAX as usize + 1],
+        };
+        let _ = path.to_bytes();
+    }
 
     #[test]
     fn test_inner_nodes() {

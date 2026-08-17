@@ -40,6 +40,48 @@ pub fn intro(
     msm.intro(group, sbound, base, one)
 }
 
+/// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`
+/// (value `= φ(P)`) — GLV's endomorphism leaf, the second base a joint
+/// wNAF ladder walks alongside [`intro`]'s `⟨P × 1⟩` (the two merge back
+/// onto one term at `combine` time: `msm_combine`'s shared-base rule
+/// gives `⟨P × (a + b·λ)⟩`). `λ` is never an AIR-known constant — the
+/// term's scalar is the group's own `lambda_ptr`, authenticated by the
+/// boundary's `EcGroup` consume — and `φ(P)`'s membership rides its
+/// value relation (`x_φ = β·x_P`, `y_φ = y_P`, both certified in-circuit)
+/// rather than a fresh MAC trio, so this never revalidates `P`. Panics if
+/// `base` is the point at infinity or its group has no GLV endomorphism.
+/// Returns the expression handle.
+pub fn intro_endo(
+    msm: &mut EcMsmRequires,
+    ec: &mut EcStores,
+    uint: &mut UintStores,
+    base: EcPointPtr,
+) -> EcExprPtr {
+    if let Some(e) = msm.lookup_intro_endo(base) {
+        return e; // a prior ⟨base × λ⟩ — reuse it
+    }
+    let group = ec.store.point_params(base).0;
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
+    assert_ne!(beta_ptr.addr(), 0, "intro_endo requires a group with a GLV endomorphism");
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let sbound = ec.store.group_sbound(group);
+    let (px, py) = ec.store.point_params(base).1.expect("intro_endo of the point at infinity");
+
+    // x_φ = β·x_P (the plain `κ_a = 1, κ_c = 0` product arrangement, like
+    // the membership trio's `u ≡ x² + a`); y_φ = y_P rides the shared
+    // `endo_y` ptr for free.
+    let phi_x = uint.require().mac(1, beta_ptr, px, 0, bound_ptr);
+    let (val, minted) = ec.store.add_point_cert(group, phi_x, py);
+    ec.store.require_ecpoint(base);
+    ec.store.require_ecpoint(val);
+    ec.store.require_ecgroup(group);
+
+    msm.intro_endo(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, val, px, py, phi_x,
+        minted,
+    )
+}
+
 /// Combine two MSM expressions: union their term multisets (scalars on a
 /// shared base merge `mod` the scalar bound) and add their values. The
 /// merge walks both base-ordered term lists ([`merge_terms`]); the value is
@@ -63,13 +105,16 @@ pub fn combine(
     let val_a = msm.value(a);
     let val_b = msm.value(b);
     let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
 
     let rows = merge_terms(&a_terms, &b_terms, &mut uint.require());
 
     let val = ec.require(uint.require()).add(val_a, val_b, 1);
     ec.store.require_ecgroup(group);
 
-    let c = msm.combine(group, sbound, a_ptr, b_ptr, bound_ptr, a, b, val_a, val_b, val, rows);
+    let c = msm.combine(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, b, val_a, val_b, val, rows,
+    );
     msm.consume_op(a, 1);
     msm.consume_op(b, 1);
     c
@@ -94,6 +139,7 @@ pub fn neg(
     let a_terms = msm.terms(a);
     let val_a = msm.value(a);
     let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
 
     // Per term: keep the base, negate the scalar (one UintAdd each).
     let mut rows = Vec::with_capacity(a_terms.len());
@@ -121,7 +167,8 @@ pub fn neg(
     ec.store.require_ecgroup(group);
 
     let c = msm.neg(
-        group, sbound, a_ptr, b_ptr, bound_ptr, a, val_a, val, px, py, neg_py, minted, rows,
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a, val_a, val, px, py,
+        neg_py, minted, rows,
     );
     msm.consume_op(a, 1);
     c

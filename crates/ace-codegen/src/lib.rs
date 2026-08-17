@@ -23,10 +23,14 @@
 //! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
 //! - `dag`: verifier-style DAG IR and lowering helpers.
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
+//! - `factored`: shuffle/common split of a multi-AIR circuit, so per-proof-order variants share one
+//!   order-invariant section (used by the recursive verifier's circuit registry).
+//! - `factory`: cached per-order encoding and registry-leaf construction.
 //! - `layout`: READ-section layout and index mapping.
 //! - `encode`: ACE stream encoding + padding rules.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
+//! - `registry`: order tags, registry layout, subtree construction, and path authentication.
 
 // Core IR and lowering.
 mod circuit;
@@ -34,9 +38,12 @@ mod dag;
 
 // Input layout and encoding.
 mod encode;
+mod factored;
+mod factory;
 mod layout;
 mod quotient;
 mod randomness;
+mod registry;
 
 // High-level orchestration.
 mod pipeline;
@@ -69,9 +76,15 @@ pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,
+    factored::ShuffleEncodeBuffer,
+    factory::{FactoredCircuitFactory, FactoredEncodedCircuit, PackedLeafScratch},
     layout::{InputCounts, InputKey, InputLayout},
     pipeline::{
-        AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
-        build_multi_air_ace_circuit,
+        AceArtifacts, AceConfig, FactoredMultiAirCircuit, LayoutKind, build_ace_circuit_for_air,
+        build_ace_dag_for_air, build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit,
+    },
+    registry::{
+        MAX_REGISTRY_AIRS, RegistryLayout, ceil_log2, factorial, fold_row_to_root, order_from_tag,
+        order_tag, padding_leaf, path_in_verified_tree, subtree_leaves, verify_row,
     },
 };

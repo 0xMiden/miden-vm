@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    deferred::{DeferredRoot, DeferredStateWire},
+    deferred::{DeferredRoot, DeferredStateWire, MAX_PRECOMPILE_ROOTS},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -125,253 +125,216 @@ impl Deserializable for HashFunction {
     }
 }
 
-// EXECUTION PROOF
+// PROOF ARTIFACTS
 // ================================================================================================
 
-/// A proof of correct execution of Miden VM.
-///
-/// The proof contains the Miden VM STARK proof and deferred proof material for the execution's
-/// precompile claims. Verifying the deferred proof returns the root used to check the VM STARK
-/// public inputs.
-///
-/// `Empty` and STARK-backed deferred proofs are final form; wire-backed proofs are partial form.
+/// Hard encoded-size and per-allocation safety ceiling for every STARK proof.
+pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+
+/// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ExecutionProof {
-    miden: StarkProof,
-    deferred: DeferredProof,
+pub struct VmProof {
+    pub proof: StarkProof,
+    pub precompile_root: DeferredRoot,
+}
+
+impl Serializable for VmProof {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.proof.write_into(target);
+        self.precompile_root.write_into(target);
+    }
+}
+
+impl Deserializable for VmProof {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let proof = StarkProof::read_from(source)?;
+        let precompile_root = DeferredRoot::read_from(source)?;
+        Ok(Self { proof, precompile_root })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        let proof = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after VM proof payload".into(),
+            ));
+        }
+        Ok(proof)
+    }
+
+    fn min_serialized_size() -> usize {
+        StarkProof::min_serialized_size() + DeferredRoot::min_serialized_size()
+    }
+}
+
+/// A precompile STARK proof with its ordered constituent roots.
+///
+/// Binary decoding enforces the fixed root ceiling before reserving root storage, but otherwise
+/// preserves the encoded artifact shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PrecompileProof {
+    pub proof: StarkProof,
+    pub roots: Vec<DeferredRoot>,
+}
+
+impl Serializable for PrecompileProof {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.proof.write_into(target);
+        self.roots.write_into(target);
+    }
+}
+
+impl Deserializable for PrecompileProof {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let proof = StarkProof::read_from(source)?;
+        let root_count = source.read_usize()?;
+        if root_count > MAX_PRECOMPILE_ROOTS {
+            return Err(DeserializationError::InvalidValue(format!(
+                "precompile proof contains too many roots: found {root_count}, maximum is {MAX_PRECOMPILE_ROOTS}"
+            )));
+        }
+        let roots = source
+            .read_many_iter::<DeferredRoot>(root_count)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { proof, roots })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        let proof = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after precompile proof payload".into(),
+            ));
+        }
+        Ok(proof)
+    }
+
+    fn min_serialized_size() -> usize {
+        StarkProof::min_serialized_size() + usize::min_serialized_size()
+    }
+}
+
+const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
+const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
+
+/// A Miden VM execution proof, either awaiting precompile proving or complete.
+///
+/// This type preserves proof artifacts without establishing their validity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExecutionProof {
+    /// The VM STARK and deferred precompile wire are available.
+    Deferred {
+        vm: VmProof,
+        precompile: DeferredStateWire,
+    },
+    /// The proof lifecycle is complete, with an optional precompile proof.
+    Complete {
+        vm: VmProof,
+        precompile: Option<PrecompileProof>,
+    },
 }
 
 impl ExecutionProof {
-    // CONSTRUCTOR
-    // --------------------------------------------------------------------------------------------
-
-    /// Creates a new instance of [ExecutionProof] from a Miden VM STARK proof envelope and deferred
-    /// proof material.
-    pub const fn new(miden: StarkProof, deferred: DeferredProof) -> Self {
-        Self { miden, deferred }
+    /// Returns whether this proof has completed its lifecycle transition.
+    pub const fn is_complete(&self) -> bool {
+        matches!(self, Self::Complete { .. })
     }
 
-    /// Creates a new instance of [ExecutionProof] from serialized Miden VM STARK proof bytes, hash
-    /// function, and deferred proof material.
-    pub fn from_parts(
-        miden_proof_bytes: Vec<u8>,
-        hash_fn: HashFunction,
-        deferred: impl Into<DeferredProof>,
-    ) -> Self {
-        Self::new(StarkProof::new(miden_proof_bytes, hash_fn), deferred.into())
+    /// Transitions a deferred proof to complete by attaching a precompile proof.
+    pub fn complete(self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
+        let Self::Deferred { vm, .. } = self else {
+            return Err(ExecutionProofError::AlreadyComplete);
+        };
+        Ok(Self::Complete { vm, precompile: Some(precompile) })
     }
 
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the Miden VM STARK proof envelope.
-    pub const fn miden_proof(&self) -> &StarkProof {
-        &self.miden
-    }
-
-    /// Returns the deferred proof material associated with the Miden VM proof.
-    pub const fn deferred_proof(&self) -> &DeferredProof {
-        &self.deferred
-    }
-
-    /// Returns `true` if this proof is in final form.
+    /// Encodes either state canonically.
     ///
-    /// This is a shape check only: it means the deferred proof is empty or STARK-backed, not that
-    /// either the VM STARK proof or the deferred proof has been verified.
-    pub const fn is_final(&self) -> bool {
-        self.deferred.is_final()
-    }
-
-    /// Returns conjectured security level of this proof in bits.
-    ///
-    /// TODO: this is a placeholder returning a hardcoded 96 (honest only for the current
-    /// parameter preset). The conjectured estimator now exists as
-    /// `miden_air::config::conjectured_security_level`, but this method cannot call it —
-    /// `miden-air` depends on `miden-core`, not the reverse. The intended fix is to stop having
-    /// the proof self-report a security level and instead grade it in the verifier (which does
-    /// depend on `miden-air`).
-    pub fn security_level(&self) -> u32 {
-        96
-    }
-
-    // SERIALIZATION / DESERIALIZATION
-    // --------------------------------------------------------------------------------------------
-
-    /// Serializes this proof into a vector of bytes.
+    /// Encoding preserves the public enum representation and does not establish proof validity.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        self.write_into(&mut bytes);
-        bytes
+        Serializable::to_bytes(self)
     }
 
-    /// Reads the source bytes, parsing a new proof instance.
+    /// Decodes an execution proof without hydrating passive deferred wire.
     ///
-    /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
-    pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        <Self as Deserializable>::read_from_bytes(source)
+    /// Decoding establishes bounded canonical transport syntax, not proof validity.
+    pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        let proof = <Self as Deserializable>::read_from(&mut reader)?;
+
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after execution proof payload".into(),
+            ));
+        }
+        if proof.to_bytes() != bytes {
+            return Err(DeserializationError::InvalidValue(
+                "execution proof bytes are not canonically encoded".into(),
+            ));
+        }
+
+        Ok(proof)
     }
 }
 
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.miden.write_into(target);
-        self.deferred.write_into(target);
+        match self {
+            Self::Deferred { vm, precompile } => {
+                target.write_u8(DEFERRED_PROOF_DISCRIMINANT);
+                vm.write_into(target);
+                precompile.write_into(target);
+            },
+            Self::Complete { vm, precompile } => {
+                target.write_u8(COMPLETE_PROOF_DISCRIMINANT);
+                vm.write_into(target);
+                precompile.write_into(target);
+            },
+        }
     }
 }
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let miden = StarkProof::read_from(source)?;
-        let deferred = DeferredProof::read_from(source)?;
-
-        Ok(ExecutionProof::new(miden, deferred))
-    }
-
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        Self::read_from(&mut reader)
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
-impl ExecutionProof {
-    /// Creates a dummy `ExecutionProof` for testing purposes only.
-    ///
-    /// A proof created in this way will not be verifiable against any verifier.
-    pub fn new_dummy() -> Self {
-        ExecutionProof::new(
-            StarkProof::new(Vec::new(), HashFunction::Blake3_256),
-            DeferredProof::Empty,
-        )
-    }
-}
-
-// DEFERRED PROOF
-// ================================================================================================
-
-/// Proof material for the precompile claims associated with an execution proof.
-///
-/// Verification returns the deferred root used to check the VM STARK proof. `Wire` is the partial
-/// form; `Empty` and `Stark` are final forms.
-///
-/// Variants are public so callers can construct and inspect deferred proof material directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum DeferredProof {
-    /// No precompile claims were produced. Verifiers resolve this to
-    /// [`crate::deferred::TRUE_DIGEST`].
-    Empty,
-    /// Canonical deferred-state wire for a partial proof.
-    Wire(DeferredStateWire),
-    /// A precompile VM STARK proof for this execution's exact deferred root.
-    ///
-    /// After `proof` verifies against `public_root`, that root is used to verify the VM STARK
-    /// proof.
-    Stark {
-        proof: StarkProof,
-        public_root: DeferredRoot,
-    },
-}
-
-impl DeferredProof {
-    const EMPTY_TAG: u8 = 0;
-    pub(crate) const WIRE_TAG: u8 = 1;
-    const STARK_TAG: u8 = 2;
-
-    /// Creates an empty deferred proof.
-    pub const fn empty() -> Self {
-        Self::Empty
-    }
-
-    /// Creates a deferred proof backed by a wire opening.
-    pub const fn wire(wire: DeferredStateWire) -> Self {
-        Self::Wire(wire)
-    }
-
-    /// Creates a deferred proof backed by a precompile VM STARK proof.
-    pub const fn stark(proof: StarkProof, public_root: DeferredRoot) -> Self {
-        Self::Stark { proof, public_root }
-    }
-
-    /// Returns `true` if this deferred proof is [`DeferredProof::Empty`].
-    pub const fn is_empty(&self) -> bool {
-        matches!(self, Self::Empty)
-    }
-
-    /// Returns `true` if this deferred proof is in final form.
-    ///
-    /// This is a shape check only: it accepts empty and STARK-backed proofs and rejects wire-backed
-    /// partial proofs. It does not verify the contained proof material.
-    pub const fn is_final(&self) -> bool {
-        matches!(self, Self::Empty | Self::Stark { .. })
-    }
-
-    /// Returns the wire opening if this deferred proof is [`DeferredProof::Wire`].
-    pub const fn as_wire(&self) -> Option<&DeferredStateWire> {
-        match self {
-            Self::Wire(wire) => Some(wire),
-            _ => None,
+        let discriminant = source.read_u8()?;
+        if !matches!(discriminant, DEFERRED_PROOF_DISCRIMINANT | COMPLETE_PROOF_DISCRIMINANT) {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid execution proof discriminant {discriminant}"
+            )));
         }
-    }
 
-    /// Returns the nested proof and public root if this proof is [`DeferredProof::Stark`].
-    pub const fn as_stark(&self) -> Option<(&StarkProof, DeferredRoot)> {
-        match self {
-            Self::Stark { proof, public_root } => Some((proof, *public_root)),
-            _ => None,
-        }
-    }
-}
-
-impl From<DeferredStateWire> for DeferredProof {
-    fn from(wire: DeferredStateWire) -> Self {
-        Self::wire(wire)
-    }
-}
-
-impl Serializable for DeferredProof {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            Self::Empty => target.write_u8(Self::EMPTY_TAG),
-            Self::Wire(wire) => {
-                target.write_u8(Self::WIRE_TAG);
-                wire.write_into(target);
+        let vm = VmProof::read_from(source)?;
+        match discriminant {
+            DEFERRED_PROOF_DISCRIMINANT => {
+                let precompile = DeferredStateWire::read_from(source)?;
+                Ok(Self::Deferred { vm, precompile })
             },
-            Self::Stark { proof, public_root } => {
-                target.write_u8(Self::STARK_TAG);
-                proof.write_into(target);
-                public_root.write_into(target);
+            COMPLETE_PROOF_DISCRIMINANT => {
+                let precompile = Option::<PrecompileProof>::read_from(source)?;
+                Ok(Self::Complete { vm, precompile })
             },
+            _ => unreachable!("execution proof discriminant was checked before decoding"),
         }
-    }
-}
-
-impl Deserializable for DeferredProof {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let tag = source.read_u8()?;
-        match tag {
-            Self::EMPTY_TAG => Ok(Self::Empty),
-            Self::WIRE_TAG => Ok(Self::Wire(DeferredStateWire::read_from(source)?)),
-            Self::STARK_TAG => {
-                let proof = StarkProof::read_from(source)?;
-                let public_root = <DeferredRoot as Deserializable>::read_from(source)?;
-                Ok(Self::Stark { proof, public_root })
-            },
-            other => Err(DeserializationError::InvalidValue(format!(
-                "invalid deferred proof discriminant: {other}"
-            ))),
-        }
-    }
-
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        Self::read_from(&mut reader)
     }
 
     fn min_serialized_size() -> usize {
-        1
+        u8::min_serialized_size()
+            + VmProof::min_serialized_size()
+            + Option::<PrecompileProof>::min_serialized_size()
     }
+}
+
+/// Lifecycle errors returned while transitioning an execution proof.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ExecutionProofError {
+    /// Only a deferred execution proof can be completed.
+    #[error("the execution proof is already complete")]
+    AlreadyComplete,
 }
 
 // STARK PROOF
@@ -416,7 +379,13 @@ impl Serializable for StarkProof {
 
 impl Deserializable for StarkProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let bytes = Vec::<u8>::read_from(source)?;
+        let byte_count = source.read_usize()?;
+        if byte_count > MAX_STARK_PROOF_BYTES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "STARK proof contains too many bytes: found {byte_count}, maximum is {MAX_STARK_PROOF_BYTES}"
+            )));
+        }
+        let bytes = source.read_many_iter::<u8>(byte_count)?.collect::<Result<Vec<_>, _>>()?;
         let hash_fn = HashFunction::read_from(source)?;
         Ok(Self::new(bytes, hash_fn))
     }
@@ -425,6 +394,10 @@ impl Deserializable for StarkProof {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
         Self::read_from(&mut reader)
     }
+
+    fn min_serialized_size() -> usize {
+        Vec::<u8>::min_serialized_size() + HashFunction::min_serialized_size()
+    }
 }
 
 #[cfg(test)]
@@ -432,161 +405,330 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredRoot, TRUE_INDEX, Tag, WireEntry},
-        serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
+        deferred::{DeferredState, Node, PrecompileWitness, TRUE_DIGEST},
+        serde::ByteWriter,
     };
 
-    #[test]
-    fn execution_proof_from_bytes_rejects_unbounded_proof_len() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(usize::MAX);
+    fn dummy_stark_proof(bytes: &[u8]) -> StarkProof {
+        StarkProof::new(bytes.to_vec(), HashFunction::Blake3_256)
+    }
 
-        let err = ExecutionProof::from_bytes(&bytes).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("requested"));
-        assert!(message.contains("reader can provide at most"));
+    fn root(value: u64) -> DeferredRoot {
+        [Felt::new(value).unwrap(), Felt::ZERO, Felt::ZERO, Felt::ZERO].into()
+    }
+
+    fn vm_proof(precompile_root: DeferredRoot) -> VmProof {
+        VmProof {
+            proof: dummy_stark_proof(&[1]),
+            precompile_root,
+        }
+    }
+
+    fn precompile_proof(roots: &[DeferredRoot]) -> PrecompileProof {
+        PrecompileProof {
+            proof: dummy_stark_proof(&[2]),
+            roots: roots.to_vec(),
+        }
+    }
+
+    fn wire() -> (DeferredStateWire, DeferredRoot) {
+        let mut state = DeferredState::default();
+        let statement = state.register(Node::and(TRUE_DIGEST, TRUE_DIGEST)).unwrap();
+        state.log_statement(statement).unwrap();
+        let witness = PrecompileWitness::new(state).unwrap();
+        (witness.state().to_wire().unwrap(), witness.roots()[0])
+    }
+
+    fn round_trip_execution_proof(proof: &ExecutionProof) {
+        let bytes = proof.to_bytes();
+        let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
+        assert_eq!(&decoded, proof);
     }
 
     #[test]
-    fn execution_proof_read_from_bytes_rejects_unbounded_proof_len() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(usize::MAX);
-
-        let err = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
+    fn execution_proof_repository_traits_decode_one_stream_item() {
+        let (precompile_wire, wire_root) = wire();
+        let deferred = ExecutionProof::Deferred {
+            vm: vm_proof(wire_root),
+            precompile: precompile_wire,
         };
-        assert!(message.contains("requested"));
-        assert!(message.contains("reader can provide at most"));
+        let complete = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: Some(precompile_proof(&[root(1)])),
+        };
+        let mut stream = deferred.to_bytes();
+        complete.write_into(&mut stream);
+        let mut reader = SliceReader::new(&stream);
+
+        assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), deferred);
+        assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), complete);
+        assert!(!reader.has_more_bytes());
     }
 
     #[test]
-    fn execution_proof_round_trips_empty_deferred_proof() {
-        let proof = ExecutionProof::new(
-            StarkProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256),
-            DeferredProof::empty(),
+    fn execution_proof_containers_round_trip_representable_shapes_with_exact_budget() {
+        let complete_without_precompile = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        };
+        let smallest =
+            alloc::vec![complete_without_precompile.clone(), complete_without_precompile.clone(),];
+        let smallest_bytes = smallest.to_bytes();
+        assert_eq!(smallest_bytes.len(), 75);
+        assert_eq!(ExecutionProof::min_serialized_size(), 36);
+        assert_eq!(
+            Vec::<ExecutionProof>::read_from_bytes_with_budget(
+                &smallest_bytes,
+                smallest_bytes.len()
+            )
+            .unwrap(),
+            smallest
         );
 
-        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
+        let (precompile_wire, wire_root) = wire();
+        let malformed_shapes = alloc::vec![
+            ExecutionProof::Deferred {
+                vm: vm_proof(wire_root),
+                precompile: precompile_wire,
+            },
+            complete_without_precompile,
+            ExecutionProof::Complete {
+                vm: vm_proof(root(9)),
+                precompile: Some(precompile_proof(&[])),
+            },
+            ExecutionProof::Complete {
+                vm: vm_proof(root(9)),
+                precompile: Some(precompile_proof(&[root(9), root(9)])),
+            },
+            ExecutionProof::Complete {
+                vm: vm_proof(root(9)),
+                precompile: Some(precompile_proof(&[TRUE_DIGEST])),
+            },
+        ];
+        let bytes = malformed_shapes.to_bytes();
+        let decoded =
+            Vec::<ExecutionProof>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
+        assert_eq!(decoded, malformed_shapes);
 
-        assert_eq!(decoded, proof);
-        assert_eq!(decoded.miden_proof().bytes(), &[1, 2, 3]);
-        assert_eq!(decoded.miden_proof().hash_fn(), HashFunction::Blake3_256);
-        assert!(decoded.deferred_proof().is_empty());
-        assert!(decoded.is_final());
+        for wrapper in [None, Some(malformed_shapes[0].clone())] {
+            let bytes = wrapper.to_bytes();
+            let decoded =
+                Option::<ExecutionProof>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
+            assert_eq!(decoded, wrapper);
+        }
     }
 
     #[test]
-    fn execution_proof_round_trips_empty_deferred_wire() {
-        let proof = ExecutionProof::from_parts(
-            alloc::vec![1, 2, 3],
-            HashFunction::Blake3_256,
-            DeferredProof::wire(DeferredStateWire::default()),
+    fn proof_minimum_serialized_sizes_match_shortest_canonical_encodings() {
+        let stark = StarkProof::new(Vec::new(), HashFunction::Blake3_256);
+        assert_eq!(StarkProof::min_serialized_size(), stark.to_bytes().len());
+        assert_eq!(StarkProof::min_serialized_size(), 2);
+
+        let vm = VmProof {
+            proof: stark,
+            precompile_root: TRUE_DIGEST,
+        };
+        assert_eq!(VmProof::min_serialized_size(), vm.to_bytes().len());
+        assert_eq!(VmProof::min_serialized_size(), 34);
+
+        let empty = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            roots: Vec::new(),
+        };
+        assert_eq!(PrecompileProof::min_serialized_size(), empty.to_bytes().len());
+        assert_eq!(PrecompileProof::min_serialized_size(), 3);
+
+        let singleton = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            roots: alloc::vec![root(1)],
+        };
+        assert_eq!(singleton.to_bytes().len(), 35);
+
+        let proofs = alloc::vec![singleton.clone(), singleton];
+        let bytes = proofs.to_bytes();
+        assert_eq!(bytes.len(), 71);
+        let decoded = Vec::<PrecompileProof>::read_from_bytes_with_budget(&bytes, 71).unwrap();
+        assert_eq!(decoded.to_bytes(), bytes);
+    }
+
+    #[test]
+    fn stark_proof_decoder_rejects_oversized_length_before_payload() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(MAX_STARK_PROOF_BYTES + 1);
+
+        let error = StarkProof::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected excessive STARK proof length to be rejected")
+        };
+        assert!(message.contains("STARK proof contains too many bytes"));
+    }
+
+    #[test]
+    fn precompile_proof_decoder_rejects_oversized_root_count_before_payload() {
+        let mut bytes = dummy_stark_proof(&[2]).to_bytes();
+        bytes.write_usize(MAX_PRECOMPILE_ROOTS + 1);
+
+        let error = PrecompileProof::read_from_bytes(&bytes).unwrap_err();
+        let DeserializationError::InvalidValue(message) = error else {
+            panic!("expected excessive root count to be rejected")
+        };
+        assert!(message.contains("precompile proof contains too many roots"));
+    }
+
+    #[test]
+    fn standalone_proof_decoders_reject_trailing_bytes() {
+        let mut vm_bytes = vm_proof(root(3)).to_bytes();
+        vm_bytes.push(0);
+        assert!(VmProof::read_from_bytes(&vm_bytes).is_err());
+
+        let mut precompile_bytes = precompile_proof(&[root(3)]).to_bytes();
+        precompile_bytes.push(0);
+        assert!(PrecompileProof::read_from_bytes(&precompile_bytes).is_err());
+    }
+
+    #[test]
+    fn proof_artifacts_round_trip_canonically() {
+        let stark = dummy_stark_proof(&[1, 2, 3]);
+        let stark_bytes = stark.to_bytes();
+        let decoded_stark = StarkProof::read_from_bytes(&stark_bytes).unwrap();
+        assert_eq!(decoded_stark.to_bytes(), stark_bytes);
+
+        let vm = vm_proof(root(3));
+        let vm_bytes = vm.to_bytes();
+        let decoded_vm = VmProof::read_from_bytes(&vm_bytes).unwrap();
+        assert_eq!(decoded_vm.to_bytes(), vm_bytes);
+
+        let precompile = precompile_proof(&[]);
+        let precompile_bytes = precompile.to_bytes();
+        let decoded_precompile = PrecompileProof::read_from_bytes(&precompile_bytes).unwrap();
+        assert_eq!(decoded_precompile.to_bytes(), precompile_bytes);
+
+        let (precompile_wire, wire_root) = wire();
+        let proofs = [
+            ExecutionProof::Deferred {
+                vm: vm_proof(wire_root),
+                precompile: precompile_wire,
+            },
+            ExecutionProof::Complete {
+                vm: vm_proof(TRUE_DIGEST),
+                precompile: None,
+            },
+            ExecutionProof::Complete {
+                vm: vm_proof(TRUE_DIGEST),
+                precompile: Some(precompile_proof(&[TRUE_DIGEST])),
+            },
+        ];
+        for proof in &proofs {
+            round_trip_execution_proof(proof);
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn proof_artifact_serde_round_trips_preserve_representations() {
+        fn round_trip<T>(value: &T) -> T
+        where
+            T: Serialize + for<'de> Deserialize<'de>,
+        {
+            let encoded = serde_json::to_vec(value).unwrap();
+            serde_json::from_slice(&encoded).unwrap()
+        }
+
+        let stark = dummy_stark_proof(&[1, 2, 3]);
+        assert_eq!(round_trip(&stark).to_bytes(), stark.to_bytes());
+
+        let vm = vm_proof(root(1));
+        assert_eq!(round_trip(&vm).to_bytes(), vm.to_bytes());
+
+        let precompile = PrecompileProof {
+            proof: dummy_stark_proof(&[2]),
+            roots: alloc::vec![root(1), TRUE_DIGEST],
+        };
+        assert_eq!(round_trip(&precompile).to_bytes(), precompile.to_bytes());
+
+        let (precompile_wire, _) = wire();
+        let deferred = ExecutionProof::Deferred {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: precompile_wire,
+        };
+        let decoded_deferred = round_trip(&deferred);
+        assert_eq!(decoded_deferred, deferred);
+
+        let complete = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: Some(precompile),
+        };
+        let decoded_complete = round_trip(&complete);
+        assert_eq!(decoded_complete, complete);
+    }
+
+    #[test]
+    fn complete_transitions_deferred_proof_without_validating_artifact_shape() {
+        let vm = vm_proof(TRUE_DIGEST);
+        let precompile = precompile_proof(&[]);
+        let deferred = ExecutionProof::Deferred {
+            vm: vm.clone(),
+            precompile: DeferredStateWire::default(),
+        };
+
+        let completed = deferred.complete(precompile.clone()).unwrap();
+
+        let ExecutionProof::Complete {
+            vm: completed_vm,
+            precompile: Some(completed_precompile),
+        } = completed
+        else {
+            panic!("deferred proof should transition to complete")
+        };
+        assert_eq!(completed_vm.to_bytes(), vm.to_bytes());
+        assert_eq!(completed_precompile.to_bytes(), precompile.to_bytes());
+    }
+
+    #[test]
+    fn complete_rejects_an_already_complete_proof() {
+        let complete = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        };
+
+        assert!(matches!(
+            complete.complete(precompile_proof(&[])),
+            Err(ExecutionProofError::AlreadyComplete)
+        ));
+    }
+
+    #[test]
+    fn execution_proof_transport_rejects_bad_discriminants_trailing_bytes_and_bounds() {
+        assert!(ExecutionProof::read_from_bytes(&[9]).is_err());
+
+        let mut trailing = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        }
+        .to_bytes();
+        trailing.push(0);
+        assert!(ExecutionProof::read_from_bytes(&trailing).is_err());
+
+        let canonical = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        }
+        .to_bytes();
+        assert_eq!(canonical[1], 3, "one STARK byte uses a one-byte vint encoding");
+        let mut noncanonical = alloc::vec![canonical[0], 0];
+        noncanonical.extend_from_slice(&1u64.to_le_bytes());
+        noncanonical.extend_from_slice(&canonical[2..]);
+        let error = ExecutionProof::read_from_bytes(&noncanonical).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("not canonically encoded"))
         );
 
-        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
-
-        assert_eq!(decoded, proof);
-        assert_eq!(decoded.deferred_proof().as_wire(), Some(&DeferredStateWire::default()));
-        assert!(!decoded.is_final());
-    }
-
-    #[test]
-    fn execution_proof_round_trips_non_empty_deferred_wire() {
-        let tag = Tag::from_word([
-            Felt::new_unchecked(7),
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-        ]);
-        let deferred_wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Data {
-                    tag,
-                    chunks: alloc::vec![[Felt::new_unchecked(1); 8]],
-                },
-                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
-            ],
-        };
-        let proof = ExecutionProof::from_parts(
-            alloc::vec![1, 2, 3],
-            HashFunction::Blake3_256,
-            deferred_wire,
+        let mut oversized_proof = Vec::new();
+        oversized_proof.write_u8(COMPLETE_PROOF_DISCRIMINANT);
+        oversized_proof.write_usize(MAX_STARK_PROOF_BYTES + 1);
+        let error = ExecutionProof::read_from_bytes(&oversized_proof).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("STARK proof contains too many bytes"))
         );
-
-        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
-
-        assert_eq!(decoded, proof);
-        assert!(!decoded.is_final());
-    }
-
-    #[test]
-    fn execution_proof_round_trips_stark_deferred_proof() {
-        let public_root: DeferredRoot = [
-            Felt::new_unchecked(9),
-            Felt::new_unchecked(8),
-            Felt::new_unchecked(7),
-            Felt::new_unchecked(6),
-        ]
-        .into();
-        let deferred_stark_proof = StarkProof::new(alloc::vec![4, 5, 6], HashFunction::Poseidon2);
-        let deferred = DeferredProof::stark(deferred_stark_proof.clone(), public_root);
-        let proof = ExecutionProof::new(
-            StarkProof::new(alloc::vec![1, 2, 3], HashFunction::Blake3_256),
-            deferred,
-        );
-
-        let decoded = ExecutionProof::from_bytes(&proof.to_bytes()).unwrap();
-
-        assert_eq!(decoded, proof);
-        assert_eq!(decoded.deferred_proof().as_stark(), Some((&deferred_stark_proof, public_root)));
-        assert!(decoded.is_final());
-    }
-
-    #[test]
-    fn execution_proof_rejects_invalid_deferred_variant() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(0);
-        bytes.write_u8(HashFunction::Blake3_256 as u8);
-        bytes.write_u8(255);
-
-        let err = ExecutionProof::from_bytes(&bytes).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("invalid deferred proof discriminant: 255"));
-    }
-
-    #[test]
-    fn execution_proof_rejects_over_budget_proof_len() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(5);
-
-        let budget = bytes.len() + 4;
-        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
-        let err = ExecutionProof::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("requested 5 elements"));
-    }
-
-    #[test]
-    fn execution_proof_rejects_over_budget_deferred_wire_entries_len() {
-        let mut bytes = Vec::new();
-        bytes.write_usize(0);
-        bytes.write_u8(HashFunction::Blake3_256 as u8);
-        bytes.write_u8(DeferredProof::WIRE_TAG);
-        bytes.write_usize(2);
-
-        let budget = bytes.len() + 1;
-        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
-        let err = ExecutionProof::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("requested 2 elements"));
     }
 }

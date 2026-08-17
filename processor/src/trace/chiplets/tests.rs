@@ -151,9 +151,10 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
         Program::with_kernel(forest.into(), entry, KernelDescriptor::default())
     };
 
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
 
-    let _trace = crate::trace::build_trace(trace_inputs).unwrap();
+    let _trace = crate::trace::build_trace(vm_witness).unwrap();
 }
 
 // HELPER FUNCTIONS
@@ -187,8 +188,9 @@ fn build_trace(
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
 
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let trace = crate::trace::build_trace(trace_inputs).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = crate::trace::build_trace(vm_witness).unwrap();
 
     let trace_len = trace.get_trace_len();
     (

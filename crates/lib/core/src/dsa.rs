@@ -16,9 +16,10 @@
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
 /// Functions in this module generate the public-key commitment and native advice witness expected
-/// by the `ecdsa_k256_keccak::verify` ABI. The public-key coordinates are bound by that commitment,
-/// but `r` and `s` are not committed to a particular signature encoding. Unlike the `miden-crypto`
-/// Rust verifier, the MASM verifier intentionally accepts high-s values.
+/// by the `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes` ABIs. The public-key
+/// coordinates are bound by that commitment, but `r` and `s` are not committed to a particular
+/// signature encoding. Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally
+/// accepts high-s values.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
@@ -44,13 +45,13 @@ pub mod ecdsa_k256_keccak {
     }
 
     /// Encodes the provided public key and signature into the native advice-stack format expected
-    /// by `ecdsa_k256_keccak::verify`.
+    /// by `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The encoding is the structural order consumed from the advice stack:
-    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each value is a little-endian `u32` limb
-    /// represented as a field element. This preserves `r` and `s` exactly, omits the recovery ID,
-    /// and does not normalize or enforce low-s. The result is advice witness data, not a commitment
-    /// to the supplied signature encoding.
+    /// `[QX[8] || QY[8] || SIG_R[8] || SIG_S[8]]`, where each scalar value is a little-endian
+    /// `u32` limb represented as a field element. The signature portion preserves `r` and `s`
+    /// exactly, omits the recovery ID, and does not normalize or enforce low-s. The result is
+    /// advice witness data, not a commitment to the supplied signature encoding.
     ///
     /// The public-key elements come from [`SequentialCommit::to_elements()`], matching the
     /// commitment returned by [`public_key_commitment()`].
@@ -62,13 +63,14 @@ pub mod ecdsa_k256_keccak {
             "ECDSA public key elements must be QX[8] || QY[8] native limbs",
         );
 
-        let mut out = Vec::with_capacity(32);
+        let mut out = Vec::with_capacity(16 + 16);
         out.extend(pk_elements);
         out.extend_from_slice(&signature_felts(sig));
         out
     }
 
-    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify`.
+    /// Computes the `PK_COMM` word expected by `ecdsa_k256_keccak::verify` and
+    /// `ecdsa_k256_keccak::verify_bytes`.
     ///
     /// The commitment is delegated to [`PublicKey::to_commitment()`], which commits to the same
     /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].

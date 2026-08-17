@@ -162,6 +162,30 @@ mod tests {
     }
 
     #[test]
+    fn selected_axes_normalize_both_execution_witness_spellings() {
+        for spelling in ["execute_trace_inputs_sync", "execute_for_proving_sync"] {
+            let axes = selected_criterion_axes(spelling).unwrap();
+
+            assert_eq!(axes.len(), 1);
+            assert!(axes.contains("execute_for_proving_sync"));
+        }
+    }
+
+    #[test]
+    fn criterion_paths_normalize_both_execution_witness_metric_names() {
+        let root = Path::new("target/criterion");
+
+        for spelling in ["execute_trace_inputs_sync", "execute_for_proving_sync"] {
+            let path = root.join("blake3_1to1").join(spelling).join("new/estimates.json");
+
+            assert_eq!(
+                metric_name_from_estimate_path(root, &path).as_deref(),
+                Some("execute_for_proving_sync")
+            );
+        }
+    }
+
+    #[test]
     fn estimate_parser_converts_nanoseconds_to_milliseconds() {
         let payload = serde_json::json!({
             "mean": {

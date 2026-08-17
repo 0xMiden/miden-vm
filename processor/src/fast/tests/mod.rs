@@ -873,16 +873,19 @@ fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
     );
 
     let mut trace_host = DefaultHost::default();
-    let trace_inputs =
+    let execution_witness =
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(3), Felt::from_u32(4)]).unwrap())
-            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+            .execute_for_proving_with_package_debug_info_at_source_node_sync(
                 &fixture.program,
                 &fixture.debug_info,
                 fixture.entrypoint_source_node_id,
                 &mut trace_host,
             )
             .unwrap();
-    assert_eq!(trace_inputs.stack_outputs().get_element(0), Some(Felt::from_u32(7)));
+    assert_eq!(
+        execution_witness.claim().stack_outputs().get_element(0),
+        Some(Felt::from_u32(7))
+    );
 
     let mut step_host = DefaultHost::default();
     let stack_outputs =
@@ -1724,13 +1727,14 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
-    let trace_inputs =
+    let execution_witness =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
             .expect("processor advice inputs should fit advice map limits")
-            .execute_trace_inputs_sync(&program, &mut host)
+            .execute_for_proving_sync(&program, &mut host)
             .expect("traced execution should grow the stack buffer past the initial buffer");
+    let (vm_witness, _) = execution_witness.into_parts();
 
-    crate::trace::build_trace(trace_inputs)
+    crate::trace::build_trace(vm_witness)
         .expect("trace replay should accept the same operand stack depth limit");
 }
 
