@@ -1,0 +1,34 @@
+[package]
+name = "miden-wasm-event-handlers"
+version = "0.30.0"
+description = "Host-side runner for Wasm-compiled Miden VM event handlers"
+documentation = "https://docs.rs/miden-wasm-event-handlers"
+readme = "README.md"
+categories = ["no-std", "wasm"]
+keywords = ["events", "miden", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+std = ["miden-processor/std", "thiserror/std", "wasmi/std"]
+
+[dependencies]
+# Miden dependencies
+miden-event-handler-abi.workspace = true
+miden-processor.workspace = true
+
+# External dependencies
+thiserror.workspace = true
+wasmi.workspace = true
+
+[dev-dependencies]
+wat.workspace = true
