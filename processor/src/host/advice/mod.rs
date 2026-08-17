@@ -1,4 +1,7 @@
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -161,10 +164,65 @@ impl AdviceProvider {
         &mut self,
         mutations: impl IntoIterator<Item = AdviceMutation>,
     ) -> Result<(), AdviceError> {
-        let mut staged = self.clone();
-        mutations.into_iter().try_for_each(|mutation| staged.apply_mutation(mutation))?;
-        *self = staged;
-        Ok(())
+        let mutations = mutations.into_iter().collect::<Vec<_>>();
+        self.validate_mutations(&mutations)?;
+        mutations.into_iter().try_for_each(|mutation| self.apply_mutation(mutation))
+    }
+
+    fn validate_mutations(&self, mutations: &[AdviceMutation]) -> Result<(), AdviceError> {
+        let mut added_bytes = 0usize;
+        let mut new_map_entries = BTreeMap::<Word, &[Felt]>::new();
+        let mut new_merkle_nodes = BTreeSet::new();
+
+        for mutation in mutations {
+            match mutation {
+                AdviceMutation::ExtendStack { stack } => {
+                    let added = Self::felt_bytes(stack.len())?;
+                    added_bytes = added_bytes
+                        .checked_add(added)
+                        .ok_or_else(|| self.budget_error(usize::MAX))?;
+                },
+                AdviceMutation::ExtendMap { map } => {
+                    for (key, values) in map.iter() {
+                        let values = values.as_ref();
+                        let existing_values = self
+                            .map
+                            .get(key)
+                            .map(AsRef::as_ref)
+                            .or_else(|| new_map_entries.get(key).copied());
+                        if let Some(existing_values) = existing_values {
+                            if existing_values != values {
+                                return Err(AdviceError::MapKeyAlreadyPresent {
+                                    key: *key,
+                                    prev_values: existing_values.to_vec(),
+                                    new_values: values.to_vec(),
+                                });
+                            }
+                            continue;
+                        }
+
+                        new_map_entries.insert(*key, values);
+                        let added = Self::map_entry_bytes(values.len())?;
+                        added_bytes = added_bytes
+                            .checked_add(added)
+                            .ok_or_else(|| self.budget_error(usize::MAX))?;
+                    }
+                },
+                AdviceMutation::ExtendMerkleStore { inner_nodes } => {
+                    for node in inner_nodes {
+                        if !self.store.contains_internal_node(node.value)
+                            && new_merkle_nodes.insert(node.value)
+                        {
+                            added_bytes = added_bytes
+                                .checked_add(INTERNAL_NODE_SIZE_BYTES)
+                                .ok_or_else(|| self.budget_error(usize::MAX))?;
+                        }
+                    }
+                },
+            }
+        }
+
+        self.check_advice_size_addition(added_bytes)
     }
 
     fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
@@ -639,12 +697,11 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        let mut staged = self.clone();
-        staged.extend_advice_stack(inputs.stack())?;
-        staged.extend_merkle_store(inputs.store().inner_nodes())?;
-        staged.extend_map(inputs.map())?;
-        *self = staged;
-        Ok(())
+        self.apply_mutations([
+            AdviceMutation::extend_advice_stack(inputs.stack()),
+            AdviceMutation::extend_merkle_store(inputs.store().inner_nodes()),
+            AdviceMutation::extend_map(inputs.map().clone()),
+        ])
     }
 
     /// Consumes `self` and return its parts (stack, map, store).
@@ -1014,6 +1071,29 @@ mod tests {
         let mutations = [
             AdviceMutation::extend_advice_stack(AdviceStack::from(vec![Felt::ONE])),
             AdviceMutation::extend_advice_stack(AdviceStack::from(vec![Felt::ONE])),
+        ];
+
+        assert!(provider.apply_mutations(mutations).is_err());
+        assert_eq!(provider, before);
+    }
+
+    #[test]
+    fn mutation_batches_are_atomic_on_map_conflict() {
+        let key = make_leaf(0);
+        let mut provider = AdviceProvider::new(
+            AdviceInputs::default().with_map([(key, vec![Felt::ONE])]),
+            &ExecutionOptions::default(),
+        )
+        .unwrap();
+        let before = provider.clone();
+        let mutations = [
+            AdviceMutation::extend_advice_stack(AdviceStack::from(vec![Felt::ONE])),
+            AdviceMutation::extend_map(
+                [(key, vec![Felt::new_unchecked(2)])]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+                    .into(),
+            ),
         ];
 
         assert!(provider.apply_mutations(mutations).is_err());
