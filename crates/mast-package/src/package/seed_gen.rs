@@ -663,6 +663,9 @@ fn generate_fuzz_seeds() {
         "minimal_section.bin",
         &event_handlers.to_bytes(),
     );
+    // The 8-byte header of an empty Wasm module, as a seed for the section-walk targets.
+    write_seed("wasm_section_walk_differential", "empty_module.wasm", &event_handlers.module);
+    write_seed("wasm_handler_manifest", "empty_module.wasm", &event_handlers.module);
 
     println!("\nSeed corpus generated in ../../tools/miden-core-fuzz/corpus");
 }

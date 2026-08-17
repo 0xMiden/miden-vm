@@ -42,6 +42,9 @@ features = ["std", "resolver"]
 path = "../../crates/wasm-event-handlers"
 features = ["std"]
 
+[dependencies.wasmi]
+version = "1.1"
+
 [dependencies.miden-project]
 path = "../../crates/project"
 features = ["std", "serde"]
@@ -194,6 +197,13 @@ bench = false
 [[bin]]
 name = "wasm_handler_manifest"
 path = "fuzz_targets/wasm_handler_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_section_walk_differential"
+path = "fuzz_targets/wasm_section_walk_differential.rs"
 test = false
 doc = false
 bench = false

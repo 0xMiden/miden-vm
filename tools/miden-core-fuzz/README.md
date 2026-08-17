@@ -152,6 +152,14 @@ cargo +nightly fuzz run event_handler_section_deserialize --fuzz-dir tools/miden
 cargo +nightly fuzz run wasm_handler_manifest --fuzz-dir tools/miden-core-fuzz
 ```
 
+**`wasm_section_walk_differential`** — Differential test: any module wasmi validates must also
+pass the handler loader's hand-rolled section walk, since the loader conservatively rejects
+modules whose walk fails.
+
+```bash
+cargo +nightly fuzz run wasm_section_walk_differential --fuzz-dir tools/miden-core-fuzz
+```
+
 ### Component Targets
 
 These fuzz internal structures through the MastForest deserialization path:

@@ -35,6 +35,8 @@ mod package;
 
 pub use error::WasmHandlerLoadError;
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
+#[doc(hidden)]
+pub use package::fuzz_walk_sections;
 pub use package::{
     handlers_from_package, host_library_from_package, manifest_from_module, section_from_module,
 };

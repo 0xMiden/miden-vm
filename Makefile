@@ -451,6 +451,7 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	cargo +nightly fuzz run project_assemble --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run event_handler_section_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run wasm_handler_manifest --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run wasm_section_walk_differential --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	exit $$FAILED
 
 .PHONY: fuzz-list
