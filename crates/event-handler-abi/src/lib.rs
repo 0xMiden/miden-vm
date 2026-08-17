@@ -35,7 +35,10 @@
 
 /// The version of this ABI contract.
 ///
-/// The host refuses to load a handler module whose declared ABI version does not match.
+/// Version bumps are additive only: a newer version may add host functions, but must not change
+/// or remove existing ones. Hosts therefore accept every declared version from `1` up to their
+/// own [`ABI_VERSION`]. A breaking change gets a new import namespace (for example
+/// `miden:event/v2`) instead of a version bump.
 pub const ABI_VERSION: u32 = 1;
 
 /// The Wasm import module namespace that provides all host functions.
@@ -145,8 +148,9 @@ pub struct RawMerkleNode {
 
 /// The result code of a host function call.
 ///
-/// Codes other than [`Status::Ok`] report conditions a correct handler can meet at run time.
-/// Defect conditions (bad pointers, non-canonical field elements, limit violations) do not get a
+/// A host function returns a status only when a non-[`Status::Ok`] outcome is reachable for a
+/// correct handler. Calls that cannot fail return their value directly (or nothing). Defect
+/// conditions (bad pointers, non-canonical field elements, limit violations) do not get a
 /// status code: the host traps the handler instead.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,14 +206,16 @@ pub mod host_fn {
     pub const STACK_DEPTH: &str = "stack_depth";
     /// See `guest::stack_get`.
     pub const STACK_GET: &str = "stack_get";
-    /// See `guest::stack_get_word`.
-    pub const STACK_GET_WORD: &str = "stack_get_word";
+    /// See `guest::stack_read`.
+    pub const STACK_READ: &str = "stack_read";
     /// See `guest::clk`.
     pub const CLK: &str = "clk";
     /// See `guest::ctx`.
     pub const CTX: &str = "ctx";
     /// See `guest::mem_get`.
     pub const MEM_GET: &str = "mem_get";
+    /// See `guest::mem_read`.
+    pub const MEM_READ: &str = "mem_read";
     /// See `guest::adv_stack_len`.
     pub const ADV_STACK_LEN: &str = "adv_stack_len";
     /// See `guest::adv_stack_read`.
@@ -248,18 +254,17 @@ pub mod guest {
         /// Returns the depth of the operand stack.
         pub fn stack_depth() -> u32;
 
-        /// Writes the operand-stack element at position `pos` to `out`.
+        /// Returns the operand-stack element at position `pos` in canonical form.
         ///
         /// Position `0` is the top of the stack and holds the event ID. Positions past the stack
-        /// depth read as zero, the same as for native event handlers. Always returns
-        /// `Status::Ok`.
-        pub fn stack_get(pos: u32, out: *mut RawFelt) -> i32;
+        /// depth read as zero, the same as for native event handlers.
+        pub fn stack_get(pos: u32) -> u64;
 
-        /// Writes the word at operand-stack positions `start_pos..start_pos + 4` to `out`.
+        /// Writes the `count` operand-stack elements at positions
+        /// `start_pos..start_pos + count` to `out`, ordered from the top of the stack down.
         ///
-        /// Element `0` of the word is the stack element at `start_pos` (closest to the top).
-        /// Positions past the stack depth read as zero. Always returns `Status::Ok`.
-        pub fn stack_get_word(start_pos: u32, out: *mut RawWord) -> i32;
+        /// Positions past the stack depth read as zero.
+        pub fn stack_read(start_pos: u32, out: *mut RawFelt, count: u32);
 
         /// Returns the current clock cycle.
         pub fn clk() -> u64;
@@ -272,6 +277,14 @@ pub mod guest {
         /// Returns `Status::Uninit` when the cell was never written; `out` is not changed in that
         /// case. Uninitialized memory is distinct from a zero value.
         pub fn mem_get(addr: u32, out: *mut RawFelt) -> i32;
+
+        /// Writes the `count` memory elements at addresses `addr..addr + count` of the current
+        /// context to `out`.
+        ///
+        /// Returns `Status::OutOfBounds` when `addr + count` goes past the `u32` address space,
+        /// and `Status::Uninit` when any cell in the range was never written; `out` is not
+        /// changed in either case. Use `mem_get` for a per-cell presence check.
+        pub fn mem_read(addr: u32, out: *mut RawFelt, count: u32) -> i32;
 
         /// Returns the number of elements on the advice stack.
         pub fn adv_stack_len() -> u32;
@@ -305,20 +318,19 @@ pub mod guest {
         /// Buffers `len` elements to extend the advice stack, ordered from the new top of the
         /// stack down.
         ///
-        /// Always returns `Status::Ok`; a size-limit violation traps.
-        pub fn adv_stack_extend(vals: *const RawFelt, len: u32) -> i32;
+        /// A size-limit violation traps.
+        pub fn adv_stack_extend(vals: *const RawFelt, len: u32);
 
         /// Buffers an advice-map insertion of `len` elements under `key`.
         ///
         /// Inserting a key that exists with a different value makes the handler fail when the
-        /// host applies the buffered mutations. Always returns `Status::Ok`; a size-limit
-        /// violation traps.
-        pub fn adv_map_insert(key: *const RawWord, vals: *const RawFelt, len: u32) -> i32;
+        /// host applies the buffered mutations. A size-limit violation traps.
+        pub fn adv_map_insert(key: *const RawWord, vals: *const RawFelt, len: u32);
 
         /// Buffers `len` inner nodes to extend the Merkle store.
         ///
-        /// Always returns `Status::Ok`; a size-limit violation traps.
-        pub fn merkle_store_extend(nodes: *const RawMerkleNode, len: u32) -> i32;
+        /// A size-limit violation traps.
+        pub fn merkle_store_extend(nodes: *const RawMerkleNode, len: u32);
 
         // FAILURE
         // ----------------------------------------------------------------------------------------

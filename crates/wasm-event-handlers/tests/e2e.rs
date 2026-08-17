@@ -15,13 +15,12 @@ use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 /// A handler that reads the stack element below the event ID, doubles it, and pushes the result
 /// to the advice stack.
 const DOUBLE_WAT: &str = r#"(module
-  (import "miden:event/v1" "stack_get" (func $stack_get (param i32 i32) (result i32)))
-  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32) (result i32)))
+  (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
+  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
   (memory (export "memory") 1)
   (func (export "double")
-    (drop (call $stack_get (i32.const 1) (i32.const 0)))
-    (i64.store (i32.const 0) (i64.mul (i64.load (i32.const 0)) (i64.const 2)))
-    (drop (call $adv_stack_extend (i32.const 0) (i32.const 1)))))"#;
+    (i64.store (i32.const 0) (i64.mul (call $stack_get (i32.const 1)) (i64.const 2)))
+    (call $adv_stack_extend (i32.const 0) (i32.const 1))))"#;
 
 /// The program emits the event with 5 below the event ID, pops the handler's answer from the
 /// advice stack, and asserts it is 10.
@@ -68,6 +67,57 @@ fn program_verifies_advice_from_a_packaged_wasm_handler() {
     FastProcessor::new(StackInputs::default())
         .execute_sync(&program, &mut host)
         .expect("the handler's advice satisfies the in-VM check");
+}
+
+/// A handler that batch-reads two memory elements the program wrote and forwards them as
+/// advice; a non-`Ok` status makes it fail.
+const READ_MEM_WAT: &str = r#"(module
+  (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
+  (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
+  (import "miden:event/v1" "fail" (func $fail (param i32 i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 64) "mem_read failed")
+  (func (export "read_mem")
+    (if (i32.ne (call $mem_read (i32.const 100) (i32.const 0) (i32.const 2)) (i32.const 0))
+      (then (call $fail (i32.const 64) (i32.const 15))))
+    (call $adv_stack_extend (i32.const 0) (i32.const 2))))"#;
+
+#[test]
+fn packaged_handler_reads_vm_memory() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager)
+        .assemble_program(
+            "wasm_handler_mem_read",
+            r#"
+            begin
+                push.42 mem_store.100
+                push.43 mem_store.101
+                emit.event("test::wasm::read_mem")
+                adv_push push.42 assert_eq
+                adv_push push.43 assert_eq
+            end"#,
+        )
+        .expect("program assembles");
+
+    let section = EventHandlerSection {
+        abi_version: ABI_VERSION,
+        module: wat::parse_str(READ_MEM_WAT).expect("fixture WAT parses"),
+        handlers: vec![EventHandlerManifestEntry::new(
+            miden_processor::event::EventName::new("test::wasm::read_mem"),
+            "read_mem",
+        )],
+    };
+    let package = (*package).with_event_handlers(&section).expect("section attaches");
+    let program = package.unwrap_program();
+
+    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+        .expect("handlers load from the package");
+    let mut host = DefaultHost::default();
+    host.load_library(library).expect("handlers register");
+
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect("the batch memory read matches what the program wrote");
 }
 
 /// Compiles the Rust guest fixture crate for `wasm32-unknown-unknown` and returns the module

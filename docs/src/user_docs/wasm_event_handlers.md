@@ -47,21 +47,24 @@ host.load_library(library)?; // registers the MAST forest and the handlers
 
 The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`). All host functions are imported from the `miden:event/v1` namespace. Field elements cross the boundary as canonical little-endian `u64` values (`RawFelt`); a word is four of them (`RawWord`).
 
+Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
+
 **Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them.
 
-**Queries** mirror the read surface of `ProcessorState`:
+**Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
 
 | Import | Description |
 | --- | --- |
 | `stack_depth() -> u32` | Depth of the operand stack. |
-| `stack_get(pos, out) -> status` | Operand-stack element; position `0` holds the event ID, positions past the depth read as zero. |
-| `stack_get_word(start_pos, out) -> status` | The word at positions `start_pos..start_pos + 4`. |
+| `stack_get(pos) -> u64` | Operand-stack element, returned directly in canonical form; position `0` holds the event ID, positions past the depth read as zero. |
+| `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count`, ordered from the top down. |
 | `clk() -> u64`, `ctx() -> u32` | Clock cycle and execution context. |
-| `mem_get(addr, out) -> status` | Memory element of the current context; `Uninit` when the cell was never written (distinct from zero). |
+| `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when the cell was never written (distinct from zero). |
+| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when any cell is unwritten, `OutOfBounds` past the `u32` address space. |
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
 | `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap) -> status` | Two-phase advice-map reads; `NotFound` when the key has no entry. |
 
-**Mutations** are buffered and map one-to-one onto the processor's advice mutations:
+**Mutations** are buffered, return nothing (limit violations trap), and map one-to-one onto the processor's advice mutations:
 
 | Import | Description |
 | --- | --- |

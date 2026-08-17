@@ -7,12 +7,16 @@ use miden_processor::event::EventName;
 /// An error raised while loading and validating a Wasm handler module.
 #[derive(Debug, thiserror::Error)]
 pub enum WasmHandlerLoadError {
-    /// The module declares an ABI version this crate does not support.
-    #[error("handler module declares ABI version {declared}, but this host supports {supported}")]
+    /// The module declares an ABI version this crate does not support. Version bumps are
+    /// additive, so hosts accept every declared version from `1` up to their own.
+    #[error(
+        "handler module declares ABI version {declared}, but this host supports versions \
+         1 through {supported}"
+    )]
     AbiVersionMismatch {
         /// The version the module declares.
         declared: u32,
-        /// The version this crate implements.
+        /// The newest version this crate implements.
         supported: u32,
     },
 
