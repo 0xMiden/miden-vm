@@ -330,23 +330,21 @@ impl<'a> DeferredSessionBuilder<'a> {
         // `glv_joint_wnaf_with_tables`, not the table's seed, so a shared
         // base's tables serve every claim's GLV split regardless of sign.
         //
-        // A base at infinity has no endomorphism image, so it skips the
-        // endo table and rides `glv_joint_wnaf_with_tables`'s plain-only
-        // leg instead of a GLV split.
+        // Every base here already cleared the identity check above, so each
+        // one gets an endomorphism image and an endo table.
         let expr = if curve.endomorphism().is_some() {
             for (base, _) in &expr_terms {
                 self.ensure_wnaf_table(base, MSM_WNAF_WINDOW);
-                if !self.session.is_pai(base) {
-                    self.ensure_wnaf_table_endo(base, MSM_WNAF_WINDOW);
-                }
+                self.ensure_wnaf_table_endo(base, MSM_WNAF_WINDOW);
             }
             let table_terms: Vec<(&strategies::WnafTable, Option<&strategies::WnafTable>, U256)> =
                 expr_terms
                     .iter()
                     .map(|(base, scalar)| {
                         let plain = self.wnaf_tables.get(&(base.point, MSM_WNAF_WINDOW)).unwrap();
-                        let endo = self.glv_endo_tables.get(&(base.point, MSM_WNAF_WINDOW));
-                        (plain, endo, *scalar)
+                        let endo =
+                            self.glv_endo_tables.get(&(base.point, MSM_WNAF_WINDOW)).unwrap();
+                        (plain, Some(endo), *scalar)
                     })
                     .collect();
             strategies::glv_joint_wnaf_with_tables(&mut self.session, &table_terms)
