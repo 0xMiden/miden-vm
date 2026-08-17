@@ -1,6 +1,7 @@
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
 mod error;
+mod event_handlers;
 mod id;
 mod manifest;
 mod section;
@@ -37,6 +38,10 @@ use miden_core::{
 
 pub use self::{
     error::{PackageDebugInfoError, PackageStripError},
+    event_handlers::{
+        EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
+        MAX_MODULE_BYTES, MAX_NAME_BYTES,
+    },
     id::PackageId,
     manifest::{
         ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
@@ -263,8 +268,9 @@ impl Package {
 
     /// Returns the commitment used to identify this package during dependency resolution.
     ///
-    /// This binds the package code, identity, manifest, and sections which affect package use.
-    /// Optional debug data, descriptions, and opaque custom sections are excluded.
+    /// This binds the package code, identity, manifest, and sections which affect package use
+    /// (account component metadata and event handlers). Optional debug data, descriptions, and
+    /// opaque custom sections are excluded.
     pub fn dependency_commitment(&self) -> Word {
         let mut bytes = Vec::new();
         bytes.write_bytes(b"miden.package.dependency.v1");
@@ -278,10 +284,16 @@ impl Package {
     }
 
     fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
+        // Event-handler code decides the advice a program receives, so the section affects
+        // package use: two packages that differ only in handler code must not share a
+        // dependency identity.
         let sections = self
             .sections
             .iter()
-            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .filter(|section| {
+                section.id == SectionId::ACCOUNT_COMPONENT_METADATA
+                    || section.id == SectionId::EVENT_HANDLERS
+            })
             .collect::<Vec<_>>();
         target.write_usize(sections.len());
         for section in sections {
@@ -1204,6 +1216,72 @@ impl Package {
         self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
     }
 
+    /// Decodes the [`EventHandlerSection`] of this package, if present.
+    ///
+    /// Returns `Ok(None)` when the package has no `event_handlers` section.
+    ///
+    /// # Errors
+    /// Returns an error when the package contains more than one `event_handlers` section, or
+    /// when the section payload fails to decode (including size-cap violations).
+    pub fn event_handlers(&self) -> Result<Option<EventHandlerSection>, EventHandlerSectionError> {
+        let mut sections =
+            self.sections.iter().filter(|section| section.id == SectionId::EVENT_HANDLERS);
+        let Some(section) = sections.next() else {
+            return Ok(None);
+        };
+        if sections.next().is_some() {
+            return Err(EventHandlerSectionError::DuplicateSection);
+        }
+        let decoded = EventHandlerSection::read_from_bytes(section.data.as_ref())?;
+        Ok(Some(decoded))
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package.
+    ///
+    /// The section is semantic package content: it becomes part of
+    /// [`Self::dependency_commitment`], and the manifest order inside the section is canonical.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when a
+    /// field of the section goes over its size cap.
+    pub fn with_event_handlers(
+        mut self,
+        section: &EventHandlerSection,
+    ) -> Result<Self, EventHandlerSectionError> {
+        if self.sections.iter().any(|existing| existing.id == SectionId::EVENT_HANDLERS) {
+            return Err(EventHandlerSectionError::AlreadyPresent);
+        }
+        if section.module.len() > MAX_MODULE_BYTES {
+            return Err(EventHandlerSectionError::OverSizeCap {
+                field: "module",
+                actual: section.module.len(),
+                max: MAX_MODULE_BYTES,
+            });
+        }
+        if section.handlers.len() > MAX_HANDLERS {
+            return Err(EventHandlerSectionError::OverSizeCap {
+                field: "handler count",
+                actual: section.handlers.len(),
+                max: MAX_HANDLERS,
+            });
+        }
+        for entry in &section.handlers {
+            for (field, name) in
+                [("event name", entry.event.as_str()), ("export name", entry.export.as_str())]
+            {
+                if name.len() > MAX_NAME_BYTES {
+                    return Err(EventHandlerSectionError::OverSizeCap {
+                        field,
+                        actual: name.len(),
+                        max: MAX_NAME_BYTES,
+                    });
+                }
+            }
+        }
+        self.sections.push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        Ok(self)
+    }
+
     /// Extract the embedded kernel package from this package.
     ///
     /// Returns `Ok(None)` if the kernel custom section is not present.
@@ -1662,6 +1740,87 @@ mod tests {
         assert_ne!(code_commitment, with_advice.code_commitment());
         assert_eq!(artifacts_commitment, with_advice.artifacts_commitment());
         assert_ne!(package_commitment, with_advice.commitment());
+    }
+
+    fn sample_event_handlers() -> EventHandlerSection {
+        EventHandlerSection {
+            abi_version: 1,
+            // The 8-byte header of an empty Wasm module.
+            module: vec![0, 97, 115, 109, 1, 0, 0, 0],
+            handlers: vec![EventHandlerManifestEntry::new(
+                miden_core::events::EventName::new("test::wasm::handler"),
+                "handler",
+            )],
+        }
+    }
+
+    #[test]
+    fn event_handler_section_roundtrips_through_package_serialization() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        let bytes = package.to_bytes();
+        let decoded = Package::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.event_handlers().unwrap(), Some(section));
+    }
+
+    #[test]
+    fn event_handler_section_binds_the_dependency_commitment() {
+        let package = build_kernel_package("kernel");
+        let without = package.dependency_commitment();
+
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+        let with_digest = with_handlers.dependency_commitment();
+        assert_ne!(without, with_digest, "attaching handlers must change the identity");
+
+        // A change in only the handler bytes must change the identity.
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let other = package.with_event_handlers(&other_section).unwrap();
+        assert_ne!(with_digest, other.dependency_commitment());
+
+        // The identity is stable across serialization roundtrips.
+        let decoded = Package::read_from_bytes(&with_handlers.to_bytes()).unwrap();
+        assert_eq!(with_digest, decoded.dependency_commitment());
+    }
+
+    #[test]
+    fn duplicate_event_handler_sections_are_rejected() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        // A second attach is rejected.
+        assert!(matches!(
+            package.clone().with_event_handlers(&section),
+            Err(EventHandlerSectionError::AlreadyPresent)
+        ));
+
+        // A manually duplicated section is rejected on access.
+        let mut broken = package;
+        broken
+            .sections
+            .push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        assert!(matches!(
+            broken.event_handlers(),
+            Err(EventHandlerSectionError::DuplicateSection)
+        ));
+    }
+
+    #[test]
+    fn oversized_event_handler_section_is_rejected_on_attach() {
+        let mut section = sample_event_handlers();
+        section.handlers = (0..=MAX_HANDLERS)
+            .map(|idx| {
+                EventHandlerManifestEntry::new(
+                    miden_core::events::EventName::from_string(format!("test::wasm::h{idx}")),
+                    format!("h{idx}"),
+                )
+            })
+            .collect();
+        assert!(matches!(
+            build_kernel_package("kernel").with_event_handlers(&section),
+            Err(EventHandlerSectionError::OverSizeCap { field: "handler count", .. })
+        ));
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
