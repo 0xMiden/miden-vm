@@ -2071,3 +2071,31 @@ end
         "  `----"
     );
 }
+
+#[test]
+fn test_locals_attribute_roundtrip_formatting() {
+    let expected = "\
+namespace $exec
+
+@locals(4)
+proc foo
+    loc_storew_le.0
+    locaddr.0
+    dyncall
+end
+
+begin
+    exec.foo
+end
+";
+
+    let context = SyntaxTestContext::default();
+    let source = source_file!(&context, expected);
+    let module = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    let formatted = module.to_string();
+    assert_eq!(formatted, expected);
+
+    let source = source_file!(&context, formatted);
+    let reparsed = context.parse_program_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(reparsed.to_string(), expected);
+}
