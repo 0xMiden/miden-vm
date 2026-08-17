@@ -2337,6 +2337,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-event-handler-abi"
+version = "0.30.0"
+dependencies = [
+ "miden-core",
+]
+
+[[package]]
 name = "miden-field"
 version = "0.31.0"
 dependencies = [

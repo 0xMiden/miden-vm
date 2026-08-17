@@ -1,0 +1,29 @@
+[package]
+name = "miden-event-handler-abi"
+version = "0.30.0"
+description = "ABI contract between the Miden VM host and Wasm-compiled event handlers"
+documentation = "https://docs.rs/miden-event-handler-abi"
+readme = "README.md"
+categories = ["no-std", "wasm"]
+keywords = ["abi", "events", "miden", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = []
+# Enables the guest-side extern import declarations. Only meaningful when the
+# crate is compiled for a `wasm32` guest module.
+guest = []
+
+[dependencies]
+
+[dev-dependencies]
+miden-core.workspace = true
