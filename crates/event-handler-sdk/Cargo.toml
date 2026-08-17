@@ -1,0 +1,28 @@
+[package]
+name = "miden-event-handler-sdk"
+version = "0.30.0"
+description = "Guest SDK for writing Wasm-compiled Miden VM event handlers in Rust"
+documentation = "https://docs.rs/miden-event-handler-sdk"
+readme = "README.md"
+categories = ["no-std", "wasm"]
+keywords = ["events", "miden", "sdk", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = []
+# Installs a #[panic_handler] that forwards the panic message through `fail`. Enable it in the
+# final handler crate; leave it off in libraries so the final crate stays free to choose.
+panic-handler = []
+
+[dependencies]
+miden-event-handler-abi = { workspace = true, features = ["guest"] }
+miden-event-handler-macros.workspace = true

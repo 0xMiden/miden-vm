@@ -35,4 +35,6 @@ mod package;
 
 pub use error::WasmHandlerLoadError;
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
-pub use package::{handlers_from_package, host_library_from_package};
+pub use package::{
+    handlers_from_package, host_library_from_package, manifest_from_module, section_from_module,
+};

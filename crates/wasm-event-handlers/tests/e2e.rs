@@ -70,6 +70,112 @@ fn program_verifies_advice_from_a_packaged_wasm_handler() {
         .expect("the handler's advice satisfies the in-VM check");
 }
 
+/// Compiles the Rust guest fixture crate for `wasm32-unknown-unknown` and returns the module
+/// bytes. This exercises the guest SDK and its manifest-emitting macro with the real toolchain.
+fn build_rust_guest_fixture() -> Vec<u8> {
+    use std::{path::Path, process::Command};
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
+    // A dedicated target dir avoids lock contention with the build that runs this test.
+    let target_dir = workspace_root.join("target").join("guest-fixture");
+
+    let status = Command::new(env!("CARGO"))
+        .current_dir(workspace_root)
+        .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
+        .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])
+        .arg(&target_dir)
+        .status()
+        .expect("cargo is available");
+    assert!(status.success(), "the guest fixture must build");
+
+    let artifact = target_dir
+        .join("wasm32-unknown-unknown/release")
+        .join("miden_wasm_handler_guest_fixture.wasm");
+    std::fs::read(artifact).expect("the guest fixture artifact exists")
+}
+
+#[test]
+fn rust_guest_fixture_end_to_end() {
+    use miden_wasm_event_handlers::section_from_module;
+
+    let wasm = build_rust_guest_fixture();
+    // The manifest comes from the module's own miden:event-manifest records.
+    let section = section_from_module(wasm).expect("the fixture embeds its manifest");
+    let mut events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
+    events.sort_unstable();
+    assert_eq!(events, ["test::wasm::add_hundred", "test::wasm::always_panics"]);
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager)
+        .assemble_program(
+            "rust_guest_e2e",
+            r#"
+            begin
+                push.5
+                emit.event("test::wasm::add_hundred")
+                adv_push
+                push.105
+                assert_eq
+                drop
+            end"#,
+        )
+        .expect("program assembles");
+    let package = (*package).with_event_handlers(&section).expect("section attaches");
+    let decoded = Arc::new(Package::read_from_bytes(&package.to_bytes()).expect("package decodes"));
+
+    let library = host_library_from_package(&decoded, WasmHandlerLimits::default())
+        .expect("handlers load from the package");
+    let mut host = DefaultHost::default();
+    host.load_library(library).expect("handlers register");
+
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&decoded.unwrap_program(), &mut host)
+        .expect("the Rust handler's advice satisfies the in-VM check");
+}
+
+#[test]
+fn rust_guest_panic_reaches_the_host() {
+    let wasm = build_rust_guest_fixture();
+    let section = miden_wasm_event_handlers::section_from_module(wasm).expect("manifest embedded");
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager)
+        .assemble_program(
+            "rust_guest_panic",
+            r#"
+            begin
+                emit.event("test::wasm::always_panics")
+            end"#,
+        )
+        .expect("program assembles");
+    let package = (*package).with_event_handlers(&section).expect("section attaches");
+    let program = package.unwrap_program();
+
+    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+        .expect("handlers load from the package");
+    let mut host = DefaultHost::default();
+    host.load_library(library).expect("handlers register");
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect_err("the handler panics");
+
+    // The guest's message sits in the error source chain, below the processor's event context.
+    let mut chain = String::new();
+    let mut current: Option<&dyn std::error::Error> = Some(&err);
+    while let Some(error) = current {
+        chain.push_str(&error.to_string());
+        chain.push('\n');
+        current = error.source();
+    }
+    assert!(
+        chain.contains("the fixture panicked on purpose"),
+        "unexpected error chain: {chain}"
+    );
+    assert!(chain.contains("guest panic"), "unexpected error chain: {chain}");
+}
+
 #[test]
 fn program_fails_without_the_packaged_handlers() {
     let package = assemble_package_with_handlers();
