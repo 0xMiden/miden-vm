@@ -2991,7 +2991,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 [[package]]
 name = "p3-air"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 dependencies = [
  "p3-field 0.6.0",
  "p3-matrix 0.6.0",
@@ -3121,7 +3121,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 dependencies = [
  "itertools 0.15.0",
  "num-bigint 0.5.1",
@@ -3238,7 +3238,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 dependencies = [
  "itertools 0.15.0",
  "p3-field 0.6.0",
@@ -3267,7 +3267,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 
 [[package]]
 name = "p3-maybe-rayon"
@@ -3416,7 +3416,7 @@ dependencies = [
 [[package]]
 name = "p3-security"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 dependencies = [
  "libm",
  "p3-air 0.6.0",
@@ -3461,7 +3461,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3?rev=f67b0ea2ff8b3d06fff1081989bd3063c656029e#f67b0ea2ff8b3d06fff1081989bd3063c656029e"
+source = "git+https://github.com/Plonky3/Plonky3?rev=389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a#389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a"
 dependencies = [
  "p3-maybe-rayon 0.6.0",
  "serde",
