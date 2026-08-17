@@ -138,6 +138,20 @@ These targets exercise package deserializers used by `.masp`.
 cargo +nightly fuzz run package_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
+**`event_handler_section_deserialize`** — Tests `EventHandlerSection::read_from_bytes` (the
+untrusted `event_handlers` package section with its decode-time size caps).
+
+```bash
+cargo +nightly fuzz run event_handler_section_deserialize --fuzz-dir tools/miden-core-fuzz
+```
+
+**`wasm_handler_manifest`** — Tests `manifest_from_module`: the Wasm section walk and the
+`miden:event-manifest` custom-section record parser.
+
+```bash
+cargo +nightly fuzz run wasm_handler_manifest --fuzz-dir tools/miden-core-fuzz
+```
+
 ### Component Targets
 
 These fuzz internal structures through the MastForest deserialization path:

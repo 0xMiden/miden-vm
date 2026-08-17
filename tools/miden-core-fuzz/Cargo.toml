@@ -38,6 +38,10 @@ features = ["std"]
 path = "../../crates/package-registry"
 features = ["std", "resolver"]
 
+[dependencies.miden-wasm-event-handlers]
+path = "../../crates/wasm-event-handlers"
+features = ["std"]
+
 [dependencies.miden-project]
 path = "../../crates/project"
 features = ["std", "serde"]
@@ -176,6 +180,20 @@ bench = false
 [[bin]]
 name = "project_assemble"
 path = "fuzz_targets/project_assemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "event_handler_section_deserialize"
+path = "fuzz_targets/event_handler_section_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wasm_handler_manifest"
+path = "fuzz_targets/wasm_handler_manifest.rs"
 test = false
 doc = false
 bench = false

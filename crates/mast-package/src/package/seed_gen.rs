@@ -649,5 +649,20 @@ fn generate_fuzz_seeds() {
         write_seed("package_semantic_deserialize", name, &bytes);
     }
 
+    let event_handlers = crate::EventHandlerSection {
+        abi_version: 1,
+        // The 8-byte header of an empty Wasm module.
+        module: vec![0, 97, 115, 109, 1, 0, 0, 0],
+        handlers: vec![crate::EventHandlerManifestEntry::new(
+            miden_core::events::EventName::new("seed::event"),
+            "handler",
+        )],
+    };
+    write_seed(
+        "event_handler_section_deserialize",
+        "minimal_section.bin",
+        &event_handlers.to_bytes(),
+    );
+
     println!("\nSeed corpus generated in ../../tools/miden-core-fuzz/corpus");
 }
