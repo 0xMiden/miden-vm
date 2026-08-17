@@ -2,7 +2,7 @@
 //!
 //! The chiplet stack proves a different statement from the VM's, with its own AIRs, bus width, and
 //! PCS preset, so it needs its own shape — but the round budget itself is shared with the VM
-//! through [`miden_security`], and so are the challenge field and commitment hash.
+//! through [`p3_security::budget`], and so are the challenge field and commitment hash.
 //!
 //! The AIR shape is pinned as a constant and guarded against drift by `air_shape_matches_symbolic`,
 //! matching how the VM side does it.
@@ -14,7 +14,7 @@ use miden_core::{
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
-use miden_security::{AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport};
+use p3_security::budget::{AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport};
 
 use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
@@ -41,7 +41,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 587,
     max_constraint_degree: 5,
-    num_deep_terms: 770,
+    num_deep_terms: Some(770),
     lookup: LookupShape {
         fractions_per_row: 244,
         max_message_width: 18,
@@ -73,7 +73,7 @@ pub fn derive_air_shape() -> AirShape {
     AirShape {
         num_composed_constraints: (num_constraints + num_airs) as u32,
         max_constraint_degree: max_constraint_degree as u32,
-        num_deep_terms: num_columns as u32 + NUM_OOD_POINTS,
+        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
         lookup: LookupShape {
             fractions_per_row: fractions_per_row as u32,
             max_message_width: MAX_MESSAGE_WIDTH as u32,
@@ -157,7 +157,7 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
         field_bits: CHALLENGE_FIELD_BITS,
         collision_resistance: COLLISION_RESISTANCE,
     };
-    miden_security::security_report(params, &instance, &AIR_SHAPE)
+    p3_security::budget::security_report(params, &instance, &AIR_SHAPE)
 }
 
 /// Grades a chiplet-stack proof, returning its conjectured security level in bits.
@@ -186,10 +186,10 @@ mod tests {
         let params = protocol_params(&precompile_pcs_params());
 
         for (log_height, expected_level, expected_binding) in [
-            (16, 96, miden_security::report::QUERY_LABEL),
-            (18, 96, miden_security::report::QUERY_LABEL),
-            (20, 95, miden_security::report::LOOKUP_LABEL),
-            (24, 91, miden_security::report::LOOKUP_LABEL),
+            (16, 96, p3_security::budget::report::QUERY_LABEL),
+            (18, 96, p3_security::budget::report::QUERY_LABEL),
+            (20, 95, p3_security::budget::report::LOOKUP_LABEL),
+            (24, 91, p3_security::budget::report::LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height);
             assert_eq!(

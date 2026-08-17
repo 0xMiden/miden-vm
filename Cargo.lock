@@ -2072,10 +2072,10 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-security",
  "miden-test-serialization-macros",
  "miden-utils-indexing",
  "p3-field 0.6.3",
+ "p3-security",
  "proptest",
  "thiserror",
  "tracing",
@@ -2536,8 +2536,8 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "miden-security",
  "miden-serde-utils",
+ "p3-security",
  "rand 0.10.2",
  "rayon",
  "ruint",
@@ -2622,13 +2622,6 @@ checksum = "c13695bf99aabaa21d6572b807c66bb26251aa3d9b75e828b3c99b97a3b1ce7e"
 dependencies = [
  "hashbrown 0.17.1",
  "rustc-hash",
-]
-
-[[package]]
-name = "miden-security"
-version = "0.30.0"
-dependencies = [
- "p3-security",
 ]
 
 [[package]]

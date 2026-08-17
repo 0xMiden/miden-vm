@@ -25,7 +25,6 @@ members = [
     "crates/package-registry-local",
     "crates/miden-format",
     "crates/project",
-    "crates/security",
     "crates/serde-utils",
     "crates/stark-transcript",
     "crates/stateful-hasher",
@@ -106,7 +105,6 @@ miden-project           = { path = "./crates/project", version = "0.30", default
 miden-prover            = { path = "./prover", version = "0.30", default-features = false }
 miden-core-lib          = { path = "./crates/lib/core", version = "0.30", default-features = false }
 miden-serde-utils       = { path = "./crates/serde-utils", version = "0.30", default-features = false }
-miden-security          = { path = "./crates/security", version = "0.30", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.30", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.30", default-features = false }
 midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.11", default-features = false }
@@ -195,6 +193,8 @@ p3-maybe-rayon   = { version = "0.6.3", default-features = false }
 p3-merkle-tree   = { version = "0.6.3", default-features = false }
 p3-mersenne-31   = { version = "0.6.3", default-features = false }
 p3-poseidon2-air = { version = "0.6.3", default-features = false }
+# Not yet published (github.com/Plonky3/Plonky3#<PR bundling U1+U2>); pinned by commit until it is.
+p3-security      = { git = "https://github.com/Plonky3/Plonky3", rev = "389a3dcde1a37ae8e8e97e0cadaf896dab34fb8a", default-features = false }
 p3-symmetric     = { version = "0.6.3", default-features = false }
 p3-uni-stark     = { version = "0.6.3", default-features = false }
 p3-util          = { version = "0.6.3", default-features = false }

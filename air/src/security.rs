@@ -7,7 +7,10 @@
 
 use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
 use miden_crypto::stark::pcs::PcsParams;
-use miden_security::{AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, fixed};
+use p3_security::{
+    budget::{AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport},
+    fixed,
+};
 
 use crate::{
     AIRS, ConstraintCounts, ConstraintDegrees, Felt, MidenAir, config,
@@ -42,7 +45,7 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 426,
     max_constraint_degree: 9,
-    num_deep_terms: 138,
+    num_deep_terms: Some(138),
     lookup: LookupShape {
         fractions_per_row: 28,
         max_message_width: 16,
@@ -73,7 +76,7 @@ pub fn derive_air_shape() -> AirShape {
         // folded by powers of one challenge and the AIRs by a second.
         num_composed_constraints: (num_constraints + AIRS.len()) as u32,
         max_constraint_degree: max_constraint_degree as u32,
-        num_deep_terms: num_columns as u32 + NUM_OOD_POINTS,
+        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
         lookup: LookupShape {
             fractions_per_row: fractions_per_row as u32,
             max_message_width: MIDEN_MAX_MESSAGE_WIDTH as u32,
@@ -140,7 +143,10 @@ pub const COMPOSITION_COEFFICIENT: u64 =
 pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
 
 /// `log2` of the DEEP round's error coefficient, in fixed point.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.num_deep_terms as u64);
+pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
+    Some(n) => n as u64,
+    None => 0,
+});
 
 /// `log2` of the FRI folding round's error coefficient, in fixed point.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOLDING_ARITY) - 1));
@@ -181,7 +187,7 @@ pub fn conjectured_security_level(
         folding_pow_bits,
         lookup_pow_bits: 0,
     };
-    miden_security::security_report(&params, &deployed_instance(log_max_height), &AIR_SHAPE)
+    p3_security::budget::security_report(&params, &deployed_instance(log_max_height), &AIR_SHAPE)
         .security_level()
 }
 
@@ -218,7 +224,7 @@ pub fn security_report(
         field_bits: CHALLENGE_FIELD_BITS,
         collision_resistance,
     };
-    miden_security::security_report(params, &instance, &AIR_SHAPE)
+    p3_security::budget::security_report(params, &instance, &AIR_SHAPE)
 }
 
 #[cfg(test)]
@@ -242,10 +248,10 @@ mod tests {
         let params = protocol_params(&config::pcs_params());
 
         for (log_height, expected_level, expected_binding) in [
-            (20, 96, miden_security::report::QUERY_LABEL),
-            (22, 96, miden_security::report::QUERY_LABEL),
-            (24, 95, miden_security::report::LOOKUP_LABEL),
-            (29, 90, miden_security::report::LOOKUP_LABEL),
+            (20, 96, p3_security::budget::report::QUERY_LABEL),
+            (22, 96, p3_security::budget::report::QUERY_LABEL),
+            (24, 95, p3_security::budget::report::LOOKUP_LABEL),
+            (29, 90, p3_security::budget::report::LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height, 128);
             assert_eq!(
@@ -293,7 +299,7 @@ mod tests {
         assert_eq!(
             CHALLENGE_FIELD_BITS
                 - FOLDING_COEFFICIENT
-                - miden_security::fixed::from_bits(config::LOG_BLOWUP as u32),
+                - fixed::from_bits(config::LOG_BLOWUP as u32),
             FOLDING_BASE_FP,
             "FOLDING_BASE_FP is stale"
         );
@@ -382,7 +388,7 @@ mod tests {
         let crossover = (6..=30)
             .find(|&log_height| {
                 security_report(&params, log_height, 128).binding_term().label
-                    == miden_security::report::LOOKUP_LABEL
+                    == p3_security::budget::report::LOOKUP_LABEL
             })
             .expect("the lookup round must bind at some supported height");
 
