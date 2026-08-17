@@ -20,8 +20,8 @@
 //!
 //! The wrapper functions in this crate talk to the host through the raw imports declared in the
 //! `miden-event-handler-abi` crate. Conditions a correct handler cannot meet (for example an
-//! unknown status code) end the handler through [`fail`]. Enable the `panic-handler` feature in
-//! the final handler crate to forward panic messages to the host the same way.
+//! unknown status code) end the handler through the `fail` wrapper. Enable the `panic-handler`
+//! feature in the final handler crate to forward panic messages to the host the same way.
 
 #![no_std]
 
