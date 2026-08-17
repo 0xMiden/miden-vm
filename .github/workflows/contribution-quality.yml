@@ -304,6 +304,7 @@ jobs:
                 `Automatic closing disabled: ${maintainerIntervention.login} `
                   + `${maintainerIntervention.action} this pull request as a maintainer.`,
               );
+              return;
             } else if (interventionCheckFailed) {
               core.warning('Automatic closing disabled because maintainer intervention is unknown.');
             }
