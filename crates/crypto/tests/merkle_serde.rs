@@ -137,7 +137,8 @@ fn mmr_serde_and_binary_validate_state() {
 
 #[test]
 fn mmr_peaks_serde_validates_peak_count() {
-    let peaks = MmrPeaks::new(Forest::new(3).unwrap(), vec![leaf(1), leaf(2)]).unwrap();
+    let forest = Forest::new(Forest::MAX_LEAVES).unwrap();
+    let peaks = MmrPeaks::new(forest, vec![leaf(1); forest.num_trees()]).unwrap();
     let value = serde_json::to_value(&peaks).unwrap();
     assert_eq!(decode::<MmrPeaks>(&value).unwrap(), peaks);
 
@@ -147,15 +148,34 @@ fn mmr_peaks_serde_validates_peak_count() {
 }
 
 #[test]
-fn mmr_path_serde_validates_position() {
-    let path = MmrPath::new(Forest::new(4).unwrap(), 2, MerklePath::new(vec![leaf(9), leaf(8)]));
+fn mmr_peaks_serde_rejects_the_first_excess_peak() {
+    let max_peaks = Forest::MAX_LEAVES.count_ones() as usize;
+    let value = json!({ "forest": 0, "peaks": vec![Word::default(); max_peaks + 1] });
+
+    let error = decode::<MmrPeaks>(&value).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains(&format!("sequence contains more than {max_peaks} elements")),
+        "unexpected error: {message}",
+    );
+}
+
+#[test]
+fn mmr_path_serde_validates_position_and_depth() {
+    let path = MmrPath::new(Forest::new(2).unwrap(), 0, MerklePath::new(vec![leaf(9)]));
     let value = serde_json::to_value(&path).unwrap();
     assert_eq!(decode::<MmrPath>(&value).unwrap(), path);
 
     // Both relative-position and peak-index calculations require a position inside the forest.
-    let mut tampered = value;
-    tampered["position"] = serde_json::json!(4);
+    let mut tampered = value.clone();
+    tampered["position"] = serde_json::json!(2);
     assert!(decode::<MmrPath>(&tampered).is_err());
+
+    for path_len in [0, 2] {
+        let mut tampered = value.clone();
+        tampered["merkle_path"]["nodes"] = json!(vec![Word::default(); path_len]);
+        assert!(decode::<MmrPath>(&tampered).is_err(), "accepted path length {path_len}");
+    }
 }
 
 #[test]

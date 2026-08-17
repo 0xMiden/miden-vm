@@ -192,8 +192,8 @@ impl From<MmrPeaks> for Vec<Word> {
     }
 }
 
-/// A manual impl (instead of a derive) so serde deserialization enforces the same invariants as
-/// [`MmrPeaks::new`]: a supported forest size and a peak count equal to the forest's tree count.
+/// Bounds the peak sequence while reading it, then validates the forest size and peak count
+/// through [`MmrPeaks::new`].
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for MmrPeaks {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -204,10 +204,10 @@ impl<'de> serde::Deserialize<'de> for MmrPeaks {
         #[serde(rename = "MmrPeaks")]
         struct Raw {
             forest: Forest,
-            peaks: Vec<Word>,
+            peaks: crate::merkle::BoundedVec<Word, { Forest::MAX_LEAVES.count_ones() as usize }>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        MmrPeaks::new(raw.forest, raw.peaks).map_err(serde::de::Error::custom)
+        MmrPeaks::new(raw.forest, raw.peaks.0).map_err(serde::de::Error::custom)
     }
 }

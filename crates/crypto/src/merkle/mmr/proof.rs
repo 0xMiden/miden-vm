@@ -163,8 +163,8 @@ impl MmrProof {
     }
 }
 
-/// Rejects positions outside the forest, as required by [`MmrPath::relative_pos`] and
-/// [`MmrPath::peak_index`]. The nested [`MerklePath`] enforces its own length bound.
+/// Rejects positions outside the forest and paths whose depth does not match the tree containing
+/// the position. The nested [`MerklePath`] enforces its own length bound.
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for MmrPath {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -180,13 +180,23 @@ impl<'de> serde::Deserialize<'de> for MmrPath {
         }
 
         let raw = Raw::deserialize(deserializer)?;
-        if raw.position >= raw.forest.num_leaves() {
+        let expected_depth =
+            raw.forest.leaf_to_corresponding_tree(raw.position).ok_or_else(|| {
+                serde::de::Error::custom(format_args!(
+                    "MmrPath position {} is outside a forest of {} leaves",
+                    raw.position,
+                    raw.forest.num_leaves(),
+                ))
+            })? as usize;
+        let actual_depth = raw.merkle_path.nodes().len();
+        if actual_depth != expected_depth {
             return Err(serde::de::Error::custom(format_args!(
-                "MmrPath position {} is outside a forest of {} leaves",
+                "MmrPath depth {actual_depth} does not match the expected depth {expected_depth} \
+                 for position {}",
                 raw.position,
-                raw.forest.num_leaves(),
             )));
         }
+
         Ok(MmrPath::new(raw.forest, raw.position, raw.merkle_path))
     }
 }
