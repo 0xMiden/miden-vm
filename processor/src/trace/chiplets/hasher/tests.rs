@@ -7,15 +7,18 @@ use miden_air::{
     NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
     PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols,
     trace::{
-        chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
+        chiplets::hasher::{
+            CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, MAX_MERKLE_DEPTH, MAX_MERKLE_INDEX_HALF,
+            RATE_LEN, TRACE_WIDTH,
+        },
         poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
     },
 };
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
-    crypto::merkle::{MerkleTree, NodeIndex},
-    field::PrimeCharacteristicRing,
+    crypto::merkle::{MerklePath, MerkleTree, NodeIndex},
+    field::{PrimeCharacteristicRing, PrimeField64},
     mast::OpBatch,
 };
 use miden_utils_testing::rand::rand_array;
@@ -23,7 +26,7 @@ use miden_utils_testing::rand::rand_array;
 use super::{
     ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
     MR_UPDATE_OLD, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state, get_digest, init_state,
-    init_state_from_words,
+    init_state_from_words, merkle_index_canonicality_witness,
 };
 
 // SPONGE MODE TESTS
@@ -110,7 +113,19 @@ fn hasher_build_merkle_root_depth_1() {
 
     // Row 0: input (MP_VERIFY, is_boundary=1, node_index=0)
     let init_state = init_state_from_words(&leaves[0], &path0[0]);
-    check_controller_input(&trace.controller, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO);
+    let controller_state = with_canonicality_witness(init_state, ZERO, ZERO);
+    check_controller_input(
+        &trace.controller,
+        0,
+        MP_VERIFY,
+        &controller_state,
+        ZERO,
+        ONE,
+        ZERO,
+        ZERO,
+    );
+    // The controller columns hold the witness, but the permutation request still receives zeros.
+    assert_eq!(poseidon2_row(&trace.poseidon2, 0).state, init_state);
     // Row 1: output (RETURN_HASH, is_boundary=1, node_index=0)
     check_controller_output(
         &trace.controller,
@@ -159,12 +174,83 @@ fn hasher_build_merkle_root_depth_3() {
     // Pair 2 (rows 4-5): node_index 1 -> 0, b_2=1&1=1, b_next=0 (last step)
     check_merkle_controller_pair(&trace.controller, 4, MP_VERIFY, 1, false, true, ZERO, ONE, ZERO);
 
-    // Capacity is zero on all tree-mode input rows
-    for row in [0, 2, 4] {
+    // Level 0 carries the canonicality witness; all later Merkle inputs retain zero capacity.
+    assert_eq!(
+        controller_row(&trace.controller, 0).capacity(),
+        merkle_index_canonicality_witness(Felt::from_u8(2), ONE)
+    );
+    for row in [2, 4] {
         for (i, value) in controller_row(&trace.controller, row).capacity().into_iter().enumerate()
         {
             assert_eq!(value, ZERO, "capacity[{i}] should be zero on tree input row {row}");
         }
+    }
+}
+
+fn with_canonicality_witness(
+    mut state: HasherState,
+    node_index_next: Felt,
+    direction_bit: Felt,
+) -> HasherState {
+    state[RATE_LEN..]
+        .copy_from_slice(&merkle_index_canonicality_witness(node_index_next, direction_bit));
+    state
+}
+
+#[test]
+fn merkle_index_canonicality_slack_covers_boundaries_including_q_minus_one() {
+    for index in [0, 1, (1 << 32) - 2, 1 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let x = index >> 1;
+        let bit = index & 1;
+        let [slack_0, slack_1, slack_2, slack_3] =
+            merkle_index_canonicality_witness(Felt::new_unchecked(x), Felt::new_unchecked(bit));
+        let slack = slack_0.as_canonical_u64()
+            + (slack_1.as_canonical_u64() << 16)
+            + (slack_2.as_canonical_u64() << 32)
+            + (slack_3.as_canonical_u64() << 48);
+
+        assert_eq!(x + slack + bit, MAX_MERKLE_INDEX_HALF, "index 0x{index:016x}");
+        assert!(slack_3.as_canonical_u64() < 1 << 15);
+    }
+}
+
+#[test]
+fn merkle_canonicality_supports_every_depth_and_boundary_index() {
+    for depth in 1..=usize::from(MAX_MERKLE_DEPTH) {
+        let upper = if depth == usize::from(MAX_MERKLE_DEPTH) {
+            Felt::ORDER_U64 - 1
+        } else {
+            (1_u64 << depth) - 1
+        };
+        let mut indices = vec![0, upper];
+        if depth == usize::from(MAX_MERKLE_DEPTH) {
+            indices.push(Felt::ORDER_U64 - 2);
+        }
+
+        // Exercise both sides of the 32-bit boundary whenever they are valid at this depth.
+        for index in [(1_u64 << 32) - 2, (1_u64 << 32) - 1, 1_u64 << 32] {
+            if index <= upper {
+                indices.push(index);
+            }
+        }
+        indices.sort_unstable();
+        indices.dedup();
+
+        let path = MerklePath::new(vec![Digest::default(); depth]);
+        let mut hasher = Hasher::default();
+        for index in indices {
+            hasher.build_merkle_root(Digest::default(), &path, Felt::new_unchecked(index));
+            hasher.update_merkle_root(
+                Digest::default(),
+                init_leaf(1),
+                &path,
+                Felt::new_unchecked(index),
+            );
+        }
+
+        // Materialize both traces so witness construction and trace writing run at every
+        // supported depth.
+        build_trace(hasher);
     }
 }
 
@@ -904,7 +990,7 @@ fn make_basic_block_batches(ops: Vec<miden_core::operations::Operation>) -> Vec<
 ///
 /// Uses Pad instead of Noop to ensure the groups differ from those produced by `make_multi_batch`.
 /// Extracts the per-batch group hashes, the form `Hasher::hash_basic_block` consumes.
-fn batch_groups(batches: &[OpBatch]) -> Vec<[Felt; miden_air::trace::chiplets::hasher::RATE_LEN]> {
+fn batch_groups(batches: &[OpBatch]) -> Vec<[Felt; RATE_LEN]> {
     batches.iter().map(|batch| *batch.groups()).collect()
 }
 

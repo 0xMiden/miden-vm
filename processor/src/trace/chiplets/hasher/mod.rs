@@ -2,8 +2,9 @@ use alloc::vec::Vec;
 
 use hashbrown::HashMap;
 use miden_air::trace::chiplets::hasher::{
-    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MAX_MERKLE_INDEX_HALF,
+    MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH,
+    Selectors,
 };
 use miden_core::chiplets::hasher::apply_permutation;
 
@@ -11,6 +12,7 @@ use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, Word as Digest,
     ZERO,
 };
+use crate::trace::range::RangeChecker;
 
 mod trace;
 use trace::{HasherTrace, fill_poseidon2_permutation_trace};
@@ -114,6 +116,11 @@ impl Hasher {
         } else {
             (self.perm_requests.len() + 1) * HASH_CYCLE_LEN
         }
+    }
+
+    /// Adds range-check requests for the level-0 Merkle canonicality witnesses.
+    pub(super) fn append_range_checks(&self, range_checker: &mut RangeChecker) {
+        self.trace.append_range_checks(range_checker);
     }
 
     /// Estimates the controller trace length before finalization.
@@ -390,6 +397,18 @@ impl Hasher {
     ) -> HasherState {
         let perm_id = self.record_perm_request(&state);
 
+        // Level-0 Merkle rows store the canonical-index witness in the capacity columns. Keep the
+        // witness separate from `state`, which is the zero-capacity input used by the permutation
+        // request and by memoized replay.
+        let is_merkle_input = init_selectors == MP_VERIFY
+            || init_selectors == MR_UPDATE_OLD
+            || init_selectors == MR_UPDATE_NEW;
+        let canonicality_witness = if is_boundary_input == ONE && is_merkle_input {
+            Some(merkle_index_canonicality_witness(output_node_index, input_direction_bit))
+        } else {
+            None
+        };
+
         self.trace.append_controller_row(
             init_selectors,
             &state,
@@ -398,6 +417,7 @@ impl Hasher {
             is_boundary_input,
             input_direction_bit,
             perm_id,
+            canonicality_witness,
         );
 
         let mut permuted = state;
@@ -411,6 +431,7 @@ impl Hasher {
             is_boundary_output,
             output_direction_bit,
             perm_id,
+            None,
         );
 
         permuted
@@ -573,6 +594,30 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 
 fn perm_id_felt(id: usize) -> Felt {
     Felt::from_u32(u32::try_from(id).expect("Poseidon2 permutation id exceeds u32"))
+}
+
+/// Builds the four limbs of the level-0 Merkle canonicality slack.
+///
+/// Let `x` be the index after removing the first direction bit `b`, and let
+/// `M = (Q - 1) / 2`. A canonical index satisfies `x + b <= M`, so its slack is
+/// `y = M - x - b`. The AIR checks this equation, while the range bus checks all four 16-bit limbs
+/// and `2*y_3`. The latter makes the top limb 15-bit and therefore keeps `y` below `2^63`.
+/// For the largest canonical index, `Q - 1`, the slack is zero.
+fn merkle_index_canonicality_witness(node_index_next: Felt, direction_bit: Felt) -> [Felt; 4] {
+    const LIMB_MASK: u64 = (1 << 16) - 1;
+
+    let x = node_index_next.as_canonical_u64();
+    let bit = direction_bit.as_canonical_u64();
+    let slack = MAX_MERKLE_INDEX_HALF
+        .checked_sub(x.checked_add(bit).expect("Merkle index plus direction bit overflowed"))
+        .expect("non-canonical Merkle index has no canonicality slack witness");
+
+    [
+        Felt::new_unchecked(slack & LIMB_MASK),
+        Felt::new_unchecked((slack >> 16) & LIMB_MASK),
+        Felt::new_unchecked((slack >> 32) & LIMB_MASK),
+        Felt::new_unchecked(slack >> 48),
+    ]
 }
 
 // HASHER STATE MUTATORS

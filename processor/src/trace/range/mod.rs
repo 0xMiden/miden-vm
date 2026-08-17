@@ -61,8 +61,9 @@ impl RangeChecker {
 
     /// Adds a batch of range-check lookups to this [RangeChecker] instance.
     pub fn add_range_checks(&mut self, values: &[u16]) {
-        // Current emitters record range checks in batches of two or four values.
-        debug_assert!(values.len() == 2 || values.len() == 4);
+        // Callers provide two Merkle-depth, U32DIV, or memory-delta values; four u32 helper
+        // values; or five Merkle-index witness values.
+        debug_assert!(matches!(values.len(), 2 | 4 | 5));
 
         for value in values.iter() {
             // add the specified value to the trace of this range checker's lookups.

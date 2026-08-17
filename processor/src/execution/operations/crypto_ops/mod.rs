@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::chiplets::hasher::{Hasher, MAX_MERKLE_DEPTH, STATE_WIDTH};
-use miden_core::deferred::Tag;
+use miden_core::{crypto::merkle::MerklePath, deferred::Tag};
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
@@ -86,6 +86,34 @@ fn validate_merkle_depth(depth: Felt) -> Result<(), CryptoError> {
     Ok(())
 }
 
+/// Rejects a materialized Merkle path whose length differs from the stack depth.
+///
+/// An absent path is valid for processor implementations whose hasher does not consume advice
+/// paths.
+fn validate_merkle_path_length(
+    path: Option<&MerklePath>,
+    expected_depth: Felt,
+) -> Result<(), CryptoError> {
+    if let Some(path) = path {
+        validate_materialized_merkle_path_length(path.nodes().len(), expected_depth)?;
+    }
+    Ok(())
+}
+
+/// Rejects a materialized Merkle path whose actual node count differs from the stack depth.
+fn validate_materialized_merkle_path_length(
+    path_len: usize,
+    expected_depth: Felt,
+) -> Result<(), CryptoError> {
+    // Compare without narrowing `path_len`: a wrapped length must not appear to match the depth.
+    if u64::try_from(path_len).ok() != Some(expected_depth.as_canonical_u64()) {
+        return Err(
+            OperationError::InvalidMerklePathLength { path_len, depth: expected_depth }.into()
+        );
+    }
+    Ok(())
+}
+
 /// Verifies that a Merkle path from the specified node resolves to the specified root. The
 /// stack is expected to be arranged as follows (from the top):
 /// - value of the node, 4 elements.
@@ -106,6 +134,7 @@ fn validate_merkle_depth(depth: Felt) -> Result<(), CryptoError> {
 /// - The specified depth is greater than the depth of the Merkle tree identified by the specified
 ///   root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
+/// - The advice provider returns a path whose length does not equal the specified depth.
 #[inline(always)]
 pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -122,6 +151,7 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
 
     // get a Merkle path from the advice provider for the specified root and node index
     let path = processor.advice_provider().get_merkle_path(root, depth, index)?;
+    validate_merkle_path_length(path.as_ref(), depth)?;
 
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), depth, index, root);
 
@@ -174,6 +204,7 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
 /// - The specified depth is greater than the depth of the Merkle tree identified by the specified
 ///   root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
+/// - The advice provider returns a path whose length does not equal the specified depth.
 #[inline(always)]
 pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -200,11 +231,7 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
         new_value,
     )?;
 
-    if let Some(path) = &path
-        && path.len() != depth.as_canonical_u64() as usize
-    {
-        return Err(OperationError::InvalidMerklePathLength { path_len: path.len(), depth }.into());
-    }
+    validate_merkle_path_length(path.as_ref(), depth)?;
 
     let (addr, new_root) = processor.hasher().update_merkle_root(
         claimed_old_root,

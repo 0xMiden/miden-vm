@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, apply_permutation},
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    crypto::merkle::{MerklePath, MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     program::StackInputs,
 };
@@ -11,7 +11,7 @@ use proptest::prelude::*;
 
 use super::{
     op_crypto_stream, op_horner_eval_base, op_horner_eval_ext, op_hperm, op_mpverify, op_mrupdate,
-    validate_merkle_depth,
+    validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
 use crate::{
     AdviceInputs, ContextId,
@@ -851,10 +851,10 @@ fn test_op_mrupdate_merge_subtree() {
     assert!(processor.advice_provider().has_merkle_root(expected_root));
 }
 
-// MERKLE DEPTH VALIDATION
+// MERKLE VALIDATION
 // --------------------------------------------------------------------------------------------
 
-mod merkle_depth_validation {
+mod merkle_validation {
     use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
     use miden_core::field::PrimeCharacteristicRing;
 
@@ -867,6 +867,37 @@ mod merkle_depth_validation {
             validate_merkle_depth(felt(depth))
                 .unwrap_or_else(|err| panic!("depth {depth} must be accepted: {err}"));
         }
+    }
+
+    #[test]
+    fn materialized_path_length_must_match_depth() {
+        let path = MerklePath::new(vec![init_node(1); 3]);
+
+        validate_merkle_path_length(None, felt(3)).expect("an absent path is allowed");
+        validate_merkle_path_length(Some(&path), felt(3)).expect("path length should match");
+
+        let err = validate_merkle_path_length(Some(&path), felt(2))
+            .expect_err("a materialized path must match the stack depth");
+        assert!(matches!(
+            err,
+            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+                path_len: 3,
+                depth,
+            }) if depth == felt(2)
+        ));
+    }
+
+    #[test]
+    fn materialized_path_length_is_not_narrowed() {
+        let err = validate_materialized_merkle_path_length(257, felt(1))
+            .expect_err("the actual path length must not wrap to the expected depth");
+        assert!(matches!(
+            err,
+            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+                path_len: 257,
+                depth,
+            }) if depth == felt(1)
+        ));
     }
 
     /// The execution path must enforce the same depth range as the AIR. In particular, the generic
@@ -898,6 +929,33 @@ mod merkle_depth_validation {
                 .expect_err(&alloc::format!("MRUPDATE must reject depth {depth}"));
             assert_merkle_depth_error(err, depth, "MRUPDATE");
         }
+    }
+
+    /// An MRUPDATE rejected for an invalid depth must leave the advice tree unchanged.
+    #[test]
+    fn rejected_mrupdate_does_not_mutate_the_advice_tree() {
+        let leaves: Vec<Word> = (1..=8).map(init_node).collect();
+        let tree = MerkleTree::new(&leaves).unwrap();
+        let root = tree.root();
+        let new_value = init_node(99);
+
+        let mut updated_leaves = leaves.clone();
+        updated_leaves[0] = new_value;
+        let updated_root = MerkleTree::new(updated_leaves).unwrap().root();
+
+        let stack = mrupdate_stack(leaves[0], ZERO, root, new_value);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap())
+            .with_advice(AdviceInputs::default().with_merkle_store(MerkleStore::from(&tree)))
+            .expect("advice inputs should fit");
+        let err =
+            op_mrupdate(&mut processor, &mut NoopTracer).expect_err("depth zero must be rejected");
+        assert_merkle_depth_error(err, ZERO, "MRUPDATE");
+
+        assert!(processor.advice_provider().has_merkle_root(root));
+        assert!(
+            !processor.advice_provider().has_merkle_root(updated_root),
+            "rejected MRUPDATE inserted the updated tree into the advice store"
+        );
     }
 
     /// Builds an MPVERIFY stack with node index zero.

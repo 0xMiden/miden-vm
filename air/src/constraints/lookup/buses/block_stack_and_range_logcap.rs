@@ -1,7 +1,7 @@
 //! Packs four buses onto one main-trace lookup column:
 //!
 //! - Block-stack table: control-flow block nesting.
-//! - stack range-check removes: gated by u32 or Merkle opcodes.
+//! - u32 and Merkle-depth range-check removes: gated by u32 or Merkle opcodes.
 //! - Log-deferred transcript-state: gated by the log deferred opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
@@ -96,7 +96,7 @@ use crate::{
 /// the sum: `4 + 1 = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
-/// Emit the merged block-stack + stack-range-check + logpre + range-table column.
+/// Emit the merged block-stack + u32/Merkle-depth range-check + logpre + range-table column.
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -141,7 +141,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let range_m = local.range.multiplicity;
     let range_v = local.range.value;
 
-    // ---- stack range-check + logpre captures (from range_logcap.rs) ----
+    // ---- u32 and Merkle-depth range-check + logpre captures (from range_logcap.rs) ----
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
@@ -366,7 +366,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
                     // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
                     // Remove the previous deferred root, add the next. Mutually exclusive with all
-                    // block-stack branches and with stack range checks.
+                    // block-stack branches and with the u32 and Merkle-depth range checks.
                     g.batch(
                         "log_deferred_state",
                         f_log_deferred,

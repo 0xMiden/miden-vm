@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Range Checker
 
-Miden VM relies heavily on 16-bit range checks, which prove that a field element represents an integer in $[0, 2^{16})$. Selected [u32 operations](./stack/u32_ops.md) request checks for four helper values; `U32DIV` requests two additional checks. Each active memory row requests five checks, and `MPVERIFY` and `MRUPDATE` request two checks for their Merkle-path depth.
+Miden VM relies heavily on 16-bit range checks, which prove that a field element represents an integer in $[0, 2^{16})$. Selected [u32 operations](./stack/u32_ops.md) request checks for four helper values; `U32DIV` requests two additional checks. Each active memory row requests five checks. `MPVERIFY` and `MRUPDATE` request two checks for their Merkle-path depth, and each Merkle path leg requests five checks for its canonical-index witness.
 
 Thus, it is very important for the VM to be able to perform a large number of 16-bit range checks very efficiently. In this note we describe how this can be achieved using the [LogUp](./lookups/logup.md) lookup argument.
 
@@ -107,7 +107,7 @@ This construction is implemented in Miden with the following requirements, capab
 ### Requirements
 
 - 2 columns of the main trace: $m, v$, where $v$ contains the value being range-checked and $m$ is the number of times the value is checked (its multiplicity).
-- 1 domain-separated [communication bus](./lookups/index.md#communication-buses-in-miden-vm), `RangeCheck`, to ensure that the table multiplicities match the requests from [u32 operations](./stack/u32_ops.md#range-checks), [Merkle operations](./stack/crypto_ops.md#merkle-depth-range-checks), and the [memory chiplet](./chiplets/memory.md).
+- 1 domain-separated [communication bus](./lookups/index.md#communication-buses-in-miden-vm), `RangeCheck`, to ensure that the table multiplicities match the requests from [u32 operations](./stack/u32_ops.md#range-checks), [Merkle operations](./stack/crypto_ops.md#merkle-range-checks), and the [memory chiplet](./chiplets/memory.md).
 
 ### Capabilities
 
@@ -160,6 +160,11 @@ The current requesters are:
 
 - Selected [`u32` operations](./stack/u32_ops.md#range-checks), which request checks for four decoder helper values. `U32DIV` requests two additional checks for its remainder bound.
 - `MPVERIFY` and `MRUPDATE`, which request checks for the depth $d$ and the scaled value $2^{10}(d - 1)$. Together these enforce $1 \le d \le 64$.
+- Each MPVERIFY path and each of MRUPDATE's old and new paths, which request checks for the four
+  limbs $y_0, y_1, y_2, y_3$ of the level-0 canonical-index slack and for $2y_3$. The limb checks
+  give $y_j < 2^{16}$, and the extra check gives $y_3 < 2^{15}$. Thus the complete slack is less
+  than $2^{63}$; see
+  [Merkle range checks](./stack/crypto_ops.md#merkle-range-checks).
 - The [memory chiplet](./chiplets/memory.md), which requests five checks per active row for the delta limbs $d_0$ and $d_1$ and the word-address values $w_0$, $w_1$, and $4w_1$.
 
 These interactions do not use a dedicated $b_{\mathrm{range}}$ accumulator. They are packed with other lookup interactions in the Core and Chiplets AIRs. For AIR $i$, let $\sigma_i$ be the sum of all its lookup contributions and $n_i$ its trace length. The AIR commits the normalized sum

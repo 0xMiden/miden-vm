@@ -78,7 +78,7 @@
 
 #### Fixes
 
-- [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` in the AIR.
+- [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index.
 
 ## v0.29.0 (2026-08-04)
 

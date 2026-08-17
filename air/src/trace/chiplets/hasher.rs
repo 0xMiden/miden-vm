@@ -12,6 +12,7 @@
 
 use core::ops::Range;
 
+use miden_core::field::PrimeField64;
 pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, ONE, ZERO};
@@ -102,8 +103,29 @@ const _: () = assert!(
     "MAX_MERKLE_DEPTH must be greater than one and divide 2^16"
 );
 
-/// Scale used with a 16-bit range check to enforce the upper Merkle-depth bound.
+// The canonicality witness uses the final `depth - 1` path bits to reconstruct the level-1 index.
+// Keep that suffix within 63 bits so its field representation cannot wrap.
+const _: () = assert!(
+    MAX_MERKLE_DEPTH <= 64,
+    "the canonical-index witness requires the shifted index to fit in 63 bits"
+);
+
+/// Scale applied to `depth - 1` for the second Merkle-depth range check.
+///
+/// For a 16-bit `depth`, `(depth - 1) * MERKLE_DEPTH_RANGE_SCALE` is a 16-bit value exactly when
+/// `1 <= depth <= MAX_MERKLE_DEPTH`, so the pair of checks enforces both depth bounds.
 pub const MERKLE_DEPTH_RANGE_SCALE: u16 = ((1_u32 << 16) / MAX_MERKLE_DEPTH as u32) as u16;
+
+/// Half of the largest canonical Merkle index, `(Q - 1) / 2`.
+///
+/// For `n = 2*x + b`, the bound `n < Q` is equivalent to `x + b <= (Q - 1) / 2`. The level-0
+/// witness proves this inequality by adding a non-negative slack.
+pub const MAX_MERKLE_INDEX_HALF: u64 = (Felt::ORDER_U64 - 1) / 2;
+
+const _: () = assert!(
+    2 * MAX_MERKLE_INDEX_HALF + 1 == Felt::ORDER_U64,
+    "MAX_MERKLE_INDEX_HALF must be exactly (Q - 1) / 2"
+);
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;

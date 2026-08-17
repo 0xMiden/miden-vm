@@ -11,6 +11,8 @@
 //!
 //! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
 
+use core::array;
+
 use miden_core::{
     WORD_SIZE,
     field::{Algebra, PrimeCharacteristicRing},
@@ -164,6 +166,22 @@ pub enum HasherPayload<E> {
     Rate(Rate<E>),
     /// 4-element word/digest.
     Word(WordFields<E>),
+}
+
+/// AIR-side Merkle-init message selected from the controller sub-selectors and rate halves.
+///
+/// On controller rows, `s1` and `s2` are independently constrained to be boolean. The three
+/// Merkle encodings are `(s1, s2) = (0, 1)` for MP, `(1, 0)` for MV, and `(1, 1)` for MU.
+/// `direction_bit` selects the rate half containing the leaf word.
+#[derive(Clone, Debug)]
+pub(super) struct MerkleInitFromSelectorsMsg<E> {
+    pub s1: E,
+    pub s2: E,
+    pub direction_bit: E,
+    pub addr: E,
+    pub node_index: E,
+    pub rate_0: WordFields<E>,
+    pub rate_1: WordFields<E>,
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
@@ -640,6 +658,35 @@ where
     }
 }
 
+impl<E, EF> LookupMessage<E, EF> for MerkleInitFromSelectorsMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let s1 = self.s1.clone();
+        let s2 = self.s2.clone();
+        let not_s1 = E::ONE - s1.clone();
+        let not_s2 = E::ONE - s2.clone();
+        let f_mp = not_s1 * s2.clone();
+        let f_mv = s1.clone() * not_s2;
+        let f_mu = s1 * s2;
+
+        let mut acc = challenges.bus_prefix[BusId::HasherMerkleVerifyInit as usize].clone() * f_mp
+            + challenges.bus_prefix[BusId::HasherMerkleOldInit as usize].clone() * f_mv
+            + challenges.bus_prefix[BusId::HasherMerkleNewInit as usize].clone() * f_mu;
+        acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
+
+        let bit = self.direction_bit.clone();
+        let one_minus_bit = E::ONE - bit.clone();
+        let word: WordFields<E> = array::from_fn(|i| {
+            self.rate_0[i].clone() * one_minus_bit.clone() + self.rate_1[i].clone() * bit.clone()
+        });
+        acc += challenges.inner_product_at(2, &word);
+        acc
+    }
+}
+
 // --- MemoryMsg (interaction-specific bus ids) ----------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for MemoryMsg<E>
@@ -934,10 +981,9 @@ where
 // SIBLING MESSAGES
 // ================================================================================================
 //
-// [`SiblingMsg<E>`] carries the relevant hasher half alongside a [`SiblingBit`] tag and
-// encodes against sparse β layouts (`[2, 7, 8, 9, 10]` and `[2, 3, 4, 5, 6]`) dictated by
-// the responder-side hasher chiplet algebra. The trait is permissive about which β
-// positions an `encode` body touches; contiguity is a convention, not a requirement.
+// [`SiblingMsg<E>`] carries an already selected rate half and a [`SiblingBit`] tag.
+// [`SiblingFromRatesMsg<E>`] receives both rate halves and makes the same selection inside the AIR
+// encoding. Both use the sparse β layout expected by the hasher chiplet.
 
 /// Sibling-table message for the Merkle sibling bus.
 ///
@@ -976,5 +1022,150 @@ where
         };
         acc += challenges.inner_product_at(base, self.h.as_slice());
         acc
+    }
+}
+
+/// AIR-side sibling message that selects the sibling from the two hasher rate halves.
+///
+/// For a boolean `direction_bit`, this encodes the same value as [`SiblingMsg`]. The Merkle input
+/// constraints enforce booleanity. Selecting the rate here lets one signed interaction handle both
+/// MRUPDATE legs and both directions.
+#[derive(Clone, Debug)]
+pub(super) struct SiblingFromRatesMsg<E> {
+    pub direction_bit: E,
+    pub mrupdate_id: E,
+    pub node_index: E,
+    pub rate_0: WordFields<E>,
+    pub rate_1: WordFields<E>,
+}
+
+impl<E, EF> LookupMessage<E, EF> for SiblingFromRatesMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
+        acc += challenges.inner_product_at(1, &[self.mrupdate_id.clone(), self.node_index.clone()]);
+        let bit = self.direction_bit.clone();
+        let one_minus_bit = E::ONE - bit.clone();
+        let selected_rate_0: WordFields<E> =
+            array::from_fn(|i| self.rate_0[i].clone() * bit.clone());
+        let selected_rate_1: WordFields<E> =
+            array::from_fn(|i| self.rate_1[i].clone() * one_minus_bit.clone());
+        acc += challenges.inner_product_at(3, &selected_rate_0);
+        acc += challenges.inner_product_at(7, &selected_rate_1);
+        acc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::Felt;
+
+    use super::{
+        BusId, HasherMsg, MIDEN_MAX_MESSAGE_WIDTH, MerkleInitFromSelectorsMsg, SiblingBit,
+        SiblingFromRatesMsg, SiblingMsg,
+    };
+    use crate::lookup::{Challenges, message::LookupMessage};
+
+    /// The tests compare each combined encoder with the simpler messages it replaces. Several
+    /// deterministic challenge pairs exercise different coefficients; boolean selector
+    /// constraints provide the algebraic equivalence.
+    const CHALLENGE_POINTS: [(u64, u64); 3] = [
+        (29, 31),
+        (0x0123_4567_89ab_cdef, 0xa5a5_5a5a_0f0f_1111),
+        (1 << 40, (1 << 50) + 33),
+    ];
+
+    fn challenge_points() -> impl Iterator<Item = Challenges<Felt>> {
+        CHALLENGE_POINTS.into_iter().map(|(alpha, beta)| {
+            Challenges::new(
+                Felt::new_unchecked(alpha),
+                Felt::new_unchecked(beta),
+                MIDEN_MAX_MESSAGE_WIDTH,
+                BusId::COUNT,
+            )
+        })
+    }
+
+    #[test]
+    fn sibling_from_rates_matches_selected_sibling_for_boolean_directions() {
+        let mrupdate_id = Felt::from_u32(37);
+        let node_index = Felt::from_u32(41);
+        let rate_0 = [43, 47, 53, 59].map(Felt::from_u32);
+        let rate_1 = [61, 67, 71, 73].map(Felt::from_u32);
+
+        for challenges in challenge_points() {
+            for (direction_bit, bit, sibling) in
+                [(Felt::ZERO, SiblingBit::Zero, rate_1), (Felt::ONE, SiblingBit::One, rate_0)]
+            {
+                let from_rates = SiblingFromRatesMsg {
+                    direction_bit,
+                    mrupdate_id,
+                    node_index,
+                    rate_0,
+                    rate_1,
+                };
+                let selected = SiblingMsg { bit, mrupdate_id, node_index, h: sibling };
+
+                assert_eq!(
+                    <SiblingFromRatesMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
+                        &from_rates,
+                        &challenges,
+                    ),
+                    <SiblingMsg<Felt> as LookupMessage<Felt, Felt>>::encode(&selected, &challenges,),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn merkle_init_from_selectors_matches_typed_messages() {
+        let addr = Felt::from_u32(37);
+        let node_index = Felt::from_u32(41);
+        let rate_0 = [43, 47, 53, 59].map(Felt::from_u32);
+        let rate_1 = [61, 67, 71, 73].map(Felt::from_u32);
+
+        for challenges in challenge_points() {
+            for (s1, s2, kind) in [
+                (Felt::ZERO, Felt::ONE, BusId::HasherMerkleVerifyInit),
+                (Felt::ONE, Felt::ZERO, BusId::HasherMerkleOldInit),
+                (Felt::ONE, Felt::ONE, BusId::HasherMerkleNewInit),
+            ] {
+                for direction_bit in [Felt::ZERO, Felt::ONE] {
+                    let from_selectors = MerkleInitFromSelectorsMsg {
+                        s1,
+                        s2,
+                        direction_bit,
+                        addr,
+                        node_index,
+                        rate_0,
+                        rate_1,
+                    };
+                    let word = if direction_bit == Felt::ZERO { rate_0 } else { rate_1 };
+                    let typed = match kind {
+                        BusId::HasherMerkleVerifyInit => {
+                            HasherMsg::merkle_verify_init(addr, node_index, word)
+                        },
+                        BusId::HasherMerkleOldInit => {
+                            HasherMsg::merkle_old_init(addr, node_index, word)
+                        },
+                        BusId::HasherMerkleNewInit => {
+                            HasherMsg::merkle_new_init(addr, node_index, word)
+                        },
+                        _ => unreachable!("test cases contain only Merkle-init bus ids"),
+                    };
+
+                    assert_eq!(
+                        <MerkleInitFromSelectorsMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
+                            &from_selectors,
+                            &challenges,
+                        ),
+                        <HasherMsg<Felt> as LookupMessage<Felt, Felt>>::encode(&typed, &challenges,),
+                    );
+                }
+            }
+        }
     }
 }

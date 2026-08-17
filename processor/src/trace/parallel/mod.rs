@@ -483,7 +483,7 @@ fn initialize_range_checker(
         range_checker.add_range_checks(values.as_ref());
     }
 
-    // Add all memory-related range checks
+    // Add all hasher- and memory-related range checks.
     chiplets.append_range_checks(&mut range_checker);
 
     range_checker
