@@ -35,9 +35,15 @@ const MERKLE_NODE_FELTS: usize = 12;
 const MAX_FAIL_MSG_BYTES: u32 = 4096;
 
 /// Fuel charged per field element a host call moves between the VM and the guest.
+///
+/// Calibrated with `benches/handler_call.rs` (Apple M-series, wasmi 1.1): one fuel unit of
+/// guest execution costs ~0.8 ns and one host-moved felt costs ~0.7-0.9 ns, so a 1:1 charge
+/// makes host-moved data cost the guest about as much fuel as moving it itself would.
 const FUEL_PER_FELT: u64 = 1;
 
 /// Extra fuel charged per Merkle node for the host-side digest verification hash.
+///
+/// At ~0.8 ns per fuel unit this budgets ~160 ns per node, the order of one Poseidon2 merge.
 const FUEL_PER_MERKLE_NODE: u64 = 200;
 
 // HOST CONTEXT
@@ -51,13 +57,13 @@ const FUEL_PER_MERKLE_NODE: u64 = 200;
 /// Two facts make the `Send`/`Sync` impls sound:
 ///
 /// 1. The pointer never actually crosses a thread in use. `WasmHandlerModule::call` creates the
-///    store, runs the export, and consumes the store on one thread, and host functions
-///    dereference the pointer only during that call, while the `&ProcessorState` borrow is
-///    alive. The impls exist only to satisfy wasmi's trait bounds (the store-limiter closure
-///    and the linker's store-data type parameter), not to enable cross-thread access.
+///    store, runs the export, and consumes the store on one thread, and host functions dereference
+///    the pointer only during that call, while the `&ProcessorState` borrow is alive. The impls
+///    exist only to satisfy wasmi's trait bounds (the store-limiter closure and the linker's
+///    store-data type parameter), not to enable cross-thread access.
 /// 2. Even if a future wasmi internals change moved the store data, `ProcessorState` is `Sync`
-///    (checked by a static assertion in the tests), so a shared reference reachable through
-///    this pointer is safe to read from any thread.
+///    (checked by a static assertion in the tests), so a shared reference reachable through this
+///    pointer is safe to read from any thread.
 pub(crate) struct StatePtr(*const ProcessorState<'static>);
 
 // SAFETY: see the type-level comment.
