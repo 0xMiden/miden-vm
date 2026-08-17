@@ -140,6 +140,7 @@ assert_matches = { workspace = true }
 hex            = { features = ["alloc"], workspace = true }
 itertools      = { features = ["use_std"], workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
+postcard       = { workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
 serde_json     = { workspace = true }
