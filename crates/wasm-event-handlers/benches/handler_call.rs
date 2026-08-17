@@ -17,10 +17,7 @@ use std::{sync::Arc, time::Duration};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_event_handler_abi::ABI_VERSION;
-use miden_processor::{
-    FastProcessor, StackInputs,
-    event::{EventHandler, EventName},
-};
+use miden_processor::{FastProcessor, StackInputs, event::EventName};
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 
 const EVENT: EventName = EventName::new("bench::wasm::handler");
