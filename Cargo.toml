@@ -15,6 +15,8 @@ members = [
     "crates/crypto-derive",
     "crates/debug-types",
     "crates/event-handler-abi",
+    "crates/event-handler-macros",
+    "crates/event-handler-sdk",
     "crates/field",
     "crates/lib/core",
     "crates/lib/core/codegen",
@@ -37,6 +39,7 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "crates/wasm-event-handlers",
+    "crates/wasm-handler-guest-fixture",
     "miden-vm",
     "crates/precompiles",
     "crates/precompiles-air",
@@ -110,6 +113,8 @@ miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "0.
 miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "0.31", default-features = false }
 miden-processor         = { path = "./processor", version = "0.31", default-features = false }
 miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "0.31", default-features = false }
+miden-event-handler-macros = { path = "./crates/event-handler-macros", version = "0.31", default-features = false }
+miden-event-handler-sdk = { path = "./crates/event-handler-sdk", version = "0.31", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "0.31", default-features = false }
 miden-prover            = { path = "./prover", version = "0.31", default-features = false }

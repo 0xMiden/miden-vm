@@ -1,0 +1,22 @@
+[package]
+name = "miden-event-handler-macros"
+version = "0.30.0"
+description = "Attribute macro for declaring Wasm-compiled Miden VM event handlers"
+documentation = "https://docs.rs/miden-event-handler-macros"
+readme = "README.md"
+categories = ["development-tools::procedural-macro-helpers", "wasm"]
+keywords = ["events", "miden", "proc-macro", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn2.workspace = true

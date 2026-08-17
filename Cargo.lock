@@ -2365,6 +2365,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-event-handler-macros"
+version = "0.30.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "miden-event-handler-sdk"
+version = "0.30.0"
+dependencies = [
+ "miden-event-handler-abi",
+ "miden-event-handler-macros",
+]
+
+[[package]]
 name = "miden-field"
 version = "0.31.0"
 dependencies = [
@@ -2874,6 +2891,13 @@ dependencies = [
  "thiserror",
  "wasmi",
  "wat",
+]
+
+[[package]]
+name = "miden-wasm-handler-guest-fixture"
+version = "0.30.0"
+dependencies = [
+ "miden-event-handler-sdk",
 ]
 
 [[package]]

@@ -226,46 +226,60 @@ impl WasmHandlerModule {
     }
 }
 
-/// Returns `true` when the Wasm binary has a start section (section ID 8).
-///
-/// The walk runs after wasmi validated the binary, so the section layout is well formed. Out of
-/// caution, any inconsistency the walk still meets is reported as a start section.
-fn has_start_section(wasm: &[u8]) -> bool {
+/// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
+/// position.
+pub(crate) fn read_leb_u32(data: &[u8], mut pos: usize) -> Option<(u32, usize)> {
+    let mut value: u64 = 0;
+    let mut shift = 0u32;
+    loop {
+        let byte = *data.get(pos)?;
+        pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= 35 {
+            return None;
+        }
+    }
+    u32::try_from(value).ok().map(|value| (value, pos))
+}
+
+/// Walks the top-level sections of a Wasm binary, calling `visit` with each section ID and
+/// payload. Returns `None` when the walk meets a malformed layout.
+pub(crate) fn walk_wasm_sections<'a>(
+    wasm: &'a [u8],
+    mut visit: impl FnMut(u8, &'a [u8]),
+) -> Option<()> {
     /// The length of the Wasm binary header (magic + version).
     const HEADER_LEN: usize = 8;
-    /// The section ID of the start section.
-    const START_SECTION_ID: u8 = 8;
 
+    if wasm.len() < HEADER_LEN {
+        return None;
+    }
     let mut pos = HEADER_LEN;
     while pos < wasm.len() {
         let id = wasm[pos];
-        pos += 1;
-
-        // Decode the LEB128-encoded section size.
-        let mut size: u64 = 0;
-        let mut shift = 0u32;
-        loop {
-            let Some(&byte) = wasm.get(pos) else { return true };
-            pos += 1;
-            size |= u64::from(byte & 0x7f) << shift;
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-            if shift >= 35 {
-                return true;
-            }
-        }
-
-        if id == START_SECTION_ID {
-            return true;
-        }
-        pos = match pos.checked_add(size as usize) {
-            Some(next) => next,
-            None => return true,
-        };
+        let (size, payload_start) = read_leb_u32(wasm, pos + 1)?;
+        let payload_end = payload_start.checked_add(size as usize)?;
+        visit(id, wasm.get(payload_start..payload_end)?);
+        pos = payload_end;
     }
-    false
+    Some(())
+}
+
+/// Returns `true` when the Wasm binary has a start section (section ID 8).
+///
+/// The walk runs after wasmi validated the binary, so the section layout is well formed. Out of
+/// caution, a malformed walk is also reported as a start section.
+fn has_start_section(wasm: &[u8]) -> bool {
+    /// The section ID of the start section.
+    const START_SECTION_ID: u8 = 8;
+
+    let mut found = false;
+    let walked = walk_wasm_sections(wasm, |id, _| found |= id == START_SECTION_ID);
+    walked.is_none() || found
 }
 
 impl core::fmt::Debug for WasmHandlerModule {
