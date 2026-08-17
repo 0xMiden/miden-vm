@@ -33,22 +33,23 @@ impl CompileCmd {
 
         // compile the program
         // Note: assembler debug mode is always enabled (issue #1821)
-        let compiled_program = program.compile(libraries.libraries.iter().cloned())?;
+        let compiled_package = program.compile_package(libraries.libraries.iter().cloned())?;
+        let compiled_program = compiled_package.unwrap_program();
 
         // report program hash to user
         let program_hash: [u8; 32] = compiled_program.hash().into();
         println!("program hash is {}", hex::encode(program_hash));
 
-        // write the compiled program into the specified path if one is provided; if the path is
+        // write the compiled package into the specified path if one is provided; if the path is
         // not provided, writes the file into the same directory as the source file, but with
-        // `.masb` extension.
+        // `.masp` extension.
         let out_path = self.output_file.clone().unwrap_or_else(|| {
             let mut out_file = self.assembly_file.clone();
-            out_file.set_extension("masb");
+            out_file.set_extension("masp");
             out_file
         });
 
-        compiled_program
+        compiled_package
             .write_to_file(out_path)
             .into_diagnostic()
             .wrap_err("Failed to write the compiled file")
