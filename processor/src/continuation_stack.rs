@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{mast::MastNodeId, program::Program};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceInlineCall, DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -11,23 +11,30 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 pub struct SourceInlineCallContext {
     package_debug_info: Arc<PackageDebugInfo>,
     source_node_id: DebugSourceNodeId,
+    op_idx: u32,
 }
 
 impl SourceInlineCallContext {
     pub(crate) fn new(
         package_debug_info: Arc<PackageDebugInfo>,
         source_node_id: DebugSourceNodeId,
+        op_idx: u32,
     ) -> Self {
-        Self { package_debug_info, source_node_id }
+        Self {
+            package_debug_info,
+            source_node_id,
+            op_idx,
+        }
     }
 
-    pub(crate) fn for_operation_zero(
+    pub(crate) fn for_source_boundary(
         package_debug_info: Arc<PackageDebugInfo>,
         source_node_id: Option<DebugSourceNodeId>,
     ) -> Option<Self> {
         let source_node_id = source_node_id?;
-        package_debug_info.inline_calls_for_operation(source_node_id, 0).next()?;
-        Some(Self::new(package_debug_info, source_node_id))
+        let op_idx = package_debug_info.source_node(source_node_id)?.op_start;
+        package_debug_info.inline_calls_for_operation(source_node_id, op_idx).next()?;
+        Some(Self::new(package_debug_info, source_node_id, op_idx))
     }
 
     /// Returns the package debug information which owns this source occurrence.
@@ -35,9 +42,15 @@ impl SourceInlineCallContext {
         &self.package_debug_info
     }
 
-    /// Returns the source occurrence whose operation-zero inline rows form this context.
+    /// Returns the source occurrence whose boundary inline rows form this context.
     pub fn source_node_id(&self) -> DebugSourceNodeId {
         self.source_node_id
+    }
+
+    /// Returns the inline calls inherited at this source boundary.
+    pub fn inline_calls(&self) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.package_debug_info
+            .inline_calls_for_operation(self.source_node_id, self.op_idx)
     }
 }
 
@@ -407,6 +420,10 @@ mod tests {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastForest;
+    use miden_mast_package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceInlineCall, DebugSourceNode,
+        PackageDebugInfoBuilder,
+    };
 
     use super::*;
 
@@ -469,5 +486,32 @@ mod tests {
         assert!(matches!(result[0], Continuation::EnterForest { .. }));
         assert!(matches!(result[1], Continuation::EnterForest { .. }));
         assert!(matches!(result[2], Continuation::StartNode(_)));
+    }
+
+    #[test]
+    fn inline_call_context_uses_the_source_boundary_index() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_node_id = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: Vec::new(),
+                op_start: 7,
+                op_end: 7,
+                asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
+                inline_calls: vec![DebugSourceInlineCall {
+                    op_idx: 7,
+                    callee_idx: DebugFunctionIdx::from(0),
+                    loc_idx: DebugLocIdx::from(0),
+                }],
+            })
+            .unwrap();
+        let debug_info = Arc::from(builder.build());
+
+        let context =
+            SourceInlineCallContext::for_source_boundary(debug_info, Some(source_node_id))
+                .expect("boundary row should create inherited inline context");
+
+        assert_eq!(context.inline_calls().map(|row| row.op_idx).collect::<Vec<_>>(), [7]);
     }
 }

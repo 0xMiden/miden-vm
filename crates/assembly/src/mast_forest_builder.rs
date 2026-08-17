@@ -528,14 +528,19 @@ impl MastForestBuilder {
 
     /// Records a source occurrence of an `exec` target under the supplied inline call chain.
     ///
-    /// `exec` reuses the callee's execution node instead of creating a control node. Clone its
-    /// source-occurrence tree so the call-site chain is visible for every executed operation while
-    /// leaving the shared MAST nodes and other source occurrences unchanged.
+    /// `exec` reuses the callee's execution node instead of creating a control node. An undecorated
+    /// use can reuse the exact source occurrence carried by [`MastNodeUse`]. When an inline chain
+    /// is active, clone its source-occurrence tree so the chain is visible for every executed
+    /// operation while leaving the shared MAST nodes and other source occurrences unchanged.
     pub(crate) fn record_exec_inline_calls(
         &mut self,
         target: MastNodeUse,
         inline_calls: &[DebugSourceInlineCall],
     ) -> Result<MastNodeUse, Report> {
+        if inline_calls.is_empty() {
+            return Ok(target);
+        }
+
         let mut cloned = BTreeMap::new();
         let decorated_source_ref = self.clone_source_occurrence_with_inline_calls(
             target.source_ref(),
@@ -579,10 +584,11 @@ impl MastForestBuilder {
         if source_node.op_start == source_node.op_end
             && self.nodes[source_node.exec_node].kind.is_external()
         {
+            let boundary_op_idx = source_node.op_start;
             inline_calls.extend(source_node.inline_calls.iter().copied());
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
                 DebugSourceInlineCall {
-                    op_idx: 0,
+                    op_idx: boundary_op_idx,
                     callee_idx: inline_call.callee_idx,
                     loc_idx: inline_call.loc_idx,
                 }
@@ -1626,6 +1632,72 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    #[test]
+    fn plain_exec_reuses_the_exact_source_occurrence() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let target = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+        let source_node_count = builder.debug_info.debug_info().nodes().len();
+
+        for _ in 0..1_024 {
+            assert_eq!(builder.record_exec_inline_calls(target, &[]).unwrap(), target);
+        }
+
+        assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
+    }
+
+    #[test]
+    fn external_exec_preserves_the_source_boundary_index() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let mast_root = test_word(7);
+        let (callee_idx, loc_idx) = {
+            let debug_info = builder.debug_info_mut();
+            let uri = Uri::from("file:///external-boundary.masm");
+            let loc_idx = debug_info.add_location(Location::new(
+                uri,
+                ByteIndex::from(0u32),
+                ByteIndex::from(1u32),
+            ));
+            let file_idx = debug_info.debug_info().locations()[loc_idx].file_idx;
+            let name_idx = debug_info.add_string("external::callee");
+            let callee_idx = debug_info.add_function(FunctionInfo::new(
+                None,
+                name_idx,
+                file_idx,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                mast_root,
+            ));
+            (callee_idx, loc_idx)
+        };
+        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let external_ref = builder
+            .ensure_external_link_with_source_ref(mast_root, None, None, None)
+            .unwrap();
+        let boundary_source_ref = builder
+            .push_source_occurrence(
+                external_ref,
+                vec![],
+                7,
+                7,
+                vec![],
+                vec![],
+                vec![DebugSourceInlineCall { op_idx: 7, ..inline_call }],
+                &[],
+                false,
+            )
+            .unwrap();
+        let target = MastNodeUse::new(external_ref, boundary_source_ref);
+
+        let decorated = builder.record_exec_inline_calls(target, &[inline_call]).unwrap();
+        let source_node = &builder.debug_info[decorated.source_ref()];
+
+        assert_eq!((source_node.op_start, source_node.op_end), (7, 7));
+        assert_eq!(source_node.inline_calls.len(), 2);
+        assert!(source_node.inline_calls.iter().all(|row| row.op_idx == 7));
     }
 
     #[derive(Debug, Clone)]

@@ -3465,7 +3465,12 @@ fn external_exec_records_inline_context_at_the_boundary() -> TestResult {
         .expect("decorated external exec should carry boundary inline context");
 
     assert_eq!(external_source.op_start, external_source.op_end);
-    assert!(external_source.inline_calls.iter().all(|inline_call| inline_call.op_idx == 0));
+    assert!(
+        external_source
+            .inline_calls
+            .iter()
+            .all(|inline_call| inline_call.op_idx == external_source.op_start)
+    );
     Ok(())
 }
 

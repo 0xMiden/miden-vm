@@ -58,7 +58,7 @@ impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     }
 
     pub fn current_inline_call_context(&self) -> Option<SourceInlineCallContext> {
-        SourceInlineCallContext::for_operation_zero(
+        SourceInlineCallContext::for_source_boundary(
             self.source_debug_info.clone()?,
             self.current_source_node_id,
         )

@@ -95,16 +95,13 @@ fn active_inline_names(resume_context: &ResumeContext) -> Vec<String> {
     resume_context
         .inherited_inline_call_contexts()
         .flat_map(|context| {
-            context
-                .debug_info()
-                .inline_calls_for_operation(context.source_node_id(), 0)
-                .map(|inline_call| {
-                    let function = context
-                        .debug_info()
-                        .get_function(inline_call.callee_idx)
-                        .expect("inline callee should be registered");
-                    context.debug_info()[function.name_idx].to_string()
-                })
+            context.inline_calls().map(|inline_call| {
+                let function = context
+                    .debug_info()
+                    .get_function(inline_call.callee_idx)
+                    .expect("inline callee should be registered");
+                context.debug_info()[function.name_idx].to_string()
+            })
         })
         .collect()
 }

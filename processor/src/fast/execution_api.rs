@@ -937,7 +937,7 @@ impl FastProcessor {
                     source_node_id,
                 } => {
                     let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
-                        SourceInlineCallContext::for_operation_zero(debug_info, source_node_id)
+                        SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
                     });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self.load_mast_forest_sync(
@@ -1070,7 +1070,7 @@ impl FastProcessor {
                     source_node_id,
                 } => {
                     let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
-                        SourceInlineCallContext::for_operation_zero(debug_info, source_node_id)
+                        SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
                     });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self
