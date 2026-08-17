@@ -226,6 +226,88 @@ fn kernel_commitment_rejects_non_u32_procedure_count() {
     }
 }
 
+/// The MASM kernel pipe must store the canonical digest list and authenticate the same commitment
+/// as `KernelDescriptor::commitment`.
+#[test]
+fn pipe_kernel_digests_to_memory_matches_native() {
+    use miden_core::{Felt, Word, program::KernelDescriptor};
+
+    const KERNEL_PTR: u64 = 1000;
+    const UNTOUCHED_MEMORY: [u64; 4] = [91, 92, 93, 94];
+    const STACK_TAIL: [u64; 4] = [701, 702, 703, 704];
+
+    let digest = |seed: u64| -> Word {
+        [
+            Felt::new_unchecked(seed),
+            Felt::new_unchecked(seed + 1),
+            Felt::new_unchecked(seed + 2),
+            Felt::new_unchecked(seed + 3),
+        ]
+        .into()
+    };
+
+    // Exercise every distinct control-flow shape: empty, single, even, and odd with an even prefix.
+    for hashes in [
+        vec![],
+        vec![digest(10)],
+        vec![digest(10), digest(20)],
+        vec![digest(10), digest(20), digest(30)],
+    ] {
+        let kernel = KernelDescriptor::from_hashes(hashes).unwrap();
+        let commitment = kernel.commitment();
+        let num_procedures = kernel.proc_hashes().len();
+
+        // Advice must use the descriptor's canonical procedure order.
+        let witness: Vec<u64> = Word::words_as_elements(kernel.proc_hashes())
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect();
+
+        let k = commitment.as_elements();
+        let source = format!(
+            "
+            use miden::core::sys
+            use miden::core::sys::vm::claim
+
+            begin
+                # Pre-fill the destination so the empty case proves memory is untouched.
+                push.94.93.92.91.{KERNEL_PTR} mem_storew_le dropw
+
+                # Preserve an unrelated word below the helper's inputs.
+                push.704.703.702.701
+
+                # [num_kernel_procedures, kernel_ptr, K, STACK_TAIL]
+                push.{}.{}.{}.{}
+                push.{KERNEL_PTR}
+                push.{num_procedures}
+
+                exec.claim::pipe_kernel_digests_to_memory
+                exec.sys::truncate_stack
+            end
+            ",
+            k[3].as_canonical_u64(),
+            k[2].as_canonical_u64(),
+            k[1].as_canonical_u64(),
+            k[0].as_canonical_u64(),
+        );
+
+        let expected_memory = if witness.is_empty() {
+            UNTOUCHED_MEMORY.to_vec()
+        } else {
+            witness.clone()
+        };
+
+        let mut expected_stack = STACK_TAIL.to_vec();
+        expected_stack.resize(16, 0);
+
+        build_test!(source.as_str(), &[], witness.as_slice()).expect_stack_and_memory(
+            &expected_stack,
+            KERNEL_PTR as u32,
+            &expected_memory,
+        );
+    }
+}
+
 /// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
 /// same `(verifier_root, claim_commitment)` pair.
 #[test]

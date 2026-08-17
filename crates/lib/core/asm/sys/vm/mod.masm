@@ -6,7 +6,6 @@ pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 
-use miden::core::mem
 use miden::core::stark::verifier
 use miden::core::stark::constants
 
@@ -259,17 +258,10 @@ proc materialize_kernel_witness
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::kernel_witness_ptr swap
-    exec.mem::pipe_words_to_memory
-    # The pipe computes an untagged hash; discard it and check the domain-tagged commitment below.
-    dropw dropw dropw drop
-    # => [num_kernel_procedures, K, ...]
-
     dup exec.constants::num_kernel_procedures_ptr mem_store
-    exec.constants::kernel_witness_ptr
-    exec.claim::kernel_commitment
-    # => [K', K, ...]
-    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    exec.constants::kernel_witness_ptr swap
+    # => [num_kernel_procedures, kernel_witness_ptr, K, ...]
+    exec.claim::pipe_kernel_digests_to_memory
     # => [...]
 end
 

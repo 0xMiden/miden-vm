@@ -98,3 +98,64 @@ pub proc kernel_commitment
     exec.poseidon2::hash_elements_in_domain
     # => [K, ...]
 end
+
+#! Copies kernel procedure digests from advice to memory and authenticates their commitment.
+#!
+#! The caller must validate that `num_kernel_procedures` is a u32 no greater than
+#! `KernelDescriptor::MAX_NUM_PROCEDURES`. Each advice digest is consumed and stored exactly once.
+#!
+#! Inputs:  [num_kernel_procedures, kernel_ptr, K, ...]
+#! Outputs: [...]
+pub proc pipe_kernel_digests_to_memory
+    dup eq.0
+    if.true
+        # Empty input uses C = [0, KERNEL_DOMAIN_TAG, 1, 0] and one permutation.
+        drop push.0.1.KERNEL_DOMAIN_TAG.0
+        exec.poseidon2::init_with_capacity
+        exec.poseidon2::permute
+        # => [R0, R1, C, kernel_ptr, K, ...]
+    else
+        dup is_odd
+        if.true
+            # Stream the even prefix, if any, with C = [4, KERNEL_DOMAIN_TAG, 0, 0].
+            dup eq.1
+            if.true
+                drop
+                push.0.0.KERNEL_DOMAIN_TAG.4
+                exec.poseidon2::init_with_capacity
+                # => [R0, R1, C, kernel_ptr, K, ...]
+            else
+                sub.1 mul.4 dup.1 add swap
+                # => [kernel_ptr, even_end_ptr, K, ...]
+                push.0.0.KERNEL_DOMAIN_TAG.4
+                exec.poseidon2::init_with_capacity
+                exec.mem::pipe_double_words_to_memory
+                # => [R0, R1, C, final_ptr, K, ...]
+            end
+
+            # Overwrite the rate with the final digest and its zero-padding word.
+            swapw dropw adv_loadw
+            # => [digest, C, final_ptr, K, ...]
+            movup.8 dup add.4 movdn.5 mem_storew_le
+            movup.4 movdn.8
+            # => [digest, C, final_ptr+4, K, ...]
+            padw swapw
+            exec.poseidon2::permute
+            # => [R0, R1, C, final_ptr+4, K, ...]
+        else
+            # Non-empty even input uses C = [0, KERNEL_DOMAIN_TAG, 0, 0].
+            mul.4 dup.1 add swap
+            # => [kernel_ptr, end_ptr, K, ...]
+            push.0.0.KERNEL_DOMAIN_TAG.0
+            exec.poseidon2::init_with_capacity
+            exec.mem::pipe_double_words_to_memory
+            # => [R0, R1, C, end_ptr, K, ...]
+        end
+    end
+
+    exec.poseidon2::squeeze_digest
+    # => [K', end_ptr, K, ...]
+    movup.4 drop
+    assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
+    # => [...]
+end
