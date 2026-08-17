@@ -34,6 +34,12 @@ const MERKLE_NODE_FELTS: usize = 12;
 /// truncated.
 const MAX_FAIL_MSG_BYTES: u32 = 4096;
 
+/// Fuel charged per field element a host call moves between the VM and the guest.
+const FUEL_PER_FELT: u64 = 1;
+
+/// Extra fuel charged per Merkle node for the host-side digest verification hash.
+const FUEL_PER_MERKLE_NODE: u64 = 200;
+
 // HOST CONTEXT
 // ================================================================================================
 
@@ -178,6 +184,23 @@ fn write_u32(data: &mut [u8], ptr: u32, value: u32) -> Result<(), wasmi::Error> 
     Ok(())
 }
 
+/// Charges fuel for host-side work; traps when the budget is exhausted.
+///
+/// wasmi meters guest instructions, but a host call costs the guest only its call overhead.
+/// Without this charge, a small loop of host calls could make the host move data far out of
+/// proportion to the guest's fuel budget. Charging per element moved (and per hash computed)
+/// keeps the fuel budget a bound on the total work a handler causes. The charge applies to the
+/// requested size, before validation, so failed probes are not free.
+fn charge_fuel(caller: &mut Caller<'_, HostCtx>, cost: u64) -> Result<(), wasmi::Error> {
+    let fuel = caller.get_fuel().expect("fuel metering is enabled in the engine config");
+    let Some(rest) = fuel.checked_sub(cost) else {
+        caller.set_fuel(0).expect("fuel metering is enabled in the engine config");
+        return Err(trap("handler ran out of fuel during a host call"));
+    };
+    caller.set_fuel(rest).expect("fuel metering is enabled in the engine config");
+    Ok(())
+}
+
 /// Adds `felts` field elements to the mutation budget; traps when the budget is exceeded.
 fn charge_mutation(ctx: &mut HostCtx, felts: usize) -> Result<(), wasmi::Error> {
     ctx.mutation_felts = ctx.mutation_felts.saturating_add(felts);
@@ -227,6 +250,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::STACK_READ,
             |mut caller: Caller<'_, HostCtx>, start_pos: u32, out: u32, count: u32| {
+                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
                 let mem = memory(&mut caller)?;
                 // Reject a bad output range before collecting, so `count` is bounded by the
                 // guest memory size when the collection allocates.
@@ -276,6 +300,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::MEM_READ,
             |mut caller: Caller<'_, HostCtx>, addr: u32, out: u32, count: u32| {
+                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
                 let mem = memory(&mut caller)?;
                 byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
                 if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
@@ -308,6 +333,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::ADV_STACK_READ,
             |mut caller: Caller<'_, HostCtx>, offset: u32, out: u32, count: u32| {
+                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
                 let mem = memory(&mut caller)?;
                 byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
                 let provider = state(&caller)?.advice_provider();
@@ -353,14 +379,20 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             |mut caller: Caller<'_, HostCtx>, key: u32, out: u32, cap: u32| {
                 let mem = memory(&mut caller)?;
                 let key = read_word(mem.data(&caller), key)?;
-                let Some(values) =
-                    state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::to_vec)
+                let Some(len) =
+                    state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
                 else {
                     return Ok(Status::NotFound.as_raw());
                 };
-                if values.len() > cap as usize {
+                if len > cap as usize {
                     return Ok(Status::CapacityTooSmall.as_raw());
                 }
+                charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT)?;
+                let values = state(&caller)?
+                    .advice_provider()
+                    .get_mapped_values(&key)
+                    .expect("the entry was present above")
+                    .to_vec();
                 write_felts(mem.data_mut(&mut caller), out, &values)?;
                 Ok(OK)
             },
@@ -375,6 +407,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::ADV_STACK_EXTEND,
             |mut caller: Caller<'_, HostCtx>, vals: u32, len: u32| {
+                charge_fuel(&mut caller, u64::from(len) * FUEL_PER_FELT)?;
                 charge_mutation(caller.data_mut(), len as usize)?;
                 let mem = memory(&mut caller)?;
                 let felts = read_felts(mem.data(&caller), vals, len)?;
@@ -392,6 +425,7 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             IMPORT_MODULE,
             host_fn::ADV_MAP_INSERT,
             |mut caller: Caller<'_, HostCtx>, key: u32, vals: u32, len: u32| {
+                charge_fuel(&mut caller, (u64::from(len) + 4) * FUEL_PER_FELT)?;
                 charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
                 let mem = memory(&mut caller)?;
                 let key = read_word(mem.data(&caller), key)?;
@@ -410,6 +444,10 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
             host_fn::MERKLE_STORE_EXTEND,
             |mut caller: Caller<'_, HostCtx>, nodes: u32, len: u32| {
                 let felt_count = (len as usize).saturating_mul(MERKLE_NODE_FELTS);
+                // Charge for the data moved and for the per-node digest verification hash.
+                let fuel = (felt_count as u64).saturating_mul(FUEL_PER_FELT)
+                    + u64::from(len).saturating_mul(FUEL_PER_MERKLE_NODE);
+                charge_fuel(&mut caller, fuel)?;
                 charge_mutation(caller.data_mut(), felt_count)?;
                 let mem = memory(&mut caller)?;
                 let felts = read_felts(mem.data(&caller), nodes, felt_count as u32)?;

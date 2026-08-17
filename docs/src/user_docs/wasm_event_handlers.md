@@ -78,4 +78,8 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 
 Handler modules are untrusted. At load time the host rejects: imports outside `miden:event/v1` (no WASI), modules with a start section, missing or wrongly-typed manifest exports, duplicate or reserved (`sys::`) event names, and an ABI version mismatch. Float instructions are rejected by default for cross-host determinism.
 
-Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), and a cap on the total buffered mutation size (default 65,536 field elements).
+Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), and a cap on the total buffered mutation size (default 65,536 field elements). Fuel meters more than instructions: host calls charge additional fuel in proportion to the field elements they move (and per Merkle node hashed), so the budget bounds the total work a handler causes on the host, not only what it executes itself.
+
+## Determinism across hosts
+
+Advice shapes execution, so every host that executes a program must obtain byte-identical advice from its handlers. For handlers this means: all hosts in a proving pipeline must run the same handler module, the same runner version, and **identical `WasmHandlerLimits`**. A handler that sits near a limit can succeed on one host and trap on another when their fuel, memory, or mutation caps differ — which makes the executions diverge. Treat the limits as part of the deployment configuration, not as a per-machine tuning knob.

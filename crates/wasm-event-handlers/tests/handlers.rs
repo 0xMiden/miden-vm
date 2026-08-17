@@ -417,6 +417,21 @@ fn infinite_loop_runs_out_of_fuel() {
 }
 
 #[test]
+fn host_call_work_is_metered() {
+    // 13 memory pages fit the 100k-felt output buffer, so the pointer check passes; without the
+    // host-call fuel charge, the empty advice stack would make this a cheap OutOfBounds status.
+    let wat_src = format!(
+        "(module {IMPORTS} (memory (export \"memory\") 13)
+           (func (export \"handler\")
+             (drop (call $adv_stack_read (i32.const 0) (i32.const 0) (i32.const 100000)))))"
+    );
+    let limits = WasmHandlerLimits { fuel: 1000, ..Default::default() };
+    let module = load_with_limits(&wat_src, limits);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("out of fuel"), "unexpected error: {err}");
+}
+
+#[test]
 fn memory_growth_is_capped() {
     // 512 pages = 32 MiB, above the 16 MiB default cap; the failed grow traps.
     let wat_src = fixture("(drop (memory.grow (i32.const 512)))");
