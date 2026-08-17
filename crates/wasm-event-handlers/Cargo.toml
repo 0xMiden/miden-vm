@@ -32,9 +32,13 @@ thiserror.workspace = true
 wasmi.workspace = true
 
 [dev-dependencies]
-criterion.workspace = true
 miden-assembly.workspace = true
 wat.workspace = true
+
+# criterion does not build for wasm targets, and the wasip1 smoke test compiles the
+# dev-dependency set.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion.workspace = true
 
 [[bench]]
 name = "handler_call"

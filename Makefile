@@ -260,6 +260,11 @@ build-no-std: ## Builds without the standard library
 build-target-miden: ## Builds miden-field for wasm32-wasip2 with cfg(miden)
 	RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }--cfg miden" cargo build --release -p miden-field --target wasm32-wasip2
 
+.PHONY: test-wasm-handlers-host
+test-wasm-handlers-host: ## Runs the Wasm event handler tests inside a wasm32 host via wasmtime (smoke test for browser-class hosts)
+	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+	cargo test -p miden-wasm-event-handlers --target wasm32-wasip1 --test handlers
+
 .PHONY: test-wasm-simd
 test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128 (requires wasmtime)
 	CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
