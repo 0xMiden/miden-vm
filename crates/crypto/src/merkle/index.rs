@@ -22,10 +22,30 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// The root is represented by the pair $(0, 0)$, its left child is $(1, 0)$ and its right child
 /// $(1, 1)$.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct NodeIndex {
     depth: u8,
     position: u64,
+}
+
+/// Deserializes through [`NodeIndex::new`] so serde and binary inputs enforce the same depth and
+/// position bounds. The helper preserves the field layout produced by `Serialize`.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for NodeIndex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename = "NodeIndex")]
+        struct Raw {
+            depth: u8,
+            position: u64,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        NodeIndex::new(raw.depth, raw.position).map_err(serde::de::Error::custom)
+    }
 }
 
 impl NodeIndex {
