@@ -793,6 +793,7 @@ dependencies = [
  "regex",
  "rustc_version 0.4.1",
  "semver 1.0.28",
+ "serde",
  "smallvec",
  "thiserror",
 ]
@@ -876,6 +877,7 @@ dependencies = [
  "p3-util",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
+ "serde",
  "sha2",
  "sha3",
  "subtle",
@@ -978,6 +980,7 @@ dependencies = [
  "miden-debug-types",
  "miden-utils-indexing",
  "rustc-hash",
+ "serde",
  "thiserror",
  "zerocopy",
 ]
@@ -1027,6 +1030,7 @@ dependencies = [
  "miden-mast-package",
  "proptest",
  "pubgrub",
+ "serde",
  "smallvec",
  "thiserror",
 ]
@@ -1862,6 +1866,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "semver-parser"
