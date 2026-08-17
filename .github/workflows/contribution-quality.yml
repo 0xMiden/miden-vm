@@ -20,6 +20,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: contribution-quality-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     if: ${{ github.event_name != 'pull_request_target' || github.event.pull_request.user.login != 'dependabot[bot]' }}
@@ -38,12 +42,12 @@ jobs:
           script: |
             const isPullRequestEvent = Boolean(context.payload.pull_request);
             const fromDispatch = context.payload?.inputs?.pr_number || process.env.DISPATCH_PR_NUMBER;
-            const prNumber = Number.parseInt(
+            const rawPrNumber = String(
               isPullRequestEvent ? context.payload.pull_request.number : fromDispatch,
-              10,
             );
-            if (!Number.isInteger(prNumber)) {
-              core.setFailed('pr_number is required for manual runs.');
+            const prNumber = Number(rawPrNumber);
+            if (!/^[1-9]\d*$/.test(rawPrNumber) || !Number.isSafeInteger(prNumber)) {
+              core.setFailed('pr_number must be a positive integer without leading zeroes.');
               return;
             }
 
@@ -57,25 +61,100 @@ jobs:
             });
 
             const author = pr.user?.login || '';
-            let permission = 'none';
-            try {
-              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: author,
-              });
-              permission = (data.permission || 'none').toLowerCase();
-            } catch (error) {
-              if (error.status !== 404) {
-                core.warning(`Failed to resolve collaborator permission for ${author}: ${error.message}`);
+            const maintainerPermissions = new Set(['admin', 'maintain', 'write']);
+            const permissionByLogin = new Map();
+            const getPermission = async (login) => {
+              const normalizedLogin = login.toLowerCase();
+              if (permissionByLogin.has(normalizedLogin)) {
+                return permissionByLogin.get(normalizedLogin);
               }
-            }
 
-            const trusted = ['admin', 'maintain', 'write'].includes(permission);
+              let permission = null;
+              try {
+                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username: login,
+                });
+                permission = (data.permission || 'none').toLowerCase();
+              } catch (error) {
+                if (error.status === 404) {
+                  permission = 'none';
+                } else {
+                  core.warning(
+                    `Failed to resolve collaborator permission for ${login}: ${error.message}`,
+                  );
+                }
+              }
+              permissionByLogin.set(normalizedLogin, permission);
+              return permission;
+            };
+            const isMaintainer = (permission) => maintainerPermissions.has(permission);
+
+            const permission = await getPermission(author);
+            const trusted = isMaintainer(permission);
             if (!forceAll && (trusted || pr.draft)) {
               core.info(`Skipping author=${author} permission=${permission} draft=${pr.draft}.`);
               return;
             }
+
+            const checkMaintainerIntervention = async () => {
+              let checkFailed = false;
+              let reviews = [];
+              let events = [];
+              try {
+                reviews = await github.paginate(github.rest.pulls.listReviews, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  per_page: 100,
+                });
+              } catch (error) {
+                checkFailed = true;
+                core.warning(`Failed to fetch pull request reviews: ${error.message}`);
+              }
+              try {
+                events = await github.paginate(github.rest.issues.listEvents, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  per_page: 100,
+                });
+              } catch (error) {
+                checkFailed = true;
+                core.warning(`Failed to fetch pull request events: ${error.message}`);
+              }
+
+              const interventionActors = new Map();
+              const addIntervention = (login, action) => {
+                if (login) {
+                  interventionActors.set(login.toLowerCase(), { login, action });
+                }
+              };
+              if (isPullRequestEvent && context.payload.action === 'reopened') {
+                addIntervention(context.payload.sender?.login, 'reopened');
+              }
+              for (const review of reviews) {
+                if (review.submitted_at) {
+                  addIntervention(review.user?.login, 'reviewed');
+                }
+              }
+              for (const event of events) {
+                if (event.event === 'reopened') {
+                  addIntervention(event.actor?.login, 'reopened');
+                }
+              }
+
+              for (const intervention of interventionActors.values()) {
+                const actorPermission = await getPermission(intervention.login);
+                if (actorPermission === null) {
+                  checkFailed = true;
+                } else if (isMaintainer(actorPermission)) {
+                  return { intervention, checkFailed };
+                }
+              }
+              return { intervention: null, checkFailed };
+            };
 
             const allFiles = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
@@ -110,76 +189,86 @@ jobs:
               (file) => testPaths.some((pattern) => pattern.test(file.filename)),
             );
 
-            const summary = [pr.title, pr.body].filter(Boolean).join('\n');
-            const repository = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
-            const issueNumbers = new Set();
-            const addIssueNumber = (repo, number) => {
-              if (number && (!repo || repo.toLowerCase() === repository)) {
-                issueNumbers.add(Number.parseInt(number, 10));
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            const allowedOwner = context.repo.owner.toLowerCase();
+            const maxIssueReferences = 20;
+            const checkLinkedIssues = async (pullRequest) => {
+              const summary = [pullRequest.title, pullRequest.body].filter(Boolean).join('\n');
+              const issueReferences = new Map();
+              const addIssueReference = (repositoryName, number) => {
+                const [owner, repo, extra] = repositoryName.split('/');
+                const issueNumber = Number.parseInt(number, 10);
+                if (
+                  extra
+                  || !owner
+                  || !repo
+                  || owner.toLowerCase() !== allowedOwner
+                  || !Number.isInteger(issueNumber)
+                ) {
+                  return;
+                }
+                const key = `${owner}/${repo}#${issueNumber}`.toLowerCase();
+                issueReferences.set(key, { owner, repo, number: issueNumber });
+              };
+
+              for (const match of summary.matchAll(
+                /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/(\d+)/ig,
+              )) {
+                addIssueReference(`${match[1]}/${match[2]}`, match[3]);
               }
+              for (const match of summary.matchAll(
+                /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/g,
+              )) {
+                addIssueReference(match[1], match[2]);
+              }
+              for (const match of summary.matchAll(/(^|[^\w/])#(\d+)\b/gm)) {
+                addIssueReference(repository, match[2]);
+              }
+
+              const linkedIssues = [];
+              const assignedIssues = [];
+              const referencesToCheck = [...issueReferences.values()].slice(0, maxIssueReferences);
+              const checkIncomplete = issueReferences.size > referencesToCheck.length;
+              let checkFailed = false;
+              if (checkIncomplete) {
+                core.warning(
+                  `Only the first ${maxIssueReferences} linked issue references will be checked; `
+                    + 'automatic closing is disabled.',
+                );
+              }
+              for (const reference of referencesToCheck) {
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner: reference.owner,
+                    repo: reference.repo,
+                    issue_number: reference.number,
+                  });
+                  if (issue.pull_request || issue.state !== 'open') {
+                    continue;
+                  }
+                  linkedIssues.push(reference);
+                  const assignees = (issue.assignees || []).map(
+                    (assignee) => assignee.login.toLowerCase(),
+                  );
+                  if (assignees.includes(author.toLowerCase())) {
+                    assignedIssues.push(reference);
+                  }
+                } catch (error) {
+                  if (error.status !== 404) {
+                    checkFailed = true;
+                    core.warning(
+                      `Failed to fetch issue ${reference.owner}/${reference.repo}`
+                        + `#${reference.number}: ${error.message}`,
+                    );
+                  }
+                }
+              }
+              return { summary, linkedIssues, assignedIssues, checkIncomplete, checkFailed };
             };
 
-            for (const match of summary.matchAll(
-              /https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/(\d+)/ig,
-            )) {
-              addIssueNumber(`${match[1]}/${match[2]}`, match[3]);
-            }
-            for (const match of summary.matchAll(
-              /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/g,
-            )) {
-              addIssueNumber(match[1], match[2]);
-            }
-            for (const match of summary.matchAll(/(^|[^\w/])#(\d+)\b/gm)) {
-              addIssueNumber(repository, match[2]);
-            }
-
-            const linkedIssues = [];
-            const assignedIssues = [];
-            for (const issueNumber of [...issueNumbers].slice(0, 5)) {
-              try {
-                const { data: issue } = await github.rest.issues.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                });
-                if (issue.pull_request || issue.state !== 'open') {
-                  continue;
-                }
-                linkedIssues.push(issueNumber);
-                const assignees = (issue.assignees || []).map(
-                  (assignee) => assignee.login.toLowerCase(),
-                );
-                if (assignees.includes(author.toLowerCase())) {
-                  assignedIssues.push(issueNumber);
-                }
-              } catch (error) {
-                core.warning(`Failed to fetch issue #${issueNumber}: ${error.message}`);
-              }
-            }
-
-            const hasRationale = /(^|\n)#{0,3}\s*(rationale|why)\b/i.test(summary)
-              || /\bbecause\b/i.test(summary);
             const trivialDocs = onlyDocs && changedLines <= 20 && allFiles.length <= 2;
             const trivialCode = onlyCode && !touchesTests && changedLines <= 8
               && allFiles.length <= 1;
-
-            const findings = [];
-            if (linkedIssues.length === 0) {
-              findings.push('Link a relevant open issue in the pull request description.');
-            } else if (assignedIssues.length === 0) {
-              findings.push('At least one linked open issue must be assigned to the pull request author.');
-            }
-            if (!hasRationale) {
-              findings.push('Add a short Rationale that explains why the change is needed.');
-            }
-            if (trivialDocs) {
-              findings.push('This appears to be a small documentation edit that maintainers may batch.');
-            }
-            if (trivialCode) {
-              findings.push('This appears to be a small code edit without tests that maintainers may batch.');
-            }
-
-            const closeUnassigned = assignedIssues.length === 0;
             const marker = '<!-- contribution-quality-comment -->';
             const legacyHeader = 'Automated check (CONTRIBUTING.md)';
             const comments = await github.paginate(github.rest.issues.listComments, {
@@ -196,88 +285,167 @@ jobs:
               })
               .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))[0];
 
-            if (findings.length > 0) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                labels: ['quality-concern'],
-              });
-            } else {
-              try {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  name: 'quality-concern',
-                });
-              } catch (error) {
-                if (error.status !== 404) {
-                  throw error;
-                }
-              }
+            const { data: latestPr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            let issueCheck = await checkLinkedIssues(latestPr);
+            const {
+              intervention: maintainerIntervention,
+              checkFailed: interventionCheckFailed,
+            } = await checkMaintainerIntervention();
+            if (maintainerIntervention) {
+              core.info(
+                `Automatic closing disabled: ${maintainerIntervention.login} `
+                  + `${maintainerIntervention.action} this pull request as a maintainer.`,
+              );
+            } else if (interventionCheckFailed) {
+              core.warning('Automatic closing disabled because maintainer intervention is unknown.');
             }
+            const getFindings = (check) => {
+              const hasRationale = /(^|\n)#{0,3}\s*(rationale|why)\b/i.test(check.summary)
+                || /\bbecause\b/i.test(check.summary);
+              const findings = [];
+              if (check.linkedIssues.length === 0) {
+                findings.push('Link a relevant open issue in the pull request description.');
+              } else if (check.assignedIssues.length === 0) {
+                findings.push(
+                  'At least one linked open issue must be assigned to the pull request author.',
+                );
+              }
+              if (!hasRationale) {
+                findings.push('Add a short Rationale that explains why the change is needed.');
+              }
+              if (trivialDocs) {
+                findings.push(
+                  'This appears to be a small documentation edit that maintainers may batch.',
+                );
+              }
+              if (trivialCode) {
+                findings.push(
+                  'This appears to be a small code edit without tests that maintainers may batch.',
+                );
+              }
+              return findings;
+            };
+            let findings = getFindings(issueCheck);
 
-            let commentBody = '';
+            let closeUnassigned = latestPr.state !== 'closed'
+              && (forceAll || !latestPr.draft)
+              && issueCheck.assignedIssues.length === 0
+              && permission !== null
+              && !maintainerIntervention
+              && !interventionCheckFailed
+              && !issueCheck.checkIncomplete
+              && !issueCheck.checkFailed;
+
             if (closeUnassigned) {
-              const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
-                + `/blob/${pr.base.ref}`
-                + '/CONTRIBUTING.md#contribution-quality';
-              commentBody = [
-                marker,
-                'This pull request was closed without review because none of the linked open issues',
-                `is assigned to @${author}.`,
-                '',
-                `Our [contribution guidelines](${policyUrl}) require contributions to link to an`,
-                'issue assigned to the author. Please ask to be assigned before opening a new',
-                'pull request.',
-              ].join('\n');
-            } else if (findings.length > 0) {
-              const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
-                + `/blob/${pr.base.ref}`
-                + '/CONTRIBUTING.md#contribution-quality';
-              commentBody = [
-                marker,
-                legacyHeader,
-                '',
-                'Findings:',
-                ...findings.map((finding) => `- ${finding}`),
-                '',
-                'Next steps:',
-                `- Read the [contribution quality guidelines](${policyUrl}).`,
-                '- If this is a false positive, ask a maintainer to review this check.',
-              ].join('\n');
-            }
-
-            if (commentBody) {
-              if (existingComment && existingComment.body !== commentBody) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existingComment.id,
-                  body: commentBody,
-                });
-              } else if (!existingComment) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  body: commentBody,
-                });
-              }
-            } else if (existingComment) {
-              await github.rest.issues.deleteComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-              });
-            }
-
-            if (closeUnassigned && pr.state !== 'closed') {
-              await github.rest.pulls.update({
+              const finalInterventionCheck = await checkMaintainerIntervention();
+              const { data: finalPr } = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: prNumber,
-                state: 'closed',
               });
+              issueCheck = await checkLinkedIssues(finalPr);
+              findings = getFindings(issueCheck);
+              if (
+                finalPr.state === 'closed'
+                || (!forceAll && finalPr.draft)
+                || issueCheck.assignedIssues.length > 0
+                || issueCheck.checkIncomplete
+                || issueCheck.checkFailed
+                || finalInterventionCheck.intervention
+                || finalInterventionCheck.checkFailed
+              ) {
+                closeUnassigned = false;
+                core.warning('Pull request left open after the final contribution quality check.');
+              } else {
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  state: 'closed',
+                });
+              }
             }
+
+            const updateDiagnostics = async () => {
+              if (findings.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: ['quality-concern'],
+                });
+              } else {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    name: 'quality-concern',
+                  });
+                } catch (error) {
+                  if (error.status !== 404) {
+                    throw error;
+                  }
+                }
+              }
+
+              let commentBody = '';
+              if (closeUnassigned) {
+                const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
+                  + `/blob/${pr.base.ref}`
+                  + '/CONTRIBUTING.md#contribution-quality';
+                commentBody = [
+                  marker,
+                  'This pull request was closed without review because none of the linked open issues',
+                  `is assigned to @${author}.`,
+                  '',
+                  `Our [contribution guidelines](${policyUrl}) require contributions to link to an`,
+                  'issue assigned to the author. Please ask to be assigned before opening a new',
+                  'pull request.',
+                ].join('\n');
+              } else if (findings.length > 0) {
+                const policyUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`
+                  + `/blob/${pr.base.ref}`
+                  + '/CONTRIBUTING.md#contribution-quality';
+                commentBody = [
+                  marker,
+                  legacyHeader,
+                  '',
+                  'Findings:',
+                  ...findings.map((finding) => `- ${finding}`),
+                  '',
+                  'Next steps:',
+                  `- Read the [contribution quality guidelines](${policyUrl}).`,
+                  '- If this is a false positive, ask a maintainer to review this check.',
+                ].join('\n');
+              }
+
+              if (commentBody) {
+                if (existingComment && existingComment.body !== commentBody) {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: existingComment.id,
+                    body: commentBody,
+                  });
+                } else if (!existingComment) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: commentBody,
+                  });
+                }
+              } else if (existingComment) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                });
+              }
+            };
+            await updateDiagnostics();
