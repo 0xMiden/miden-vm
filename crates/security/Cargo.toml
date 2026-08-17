@@ -19,5 +19,8 @@ doctest = false
 default = ["std"]
 std     = []
 
+[dev-dependencies]
+p3-security = { git = "https://github.com/Plonky3/Plonky3", rev = "f67b0ea2ff8b3d06fff1081989bd3063c656029e" }
+
 [lints]
 workspace = true

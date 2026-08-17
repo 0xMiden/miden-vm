@@ -83,4 +83,6 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# `p3-security` is not yet published; `crates/security`'s dev-dependency pins it by commit until
+# it is.
+allow-git = ["https://github.com/Plonky3/Plonky3"]
