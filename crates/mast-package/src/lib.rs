@@ -23,9 +23,10 @@ pub use self::package::arbitrary;
 pub use self::{
     dependency::Dependency,
     package::{
-        ConstantExport, InvalidSectionIdError, InvalidTargetTypeError, ManifestValidationError,
-        Package, PackageDebugInfoError, PackageExport, PackageId, PackageManifest, PackageModule,
-        PackageStripError, PackageSubmodule, ProcedureExport, Section, SectionId, TargetType,
-        TypeExport,
+        ConstantExport, EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError,
+        InvalidSectionIdError, InvalidTargetTypeError, MAX_HANDLERS, MAX_MODULE_BYTES,
+        MAX_NAME_BYTES, ManifestValidationError, Package, PackageDebugInfoError, PackageExport,
+        PackageId, PackageManifest, PackageModule, PackageStripError, PackageSubmodule,
+        ProcedureExport, Section, SectionId, TargetType, TypeExport,
     },
 };
