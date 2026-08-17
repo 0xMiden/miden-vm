@@ -322,6 +322,8 @@ const _: () = {
 };
 
 #[test]
+// wasm32 hosts (the wasip1 smoke-test run) have no threads.
+#[cfg_attr(target_family = "wasm", ignore = "no threads on wasm32 hosts")]
 fn concurrent_calls_share_one_module_deterministically() {
     // One compiled module, called from many threads at once, each against its own processor
     // state. This exercises the Send + Sync claims of the handler and yields the determinism
