@@ -194,36 +194,37 @@ impl Status {
 
 /// The names of the host functions in the [`IMPORT_MODULE`] namespace.
 ///
-/// The host registers its functions under these names. The guest extern declarations in
-/// [`mod@guest`] use the same names. Keep the two lists identical.
+/// The host registers its functions under these names. The guest extern declarations in the
+/// `guest` module (compiled for `wasm32` guests only) use the same names, and their doc
+/// comments are the normative description of each function. Keep the two lists identical.
 pub mod host_fn {
-    /// See [`crate::guest::stack_depth`].
+    /// See `guest::stack_depth`.
     pub const STACK_DEPTH: &str = "stack_depth";
-    /// See [`crate::guest::stack_get`].
+    /// See `guest::stack_get`.
     pub const STACK_GET: &str = "stack_get";
-    /// See [`crate::guest::stack_get_word`].
+    /// See `guest::stack_get_word`.
     pub const STACK_GET_WORD: &str = "stack_get_word";
-    /// See [`crate::guest::clk`].
+    /// See `guest::clk`.
     pub const CLK: &str = "clk";
-    /// See [`crate::guest::ctx`].
+    /// See `guest::ctx`.
     pub const CTX: &str = "ctx";
-    /// See [`crate::guest::mem_get`].
+    /// See `guest::mem_get`.
     pub const MEM_GET: &str = "mem_get";
-    /// See [`crate::guest::adv_stack_len`].
+    /// See `guest::adv_stack_len`.
     pub const ADV_STACK_LEN: &str = "adv_stack_len";
-    /// See [`crate::guest::adv_stack_read`].
+    /// See `guest::adv_stack_read`.
     pub const ADV_STACK_READ: &str = "adv_stack_read";
-    /// See [`crate::guest::adv_map_value_len`].
+    /// See `guest::adv_map_value_len`.
     pub const ADV_MAP_VALUE_LEN: &str = "adv_map_value_len";
-    /// See [`crate::guest::adv_map_value_read`].
+    /// See `guest::adv_map_value_read`.
     pub const ADV_MAP_VALUE_READ: &str = "adv_map_value_read";
-    /// See [`crate::guest::adv_stack_extend`].
+    /// See `guest::adv_stack_extend`.
     pub const ADV_STACK_EXTEND: &str = "adv_stack_extend";
-    /// See [`crate::guest::adv_map_insert`].
+    /// See `guest::adv_map_insert`.
     pub const ADV_MAP_INSERT: &str = "adv_map_insert";
-    /// See [`crate::guest::merkle_store_extend`].
+    /// See `guest::merkle_store_extend`.
     pub const MERKLE_STORE_EXTEND: &str = "merkle_store_extend";
-    /// See [`crate::guest::fail`].
+    /// See `guest::fail`.
     pub const FAIL: &str = "fail";
 }
 
