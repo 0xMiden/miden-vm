@@ -637,6 +637,21 @@ impl SourceContent {
 
     /// Get the [ByteIndex] corresponding to the given line and column indices.
     ///
+    /// `column_index` counts Unicode scalar values (chars), matching [`SourceContent::location`]
+    /// (which computes columns via `chars().count()`) -- not bytes, and not UTF-16 code units as
+    /// used by the Language Server Protocol. Callers bridging from LSP (which reports columns in
+    /// UTF-16 code units) must convert to a scalar-based column before calling this function;
+    /// passing a UTF-16 column straight through gives the wrong offset for any line containing a
+    /// character outside the Basic Multilingual Plane (e.g. most emoji), since those encode as
+    /// one `char` here but two UTF-16 code units there.
+    ///
+    /// A column that would land on or inside the line's terminator (`"\n"` or `"\r\n"`) is out
+    /// of bounds and returns `None`: that position is only reachable by moving to the start of
+    /// the next line (`line_index + 1`, column `0`). Without this, [`SourceContent::update`]
+    /// could be handed a same-line selection (`start.line == end.line`) whose byte range
+    /// actually spans a line terminator, corrupting the incrementally-maintained line-start
+    /// bookkeeping that assumes a same-line edit never removes a newline.
+    ///
     /// Returns `None` if the line or column indices are out of bounds.
     pub fn line_column_to_offset(
         &self,
@@ -649,20 +664,29 @@ impl SourceContent {
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        // `column_index` counts characters, matching `location` (which computes columns via
-        // `chars().count()`) -- not bytes. Using it directly as a byte offset, as this used to
-        // via `split_at`, is wrong for any line containing multi-byte UTF-8 characters: it
-        // silently returns an offset that's short by the accumulated extra bytes of any
-        // multi-byte characters before it, and panics outright whenever that byte offset lands
-        // inside a multi-byte character instead of on a char boundary.
-        let byte_len = match line_src.char_indices().nth(column_index) {
-            Some((offset, _)) => offset,
-            None if column_index == line_src.chars().count() => line_src.len(),
-            None => return None,
+
+        // Exclude any trailing line terminator from the content this searches: see the
+        // rejection rationale above.
+        let terminator_len = if line_src.ends_with("\r\n") {
+            2
+        } else if line_src.ends_with('\n') {
+            1
+        } else {
+            0
         };
-        let pre = &line_src[..byte_len];
-        let start = line_span.start;
-        Some(start + ByteOffset::from_str_len(pre))
+        let content = &line_src[..line_src.len() - terminator_len];
+
+        // Chain `content.len()` onto the char boundaries (as the one-past-the-end position) so
+        // a single `nth` call covers both "column falls within the content" and "column is
+        // exactly at the end of the content", instead of a second full scan via
+        // `content.chars().count()` to special-case the latter.
+        let byte_len = content
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(core::iter::once(content.len()))
+            .nth(column_index)?;
+
+        Some(line_span.start + ByteOffset(byte_len as i64))
     }
 
     /// Get a [FileLineCol] corresponding to the line/column in this file at which `byte_index`
@@ -1533,15 +1557,16 @@ end
     #[test]
     fn source_content_line_column_to_offset_multibyte_utf8() {
         // "héllo\n": h(1 byte) é(2 bytes) l l o(1 byte each) \n(1 byte)
-        // = 6 characters, 7 bytes. `line_range` includes the trailing "\n" in the line's byte
-        // span, so it counts as the line's 6th character (column index 5).
+        // = 6 characters, 7 bytes. The line's terminator ("\n") is excluded from the valid
+        // column range (see `source_content_line_column_to_offset_rejects_line_terminator`), so
+        // the content searched for column positions is just "héllo": 5 characters, 6 bytes.
         const CONTENT: &str = "héllo\n";
         let content = SourceContent::new("text", "test.txt", CONTENT);
 
-        // column -> expected byte offset, for every character position within the line
-        // (including the trailing "\n"). Column 2 ("l", right after "é") is the case that
-        // used to land mid-character: "h" is 1 byte and "é" is 2, so it must be byte 3, not
-        // byte 2.
+        // column -> expected byte offset, for every character position within the line's
+        // content (excluding the trailing "\n"). Column 2 ("l", right after "é") is the case
+        // that used to land mid-character: "h" is 1 byte and "é" is 2, so it must be byte 3,
+        // not byte 2. Column 5 is one past the last character ("o"), i.e. right before "\n".
         let expected = [(0, 0u32), (1, 1), (2, 3), (3, 4), (4, 5), (5, 6)];
         for (column, expected_byte) in expected {
             let offset = content
@@ -1550,21 +1575,8 @@ end
             assert_eq!(offset.to_u32(), expected_byte, "wrong byte offset for column {column}");
         }
 
-        // One past the last character (the position right after "\n") is still in bounds and
-        // lands at the byte length of the line.
-        assert_eq!(
-            content.line_column_to_offset(LineIndex(0), ColumnIndex(6)).unwrap().to_u32(),
-            7
-        );
-        // Anything further is out of bounds: must return None, not panic and not silently
-        // return an in-bounds-looking offset.
-        assert!(content.line_column_to_offset(LineIndex(0), ColumnIndex(7)).is_none());
-
         // location() is the inverse of line_column_to_offset(); round-tripping through both
-        // must return to the same character column for every character position covered above
-        // (this stays within line 0's own characters, including "é" and the "l" that follows
-        // it -- column 6 is excluded since that byte offset is also the start of the next
-        // line, which location() resolves to line 1 rather than "end of line 0").
+        // must return to the same character column for every character position covered above.
         for (column, _) in expected {
             let offset = content.line_column_to_offset(LineIndex(0), ColumnIndex(column)).unwrap();
             let loc = content.location(offset).unwrap();
@@ -1576,5 +1588,83 @@ end
                 "round-trip mismatch at column {column}"
             );
         }
+    }
+
+    /// Regression test: a column landing on or inside a line's terminator ("\n" or "\r\n") must
+    /// be rejected. That byte range is only reachable by moving to the start of the next line
+    /// (`line_index + 1`, column `0`); allowing it as a same-line column let `update()` accept a
+    /// same-line selection (`start.line == end.line`) that actually spans a line terminator,
+    /// corrupting the incrementally-maintained line-start bookkeeping (see
+    /// `source_content_update_rejects_same_line_selection_spanning_line_terminator`).
+    #[test]
+    fn source_content_line_column_to_offset_rejects_line_terminator() {
+        // "\n"-terminated line: content "ab" is 2 characters, so columns 0..=2 are valid and
+        // column 3 (on the "\n" itself) must be rejected.
+        let lf = SourceContent::new("text", "test.txt", "ab\ncd");
+        assert!(lf.line_column_to_offset(LineIndex(0), ColumnIndex(2)).is_some());
+        assert!(lf.line_column_to_offset(LineIndex(0), ColumnIndex(3)).is_none());
+
+        // "\r\n"-terminated line: the terminator is 2 characters, both of which must be
+        // rejected as a column position, not just the "\n" half of it.
+        let crlf = SourceContent::new("text", "test.txt", "ab\r\ncd");
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(2)).is_some());
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(3)).is_none());
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(4)).is_none());
+    }
+
+    /// Documents (and pins) that `line_column_to_offset` counts Unicode scalar values (`char`s),
+    /// not UTF-16 code units as used by the Language Server Protocol. A caller bridging from
+    /// LSP must convert a UTF-16 column to a scalar column before calling this function: for a
+    /// line containing a character outside the Basic Multilingual Plane, the two disagree.
+    #[test]
+    fn source_content_line_column_to_offset_astral_character() {
+        // U+1F600 (an emoji outside the BMP) is 1 Unicode scalar value / char, but 2 UTF-16
+        // code units (a surrogate pair), and 4 bytes in UTF-8. So the scalar column right
+        // after it is 1 (this function's contract), while LSP would report that same position
+        // as column 2.
+        const CONTENT: &str = "\u{1F600}x";
+        let content = SourceContent::new("text", "test.txt", CONTENT);
+
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(0)).unwrap().to_u32(),
+            0
+        );
+        // Scalar column 1, right after the emoji: this function's actual contract.
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(1)).unwrap().to_u32(),
+            4
+        );
+        // Scalar column 2 lands one past "x" (the end of the line) -- this is what an
+        // unconverted LSP column of 2 would be mistaken for landing right after the emoji, but
+        // it doesn't; converting UTF-16 columns to scalar columns is the caller's
+        // responsibility, not this function's.
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(2)).unwrap().to_u32(),
+            5
+        );
+    }
+
+    /// Regression test for the same-line-selection-spans-a-terminator scenario: before
+    /// `line_column_to_offset` rejected columns landing on/inside a line terminator, a
+    /// same-line selection (`start.line == end.line`) could target exactly the "\n" character
+    /// (e.g. columns 1..2 of line 0 in "a\nb", which is the "\n" itself). `update()`'s
+    /// same-line/multi-line branch is chosen from `start.line == end.line`, so this looked like
+    /// a same-line edit even though it deletes the line terminator -- corrupting the
+    /// incrementally-maintained `line_starts` instead of being rejected outright.
+    #[test]
+    fn source_content_update_rejects_same_line_selection_spanning_line_terminator() {
+        let mut content = SourceContent::new("text", "test.txt", "a\nb");
+        assert_eq!(content.line_count(), 2);
+
+        let selection = Selection::new(Position::new(0, 1), Position::new(0, 2));
+        let result = content.update(String::new(), Some(selection), 1);
+
+        assert!(
+            result.is_err(),
+            "expected the same-line selection spanning the line terminator to be rejected, got: \
+             {result:?}"
+        );
+        // The rejected edit must not have touched the original content or line bookkeeping.
+        assert_eq!(content.line_count(), 2);
     }
 }
