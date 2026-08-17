@@ -15,6 +15,7 @@ members = [
     "crates/crypto",
     "crates/crypto-derive",
     "crates/debug-types",
+    "crates/event-handler-abi",
     "crates/field",
     "crates/lib/core",
     "crates/lib/core/codegen",
@@ -94,6 +95,7 @@ miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "1.0.0
 miden-crypto            = { path = "./crates/crypto", version = "1.0.0-rc.1", default-features = false }
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "1.0.0-rc.1", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "1.0.0-rc.1", default-features = false }
+miden-event-handler-abi = { path = "./crates/event-handler-abi", version = "1.0.0-rc.1", default-features = false }
 miden-field             = { path = "./crates/field", version = "1.0.0-rc.1", default-features = false }
 miden-stark            = { path = "./crates/stark/core", version = "1.0.0-rc.1", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "1.0.0-rc.1", default-features = false }
