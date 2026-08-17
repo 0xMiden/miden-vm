@@ -860,10 +860,11 @@ impl IntoIterator for AceReplay {
 
 /// Replay data for range checking operations.
 ///
-/// This currently only records
+/// Standard u32 operations record four limbs; U32DIV records a second pair for its remainder bound.
 #[derive(Debug, Default)]
 pub struct RangeCheckerReplay {
     range_checks_u32_ops: VecDeque<[u16; 4]>,
+    range_checks_u32div_remainder_diffs: VecDeque<[u16; 2]>,
 }
 
 impl RangeCheckerReplay {
@@ -874,15 +875,15 @@ impl RangeCheckerReplay {
     pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
         self.range_checks_u32_ops.push_back(u16_limbs);
     }
-}
 
-impl IntoIterator for RangeCheckerReplay {
-    type Item = [u16; 4];
-    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
+    /// Records the two 16-bit limbs of `divisor - remainder - 1` for U32DIV.
+    pub fn record_u32div_remainder_diff(&mut self, u16_limbs: [u16; 2]) {
+        self.range_checks_u32div_remainder_diffs.push_back(u16_limbs);
+    }
 
-    /// Returns an iterator over all recorded range checks resulting from u32 operations.
-    fn into_iter(self) -> Self::IntoIter {
-        self.range_checks_u32_ops.into_iter()
+    /// Returns the standard four-limb checks and the U32DIV-specific remainder-bound checks.
+    pub fn into_parts(self) -> (VecDeque<[u16; 4]>, VecDeque<[u16; 2]>) {
+        (self.range_checks_u32_ops, self.range_checks_u32div_remainder_diffs)
     }
 }
 

@@ -11,6 +11,7 @@
 
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
   slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
+- [BREAKING] Added structural and hash-consistency validation to serde deserialization for `MerkleTree`, `Mmr`, `MmrPeaks`, `MmrPath`, `PartialMerkleTree`, and `SimpleSmt`. `Mmr` binary deserialization now applies the same validation, and `PartialMerkleTree::with_leaves` rejects depth-zero leaves ([#3645](https://github.com/0xMiden/miden-vm/pull/3645)).
 - [BREAKING] `UniqueNodes` entries are now keyed by tree position, and missing nodes mean canonical empty subtree roots. The `NodeValue` enum was removed ([#3620](https://github.com/0xMiden/miden-vm/pull/3620)).
 - [BREAKING] Hardened and documented Falcon math. `Polynomial::karatsuba` now requires equal, nonempty coefficient vectors with supported recursive lengths. Also fixed field canonicalization and polynomial division edge cases, enforced FFT size limits, and added reference and oracle tests for SamplerZ, FFT, and NTRU ([#3629](https://github.com/0xMiden/miden-vm/pull/3629)).
 - [BREAKING] Hardened Merkle APIs and deserialization against malformed inputs: `SparseMerklePath` validates depth before narrowing and validates both binary and serde input, `MerklePath` and `NodeIndex` validate serde input, `MerklePath` mutable dereferencing now exposes a slice to preserve its length bound, `InOrderIndex` rejects zero during deserialization, the `Forest` root and rightmost in-order index accessors return `Option` with `_unchecked` variants for non-empty callers, and `MerkleStore::get_leaf_depth` handles depth-zero trees without overflowing a shift ([#3635](https://github.com/0xMiden/miden-vm/pull/3635)).
@@ -52,6 +53,7 @@
 
 #### Fixes
 
+- [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, and the bypassing `serde` derives were removed from `LeafIndex`, `SmtLeaf`, `Smt`, and `PartialSmt` ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
 - Fixed `Polynomial::div` panicking when the numerator is zero by adding the missing `return` keyword ([#3534](https://github.com/0xMiden/miden-vm/issues/3534)).
 - Moved the `read_bounded_len` and `validate_bounded_len` helpers from `miden-core` to `miden-serde-utils`, where they are now public. `miden-core::serde` re-exports them unchanged, and the private duplicates in `miden-utils-indexing` were removed ([#3415](https://github.com/0xMiden/miden-vm/issues/3415)).
