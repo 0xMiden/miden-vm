@@ -47,6 +47,33 @@ fn cli_run() {
 }
 
 #[test]
+fn compiled_program_can_be_run() {
+    let working_dir = TempDir::new().unwrap();
+    let assembly_path = working_dir.path().join("fib.masm");
+    fs::copy(fixture("masm-examples/fib/fib.masm"), &assembly_path).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("compile").arg("--assembly").arg(&assembly_path);
+    cmd.assert().success();
+
+    let package_path = assembly_path.with_extension("masp");
+    assert!(package_path.exists());
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("run")
+        .arg(&package_path)
+        .arg("--input")
+        .arg(fixture("masm-examples/fib/fib.inputs"))
+        .arg("-n")
+        .arg("1")
+        .arg("-m")
+        .arg("8192")
+        .arg("-e")
+        .arg("8192");
+    cmd.assert().success();
+}
+
+#[test]
 fn run_rejects_missing_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("miden-vm-cli-missing-run-inputs-test.masm");
