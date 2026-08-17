@@ -32,5 +32,10 @@ thiserror.workspace = true
 wasmi.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 miden-assembly.workspace = true
 wat.workspace = true
+
+[[bench]]
+name = "handler_call"
+harness = false
