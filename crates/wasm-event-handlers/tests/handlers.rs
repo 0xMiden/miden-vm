@@ -314,6 +314,44 @@ fn merkle_store_accepts_consistent_node() {
     assert_eq!(mutations, vec![AdviceMutation::extend_merkle_store([node])]);
 }
 
+// The `StatePtr` safety argument relies on `ProcessorState` being `Sync`; keep that fact
+// checked at compile time.
+const _: () = {
+    const fn assert_sync<T: Sync>() {}
+    assert_sync::<miden_processor::ProcessorState<'static>>();
+};
+
+#[test]
+fn concurrent_calls_share_one_module_deterministically() {
+    // One compiled module, called from many threads at once, each against its own processor
+    // state. This exercises the Send + Sync claims of the handler and yields the determinism
+    // check: identical state must produce identical mutations everywhere.
+    let wat_src = fixture(
+        "(i64.store (i32.const 0) (call $stack_get (i32.const 1)))
+         (call $adv_stack_extend (i32.const 0) (i32.const 1))",
+    );
+    let module = load(&wat_src);
+
+    let expected = {
+        let processor = processor_with_stack(&[5, 7]);
+        run(&module, &processor).expect("handler succeeds")
+    };
+
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            let module = &module;
+            let expected = &expected;
+            scope.spawn(move || {
+                for _ in 0..50 {
+                    let processor = processor_with_stack(&[5, 7]);
+                    let mutations = run(module, &processor).expect("handler succeeds");
+                    assert_eq!(&mutations, expected);
+                }
+            });
+        }
+    });
+}
+
 #[test]
 fn stateless_across_calls() {
     let wat_src = format!(

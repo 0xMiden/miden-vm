@@ -48,10 +48,16 @@ const FUEL_PER_MERKLE_NODE: u64 = 200;
 ///
 /// # Safety
 ///
-/// The pointer is dereferenced only by host functions that run while the owning store executes a
-/// handler export, and `WasmHandlerModule::call` keeps the `&ProcessorState` borrow alive for
-/// that whole time. Native event handlers already receive `&ProcessorState` under the
-/// `Send + Sync` handler contract, so sharing the pointer across the same boundary is sound.
+/// Two facts make the `Send`/`Sync` impls sound:
+///
+/// 1. The pointer never actually crosses a thread in use. `WasmHandlerModule::call` creates the
+///    store, runs the export, and consumes the store on one thread, and host functions
+///    dereference the pointer only during that call, while the `&ProcessorState` borrow is
+///    alive. The impls exist only to satisfy wasmi's trait bounds (the store-limiter closure
+///    and the linker's store-data type parameter), not to enable cross-thread access.
+/// 2. Even if a future wasmi internals change moved the store data, `ProcessorState` is `Sync`
+///    (checked by a static assertion in the tests), so a shared reference reachable through
+///    this pointer is safe to read from any thread.
 pub(crate) struct StatePtr(*const ProcessorState<'static>);
 
 // SAFETY: see the type-level comment.
