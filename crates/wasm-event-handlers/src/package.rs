@@ -112,6 +112,23 @@ pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHan
     })
 }
 
+/// Fuzzing support: returns `true` when the top-level section walk of `wasm` succeeds and every
+/// custom section splits into a name and content.
+///
+/// Differential fuzzing checks this against wasmi's validator: the load path conservatively
+/// rejects modules whose walk fails, so any module wasmi validates must also walk. Not part of
+/// the public API.
+#[doc(hidden)]
+pub fn fuzz_walk_sections(wasm: &[u8]) -> bool {
+    let mut custom_sections_ok = true;
+    let walked = walk_wasm_sections(wasm, |id, payload| {
+        if id == 0 {
+            custom_sections_ok &= split_custom_section(payload).is_some();
+        }
+    });
+    walked.is_some() && custom_sections_ok
+}
+
 /// Splits a custom-section payload into its name and its content.
 fn split_custom_section(payload: &[u8]) -> Option<(&[u8], &[u8])> {
     let (name_len, name_start) = read_leb_u32(payload, 0)?;
