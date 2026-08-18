@@ -424,7 +424,9 @@ fn lower_begin_block(
 ) -> Result<ast::Form, ParsingError> {
     let span = context.parse().span_for_node(begin.syntax());
     let block = match begin.block() {
-        Some(block) => lower_required_block(context, &block, "expected a non-empty entry block")?,
+        Some(block) => {
+            lower_required_block(context, &block, "expected a non-empty entry block", 0)?
+        },
         None => {
             return Err(ParsingError::InvalidSyntax {
                 span,
@@ -446,7 +448,7 @@ fn lower_procedure(
     let (name, signature) = preflight_procedure_header(context, procedure)?;
     let body = match procedure.block() {
         Some(block) => {
-            lower_required_block(context, &block, "expected a non-empty procedure body")?
+            lower_required_block(context, &block, "expected a non-empty procedure body", 0)?
         },
         None => {
             return Err(ParsingError::InvalidSyntax {

@@ -15,7 +15,7 @@ use super::{
     context::LoweringContext, fragments::lower_u32_immediate_token,
     instructions::try_lower_instruction,
 };
-use crate::{ast, parser::ParsingError};
+use crate::{MAX_CONTROL_FLOW_NESTING, ast, parser::ParsingError};
 
 /// Lowers `block` and rejects source-level empty bodies using `empty_message`.
 ///
@@ -25,6 +25,7 @@ pub(super) fn lower_required_block(
     context: &mut LoweringContext<'_>,
     block: &CstBlock,
     empty_message: &'static str,
+    nesting_depth: usize,
 ) -> Result<ast::Block, ParsingError> {
     if !has_source_operations(block) {
         return Err(ParsingError::InvalidSyntax {
@@ -33,7 +34,7 @@ pub(super) fn lower_required_block(
         });
     }
 
-    lower_block(context, block)
+    lower_block(context, block, nesting_depth)
 }
 
 /// Lowers a CST block into the AST block representation.
@@ -43,11 +44,12 @@ pub(super) fn lower_required_block(
 pub(super) fn lower_block(
     context: &mut LoweringContext<'_>,
     block: &CstBlock,
+    nesting_depth: usize,
 ) -> Result<ast::Block, ParsingError> {
     let span = context.parse().span_for_node(block.syntax());
     let mut ops = Vec::new();
     for op in block.operations() {
-        ops.extend(lower_operation(context, &op)?);
+        ops.extend(lower_operation(context, &op, nesting_depth)?);
         if ops.len() > u16::MAX as usize {
             return Err(ParsingError::CodeBlockTooBig { span });
         }
@@ -60,21 +62,53 @@ pub(super) fn lower_block(
 fn lower_operation(
     context: &mut LoweringContext<'_>,
     op: &CstOperation,
+    nesting_depth: usize,
 ) -> Result<Vec<ast::Op>, ParsingError> {
     match op {
-        CstOperation::If(op) => Ok(vec![lower_if_op(context, op)?]),
-        CstOperation::While(op) => Ok(vec![lower_while_op(context, op)?]),
-        CstOperation::DoWhile(op) => Ok(vec![lower_do_while_op(context, op)?]),
-        CstOperation::Repeat(op) => Ok(vec![lower_repeat_op(context, op)?]),
+        CstOperation::If(op) => {
+            let span = context.parse().span_for_node(op.syntax());
+            let nesting_depth = enter_control_flow(span, nesting_depth)?;
+            Ok(vec![lower_if_op(context, op, nesting_depth)?])
+        },
+        CstOperation::While(op) => {
+            let span = context.parse().span_for_node(op.syntax());
+            let nesting_depth = enter_control_flow(span, nesting_depth)?;
+            Ok(vec![lower_while_op(context, op, nesting_depth)?])
+        },
+        CstOperation::DoWhile(op) => {
+            let span = context.parse().span_for_node(op.syntax());
+            let nesting_depth = enter_control_flow(span, nesting_depth)?;
+            Ok(vec![lower_do_while_op(context, op, nesting_depth)?])
+        },
+        CstOperation::Repeat(op) => {
+            let span = context.parse().span_for_node(op.syntax());
+            let nesting_depth = enter_control_flow(span, nesting_depth)?;
+            Ok(vec![lower_repeat_op(context, op, nesting_depth)?])
+        },
         CstOperation::Instruction(op) => lower_instruction(context, op),
     }
+}
+
+fn enter_control_flow(span: SourceSpan, nesting_depth: usize) -> Result<usize, ParsingError> {
+    let nesting_depth = nesting_depth + 1;
+    if nesting_depth > MAX_CONTROL_FLOW_NESTING {
+        return Err(ParsingError::ControlFlowNestingDepthExceeded {
+            span,
+            max_depth: MAX_CONTROL_FLOW_NESTING,
+        });
+    }
+    Ok(nesting_depth)
 }
 
 /// Lowers an `if.true` / `if.false` operation.
 ///
 /// Empty source branches are accepted when an `else` branch is present. Missing `else` branches and
 /// accepted empty source branches lower to empty AST blocks.
-fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::Op, ParsingError> {
+fn lower_if_op(
+    context: &mut LoweringContext<'_>,
+    op: &CstIfOp,
+    nesting_depth: usize,
+) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     let cond = parse_if_condition(context, op)?;
 
@@ -88,7 +122,7 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
     let else_has_ops = else_node.as_ref().is_some_and(has_source_operations);
 
     let then_blk = if then_has_ops {
-        lower_block(context, &then_node)?
+        lower_block(context, &then_node, nesting_depth)?
     } else if else_node.is_some() {
         empty_block(span)
     } else {
@@ -103,7 +137,7 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
             if !else_has_ops {
                 empty_block(span)
             } else {
-                lower_block(context, &else_node)?
+                lower_block(context, &else_node, nesting_depth)?
             }
         },
         None => empty_block(span),
@@ -124,6 +158,7 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
 fn lower_while_op(
     context: &mut LoweringContext<'_>,
     op: &CstWhileOp,
+    nesting_depth: usize,
 ) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     parse_while_condition(context, op)?;
@@ -131,7 +166,8 @@ fn lower_while_op(
         span,
         message: "expected a block body for `while`".to_string(),
     })?;
-    let body = lower_required_block(context, &body, "expected a non-empty `while` block")?;
+    let body =
+        lower_required_block(context, &body, "expected a non-empty `while` block", nesting_depth)?;
     Ok(ast::Op::While { span, body })
 }
 
@@ -139,19 +175,25 @@ fn lower_while_op(
 fn lower_do_while_op(
     context: &mut LoweringContext<'_>,
     op: &CstDoWhileOp,
+    nesting_depth: usize,
 ) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {
         span,
         message: "expected a block body for `do`".to_string(),
     })?;
-    let body = lower_required_block(context, &body, "expected a non-empty `do` block")?;
+    let body =
+        lower_required_block(context, &body, "expected a non-empty `do` block", nesting_depth)?;
     let condition = op.condition().ok_or_else(|| ParsingError::InvalidSyntax {
         span,
         message: "expected a condition block after `while`".to_string(),
     })?;
-    let condition =
-        lower_required_block(context, &condition, "expected a non-empty `while` condition")?;
+    let condition = lower_required_block(
+        context,
+        &condition,
+        "expected a non-empty `while` condition",
+        nesting_depth,
+    )?;
     Ok(ast::Op::DoWhile { span, body, condition })
 }
 
@@ -159,6 +201,7 @@ fn lower_do_while_op(
 fn lower_repeat_op(
     context: &mut LoweringContext<'_>,
     op: &CstRepeatOp,
+    nesting_depth: usize,
 ) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     let count = parse_repeat_count(context, op)?;
@@ -166,7 +209,8 @@ fn lower_repeat_op(
         span,
         message: "expected a block body for `repeat`".to_string(),
     })?;
-    let body = lower_required_block(context, &body, "expected a non-empty `repeat` block")?;
+    let body =
+        lower_required_block(context, &body, "expected a non-empty `repeat` block", nesting_depth)?;
     Ok(ast::Op::Repeat { span, count, body })
 }
 

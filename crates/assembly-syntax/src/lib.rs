@@ -38,5 +38,11 @@ pub use self::{
 /// Maximum allowed iteration count for `repeat.<count>` blocks.
 pub const MAX_REPEAT_COUNT: u32 = 1_000_000;
 
+/// Maximum allowed nesting of control-flow blocks.
+///
+/// This limit prevents stack overflows while parsing or compiling maliciously deep block nesting,
+/// while remaining far above typical program structure depth.
+pub const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
 /// The modulus of the Miden field as a raw u64 integer
 pub(crate) const FIELD_MODULUS: u64 = Felt::ORDER_U64;
