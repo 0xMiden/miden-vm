@@ -1576,6 +1576,32 @@ end
 }
 
 #[test]
+fn test_constant_expr_parentheses_roundtrip_formatting() {
+    let source = "\
+namespace test::formatting
+
+use {N} from dep
+
+const LOWER_PRECEDENCE_LHS = (N + 1) * 3
+const LOWER_PRECEDENCE_RHS = 3 * (N + 1)
+const SAME_PRECEDENCE_RHS = N - (N - 1)
+";
+
+    let context = SyntaxTestContext::default();
+    let source = source_file!(&context, source);
+    let module = context.parse_module_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+
+    let formatted = module.to_string();
+    assert!(formatted.contains("const LOWER_PRECEDENCE_LHS = (N+1)*3"));
+    assert!(formatted.contains("const LOWER_PRECEDENCE_RHS = 3*(N+1)"));
+    assert!(formatted.contains("const SAME_PRECEDENCE_RHS = N-(N-1)"));
+
+    let source = source_file!(&context, &formatted);
+    let reparsed = context.parse_module_source_file(source).unwrap_or_else(|err| panic!("{err}"));
+    assert_eq!(module, reparsed);
+}
+
+#[test]
 fn test_words_roundtrip_formatting() {
     let source = "\
 namespace test::words

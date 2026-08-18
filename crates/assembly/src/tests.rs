@@ -1643,7 +1643,7 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
 }
 
 #[test]
-fn link_time_const_evaluation_nested_imported_expression_succeeds() -> TestResult {
+fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
     let context = TestContext::default();
     let constants = parse_module!(
         &context,
@@ -1670,10 +1670,31 @@ fn link_time_const_evaluation_nested_imported_expression_succeeds() -> TestResul
 
             const OFFSET_1 = WORD_NUM_ELEMENTS + 1
             const OFFSET_2 = OFFSET_1 + 1
+            const IMPORTED_ON_RHS = 10 - WORD_NUM_ELEMENTS
+            const MULTIPLE_DEFERRED_SUBTREES =
+                (WORD_NUM_ELEMENTS + 1) * (WORD_NUM_ELEMENTS - 1)
+            const FIELD_DIVISION = WORD_NUM_ELEMENTS / 2
+            const INTEGER_DIVISION = (WORD_NUM_ELEMENTS + 3) // 2
 
             begin
                 push.OFFSET_2
                 push.6
+                assert_eq
+
+                push.IMPORTED_ON_RHS
+                push.6
+                assert_eq
+
+                push.MULTIPLE_DEFERRED_SUBTREES
+                push.15
+                assert_eq
+
+                push.FIELD_DIVISION
+                push.2
+                assert_eq
+
+                push.INTEGER_DIVISION
+                push.3
                 assert_eq
             end
         "#

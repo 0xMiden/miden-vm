@@ -407,7 +407,7 @@ where
                             rhs: rhs.into(),
                         });
                     },
-                    (ConstantExpr::Int(_) | ConstantExpr::Var(_), rhs) => {
+                    (lhs, rhs) if is_integer_expr(&lhs) => {
                         let operand = rhs.span();
                         return Err(ConstEvalError::InvalidConstExprOperand {
                             span,

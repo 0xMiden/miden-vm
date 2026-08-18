@@ -379,6 +379,40 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 }
 
 #[test]
+fn deferred_binary_expr_reports_invalid_rhs_operand() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            r#"
+namespace test
+
+use {N} from dep
+
+const BAD = (N + 1) + "hello"
+"#,
+        )
+        .expect_err("string operand in an arithmetic constant expression must be rejected");
+    let syntax_error = syntax_error(&error);
+    let operand = syntax_error
+        .errors
+        .iter()
+        .find_map(|error| match error {
+            SemanticAnalysisError::ConstEvalError(ConstEvalError::InvalidConstExprOperand {
+                operand,
+                ..
+            }) => Some(*operand),
+            _ => None,
+        })
+        .expect("expected an invalid constant expression operand");
+    let operand_text = syntax_error
+        .source_file
+        .source_slice(operand)
+        .expect("invalid operand span should refer to the source");
+
+    assert_eq!(operand_text, r#""hello""#);
+}
+
+#[test]
 fn exported_proc_signature_rejects_private_local_type() {
     let context = SyntaxTestContext::default();
     let error = context

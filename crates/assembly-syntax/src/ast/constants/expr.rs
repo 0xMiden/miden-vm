@@ -139,6 +139,22 @@ impl ConstantExpr {
 
         references.into_iter().collect()
     }
+
+    fn render_operand(&self, parent_precedence: u8, is_rhs: bool) -> crate::prettier::Document {
+        use crate::prettier::{PrettyPrint, const_text};
+
+        let rendered = self.render();
+        let Self::BinaryOp { op, .. } = self else {
+            return rendered;
+        };
+
+        let precedence = op.precedence();
+        if precedence < parent_precedence || (is_rhs && precedence == parent_precedence) {
+            const_text("(") + rendered + const_text(")")
+        } else {
+            rendered
+        }
+    }
 }
 
 impl Eq for ConstantExpr {}
@@ -219,8 +235,14 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
                     + const_text(")"),
             ),
             Self::BinaryOp { op, lhs, rhs, .. } => {
-                let single_line = lhs.render() + display(op) + rhs.render();
-                let multi_line = lhs.render() + nl() + (display(op)) + rhs.render();
+                let precedence = op.precedence();
+                let single_line = lhs.render_operand(precedence, false)
+                    + display(op)
+                    + rhs.render_operand(precedence, true);
+                let multi_line = lhs.render_operand(precedence, false)
+                    + nl()
+                    + display(op)
+                    + rhs.render_operand(precedence, true);
                 single_line | multi_line
             },
         }
@@ -293,6 +315,13 @@ impl ConstantOp {
             Self::Mul => "Mul",
             Self::Div => "Div",
             Self::IntDiv => "IntDiv",
+        }
+    }
+
+    pub(crate) const fn precedence(self) -> u8 {
+        match self {
+            Self::Add | Self::Sub => 1,
+            Self::Mul | Self::Div | Self::IntDiv => 2,
         }
     }
 }
