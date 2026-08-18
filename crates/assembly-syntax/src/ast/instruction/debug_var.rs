@@ -170,7 +170,55 @@ impl DebugLocationExpressionError {
 #[cfg(feature = "serde")]
 #[derive(Deserialize)]
 struct DebugLocationExpressionSerde {
+    #[serde(deserialize_with = "deserialize_debug_location_expression_operations")]
     operations: Vec<DebugLocationExpressionOp>,
+}
+
+#[cfg(feature = "serde")]
+fn deserialize_debug_location_expression_operations<'de, D>(
+    deserializer: D,
+) -> Result<Vec<DebugLocationExpressionOp>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OperationsVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for OperationsVisitor {
+        type Value = Vec<DebugLocationExpressionOp>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                formatter,
+                "at most {MAX_DEBUG_LOCATION_EXPRESSION_OPS} debug location operations"
+            )
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            if let Some(operation_count) = sequence.size_hint()
+                && operation_count > MAX_DEBUG_LOCATION_EXPRESSION_OPS
+            {
+                return Err(serde::de::Error::custom(DebugLocationExpressionError {
+                    operation_count,
+                }));
+            }
+
+            let mut operations = Vec::with_capacity(sequence.size_hint().unwrap_or(0).min(8));
+            while let Some(operation) = sequence.next_element()? {
+                if operations.len() == MAX_DEBUG_LOCATION_EXPRESSION_OPS {
+                    return Err(serde::de::Error::custom(DebugLocationExpressionError {
+                        operation_count: operations.len() + 1,
+                    }));
+                }
+                operations.push(operation);
+            }
+            Ok(operations)
+        }
+    }
+
+    deserializer.deserialize_seq(OperationsVisitor)
 }
 
 const MAX_DEBUG_LOCATION_EXPRESSION_OPS: usize = 256;
