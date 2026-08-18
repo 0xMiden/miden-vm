@@ -134,23 +134,25 @@ impl Serializable for PackageDebugInfo {
 
 #[cfg(target_endian = "little")]
 impl PackageDebugInfo {
-    /// Deserializes package debug information without the fixed resource limits used for untrusted
-    /// input.
+    /// Reads package debug information without the fixed resource limits enforced by
+    /// [`Self::read_from`].
     ///
-    /// This is intended for analysis and troubleshooting when the caller explicitly accepts the
-    /// allocation cost of the encoded data. It still validates lengths against the reader's
-    /// remaining input and allocation budget, and performs all normal wire-format validity checks.
-    /// Callers can supply a budgeted reader if they need a custom resource limit.
+    /// Use this for data from a trusted producer or in analysis tooling where the caller accepts
+    /// its memory and processing costs. This method still checks the wire format and honors the
+    /// reader's remaining input and allocation budget. Use [`Self::read_from`] for potentially
+    /// adversarial input with the standard fixed limits.
     pub fn read_from_unmetered<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::UNMETERED)
     }
 
-    /// Deserializes package debug information from `bytes` without the fixed resource limits used
-    /// for untrusted input.
+    /// Reads package debug information from `bytes` without the fixed resource limits enforced by
+    /// [`Self::read_from_bytes`].
     ///
-    /// See [`Self::read_from_unmetered`].
+    /// Use this only when the caller accepts the memory and processing costs of the encoded data.
+    /// The wire-format checks described by [`Self::read_from_unmetered`] still apply. Use
+    /// [`Self::read_from_bytes`] for potentially adversarial input with the standard fixed limits.
     pub fn read_from_bytes_unmetered(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from_unmetered(&mut miden_core::serde::SliceReader::new(bytes))
     }
@@ -274,8 +276,24 @@ impl PackageDebugInfo {
 
 #[cfg(target_endian = "little")]
 impl Deserializable for PackageDebugInfo {
+    /// Reads package debug information using fixed resource limits for potentially adversarial
+    /// input.
+    ///
+    /// The limits cap the encoded payload, string table, individual strings, and type table. This
+    /// method also performs the normal wire-format checks. Use [`Self::read_from_unmetered`] only
+    /// when the data may exceed those limits and the caller accepts its resource costs.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Self::read_from_with_limits(source, PackageDebugInfoDecodeLimits::BOUNDED)
+    }
+
+    /// Reads package debug information from `bytes` using fixed resource limits for potentially
+    /// adversarial input.
+    ///
+    /// This is the byte-slice counterpart to [`Self::read_from`]. Use
+    /// [`Self::read_from_bytes_unmetered`] only when the data may exceed the standard limits and
+    /// the caller accepts its resource costs.
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        Self::read_from(&mut miden_core::serde::SliceReader::new(bytes))
     }
 }
 

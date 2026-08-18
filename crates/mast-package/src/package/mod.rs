@@ -360,6 +360,11 @@ impl Package {
     /// Normal package readers validate debug sections before returning. Explicit trusted readers
     /// and in-process construction may defer validation until this method is called.
     ///
+    /// Decoding uses the fixed resource limits of [`PackageDebugInfo::read_from`]. Analysis tools
+    /// that intentionally accept larger debug information can locate [`SectionId::DEBUG_INFO`] in
+    /// [`Package::sections`] and call [`PackageDebugInfo::read_from_bytes_unmetered`] on its data.
+    /// That alternative does not perform this method's package-level reference validation.
+    ///
     /// This does not read legacy debug metadata from the embedded [`MastForest`].
     pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
         if !self.debug_sections_trusted && self.sections.iter().any(|section| section.id.is_debug())
