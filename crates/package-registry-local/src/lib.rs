@@ -189,13 +189,9 @@ impl LocalPackageRegistry {
                     fs::File::open(&index_path).map_err(LocalRegistryError::IndexRead)?;
                 file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
             }
-            // Hash with the same ASCII trim used by save_with_locked_operation. Unicode `trim()`
-            // strips more (e.g. NBSP, vertical tab), which would make later writes fail with
-            // WriteToStaleIndex even though the file was not modified. Parsing still uses `trim()`
-            // so a leading NBSP does not turn a valid index into a TOML error.
-            index_checksum =
-                *miden_core::crypto::hash::Sha256::hash(contents.trim_ascii().as_bytes())
-                    .as_bytes();
+            // Checksum uses ASCII trim via `hash_index_contents`. Parsing still uses Unicode
+            // `trim()` so a leading NBSP does not turn a valid index into a TOML error.
+            index_checksum = hash_index_contents(contents.as_bytes());
             let contents = contents.trim();
             if contents.is_empty() {
                 InMemoryPackageRegistry::default()
@@ -204,7 +200,7 @@ impl LocalPackageRegistry {
                 InMemoryPackageRegistry::from_packages(persisted.packages)
             }
         } else {
-            index_checksum = *miden_core::crypto::hash::Sha256::hash(&[]).as_bytes();
+            index_checksum = hash_index_contents(&[]);
             InMemoryPackageRegistry::default()
         };
 
@@ -390,8 +386,7 @@ impl LocalPackageRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(LocalRegistryError::IndexRead(error)),
         };
-        let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
-        if &self.index_checksum != checksum.as_bytes() {
+        if self.index_checksum != hash_index_contents(&prev_contents) {
             return Err(LocalRegistryError::WriteToStaleIndex);
         }
 
@@ -399,13 +394,13 @@ impl LocalPackageRegistry {
 
         // Compute the new checksum of the updated index contents before we write, but do not
         // update the in-memory state until we've successfully persisted the index
-        let new_checksum = miden_core::crypto::hash::Sha256::hash(contents.as_bytes().trim_ascii());
+        let new_checksum = hash_index_contents(contents.as_bytes());
 
         write_file_atomically(&self.index_path, contents.as_bytes())
             .map_err(LocalRegistryError::IndexWrite)?;
 
         // Update the index checksum for the next write
-        self.index_checksum = *new_checksum.as_bytes();
+        self.index_checksum = new_checksum;
 
         Ok(())
     }
@@ -667,6 +662,10 @@ impl LocalPackageRegistry {
             artifact_path,
         })
     }
+}
+
+fn hash_index_contents(contents: &[u8]) -> [u8; 32] {
+    *miden_core::crypto::hash::Sha256::hash(contents.trim_ascii()).as_bytes()
 }
 
 fn lock_path_for_index(index_path: &Path) -> PathBuf {
