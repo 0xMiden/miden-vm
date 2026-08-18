@@ -120,7 +120,11 @@ impl Serialize for TargetType {
     where
         S: Serializer,
     {
-        serializer.serialize_str(self.as_str())
+        if serializer.is_human_readable() {
+            serializer.serialize_str(self.as_str())
+        } else {
+            serializer.serialize_u8(*self as u8)
+        }
     }
 }
 
@@ -130,9 +134,14 @@ impl<'de> Deserialize<'de> for TargetType {
     where
         D: Deserializer<'de>,
     {
-        String::deserialize(deserializer)?
-            .parse::<Self>()
-            .map_err(|err| DeError::custom(err.to_string()))
+        if deserializer.is_human_readable() {
+            String::deserialize(deserializer)?
+                .parse::<Self>()
+                .map_err(|err| DeError::custom(err.to_string()))
+        } else {
+            let tag = u8::deserialize(deserializer)?;
+            Self::try_from(tag).map_err(|err| DeError::custom(err.to_string()))
+        }
     }
 }
 
