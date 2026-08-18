@@ -9,8 +9,8 @@ use core::ops::Range;
 pub use self::{
     advice::SystemEventNode,
     debug_var::{
-        DebugFrameBase, DebugLocationExpression, DebugLocationExpressionOp, DebugVarInfo,
-        DebugVarLocation,
+        DebugFrameBase, DebugLocationExpression, DebugLocationExpressionError,
+        DebugLocationExpressionOp, DebugVarInfo, DebugVarLocation,
     },
     inline_call::DebugInlineCallInfo,
 };

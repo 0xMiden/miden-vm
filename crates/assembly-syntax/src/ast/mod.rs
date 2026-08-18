@@ -39,8 +39,8 @@ pub use self::{
         Import, ImportDecl, ImportKind, ImportSpec, ItemImport, ItemImportGroup, ModuleImport,
     },
     instruction::{
-        DebugFrameBase, DebugInlineCallInfo, DebugLocationExpression, DebugLocationExpressionOp,
-        DebugVarInfo, DebugVarLocation, Instruction, SystemEventNode,
+        DebugFrameBase, DebugInlineCallInfo, DebugLocationExpression, DebugLocationExpressionError,
+        DebugLocationExpressionOp, DebugVarInfo, DebugVarLocation, Instruction, SystemEventNode,
     },
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     item::*,

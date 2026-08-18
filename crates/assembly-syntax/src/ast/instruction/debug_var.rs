@@ -1,4 +1,4 @@
-use alloc::{format, sync::Arc, vec::Vec};
+use alloc::{format, string::ToString, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
 use miden_core::serde::{
@@ -146,15 +146,47 @@ pub enum DebugFrameBase {
 /// simple [`DebugVarLocation`] variants. Producers must resolve source-specific coordinates, such
 /// as Wasm local/global indices, before constructing this expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DebugLocationExpression {
     operations: Vec<DebugLocationExpressionOp>,
 }
 
+/// Error returned when a structured debug location expression exceeds the wire-format limit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+#[error(
+    "debug location expression has {operation_count} operations, but at most {MAX_DEBUG_LOCATION_EXPRESSION_OPS} are supported"
+)]
+pub struct DebugLocationExpressionError {
+    operation_count: usize,
+}
+
+impl DebugLocationExpressionError {
+    /// Returns the rejected operation count.
+    pub fn operation_count(&self) -> usize {
+        self.operation_count
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+struct DebugLocationExpressionSerde {
+    operations: Vec<DebugLocationExpressionOp>,
+}
+
+const MAX_DEBUG_LOCATION_EXPRESSION_OPS: usize = 256;
+
 impl DebugLocationExpression {
     /// Creates a location expression from runtime-resolved operations.
-    pub fn new(operations: Vec<DebugLocationExpressionOp>) -> Self {
-        Self { operations }
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the expression exceeds the maximum operation count accepted by the
+    /// package wire format.
+    pub fn new(
+        operations: Vec<DebugLocationExpressionOp>,
+    ) -> Result<Self, DebugLocationExpressionError> {
+        validate_debug_location_expression_len(operations.len())?;
+        Ok(Self { operations })
     }
 
     /// Returns the operations in evaluation order.
@@ -165,6 +197,17 @@ impl DebugLocationExpression {
     /// Returns true if this expression contains no operations.
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for DebugLocationExpression {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let expression = DebugLocationExpressionSerde::deserialize(deserializer)?;
+        Self::new(expression.operations).map_err(serde::de::Error::custom)
     }
 }
 
@@ -350,16 +393,27 @@ impl Serializable for DebugLocationExpression {
 impl Deserializable for DebugLocationExpression {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let count = read_bounded_len(source, "debug location expression operations", 1)?;
-        let mut operations = Vec::with_capacity(count);
+        validate_debug_location_expression_len(count)
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
+        let mut operations = Vec::with_capacity(count.min(8));
         for _ in 0..count {
             operations.push(DebugLocationExpressionOp::read_from(source)?);
         }
-        Ok(Self::new(operations))
+        Ok(Self { operations })
     }
 
     fn min_serialized_size() -> usize {
         usize::min_serialized_size()
     }
+}
+
+fn validate_debug_location_expression_len(
+    operation_count: usize,
+) -> Result<(), DebugLocationExpressionError> {
+    if operation_count > MAX_DEBUG_LOCATION_EXPRESSION_OPS {
+        return Err(DebugLocationExpressionError { operation_count });
+    }
+    Ok(())
 }
 
 impl Serializable for DebugLocationExpressionOp {
@@ -503,14 +557,17 @@ mod tests {
         );
         assert_eq!(DebugVarLocation::Unavailable.to_string(), "unavailable");
         assert_eq!(
-            DebugVarLocation::Expression(DebugLocationExpression::new(vec![
-                DebugLocationExpressionOp::FrameBaseAddress {
-                    base: DebugFrameBase::Local(-2),
-                    byte_offset: 4,
-                },
-                DebugLocationExpressionOp::AddUnsigned(8),
-                DebugLocationExpressionOp::DerefBytes,
-            ]))
+            DebugVarLocation::Expression(
+                DebugLocationExpression::new(vec![
+                    DebugLocationExpressionOp::FrameBaseAddress {
+                        base: DebugFrameBase::Local(-2),
+                        byte_offset: 4,
+                    },
+                    DebugLocationExpressionOp::AddUnsigned(8),
+                    DebugLocationExpressionOp::DerefBytes,
+                ])
+                .unwrap(),
+            )
             .to_string(),
             "expr([FrameBaseAddress { base: Local(-2), byte_offset: 4 }, AddUnsigned(8), DerefBytes])"
         );
@@ -532,12 +589,15 @@ mod tests {
                 base: DebugFrameBase::Memory(100),
                 byte_offset: -16,
             },
-            DebugVarLocation::Expression(DebugLocationExpression::new(vec![
-                DebugLocationExpressionOp::ReadStack(2),
-                DebugLocationExpressionOp::ConstI64(-4),
-                DebugLocationExpressionOp::Add,
-                DebugLocationExpressionOp::DerefBytes,
-            ])),
+            DebugVarLocation::Expression(
+                DebugLocationExpression::new(vec![
+                    DebugLocationExpressionOp::ReadStack(2),
+                    DebugLocationExpressionOp::ConstI64(-4),
+                    DebugLocationExpressionOp::Add,
+                    DebugLocationExpressionOp::DerefBytes,
+                ])
+                .unwrap(),
+            ),
         ];
 
         for loc in &locations {
@@ -575,6 +635,30 @@ mod tests {
     }
 
     #[test]
+    fn debug_location_expression_caps_operation_count_before_allocation() {
+        let count = MAX_DEBUG_LOCATION_EXPRESSION_OPS + 1;
+        let mut bytes = Vec::new();
+        bytes.write_usize(count);
+        bytes.resize(bytes.len() + count, 0);
+
+        let mut reader = SliceReader::new(&bytes);
+        let err = DebugLocationExpression::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("at most 256"));
+    }
+
+    #[test]
+    fn debug_location_expression_constructor_rejects_oversized_input() {
+        let operations =
+            vec![DebugLocationExpressionOp::Add; MAX_DEBUG_LOCATION_EXPRESSION_OPS + 1];
+        let error = DebugLocationExpression::new(operations).unwrap_err();
+
+        assert_eq!(error.operation_count(), MAX_DEBUG_LOCATION_EXPRESSION_OPS + 1);
+    }
+
+    #[test]
     fn debug_var_info_set_value_location() {
         let mut var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
         var.set_value_location(DebugVarLocation::ResolvedFrameBase {
@@ -588,5 +672,30 @@ mod tests {
                 byte_offset: 12,
             }
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_round_trips_location_expressions() {
+        let expression = DebugLocationExpression::new(vec![
+            DebugLocationExpressionOp::ReadLocal(-2),
+            DebugLocationExpressionOp::DerefBytes,
+        ])
+        .unwrap();
+        let json = serde_json::to_string(&expression).unwrap();
+
+        assert_eq!(serde_json::from_str::<DebugLocationExpression>(&json).unwrap(), expression);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_oversized_location_expressions() {
+        let expression = DebugLocationExpression {
+            operations: vec![DebugLocationExpressionOp::Add; MAX_DEBUG_LOCATION_EXPRESSION_OPS + 1],
+        };
+        let json = serde_json::to_string(&expression).unwrap();
+        let error = serde_json::from_str::<DebugLocationExpression>(&json).unwrap_err();
+
+        assert!(error.to_string().contains("at most 256"));
     }
 }
