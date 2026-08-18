@@ -651,7 +651,6 @@ impl crate::prettier::PrettyPrint for StructType {
 
         let repr = match &*self.repr {
             TypeRepr::Default => Document::Empty,
-            TypeRepr::BigEndian => const_text(" @bigendian"),
             repr @ (TypeRepr::Align(_) | TypeRepr::Packed(_) | TypeRepr::Transparent) => {
                 text(format!(" @{repr}"))
             },
@@ -1315,7 +1314,6 @@ mod tests {
     #[test]
     fn struct_type_expr_render_round_trips_non_default_reprs() {
         for repr in [
-            TypeRepr::BigEndian,
             TypeRepr::align(16),
             TypeRepr::packed(1),
             TypeRepr::packed(2),
@@ -1352,7 +1350,7 @@ mod tests {
     fn type_expr_from_type_preserves_struct_metadata() {
         let ty = Type::Struct(Arc::new(types::StructType::from_parts(
             Some(Arc::from("miden:base/core-types@1.0.0/account-id")),
-            TypeRepr::BigEndian,
+            TypeRepr::align(16),
             [
                 (Arc::<str>::from("prefix"), Type::Felt),
                 (Arc::<str>::from("suffix"), Type::Felt),
@@ -1366,7 +1364,7 @@ mod tests {
             actual.name.as_ref().map(Ident::as_str),
             Some("miden:base/core-types@1.0.0/account-id"),
         );
-        assert_eq!(*actual.repr, TypeRepr::BigEndian);
+        assert_eq!(*actual.repr, TypeRepr::align(16));
         assert_eq!(actual.fields[0].name.as_str(), "prefix");
         assert_eq!(actual.fields[1].name.as_str(), "suffix");
     }
@@ -1374,7 +1372,7 @@ mod tests {
     #[test]
     fn parsed_struct_type_preserves_field_names_through_resolution() {
         let expr = parse_type_alias_expr(
-            "type AccountId = struct @bigendian { prefix: felt, suffix: felt }\n",
+            "type AccountId = struct @align(16) { prefix: felt, suffix: felt }\n",
         );
 
         let mut resolver = DummyResolver::new();
@@ -1385,14 +1383,14 @@ mod tests {
         let Type::Struct(resolved_struct) = &resolved else {
             panic!("expected resolved struct type, got {resolved:?}");
         };
-        assert_eq!(resolved_struct.repr(), TypeRepr::BigEndian);
+        assert_eq!(resolved_struct.repr(), TypeRepr::align(16));
         assert_eq!(resolved_struct.fields()[0].name.as_deref(), Some("prefix"));
         assert_eq!(resolved_struct.fields()[1].name.as_deref(), Some("suffix"));
 
         let TypeExpr::Struct(converted) = TypeExpr::from(resolved) else {
             panic!("expected concrete struct to convert back to struct type expression");
         };
-        assert_eq!(*converted.repr, TypeRepr::BigEndian);
+        assert_eq!(*converted.repr, TypeRepr::align(16));
         assert_eq!(converted.fields[0].name.as_str(), "prefix");
         assert_eq!(converted.fields[1].name.as_str(), "suffix");
     }

@@ -12,7 +12,10 @@ use crate::*;
 /// provide the serialization implementation in midenc-hir-type instead
 impl Serializable for FunctionType {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.abi as u8);
+        target.write_u8(self.abi.tag());
+        if let CallConv::Extern(name) = &self.abi {
+            name.write_into(target);
+        }
         target.write_usize(self.params().len());
         target.write_many(self.params().iter());
         target.write_usize(self.results().len());
@@ -41,6 +44,7 @@ impl FunctionType {
             1 => CallConv::C,
             2 => CallConv::Wasm,
             3 => CallConv::ComponentModel,
+            4 => CallConv::Extern(Arc::<str>::read_from(source)?),
             invalid => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid CallConv tag: {invalid}"
@@ -132,9 +136,11 @@ impl Serializable for Type {
                         target.write_u16(align.get());
                     },
                     TypeRepr::Transparent => target.write_u8(3),
-                    TypeRepr::BigEndian => target.write_u8(4),
                 }
-                target.write_u8(ty.len() as u8);
+                target.write_u8(
+                    u8::try_from(ty.len())
+                        .expect("invalid struct: expected no more than 255 fields"),
+                );
                 for field in ty.fields() {
                     if let Some(name) = field.name.as_ref() {
                         target.write_bool(true);
@@ -188,6 +194,9 @@ impl Serializable for Type {
                         target.write_bool(false);
                     }
                 }
+            },
+            Type::Variadic => {
+                target.write_u8(22);
             },
         }
     }
@@ -280,7 +289,6 @@ impl Type {
                         TypeRepr::Packed(align)
                     },
                     3 => TypeRepr::Transparent,
-                    4 => TypeRepr::BigEndian,
                     invalid => {
                         return Err(DeserializationError::InvalidValue(format!(
                             "invalid TypeRepr tag: {invalid}"
@@ -374,6 +382,7 @@ impl Type {
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
                 Type::Enum(Arc::new(enum_ty))
             },
+            22 => Type::Variadic,
             invalid => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid Type tag: {invalid}"
@@ -397,6 +406,18 @@ mod tests {
     use miden_serde_utils::{BudgetedReader, ByteWriter, SliceReader};
 
     use super::*;
+
+    #[test]
+    fn struct_type_round_trips_at_the_maximum_field_count() {
+        let fields = core::iter::repeat_n(Type::U8, 255).collect::<Vec<_>>();
+        let ty = Type::from(StructType::new(fields));
+
+        let mut bytes = Vec::new();
+        ty.write_into(&mut bytes);
+        let decoded = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
+
+        assert_eq!(decoded, ty);
+    }
 
     #[test]
     fn function_type_rejects_over_budget_params() {

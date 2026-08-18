@@ -1,8 +1,6 @@
 use core::{fmt, iter::FusedIterator};
 
 use miden_formatting::prettier::PrettyPrint;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use smallvec::{SmallVec, smallvec};
 
 use crate::*;
@@ -47,7 +45,6 @@ pub enum InvalidEnumTypeError {
 /// In 1, the variants are all of the same type as the discriminant. In 2, the variants may each be
 /// different shape.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EnumType {
     /// The name of the enumeration itself.
     pub(crate) name: Arc<str>,
@@ -73,7 +70,6 @@ pub struct EnumType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Variant {
     /// The name of this variant
     pub name: Arc<str>,

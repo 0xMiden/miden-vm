@@ -945,7 +945,7 @@ impl Linker {
     ) -> Result<Arc<types::FunctionType>, LinkerError> {
         use miden_assembly_syntax::ast::TypeResolver;
 
-        let cc = ty.cc;
+        let cc = ty.cc.clone();
         let mut args = Vec::with_capacity(ty.args.len());
 
         let symbol_resolver = SymbolResolver::new(self);

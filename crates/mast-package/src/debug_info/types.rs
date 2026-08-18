@@ -662,6 +662,11 @@ pub enum DebugTypeInfo {
         /// Variants of the enum.
         variants: Vec<DebugVariantInfo>,
     },
+    /// Represents a variable number (zero or more) of types in function argument or result position
+    ///
+    /// Variadic type parameters are always in trailing position, but may be preceded by
+    /// non-variadic type parameters
+    Variadic,
     /// An unknown or opaque type
     Unknown,
 }
@@ -1002,6 +1007,7 @@ impl DebugTypeInfo {
                 }
                 Some((Type::Enum(Arc::new(enum_ty)), None))
             },
+            Self::Variadic => Some((Type::Variadic, None)),
             Self::Unknown => Some((Type::Unknown, None)),
         }
     }
@@ -1067,7 +1073,7 @@ fn checked_type_size_in_bytes(ty: &Type) -> Option<usize> {
 
 fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
     match ty {
-        Type::Unknown | Type::Never => Some(0),
+        Type::Unknown | Type::Never | Type::Variadic => Some(0),
         Type::I1 => Some(1),
         Type::I8 | Type::U8 => Some(8),
         Type::I16 | Type::U16 => Some(16),
@@ -1087,7 +1093,8 @@ fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
                 padded_element_size.checked_mul(count - 1)?.checked_add(element_size)
             },
         },
-        Type::List(_) => None,
+        // A list is a fat pointer: a 32-bit length followed by a 32-bit pointer.
+        Type::List(_) => Some(64),
     }
 }
 
@@ -1374,6 +1381,48 @@ mod tests {
         };
         assert_eq!(element.as_ref(), &Type::U16);
         assert!(dynamic_declared.is_none());
+    }
+
+    #[test]
+    fn register_and_recover_list_round_trips() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let list_ty = Type::List(Arc::new(Type::U16));
+        let list_idx = builder
+            .register_debug_type(None, None, &list_ty)
+            .expect("list should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = debug_info[list_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("list should be recoverable");
+
+        assert_eq!(recovered, list_ty);
+    }
+
+    #[test]
+    fn register_and_recover_struct_containing_a_list_field() {
+        use miden_assembly_syntax::ast::types::StructType;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_ty = Type::Struct(Arc::new(StructType::named(
+            Arc::from("holder"),
+            [
+                (Arc::from("count"), Type::U32),
+                (Arc::from("items"), Type::List(Arc::new(Type::U8))),
+            ],
+        )));
+        let struct_idx = builder
+            .register_debug_type(None, None, &struct_ty)
+            .expect("struct should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = debug_info[struct_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("struct containing a list should be recoverable");
+
+        assert_eq!(recovered, struct_ty);
     }
 
     #[test]

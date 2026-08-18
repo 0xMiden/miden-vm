@@ -950,7 +950,7 @@ fn validate_debug_type_info(
     types: &IndexVec<DebugTypeIdx, DebugTypeInfo>,
 ) -> Result<(), DebugInfoTableRemapError> {
     match ty {
-        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => {},
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown | DebugTypeInfo::Variadic => {},
         DebugTypeInfo::Pointer { pointee_type_idx } => {
             validate_type_idx(*pointee_type_idx, types)?;
         },
@@ -1077,6 +1077,7 @@ fn remap_debug_type_info(
                 .collect::<Result<_, DebugInfoTableRemapError>>()?,
         },
         DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
+        DebugTypeInfo::Variadic => DebugTypeInfo::Variadic,
     })
 }
 

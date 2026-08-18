@@ -461,6 +461,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             Type::U256 => self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U256)),
             Type::Unknown => self.add_type(DebugTypeInfo::Unknown),
             Type::Never => self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void)),
+            Type::Variadic => self.add_type(DebugTypeInfo::Variadic),
             Type::Ptr(ptr) => {
                 let pointee_name = declared_ty.and_then(|t| match t {
                     TypeExpr::Ptr(p) => match p.pointee.as_ref() {
@@ -497,40 +498,16 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
                     .map_err(|_| Report::msg("array type is too large"))?;
                 self.add_type(DebugTypeInfo::Array { element_type_idx, count: Some(count) })
             },
-            Type::List(ty) => {
-                let pointee_name = declared_ty.and_then(|t| match t {
-                    TypeExpr::Ptr(p) => match p.pointee.as_ref() {
-                        TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
-                        _ => None,
-                    },
-                    _ => None,
-                });
-                let pointee_name = pointee_name.map(|name| self.add_string(name));
-                let pointee_decl = declared_ty.and_then(|t| match t {
-                    TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
-                    _ => None,
-                });
-                let pointee_ty = self.register_debug_type(pointee_name, pointee_decl, ty)?;
-                let usize_ty = self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
-                let pointer_ty =
-                    self.add_type(DebugTypeInfo::Pointer { pointee_type_idx: pointee_ty });
-                let name_idx =
-                    declared_name.unwrap_or_else(|| self.add_string(format!("list<{ty}>")));
-                let ptr = DebugFieldInfo {
-                    name_idx: self.add_string("ptr"),
-                    type_idx: pointer_ty,
-                    offset: 0,
-                };
-                let len = DebugFieldInfo {
-                    name_idx: self.add_string("len"),
-                    type_idx: usize_ty,
-                    offset: 4,
-                };
-                self.add_type(DebugTypeInfo::Struct {
-                    name_idx,
-                    size: 8,
-                    fields: vec![ptr, len],
-                })
+            Type::List(element_ty) => {
+                // A list is emitted as an array with no fixed element count, which is what
+                // recovery expects. Emitting the fat pointer's `{ len, ptr }` layout as a
+                // synthetic struct instead would not round-trip, as such a record is
+                // indistinguishable from an ordinary struct on the way back.
+                //
+                // `TypeExpr` cannot express a list, so there is never a declared type or name
+                // to propagate here.
+                let element_type_idx = self.register_debug_type(None, None, element_ty)?;
+                self.add_type(DebugTypeInfo::Array { element_type_idx, count: None })
             },
             Type::Struct(struct_ty) => {
                 let declared_field_tys = declared_ty.and_then(|t| match t {

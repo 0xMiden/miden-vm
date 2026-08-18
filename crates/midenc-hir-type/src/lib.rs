@@ -25,12 +25,34 @@ pub use self::{
 
 /// Represents the type of a value in the HIR type system
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Type {
     /// This indicates a failure to type a value, or a value which is untypable
     Unknown,
     /// This type is the bottom type, and represents divergence, akin to Rust's Never/! type
     Never,
+    /// This type represents a variadic type parameter, i.e. it can represent zero or more values
+    /// of arbitrary type.
+    ///
+    /// It is only valid in function types, and must always be in trailing position, i.e. if mixed
+    /// with other types, it must come last in the list, as shown below:
+    ///
+    /// ## Valid
+    ///
+    /// * `fn (...)`
+    /// * `fn () -> ...`
+    /// * `fn (...) -> ...`
+    /// * `fn (i8, ...)`
+    /// * `fn () -> (i8, ...)`
+    /// * `fn (i8, ...) -> (i8, ...)`
+    ///
+    /// ## Invalid
+    ///
+    /// * `fn (..., ...)`
+    /// * `fn () -> (..., ...)`
+    /// * `fn (..., i8)`
+    /// * `fn (i8, ..., i8)`
+    /// * `fn () -> (..., i8)`
+    Variadic,
     /// A 1-bit integer, i.e. a boolean value.
     ///
     /// When the bit is 1, the value is true; 0 is false.
@@ -76,11 +98,15 @@ pub enum Type {
     Array(Arc<ArrayType>),
     /// A dynamically sized list of values of the given type.
     ///
-    /// Lists use a fat pointer layout containing a pointer and a length.
+    /// This is represented as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and is therefore
+    /// 8 bytes in size with an alignment of 4. Its layout does not depend on the element type.
+    ///
+    /// NOTE: This primarily exists to support the Wasm Canonical ABI.
     List(Arc<Type>),
     /// A reference to a function with the given type signature
     Function(Arc<FunctionType>),
 }
+
 impl Type {
     /// Returns true if this type is a zero-sized type, which includes:
     ///
@@ -92,6 +118,7 @@ impl Type {
         match self {
             Self::Unknown => false,
             Self::Never => true,
+            Self::Variadic => false,
             Self::Array(ty) => ty.is_zst(),
             Self::Struct(struct_ty) => struct_ty.fields.iter().all(|f| f.ty.is_zst()),
             Self::Enum(enum_ty) => enum_ty.is_zst(),
@@ -349,6 +376,7 @@ impl PrettyPrint for Type {
         match self {
             Self::Unknown => const_text("?"),
             Self::Never => const_text("!"),
+            Self::Variadic => const_text("..."),
             Self::I1 => const_text("i1"),
             Self::I8 => const_text("i8"),
             Self::U8 => const_text("u8"),

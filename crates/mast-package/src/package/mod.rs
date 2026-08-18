@@ -870,7 +870,9 @@ impl Package {
         debug_info: &PackageDebugInfo,
     ) -> Result<(), PackageDebugInfoError> {
         match ty {
-            DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => Ok(()),
+            DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown | DebugTypeInfo::Variadic => {
+                Ok(())
+            },
             DebugTypeInfo::Pointer { pointee_type_idx } => {
                 self.validate_type_index(*pointee_type_idx, debug_info, || {
                     format!("debug type {type_index} pointer target")

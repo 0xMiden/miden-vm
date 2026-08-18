@@ -753,7 +753,6 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             return match name_text {
                 "packed" => Ok(Span::new(name_span, TypeRepr::packed(1))),
                 "transparent" => Ok(Span::new(name_span, TypeRepr::Transparent)),
-                "bigendian" => Ok(Span::new(name_span, TypeRepr::BigEndian)),
                 "align" => Err(ParsingError::InvalidStructRepr {
                     span: join_spans(self.token_span(&at), name_span),
                     message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),

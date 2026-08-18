@@ -7,7 +7,6 @@ use super::{Alignable, Type};
 
 /// This represents a structured aggregate type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StructType {
     /// An optional display name for this struct type
     pub(crate) name: Option<Arc<str>>,
@@ -25,7 +24,6 @@ pub struct StructType {
 
 /// This represents metadata about a field of a [StructType]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StructField {
     /// An optional display name for this field
     pub name: Option<Arc<str>>,
@@ -41,7 +39,6 @@ pub struct StructField {
 
 /// This represents metadata about how a structured type will be represented in memory
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TypeRepr {
     /// This corresponds to the C ABI representation for a given type
     #[default]
@@ -69,22 +66,6 @@ pub enum TypeRepr {
     /// This may only be used on structs with no more than one non-zero sized field, and
     /// indicates that the representation of that field should be used for the struct.
     Transparent,
-    /// This is equivalent to the default representation, except it indicates that if multiple
-    /// field elements are required to represent the value on Miden's operand stack (i.e. the
-    /// value is larger than 4 bytes), then the field elements will be ordered on the operand stack
-    /// with the highest-addressed bytes at the top.
-    ///
-    /// Normally, types are laid out in natural order (i.e. lowest-addressed bytes on top of the
-    /// stack), and when lowering word-sized loads/stores, we are required to reverse the order
-    /// of the elements into big-endian order.
-    ///
-    /// This representation essentially disables this implicit reversal, keeping elements on the
-    /// operand stack in the order produced by `mem_loadw`.
-    ///
-    /// NOTE: This is meant to be a temporary work around to permit us to represent some legacy
-    /// types in the transaction kernel API which use a different representation on the operand
-    /// stack than in memory - this _will_ be deprecated in the future.
-    BigEndian,
 }
 
 impl TypeRepr {
@@ -184,6 +165,13 @@ impl StructType {
         <I as IntoIterator>::Item: Into<NameAndType>,
     {
         let tys = fields.into_iter().map(Into::into).collect::<SmallVec<[_; 2]>>();
+        // NOTE: `StructField::index` is a `u8`, so 256 fields would be representable here, but
+        // the field count is encoded as a `u8` on the wire, where 256 truncates to 0. Cap the
+        // count at 255 so that every constructible struct can round-trip.
+        assert!(
+            u8::try_from(tys.len()).is_ok(),
+            "invalid struct: expected no more than 255 fields"
+        );
         let mut fields = SmallVec::<[_; 2]>::with_capacity(tys.len());
         let size = match repr {
             TypeRepr::Transparent => {
@@ -222,9 +210,7 @@ impl StructType {
                 let align = match repr {
                     TypeRepr::Align(align) => core::cmp::max(align.get(), default_align),
                     TypeRepr::Packed(align) => core::cmp::min(align.get(), default_align),
-                    TypeRepr::Transparent | TypeRepr::Default | TypeRepr::BigEndian => {
-                        default_align
-                    },
+                    TypeRepr::Transparent | TypeRepr::Default => default_align,
                 };
 
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
@@ -387,7 +373,6 @@ impl miden_formatting::prettier::PrettyPrint for TypeRepr {
             Self::Transparent => const_text("transparent"),
             Self::Align(align) => text(format!("align({align})")),
             Self::Packed(align) => text(format!("packed({align})")),
-            Self::BigEndian => const_text("big-endian"),
         }
     }
 }

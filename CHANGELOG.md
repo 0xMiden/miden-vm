@@ -1,4 +1,5 @@
 # Changelog
+
 ## v0.30.0 (Unreleased)
 
 #### Features
@@ -51,6 +52,18 @@
 - [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 - Made `Mmr::clone()` cheap by storing MMR nodes in chunked, `Arc`-shared storage. Clones share all chunk storage with the original; appending after a clone copies at most one 32 KiB chunk. Public API and serialization formats are unchanged. ([#3562](https://github.com/0xMiden/miden-vm/pull/3562)).
 - The `miden-precompiles` package has been merged into `miden-core`, users should remove any references to `miden-precompiles` and use `miden-core` instead.
+- [BREAKING] `midenc_hir_type::CallConv` has gained a new variant `Extern`, for language frontends to use for representing their own internal calling conventions.
+- [BREAKING] `midenc_hir_type::Type` has gained a new variant: `Variadic`, for use in representing function signatures that have variadic parameter or result lists.
+- The `List` variant of `midenc_hir_type::Type` has had its representation defined as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and so it is now supported in APIs that previously would panic due to the representation being unspecified. `List` is now emitted into debug info as an array with no fixed element count, which is what debug type recovery expects, so lists round-trip through package debug info; previously they were emitted as a synthetic `{ ptr, len }` struct and recovered as an ordinary struct. Structs with a `List`-typed field are now recoverable at all, where recovery previously failed outright because a list was treated as having no computable size.
+- [BREAKING] `midenc_hir_type::StructType` now rejects structs with more than 255 fields. 256 fields were previously constructible, but the field count is encoded as a `u8`, so such a struct silently serialized as having zero fields.
+
+#### Features
+
+- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+
+#### Changes
+
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 - [BREAKING] `verify` and `Verifier::verify` now borrow the proof and the claim instead of
   consuming them.

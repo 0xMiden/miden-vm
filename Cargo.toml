@@ -107,7 +107,7 @@ miden-core-lib          = { path = "./crates/lib/core", version = "0.30", defaul
 miden-serde-utils       = { path = "./crates/serde-utils", version = "0.30", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.30", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.30", default-features = false }
-midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.11", default-features = false }
+midenc-hir-type         = { path = "./crates/midenc-hir-type", version = "0.12", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.30", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.30", default-features = false }
 miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.30", default-features = false }
@@ -155,7 +155,6 @@ rocksdb         = { version = "0.24", default-features = false }
 seq-macro       = "0.3"
 serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
-serde_repr      = { version = "0.1" }
 serde-untagged  = {version = "0.1" }
 sha2            = { version = "0.11", default-features = false }
 sha3            = { version = "0.12", default-features = false }
