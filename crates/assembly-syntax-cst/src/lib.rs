@@ -27,3 +27,9 @@ pub use self::{
     parser::{Parse, parse_inline_masm, parse_source_file, parse_text},
     syntax::{MasmLanguage, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
+
+/// Maximum allowed nesting of control-flow blocks.
+///
+/// This limit prevents stack overflows while parsing or compiling maliciously deep block nesting,
+/// while remaining far above typical program structure depth.
+pub const MAX_CONTROL_FLOW_NESTING: usize = 256;
