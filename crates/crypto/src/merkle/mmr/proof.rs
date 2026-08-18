@@ -8,7 +8,7 @@ use crate::Word;
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MmrPath {
     /// The state of the MMR when the MMR path was created.
     forest: Forest,
@@ -160,6 +160,44 @@ impl MmrProof {
     pub fn with_forest(&self, target_forest: Forest) -> Result<MmrProof, MmrError> {
         let adjusted_path = self.path.with_forest(target_forest)?;
         Ok(MmrProof::new(adjusted_path, self.leaf))
+    }
+}
+
+/// Rejects positions outside the forest and paths whose depth does not match the tree containing
+/// the position. The nested [`MerklePath`] enforces its own length bound.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MmrPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename = "MmrPath")]
+        struct Raw {
+            forest: Forest,
+            position: usize,
+            merkle_path: MerklePath,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        let expected_depth =
+            raw.forest.leaf_to_corresponding_tree(raw.position).ok_or_else(|| {
+                serde::de::Error::custom(format_args!(
+                    "MmrPath position {} is outside a forest of {} leaves",
+                    raw.position,
+                    raw.forest.num_leaves(),
+                ))
+            })? as usize;
+        let actual_depth = raw.merkle_path.nodes().len();
+        if actual_depth != expected_depth {
+            return Err(serde::de::Error::custom(format_args!(
+                "MmrPath depth {actual_depth} does not match the expected depth {expected_depth} \
+                 for position {}",
+                raw.position,
+            )));
+        }
+
+        Ok(MmrPath::new(raw.forest, raw.position, raw.merkle_path))
     }
 }
 

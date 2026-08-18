@@ -1,11 +1,8 @@
 //! Range-check bus test.
 //!
-//! Verifies that every expected `RangeMsg` interaction fires at the right row, whether it
-//! comes from a u32 stack op (decoder-side `user_op_helpers`) or a memory chiplet row (delta
-//! limbs + word-address decomposition). The test is column-blind — since both call sites are
-//! currently packed into different aux columns (M1 for u32rc, C2 for memory range checks),
-//! the subset-based [`InteractionLog`] happens to pick up both without the test having to
-//! know where each one landed.
+//! Verifies that every expected `RangeMsg` interaction fires at the right row, whether it comes
+//! from a u32 stack op or a memory chiplet row. [`InteractionLog`] collects messages across all
+//! auxiliary columns, so these tests do not depend on the current column packing.
 
 use alloc::vec::Vec;
 
@@ -41,6 +38,38 @@ fn u32_stack_op_emits_range_check_removes() {
     assert_eq!(exp.count_removes(), 4, "expected 4 helper-register range-check removes");
     assert_eq!(exp.count_adds(), 0);
     log.assert_contains(&exp);
+}
+
+/// U32DIV uses four helper limbs for the quotient and remainder and two more for
+/// `divisor - remainder - 1`. All six must reach the range-check bus, even though the final pair
+/// is packed into a different lookup column.
+#[test]
+fn u32div_emits_all_range_check_removes() {
+    let operations = vec![Operation::U32div, Operation::Drop, Operation::Drop, Operation::U32div];
+    let trace = build_trace_from_ops(operations, &[0x0008_000b, 0x003b_0051, 3, 0x0003_0004]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let rows: Vec<RowIndex> = (0..main.core_height())
+        .map(RowIndex::from)
+        .filter(|&row| {
+            main.get_op_code(row) == Felt::from_u8(miden_core::operations::opcodes::U32DIV)
+        })
+        .collect();
+    assert_eq!(rows.len(), 2, "expected two U32DIV rows");
+
+    // The first division has nonzero limbs for the remainder and its bound. The second has a
+    // nonzero high quotient limb. Distinct values in the first row also expose limb swaps.
+    let expected_helpers = [[7, 0, 4, 3, 6, 5], [1, 1, 1, 0, 1, 0]];
+    let mut expected = Expectations::new(&log);
+    for (row, expected_row) in rows.into_iter().zip(expected_helpers) {
+        let helpers: [Felt; 6] = core::array::from_fn(|i| main.helper_register(i, row));
+        assert_eq!(helpers, expected_row.map(Felt::new_unchecked));
+        for value in helpers {
+            expected.remove(usize::from(row), &RangeMsg { value });
+        }
+    }
+    log.assert_contains(&expected);
 }
 
 /// Two memory ops (`MStoreW` + `MLoadW`) on the same word address emit 5 `RangeMsg` removes

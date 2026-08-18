@@ -100,6 +100,15 @@ fn with_leaves_empty() {
     assert_eq!(0, pmt.max_depth());
 }
 
+/// Checks that a non-empty partial tree cannot use the root as a leaf.
+#[test]
+fn with_leaves_rejects_root() {
+    let result =
+        PartialMerkleTree::with_leaves(BTreeMap::from([(NodeIndex::root(), int_to_node(1))]));
+
+    assert!(matches!(result, Err(MerkleError::DepthTooSmall(0))));
+}
+
 /// Checks that `read_from_bytes_with_budget()` accepts an empty input.
 #[test]
 fn deserialize_empty_with_budget() {

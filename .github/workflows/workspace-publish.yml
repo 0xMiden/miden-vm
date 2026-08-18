@@ -175,15 +175,15 @@ jobs:
           mv target/${{ matrix.target }}/optimized/miden-format miden-format-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-registry miden-registry-${{ matrix.target }}
       - name: Attest miden-vm
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-vm-${{ matrix.target }}
       - name: Attest miden-format
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-format-${{ matrix.target }}
       - name: Attest miden-registry
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-registry-${{ matrix.target }}
       - name: Upload
@@ -210,7 +210,7 @@ jobs:
           mv target/packages/miden-precompiles.masp precompiles.masp
       - name: Attest MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             core.masp

@@ -350,6 +350,25 @@ begin
 end
 ```
 
+#### String-derived constants
+
+The `word("...")` constructor hashes a string with Blake3 to derive a deterministic word. The
+result behaves like any other word constant, including support for slice notation:
+
+```
+const STORAGE_SLOT = word("miden::account::storage_slot")
+
+begin
+    push.STORAGE_SLOT       # pushes the full word
+    push.STORAGE_SLOT[0]    # pushes the first element
+    push.STORAGE_SLOT[1..3] # pushes a two-element slice
+end
+```
+
+Use `event("...")` when a string should identify an event. It derives a single field element that
+can be used with event instructions, for example `const TRANSFER = event("miden::transfer")` and
+`emit.TRANSFER`.
+
 ### Types
 
 Miden Assembly supports types for the purpose of specifying the _type signature_ of a procedure. This is used by other tooling in the Miden toolchain to bind against procedures written in Miden Assembly from higher-level languages, e.g. Rust. The type system is low-level and structural, but some conveniences are provided in Miden Assembly to improve ergonomics and aid in the construction of future static analyses.

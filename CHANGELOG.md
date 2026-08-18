@@ -4,9 +4,14 @@
 #### Features
 
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
+- Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
+- [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 
 #### Changes
 
+- Documented the `word("...")` and `event("...")` string-derived constant constructors and word
+  slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
+- [BREAKING] Added structural and hash-consistency validation to serde deserialization for `MerkleTree`, `Mmr`, `MmrPeaks`, `MmrPath`, `PartialMerkleTree`, and `SimpleSmt`. `Mmr` binary deserialization now applies the same validation, and `PartialMerkleTree::with_leaves` rejects depth-zero leaves ([#3645](https://github.com/0xMiden/miden-vm/pull/3645)).
 - [BREAKING] `UniqueNodes` entries are now keyed by tree position, and missing nodes mean canonical empty subtree roots. The `NodeValue` enum was removed ([#3620](https://github.com/0xMiden/miden-vm/pull/3620)).
 - [BREAKING] Hardened and documented Falcon math. `Polynomial::karatsuba` now requires equal, nonempty coefficient vectors with supported recursive lengths. Also fixed field canonicalization and polynomial division edge cases, enforced FFT size limits, and added reference and oracle tests for SamplerZ, FFT, and NTRU ([#3629](https://github.com/0xMiden/miden-vm/pull/3629)).
 - [BREAKING] Hardened Merkle APIs and deserialization against malformed inputs: `SparseMerklePath` validates depth before narrowing and validates both binary and serde input, `MerklePath` and `NodeIndex` validate serde input, `MerklePath` mutable dereferencing now exposes a slice to preserve its length bound, `InOrderIndex` rejects zero during deserialization, the `Forest` root and rightmost in-order index accessors return `Option` with `_unchecked` variants for non-empty callers, and `MerkleStore::get_leaf_depth` handles depth-zero trees without overflowing a shift ([#3635](https://github.com/0xMiden/miden-vm/pull/3635)).
@@ -19,6 +24,7 @@
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
 - [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
+- Made `Mmr::clone()` cheap by storing MMR nodes in chunked, `Arc`-shared storage. Clones share all chunk storage with the original; appending after a clone copies at most one 32 KiB chunk. Public API and serialization formats are unchanged. ([#3562](https://github.com/0xMiden/miden-vm/pull/3562)).
 
 #### Features
 
@@ -47,6 +53,7 @@
 
 #### Fixes
 
+- [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, and the bypassing `serde` derives were removed from `LeafIndex`, `SmtLeaf`, `Smt`, and `PartialSmt` ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
 - Fixed `Polynomial::div` panicking when the numerator is zero by adding the missing `return` keyword ([#3534](https://github.com/0xMiden/miden-vm/issues/3534)).
 - Moved the `read_bounded_len` and `validate_bounded_len` helpers from `miden-core` to `miden-serde-utils`, where they are now public. `miden-core::serde` re-exports them unchanged, and the private duplicates in `miden-utils-indexing` were removed ([#3415](https://github.com/0xMiden/miden-vm/issues/3415)).
