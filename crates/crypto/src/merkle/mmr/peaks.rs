@@ -190,23 +190,3 @@ impl From<MmrPeaks> for Vec<Word> {
         peaks.peaks
     }
 }
-
-/// Bounds the peak sequence while reading it, then validates the forest size and peak count
-/// through [`MmrPeaks::new`].
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MmrPeaks {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "MmrPeaks")]
-        struct Raw {
-            forest: Forest,
-            peaks: crate::merkle::BoundedVec<Word, { Forest::MAX_LEAVES.count_ones() as usize }>,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        MmrPeaks::new(raw.forest, raw.peaks.0).map_err(serde::de::Error::custom)
-    }
-}

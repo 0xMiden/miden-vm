@@ -482,33 +482,3 @@ impl<const DEPTH: u8> SparseMerkleTree<DEPTH> for SimpleSmt<DEPTH> {
         Ok(result)
     }
 }
-
-/// Rebuilds the tree from its leaves and rejects any different claimed state.
-#[cfg(feature = "serde")]
-impl<'de, const DEPTH: u8> serde::Deserialize<'de> for SimpleSmt<DEPTH> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "SimpleSmt")]
-        struct Raw {
-            root: Word,
-            inner_nodes: InnerNodes,
-            leaves: Leaves,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        let rebuilt = SimpleSmt::<DEPTH>::with_leaves(raw.leaves.iter().map(|(k, v)| (*k, *v)))
-            .map_err(serde::de::Error::custom)?;
-        if rebuilt.root != raw.root
-            || rebuilt.inner_nodes != raw.inner_nodes
-            || rebuilt.leaves != raw.leaves
-        {
-            return Err(serde::de::Error::custom(
-                "SimpleSmt state is inconsistent with its leaves",
-            ));
-        }
-        Ok(rebuilt)
-    }
-}
