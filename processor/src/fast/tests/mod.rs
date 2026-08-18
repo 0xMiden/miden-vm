@@ -1126,6 +1126,7 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
     set_entrypoint_inline_context(&source_manager, &mut program_module, "source::external");
     let package: Arc<Package> =
         Arc::from(assembler.assemble_program("program", program_module).unwrap());
+    let caller_forest = package.mast_forest().clone();
 
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut resume_context = processor
@@ -1135,18 +1136,23 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
     host.load_library(library).unwrap();
     let mut saw_target_context = false;
     let mut saw_context_cleared = false;
-    let mut saw_pending_external_return = false;
     loop {
         let names = active_inline_names(&resume_context);
-        if matches!(
-            resume_context.continuation_stack().peek_continuation(),
-            Some(crate::Continuation::EnterForest { .. })
-        ) {
-            saw_pending_external_return = true;
-            assert!(names.is_empty(), "pending external return must not expose a stale context");
-        }
         if names.is_empty() {
-            saw_context_cleared |= saw_target_context;
+            if saw_target_context {
+                saw_context_cleared = true;
+                assert_eq!(
+                    resume_context.current_forest().commitment(),
+                    caller_forest.commitment()
+                );
+                assert!(
+                    !matches!(
+                        resume_context.continuation_stack().peek_continuation(),
+                        Some(crate::Continuation::EnterForest { .. })
+                    ),
+                    "resume contexts must eagerly restore non-clock forest continuations",
+                );
+            }
         } else {
             assert_eq!(names, ["source::external"]);
             saw_target_context = true;
@@ -1161,10 +1167,65 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
 
     assert!(saw_target_context, "loaded target should inherit the external boundary context");
     assert!(saw_context_cleared, "inline context should end when external execution returns");
-    assert!(
-        saw_pending_external_return,
-        "the test must stop before restoring the caller forest"
+}
+
+#[test]
+fn nested_external_returns_restore_the_caller_before_resuming() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (leaf_package, leaf_digest, _) = host_loaded_package_fixture(
+        source_manager.clone(),
+        vec![Operation::Pad, Operation::Drop],
+        true,
     );
+    let leaf_forest = leaf_package.mast_forest().clone();
+    let (forwarder_package, forwarder_digest) = host_loaded_forwarder_package(leaf_digest);
+    let forwarder_forest = forwarder_package.mast_forest().clone();
+    let (program, caller_debug_info) = external_program_for_digest(forwarder_digest);
+    let caller_forest = program.mast_forest().clone();
+
+    let mut host = DefaultHost::default()
+        .with_source_manager(source_manager)
+        .with_library(Arc::new(forwarder_package))
+        .expect("forwarder package should register")
+        .with_library(Arc::new(leaf_package))
+        .expect("leaf package should register");
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context(&program)
+        .expect("program resume context should initialize");
+    let mut saw_leaf = false;
+    let mut saw_restored_caller = false;
+
+    loop {
+        let current_forest = resume_context.current_forest();
+        assert!(
+            !Arc::ptr_eq(current_forest, &forwarder_forest),
+            "source-unaware external forwarding must not expose an intermediate resume context",
+        );
+        if Arc::ptr_eq(current_forest, &leaf_forest) {
+            saw_leaf = true;
+        } else if saw_leaf && Arc::ptr_eq(current_forest, &caller_forest) {
+            saw_restored_caller = true;
+            assert!(
+                !matches!(
+                    resume_context.continuation_stack().peek_continuation(),
+                    Some(crate::Continuation::EnterForest { .. })
+                ),
+                "all pending forest restorations must be applied before resuming",
+            );
+        }
+
+        let Some(next_resume_context) = processor
+            .step_with_package_debug_info_sync(&mut host, resume_context, &caller_debug_info)
+            .unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_leaf, "execution should enter the leaf package");
+    assert!(saw_restored_caller, "execution should resume directly in the caller package");
 }
 
 fn absolute_path(name: &str) -> Arc<Path> {

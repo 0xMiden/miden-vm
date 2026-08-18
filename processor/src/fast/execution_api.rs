@@ -20,7 +20,7 @@ use super::{
 use crate::PrecompileWitness;
 use crate::{
     ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
-    continuation_stack::{ContinuationStack, SourceInlineCallContext},
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
         MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
     },
@@ -816,10 +816,10 @@ impl FastProcessor {
     fn resume_context_from_flow(
         flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         mut continuation_stack: ContinuationStack<Arc<MastForest>>,
-        current_forest: Arc<MastForest>,
+        mut current_forest: Arc<MastForest>,
         kernel: KernelDescriptor,
-        package_debug_info: Option<Arc<PackageDebugInfo>>,
-        inline_call_contexts: Vec<Option<SourceInlineCallContext>>,
+        mut package_debug_info: Option<Arc<PackageDebugInfo>>,
+        mut inline_call_contexts: Vec<Option<SourceInlineCallContext>>,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         match flow {
             ControlFlow::Continue(_) => Ok(None),
@@ -828,6 +828,26 @@ impl FastProcessor {
                 BreakReason::Stopped(maybe_continuation) => {
                     if let Some((continuation, source_node_id)) = maybe_continuation {
                         continuation_stack.push_with_source_node_id(continuation, source_node_id);
+                    }
+
+                    while matches!(
+                        continuation_stack.peek_continuation(),
+                        Some(Continuation::EnterForest { .. })
+                    ) {
+                        let Some((
+                            Continuation::EnterForest {
+                                forest,
+                                package_debug_info: restored_debug_info,
+                                inline_context_depth,
+                            },
+                            _,
+                        )) = continuation_stack.pop_continuation_with_source_node_id()
+                        else {
+                            unreachable!("peeked continuation must still be EnterForest")
+                        };
+                        current_forest = forest;
+                        package_debug_info = restored_debug_info;
+                        inline_call_contexts.truncate(inline_context_depth);
                     }
 
                     Ok(Some(ResumeContext {

@@ -87,6 +87,11 @@
 #### Fixes
 
 - Fixed `Felt`'s `Debug` impl on the `miden` target by formatting the canonical `u64` value instead of the `f32` backing type. The `Debug` output format changed from `Felt { inner: .. }` to `Felt(..)` ([#3693](https://github.com/0xMiden/miden-vm/pull/3693)).
+## v0.30.0 (Unreleased)
+
+#### Changes
+
+- [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
 
 ## v0.29.1 (2026-08-11)
 
@@ -96,10 +101,6 @@
 - Added `ecdsa_k256_keccak::verify_bytes` for verifying signatures over variable-length Keccak256 message bytes stored in VM memory ([#3563](https://github.com/0xMiden/miden-vm/pull/3563)).
 - Fixed persistent `LargeSmtForest::entries()` iteration, including snapshot-backed readers, by bounding RocksDB scans to the requested lineage prefix instead of scanning subsequent lineages ([#3576](https://github.com/0xMiden/miden-vm/pull/3576)).
 - Keccak-256 wrapper preimages may now cover memory that was never written to, matching the in-VM rule that unwritten memory reads as zero ([#3537](https://github.com/0xMiden/miden-vm/issues/3537)).
-#### Enhancements
-
-- Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
-
 ## v0.29.0 (2026-08-04)
 
 #### Changes

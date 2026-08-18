@@ -14,7 +14,8 @@ use miden_mast_package::debug_info::{
 };
 
 use super::{
-    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceNodeRef,
+    MastForestBuilder, MastNodeRef, MastNodeUse, PendingMastNodeDraft, PendingMastNodeKind,
+    SourceNodeRef,
 };
 use crate::diagnostics::Report;
 
@@ -97,27 +98,52 @@ impl MastForestBuilder {
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
     ) -> Result<MastNodeRef, Report> {
+        let source_child_refs = self.source_child_refs_for_node_refs(&child_refs);
+        let child_uses = child_refs
+            .into_iter()
+            .zip(source_child_refs)
+            .map(|(node_ref, source_ref)| MastNodeUse::new(node_ref, source_ref))
+            .collect();
+        Ok(self
+            .ensure_node_from_statically_linked_source_use(
+                source_node,
+                child_uses,
+                source_metadata,
+            )?
+            .node_ref())
+    }
+
+    /// Copies a statically linked source occurrence while preserving the exact source occurrence
+    /// selected for each execution child.
+    fn ensure_node_from_statically_linked_source_use(
+        &mut self,
+        source_node: MastNode,
+        child_uses: Vec<MastNodeUse>,
+        source_metadata: Option<StaticSourceMetadata>,
+    ) -> Result<MastNodeUse, Report> {
+        let child_refs = child_uses.iter().copied().map(MastNodeUse::node_ref).collect();
+        let source_child_refs =
+            child_uses.iter().copied().map(MastNodeUse::source_ref).collect::<Vec<_>>();
         let StaticPendingDraft { draft, source_op_range } = self
             .pending_draft_for_statically_linked_source(source_node, child_refs, source_metadata);
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
-        if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
-            self.record_static_source_occurrence(
-                node_ref,
-                source_child_refs,
-                &draft,
-                source_op_range,
-            )?;
-            return Ok(node_ref);
-        }
-
-        let node_ref = self.insert_or_replace_pending_node_record_ref(
-            dedup_key,
-            draft.clone(),
-            &source_child_refs,
+        let node_ref =
+            if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
+                node_ref
+            } else {
+                self.insert_or_replace_pending_node_record_ref(
+                    dedup_key,
+                    draft.clone(),
+                    &source_child_refs,
+                )?
+            };
+        let source_ref = self.record_static_source_occurrence(
+            node_ref,
+            source_child_refs,
+            &draft,
+            source_op_range,
         )?;
-        self.record_static_source_occurrence(node_ref, source_child_refs, &draft, source_op_range)?;
-        Ok(node_ref)
+        Ok(MastNodeUse::new(node_ref, source_ref))
     }
 
     fn record_static_source_occurrence(
@@ -365,26 +391,28 @@ impl MastForestBuilder {
         tables: &DebugInfoTableRemapping,
         source_root_id: DebugSourceNodeId,
     ) -> Result<MastNodeRef, Report> {
-        let mut node_refs_by_source_id = BTreeMap::new();
-        self.copy_package_debug_source_node_ref(
-            source_forest,
-            package_debug_info,
-            tables,
-            source_root_id,
-            &mut node_refs_by_source_id,
-        )
+        let mut node_uses_by_source_id = BTreeMap::new();
+        Ok(self
+            .copy_package_debug_source_node_use(
+                source_forest,
+                package_debug_info,
+                tables,
+                source_root_id,
+                &mut node_uses_by_source_id,
+            )?
+            .node_ref())
     }
 
-    fn copy_package_debug_source_node_ref(
+    fn copy_package_debug_source_node_use(
         &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
         tables: &DebugInfoTableRemapping,
         source_node_id: DebugSourceNodeId,
-        node_refs_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeRef>,
-    ) -> Result<MastNodeRef, Report> {
-        if let Some(node_ref) = node_refs_by_source_id.get(&source_node_id).copied() {
-            return Ok(node_ref);
+        node_uses_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeUse>,
+    ) -> Result<MastNodeUse, Report> {
+        if let Some(node_use) = node_uses_by_source_id.get(&source_node_id).copied() {
+            return Ok(node_use);
         }
 
         let source_node = package_debug_info.source_node(source_node_id).ok_or_else(|| {
@@ -412,7 +440,7 @@ impl MastForestBuilder {
             )));
         }
 
-        let mut child_refs = Vec::new();
+        let mut child_uses = Vec::new();
         for (child_index, child_source_node_id) in source_node.children.iter().copied().enumerate()
         {
             let child_source_node =
@@ -427,12 +455,12 @@ impl MastForestBuilder {
                     child_source_node.exec_node, exec_child_ids[child_index],
                 )));
             }
-            child_refs.push(self.copy_package_debug_source_node_ref(
+            child_uses.push(self.copy_package_debug_source_node_use(
                 source_forest,
                 package_debug_info,
                 tables,
                 child_source_node_id,
-                node_refs_by_source_id,
+                node_uses_by_source_id,
             )?);
         }
 
@@ -443,13 +471,13 @@ impl MastForestBuilder {
             source_node_id,
             source_exec_node_id,
         )?;
-        let node_ref = self.ensure_node_from_statically_linked_source_ref(
+        let node_use = self.ensure_node_from_statically_linked_source_use(
             source_exec_node,
-            child_refs,
+            child_uses,
             Some(metadata),
         )?;
-        node_refs_by_source_id.insert(source_node_id, node_ref);
-        Ok(node_ref)
+        node_uses_by_source_id.insert(source_node_id, node_use);
+        Ok(node_use)
     }
 
     fn package_source_metadata(

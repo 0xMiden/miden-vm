@@ -4,7 +4,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::debuginfo::SourceManager;
+use miden_assembly_syntax::{
+    ast::DebugInlineCallInfo,
+    debuginfo::{FileLineCol, SourceManager},
+};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -20,7 +23,7 @@ use miden_core::{
 use miden_mast_package::{
     ManifestValidationError,
     debug_info::{
-        DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugSourceAsmOp,
+        DebugFunctionIdx, DebugInfoBuilder, DebugInfoTableRemapping, DebugLocIdx, DebugSourceAsmOp,
         DebugSourceInlineCall, DebugSourceVar, FunctionInfo, PackageDebugInfo,
     },
 };
@@ -79,6 +82,9 @@ const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 /// Domain used when basic-block interning keys must preserve source-index layout.
 const BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
 
+type InlineFunctionKey = (Arc<str>, Option<Arc<str>>, FileLineCol);
+type InlineCallChainKey = Vec<(DebugFunctionIdx, DebugLocIdx)>;
+
 // MAST FOREST BUILDER
 // ================================================================================================
 
@@ -96,6 +102,10 @@ pub struct MastForestBuilder {
     advice_map: AdviceMap,
     /// Package debug info produced while building the forest
     debug_info: DebugInfoBuilder<MastNodeRef, SourceNodeRef>,
+    /// Interned source-level functions referenced by inline-call rows.
+    inline_function_indices: BTreeMap<InlineFunctionKey, DebugFunctionIdx>,
+    /// Decorated source trees reused by identical exec occurrences.
+    decorated_source_refs: BTreeMap<(SourceNodeRef, InlineCallChainKey), SourceNodeRef>,
     /// A map of all procedures added to the MAST forest indexed by their global procedure ID.
     /// This includes all local, exported, and re-exported procedures. In case multiple procedures
     /// with the same digest are added to the MAST forest builder, only the first procedure is
@@ -280,8 +290,6 @@ impl MastForestBuilder {
                 digest: draft.digest,
                 kind: draft.kind,
                 child_refs: draft.child_refs,
-                asm_ops: draft.asm_ops,
-                debug_vars: draft.debug_vars,
             })
             .into_diagnostic()
             .wrap_err("assembler created too many MAST nodes")?;
@@ -376,8 +384,6 @@ impl MastForestBuilder {
             digest: draft.digest,
             kind: draft.kind,
             child_refs: draft.child_refs,
-            asm_ops: draft.asm_ops,
-            debug_vars: draft.debug_vars,
         };
         self.node_ref_by_key.insert(key, node_ref);
     }
@@ -467,6 +473,38 @@ impl MastForestBuilder {
         &mut self.debug_info
     }
 
+    pub(crate) fn register_inline_function(
+        &mut self,
+        inline_call: &DebugInlineCallInfo,
+    ) -> DebugFunctionIdx {
+        let key = (
+            Arc::from(inline_call.name()),
+            inline_call.linkage_name().map(Arc::from),
+            inline_call.declaration().clone(),
+        );
+        if let Some(function_idx) = self.inline_function_indices.get(&key) {
+            return *function_idx;
+        }
+
+        let (name, linkage_name, declaration) = &key;
+        let file_idx = self.debug_info.add_file(declaration.uri.clone(), None);
+        let name_idx = self.debug_info.add_string(name.clone());
+        let mut function = FunctionInfo::new(
+            None,
+            name_idx,
+            file_idx,
+            declaration.line,
+            declaration.column,
+            Word::default(),
+        );
+        if let Some(linkage_name) = linkage_name {
+            function = function.with_linkage_name(self.debug_info.add_string(linkage_name.clone()));
+        }
+        let function_idx = self.debug_info.add_function(function);
+        self.inline_function_indices.insert(key, function_idx);
+        function_idx
+    }
+
     fn intern_pending_node_with_asm_op_use(
         &mut self,
         mut draft: PendingMastNodeDraft,
@@ -550,13 +588,22 @@ impl MastForestBuilder {
             return Ok(target);
         }
 
+        let chain_key = inline_calls
+            .iter()
+            .map(|inline_call| (inline_call.callee_idx, inline_call.loc_idx))
+            .collect::<Vec<_>>();
+        let cache_key = (target.source_ref(), chain_key);
+        if let Some(source_ref) = self.decorated_source_refs.get(&cache_key) {
+            return Ok(MastNodeUse::new(target.node_ref(), *source_ref));
+        }
+
         let mut cloned = BTreeMap::new();
         let decorated_source_ref = self.clone_source_occurrence_with_inline_calls(
             target.source_ref(),
             inline_calls,
             &mut cloned,
-            true,
         )?;
+        self.decorated_source_refs.insert(cache_key, decorated_source_ref);
         Ok(MastNodeUse::new(target.node_ref(), decorated_source_ref))
     }
 
@@ -565,7 +612,6 @@ impl MastForestBuilder {
         source_ref: SourceNodeRef,
         active_inline_calls: &[DebugSourceInlineCall],
         cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
-        update_latest: bool,
     ) -> Result<SourceNodeRef, Report> {
         if let Some(cloned_ref) = cloned.get(&source_ref) {
             return Ok(*cloned_ref);
@@ -584,7 +630,7 @@ impl MastForestBuilder {
             source_node.inline_calls,
             &[],
             is_external_boundary,
-            update_latest,
+            false,
         )?;
         cloned.insert(source_ref, cloned_ref);
         Ok(cloned_ref)
@@ -605,7 +651,6 @@ impl MastForestBuilder {
                 child_ref,
                 active_inline_calls,
                 cloned,
-                false,
             )?);
         }
 
@@ -1445,24 +1490,22 @@ impl MastForestBuilder {
 
                 merged_source_occurrences.push((source_ref, ops_offset));
 
-                let pending_node = &self.nodes[basic_block_ref];
-                merged_asm_ops.extend(pending_node.asm_ops.iter().map(|asm_op| {
+                let source_node = &self.debug_info[source_ref];
+                merged_asm_ops.extend(source_node.asm_ops.iter().map(|asm_op| {
                     let mut asm_op = *asm_op;
                     asm_op.op_idx += u32::try_from(ops_offset).unwrap();
                     asm_op
                 }));
-                merged_debug_vars.extend(pending_node.debug_vars.iter().map(|debug_var| {
+                merged_debug_vars.extend(source_node.debug_vars.iter().map(|debug_var| {
                     let mut debug_var = debug_var.clone();
                     debug_var.op_idx += u32::try_from(ops_offset).unwrap();
                     debug_var
                 }));
-                merged_inline_calls.extend(self.debug_info[source_ref].inline_calls.iter().map(
-                    |inline_call| {
-                        let mut inline_call = *inline_call;
-                        inline_call.op_idx += u32::try_from(ops_offset).unwrap();
-                        inline_call
-                    },
-                ));
+                merged_inline_calls.extend(source_node.inline_calls.iter().map(|inline_call| {
+                    let mut inline_call = *inline_call;
+                    inline_call.op_idx += u32::try_from(ops_offset).unwrap();
+                    inline_call
+                }));
                 merged_functions.extend(self.function_indices_for_source_ref(source_ref));
 
                 operations.extend(block_ops);
@@ -1737,6 +1780,52 @@ mod tests {
         }
 
         assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
+    }
+
+    #[test]
+    fn repeated_decorated_exec_reuses_the_same_source_tree() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let target = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+        let (callee_idx, loc_idx) = {
+            let inline_call = DebugInlineCallInfo::new(
+                "source::callee",
+                FileLineCol::new(
+                    "file:///decorated-exec.masm",
+                    LineNumber::new(1).unwrap(),
+                    ColumnNumber::new(1).unwrap(),
+                ),
+                FileLineCol::new(
+                    "file:///decorated-exec.masm",
+                    LineNumber::new(2).unwrap(),
+                    ColumnNumber::new(1).unwrap(),
+                ),
+            );
+            let callee_idx = builder.register_inline_function(&inline_call);
+            let duplicate_idx = builder.register_inline_function(&inline_call);
+            assert_eq!(callee_idx, duplicate_idx);
+            let call_site_span = builder.debug_info_mut().add_location(Location::new(
+                Uri::from("file:///decorated-exec.masm"),
+                ByteIndex::from(1u32),
+                ByteIndex::from(2u32),
+            ));
+            (callee_idx, call_site_span)
+        };
+        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let decorated = builder.record_exec_inline_calls(target, &[inline_call]).unwrap();
+        let source_node_count = builder.debug_info.debug_info().nodes().len();
+
+        for _ in 0..1_024 {
+            assert_eq!(
+                builder.record_exec_inline_calls(target, &[inline_call]).unwrap(),
+                decorated
+            );
+        }
+
+        assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
+        assert_eq!(builder.debug_info.debug_info().functions().len(), 1);
+        assert_eq!(builder.latest_node_use(target.node_ref()), Some(target));
     }
 
     #[test]
@@ -2256,12 +2345,18 @@ mod tests {
             ));
             (function_a, function_b, location_a, location_b)
         };
+        let asm_op_a = add_test_asm_op(&mut builder, test_asm_op("alias_a", "add"));
+        let asm_op_b = add_test_asm_op(&mut builder, test_asm_op("alias_b", "add"));
+        let debug_var_a =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("a", DebugVarLocation::Stack(0)));
+        let debug_var_b =
+            add_test_debug_var(&mut builder, DebugVarInfo::new("b", DebugVarLocation::Stack(0)));
 
         let alias_a_ref = builder
             .ensure_block_ref(
                 vec![Operation::Add],
-                vec![],
-                vec![],
+                vec![asm_op_a],
+                vec![debug_var_a],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
                     callee_idx: function_a,
@@ -2274,8 +2369,8 @@ mod tests {
         let alias_b_ref = builder
             .ensure_block_ref(
                 vec![Operation::Add],
-                vec![],
-                vec![],
+                vec![asm_op_b],
+                vec![debug_var_b],
                 vec![DebugSourceInlineCall {
                     op_idx: 0,
                     callee_idx: function_b,
@@ -2307,6 +2402,16 @@ mod tests {
                 loc_idx: location_b,
             }],
             "the merged occurrence must use the selected alias's inline-call metadata",
+        );
+        assert_eq!(
+            builder.debug_info[merged_source.asm_ops[0].context_name_idx].as_ref(),
+            "alias_b",
+            "the merged occurrence must use the selected alias's assembly metadata",
+        );
+        assert_eq!(
+            builder.debug_info[merged_source.debug_vars[0].name_idx].as_ref(),
+            "b",
+            "the merged occurrence must use the selected alias's variable metadata",
         );
         assert_eq!(
             builder.debug_info[function_a].source_node.into_option(),
@@ -3836,5 +3941,60 @@ mod tests {
             "alias_b",
             "exact static provenance should select the hinted package source occurrence",
         );
+    }
+
+    #[test]
+    fn test_static_link_preserves_repeated_exact_child_occurrences() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+        let static_asm_op =
+            add_test_asm_op(&mut source_builder, AssemblyOp::new(None, "static", 1, "add"));
+        let static_child = source_builder
+            .ensure_block_use(vec![Operation::Add], vec![static_asm_op], vec![], vec![], vec![])
+            .unwrap();
+        let static_root = source_builder
+            .ensure_split_node_use(
+                [static_child, static_child],
+                AssemblyOp::new(None, "static", 1, "if.true"),
+                vec![],
+            )
+            .unwrap();
+        source_builder.record_procedure_root_use(static_root);
+
+        let (static_forest, static_remapping, static_debug_info, static_source_remapping) =
+            source_builder.build().unwrap().into_parts_with_debug_info();
+        let static_root_id = static_remapping[&static_root.node_ref()];
+        let static_source_root_id = static_source_remapping[&static_root.source_ref()];
+
+        let mut builder =
+            MastForestBuilder::new_with_static_libraries([StaticLibrary::from_mast_forest(
+                &static_forest,
+                Some(*static_debug_info),
+            )])
+            .unwrap();
+        let local_asm_op = add_test_asm_op(&mut builder, AssemblyOp::new(None, "local", 1, "add"));
+        builder
+            .ensure_block_use(vec![Operation::Add], vec![local_asm_op], vec![], vec![], vec![])
+            .unwrap();
+
+        let linked_root_ref = builder
+            .ensure_external_link_with_source_ref(
+                static_forest[static_root_id].digest(),
+                Some(static_forest.commitment()),
+                Some(static_root_id),
+                Some(static_source_root_id),
+            )
+            .unwrap();
+        record_test_root(&mut builder, linked_root_ref);
+
+        let (_, _, linked_debug_info, _) = builder.build().unwrap().into_parts_with_debug_info();
+        let linked_root = &linked_debug_info[linked_debug_info.roots()[0]];
+        assert_eq!(linked_root.children.len(), 2);
+        for child in linked_root.children.iter().copied() {
+            let asm_op = linked_debug_info[child]
+                .asm_ops
+                .first()
+                .expect("the exact static child should retain its assembly metadata");
+            assert_eq!(linked_debug_info[asm_op.context_name_idx].as_ref(), "static");
+        }
     }
 }

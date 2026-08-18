@@ -11,13 +11,12 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::{
-    Felt, Word,
+    Felt,
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
 use miden_mast_package::debug_info::{
     DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
-    FunctionInfo,
 };
 
 use crate::{
@@ -158,7 +157,9 @@ impl BasicBlockBuilder<'_> {
 impl BasicBlockBuilder<'_> {
     /// Adds the specified operation to the list of basic block operations.
     pub fn push_op(&mut self, op: Operation) {
-        self.record_active_inline_calls(self.ops.len() as u32);
+        if !self.active_inline_calls.is_empty() {
+            self.record_active_inline_calls(self.ops.len() as u32);
+        }
         self.ops.push(op);
     }
 
@@ -168,15 +169,23 @@ impl BasicBlockBuilder<'_> {
         I: IntoIterator<Item = O>,
         O: Borrow<Operation>,
     {
-        for op in ops {
-            self.push_op(*op.borrow());
+        if self.active_inline_calls.is_empty() {
+            self.ops.extend(ops.into_iter().map(|op| *op.borrow()));
+        } else {
+            for op in ops {
+                self.push_op(*op.borrow());
+            }
         }
     }
 
     /// Adds the specified operation n times to the list of basic block operations.
     pub fn push_op_many(&mut self, op: Operation, n: usize) {
-        for _ in 0..n {
-            self.push_op(op);
+        if self.active_inline_calls.is_empty() {
+            self.ops.resize(self.ops.len() + n, op);
+        } else {
+            for _ in 0..n {
+                self.push_op(op);
+            }
         }
     }
 
@@ -294,29 +303,8 @@ impl BasicBlockBuilder<'_> {
             return;
         };
 
-        let debug_info = self.mast_forest_builder.debug_info_mut();
-        let declaration = inline_call.declaration();
-        let file_idx = debug_info.add_file(declaration.uri.clone(), None);
-        let name_idx = debug_info.add_string(inline_call.name());
-        let mut function = FunctionInfo::new(
-            None,
-            name_idx,
-            file_idx,
-            declaration.line,
-            declaration.column,
-            Word::default(),
-        );
-        if let Some(linkage_name) = inline_call.linkage_name() {
-            function = function.with_linkage_name(debug_info.add_string(linkage_name));
-        }
-        let callee_idx = debug_info
-            .debug_info()
-            .functions()
-            .iter()
-            .position(|existing| existing == &function)
-            .map(|index| DebugFunctionIdx::from(index as u32))
-            .unwrap_or_else(|| debug_info.add_function(function));
-        let loc_idx = debug_info.add_location(call_site);
+        let callee_idx = self.mast_forest_builder.register_inline_function(inline_call);
+        let loc_idx = self.mast_forest_builder.debug_info_mut().add_location(call_site);
         self.active_inline_calls.push(ActiveInlineCall { callee_idx, loc_idx });
     }
 
@@ -326,7 +314,13 @@ impl BasicBlockBuilder<'_> {
     }
 
     fn record_active_inline_calls(&mut self, op_idx: u32) {
-        self.inline_calls.extend(self.active_inline_call_rows(op_idx));
+        self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
+            DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            }
+        }));
     }
 }
 
