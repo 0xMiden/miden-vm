@@ -119,13 +119,13 @@ impl Package {
         }
     }
 
-    /// Reads a trusted package from `source` without validating the embedded MAST forest.
+    /// Reads a package from trusted storage without validating the embedded MAST forest.
     ///
     /// # Trust boundary
     ///
     /// This skips embedded MAST and manifest cross-check validation and trusts serialized node
-    /// digests. Use it only for bytes that were already validated before being persisted by the
-    /// same trusted system.
+    /// digests. Use it for a package written and retained by the same trusted system, such as a
+    /// local build cache.
     ///
     /// Do not use this for user-controlled packages, network input, or any other package that
     /// crosses a trust boundary. Use [`Package::read_from`] for those inputs.
@@ -136,13 +136,14 @@ impl Package {
         Self::read_from_with_header_and_mast(source, header, mast_forest, false, false)
     }
 
-    /// Reads trusted package bytes without validating the embedded MAST forest.
+    /// Reads package bytes from trusted storage without validating the embedded MAST forest.
     ///
     /// # Trust boundary
     ///
     /// This skips embedded MAST and manifest cross-check validation and trusts serialized node
-    /// digests. Use it only for bytes that were already validated before being persisted by the
-    /// same trusted system.
+    /// digests. Use it for a package written and retained by the same trusted system, such as a
+    /// local build cache. This method still applies the finite byte-read budget used by
+    /// [`Package::read_from_bytes`].
     ///
     /// Do not use this for user-controlled packages, network input, or any other package that
     /// crosses a trust boundary. Use [`Package::read_from_bytes`] for those inputs.
@@ -278,6 +279,13 @@ impl Package {
 }
 
 impl Deserializable for Package {
+    /// Reads and validates a package from potentially adversarial input.
+    ///
+    /// This validates the embedded MAST forest, manifest references, and package-owned debug
+    /// information before returning. The caller's [`ByteReader`] controls the resource budget. For
+    /// a byte slice, prefer [`Package::read_from_bytes`], which applies a finite byte-read budget.
+    /// Use [`Package::read_from_trusted`] for packages written and retained by the same trusted
+    /// system when repeating these checks is unnecessary.
     #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
@@ -288,6 +296,12 @@ impl Deserializable for Package {
         Self::read_from_with_header_and_mast(source, header, mast, true, true)
     }
 
+    /// Reads and validates a package from a potentially adversarial byte slice.
+    ///
+    /// This is the recommended reader for untrusted package bytes. It applies a finite byte-read
+    /// budget and validates the embedded MAST forest, manifest references, and package-owned debug
+    /// information. Use [`Package::read_from_bytes_trusted`] for packages written and retained by
+    /// the same trusted system when repeating these checks is unnecessary.
     #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
