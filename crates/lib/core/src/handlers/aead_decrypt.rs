@@ -7,7 +7,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::events::EventName;
+use miden_core::{Word, events::EventName};
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
@@ -139,7 +139,7 @@ fn compute_sizes(
         .and_then(|count| count.try_into().ok())
         .ok_or(AeadDecryptError::SizeOverflow)?;
     if data_blocks_count
-        .checked_mul(8)
+        .checked_mul(Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS)
         .is_none_or(|size_bytes| size_bytes > max_advice_size_bytes)
     {
         return Err(AeadDecryptError::SizeOverflow);
@@ -172,7 +172,7 @@ enum AeadDecryptError {
 
 #[cfg(test)]
 mod tests {
-    use miden_processor::ExecutionOptions;
+    use miden_processor::{ExecutionOptions, Word};
 
     use crate::handlers::aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, AeadDecryptError, compute_sizes};
 
@@ -193,7 +193,8 @@ mod tests {
 
     #[test]
     fn test_compute_sizes_accepts_max_advice_stack_budget() {
-        let max_budget_elements = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES / 8;
+        let max_budget_elements = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES
+            / (Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS);
         let max_budget_num_blocks = max_budget_elements / 8;
         let (_, _, data_blocks_count) = compute_sizes(
             max_budget_num_blocks as u64,
@@ -207,8 +208,10 @@ mod tests {
 
     #[test]
     fn test_compute_sizes_rejects_plaintext_larger_than_advice_stack_budget() {
-        let first_over_budget_num_blocks =
-            (ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES / 8 / 8) + 1;
+        let first_over_budget_num_blocks = (ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES
+            / (Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS)
+            / 8)
+            + 1;
         let err = compute_sizes(
             first_over_budget_num_blocks as u64,
             0,

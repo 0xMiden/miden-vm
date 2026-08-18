@@ -4,7 +4,7 @@ use alloc::{
 };
 
 use miden_core::{
-    Felt, WORD_SIZE, Word,
+    Felt, Word,
     advice::{AdviceInputs, AdviceMap, AdviceStack},
     crypto::{
         hash::Poseidon2,
@@ -22,8 +22,9 @@ use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInt
 // CONSTANTS
 // ================================================================================================
 
-const FELT_SIZE_BYTES: usize = 8;
-const INTERNAL_NODE_SIZE_BYTES: usize = 3 * WORD_SIZE * FELT_SIZE_BYTES;
+const FELT_SIZE_BYTES: usize = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+// A Merkle store entry contains the node value and its two children.
+const INTERNAL_NODE_SIZE_BYTES: usize = 3 * Word::SERIALIZED_SIZE;
 
 trait MerkleStoreBudget {
     fn contains_internal_node(&self, root: Word) -> bool;
@@ -291,7 +292,7 @@ impl AdviceProvider {
     /// Returns an error if the advice stack does not contain a full word.
     fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
         let value = self.stack.consume_word().ok_or(AdviceError::StackReadFailed)?;
-        self.advice_size_bytes -= WORD_SIZE * FELT_SIZE_BYTES;
+        self.advice_size_bytes -= Word::SERIALIZED_SIZE;
         Ok(value)
     }
 
@@ -305,7 +306,7 @@ impl AdviceProvider {
     /// Returns an error if the advice stack does not contain two words.
     fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
         let value = self.stack.consume_dword().ok_or(AdviceError::StackReadFailed)?;
-        self.advice_size_bytes -= 2 * WORD_SIZE * FELT_SIZE_BYTES;
+        self.advice_size_bytes -= 2 * Word::SERIALIZED_SIZE;
         Ok(value)
     }
 
@@ -324,9 +325,9 @@ impl AdviceProvider {
 
     /// Pushes a word (4 elements) onto the stack.
     pub fn push_stack_word(&mut self, word: &Word) -> Result<(), AdviceError> {
-        self.check_stack_capacity(4)?;
+        self.check_stack_capacity(Word::NUM_ELEMENTS)?;
         self.stack.prepend_word(*word);
-        self.advice_size_bytes += WORD_SIZE * FELT_SIZE_BYTES;
+        self.advice_size_bytes += Word::SERIALIZED_SIZE;
         Ok(())
     }
 
@@ -442,10 +443,9 @@ impl AdviceProvider {
     }
 
     fn map_entry_bytes(value_len: usize) -> Result<usize, AdviceError> {
-        let element_count = WORD_SIZE
-            .checked_add(value_len)
-            .ok_or(AdviceError::SizeBudgetExceeded { current: 0, added: usize::MAX, max: 0 })?;
-        Self::felt_bytes(element_count)
+        Self::felt_bytes(value_len)?
+            .checked_add(Word::SERIALIZED_SIZE)
+            .ok_or(AdviceError::SizeBudgetExceeded { current: 0, added: usize::MAX, max: 0 })
     }
 
     fn merkle_node_bytes(count: usize) -> Result<usize, AdviceError> {
@@ -759,7 +759,7 @@ mod tests {
 
     use miden_core::WORD_SIZE;
 
-    use super::{AdviceProvider, FELT_SIZE_BYTES, INTERNAL_NODE_SIZE_BYTES};
+    use super::AdviceProvider;
     use crate::{
         AdviceInputs, ExecutionOptions, Felt, Word,
         advice::{AdviceError, AdviceMap, AdviceMutation, AdviceStack},
@@ -838,7 +838,7 @@ mod tests {
     #[test]
     fn advice_map_insert_respects_combined_budget() {
         let base = AdviceProvider::default().advice_size_bytes;
-        let entry_bytes = (WORD_SIZE + 1) * FELT_SIZE_BYTES;
+        let entry_bytes = AdviceProvider::map_entry_bytes(1).unwrap();
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base + entry_bytes);
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
 
@@ -861,7 +861,7 @@ mod tests {
     #[test]
     fn advice_map_extend_respects_combined_budget_atomically() {
         let base = AdviceProvider::default().advice_size_bytes;
-        let entry_bytes = (WORD_SIZE + 1) * FELT_SIZE_BYTES;
+        let entry_bytes = AdviceProvider::map_entry_bytes(1).unwrap();
         let options =
             ExecutionOptions::default().with_max_advice_size_bytes(base + 2 * entry_bytes);
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
@@ -890,7 +890,8 @@ mod tests {
         let inputs = AdviceInputs::default()
             .with_stack(stack)
             .with_map([(make_leaf(0), vec![Felt::ONE])]);
-        let required = base + FELT_SIZE_BYTES + (WORD_SIZE + 1) * FELT_SIZE_BYTES;
+        let felt_bytes = AdviceProvider::felt_bytes(1).unwrap();
+        let required = base + felt_bytes + AdviceProvider::map_entry_bytes(1).unwrap();
         AdviceProvider::new(
             inputs.clone(),
             &ExecutionOptions::default().with_max_advice_size_bytes(required),
@@ -899,12 +900,12 @@ mod tests {
 
         let err = AdviceProvider::new(
             inputs,
-            &ExecutionOptions::default().with_max_advice_size_bytes(required - FELT_SIZE_BYTES),
+            &ExecutionOptions::default().with_max_advice_size_bytes(required - felt_bytes),
         )
         .unwrap_err();
         assert!(matches!(
             err,
-            AdviceError::SizeBudgetExceeded { max, .. } if max == required - FELT_SIZE_BYTES
+            AdviceError::SizeBudgetExceeded { max, .. } if max == required - felt_bytes
         ));
     }
 
@@ -912,9 +913,9 @@ mod tests {
     fn initial_merkle_store_respects_combined_budget() {
         let tree = merkle_tree_from_leaves(0..4);
         let store = merkle_store_from_tree(&tree);
-        let required = store.num_internal_nodes() * INTERNAL_NODE_SIZE_BYTES;
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes(required - INTERNAL_NODE_SIZE_BYTES);
+        let node_bytes = AdviceProvider::merkle_node_bytes(1).unwrap();
+        let required = AdviceProvider::merkle_node_bytes(store.num_internal_nodes()).unwrap();
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(required - node_bytes);
         let inputs = AdviceInputs::default().with_merkle_store(store);
 
         let err = AdviceProvider::new(inputs, &options).unwrap_err();
@@ -928,9 +929,9 @@ mod tests {
     #[test]
     fn merkle_store_extend_respects_combined_budget_atomically() {
         let base_node_count = MerkleStore::default().num_internal_nodes();
-        let base = base_node_count * INTERNAL_NODE_SIZE_BYTES;
-        let options =
-            ExecutionOptions::default().with_max_advice_size_bytes(base + INTERNAL_NODE_SIZE_BYTES);
+        let base = AdviceProvider::merkle_node_bytes(base_node_count).unwrap();
+        let node_bytes = AdviceProvider::merkle_node_bytes(1).unwrap();
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(base + node_bytes);
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let tree = merkle_tree_from_leaves(0..4);
 
@@ -938,7 +939,7 @@ mod tests {
         assert!(matches!(
             err,
             AdviceError::SizeBudgetExceeded { current, max, .. }
-                if current == base && max == base + INTERNAL_NODE_SIZE_BYTES
+                if current == base && max == base + node_bytes
         ));
 
         assert_eq!(provider.merkle_store_node_count, base_node_count);
@@ -949,8 +950,9 @@ mod tests {
     fn merkle_store_extend_allows_exact_combined_budget() {
         let base_node_count = MerkleStore::default().num_internal_nodes();
         let tree = merkle_tree_from_leaves(0..2);
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes((base_node_count + 1) * INTERNAL_NODE_SIZE_BYTES);
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(
+            AdviceProvider::merkle_node_bytes(base_node_count + 1).unwrap(),
+        );
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
 
         provider.extend_merkle_store(tree.inner_nodes()).unwrap();
@@ -963,8 +965,9 @@ mod tests {
     fn merkle_store_extend_counts_only_new_unique_nodes() {
         let base_node_count = MerkleStore::default().num_internal_nodes();
         let tree = merkle_tree_from_leaves(0..2);
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes((base_node_count + 1) * INTERNAL_NODE_SIZE_BYTES);
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(
+            AdviceProvider::merkle_node_bytes(base_node_count + 1).unwrap(),
+        );
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let nodes = tree.inner_nodes().collect::<Vec<_>>();
 
@@ -980,7 +983,8 @@ mod tests {
     #[test]
     fn merkle_store_merge_respects_combined_budget_atomically() {
         let base_node_count = MerkleStore::default().num_internal_nodes();
-        let base = base_node_count * INTERNAL_NODE_SIZE_BYTES;
+        let base = AdviceProvider::merkle_node_bytes(base_node_count).unwrap();
+        let node_bytes = AdviceProvider::merkle_node_bytes(1).unwrap();
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base);
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
 
@@ -988,7 +992,7 @@ mod tests {
         assert!(matches!(
             err,
             AdviceError::SizeBudgetExceeded { current, added, max }
-                if current == base && added == INTERNAL_NODE_SIZE_BYTES && max == base
+                if current == base && added == node_bytes && max == base
         ));
 
         assert_eq!(provider.merkle_store_node_count, base_node_count);
@@ -999,8 +1003,8 @@ mod tests {
         let tree = merkle_tree_from_leaves(0..4);
         let store = merkle_store_from_tree(&tree);
         let node_count = store.num_internal_nodes();
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes(node_count * INTERNAL_NODE_SIZE_BYTES);
+        let required = AdviceProvider::merkle_node_bytes(node_count).unwrap();
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(required);
         let inputs = AdviceInputs::default().with_merkle_store(store);
         let mut provider = AdviceProvider::new(inputs, &options).unwrap();
 
@@ -1010,8 +1014,7 @@ mod tests {
         assert!(matches!(
             err,
             AdviceError::SizeBudgetExceeded { current, max, .. }
-                if current == node_count * INTERNAL_NODE_SIZE_BYTES
-                    && max == node_count * INTERNAL_NODE_SIZE_BYTES
+                if current == required && max == required
         ));
 
         assert_eq!(provider.merkle_store_node_count, node_count);
@@ -1033,8 +1036,9 @@ mod tests {
                 make_leaf(100),
             )
             .unwrap();
-        let options = ExecutionOptions::default()
-            .with_max_advice_size_bytes(staged.num_internal_nodes() * INTERNAL_NODE_SIZE_BYTES);
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(
+            AdviceProvider::merkle_node_bytes(staged.num_internal_nodes()).unwrap(),
+        );
         let inputs = AdviceInputs::default().with_merkle_store(store);
         let mut provider = AdviceProvider::new(inputs, &options).unwrap();
 
@@ -1048,7 +1052,7 @@ mod tests {
     #[test]
     fn stack_pop_releases_capacity_for_map_growth() {
         let base = AdviceProvider::default().advice_size_bytes;
-        let entry_bytes = (WORD_SIZE + 1) * FELT_SIZE_BYTES;
+        let entry_bytes = AdviceProvider::map_entry_bytes(1).unwrap();
         let stack = AdviceStack::from(vec![Felt::ONE; WORD_SIZE + 1]);
         let options = ExecutionOptions::default().with_max_advice_size_bytes(base + entry_bytes);
         let mut provider =
@@ -1064,8 +1068,8 @@ mod tests {
     #[test]
     fn mutation_batches_are_atomic() {
         let base = AdviceProvider::default().advice_size_bytes;
-        let options =
-            ExecutionOptions::default().with_max_advice_size_bytes(base + FELT_SIZE_BYTES);
+        let options = ExecutionOptions::default()
+            .with_max_advice_size_bytes(base + AdviceProvider::felt_bytes(1).unwrap());
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
         let before = provider.clone();
         let mutations = [

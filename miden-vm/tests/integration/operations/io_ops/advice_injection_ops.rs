@@ -511,8 +511,9 @@ fn run_insert_mem_with_max_value_elements_and_repeats(
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();
-    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * 4 * 8;
-    let map_entry_bytes = (4 + max_value_elements) * 8;
+    let felt_bytes = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    let base_store_bytes = MerkleStore::default().num_internal_nodes() * 3 * Word::SERIALIZED_SIZE;
+    let map_entry_bytes = Word::SERIALIZED_SIZE + max_value_elements * felt_bytes;
     let options =
         ExecutionOptions::default().with_max_advice_size_bytes(base_store_bytes + map_entry_bytes);
 
