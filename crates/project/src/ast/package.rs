@@ -61,6 +61,7 @@ mod semver_serde {
     use serde::{
         Serialize,
         de::{self, MapAccess, Visitor},
+        ser::SerializeMap,
     };
 
     use super::{MaybeInherit, SemVer, Span};
@@ -74,7 +75,11 @@ mod semver_serde {
     {
         match value.as_deref() {
             None => serializer.serialize_none(),
-            Some(MaybeInherit::Inherit) => true.serialize(serializer),
+            Some(MaybeInherit::Inherit) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("workspace", &true)?;
+                map.end()
+            },
             Some(MaybeInherit::Value(version)) => version.to_string().serialize(serializer),
         }
     }
@@ -134,6 +139,20 @@ mod semver_serde {
         }
 
         deserializer.deserialize_any(SemVerVisitor(PhantomData))
+    }
+
+    #[test]
+    fn inherited_version_roundtrips() {
+        let detail = super::PackageDetail {
+            version: Some(Span::unknown(MaybeInherit::Inherit)),
+            ..Default::default()
+        };
+
+        let encoded = toml::to_string(&detail).unwrap();
+        assert_eq!(encoded, "[version]\nworkspace = true\n");
+
+        let decoded: super::PackageDetail = toml::from_str(&encoded).unwrap();
+        assert!(matches!(decoded.version.as_deref(), Some(MaybeInherit::Inherit)));
     }
 }
 
