@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax::debuginfo::SourceManager;
 use miden_core::{
@@ -117,6 +121,11 @@ pub struct MastForestBuilder {
     /// Supplemental range records created while merging blocks are excluded because they do not
     /// represent a complete occurrence of the execution node.
     source_refs_by_node_ref: BTreeMap<MastNodeRef, Vec<SourceNodeRef>>,
+    /// Source occurrences which represent unresolved external execution boundaries.
+    ///
+    /// This is tracked independently of the execution node kind because an external placeholder
+    /// can be deduplicated with, or later replaced by, a concrete node with the same digest.
+    external_boundary_source_refs: BTreeSet<SourceNodeRef>,
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
@@ -562,7 +571,34 @@ impl MastForestBuilder {
             return Ok(*cloned_ref);
         }
 
-        let source_node = self.debug_info[source_ref].clone();
+        let is_external_boundary = self.external_boundary_source_refs.contains(&source_ref);
+        let source_node =
+            self.source_occurrence_with_inline_calls(source_ref, active_inline_calls, cloned)?;
+        let cloned_ref = self.push_source_occurrence(
+            source_node.exec_node,
+            source_node.children,
+            source_node.op_start as usize,
+            source_node.op_end as usize,
+            source_node.asm_ops,
+            source_node.debug_vars,
+            source_node.inline_calls,
+            &[],
+            is_external_boundary,
+            update_latest,
+        )?;
+        cloned.insert(source_ref, cloned_ref);
+        Ok(cloned_ref)
+    }
+
+    fn source_occurrence_with_inline_calls(
+        &mut self,
+        source_ref: SourceNodeRef,
+        active_inline_calls: &[DebugSourceInlineCall],
+        cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
+    ) -> Result<miden_mast_package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report>
+    {
+        let mut source_node = self.debug_info[source_ref].clone();
+        let is_external_boundary = self.external_boundary_source_refs.contains(&source_ref);
         let mut child_refs = Vec::with_capacity(source_node.children.len());
         for child_ref in source_node.children.iter().copied() {
             child_refs.push(self.clone_source_occurrence_with_inline_calls(
@@ -578,12 +614,10 @@ impl MastForestBuilder {
                 + active_inline_calls.len()
                     * core::cmp::max(
                         source_node.op_end.saturating_sub(source_node.op_start),
-                        u32::from(self.nodes[source_node.exec_node].kind.is_external()),
+                        u32::from(is_external_boundary),
                     ) as usize,
         );
-        if source_node.op_start == source_node.op_end
-            && self.nodes[source_node.exec_node].kind.is_external()
-        {
+        if source_node.op_start == source_node.op_end && is_external_boundary {
             let boundary_op_idx = source_node.op_start;
             inline_calls.extend(source_node.inline_calls.iter().copied());
             inline_calls.extend(active_inline_calls.iter().map(|inline_call| {
@@ -611,19 +645,9 @@ impl MastForestBuilder {
             }));
         }
 
-        let cloned_ref = self.push_source_occurrence(
-            source_node.exec_node,
-            child_refs,
-            source_node.op_start as usize,
-            source_node.op_end as usize,
-            source_node.asm_ops,
-            source_node.debug_vars,
-            inline_calls,
-            &[],
-            update_latest,
-        )?;
-        cloned.insert(source_ref, cloned_ref);
-        Ok(cloned_ref)
+        source_node.children = child_refs;
+        source_node.inline_calls = inline_calls;
+        Ok(source_node)
     }
 
     fn record_source_occurrence(
@@ -633,7 +657,31 @@ impl MastForestBuilder {
         draft: &PendingMastNodeDraft,
     ) -> Result<SourceNodeRef, Report> {
         let (op_start, op_end) = self.source_op_range_for_draft(draft);
-        self.push_source_occurrence(
+        self.record_source_occurrence_with_range(exec_ref, child_refs, draft, op_start, op_end)
+    }
+
+    fn record_source_occurrence_with_range(
+        &mut self,
+        exec_ref: MastNodeRef,
+        child_refs: Vec<SourceNodeRef>,
+        draft: &PendingMastNodeDraft,
+        op_start: usize,
+        op_end: usize,
+    ) -> Result<SourceNodeRef, Report> {
+        let is_external_boundary = draft.kind.is_external();
+        if is_external_boundary && !self.nodes[exec_ref].kind.is_external() {
+            let source_ref = self
+                .latest_source_ref_by_node_ref
+                .get(&exec_ref)
+                .copied()
+                .expect("a concrete execution node must have a source occurrence");
+            for function in &draft.functions {
+                self.debug_info.set_function_source_node(*function, source_ref);
+            }
+            return Ok(source_ref);
+        }
+
+        let source_ref = self.push_source_occurrence(
             exec_ref,
             child_refs,
             op_start,
@@ -642,8 +690,45 @@ impl MastForestBuilder {
             draft.debug_vars.clone(),
             draft.inline_calls.clone(),
             &draft.functions,
+            is_external_boundary,
             true,
-        )
+        )?;
+
+        if !is_external_boundary {
+            self.remap_external_boundary_occurrences(exec_ref, source_ref)?;
+        }
+
+        Ok(source_ref)
+    }
+
+    fn remap_external_boundary_occurrences(
+        &mut self,
+        exec_ref: MastNodeRef,
+        concrete_source_ref: SourceNodeRef,
+    ) -> Result<(), Report> {
+        let external_boundaries = self
+            .external_boundary_source_refs
+            .iter()
+            .copied()
+            .filter(|source_ref| self.debug_info[*source_ref].exec_node == exec_ref)
+            .collect::<Vec<_>>();
+
+        for boundary_source_ref in external_boundaries {
+            let active_inline_calls = self.debug_info[boundary_source_ref].inline_calls.clone();
+            let replacement = if active_inline_calls.is_empty() {
+                self.debug_info[concrete_source_ref].clone()
+            } else {
+                self.source_occurrence_with_inline_calls(
+                    concrete_source_ref,
+                    &active_inline_calls,
+                    &mut BTreeMap::new(),
+                )?
+            };
+            self.debug_info[boundary_source_ref] = replacement;
+            self.external_boundary_source_refs.remove(&boundary_source_ref);
+        }
+
+        Ok(())
     }
 
     fn source_op_range_for_draft(&self, draft: &PendingMastNodeDraft) -> (usize, usize) {
@@ -672,6 +757,7 @@ impl MastForestBuilder {
         debug_vars: Vec<DebugSourceVar>,
         inline_calls: Vec<DebugSourceInlineCall>,
         functions: &[DebugFunctionIdx],
+        is_external_boundary: bool,
         update_latest: bool,
     ) -> Result<SourceNodeRef, Report> {
         let source_ref = self
@@ -687,6 +773,9 @@ impl MastForestBuilder {
             })
             .into_diagnostic()
             .wrap_err("assembler created too many source MAST node refs")?;
+        if is_external_boundary {
+            self.external_boundary_source_refs.insert(source_ref);
+        }
         for function in functions {
             self.debug_info.set_function_source_node(*function, source_ref);
         }
@@ -1289,6 +1378,7 @@ impl MastForestBuilder {
                 // The functions now belong to the aggregate merged occurrence created above.
                 &[],
                 false,
+                false,
             )?;
         }
 
@@ -1687,6 +1777,7 @@ mod tests {
                 vec![],
                 vec![DebugSourceInlineCall { op_idx: 7, ..inline_call }],
                 &[],
+                true,
                 false,
             )
             .unwrap();
@@ -1698,6 +1789,76 @@ mod tests {
         assert_eq!((source_node.op_start, source_node.op_end), (7, 7));
         assert_eq!(source_node.inline_calls.len(), 2);
         assert!(source_node.inline_calls.iter().all(|row| row.op_idx == 7));
+    }
+
+    #[test]
+    fn external_source_reuses_an_existing_concrete_occurrence() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let target = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+        let source_node_count = builder.debug_info.debug_info().nodes().len();
+        let mast_root = builder.nodes[target.node_ref()].digest;
+
+        let external_ref = builder
+            .ensure_external_link_with_source_ref(mast_root, None, None, None)
+            .unwrap();
+
+        assert_eq!(external_ref, target.node_ref());
+        assert_eq!(builder.latest_source_ref_for_node_ref(external_ref), Some(target.source_ref()));
+        assert_eq!(builder.debug_info.debug_info().nodes().len(), source_node_count);
+        assert!(builder.external_boundary_source_refs.is_empty());
+    }
+
+    #[test]
+    fn decorated_external_source_is_remapped_when_the_concrete_node_arrives() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+        let block_digest =
+            BasicBlockNodeBuilder::new(vec![Operation::Add]).build().unwrap().digest();
+        let (callee_idx, loc_idx) = {
+            let debug_info = builder.debug_info_mut();
+            let uri = Uri::from("file:///external-replacement.masm");
+            let loc_idx = debug_info.add_location(Location::new(
+                uri,
+                ByteIndex::from(0u32),
+                ByteIndex::from(1u32),
+            ));
+            let file_idx = debug_info.debug_info().locations()[loc_idx].file_idx;
+            let name_idx = debug_info.add_string("external::callee");
+            let callee_idx = debug_info.add_function(FunctionInfo::new(
+                None,
+                name_idx,
+                file_idx,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+                block_digest,
+            ));
+            (callee_idx, loc_idx)
+        };
+        let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };
+        let external_ref = builder
+            .ensure_external_link_with_source_ref(block_digest, None, None, None)
+            .unwrap();
+        let external_use = builder.latest_node_use(external_ref).unwrap();
+        let decorated = builder.record_exec_inline_calls(external_use, &[inline_call]).unwrap();
+        builder.record_procedure_root_use(decorated);
+
+        let concrete = builder
+            .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
+            .unwrap();
+
+        assert_eq!(concrete.node_ref(), external_ref);
+        assert!(!builder.external_boundary_source_refs.contains(&decorated.source_ref()));
+        let remapped_source = &builder.debug_info[decorated.source_ref()];
+        assert_eq!((remapped_source.op_start, remapped_source.op_end), (0, 1));
+        assert_eq!(remapped_source.inline_calls, vec![inline_call]);
+
+        let (_, _, debug_info, source_remapping) =
+            builder.build().unwrap().into_parts_with_debug_info();
+        let remapped_source = &debug_info[source_remapping[&decorated.source_ref()]];
+        assert_eq!((remapped_source.op_start, remapped_source.op_end), (0, 1));
+        assert_eq!(remapped_source.inline_calls.len(), 1);
+        assert_eq!(remapped_source.inline_calls[0].op_idx, 0);
     }
 
     #[derive(Debug, Clone)]

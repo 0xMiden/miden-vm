@@ -129,17 +129,7 @@ impl MastForestBuilder {
     ) -> Result<SourceNodeRef, Report> {
         let (op_start, op_end) =
             source_op_range.unwrap_or_else(|| self.source_op_range_for_draft(draft));
-        self.push_source_occurrence(
-            exec_ref,
-            child_refs,
-            op_start,
-            op_end,
-            draft.asm_ops.clone(),
-            draft.debug_vars.clone(),
-            draft.inline_calls.clone(),
-            &draft.functions,
-            true,
-        )
+        self.record_source_occurrence_with_range(exec_ref, child_refs, draft, op_start, op_end)
     }
 
     fn unadjust_source_block_indices<T>(

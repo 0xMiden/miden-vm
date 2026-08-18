@@ -1135,8 +1135,16 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
     host.load_library(library).unwrap();
     let mut saw_target_context = false;
     let mut saw_context_cleared = false;
+    let mut saw_pending_external_return = false;
     loop {
         let names = active_inline_names(&resume_context);
+        if matches!(
+            resume_context.continuation_stack().peek_continuation(),
+            Some(crate::Continuation::EnterForest { .. })
+        ) {
+            saw_pending_external_return = true;
+            assert!(names.is_empty(), "pending external return must not expose a stale context");
+        }
         if names.is_empty() {
             saw_context_cleared |= saw_target_context;
         } else {
@@ -1153,6 +1161,10 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
 
     assert!(saw_target_context, "loaded target should inherit the external boundary context");
     assert!(saw_context_cleared, "inline context should end when external execution returns");
+    assert!(
+        saw_pending_external_return,
+        "the test must stop before restoring the caller forest"
+    );
 }
 
 fn absolute_path(name: &str) -> Arc<Path> {

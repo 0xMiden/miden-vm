@@ -51,7 +51,17 @@ impl ResumeContext {
     /// Returns dynamic-boundary inline contexts active for the next operation, ordered from the
     /// innermost boundary to the outermost.
     pub fn inherited_inline_call_contexts(&self) -> impl Iterator<Item = &SourceInlineCallContext> {
-        self.inline_call_contexts.iter().rev().filter_map(Option::as_ref)
+        let effective_depth = self.continuation_stack.iter_continuations_for_next_clock().fold(
+            self.inline_call_contexts.len(),
+            |depth, continuation| match continuation {
+                Continuation::EnterForest { inline_context_depth, .. } => *inline_context_depth,
+                _ => depth,
+            },
+        );
+        self.inline_call_contexts[..effective_depth.min(self.inline_call_contexts.len())]
+            .iter()
+            .rev()
+            .filter_map(Option::as_ref)
     }
 
     /// Returns a reference to the kernel being currently executed.

@@ -91,7 +91,9 @@ where
 
     let old_package_debug_info = current_package_debug_info.clone();
     let inline_context_depth = inline_call_contexts.len();
-    inline_call_contexts.push(inline_call_context);
+    if let Some(inline_call_context) = inline_call_context {
+        inline_call_contexts.push(Some(inline_call_context));
+    }
 
     // Push current forest to the continuation stack so that we can return to it
     continuation_stack.push_enter_forest_with_package_debug_info(
@@ -169,6 +171,7 @@ mod tests {
         );
 
         assert_matches!(result, ControlFlow::Continue(()));
+        assert!(inline_call_contexts.is_empty());
         assert_matches!(
             continuation_stack.pop_continuation_with_source_node_id(),
             Some((Continuation::StartNode(node_id), None)) if node_id == target_id
