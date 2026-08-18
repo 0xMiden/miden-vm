@@ -105,14 +105,12 @@ struct PvmReadLayout {
 #[derive(Clone, Debug)]
 struct PvmReadRegion {
     constant: &'static str,
-    accessor: &'static str,
     ptr: u32,
     extent: u32,
 }
 
 /// The encoded ACE stream's shape, which an in-VM verifier needs as compile-time
-/// constants: how much to read, how many blocks to hash per segment, and the digest of
-/// the order-invariant segment.
+/// constants: how much to read, where the order-invariant segment begins, and its digest.
 ///
 /// Uniform across proof orders by construction: only the factored shuffle routing changes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -120,8 +118,7 @@ struct CircuitShape {
     num_inputs: usize,
     num_eval_gates: usize,
     stream_len: usize,
-    prefix_rows: usize,
-    common_rows: usize,
+    shuffle_prefix_len: usize,
     common_commitment: Word,
 }
 
@@ -139,8 +136,7 @@ impl CircuitShape {
             num_inputs: circuit.encoded.num_vars(),
             num_eval_gates: circuit.encoded.num_eval_rows(),
             stream_len,
-            prefix_rows: circuit.shuffle_prefix_len / 8,
-            common_rows: (stream_len - circuit.shuffle_prefix_len) / 8,
+            shuffle_prefix_len: circuit.shuffle_prefix_len,
             common_commitment: circuit.common_commitment,
         })
     }
@@ -150,46 +146,28 @@ impl PvmReadLayout {
     /// Derive every READ-region boundary from the circuit's own `InputLayout`.
     fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
         let boundary_specs = [
-            ("PUBLIC_INPUTS_PTR", "public_inputs_ptr", InputKey::Public(0)),
-            ("AUX_RAND_ELEM_PTR", "aux_rand_elem_ptr", InputKey::AuxRandBeta),
-            (
-                "PREPROCESSED_CURRENT_PTR",
-                "preprocessed_current_ptr",
-                InputKey::Preprocessed { offset: 0, index: 0 },
-            ),
-            ("MAIN_CURRENT_PTR", "main_current_ptr", InputKey::Main { offset: 0, index: 0 }),
-            (
-                "AUX_CURRENT_PTR",
-                "aux_current_ptr",
-                InputKey::AuxCoord { offset: 0, index: 0, coord: 0 },
-            ),
+            ("PUBLIC_INPUTS_PTR", InputKey::Public(0)),
+            ("AUX_RAND_ELEM_PTR", InputKey::AuxRandBeta),
+            ("PREPROCESSED_CURRENT_PTR", InputKey::Preprocessed { offset: 0, index: 0 }),
+            ("MAIN_CURRENT_PTR", InputKey::Main { offset: 0, index: 0 }),
+            ("AUX_CURRENT_PTR", InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }),
             (
                 "QUOTIENT_CURRENT_PTR",
-                "quotient_current_ptr",
                 InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 },
             ),
-            (
-                "PREPROCESSED_NEXT_PTR",
-                "preprocessed_next_ptr",
-                InputKey::Preprocessed { offset: 1, index: 0 },
-            ),
-            ("MAIN_NEXT_PTR", "main_next_ptr", InputKey::Main { offset: 1, index: 0 }),
-            (
-                "AUX_NEXT_PTR",
-                "aux_next_ptr",
-                InputKey::AuxCoord { offset: 1, index: 0, coord: 0 },
-            ),
+            ("PREPROCESSED_NEXT_PTR", InputKey::Preprocessed { offset: 1, index: 0 }),
+            ("MAIN_NEXT_PTR", InputKey::Main { offset: 1, index: 0 }),
+            ("AUX_NEXT_PTR", InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }),
             (
                 "QUOTIENT_NEXT_PTR",
-                "quotient_next_ptr",
                 InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 0 },
             ),
-            ("AUX_BUS_BOUNDARY_PTR", "aux_bus_boundary_ptr", InputKey::AuxBusBoundary(0)),
-            ("AUXILIARY_ACE_INPUTS_PTR", "auxiliary_ace_inputs_ptr", InputKey::Alpha),
+            ("AUX_BUS_BOUNDARY_PTR", InputKey::AuxBusBoundary(0)),
+            ("AUXILIARY_ACE_INPUTS_PTR", InputKey::Alpha),
         ];
 
         let mut boundaries = Vec::with_capacity(boundary_specs.len() + 1);
-        for &(constant, accessor, key) in &boundary_specs {
+        for &(constant, key) in &boundary_specs {
             let index = layout.index(key).ok_or_else(|| {
                 format!("PVM ACE layout is missing boundary {constant} ({key:?})")
             })?;
@@ -200,13 +178,13 @@ impl PvmReadLayout {
             let ptr = PVM_READ_START
                 .checked_add(felt_offset)
                 .ok_or_else(|| format!("PVM ACE layout boundary {constant} overflows u32"))?;
-            boundaries.push((constant, accessor, ptr));
+            boundaries.push((constant, ptr));
         }
 
-        if boundaries.first().map(|(_, _, ptr)| *ptr) != Some(PVM_READ_START) {
+        if boundaries.first().map(|(_, ptr)| *ptr) != Some(PVM_READ_START) {
             return Err("PVM public inputs must begin at the complete READ-section anchor".into());
         }
-        if boundaries.windows(2).any(|pair| pair[0].2 >= pair[1].2) {
+        if boundaries.windows(2).any(|pair| pair[0].1 >= pair[1].1) {
             return Err("PVM ACE READ-region boundaries are not strictly increasing".into());
         }
 
@@ -220,15 +198,14 @@ impl PvmReadLayout {
         let stream_ptr = PVM_READ_START
             .checked_add(read_extent)
             .ok_or_else(|| "PVM ACE stream pointer overflows u32".to_string())?;
-        boundaries.push(("ACE_CIRCUIT_STREAM_PTR", "ace_circuit_stream_ptr", stream_ptr));
+        boundaries.push(("ACE_CIRCUIT_STREAM_PTR", stream_ptr));
 
         let regions = boundaries
             .windows(2)
             .map(|pair| PvmReadRegion {
                 constant: pair[0].0,
-                accessor: pair[0].1,
-                ptr: pair[0].2,
-                extent: pair[1].2 - pair[0].2,
+                ptr: pair[0].1,
+                extent: pair[1].1 - pair[0].1,
             })
             .collect();
 
@@ -498,8 +475,14 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     )
     .expect("writing to String cannot fail");
 
-    for region in &layout.regions {
-        writeln!(out, "pub proc {}\n    push.{}\nend\n", region.accessor, region.constant)
+    for (accessor, constant) in [
+        ("public_inputs_ptr", "PUBLIC_INPUTS_PTR"),
+        ("aux_rand_elem_ptr", "AUX_RAND_ELEM_PTR"),
+        ("preprocessed_current_ptr", "PREPROCESSED_CURRENT_PTR"),
+        ("aux_bus_boundary_ptr", "AUX_BUS_BOUNDARY_PTR"),
+        ("auxiliary_ace_inputs_ptr", "AUXILIARY_ACE_INPUTS_PTR"),
+    ] {
+        writeln!(out, "pub proc {accessor}\n    push.{constant}\nend\n")
             .expect("writing to String cannot fail");
     }
     out.push_str("pub proc ace_circuit_stream_ptr\n    push.ACE_CIRCUIT_STREAM_PTR\nend\n");
@@ -523,7 +506,7 @@ fn render_pvm_constraints_eval(
         num_inputs: shape.num_inputs,
         num_eval_gates: shape.num_eval_gates,
         stream_len: shape.stream_len,
-        shuffle_prefix_len: shape.prefix_rows * 8,
+        shuffle_prefix_len: shape.shuffle_prefix_len,
         max_cycle_len_log,
         registry_depth: PVM_ACE_REGISTRY_DEPTH,
         order_tag_count: PVM_ORDER_COUNT,

@@ -153,8 +153,13 @@ end
 #! transcript. This procedure applies no acceptance policy: the caller grades the returned
 #! parameters under its own policy.
 #!
+#! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
+#! commitment, constraint, or public-root check fails.
+#!
 #! Inputs:  [D]
 #! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#!
+#! Invocation: exec
 pub proc verify_proof
     exec.utils::load_security_params
 

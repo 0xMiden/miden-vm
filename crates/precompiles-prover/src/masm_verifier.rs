@@ -17,7 +17,7 @@ use miden_core::{
     deferred::DeferredClaim,
     field::{BasedVectorSpace, QuadFelt},
     program::proof_request_key,
-    proof::{HashFunction, StarkProof as SerializedStarkProof},
+    proof::{HashFunction, PrecompileProof, StarkProof as SerializedStarkProof},
 };
 use miden_crypto::{
     merkle::{MerklePath, PartialMerkleTree},
@@ -34,9 +34,10 @@ use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
 use crate::{
+    MAX_STARK_PROOF_BYTES,
     ace::{order_tag_from_log_heights, proof_order_from_log_heights},
     ace_registry::{factory, pvm_ace_registry_path},
-    session::{ChipletMultiAir, MAX_STARK_PROOF_BYTES, NUM_CHIPLETS, preprocessed_cache},
+    session::{ChipletMultiAir, NUM_CHIPLETS, preprocessed_cache},
     stark_config::{
         Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
     },
@@ -58,18 +59,24 @@ pub struct PvmRecursiveVerifierInputs {
 impl PvmRecursiveVerifierInputs {
     /// Builds a proof package addressed by the verifier and claim commitments.
     ///
-    /// The proof must be a Poseidon2 proof because the recursive verifier supports only
-    /// Poseidon2 STARKs.
+    /// The proof must contain exactly one deferred root. Aggregated precompile proofs require a
+    /// separate authentication of their ordered constituent roots, which the MASM verifier does
+    /// not yet implement. The underlying STARK must use Poseidon2.
     ///
     /// # Errors
     ///
     /// Returns an error if the proof cannot be converted into verifier advice.
     pub fn for_request(
         verifier_root: Word,
-        proof: &SerializedStarkProof,
-        claim: DeferredClaim,
+        proof: &PrecompileProof,
     ) -> Result<Self, PvmRecursiveVerifierInputsError> {
-        let advice = build_verifier_advice(proof, claim)?;
+        let [root] = proof.roots.as_slice() else {
+            return Err(PvmRecursiveVerifierInputsError::UnsupportedRootCount {
+                roots: proof.roots.len(),
+            });
+        };
+        let claim = DeferredClaim::new(*root);
+        let advice = build_verifier_advice(&proof.proof, claim)?;
         Ok(Self::package(verifier_root, claim, advice))
     }
 
@@ -103,6 +110,9 @@ impl PvmRecursiveVerifierInputs {
 /// Failures while parsing and adapting a PVM proof for the MASM verifier.
 #[derive(Debug, thiserror::Error)]
 pub enum PvmRecursiveVerifierInputsError {
+    /// The current MASM verifier authenticates one deferred root at a time.
+    #[error("the PVM MASM verifier requires exactly one deferred root, found {roots}")]
+    UnsupportedRootCount { roots: usize },
     /// The MASM verifier implements the Poseidon2 transcript only.
     #[error("the PVM MASM verifier supports Poseidon2 proofs only")]
     UnsupportedHashFunction,
@@ -373,10 +383,12 @@ mod tests {
 
     #[test]
     fn recursive_inputs_reject_non_poseidon2_proofs_before_parsing() {
-        let proof = SerializedStarkProof::new(Vec::new(), HashFunction::Rpo256);
-        let claim = DeferredClaim::new(Word::default());
+        let proof = PrecompileProof {
+            proof: SerializedStarkProof::new(Vec::new(), HashFunction::Rpo256),
+            roots: vec![Word::default()],
+        };
         assert!(matches!(
-            PvmRecursiveVerifierInputs::for_request(Word::default(), &proof, claim),
+            PvmRecursiveVerifierInputs::for_request(Word::default(), &proof),
             Err(PvmRecursiveVerifierInputsError::UnsupportedHashFunction),
         ));
     }
@@ -384,15 +396,31 @@ mod tests {
     #[test]
     fn recursive_inputs_reject_oversized_proofs_before_parsing() {
         let size = MAX_STARK_PROOF_BYTES + 1;
-        let proof = SerializedStarkProof::new(vec![0; size], HashFunction::Poseidon2);
-        let claim = DeferredClaim::new(Word::default());
+        let proof = PrecompileProof {
+            proof: SerializedStarkProof::new(vec![0; size], HashFunction::Poseidon2),
+            roots: vec![Word::default()],
+        };
         assert!(matches!(
-            PvmRecursiveVerifierInputs::for_request(Word::default(), &proof, claim),
+            PvmRecursiveVerifierInputs::for_request(Word::default(), &proof),
             Err(PvmRecursiveVerifierInputsError::ProofTooLarge {
                 size: actual,
                 max: MAX_STARK_PROOF_BYTES,
             }) if actual == size,
         ));
+    }
+
+    #[test]
+    fn recursive_inputs_reject_non_singleton_precompile_proofs() {
+        let serialized = || SerializedStarkProof::new(Vec::new(), HashFunction::Poseidon2);
+        for roots in [Vec::new(), vec![Word::default(); 2]] {
+            let root_count = roots.len();
+            let proof = PrecompileProof { proof: serialized(), roots };
+            assert!(matches!(
+                PvmRecursiveVerifierInputs::for_request(Word::default(), &proof),
+                Err(PvmRecursiveVerifierInputsError::UnsupportedRootCount { roots })
+                    if roots == root_count,
+            ));
+        }
     }
 
     #[test]

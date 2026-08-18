@@ -1,6 +1,3 @@
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::DeferredRoot;
 use crate::{
     Word,
@@ -13,8 +10,6 @@ use crate::{
 /// keys and downstream statements. For this claim type, the protocol defines that commitment to
 /// be the root itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct DeferredClaim(DeferredRoot);
 
 impl DeferredClaim {

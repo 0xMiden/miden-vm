@@ -71,34 +71,6 @@ pub proc preprocessed_current_ptr
     push.PREPROCESSED_CURRENT_PTR
 end
 
-pub proc main_current_ptr
-    push.MAIN_CURRENT_PTR
-end
-
-pub proc aux_current_ptr
-    push.AUX_CURRENT_PTR
-end
-
-pub proc quotient_current_ptr
-    push.QUOTIENT_CURRENT_PTR
-end
-
-pub proc preprocessed_next_ptr
-    push.PREPROCESSED_NEXT_PTR
-end
-
-pub proc main_next_ptr
-    push.MAIN_NEXT_PTR
-end
-
-pub proc aux_next_ptr
-    push.AUX_NEXT_PTR
-end
-
-pub proc quotient_next_ptr
-    push.QUOTIENT_NEXT_PTR
-end
-
 pub proc aux_bus_boundary_ptr
     push.AUX_BUS_BOUNDARY_PTR
 end

@@ -6,9 +6,9 @@ use miden_core::{
     Felt, Word,
     advice::AdviceInputs,
     crypto::hash::Keccak256,
-    deferred::{DeferredClaim, DeferredState, Node, PrecompileRegistry},
+    deferred::{DeferredState, Node, PrecompileRegistry},
     program::proof_request_key,
-    proof::{DeferredProof, HashFunction, StarkProof},
+    proof::{HashFunction, PrecompileProof, StarkProof},
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
@@ -24,24 +24,27 @@ use super::{EXAMPLE_FIB_SMALL, fib_stack_inputs, generate_recursive_verifier_dat
 #[test]
 fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     let verifier_root = pvm_verifier_root();
-    let (short_proof, short_claim) = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
-    let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof, short_claim)
+    let short_proof = prove_keccak_claim(b"PVM MASM verifier end-to-end fixture");
+    let short = PvmRecursiveVerifierInputs::for_request(verifier_root, &short_proof)
         .expect("host adapter must parse the short proof");
 
-    let mut suffixed_bytes = short_proof.bytes().to_vec();
+    let mut suffixed_bytes = short_proof.proof.bytes().to_vec();
     suffixed_bytes.push(0xaa);
-    let suffixed_proof = StarkProof::new(suffixed_bytes, HashFunction::Poseidon2);
+    let suffixed_proof = PrecompileProof {
+        proof: StarkProof::new(suffixed_bytes, HashFunction::Poseidon2),
+        roots: short_proof.roots,
+    };
     assert!(
         matches!(
-            PvmRecursiveVerifierInputs::for_request(verifier_root, &suffixed_proof, short_claim),
+            PvmRecursiveVerifierInputs::for_request(verifier_root, &suffixed_proof),
             Err(PvmRecursiveVerifierInputsError::ProofDeserialization(_)),
         ),
         "the host adapter must reject trailing proof bytes"
     );
 
     let long_message = vec![0xa5; 4096];
-    let (long_proof, long_claim) = prove_keccak_claim(&long_message);
-    let long = PvmRecursiveVerifierInputs::for_request(verifier_root, &long_proof, long_claim)
+    let long_proof = prove_keccak_claim(&long_message);
+    let long = PvmRecursiveVerifierInputs::for_request(verifier_root, &long_proof)
         .expect("host adapter must parse the long proof");
 
     assert_ne!(
@@ -116,11 +119,10 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         .expect("VM/PVM/VM/PVM verification must not leak shared scratch state");
 }
 
-fn prove_keccak_claim(input: &[u8]) -> (StarkProof, DeferredClaim) {
+fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
     let registry =
         Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
-    let mut state =
-        DeferredState::new(registry, usize::MAX).expect("Keccak fixture registry must initialize");
+    let mut state = DeferredState::new(registry).expect("Keccak fixture registry must initialize");
 
     let input_digest = state
         .register(Node::chunks_from_bytes(input))
@@ -143,17 +145,9 @@ fn prove_keccak_claim(input: &[u8]) -> (StarkProof, DeferredClaim) {
         .expect("matching Keccak assertion must register");
     let root = state.log_statement(assertion).expect("true statement must log");
 
-    let deferred = prove_deferred_state(&state, HashFunction::Poseidon2)
+    let proof = prove_deferred_state(&state, HashFunction::Poseidon2)
         .expect("fixture must produce a PVM STARK proof");
-    match deferred {
-        DeferredProof::Stark { proof, claim } => {
-            assert_eq!(claim.root(), root, "proof envelope must bind the logged root");
-            (proof, claim)
-        },
-        DeferredProof::Empty | DeferredProof::Wire(_) => {
-            panic!("non-empty fixture must produce a STARK-backed deferred proof")
-        },
-    }
+    PrecompileProof { proof, roots: vec![root] }
 }
 
 fn run_pvm_verifier(

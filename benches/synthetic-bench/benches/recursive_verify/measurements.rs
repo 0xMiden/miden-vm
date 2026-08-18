@@ -3,31 +3,16 @@
 use std::{hint::black_box, time::Instant};
 
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, trace::TraceLenSummary};
-use miden_prover::prove_sync;
 use miden_vm::{
-    ExecutionProof, ExecutionTrace, HashFunction, ProvingOptions, StackInputs, StackOutputs,
-    TraceBuildInputs, trace::build_trace,
+    ExecutionProof, ExecutionWitness, HashFunction, Prover, StackInputs, StackOutputs, VmTrace,
+    prove_sync, trace::build_trace,
 };
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
 
-pub(super) struct TraceShape {
-    core_rows: usize,
-    range_rows: usize,
-    chiplets_rows: usize,
-    poseidon2_permutation_rows: usize,
-    hash_chiplet_rows: usize,
-    bitwise_rows: usize,
-    memory_rows: usize,
-    ace_rows: usize,
-    kernel_rows: usize,
-    max_trace_rows: usize,
-    max_padded_rows: usize,
-}
-
 pub(super) struct CaseTraceShape {
     composition: ProofComposition,
-    trace: TraceShape,
+    trace: TraceLenSummary,
 }
 
 struct ProveSummary {
@@ -40,25 +25,7 @@ struct ProveSummary {
     avg_proof_bytes: f64,
 }
 
-pub(super) fn trace_shape_summary_for(summary: &TraceLenSummary) -> TraceShape {
-    let chiplets = summary.chiplets_trace_len();
-
-    TraceShape {
-        core_rows: summary.core_trace_len(),
-        range_rows: summary.range_trace_len(),
-        chiplets_rows: chiplets.trace_len(),
-        poseidon2_permutation_rows: summary.poseidon2_permutation_trace_len(),
-        hash_chiplet_rows: chiplets.hash_chiplet_len(),
-        bitwise_rows: chiplets.bitwise_chiplet_len(),
-        memory_rows: chiplets.memory_chiplet_len(),
-        ace_rows: chiplets.ace_chiplet_len(),
-        kernel_rows: chiplets.kernel_rom_len(),
-        max_trace_rows: summary.trace_len(),
-        max_padded_rows: summary.padded_trace_len(),
-    }
-}
-
-pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -> TraceBuildInputs {
+pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -> ExecutionWitness {
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         case.advice_inputs,
@@ -66,21 +33,22 @@ pub(super) fn execute_trace_inputs(case: RecursionCase, mut host: DefaultHost) -
     )
     .expect("recursive verifier advice should fit provider limits");
     processor
-        .execute_trace_inputs_sync(&case.program, &mut host)
+        .execute_for_proving_sync(&case.program, &mut host)
         .expect("execute recursive verifier")
 }
 
 pub(super) fn execute_recursive_case(
     (case, host): (RecursionCase, DefaultHost),
-) -> TraceBuildInputs {
+) -> ExecutionWitness {
     execute_trace_inputs(case, host)
 }
 
-pub(super) fn build_trace_case(trace_inputs: TraceBuildInputs) -> ExecutionTrace {
-    build_trace(trace_inputs).expect("build recursive verifier trace")
+pub(super) fn build_trace_case(witness: ExecutionWitness) -> VmTrace {
+    let (vm_witness, _) = witness.into_parts();
+    build_trace(vm_witness).expect("build recursive verifier trace")
 }
 
-pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) -> ExecutionTrace {
+pub(super) fn execute_and_build_case((case, host): (RecursionCase, DefaultHost)) -> VmTrace {
     build_trace_case(execute_trace_inputs(case, host))
 }
 
@@ -88,12 +56,12 @@ pub(super) fn prove_recursive_case(
     (case, mut host, hash_fn): (RecursionCase, DefaultHost, HashFunction),
 ) -> (StackOutputs, ExecutionProof) {
     prove_sync(
+        &Prover::new().with_hash_fn(hash_fn),
         &case.program,
         StackInputs::default(),
         case.advice_inputs,
         &mut host,
         ExecutionOptions::default(),
-        ProvingOptions::new(hash_fn),
     )
     .expect("prove recursive verifier")
 }
@@ -103,12 +71,12 @@ fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, us
     let mut host = recursive_host();
     let start = Instant::now();
     let (_, proof) = prove_sync(
+        &Prover::new().with_hash_fn(hash_fn),
         &case.program,
         StackInputs::default(),
         advice_inputs,
         &mut host,
         ExecutionOptions::default(),
-        ProvingOptions::new(hash_fn),
     )
     .expect("prove recursive verifier");
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
@@ -228,33 +196,34 @@ fn print_prove_summary(summaries: &[ProveSummary]) {
     }
 }
 
-fn trace_shape_summary(case: &RecursionCase) -> TraceShape {
-    let trace = build_trace(execute_trace_inputs(case.clone(), recursive_host()))
-        .expect("build recursive verifier trace");
-    trace_shape_summary_for(trace.trace_len_summary())
+fn trace_len_summary(case: &RecursionCase) -> TraceLenSummary {
+    let trace = build_trace_case(execute_trace_inputs(case.clone(), recursive_host()));
+    *trace.trace_len_summary()
 }
 
 pub(super) fn print_case_shape(case: &RecursionCase) -> CaseTraceShape {
-    let trace = trace_shape_summary(case);
+    let trace = trace_len_summary(case);
+    let chiplets = trace.chiplets_trace_len();
 
     println!(
         "    {} core={} range={} chiplets={} poseidon2_perm={} hash_ctrl={} max_trace={} max_padded={}",
         case.composition.label(),
-        trace.core_rows,
-        trace.range_rows,
-        trace.chiplets_rows,
-        trace.poseidon2_permutation_rows,
-        trace.hash_chiplet_rows,
-        trace.max_trace_rows,
-        trace.max_padded_rows,
+        trace.core_trace_len(),
+        trace.range_trace_len(),
+        chiplets.trace_len(),
+        trace.poseidon2_permutation_trace_len(),
+        chiplets.hash_chiplet_len(),
+        trace.trace_len(),
+        trace.padded_trace_len(),
     );
     let record = format!("BENCH_RECURSION_SHAPE {}", case.composition.machine_fields());
     print_bench_shape(&record, &trace);
     CaseTraceShape { composition: case.composition, trace }
 }
 
-pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
+pub(super) fn print_bench_shape(record: &str, shape: &TraceLenSummary) {
     // This is a machine-readable schema consumed by benchmark parsers.
+    let chiplets = shape.chiplets_trace_len();
     println!(
         concat!(
             "{} ",
@@ -263,17 +232,17 @@ pub(super) fn print_bench_shape(record: &str, shape: &TraceShape) {
             "native_hash_rows=0 and8_lookup_rows=0 max_trace_rows={} max_padded_rows={}"
         ),
         record,
-        shape.core_rows,
-        shape.range_rows,
-        shape.chiplets_rows,
-        shape.poseidon2_permutation_rows,
-        shape.hash_chiplet_rows,
-        shape.bitwise_rows,
-        shape.memory_rows,
-        shape.ace_rows,
-        shape.kernel_rows,
-        shape.max_trace_rows,
-        shape.max_padded_rows,
+        shape.core_trace_len(),
+        shape.range_trace_len(),
+        chiplets.trace_len(),
+        shape.poseidon2_permutation_trace_len(),
+        chiplets.hash_chiplet_len(),
+        chiplets.bitwise_chiplet_len(),
+        chiplets.memory_chiplet_len(),
+        chiplets.ace_chiplet_len(),
+        chiplets.kernel_rom_len(),
+        shape.trace_len(),
+        shape.padded_trace_len(),
     );
 }
 
@@ -285,21 +254,22 @@ pub(super) fn print_trace_shape_summary(shapes: &[CaseTraceShape]) {
     println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
     for case in shapes {
         let shape = &case.trace;
+        let chiplets = shape.chiplets_trace_len();
         println!(
             "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             case.composition.mvm_count(),
             case.composition.pvm_count(),
-            shape.core_rows,
-            shape.range_rows,
-            shape.chiplets_rows,
-            shape.poseidon2_permutation_rows,
-            shape.hash_chiplet_rows,
-            shape.bitwise_rows,
-            shape.memory_rows,
-            shape.ace_rows,
-            shape.kernel_rows,
-            shape.max_trace_rows,
-            shape.max_padded_rows,
+            shape.core_trace_len(),
+            shape.range_trace_len(),
+            chiplets.trace_len(),
+            shape.poseidon2_permutation_trace_len(),
+            chiplets.hash_chiplet_len(),
+            chiplets.bitwise_chiplet_len(),
+            chiplets.memory_chiplet_len(),
+            chiplets.ace_chiplet_len(),
+            chiplets.kernel_rom_len(),
+            shape.trace_len(),
+            shape.padded_trace_len(),
         );
     }
 }
