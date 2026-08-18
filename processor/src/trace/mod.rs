@@ -121,8 +121,32 @@ impl Deserializable for ExecutionWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let vm = VmWitness::read_from(source)?;
         let precompile = match source.read_u8()? {
-            0 => None,
-            1 => Some(read_precompile_witness(source)?),
+            0 => {
+                if vm.precompile_root != TRUE_DIGEST {
+                    return Err(DeserializationError::InvalidValue(
+                        "VM witness claims deferred work but no precompile witness is present"
+                            .into(),
+                    ));
+                }
+                None
+            },
+            1 => {
+                let witness = read_precompile_witness(source)?;
+                // `read_precompile_witness` only produces singleton witnesses, but do not index
+                // blindly: keep deserialization panic-free even if that invariant changes.
+                let [witness_root] = witness.roots() else {
+                    return Err(DeserializationError::InvalidValue(
+                        "expected a singleton precompile witness".into(),
+                    ));
+                };
+                if *witness_root != vm.precompile_root {
+                    return Err(DeserializationError::InvalidValue(
+                        "precompile witness root does not match the VM witness precompile root"
+                            .into(),
+                    ));
+                }
+                Some(witness)
+            },
             tag => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid precompile witness option tag {tag}"
@@ -439,5 +463,71 @@ impl VmTrace {
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
         self.main_trace.get_column_range(range)
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use miden_assembly::Assembler;
+    use miden_core::deferred::TRUE_DIGEST;
+
+    use super::{Deserializable, ExecutionWitness, Serializable};
+    use crate::{DefaultHost, FastProcessor, StackInputs};
+
+    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+        let program = Assembler::default()
+            .assemble_program("program", "begin log_deferred end")
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = DefaultHost::default();
+        let witness = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness");
+        witness.to_bytes()
+    }
+
+    #[test]
+    fn witness_wire_rejects_mismatched_precompile_root() {
+        let bytes = deferred_witness_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
+        let (vm, precompile) = restored.into_parts();
+        let precompile = precompile.expect("deferred execution should carry a precompile witness");
+        assert_ne!(vm.precompile_root, TRUE_DIGEST);
+
+        // Tamper only the VM-side precompile root and re-serialize: the two halves of the wire
+        // no longer describe the same execution, so deserialization must reject them.
+        let tampered = ExecutionWitness {
+            vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
+            precompile: Some(precompile),
+        };
+        let err = ExecutionWitness::read_from_bytes(&tampered.to_bytes())
+            .expect_err("tampered witness should be rejected");
+        assert!(
+            format!("{err:?}")
+                .contains("precompile witness root does not match the VM witness precompile root"),
+            "unexpected error: {err:?}"
+        );
+
+        // Sanity: the untampered wire still round-trips.
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
+    }
+
+    #[test]
+    fn witness_wire_rejects_missing_precompile_witness() {
+        let bytes = deferred_witness_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
+        let (vm, precompile) = restored.into_parts();
+        assert!(precompile.is_some(), "deferred execution should carry a precompile witness");
+
+        // Drop only the precompile witness while the VM side still claims deferred work: the
+        // wire must not validate as a complete execution.
+        let stripped = ExecutionWitness { vm, precompile: None };
+        let err = ExecutionWitness::read_from_bytes(&stripped.to_bytes())
+            .expect_err("witness without its precompile half should be rejected");
+        assert!(
+            format!("{err:?}")
+                .contains("VM witness claims deferred work but no precompile witness is present"),
+            "unexpected error: {err:?}"
+        );
     }
 }
