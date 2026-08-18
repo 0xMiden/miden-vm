@@ -643,16 +643,76 @@ impl MastForestBuilder {
         cloned: &mut BTreeMap<SourceNodeRef, SourceNodeRef>,
     ) -> Result<miden_mast_package::debug_info::SourceNode<MastNodeRef, SourceNodeRef>, Report>
     {
-        let mut source_node = self.debug_info[source_ref].clone();
-        let is_external_boundary = self.external_boundary_source_refs.contains(&source_ref);
-        let mut child_refs = Vec::with_capacity(source_node.children.len());
-        for child_ref in source_node.children.iter().copied() {
-            child_refs.push(self.clone_source_occurrence_with_inline_calls(
-                child_ref,
+        let mut pending = self.debug_info[source_ref]
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .map(|child_ref| (child_ref, false))
+            .collect::<Vec<_>>();
+
+        while let Some((pending_ref, children_cloned)) = pending.pop() {
+            if cloned.contains_key(&pending_ref) {
+                continue;
+            }
+
+            if !children_cloned {
+                pending.push((pending_ref, true));
+                pending.extend(
+                    self.debug_info[pending_ref]
+                        .children
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|child_ref| !cloned.contains_key(child_ref))
+                        .map(|child_ref| (child_ref, false)),
+                );
+                continue;
+            }
+
+            let is_external_boundary = self.external_boundary_source_refs.contains(&pending_ref);
+            let source_node = self.source_occurrence_with_cloned_children_and_inline_calls(
+                pending_ref,
                 active_inline_calls,
                 cloned,
-            )?);
+            );
+            let cloned_ref = self.push_source_occurrence(
+                source_node.exec_node,
+                source_node.children,
+                source_node.op_start as usize,
+                source_node.op_end as usize,
+                source_node.asm_ops,
+                source_node.debug_vars,
+                source_node.inline_calls,
+                &[],
+                is_external_boundary,
+                false,
+            )?;
+            cloned.insert(pending_ref, cloned_ref);
         }
+
+        Ok(self.source_occurrence_with_cloned_children_and_inline_calls(
+            source_ref,
+            active_inline_calls,
+            cloned,
+        ))
+    }
+
+    fn source_occurrence_with_cloned_children_and_inline_calls(
+        &self,
+        source_ref: SourceNodeRef,
+        active_inline_calls: &[DebugSourceInlineCall],
+        cloned: &BTreeMap<SourceNodeRef, SourceNodeRef>,
+    ) -> miden_mast_package::debug_info::SourceNode<MastNodeRef, SourceNodeRef> {
+        let mut source_node = self.debug_info[source_ref].clone();
+        let is_external_boundary = self.external_boundary_source_refs.contains(&source_ref);
+        let child_refs = source_node
+            .children
+            .iter()
+            .map(|child_ref| {
+                *cloned.get(child_ref).expect("source child must be cloned before its parent")
+            })
+            .collect();
 
         let mut inline_calls = Vec::with_capacity(
             source_node.inline_calls.len()
@@ -692,7 +752,7 @@ impl MastForestBuilder {
 
         source_node.children = child_refs;
         source_node.inline_calls = inline_calls;
-        Ok(source_node)
+        source_node
     }
 
     fn record_source_occurrence(

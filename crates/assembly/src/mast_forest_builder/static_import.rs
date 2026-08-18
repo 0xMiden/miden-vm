@@ -392,92 +392,94 @@ impl MastForestBuilder {
         source_root_id: DebugSourceNodeId,
     ) -> Result<MastNodeRef, Report> {
         let mut node_uses_by_source_id = BTreeMap::new();
-        Ok(self
-            .copy_package_debug_source_node_use(
-                source_forest,
-                package_debug_info,
-                tables,
-                source_root_id,
-                &mut node_uses_by_source_id,
-            )?
-            .node_ref())
-    }
+        let mut pending = vec![(source_root_id, false)];
 
-    fn copy_package_debug_source_node_use(
-        &mut self,
-        source_forest: &MastForest,
-        package_debug_info: &PackageDebugInfo,
-        tables: &DebugInfoTableRemapping,
-        source_node_id: DebugSourceNodeId,
-        node_uses_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeUse>,
-    ) -> Result<MastNodeUse, Report> {
-        if let Some(node_use) = node_uses_by_source_id.get(&source_node_id).copied() {
-            return Ok(node_use);
-        }
+        while let Some((source_node_id, children_copied)) = pending.pop() {
+            if node_uses_by_source_id.contains_key(&source_node_id) {
+                continue;
+            }
 
-        let source_node = package_debug_info.source_node(source_node_id).ok_or_else(|| {
-            Report::msg(format!(
-                "statically linked package debug graph is missing source node {source_node_id:?}"
-            ))
-        })?;
-
-        let source_exec_node_id = source_node.exec_node;
-        let source_exec_node = source_forest
-            .get_node_by_id(source_exec_node_id)
-            .ok_or_else(|| {
+            let source_node = package_debug_info.source_node(source_node_id).ok_or_else(|| {
                 Report::msg(format!(
-                    "statically linked package debug graph references missing execution node {source_exec_node_id:?}"
+                    "statically linked package debug graph is missing source node {source_node_id:?}"
                 ))
-            })?
-            .clone();
-        let mut exec_child_ids = Vec::new();
-        source_exec_node.for_each_child(|child_id| exec_child_ids.push(child_id));
-        if exec_child_ids.len() != source_node.children.len() {
-            return Err(Report::msg(format!(
-                "statically linked package debug source node {source_node_id:?} has {} children, expected {} from execution node {source_exec_node_id:?}",
-                source_node.children.len(),
-                exec_child_ids.len(),
-            )));
-        }
-
-        let mut child_uses = Vec::new();
-        for (child_index, child_source_node_id) in source_node.children.iter().copied().enumerate()
-        {
-            let child_source_node =
-                package_debug_info.source_node(child_source_node_id).ok_or_else(|| {
+            })?;
+            let source_exec_node_id = source_node.exec_node;
+            let source_exec_node = source_forest
+                .get_node_by_id(source_exec_node_id)
+                .ok_or_else(|| {
                     Report::msg(format!(
-                        "statically linked package debug graph source node {source_node_id:?} references missing child source node {child_source_node_id:?}"
+                        "statically linked package debug graph references missing execution node {source_exec_node_id:?}"
                     ))
-                })?;
-            if child_source_node.exec_node != exec_child_ids[child_index] {
+                })?
+                .clone();
+            let mut exec_child_ids = Vec::new();
+            source_exec_node.for_each_child(|child_id| exec_child_ids.push(child_id));
+            if exec_child_ids.len() != source_node.children.len() {
                 return Err(Report::msg(format!(
-                    "statically linked package debug graph source node {source_node_id:?} child {child_index} maps to {:?}, expected {:?}",
-                    child_source_node.exec_node, exec_child_ids[child_index],
+                    "statically linked package debug source node {source_node_id:?} has {} children, expected {} from execution node {source_exec_node_id:?}",
+                    source_node.children.len(),
+                    exec_child_ids.len(),
                 )));
             }
-            child_uses.push(self.copy_package_debug_source_node_use(
+            for (child_index, child_source_node_id) in
+                source_node.children.iter().copied().enumerate()
+            {
+                let child_source_node = package_debug_info
+                    .source_node(child_source_node_id)
+                    .ok_or_else(|| {
+                        Report::msg(format!(
+                            "statically linked package debug graph source node {source_node_id:?} references missing child source node {child_source_node_id:?}"
+                        ))
+                    })?;
+                if child_source_node.exec_node != exec_child_ids[child_index] {
+                    return Err(Report::msg(format!(
+                        "statically linked package debug graph source node {source_node_id:?} child {child_index} maps to {:?}, expected {:?}",
+                        child_source_node.exec_node, exec_child_ids[child_index],
+                    )));
+                }
+            }
+
+            if !children_copied {
+                pending.push((source_node_id, true));
+                pending.extend(
+                    source_node
+                        .children
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|child_id| !node_uses_by_source_id.contains_key(child_id))
+                        .map(|child_id| (child_id, false)),
+                );
+                continue;
+            }
+
+            let child_uses = source_node
+                .children
+                .iter()
+                .map(|child_id| {
+                    node_uses_by_source_id
+                        .get(child_id)
+                        .copied()
+                        .expect("source child must be copied before its parent")
+                })
+                .collect();
+            let metadata = self.package_source_metadata(
                 source_forest,
                 package_debug_info,
                 tables,
-                child_source_node_id,
-                node_uses_by_source_id,
-            )?);
+                source_node_id,
+                source_exec_node_id,
+            )?;
+            let node_use = self.ensure_node_from_statically_linked_source_use(
+                source_exec_node,
+                child_uses,
+                Some(metadata),
+            )?;
+            node_uses_by_source_id.insert(source_node_id, node_use);
         }
 
-        let metadata = self.package_source_metadata(
-            source_forest,
-            package_debug_info,
-            tables,
-            source_node_id,
-            source_exec_node_id,
-        )?;
-        let node_use = self.ensure_node_from_statically_linked_source_use(
-            source_exec_node,
-            child_uses,
-            Some(metadata),
-        )?;
-        node_uses_by_source_id.insert(source_node_id, node_use);
-        Ok(node_use)
+        Ok(node_uses_by_source_id[&source_root_id].node_ref())
     }
 
     fn package_source_metadata(

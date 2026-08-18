@@ -1148,7 +1148,7 @@ fn external_exec_propagates_inline_context_into_the_loaded_package() {
                 assert!(
                     !matches!(
                         resume_context.continuation_stack().peek_continuation(),
-                        Some(crate::Continuation::EnterForest { .. })
+                        Some(Continuation::EnterForest { .. })
                     ),
                     "resume contexts must eagerly restore non-clock forest continuations",
                 );
@@ -1209,7 +1209,7 @@ fn nested_external_returns_restore_the_caller_before_resuming() {
             assert!(
                 !matches!(
                     resume_context.continuation_stack().peek_continuation(),
-                    Some(crate::Continuation::EnterForest { .. })
+                    Some(Continuation::EnterForest { .. })
                 ),
                 "all pending forest restorations must be applied before resuming",
             );
