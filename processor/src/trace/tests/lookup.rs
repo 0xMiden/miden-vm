@@ -270,6 +270,13 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
 }
 
 #[test]
+fn u32div_trace_satisfies_air() {
+    let operations = vec![Operation::U32div, Operation::Drop, Operation::Drop, Operation::U32div];
+    let trace = build_trace_from_ops(operations, &[0x0008_000b, 0x003b_0051, 3, 0x0003_0004]);
+    trace.check_constraints();
+}
+
+#[test]
 fn perm_link_rejects_swapped_controller_outputs() {
     let trace =
         build_trace_from_ops(vec![Operation::HPerm, Operation::HPerm], &[8, 7, 6, 5, 4, 3, 2, 1]);

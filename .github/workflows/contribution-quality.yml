@@ -92,6 +92,10 @@ jobs:
             const isMaintainer = (permission) => maintainerPermissions.has(permission);
 
             const permission = await getPermission(author);
+            if (permission === null) {
+              core.setFailed(`Failed to resolve collaborator permission for ${author}.`);
+              return;
+            }
             const trusted = isMaintainer(permission);
             if (!forceAll && (trusted || pr.draft)) {
               core.info(`Skipping author=${author} permission=${permission} draft=${pr.draft}.`);
@@ -300,6 +304,7 @@ jobs:
                 `Automatic closing disabled: ${maintainerIntervention.login} `
                   + `${maintainerIntervention.action} this pull request as a maintainer.`,
               );
+              return;
             } else if (interventionCheckFailed) {
               core.warning('Automatic closing disabled because maintainer intervention is unknown.');
             }

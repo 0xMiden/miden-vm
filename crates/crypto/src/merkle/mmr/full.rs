@@ -10,7 +10,11 @@
 //! depths, i.e. as part of adding a new element to the forest the trees with same depth are
 //! merged, creating a new tree with depth d+1, this process is continued until the property is
 //! reestablished.
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::{iter::FusedIterator, ops::Index, slice};
 
 use super::{
@@ -141,7 +145,7 @@ impl PartialEq<&[Word]> for NodeStore {
 /// `O(num_nodes / 1024)` pointers instead of the full node buffer, and appending to the original
 /// after a clone copies at most one chunk.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Mmr {
     /// Refer to the `forest` method documentation for details of the semantics of this value.
     pub(super) forest: Forest,
@@ -230,6 +234,19 @@ impl Mmr {
             }
             mmr.add(v)?;
         }
+        Ok(mmr)
+    }
+
+    /// Reconstructs an MMR from serialized parts after validating its stored structure.
+    fn from_serialized_parts(forest: Forest, nodes: NodeStore) -> Result<Self, String> {
+        let mmr = Self::from_store(forest, nodes).map_err(|err| err.to_string())?;
+        if mmr
+            .inner_nodes()
+            .any(|node| node.value != Poseidon2::merge(&[node.left, node.right]))
+        {
+            return Err("Mmr contains a parent node inconsistent with its children".into());
+        }
+
         Ok(mmr)
     }
 
@@ -563,8 +580,7 @@ impl Deserializable for Mmr {
             ));
         }
         let nodes = source.read_many_iter(count)?.collect::<Result<NodeStore, _>>()?;
-        Self::from_store(forest, nodes)
-            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))
+        Self::from_serialized_parts(forest, nodes).map_err(DeserializationError::InvalidValue)
     }
 }
 
@@ -612,6 +628,25 @@ impl<'de> serde::Deserialize<'de> for NodeStore {
         }
 
         deserializer.deserialize_seq(SeqVisitor)
+    }
+}
+
+/// Applies the same structural and hash-consistency validation as binary deserialization.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Mmr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename = "Mmr")]
+        struct Raw {
+            forest: Forest,
+            nodes: NodeStore,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        Mmr::from_serialized_parts(raw.forest, raw.nodes).map_err(serde::de::Error::custom)
     }
 }
 

@@ -295,9 +295,24 @@ pub trait Tracer {
     /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
     /// the range checker. This is expected to result in four 16-bit range checks.
     ///
-    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
-    /// `U32ASSERT2`.
+    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32ASSERT2`.
     fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
+
+    /// Records the quotient, remainder, and `divisor - remainder - 1` range checks.
+    ///
+    /// Implementations that populate range-check replay data must override this method to record
+    /// the final difference. The default preserves no-op behavior for tracers that do not own that
+    /// replay data.
+    ///
+    /// Called by: `U32DIV`.
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        _remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+    }
 
     /// Records the procedure hash of a syscall.
     ///
@@ -414,11 +429,18 @@ pub enum OperationHelperRegisters {
     /// Helper for the `U32DIV` operation, which divides `a` by `b` and pushes the quotient and
     /// remainder.
     ///
-    /// - `lo`: `numerator - quotient`, used to range-check that `quotient <= numerator`.
-    /// - `hi`: `denominator - remainder - 1`, used to range-check that `remainder < denominator`.
+    /// - `quotient`: the quotient.
+    /// - `remainder`: the remainder.
+    /// - `remainder_diff`: `divisor - remainder - 1`, used to establish that the remainder is
+    ///   smaller than the divisor.
     ///
-    /// The helper registers hold the four 16-bit limbs of `lo` and `hi`.
-    U32Div { lo: Felt, hi: Felt },
+    /// The helper registers hold the four 16-bit limbs of `quotient` and `remainder`, followed by
+    /// the two 16-bit limbs of `remainder_diff`.
+    U32Div {
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    },
     /// Helper for the `U32ASSERT2` operation, which asserts that the top two stack elements are
     /// valid u32 values.
     ///
@@ -564,17 +586,18 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::U32Div { lo, hi } => {
-                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+            Self::U32Div { quotient, remainder, remainder_diff } => {
+                let (q1, q0) = split_u32_into_u16(quotient.as_canonical_u64());
+                let (r1, r0) = split_u32_into_u16(remainder.as_canonical_u64());
+                let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
 
                 [
-                    Felt::from_u16(t0),
-                    Felt::from_u16(t1),
-                    Felt::from_u16(t2),
-                    Felt::from_u16(t3),
-                    ZERO,
-                    ZERO,
+                    Felt::from_u16(q0),
+                    Felt::from_u16(q1),
+                    Felt::from_u16(r0),
+                    Felt::from_u16(r1),
+                    Felt::from_u16(d0),
+                    Felt::from_u16(d1),
                 ]
             },
             Self::U32Assert2 { first, second } => {

@@ -9,7 +9,7 @@ use miden::core::sys::vm::constraints_eval_inputs
 const NUM_INPUTS_CIRCUIT = 624
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 5320
+const NUM_EVAL_GATES_CIRCUIT = 5328
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 4
@@ -20,10 +20,10 @@ const ACE_REGISTRY_DEPTH = 3
 # Poseidon2 digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), H_COMMON).
-const H_COMMON_0 = 17931597513626032812
-const H_COMMON_1 = 3000777811375814075
-const H_COMMON_2 = 7113851075416444338
-const H_COMMON_3 = 16754350796355027135
+const H_COMMON_0 = 864947263830285166
+const H_COMMON_1 = 14478784471931351919
+const H_COMMON_2 = 6998102532366390626
+const H_COMMON_3 = 13975925580041346572
 
 # ERRORS
 # =================================================================================================
@@ -78,7 +78,7 @@ proc load_and_authenticate_ace_circuit
     movup.4
     # => [ptr, H_PREFIX, LEAF]
     padw padw padw
-    repeat.634
+    repeat.635
         adv_pipe
         exec.poseidon2::permute
     end

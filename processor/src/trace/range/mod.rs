@@ -59,10 +59,9 @@ impl RangeChecker {
         self.lookups.entry(value).and_modify(|v| *v += 1).or_insert(1);
     }
 
-    /// Adds range check lookups from the stack or memory to this [RangeChecker] instance.
+    /// Adds a batch of range-check lookups to this [RangeChecker] instance.
     pub fn add_range_checks(&mut self, values: &[u16]) {
-        // range checks requests only come from memory or from the stack, which always request 2 or
-        // 4 lookups respectively.
+        // Current emitters record range checks in batches of two or four limbs.
         debug_assert!(values.len() == 2 || values.len() == 4);
 
         for value in values.iter() {

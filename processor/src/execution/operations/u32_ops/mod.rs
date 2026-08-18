@@ -212,7 +212,7 @@ where
 /// Output: [remainder, quotient, ...] where remainder is on top, computes a / b
 ///
 /// # Errors
-/// Returns an error if the divisor is ZERO.
+/// Returns an error if either operand is not a u32 value or the divisor is zero.
 #[inline(always)]
 pub(super) fn op_u32div<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -237,13 +237,13 @@ pub(super) fn op_u32div<P: Processor, T: Tracer>(
     processor.stack_mut().set(0, Felt::new_unchecked(remainder));
     processor.stack_mut().set(1, Felt::new_unchecked(quotient));
 
-    // These range checks help enforce that quotient <= numerator.
-    let lo = Felt::new_unchecked(numerator - quotient);
-    // These range checks help enforce that remainder < denominator.
-    let hi = Felt::new_unchecked(denominator - remainder - 1);
-
-    tracer.record_u32_range_checks(lo, hi);
-    Ok(OperationHelperRegisters::U32Div { lo, hi })
+    // Range-check both outputs. The final difference check enforces that the remainder is smaller
+    // than the divisor.
+    let remainder_diff = Felt::new_unchecked(denominator - remainder - 1);
+    let quotient = Felt::new_unchecked(quotient);
+    let remainder = Felt::new_unchecked(remainder);
+    tracer.record_u32div_range_checks(quotient, remainder, remainder_diff);
+    Ok(OperationHelperRegisters::U32Div { quotient, remainder, remainder_diff })
 }
 
 /// Pops two elements off the stack, computes their bitwise AND, and pushes the result back
