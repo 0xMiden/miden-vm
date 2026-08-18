@@ -46,7 +46,8 @@ pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 
 /// Package-owned debug information decoded from the well-known debug section.
 ///
-/// [`PackageDebugInfo::read_from`] and [`PackageDebugInfo::read_from_bytes`] apply fixed resource
+/// The [`miden_core::serde::Deserializable::read_from`] and
+/// [`miden_core::serde::Deserializable::read_from_bytes`] implementations apply fixed resource
 /// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
 /// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
 /// [`PackageDebugInfo::read_from_bytes_unmetered`].
