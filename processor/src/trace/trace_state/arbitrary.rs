@@ -11,12 +11,6 @@ fn arb_row_index() -> impl Strategy<Value = RowIndex> {
     any::<u32>().prop_map(RowIndex::from)
 }
 
-// TODO: use any::<MerklePath>() once miden-crypto exposes its impl outside test code:
-// https://github.com/0xMiden/crypto/issues/1072
-fn arb_merkle_path() -> impl Strategy<Value = MerklePath> {
-    collection::vec(any::<Word>(), 0..=MAX_REPLAY_ITEMS).prop_map(MerklePath::new)
-}
-
 fn arb_vec_deque<T, S>(strategy: S) -> impl Strategy<Value = VecDeque<T>>
 where
     T: core::fmt::Debug + 'static,
@@ -312,8 +306,8 @@ impl Arbitrary for HasherOp {
                 .prop_map(Self::HashControlBlock),
             (any::<MastForestId>(), any::<MastNodeId>(), any::<Word>())
                 .prop_map(Self::HashBasicBlock),
-            (any::<Word>(), arb_merkle_path(), any::<Felt>()).prop_map(Self::BuildMerkleRoot),
-            (any::<Word>(), any::<Word>(), arb_merkle_path(), any::<Felt>())
+            (any::<Word>(), any::<MerklePath>(), any::<Felt>()).prop_map(Self::BuildMerkleRoot),
+            (any::<Word>(), any::<Word>(), any::<MerklePath>(), any::<Felt>())
                 .prop_map(Self::UpdateMerkleRoot),
         ]
         .boxed()
