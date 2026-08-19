@@ -66,7 +66,7 @@ impl RuntimeDependencies {
             Some(existing)
                 if existing.name == package.name
                     && existing.version == package.version
-                    && existing.commitment() == package.commitment() =>
+                    && existing.dependency_commitment() == package.dependency_commitment() =>
             {
                 Ok(())
             },
@@ -74,10 +74,10 @@ impl RuntimeDependencies {
                 "conflicting linked kernel packages '{}@{}#{}' and '{}@{}#{}'",
                 existing.name,
                 existing.version,
-                existing.commitment(),
+                existing.dependency_commitment(),
                 package.name,
                 package.version,
-                package.commitment()
+                package.dependency_commitment()
             ))),
             None => {
                 self.kernel = Some(package);

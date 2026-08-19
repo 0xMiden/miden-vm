@@ -300,7 +300,7 @@ impl LocalPackageRegistry {
         let Ok(loaded) = MastPackage::read_from_bytes_trusted(&bytes) else {
             return false;
         };
-        let actual_version = Version::new(loaded.version.clone(), loaded.commitment());
+        let actual_version = Version::new(loaded.version.clone(), loaded.dependency_commitment());
         loaded.name == *package && actual_version == *version
     }
 
@@ -347,7 +347,7 @@ impl LocalPackageRegistry {
             }
         })?;
 
-        let actual_version = Version::new(loaded.version.clone(), loaded.commitment());
+        let actual_version = Version::new(loaded.version.clone(), loaded.dependency_commitment());
         if loaded.name != *package || actual_version != *version {
             return Err(LocalRegistryError::ArtifactMismatch {
                 path,
@@ -437,7 +437,7 @@ impl LocalPackageRegistry {
                 Ok(existing_package) => {
                     let existing_version = Version::new(
                         existing_package.version.clone(),
-                        existing_package.commitment(),
+                        existing_package.dependency_commitment(),
                     );
                     if existing_package.name == package.name && existing_version == *version {
                         if Self::matches_after_trusted_package_read(&existing_package, package) {
@@ -592,7 +592,7 @@ impl LocalPackageRegistry {
         package: Arc<MastPackage>,
         bytes: Vec<u8>,
     ) -> Result<PublishedPackage, LocalRegistryError> {
-        let digest = package.commitment();
+        let digest = package.dependency_commitment();
         let version = Version::new(package.version.clone(), digest);
         let (record, _dependencies) = Self::record_for_package(&package, version.clone());
         let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
@@ -642,7 +642,7 @@ impl LocalPackageRegistry {
         package: Arc<MastPackage>,
         bytes: Vec<u8>,
     ) -> Result<PublishedPackage, LocalRegistryError> {
-        let digest = package.commitment();
+        let digest = package.dependency_commitment();
         let version = Version::new(package.version.clone(), digest);
         let (record, dependencies) = Self::record_for_package(&package, version.clone());
 
@@ -991,7 +991,7 @@ mod tests {
         let package = build_package(
             "pkg",
             "2.0.0",
-            [("dep", "1.0.0", TargetType::Library, dep.commitment())],
+            [("dep", "1.0.0", TargetType::Library, dep.dependency_commitment())],
         );
         package.write_to_file(&package_path).unwrap();
 
@@ -1009,7 +1009,7 @@ mod tests {
         assert_eq!(shown.dependencies.keys().next().unwrap(), &PackageId::from("dep"));
         assert_eq!(
             shown.dependencies.values().next().unwrap().to_string(),
-            format!("1.0.0#{}", dep.commitment())
+            format!("1.0.0#{}", dep.dependency_commitment())
         );
     }
 
@@ -1106,7 +1106,7 @@ mod tests {
         conflicting_package
             .sections
             .push(Section::new(SectionId::custom("cache-test").unwrap(), Vec::from([1, 2, 3])));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(Arc::from(conflicting_package))
@@ -1134,7 +1134,7 @@ mod tests {
             SectionId::custom("stale-cache-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = stale_registry
             .cache_package(conflicting_package.into())
@@ -1164,7 +1164,7 @@ mod tests {
             SectionId::custom("cache-repair-race-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let error = second_registry
             .cache_package(conflicting_package.into())
             .expect_err("cache repair should check the artifact under the index lock");
@@ -1190,7 +1190,7 @@ mod tests {
             SectionId::custom("legacy-cache-repair-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(conflicting_package.into())
@@ -1222,7 +1222,7 @@ mod tests {
             SectionId::custom("legacy-cache-corrupt-qualified-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(conflicting_package.into())
@@ -1300,7 +1300,7 @@ mod tests {
         conflicting_package
             .sections
             .push(Section::new(SectionId::custom("publish-test").unwrap(), Vec::from([1, 2, 3])));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
         conflicting_package.write_to_file(&conflicting_path).unwrap();
 
@@ -1330,7 +1330,7 @@ mod tests {
             SectionId::custom("stale-publish-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_ne!(Some(conflicting_package.commitment()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
         conflicting_package.write_to_file(&conflicting_path).unwrap();
 
@@ -1383,7 +1383,7 @@ mod tests {
         let artifact_path = registry.artifact_path_for_package(
             &package.name,
             &package.version,
-            package.commitment(),
+            package.dependency_commitment(),
         );
         fs::create_dir(&artifact_path).unwrap();
 

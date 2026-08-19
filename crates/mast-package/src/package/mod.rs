@@ -261,6 +261,34 @@ impl Package {
         )
     }
 
+    /// Returns the commitment used to identify this package during dependency resolution.
+    ///
+    /// This binds the package code, identity, manifest, and sections which affect package use.
+    /// Optional debug data, descriptions, and opaque custom sections are excluded.
+    pub fn dependency_commitment(&self) -> Word {
+        let mut bytes = Vec::new();
+        bytes.write_bytes(b"miden.package.dependency.v1");
+        self.code_commitment().write_into(&mut bytes);
+        self.name.write_into(&mut bytes);
+        self.version.to_string().write_into(&mut bytes);
+        bytes.write_u8(self.kind.into());
+        self.manifest.write_into(&mut bytes);
+        self.write_dependency_commitment_sections(&mut bytes);
+        Poseidon2::hash(&bytes)
+    }
+
+    fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
+        let sections = self
+            .sections
+            .iter()
+            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .collect::<Vec<_>>();
+        target.write_usize(sections.len());
+        for section in sections {
+            section.write_into(target);
+        }
+    }
+
     /// Returns the commitment to all serialized package data outside the MAST forest.
     pub fn artifacts_commitment(&self) -> Word {
         let mut bytes = Vec::new();
@@ -1184,24 +1212,10 @@ impl Package {
     /// * The package manifest of `self` does not declare a kernel dependency
     /// * The embedded kernel does not match the declared kernel dependency
     pub fn try_embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let Some(section) = self.embedded_kernel_section()? else {
-            return Ok(None);
-        };
-        // Dependency identity binds every serialized package byte, including debug sections. An
-        // untrusted decode below intentionally discards those sections, so compute the serialized
-        // commitment from a separate validated decode that retains them.
-        let serialized_commitment = Self::read_from_bytes_trusted(section.data.as_ref())
-            .map_err(|error| {
-                Report::msg(format!(
-                    "failed to decode embedded kernel package for '{}': {error}",
-                    self.name
-                ))
-            })?
-            .commitment();
         let Some(kernel_package) = self.embedded_kernel_package()? else {
             return Ok(None);
         };
-        self.validate_embedded_kernel_dependency(&kernel_package, serialized_commitment)?;
+        self.validate_embedded_kernel_dependency(&kernel_package)?;
         Ok(Some(kernel_package))
     }
 
@@ -1243,11 +1257,7 @@ impl Package {
         Ok(Some(section))
     }
 
-    fn validate_embedded_kernel_dependency(
-        &self,
-        kernel_package: &Self,
-        serialized_commitment: Word,
-    ) -> Result<(), Report> {
+    fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
         if !kernel_package.is_kernel() {
             return Err(Report::msg(format!(
                 "package '{}' embeds '{}', but its kind is '{}'",
@@ -1264,7 +1274,7 @@ impl Package {
 
         if kernel_dependency.name != kernel_package.name
             || kernel_dependency.version != kernel_package.version
-            || kernel_dependency.digest != serialized_commitment
+            || kernel_dependency.digest != kernel_package.dependency_commitment()
         {
             return Err(Report::msg(format!(
                 "package '{}' declares kernel runtime dependency '{}@{}#{}', but that does not match the embedded kernel package '{}@{}#{}'",
@@ -1274,7 +1284,7 @@ impl Package {
                 kernel_dependency.digest,
                 kernel_package.name,
                 kernel_package.version,
-                serialized_commitment
+                kernel_package.dependency_commitment()
             )));
         }
 
@@ -1287,7 +1297,7 @@ impl Package {
             name: self.name.clone(),
             version: self.version.clone(),
             kind: self.kind,
-            digest: self.commitment(),
+            digest: self.dependency_commitment(),
         }
     }
 
@@ -2067,7 +2077,7 @@ mod tests {
             name: package.name.clone(),
             kind: TargetType::Kernel,
             version: package.version.clone(),
-            digest: package.commitment(),
+            digest: package.dependency_commitment(),
         }
     }
 

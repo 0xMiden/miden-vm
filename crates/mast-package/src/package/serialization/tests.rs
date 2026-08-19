@@ -279,6 +279,7 @@ fn package_deserialize_from_file_trusted_preserves_trusted_debug_sections() {
 fn artifact_and_package_commitments_change_with_header_fields() {
     let package = build_package();
     let code_commitment = package.code_commitment();
+    let dependency_commitment = package.dependency_commitment();
     let artifacts_commitment = package.artifacts_commitment();
     let package_commitment = package.commitment();
 
@@ -287,6 +288,7 @@ fn artifact_and_package_commitments_change_with_header_fields() {
         ..package.clone()
     };
     assert_eq!(code_commitment, renamed.code_commitment());
+    assert_ne!(dependency_commitment, renamed.dependency_commitment());
     assert_ne!(artifacts_commitment, renamed.artifacts_commitment());
     assert_ne!(package_commitment, renamed.commitment());
 
@@ -295,11 +297,13 @@ fn artifact_and_package_commitments_change_with_header_fields() {
         ..package.clone()
     };
     assert_eq!(code_commitment, versioned.code_commitment());
+    assert_ne!(dependency_commitment, versioned.dependency_commitment());
     assert_ne!(artifacts_commitment, versioned.artifacts_commitment());
     assert_ne!(package_commitment, versioned.commitment());
 
     let executable = Package { kind: TargetType::Executable, ..package };
     assert_eq!(code_commitment, executable.code_commitment());
+    assert_ne!(dependency_commitment, executable.dependency_commitment());
     assert_ne!(artifacts_commitment, executable.artifacts_commitment());
     assert_ne!(package_commitment, executable.commitment());
 }
@@ -308,6 +312,7 @@ fn artifact_and_package_commitments_change_with_header_fields() {
 fn artifact_and_package_commitments_change_with_manifest() {
     let package = build_package();
     let interface_commitment = package.interface_commitment().unwrap();
+    let dependency_commitment = package.dependency_commitment();
     let artifacts_commitment = package.artifacts_commitment();
     let package_commitment = package.commitment();
 
@@ -323,6 +328,7 @@ fn artifact_and_package_commitments_change_with_manifest() {
         .expect("test dependency should be unique");
     assert_eq!(interface_commitment, with_dependency.interface_commitment().unwrap());
     assert_eq!(package.code_commitment(), with_dependency.code_commitment());
+    assert_ne!(dependency_commitment, with_dependency.dependency_commitment());
     assert_ne!(artifacts_commitment, with_dependency.artifacts_commitment());
     assert_ne!(package_commitment, with_dependency.commitment());
 }
@@ -331,6 +337,7 @@ fn artifact_and_package_commitments_change_with_manifest() {
 fn artifact_and_package_commitments_change_with_sections() {
     let package = build_package();
     let artifacts_commitment = package.artifacts_commitment();
+    let dependency_commitment = package.dependency_commitment();
     let package_commitment = package.commitment();
 
     let with_metadata = Package {
@@ -338,6 +345,7 @@ fn artifact_and_package_commitments_change_with_sections() {
         ..package.clone()
     };
     assert_ne!(artifacts_commitment, with_metadata.artifacts_commitment());
+    assert_ne!(dependency_commitment, with_metadata.dependency_commitment());
     assert_ne!(package_commitment, with_metadata.commitment());
 
     let described = Package {
@@ -345,6 +353,7 @@ fn artifact_and_package_commitments_change_with_sections() {
         ..package.clone()
     };
     assert_ne!(artifacts_commitment, described.artifacts_commitment());
+    assert_eq!(dependency_commitment, described.dependency_commitment());
     assert_ne!(package_commitment, described.commitment());
 
     let with_opaque_section = Package {
@@ -355,7 +364,17 @@ fn artifact_and_package_commitments_change_with_sections() {
         ..package
     };
     assert_ne!(artifacts_commitment, with_opaque_section.artifacts_commitment());
+    assert_eq!(dependency_commitment, with_opaque_section.dependency_commitment());
     assert_ne!(package_commitment, with_opaque_section.commitment());
+}
+
+#[test]
+fn dependency_commitment_ignores_optional_debug_info() {
+    let package = build_package_with_debug_info();
+    let stripped = package.clone().without_debug_info().expect("debug stripping should succeed");
+
+    assert_eq!(package.dependency_commitment(), stripped.dependency_commitment());
+    assert_ne!(package.commitment(), stripped.commitment());
 }
 
 #[test]

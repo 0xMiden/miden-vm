@@ -660,12 +660,12 @@ fn assembles_mixed_dependencies_and_inherits_static_runtime_deps() {
 
     let runtime =
         context.assemble_library_package_with_export("runtime", "1.0.0", "deps::runtime::leaf", []);
-    let runtime_digest = runtime.commitment();
+    let runtime_digest = runtime.dependency_commitment();
     context.registry_mut().add_package(runtime.into());
 
     let regdep =
         context.assemble_library_package_with_export("regdep", "1.0.0", "deps::regdep::leaf", []);
-    let regdep_digest = regdep.commitment();
+    let regdep_digest = regdep.dependency_commitment();
     context.registry_mut().add_package(regdep.into());
 
     let predep =
@@ -895,12 +895,12 @@ end
     let registered = context
         .assemble_library("predep", Some("1.0.0"), registered_module, None::<Box<Module>>)
         .unwrap();
-    let registered_digest = registered.commitment();
+    let registered_digest = registered.dependency_commitment();
     context.registry_mut().add_package(registered.into());
 
     let predep =
         context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::leaf", []);
-    let predep_digest = predep.commitment();
+    let predep_digest = predep.dependency_commitment();
     assert_ne!(registered_digest, predep_digest);
     let predep_path = tempdir.path().join("predep.masp");
     predep.write_to_file(&predep_path).unwrap();
@@ -1017,7 +1017,7 @@ fn preassembled_dependency_does_not_repair_readable_exact_registry_artifact() {
     let selected = context.registry_mut().add_package(predep.clone().into());
 
     let path_predep = MastPackage::read_from_bytes_trusted(&predep.to_bytes()).unwrap();
-    assert_eq!(path_predep.commitment(), predep.commitment());
+    assert_eq!(path_predep.dependency_commitment(), predep.dependency_commitment());
 
     let predep_path = tempdir.path().join("predep.masp");
     path_predep.write_to_file(&predep_path).unwrap();
@@ -1067,12 +1067,12 @@ fn assembles_mixed_path_and_git_dependencies_with_shared_registry_semver_resolut
 
     let shared_120 =
         context.assemble_library_package_with_export("shared", "1.2.0", "deps::shared::leaf", []);
-    let shared_120_digest = shared_120.commitment();
+    let shared_120_digest = shared_120.dependency_commitment();
     context.registry_mut().add_package(shared_120.into());
 
     let shared_130 =
         context.assemble_library_package_with_export("shared", "1.3.0", "deps::shared::leaf", []);
-    let shared_130_digest = shared_130.commitment();
+    let shared_130_digest = shared_130.dependency_commitment();
     context.registry_mut().add_package(shared_130.into());
 
     let pathdep_dir = tempdir.path().join("pathdep");
@@ -1202,12 +1202,12 @@ fn assembles_mixed_path_and_git_dependencies_with_shared_registry_digest_resolut
 
     let shared_100 =
         context.assemble_library_package_with_export("shared", "1.0.0", "deps::shared::leaf", []);
-    let shared_digest = shared_100.commitment();
+    let shared_digest = shared_100.dependency_commitment();
     context.registry_mut().add_package(shared_100.into());
 
     let shared_200 =
         context.assemble_library_package_with_export("shared", "2.0.0", "deps::shared::leaf", []);
-    assert_ne!(shared_200.commitment(), shared_digest);
+    assert_ne!(shared_200.dependency_commitment(), shared_digest);
     context.registry_mut().add_package(shared_200.into());
 
     let pathdep_dir = tempdir.path().join("pathdep");
@@ -1404,7 +1404,7 @@ fn statically_linked_dynamic_dependencies_propagate_multiple_levels() {
         "deps::runtime::leaf",
         [],
     ));
-    let runtime_digest = runtime.commitment();
+    let runtime_digest = runtime.dependency_commitment();
     context.registry_mut().add_package(runtime);
 
     let mid_dir = tempdir.path().join("mid");
@@ -1578,7 +1578,7 @@ dep.workspace = true
     let dependency = package.manifest.dependencies().next().unwrap();
     assert_eq!(dependency.name, PackageId::from("dep"));
     assert_eq!(dependency.version, "0.2.0".parse().unwrap());
-    assert_ne!(dependency.digest, dep010.commitment());
+    assert_ne!(dependency.digest, dep010.dependency_commitment());
     let dep_record = context
         .registry()
         .get_by_semver(&dependency.name, &dependency.version)
@@ -2409,7 +2409,7 @@ fn executable_packages_preserve_kernel_when_converted_back_to_program() {
     assert_eq!(embedded_kernel_package.kind, TargetType::Kernel);
     assert_eq!(embedded_kernel_package.name, kernel_dependency.name);
     assert_eq!(embedded_kernel_package.version, kernel_dependency.version);
-    assert_eq!(embedded_kernel_package.commitment(), kernel_dependency.digest);
+    assert_eq!(embedded_kernel_package.dependency_commitment(), kernel_dependency.digest);
 
     let round_tripped_package = MastPackage::read_from_bytes(&package.to_bytes())
         .expect("serialized executable package should round-trip");
@@ -2451,7 +2451,7 @@ fn executable_packages_preserve_transitive_kernel_when_converted_back_to_program
     assert_eq!(embedded_kernel_package.kind, TargetType::Kernel);
     assert_eq!(embedded_kernel_package.name, kernel_dependency.name);
     assert_eq!(embedded_kernel_package.version, kernel_dependency.version);
-    assert_eq!(embedded_kernel_package.commitment(), kernel_dependency.digest);
+    assert_eq!(embedded_kernel_package.dependency_commitment(), kernel_dependency.digest);
 
     let round_tripped_package = MastPackage::read_from_bytes(&package.to_bytes())
         .expect("serialized executable package should round-trip");
@@ -2584,7 +2584,7 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
         .expect("kernel package should round-trip as a kernel library");
     let kernel_version = miden_package_registry::Version::new(
         kernel_package.version.clone(),
-        kernel_package.commitment(),
+        kernel_package.dependency_commitment(),
     );
     let mut mid_package = MastPackage::read_from_bytes(
         &build_context
@@ -2684,7 +2684,10 @@ end
     let conflicting_kernel = build_context
         .assemble_library_package(&conflicting_kernel_manifest, None)
         .expect("conflicting kernel package build should succeed");
-    assert_ne!(conflicting_kernel.commitment(), kernel_package.commitment());
+    assert_ne!(
+        conflicting_kernel.dependency_commitment(),
+        kernel_package.dependency_commitment()
+    );
 
     let root_manifest =
         write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
@@ -2929,7 +2932,7 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
             name: PackageId::from("runtime"),
             version: runtime_v1.version.clone(),
             kind: TargetType::Library,
-            digest: runtime_v1.commitment(),
+            digest: runtime_v1.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -2971,7 +2974,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime_v2.version.clone(),
             kind: TargetType::Library,
-            digest: runtime_v2.commitment(),
+            digest: runtime_v2.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3003,7 +3006,7 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.commitment(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3045,7 +3048,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Kernel,
-            digest: runtime.commitment(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3077,7 +3080,7 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.commitment(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3119,7 +3122,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.commitment(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
