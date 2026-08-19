@@ -324,9 +324,7 @@ fn u32div_emits_all_range_check_removes() {
 
     let rows: Vec<RowIndex> = (0..main.core_height())
         .map(RowIndex::from)
-        .filter(|&row| {
-            main.get_op_code(row) == Felt::from_u8(miden_core::operations::opcodes::U32DIV)
-        })
+        .filter(|&row| main.get_op_code(row) == Felt::from_u8(opcodes::U32DIV))
         .collect();
     assert_eq!(rows.len(), 2, "expected two U32DIV rows");
 
