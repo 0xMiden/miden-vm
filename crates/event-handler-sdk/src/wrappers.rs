@@ -72,6 +72,39 @@ pub fn mem_read(addr: u32, out: &mut [RawFelt]) -> Status {
     }
 }
 
+/// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of context `ctx`.
+///
+/// The same contract as [`mem_read`], for an explicit execution context (for example the root
+/// context, ID `0`).
+pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [RawFelt]) -> Status {
+    let raw = unsafe { guest::mem_read_ctx(ctx, addr, out.as_mut_ptr(), out.len() as u32) };
+    match status(raw) {
+        result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
+        _ => fail("mem_read_ctx failed"),
+    }
+}
+
+/// Returns the Merkle-store node of the tree with root `root` at `depth`/`index`, or `None` when
+/// the store has no such tree or no node at this position.
+///
+/// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
+pub fn merkle_get_node(root: &RawWord, depth: u32, index: u64) -> Option<RawWord> {
+    let mut out = RawWord::default();
+    match status(unsafe { guest::merkle_get_node(root, depth, index, &mut out) }) {
+        Status::Ok => Some(out),
+        Status::NotFound => None,
+        _ => fail("merkle_get_node failed"),
+    }
+}
+
+/// Returns `true` when the Merkle store has a path for the node of the tree with root `root` at
+/// `depth`/`index`.
+///
+/// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
+pub fn merkle_has_path(root: &RawWord, depth: u32, index: u64) -> bool {
+    unsafe { guest::merkle_has_path(root, depth, index) != 0 }
+}
+
 /// Returns the number of elements on the advice stack.
 pub fn adv_stack_len() -> u32 {
     unsafe { guest::adv_stack_len() }
@@ -112,6 +145,64 @@ pub fn adv_map_value_read(key: &RawWord, out: &mut [RawFelt]) -> Option<usize> {
         Status::CapacityTooSmall => fail("adv_map_value_read: output buffer is too small"),
         _ => fail("adv_map_value_read failed"),
     }
+}
+
+// HASHING
+// ================================================================================================
+
+/// Returns the Poseidon2 merge of the two words in `pair`, using `domain`.
+///
+/// Domain `0` is the plain merge, the digest behind `adv.insert_hdword` advice keys and Merkle
+/// inner nodes. A non-canonical `domain` ends the handler.
+pub fn poseidon2_merge(pair: &[RawWord; 2], domain: u64) -> RawWord {
+    let mut out = RawWord::default();
+    unsafe { guest::poseidon2_merge(pair.as_ptr(), domain, &mut out) };
+    out
+}
+
+/// Returns the Poseidon2 sequential hash of `elems`, using `domain`.
+///
+/// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys. A
+/// non-canonical `domain` ends the handler.
+pub fn poseidon2_hash(elems: &[RawFelt], domain: u64) -> RawWord {
+    let mut out = RawWord::default();
+    unsafe { guest::poseidon2_hash(elems.as_ptr(), elems.len() as u32, domain, &mut out) };
+    out
+}
+
+/// Applies the Poseidon2 permutation to the 12-element `state`, in place.
+///
+/// This matches `adv.insert_hperm` advice keys: the digest is `state[4..8]` afterwards.
+pub fn poseidon2_permute(state: &mut [RawFelt; 12]) {
+    unsafe { guest::poseidon2_permute(state.as_mut_ptr()) }
+}
+
+/// Returns the Keccak-256 digest of `data`.
+pub fn keccak256(data: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    unsafe { guest::keccak256(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
+    out
+}
+
+/// Returns the SHA-256 digest of `data`.
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    unsafe { guest::sha256(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
+    out
+}
+
+/// Returns the SHA-512 digest of `data`.
+pub fn sha512(data: &[u8]) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    unsafe { guest::sha512(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
+    out
+}
+
+/// Returns the BLAKE3 digest of `data`.
+pub fn blake3(data: &[u8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    unsafe { guest::blake3(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
+    out
 }
 
 // MUTATIONS

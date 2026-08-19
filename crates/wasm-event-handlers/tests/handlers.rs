@@ -6,11 +6,19 @@
 
 use std::{string::String, sync::Arc, vec::Vec};
 
+use miden_crypto::hash::{
+    blake::Blake3_256,
+    keccak::Keccak256,
+    sha2::{Sha256, Sha512},
+};
 use miden_event_handler_abi::{ABI_VERSION, Status};
 use miden_processor::{
     DefaultHost, FastProcessor, Felt, StackInputs, Word,
     advice::{AdviceInputs, AdviceMap, AdviceMutation, AdviceStack},
-    crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
+    crypto::{
+        hash::Poseidon2,
+        merkle::{InnerNodeInfo, MerkleStore},
+    },
     event::EventName,
 };
 use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule};
@@ -29,6 +37,16 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "ctx" (func $ctx (result i32)))
   (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
   (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
+  (import "miden:event/v1" "mem_read_ctx" (func $mem_read_ctx (param i32 i32 i32 i32) (result i32)))
+  (import "miden:event/v1" "merkle_get_node" (func $merkle_get_node (param i32 i32 i64 i32) (result i32)))
+  (import "miden:event/v1" "merkle_has_path" (func $merkle_has_path (param i32 i32 i64) (result i32)))
+  (import "miden:event/v1" "poseidon2_merge" (func $poseidon2_merge (param i32 i64 i32)))
+  (import "miden:event/v1" "poseidon2_hash" (func $poseidon2_hash (param i32 i32 i64 i32)))
+  (import "miden:event/v1" "poseidon2_permute" (func $poseidon2_permute (param i32)))
+  (import "miden:event/v1" "keccak256" (func $keccak256 (param i32 i32 i32)))
+  (import "miden:event/v1" "sha256" (func $sha256 (param i32 i32 i32)))
+  (import "miden:event/v1" "sha512" (func $sha512 (param i32 i32 i32)))
+  (import "miden:event/v1" "blake3" (func $blake3 (param i32 i32 i32)))
   (import "miden:event/v1" "adv_stack_len" (func $adv_stack_len (result i32)))
   (import "miden:event/v1" "adv_stack_read" (func $adv_stack_read (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "adv_map_value_len" (func $adv_map_value_len (param i32 i32) (result i32)))
@@ -102,6 +120,42 @@ fn data_bytes(values: &[u64]) -> String {
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .map(|byte| format!("\\{byte:02x}"))
+        .collect()
+}
+
+/// Encodes the elements of the given words as the bytes of a WAT data segment.
+fn word_bytes(words: &[Word]) -> String {
+    let values: Vec<u64> = words
+        .iter()
+        .flat_map(|word| word.as_elements().iter().map(Felt::as_canonical_u64))
+        .collect();
+    data_bytes(&values)
+}
+
+/// Builds a guest body that reposts the `bytes`-byte digest at `digest` as little-endian `u32`
+/// limbs at `felts`, and buffers those limbs onto the advice stack.
+fn digest_to_advice_stack(digest: u32, felts: u32, bytes: u32) -> String {
+    let limbs = bytes / 4;
+    let stores: String = (0..limbs)
+        .map(|idx| {
+            format!(
+                "(i64.store (i32.const {}) (i64.extend_i32_u (i32.load (i32.const {}))))",
+                felts + idx * 8,
+                digest + idx * 4,
+            )
+        })
+        .collect();
+    format!("{stores} (call $adv_stack_extend (i32.const {felts}) (i32.const {limbs}))")
+}
+
+/// Splits digest bytes into the little-endian `u32` limbs [`digest_to_advice_stack`] produces.
+fn digest_limbs(bytes: &[u8]) -> Vec<Felt> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| {
+            let limb = u32::from_le_bytes(chunk.try_into().expect("chunk is 4 bytes"));
+            Felt::new_unchecked(u64::from(limb))
+        })
         .collect()
 }
 
@@ -314,6 +368,213 @@ fn merkle_store_accepts_consistent_node() {
     assert_eq!(mutations, vec![AdviceMutation::extend_merkle_store([node])]);
 }
 
+#[test]
+fn mem_read_ctx_statuses() {
+    // Context 0 of a fresh processor has no written cell, so the batch read is Uninit; a range
+    // past the u32 address space is OutOfBounds.
+    let wat_src = fixture(
+        "(i64.store (i32.const 0)
+             (i64.extend_i32_u
+                 (call $mem_read_ctx (i32.const 0) (i32.const 0) (i32.const 16) (i32.const 2))))
+         (i64.store (i32.const 8)
+             (i64.extend_i32_u
+                 (call $mem_read_ctx (i32.const 0) (i32.const -1) (i32.const 16) (i32.const 2))))
+         (call $adv_stack_extend (i32.const 0) (i32.const 2))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = [
+        Felt::new_unchecked(Status::Uninit.as_raw() as u64),
+        Felt::new_unchecked(Status::OutOfBounds.as_raw() as u64),
+    ];
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+// MERKLE QUERY TESTS
+// ================================================================================================
+
+#[test]
+fn merkle_queries() {
+    let left = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let right = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
+    let root = Poseidon2::merge(&[left, right]);
+    // A root no tree in the store has.
+    let unknown = Word::new([9u64, 9, 9, 9].map(Felt::new_unchecked));
+
+    let mut store = MerkleStore::new();
+    store.extend([InnerNodeInfo { value: root, left, right }]);
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default().with_merkle_store(store))
+        .expect("advice inputs fit");
+
+    // The known root sits at offset 0, the unknown one at offset 32.
+    let items = format!("(data (i32.const 0) \"{}\")", word_bytes(&[root, unknown]));
+    let wat_src = fixture_with(
+        &items,
+        "(drop (call $merkle_get_node (i32.const 0) (i32.const 1) (i64.const 0) (i32.const 64)))
+         (call $adv_stack_extend (i32.const 64) (i32.const 4))
+         (i64.store (i32.const 200)
+             (i64.extend_i32_u (call $merkle_has_path (i32.const 0) (i32.const 1) (i64.const 0))))
+         (i64.store (i32.const 208)
+             (i64.extend_i32_u
+                 (call $merkle_get_node (i32.const 32) (i32.const 1) (i64.const 0)
+                       (i32.const 96))))
+         (call $adv_stack_extend (i32.const 200) (i32.const 2))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor).expect("handler succeeds");
+    let statuses = [Felt::new_unchecked(1), Felt::new_unchecked(Status::NotFound.as_raw() as u64)];
+    assert_eq!(
+        mutations,
+        vec![
+            AdviceMutation::extend_advice_stack_with(left.as_elements().to_vec()),
+            AdviceMutation::extend_advice_stack_with(statuses),
+        ]
+    );
+}
+
+// HASHING TESTS
+// ================================================================================================
+
+#[test]
+fn poseidon2_merge_matches_native() {
+    let a = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let b = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
+
+    let items = format!("(data (i32.const 0) \"{}\")", word_bytes(&[a, b]));
+    let wat_src = fixture_with(
+        &items,
+        "(call $poseidon2_merge (i32.const 0) (i64.const 0) (i32.const 64))
+         (call $adv_stack_extend (i32.const 64) (i32.const 4))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = Poseidon2::merge(&[a, b]);
+    assert_eq!(
+        mutations,
+        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+    );
+}
+
+#[test]
+fn poseidon2_merge_in_domain_matches_native() {
+    let a = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let b = Word::new([5u64, 6, 7, 8].map(Felt::new_unchecked));
+
+    let items = format!("(data (i32.const 0) \"{}\")", word_bytes(&[a, b]));
+    let wat_src = fixture_with(
+        &items,
+        "(call $poseidon2_merge (i32.const 0) (i64.const 7) (i32.const 64))
+         (call $adv_stack_extend (i32.const 64) (i32.const 4))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = Poseidon2::merge_in_domain(&[a, b], Felt::new_unchecked(7));
+    assert_eq!(
+        mutations,
+        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+    );
+}
+
+#[test]
+fn poseidon2_hash_matches_native() {
+    let values = [11u64, 22, 33, 44, 55];
+    let felts: Vec<Felt> = values.iter().map(|value| Felt::new_unchecked(*value)).collect();
+
+    let items = format!("(data (i32.const 0) \"{}\")", data_bytes(&values));
+    let wat_src = fixture_with(
+        &items,
+        "(call $poseidon2_hash (i32.const 0) (i32.const 5) (i64.const 0) (i32.const 64))
+         (call $adv_stack_extend (i32.const 64) (i32.const 4))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = Poseidon2::hash_elements(&felts);
+    assert_eq!(
+        mutations,
+        vec![AdviceMutation::extend_advice_stack_with(expected.as_elements().to_vec())]
+    );
+}
+
+#[test]
+fn poseidon2_permute_matches_native() {
+    let values: [u64; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut expected = values.map(Felt::new_unchecked);
+
+    let items = format!("(data (i32.const 0) \"{}\")", data_bytes(&values));
+    let wat_src = fixture_with(
+        &items,
+        "(call $poseidon2_permute (i32.const 0))
+         (call $adv_stack_extend (i32.const 0) (i32.const 12))",
+    );
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    Poseidon2::apply_permutation(&mut expected);
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn keccak256_matches_native() {
+    let body = format!(
+        "(call $keccak256 (i32.const 0) (i32.const 3) (i32.const 64)) {}",
+        digest_to_advice_stack(64, 128, 32)
+    );
+    let wat_src = fixture_with("(data (i32.const 0) \"abc\")", &body);
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = digest_limbs(Keccak256::hash(b"abc").as_bytes());
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn sha256_matches_native() {
+    let body = format!(
+        "(call $sha256 (i32.const 0) (i32.const 3) (i32.const 64)) {}",
+        digest_to_advice_stack(64, 128, 32)
+    );
+    let wat_src = fixture_with("(data (i32.const 0) \"abc\")", &body);
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = digest_limbs(Sha256::hash(b"abc").as_bytes());
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn sha512_matches_native() {
+    let body = format!(
+        "(call $sha512 (i32.const 0) (i32.const 3) (i32.const 64)) {}",
+        digest_to_advice_stack(64, 256, 64)
+    );
+    let wat_src = fixture_with("(data (i32.const 0) \"abc\")", &body);
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = digest_limbs(Sha512::hash(b"abc").as_bytes());
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn blake3_matches_native() {
+    let body = format!(
+        "(call $blake3 (i32.const 0) (i32.const 3) (i32.const 64)) {}",
+        digest_to_advice_stack(64, 128, 32)
+    );
+    let wat_src = fixture_with("(data (i32.const 0) \"abc\")", &body);
+    let module = load(&wat_src);
+
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    let expected = digest_limbs(Blake3_256::hash(b"abc").as_bytes());
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
 // The `StatePtr` safety argument relies on `ProcessorState` being `Sync`; keep that fact
 // checked at compile time.
 const _: () = {
@@ -405,6 +666,25 @@ fn overflowing_pointer_arithmetic_is_rejected() {
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
     assert!(err.contains("pointer range"), "unexpected error: {err}");
+}
+
+#[test]
+fn merkle_invalid_depth_traps() {
+    // Depth 200 is outside the valid range for a Merkle tree; that is a defect, not a miss.
+    let wat_src = fixture(
+        "(drop (call $merkle_get_node (i32.const 0) (i32.const 200) (i64.const 0) (i32.const 64)))",
+    );
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("invalid merkle node"), "unexpected error: {err}");
+}
+
+#[test]
+fn non_canonical_domain_traps() {
+    let wat_src = fixture("(call $poseidon2_merge (i32.const 0) (i64.const -1) (i32.const 64))");
+    let module = load(&wat_src);
+    let err = run(&module, &processor()).expect_err("handler must trap");
+    assert!(err.contains("non-canonical"), "unexpected error: {err}");
 }
 
 #[test]

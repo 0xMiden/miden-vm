@@ -2885,6 +2885,7 @@ version = "0.30.0"
 dependencies = [
  "criterion",
  "miden-assembly",
+ "miden-crypto",
  "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",

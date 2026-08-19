@@ -11,10 +11,15 @@
 
 use alloc::{format, string::String, vec::Vec};
 
+use miden_crypto::hash::{
+    blake::Blake3_256,
+    keccak::Keccak256,
+    sha2::{Sha256, Sha512},
+};
 use miden_event_handler_abi::{FIELD_MODULUS, IMPORT_MODULE, Status, host_fn};
 use miden_processor::{
-    Felt, ProcessorState, Word,
-    advice::{AdviceMap, AdviceMutation},
+    ContextId, Felt, ProcessorState, Word,
+    advice::{AdviceError, AdviceMap, AdviceMutation},
     crypto::{hash::Poseidon2, merkle::InnerNodeInfo},
 };
 use wasmi::{Caller, Engine, Linker, Memory, StoreLimits, StoreLimitsBuilder};
@@ -30,6 +35,9 @@ const FELT_BYTES: usize = 8;
 /// The number of field elements in one serialized Merkle node (three words).
 const MERKLE_NODE_FELTS: usize = 12;
 
+/// The number of field elements in the Poseidon2 permutation state.
+const POSEIDON2_STATE_FELTS: usize = 12;
+
 /// The maximum number of bytes the host reads from a `fail` message. Longer messages are
 /// truncated.
 const MAX_FAIL_MSG_BYTES: u32 = 4096;
@@ -41,10 +49,39 @@ const MAX_FAIL_MSG_BYTES: u32 = 4096;
 /// makes host-moved data cost the guest about as much fuel as moving it itself would.
 const FUEL_PER_FELT: u64 = 1;
 
+/// Fuel charged per Poseidon2 permutation the host computes for the guest.
+///
+/// Calibrated with `benches/handler_call.rs` (Apple M-series): one merge measures ~1.5 us,
+/// which is ~1900 fuel units at ~0.8 ns per unit.
+const FUEL_PER_POSEIDON2_PERM: u64 = 2000;
+
 /// Extra fuel charged per Merkle node for the host-side digest verification hash.
 ///
-/// At ~0.8 ns per fuel unit this budgets ~160 ns per node, the order of one Poseidon2 merge.
-const FUEL_PER_MERKLE_NODE: u64 = 200;
+/// One node costs one Poseidon2 merge.
+const FUEL_PER_MERKLE_NODE: u64 = FUEL_PER_POSEIDON2_PERM;
+
+/// Flat fuel charged per byte-hash call, for the call and the digest setup.
+const HASH_BASE_FUEL: u64 = 100;
+
+/// Fuel charged per input byte of `keccak256`.
+///
+/// Measured at ~1.1 ns per byte with `benches/handler_call.rs` (Apple M-series).
+const FUEL_PER_KECCAK_BYTE: u64 = 2;
+
+/// Fuel charged per input byte of `sha256`.
+///
+/// Measured at ~0.5 ns per byte with `benches/handler_call.rs` (Apple M-series).
+const FUEL_PER_SHA256_BYTE: u64 = 1;
+
+/// Fuel charged per input byte of `sha512`.
+///
+/// Measured at ~0.7 ns per byte with `benches/handler_call.rs` (Apple M-series).
+const FUEL_PER_SHA512_BYTE: u64 = 1;
+
+/// Fuel charged per input byte of `blake3`.
+///
+/// Measured at ~0.6 ns per byte with `benches/handler_call.rs` (Apple M-series).
+const FUEL_PER_BLAKE3_BYTE: u64 = 1;
 
 // HOST CONTEXT
 // ================================================================================================
@@ -174,6 +211,14 @@ fn read_felts(data: &[u8], ptr: u32, count: u32) -> Result<Vec<Felt>, wasmi::Err
     Ok(out)
 }
 
+/// Converts a `u64` the guest passed by value into a field element; a non-canonical value traps.
+fn felt_arg(raw: u64) -> Result<Felt, wasmi::Error> {
+    if raw >= FIELD_MODULUS {
+        return Err(trap(format!("non-canonical field element {raw}")));
+    }
+    Ok(Felt::new_unchecked(raw))
+}
+
 /// Reads one word (four field elements) from guest memory.
 fn read_word(data: &[u8], ptr: u32) -> Result<Word, wasmi::Error> {
     let felts = read_felts(data, ptr, 4)?;
@@ -193,6 +238,13 @@ fn write_felts(data: &mut [u8], ptr: u32, felts: &[Felt]) -> Result<(), wasmi::E
 fn write_u32(data: &mut [u8], ptr: u32, value: u32) -> Result<(), wasmi::Error> {
     let range = byte_range(data.len(), ptr, 4, 1)?;
     data[range].copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+/// Writes raw bytes into guest memory.
+fn write_bytes(data: &mut [u8], ptr: u32, bytes: &[u8]) -> Result<(), wasmi::Error> {
+    let range = byte_range(data.len(), ptr, 1, bytes.len() as u32)?;
+    data[range].copy_from_slice(bytes);
     Ok(())
 }
 
@@ -314,6 +366,87 @@ fn mem_read(
     Ok(OK)
 }
 
+/// Writes the `count` memory elements at addresses `addr..addr + count` of context `ctx` to
+/// `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
+fn mem_read_ctx(
+    mut caller: Caller<'_, HostCtx>,
+    ctx: u32,
+    addr: u32,
+    out: u32,
+    count: u32,
+) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+    if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
+        return Ok(Status::OutOfBounds.as_raw());
+    }
+    let ctx = ContextId::from(ctx);
+    let state = state(&caller)?;
+    let mut felts = Vec::with_capacity(count as usize);
+    for idx in 0..count {
+        match state.get_mem_value(ctx, addr + idx) {
+            Some(felt) => felts.push(felt),
+            // The whole range must be written; use `mem_get` for per-cell checks.
+            None => return Ok(Status::Uninit.as_raw()),
+        }
+    }
+    write_felts(mem.data_mut(&mut caller), out, &felts)?;
+    Ok(OK)
+}
+
+/// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to `out`, or
+/// returns [`Status::NotFound`] when the store has no such tree or no node at this position.
+fn merkle_get_node(
+    mut caller: Caller<'_, HostCtx>,
+    root: u32,
+    depth: u32,
+    index: u64,
+    out: u32,
+) -> Result<i32, wasmi::Error> {
+    // The lookup walks one level per depth unit, and moves the root in and the node out.
+    charge_fuel(&mut caller, u64::from(depth) * FUEL_PER_FELT + 8)?;
+    let mem = memory(&mut caller)?;
+    let root = read_word(mem.data(&caller), root)?;
+    let index = felt_arg(index)?;
+    let depth = Felt::new_unchecked(u64::from(depth));
+    let node = state(&caller)?.advice_provider().get_tree_node(root, depth, index);
+    match node {
+        Ok(node) => {
+            write_felts(mem.data_mut(&mut caller), out, node.as_elements())?;
+            Ok(OK)
+        },
+        // A position outside the valid range for a Merkle tree is a defect, not a miss.
+        Err(AdviceError::InvalidMerkleTreeNodeIndex { .. }) => {
+            Err(trap("invalid merkle node depth/index"))
+        },
+        Err(AdviceError::MerkleStoreLookupFailed(_)) => Ok(Status::NotFound.as_raw()),
+        Err(err) => Err(trap(format!("{err}"))),
+    }
+}
+
+/// Returns `1` when the Merkle store has a path for the node of the tree with root `root` at
+/// `depth`/`index`, and `0` when it has not.
+fn merkle_has_path(
+    mut caller: Caller<'_, HostCtx>,
+    root: u32,
+    depth: u32,
+    index: u64,
+) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(depth) * FUEL_PER_FELT + 8)?;
+    let mem = memory(&mut caller)?;
+    let root = read_word(mem.data(&caller), root)?;
+    let index = felt_arg(index)?;
+    let depth = Felt::new_unchecked(u64::from(depth));
+    match state(&caller)?.advice_provider().has_merkle_path(root, depth, index) {
+        Ok(has_path) => Ok(i32::from(has_path)),
+        Err(AdviceError::InvalidMerkleTreeNodeIndex { .. }) => {
+            Err(trap("invalid merkle node depth/index"))
+        },
+        Err(err) => Err(trap(format!("{err}"))),
+    }
+}
+
 /// Returns the number of elements on the advice stack.
 fn adv_stack_len(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
     state(&caller).map(|state| state.advice_provider().stack_len() as u32)
@@ -389,6 +522,116 @@ fn adv_map_value_read(
         .to_vec();
     write_felts(mem.data_mut(&mut caller), out, &values)?;
     Ok(OK)
+}
+
+// HASHING
+// ================================================================================================
+
+/// Writes the Poseidon2 merge of the two words at `pair` to `out`, using `domain`.
+fn poseidon2_merge(
+    mut caller: Caller<'_, HostCtx>,
+    pair: u32,
+    domain: u64,
+    out: u32,
+) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, FUEL_PER_POSEIDON2_PERM + 12 * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    let felts = read_felts(mem.data(&caller), pair, 8)?;
+    let word = |at: usize| Word::new([felts[at], felts[at + 1], felts[at + 2], felts[at + 3]]);
+    let pair = [word(0), word(4)];
+    let domain_felt = felt_arg(domain)?;
+    // Domain zero is the plain merge, not a merge in the zero domain.
+    let digest = if domain == 0 {
+        Poseidon2::merge(&pair)
+    } else {
+        Poseidon2::merge_in_domain(&pair, domain_felt)
+    };
+    write_felts(mem.data_mut(&mut caller), out, digest.as_elements())
+}
+
+/// Writes the Poseidon2 sequential hash of the `count` field elements at `elems` to `out`, using
+/// `domain`.
+fn poseidon2_hash(
+    mut caller: Caller<'_, HostCtx>,
+    elems: u32,
+    count: u32,
+    domain: u64,
+    out: u32,
+) -> Result<(), wasmi::Error> {
+    // The sponge absorbs eight elements per permutation, and always runs a final one.
+    let permutations = u64::from(count) / 8 + 1;
+    let fuel = FUEL_PER_POSEIDON2_PERM * permutations + u64::from(count) * FUEL_PER_FELT;
+    charge_fuel(&mut caller, fuel)?;
+    let mem = memory(&mut caller)?;
+    let felts = read_felts(mem.data(&caller), elems, count)?;
+    let domain_felt = felt_arg(domain)?;
+    // Domain zero is the plain hash, not a hash in the zero domain.
+    let digest = if domain == 0 {
+        Poseidon2::hash_elements(&felts)
+    } else {
+        Poseidon2::hash_elements_in_domain(&felts, domain_felt)
+    };
+    write_felts(mem.data_mut(&mut caller), out, digest.as_elements())
+}
+
+/// Applies the Poseidon2 permutation to the 12-element state at `state_ptr`, in place.
+fn poseidon2_permute(mut caller: Caller<'_, HostCtx>, state_ptr: u32) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, FUEL_PER_POSEIDON2_PERM + 24 * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    let felts = read_felts(mem.data(&caller), state_ptr, POSEIDON2_STATE_FELTS as u32)?;
+    let mut sponge: [Felt; POSEIDON2_STATE_FELTS] =
+        felts.try_into().expect("read_felts returned the requested element count");
+    Poseidon2::apply_permutation(&mut sponge);
+    write_felts(mem.data_mut(&mut caller), state_ptr, &sponge)
+}
+
+/// Hashes the `len` bytes at `data` with `hash` and writes the digest to `out`.
+fn hash_bytes<const N: usize>(
+    mut caller: Caller<'_, HostCtx>,
+    data: u32,
+    len: u32,
+    out: u32,
+    fuel_per_byte: u64,
+    hash: impl Fn(&[u8]) -> [u8; N],
+) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, HASH_BASE_FUEL + u64::from(len) * fuel_per_byte)?;
+    let mem = memory(&mut caller)?;
+    let range = byte_range(mem.data(&caller).len(), data, 1, len)?;
+    let digest = hash(&mem.data(&caller)[range]);
+    write_bytes(mem.data_mut(&mut caller), out, &digest)
+}
+
+/// Writes the Keccak-256 digest of the `len` bytes at `data` to `out`.
+fn keccak256(
+    caller: Caller<'_, HostCtx>,
+    data: u32,
+    len: u32,
+    out: u32,
+) -> Result<(), wasmi::Error> {
+    hash_bytes(caller, data, len, out, FUEL_PER_KECCAK_BYTE, |bytes| {
+        *Keccak256::hash(bytes).as_bytes()
+    })
+}
+
+/// Writes the SHA-256 digest of the `len` bytes at `data` to `out`.
+fn sha256(caller: Caller<'_, HostCtx>, data: u32, len: u32, out: u32) -> Result<(), wasmi::Error> {
+    hash_bytes(caller, data, len, out, FUEL_PER_SHA256_BYTE, |bytes| {
+        *Sha256::hash(bytes).as_bytes()
+    })
+}
+
+/// Writes the SHA-512 digest of the `len` bytes at `data` to `out`.
+fn sha512(caller: Caller<'_, HostCtx>, data: u32, len: u32, out: u32) -> Result<(), wasmi::Error> {
+    hash_bytes(caller, data, len, out, FUEL_PER_SHA512_BYTE, |bytes| {
+        *Sha512::hash(bytes).as_bytes()
+    })
+}
+
+/// Writes the BLAKE3 digest of the `len` bytes at `data` to `out`.
+fn blake3(caller: Caller<'_, HostCtx>, data: u32, len: u32, out: u32) -> Result<(), wasmi::Error> {
+    hash_bytes(caller, data, len, out, FUEL_PER_BLAKE3_BYTE, |bytes| {
+        *Blake3_256::hash(bytes).as_bytes()
+    })
 }
 
 // MUTATIONS
@@ -509,6 +752,18 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
         host_fn::CTX => ctx,
         host_fn::MEM_GET => mem_get,
         host_fn::MEM_READ => mem_read,
+        host_fn::MEM_READ_CTX => mem_read_ctx,
+        host_fn::MERKLE_GET_NODE => merkle_get_node,
+        host_fn::MERKLE_HAS_PATH => merkle_has_path,
+        // hashing
+        host_fn::POSEIDON2_MERGE => poseidon2_merge,
+        host_fn::POSEIDON2_HASH => poseidon2_hash,
+        host_fn::POSEIDON2_PERMUTE => poseidon2_permute,
+        host_fn::KECCAK256 => keccak256,
+        host_fn::SHA256 => sha256,
+        host_fn::SHA512 => sha512,
+        host_fn::BLAKE3 => blake3,
+        // advice-provider queries
         host_fn::ADV_STACK_LEN => adv_stack_len,
         host_fn::ADV_STACK_READ => adv_stack_read,
         host_fn::ADV_MAP_VALUE_LEN => adv_map_value_len,
