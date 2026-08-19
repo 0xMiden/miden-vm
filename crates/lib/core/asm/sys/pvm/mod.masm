@@ -155,8 +155,13 @@ end
 #! The core library deliberately provides no default handler because the host must supply the
 #! deferred state or another witness source for `D`.
 #!
+#! Fails if the host has not populated the advice map under
+#! `build_proof_request_key(verifier_root, D)` by the time its event handler returns.
+#!
 #! Inputs:  [D]
 #! Outputs: [D]
+#!
+#! Invocation: exec
 pub proc request_proof
     dupw
     procref.::miden::core::sys::pvm::verify_proof
