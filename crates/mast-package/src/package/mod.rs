@@ -1187,6 +1187,9 @@ impl Package {
         let Some(section) = self.embedded_kernel_section()? else {
             return Ok(None);
         };
+        // Dependency identity binds every serialized package byte, including debug sections. An
+        // untrusted decode below intentionally discards those sections, so compute the serialized
+        // commitment from a separate validated decode that retains them.
         let serialized_commitment = Self::read_from_bytes_trusted(section.data.as_ref())
             .map_err(|error| {
                 Report::msg(format!(
