@@ -5420,6 +5420,53 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 }
 
 #[test]
+fn directly_self_referential_type_alias_is_diagnosed() -> TestResult {
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::selfref
+
+        pub type A = struct { inner: A }
+
+        pub proc entry(value: A)
+            nop
+        end
+        "#
+    ))?;
+
+    let err = context
+        .assemble_library("lib", None, module, [])
+        .expect_err("a self-referential type should be rejected");
+    assert_diagnostic!(&err, "recursive");
+    Ok(())
+}
+
+#[test]
+fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::cyc
+
+        pub type A = B
+        pub type B = A
+
+        pub proc entry(value: A)
+            nop
+        end
+        "#
+    ))?;
+
+    let err = context
+        .assemble_library("lib", None, module, [])
+        .expect_err("an alias cycle should be rejected rather than recursing forever");
+    assert_diagnostic!(&err, "recursive");
+    Ok(())
+}
+
+#[test]
 fn link_import_module_and_item_forms_resolve() -> TestResult {
     let context = TestContext::new();
     let dep = context.parse_module(source_file!(

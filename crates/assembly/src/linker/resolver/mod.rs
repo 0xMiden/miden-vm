@@ -39,6 +39,11 @@ pub struct ResolverCache {
     pub types: BTreeMap<GlobalItemIndex, types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
     pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
+    /// Type declarations currently being resolved, and where resolution of each began.
+    ///
+    /// Type references are expanded structurally, so this allows us to catch declaration cycles
+    /// such as `type A = B` / `type B = A` which would otherwise infinitely recurse.
+    pub evaluating_types: BTreeMap<GlobalItemIndex, SourceSpan>,
 }
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
@@ -173,6 +178,55 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
         context: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
+        if let Some(cached) = self.cache.types.get(&gid) {
+            return Ok(cached.clone());
+        }
+
+        if let Some(start) = self.cache.evaluating_types.get(&gid).copied() {
+            return Err(LinkerError::RecursiveType {
+                span: start,
+                cycle_span: context,
+                source_file: self.get_source_file_for(start),
+            });
+        }
+
+        self.cache.evaluating_types.insert(gid, context);
+        let resolved = self.resolve_type_by_gid(context, gid);
+        self.cache.evaluating_types.remove(&gid);
+
+        let ty = resolved?;
+        self.cache.types.insert(gid, ty.clone());
+        Ok(ty)
+    }
+
+    fn get_local_type(
+        &mut self,
+        context: SourceSpan,
+        id: ItemIndex,
+    ) -> Result<Option<types::Type>, LinkerError> {
+        self.get_type(context, self.current_module + id).map(Some)
+    }
+
+    fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
+        let context = SymbolResolutionContext {
+            span: ty.span(),
+            module: self.current_module,
+            kind: None,
+        };
+        let gid = self.resolver.resolve_type_path(&context, ty)?;
+        Ok(SymbolResolution::Exact {
+            gid,
+            path: Span::new(ty.span(), self.resolver.item_path(gid)),
+        })
+    }
+}
+
+impl<'a, 'b: 'a> Resolver<'a, 'b> {
+    fn resolve_type_by_gid(
+        &mut self,
+        context: SourceSpan,
+        gid: GlobalItemIndex,
+    ) -> Result<types::Type, LinkerError> {
         match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
             SymbolItem::Type(ast::TypeDecl::Enum(ty)) => {
@@ -234,26 +288,5 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                 })
             },
         }
-    }
-
-    fn get_local_type(
-        &mut self,
-        context: SourceSpan,
-        id: ItemIndex,
-    ) -> Result<Option<types::Type>, LinkerError> {
-        self.get_type(context, self.current_module + id).map(Some)
-    }
-
-    fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
-        let context = SymbolResolutionContext {
-            span: ty.span(),
-            module: self.current_module,
-            kind: None,
-        };
-        let gid = self.resolver.resolve_type_path(&context, ty)?;
-        Ok(SymbolResolution::Exact {
-            gid,
-            path: Span::new(ty.span(), self.resolver.item_path(gid)),
-        })
     }
 }

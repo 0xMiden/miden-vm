@@ -252,6 +252,19 @@ pub enum LinkerError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
+    #[error("recursive type definition")]
+    #[diagnostic(help(
+        "this type refers to itself without an intervening pointer, so it would have infinite \
+         size; introduce a pointer somewhere in the cycle"
+    ))]
+    RecursiveType {
+        #[label("this type is defined in terms of itself")]
+        span: SourceSpan,
+        #[label("the cycle returns here")]
+        cycle_span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("invalid type reference")]
     #[diagnostic(help("the item this path resolves to is not a type definition"))]
     InvalidTypeRef {
