@@ -19,10 +19,17 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-mast-package/std", "miden-processor/std", "thiserror/std", "wasmi/std"]
+std = [
+    "miden-crypto/std",
+    "miden-mast-package/std",
+    "miden-processor/std",
+    "thiserror/std",
+    "wasmi/std",
+]
 
 [dependencies]
 # Miden dependencies
+miden-crypto.workspace = true
 miden-event-handler-abi.workspace = true
 miden-mast-package.workspace = true
 miden-processor.workspace = true

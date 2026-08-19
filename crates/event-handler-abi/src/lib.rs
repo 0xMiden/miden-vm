@@ -216,6 +216,26 @@ pub mod host_fn {
     pub const MEM_GET: &str = "mem_get";
     /// See `guest::mem_read`.
     pub const MEM_READ: &str = "mem_read";
+    /// See `guest::mem_read_ctx`.
+    pub const MEM_READ_CTX: &str = "mem_read_ctx";
+    /// See `guest::merkle_get_node`.
+    pub const MERKLE_GET_NODE: &str = "merkle_get_node";
+    /// See `guest::merkle_has_path`.
+    pub const MERKLE_HAS_PATH: &str = "merkle_has_path";
+    /// See `guest::poseidon2_merge`.
+    pub const POSEIDON2_MERGE: &str = "poseidon2_merge";
+    /// See `guest::poseidon2_hash`.
+    pub const POSEIDON2_HASH: &str = "poseidon2_hash";
+    /// See `guest::poseidon2_permute`.
+    pub const POSEIDON2_PERMUTE: &str = "poseidon2_permute";
+    /// See `guest::keccak256`.
+    pub const KECCAK256: &str = "keccak256";
+    /// See `guest::sha256`.
+    pub const SHA256: &str = "sha256";
+    /// See `guest::sha512`.
+    pub const SHA512: &str = "sha512";
+    /// See `guest::blake3`.
+    pub const BLAKE3: &str = "blake3";
     /// See `guest::adv_stack_len`.
     pub const ADV_STACK_LEN: &str = "adv_stack_len";
     /// See `guest::adv_stack_read`.
@@ -285,6 +305,78 @@ pub mod guest {
         /// and `Status::Uninit` when any cell in the range was never written; `out` is not
         /// changed in either case. Use `mem_get` for a per-cell presence check.
         pub fn mem_read(addr: u32, out: *mut RawFelt, count: u32) -> i32;
+
+        /// Writes the `count` memory elements at addresses `addr..addr + count` of context
+        /// `ctx` to `out`.
+        ///
+        /// The same contract as `mem_read`, for an explicit execution context (for example the
+        /// root context, ID `0`). Returns `Status::OutOfBounds` when `addr + count` goes past
+        /// the `u32` address space, and `Status::Uninit` when any cell in the range was never
+        /// written; `out` is not changed in either case.
+        pub fn mem_read_ctx(ctx: u32, addr: u32, out: *mut RawFelt, count: u32) -> i32;
+
+        /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to
+        /// `out`.
+        ///
+        /// Returns `Status::NotFound` when the store has no tree with this root or no node at
+        /// this position; `out` is not changed in that case. A `depth` or `index` outside the
+        /// valid range for a Merkle tree traps.
+        pub fn merkle_get_node(
+            root: *const RawWord,
+            depth: u32,
+            index: u64,
+            out: *mut RawWord,
+        ) -> i32;
+
+        /// Returns `1` when the Merkle store has a path for the node of the tree with root
+        /// `root` at `depth`/`index`, and `0` when it has not.
+        ///
+        /// A `depth` or `index` outside the valid range for a Merkle tree traps.
+        pub fn merkle_has_path(root: *const RawWord, depth: u32, index: u64) -> i32;
+
+        // HASHING
+        // ----------------------------------------------------------------------------------------
+        //
+        // The host computes VM-native hashes on the guest's behalf, so guests do not carry
+        // their own crypto implementations and always agree bit-for-bit with the VM. Poseidon2
+        // is the hash behind every advice-map key convention (`adv.insert_hdword` keys are
+        // `merge`, `adv.insert_hqword` keys are `hash`, `adv.insert_hperm` keys come from the
+        // raw permutation) and behind Merkle nodes and SMT leaves. All `domain` parameters are
+        // field elements in canonical form; a non-canonical domain traps.
+
+        /// Writes the Poseidon2 merge of the two words at `pair` to `out`, using `domain`.
+        ///
+        /// Domain `0` is the plain merge, the digest behind `adv.insert_hdword` advice keys and
+        /// Merkle inner nodes. Other domains match `adv.insert_hdword_d` and the SMT leaf
+        /// domains.
+        pub fn poseidon2_merge(pair: *const RawWord, domain: u64, out: *mut RawWord);
+
+        /// Writes the Poseidon2 sequential hash of `count` field elements at `elems` to `out`,
+        /// using `domain`.
+        ///
+        /// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys and
+        /// commitment values. The elements are validated canonical; a non-canonical element
+        /// traps.
+        pub fn poseidon2_hash(elems: *const RawFelt, count: u32, domain: u64, out: *mut RawWord);
+
+        /// Applies the Poseidon2 permutation to the 12-element state at `state`, in place.
+        ///
+        /// This matches `adv.insert_hperm` advice keys: the digest is `state[4..8]` after the
+        /// permutation. The state elements are validated canonical; a non-canonical element
+        /// traps.
+        pub fn poseidon2_permute(state: *mut RawFelt);
+
+        /// Writes the Keccak-256 digest (32 bytes) of the `len` bytes at `data` to `out`.
+        pub fn keccak256(data: *const u8, len: u32, out: *mut u8);
+
+        /// Writes the SHA-256 digest (32 bytes) of the `len` bytes at `data` to `out`.
+        pub fn sha256(data: *const u8, len: u32, out: *mut u8);
+
+        /// Writes the SHA-512 digest (64 bytes) of the `len` bytes at `data` to `out`.
+        pub fn sha512(data: *const u8, len: u32, out: *mut u8);
+
+        /// Writes the BLAKE3 digest (32 bytes) of the `len` bytes at `data` to `out`.
+        pub fn blake3(data: *const u8, len: u32, out: *mut u8);
 
         /// Returns the number of elements on the advice stack.
         pub fn adv_stack_len() -> u32;

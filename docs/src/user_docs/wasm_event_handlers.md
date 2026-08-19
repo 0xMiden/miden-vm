@@ -61,6 +61,9 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `clk() -> u64`, `ctx() -> u32` | Clock cycle and execution context. |
 | `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when the cell was never written (distinct from zero). |
 | `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when any cell is unwritten, `OutOfBounds` past the `u32` address space. |
+| `mem_read_ctx(ctx, addr, out, count) -> status` | The same batch read for an explicit execution context, for example the root context (ID `0`). |
+| `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
+| `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. |
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
 | `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap) -> status` | Two-phase advice-map reads; `NotFound` when the key has no entry. |
 
@@ -72,13 +75,25 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `adv_map_insert(key, vals, len)` | Insert an advice-map entry. |
 | `merkle_store_extend(nodes, len)` | Add inner nodes; each must satisfy `value == hash(left, right)`. |
 
+**Hashing** is done by the host, so a handler agrees bit-for-bit with the VM's advice-key and Merkle conventions and carries no crypto implementation of its own. Each call is fuel-charged in proportion to the work it causes: per permutation for Poseidon2, per input byte for the byte hashes.
+
+| Import | Description |
+| --- | --- |
+| `poseidon2_merge(pair, domain, out)` | Merge of two words; domain `0` is the plain merge behind `adv.insert_hdword` keys and Merkle inner nodes. |
+| `poseidon2_hash(elems, count, domain, out)` | Sequential hash of field elements; domain `0` is the plain hash behind `adv.insert_hqword` keys. |
+| `poseidon2_permute(state)` | The raw permutation over 12 elements, in place; matches `adv.insert_hperm` keys, whose digest is `state[4..8]`. |
+| `keccak256(data, len, out)` | Keccak-256 digest of `len` bytes (32 bytes out). |
+| `sha256(data, len, out)` | SHA-256 digest of `len` bytes (32 bytes out). |
+| `sha512(data, len, out)` | SHA-512 digest of `len` bytes (64 bytes out). |
+| `blake3(data, len, out)` | BLAKE3 digest of `len` bytes (32 bytes out). |
+
 **Failure.** `fail(msg_ptr, msg_len)` records an error message and traps. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `Uninit`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
 
 ## Limits and validation
 
 Handler modules are untrusted. At load time the host rejects: imports outside `miden:event/v1` (no WASI), modules with a start section, missing or wrongly-typed manifest exports, duplicate or reserved (`sys::`) event names, and an ABI version mismatch. Float instructions are rejected by default for cross-host determinism.
 
-Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), and a cap on the total buffered mutation size (default 65,536 field elements). Fuel meters more than instructions: host calls charge additional fuel in proportion to the field elements they move (and per Merkle node hashed), so the budget bounds the total work a handler causes on the host, not only what it executes itself.
+Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), and a cap on the total buffered mutation size (default 65,536 field elements). Fuel meters more than instructions: host calls charge additional fuel in proportion to the field elements they move and to the hashes they compute, so the budget bounds the total work a handler causes on the host, not only what it executes itself.
 
 ## Determinism across hosts
 
