@@ -176,9 +176,12 @@ fn enforce_overflow_index_constraints<AB>(
         .when(context_start.clone())
         .assert_zero(overflow_addr_next);
 
-    // END restores the caller's overflow address through the block stack lookup. A right shift
-    // creates a new overflow record, while a left shift with non-empty overflow restores the
-    // previous address through the overflow table lookup. All other transitions preserve b1.
+    // END restores the caller's overflow address through the block stack lookup. The call and
+    // syscall end flags are mutually exclusive: the block-stack relation has one Full removal to
+    // match the corresponding CALL or SYSCALL addition (see block_stack_and_range_logcap). Thus,
+    // their sum is boolean on valid traces. A right shift creates a new overflow record, while a
+    // left shift with non-empty overflow restores the previous address through the overflow table
+    // lookup. All other transitions preserve b1.
     let context_end = op_flags.end()
         * (local.decoder.hasher_state[6].into() + local.decoder.hasher_state[7].into());
     let pointer_changes = context_start
@@ -306,5 +309,45 @@ mod tests {
                 "opcode {opcode} must reset the overflow address"
             );
         }
+    }
+
+    #[test]
+    fn call_end_allows_overflow_address_restoration() {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.decoder.hasher_state[6] = ONE;
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(23);
+        next.stack.b1 = Felt::new_unchecked(7);
+        next.stack.h0 = ONE;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+    }
+
+    #[test]
+    fn simple_end_preserves_overflow_address() {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = local.stack.b0;
+        next.stack.b1 = local.stack.b1;
+        next.stack.h0 = ONE;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b1 += ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "END of a simple block must preserve the overflow address"
+        );
     }
 }
