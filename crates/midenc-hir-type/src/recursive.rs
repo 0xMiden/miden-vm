@@ -123,6 +123,20 @@ impl RecTypeRef {
         self.group.defs.len()
     }
 
+    /// The index of the selected definition within its group.
+    #[inline]
+    #[cfg(feature = "serde")]
+    pub(crate) fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// The group's definitions, in canonical order.
+    #[inline]
+    #[cfg(feature = "serde")]
+    pub(crate) fn defs(&self) -> &[RecDef] {
+        &self.group.defs
+    }
+
     /// Unfold this reference one level into the struct it denotes.
     ///
     /// Every child of the result is an ordinary, closed [Type]. Panics if this reference selects
@@ -216,12 +230,12 @@ impl Hash for RecGroup {
 
 /// A single definition within a [RecGroup].
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct RecDef {
+pub(crate) struct RecDef {
     /// Ordering key within the group, and the display name.
-    name: Arc<str>,
-    kind: AggregateKind,
-    body: OpenAggregate,
-    layout: TypeLayout,
+    pub(crate) name: Arc<str>,
+    pub(crate) kind: AggregateKind,
+    pub(crate) body: OpenAggregate,
+    pub(crate) layout: TypeLayout,
 }
 
 fn hash_defs(defs: &[RecDef]) -> u64 {
@@ -251,7 +265,7 @@ fn hash_defs(defs: &[RecDef]) -> u64 {
 
 /// A definition body which may contain back-references.
 #[derive(Debug, PartialEq, Eq, Hash)]
-enum OpenAggregate {
+pub(crate) enum OpenAggregate {
     Struct(OpenStructType),
     Enum(OpenEnumType),
 }
@@ -263,7 +277,7 @@ enum OpenAggregate {
 /// down to its variables, with ordinary [Type] values hanging off it. Closing a body only rewrites
 /// that spine, and closed subterms are shared by `Arc` clone rather than rebuilt.
 #[derive(Debug, PartialEq, Eq, Hash)]
-enum OpenType {
+pub(crate) enum OpenType {
     /// A subterm containing no back-references.
     Closed(Type),
     /// A back-reference to definition `i` of the enclosing group.
@@ -277,37 +291,37 @@ enum OpenType {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct OpenStructType {
-    name: Option<Arc<str>>,
-    repr: TypeRepr,
-    size: u32,
-    fields: Vec<OpenStructField>,
+pub(crate) struct OpenStructType {
+    pub(crate) name: Option<Arc<str>>,
+    pub(crate) repr: TypeRepr,
+    pub(crate) size: u32,
+    pub(crate) fields: Vec<OpenStructField>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct OpenStructField {
-    name: Option<Arc<str>>,
-    index: u8,
-    align: u16,
-    offset: u32,
-    ty: OpenType,
+pub(crate) struct OpenStructField {
+    pub(crate) name: Option<Arc<str>>,
+    pub(crate) index: u8,
+    pub(crate) align: u16,
+    pub(crate) offset: u32,
+    pub(crate) ty: OpenType,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct OpenEnumType {
-    name: Arc<str>,
-    discriminant: Type,
-    variants: Vec<OpenVariant>,
-    offsets: Vec<u32>,
-    size: u32,
-    align: u32,
+pub(crate) struct OpenEnumType {
+    pub(crate) name: Arc<str>,
+    pub(crate) discriminant: Type,
+    pub(crate) variants: Vec<OpenVariant>,
+    pub(crate) offsets: Vec<u32>,
+    pub(crate) size: u32,
+    pub(crate) align: u32,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct OpenVariant {
-    name: Arc<str>,
-    value: Option<OpenType>,
-    discriminant_value: Option<u128>,
+pub(crate) struct OpenVariant {
+    pub(crate) name: Arc<str>,
+    pub(crate) value: Option<OpenType>,
+    pub(crate) discriminant_value: Option<u128>,
 }
 
 impl OpenType {
@@ -336,10 +350,10 @@ impl OpenType {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct OpenFunctionType {
-    abi: CallConv,
-    params: Vec<OpenType>,
-    results: Vec<OpenType>,
+pub(crate) struct OpenFunctionType {
+    pub(crate) abi: CallConv,
+    pub(crate) params: Vec<OpenType>,
+    pub(crate) results: Vec<OpenType>,
 }
 
 impl OpenStructType {
@@ -1343,12 +1357,15 @@ mod tests {
         // recursive form lowers identically to the shape it denotes.
         let node = build_one(node_builder(), "Node");
 
-        let equivalent = Type::from(StructType::named(Arc::from("Node"), [
-            (Arc::from("value"), Type::U32),
-            (Arc::from("next"), Type::from(PointerType::new(Type::U32))),
-        ]));
+        let equivalent = Type::from(StructType::named(
+            Arc::from("Node"),
+            [
+                (Arc::from("value"), Type::U32),
+                (Arc::from("next"), Type::from(PointerType::new(Type::U32))),
+            ],
+        ));
 
-        let recursive_parts = node.clone().to_raw_parts().expect("should lower");
+        let recursive_parts = node.to_raw_parts().expect("should lower");
         let equivalent_parts = equivalent.to_raw_parts().expect("should lower");
 
         assert_eq!(recursive_parts.len(), equivalent_parts.len());

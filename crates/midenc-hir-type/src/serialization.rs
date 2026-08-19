@@ -1,4 +1,4 @@
-use alloc::{format, string::String};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 
 use miden_serde_utils::*;
 use smallvec::SmallVec;
@@ -116,11 +116,9 @@ impl Serializable for Type {
                 }
                 ty.pointee().write_into(target);
             },
+            Type::Struct(StructRef::Rec(ty)) => write_recursive_group(ty, target),
+            Type::Enum(EnumRef::Rec(ty)) => write_recursive_group(ty, target),
             Type::Struct(ty) => {
-                assert!(
-                    !ty.is_recursive(),
-                    "TODO(recursive-types): recursive struct serialization is not implemented yet"
-                );
                 let ty = ty.get();
                 target.write_u8(17);
                 if let Some(name) = ty.name() {
@@ -171,10 +169,6 @@ impl Serializable for Type {
                 ty.write_into(target);
             },
             Type::Enum(ty) => {
-                assert!(
-                    !ty.is_recursive(),
-                    "TODO(recursive-types): recursive enum serialization is not implemented yet"
-                );
                 let ty = ty.get();
                 target.write_u8(21);
                 target.write_usize(ty.name().len());
@@ -212,6 +206,484 @@ impl Serializable for Type {
     }
 }
 
+// RECURSIVE GROUP CODEC
+// ================================================================================================
+
+/// Tag for a recursive aggregate, which carries its whole definition group.
+const TAG_RECURSIVE_GROUP: u8 = 23;
+/// Tag for a back-reference to a definition of the enclosing group. Only valid inside a group
+/// body; encountering it anywhere else would yield a type with an unbound back-reference.
+const TAG_RECURSIVE_REF: u8 = 24;
+
+fn write_str_with_len<W: ByteWriter>(name: &str, target: &mut W) {
+    target.write_usize(name.len());
+    target.write_bytes(name.as_bytes());
+}
+
+/// Encode a recursive aggregate as its whole group plus the index of the selected definition.
+///
+/// Definitions are written in canonical order, so the decoder can resolve a back-reference index
+/// to a name from the headers alone, and can reject any encoding that is not canonical.
+fn write_recursive_group<W: ByteWriter>(ty: &RecTypeRef, target: &mut W) {
+    let defs = ty.defs();
+    target.write_u8(TAG_RECURSIVE_GROUP);
+    target.write_u16(defs.len() as u16);
+
+    // Headers first, so a back-reference index can be resolved to a name while reading bodies.
+    for def in defs {
+        write_str_with_len(&def.name, target);
+        target.write_u8(match def.kind {
+            AggregateKind::Struct => 0,
+            AggregateKind::Enum => 1,
+        });
+    }
+
+    for def in defs {
+        match &def.body {
+            OpenAggregate::Struct(body) => write_open_struct_body(body, target),
+            OpenAggregate::Enum(body) => write_open_enum_body(body, target),
+        }
+    }
+
+    target.write_u16(ty.index());
+}
+
+fn write_open_struct_body<W: ByteWriter>(ty: &OpenStructType, target: &mut W) {
+    match ty.name.as_ref() {
+        Some(name) => {
+            target.write_bool(true);
+            write_str_with_len(name, target);
+        },
+        None => target.write_bool(false),
+    }
+    write_type_repr(ty.repr, target);
+    // Layouts are recomputed on decode, so field offsets and sizes are not encoded.
+    target.write_u8(
+        u8::try_from(ty.fields.len()).expect("invalid struct: expected no more than 255 fields"),
+    );
+    for field in &ty.fields {
+        match field.name.as_ref() {
+            Some(name) => {
+                target.write_bool(true);
+                write_str_with_len(name, target);
+            },
+            None => target.write_bool(false),
+        }
+        write_open_type(&field.ty, target);
+    }
+}
+
+fn write_open_enum_body<W: ByteWriter>(ty: &OpenEnumType, target: &mut W) {
+    write_str_with_len(&ty.name, target);
+    ty.discriminant.write_into(target);
+    target.write_usize(ty.variants.len());
+    let discriminant_size_in_bits = ty.discriminant.size_in_bits();
+    for variant in &ty.variants {
+        write_str_with_len(&variant.name, target);
+        match variant.value.as_ref() {
+            Some(value) => {
+                target.write_bool(true);
+                write_open_type(value, target);
+            },
+            None => target.write_bool(false),
+        }
+        match variant.discriminant_value {
+            Some(value) => {
+                target.write_bool(true);
+                write_discriminant_value(value, discriminant_size_in_bits, target);
+            },
+            None => target.write_bool(false),
+        }
+    }
+}
+
+fn write_type_repr<W: ByteWriter>(repr: TypeRepr, target: &mut W) {
+    match repr {
+        TypeRepr::Default => target.write_u8(0),
+        TypeRepr::Align(align) => {
+            target.write_u8(1);
+            target.write_u16(align.get());
+        },
+        TypeRepr::Packed(align) => {
+            target.write_u8(2);
+            target.write_u16(align.get());
+        },
+        TypeRepr::Transparent => target.write_u8(3),
+    }
+}
+
+fn write_discriminant_value<W: ByteWriter>(value: u128, size_in_bits: usize, target: &mut W) {
+    match size_in_bits {
+        n if n <= 8 => target.write_u8(value as u8),
+        n if n <= 16 => target.write_u16(value as u16),
+        n if n <= 32 => target.write_u32(value as u32),
+        n if n <= 64 => target.write_u64(value as u64),
+        _ => target.write_u128(value),
+    }
+}
+
+/// Encode an open type using the ordinary `Type` tags, with back-references as
+/// [TAG_RECURSIVE_REF]. Closed subterms delegate to the ordinary encoder.
+fn write_open_type<W: ByteWriter>(ty: &OpenType, target: &mut W) {
+    match ty {
+        OpenType::Closed(ty) => ty.write_into(target),
+        OpenType::Var(index) => {
+            target.write_u8(TAG_RECURSIVE_REF);
+            target.write_u16(*index);
+        },
+        OpenType::Ptr(addrspace, pointee) => {
+            target.write_u8(16);
+            target.write_u8(match addrspace {
+                AddressSpace::Byte => 0,
+                AddressSpace::Element => 1,
+            });
+            write_open_type(pointee, target);
+        },
+        OpenType::Struct(body) => {
+            target.write_u8(17);
+            write_open_struct_body(body, target);
+        },
+        OpenType::Array(element, len) => {
+            target.write_u8(18);
+            target.write_usize(*len);
+            write_open_type(element, target);
+        },
+        OpenType::List(element) => {
+            target.write_u8(19);
+            write_open_type(element, target);
+        },
+        OpenType::Function(ty) => {
+            target.write_u8(20);
+            target.write_u8(ty.abi.tag());
+            if let CallConv::Extern(name) = &ty.abi {
+                name.write_into(target);
+            }
+            target.write_usize(ty.params.len());
+            for param in &ty.params {
+                write_open_type(param, target);
+            }
+            target.write_usize(ty.results.len());
+            for result in &ty.results {
+                write_open_type(result, target);
+            }
+        },
+        OpenType::Enum(body) => {
+            target.write_u8(21);
+            write_open_enum_body(body, target);
+        },
+    }
+}
+
+/// Decode a recursive group and rebuild it through [RecursiveTypeBuilder], which revalidates
+/// guardedness and recomputes every layout from scratch.
+fn read_recursive_group<R: ByteReader>(
+    source: &mut R,
+    depth: usize,
+) -> Result<Type, DeserializationError> {
+    use alloc::string::ToString;
+
+    let count = source.read_u16()? as usize;
+    if count == 0 {
+        return Err(DeserializationError::InvalidValue(
+            "invalid recursive type: group must contain at least one definition".to_string(),
+        ));
+    }
+    if count > MAX_RECURSIVE_GROUP_SIZE {
+        return Err(DeserializationError::InvalidValue(format!(
+            "invalid recursive type: group has {count} definitions, but no more than              {MAX_RECURSIVE_GROUP_SIZE} are allowed"
+        )));
+    }
+    // Each definition body is at least one byte, so the remaining input bounds the group.
+    let budget = source.max_alloc(1);
+    if count > budget {
+        return Err(DeserializationError::InvalidValue(format!(
+            "invalid recursive type: group of {count} definitions exceeds budget {budget}"
+        )));
+    }
+
+    let mut names = SmallVec::<[Arc<str>; 4]>::with_capacity(count);
+    let mut kinds = SmallVec::<[AggregateKind; 4]>::with_capacity(count);
+    for _ in 0..count {
+        names.push(Arc::<str>::from(String::read_from(source)?.into_boxed_str()));
+        kinds.push(match source.read_u8()? {
+            0 => AggregateKind::Struct,
+            1 => AggregateKind::Enum,
+            invalid => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "invalid recursive type: unknown aggregate kind tag {invalid}"
+                )));
+            },
+        });
+    }
+
+    // Definitions are written in canonical order (sorted by name, names distinct). Enforcing that
+    // on decode keeps the wire form unique for each type, so equal types cannot be encoded two
+    // different ways.
+    if names.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(DeserializationError::InvalidValue(
+            "invalid recursive type: definitions are not in canonical order".to_string(),
+        ));
+    }
+
+    let mut builder = RecursiveTypeBuilder::new();
+    for (index, name) in names.iter().enumerate() {
+        match kinds[index] {
+            AggregateKind::Struct => {
+                let body = read_open_struct_body(source, &names, depth)?;
+                builder.define_struct(name.clone(), body);
+            },
+            AggregateKind::Enum => {
+                let body = read_open_enum_body(source, &names, depth)?;
+                builder.define_enum(name.clone(), body);
+            },
+        }
+    }
+
+    let root = source.read_u16()? as usize;
+    let root_name = names
+        .get(root)
+        .ok_or_else(|| {
+            DeserializationError::InvalidValue(format!(
+                "invalid recursive type: root index {root} is out of range"
+            ))
+        })?
+        .clone();
+
+    let mut built = builder
+        .build()
+        .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+
+    let ty = built.remove(&root_name).ok_or_else(|| {
+        DeserializationError::InvalidValue(
+            "invalid recursive type: root definition was not produced".to_string(),
+        )
+    })?;
+
+    // The encoded group must be exactly one strongly connected component. If it decomposed into
+    // several, or into no recursion at all, the encoding did not describe a single group.
+    let group_len = match &ty {
+        Type::Struct(StructRef::Rec(rec)) | Type::Enum(EnumRef::Rec(rec)) => rec.group_len(),
+        _ => 0,
+    };
+    if group_len != count {
+        return Err(DeserializationError::InvalidValue(
+            "invalid recursive type: definitions do not form a single recursive group".to_string(),
+        ));
+    }
+
+    Ok(ty)
+}
+
+fn read_open_struct_body<R: ByteReader>(
+    source: &mut R,
+    names: &[Arc<str>],
+    depth: usize,
+) -> Result<StructTemplate, DeserializationError> {
+    let name = if source.read_bool()? {
+        Some(Arc::<str>::from(String::read_from(source)?.into_boxed_str()))
+    } else {
+        None
+    };
+    let repr = read_type_repr(source)?;
+    let num_fields = source.read_u8()?;
+    let mut fields = Vec::with_capacity(num_fields as usize);
+    for _ in 0..num_fields {
+        let field_name = if source.read_bool()? {
+            Some(Arc::<str>::from(String::read_from(source)?.into_boxed_str()))
+        } else {
+            None
+        };
+        let ty = read_template(source, names, depth)?;
+        fields.push(FieldTemplate { name: field_name, ty });
+    }
+    Ok(StructTemplate { name, repr, fields })
+}
+
+fn read_open_enum_body<R: ByteReader>(
+    source: &mut R,
+    names: &[Arc<str>],
+    depth: usize,
+) -> Result<EnumTemplate, DeserializationError> {
+    use alloc::string::ToString;
+
+    let name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
+    let discriminant = Type::read_from_with_depth(source, depth)?;
+    if !discriminant.is_integer() || matches!(discriminant, Type::U256) {
+        return Err(DeserializationError::InvalidValue(
+            InvalidEnumTypeError::InvalidDiscriminantType(discriminant).to_string(),
+        ));
+    }
+    let discriminant_size_in_bits = discriminant.size_in_bits();
+    let num_variants = source.read_usize()?;
+    let max_variants = source.max_alloc(1);
+    if num_variants > max_variants {
+        return Err(DeserializationError::InvalidValue(format!(
+            "enum variant count {num_variants} exceeds budget {max_variants}"
+        )));
+    }
+    let mut variants = Vec::with_capacity(num_variants);
+    for _ in 0..num_variants {
+        let variant_name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
+        let value = if source.read_bool()? {
+            Some(read_template(source, names, depth)?)
+        } else {
+            None
+        };
+        let discriminant_value = if source.read_bool()? {
+            Some(read_discriminant_value(source, discriminant_size_in_bits)?)
+        } else {
+            None
+        };
+        variants.push(VariantTemplate {
+            name: variant_name,
+            value,
+            discriminant_value,
+        });
+    }
+    Ok(EnumTemplate { name, discriminant, variants })
+}
+
+fn read_type_repr<R: ByteReader>(source: &mut R) -> Result<TypeRepr, DeserializationError> {
+    use alloc::string::ToString;
+    use core::num::NonZeroU16;
+
+    Ok(match source.read_u8()? {
+        0 => TypeRepr::Default,
+        1 => TypeRepr::Align(NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
+            DeserializationError::InvalidValue(
+                "invalid type repr: alignment must be a non-zero value".to_string(),
+            )
+        })?),
+        2 => TypeRepr::Packed(NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
+            DeserializationError::InvalidValue(
+                "invalid type repr: packed alignment must be a non-zero value".to_string(),
+            )
+        })?),
+        3 => TypeRepr::Transparent,
+        invalid => {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid TypeRepr tag: {invalid}"
+            )));
+        },
+    })
+}
+
+fn read_discriminant_value<R: ByteReader>(
+    source: &mut R,
+    size_in_bits: usize,
+) -> Result<u128, DeserializationError> {
+    Ok(match size_in_bits {
+        n if n <= 8 => source.read_u8()? as u128,
+        n if n <= 16 => source.read_u16()? as u128,
+        n if n <= 32 => source.read_u32()? as u128,
+        n if n <= 64 => source.read_u64()? as u128,
+        _ => source.read_u128()?,
+    })
+}
+
+/// Read a type inside a group body, where a back-reference is permitted.
+fn read_template<R: ByteReader>(
+    source: &mut R,
+    names: &[Arc<str>],
+    depth: usize,
+) -> Result<TypeTemplate, DeserializationError> {
+    use alloc::string::ToString;
+
+    let tag = source.peek_u8()?;
+    if tag == TAG_RECURSIVE_REF {
+        source.read_u8()?;
+        let index = source.read_u16()? as usize;
+        let name = names.get(index).ok_or_else(|| {
+            DeserializationError::InvalidValue(format!(
+                "invalid recursive type reference: index {index} is out of range"
+            ))
+        })?;
+        return Ok(TypeTemplate::rec(name.clone()));
+    }
+
+    if depth == 0 && matches!(tag, 16..=21) {
+        return Err(DeserializationError::InvalidValue("type nesting exceeds limit".to_string()));
+    }
+    let next_depth = depth.saturating_sub(1);
+
+    Ok(match tag {
+        16 => {
+            source.read_u8()?;
+            let addrspace = match source.read_u8()? {
+                0 => AddressSpace::Byte,
+                1 => AddressSpace::Element,
+                invalid => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "invalid AddressSpace tag: {invalid}"
+                    )));
+                },
+            };
+            TypeTemplate::Ptr(addrspace, Box::new(read_template(source, names, next_depth)?))
+        },
+        17 => {
+            source.read_u8()?;
+            TypeTemplate::Struct(Box::new(read_open_struct_body(source, names, next_depth)?))
+        },
+        18 => {
+            source.read_u8()?;
+            let len = source.read_usize()?;
+            TypeTemplate::Array(Box::new(read_template(source, names, next_depth)?), len)
+        },
+        19 => {
+            source.read_u8()?;
+            TypeTemplate::List(Box::new(read_template(source, names, next_depth)?))
+        },
+        20 => {
+            source.read_u8()?;
+            let abi = read_call_conv(source)?;
+            let arity = source.read_usize()?;
+            let max_params = source.max_alloc(1);
+            if arity > max_params {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "function params count {arity} exceeds budget {max_params}"
+                )));
+            }
+            let mut params = Vec::with_capacity(arity);
+            for _ in 0..arity {
+                params.push(read_template(source, names, next_depth)?);
+            }
+            let num_results = source.read_usize()?;
+            let max_results = source.max_alloc(1);
+            if num_results > max_results {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "function results count {num_results} exceeds budget {max_results}"
+                )));
+            }
+            let mut results = Vec::with_capacity(num_results);
+            for _ in 0..num_results {
+                results.push(read_template(source, names, next_depth)?);
+            }
+            TypeTemplate::Function(Box::new(FunctionTemplate { abi, params, results }))
+        },
+        21 => {
+            source.read_u8()?;
+            TypeTemplate::Enum(Box::new(read_open_enum_body(source, names, next_depth)?))
+        },
+        // Anything else is an ordinary, closed type.
+        _ => TypeTemplate::Type(Type::read_from_with_depth(source, depth)?),
+    })
+}
+
+fn read_call_conv<R: ByteReader>(source: &mut R) -> Result<CallConv, DeserializationError> {
+    Ok(match source.read_u8()? {
+        0 => CallConv::Fast,
+        1 => CallConv::C,
+        2 => CallConv::Wasm,
+        3 => CallConv::ComponentModel,
+        4 => CallConv::Extern(Arc::<str>::read_from(source)?),
+        invalid => {
+            return Err(DeserializationError::InvalidValue(format!(
+                "invalid CallConv tag: {invalid}"
+            )));
+        },
+    })
+}
+
 // Bounds recursive type nesting during deserialization to prevent adversarially deep types from
 // exhausting stack or budgets; 128 is far beyond realistic type depth while keeping parsing safe.
 const MAX_TYPE_NESTING: usize = 128;
@@ -230,7 +702,7 @@ impl Type {
         use core::num::NonZeroU16;
 
         let tag = source.read_u8()?;
-        let is_recursive = matches!(tag, 16..=21);
+        let is_recursive = matches!(tag, 16..=21 | TAG_RECURSIVE_GROUP);
         if is_recursive && depth == 0 {
             return Err(DeserializationError::InvalidValue(String::from(
                 "type nesting exceeds limit",
@@ -393,6 +865,13 @@ impl Type {
                 Type::from(enum_ty)
             },
             22 => Type::Variadic,
+            TAG_RECURSIVE_GROUP => read_recursive_group(source, next_depth)?,
+            TAG_RECURSIVE_REF => {
+                return Err(DeserializationError::InvalidValue(String::from(
+                    "invalid recursive type reference: a back-reference is only valid inside a \
+                     recursive group body",
+                )));
+            },
             invalid => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid Type tag: {invalid}"
@@ -416,6 +895,168 @@ mod tests {
     use miden_serde_utils::{BudgetedReader, ByteWriter, SliceReader};
 
     use super::*;
+
+    fn build_one(mut builder: RecursiveTypeBuilder, name: &str) -> Type {
+        builder
+            .build()
+            .expect("should build")
+            .remove(name)
+            .expect("definition should exist")
+    }
+
+    fn round_trip(ty: &Type) -> Type {
+        let mut bytes = Vec::new();
+        ty.write_into(&mut bytes);
+        Type::read_from(&mut SliceReader::new(&bytes)).expect("should decode")
+    }
+
+    #[test]
+    fn self_recursive_struct_round_trips() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+        let node = build_one(builder, "Node");
+
+        assert_eq!(round_trip(&node), node);
+    }
+
+    #[test]
+    fn mutually_recursive_structs_round_trip_from_either_root() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "A",
+                StructTemplate::new(
+                    TypeRepr::Default,
+                    [("b", TypeTemplate::ptr(TypeTemplate::rec("B")))],
+                ),
+            )
+            .define_struct(
+                "B",
+                StructTemplate::new(
+                    TypeRepr::Default,
+                    [("a", TypeTemplate::ptr(TypeTemplate::rec("A")))],
+                ),
+            );
+        let built = builder.build().expect("should build");
+        let a = built.get("A").expect("A").clone();
+        let b = built.get("B").expect("B").clone();
+
+        assert_eq!(round_trip(&a), a);
+        assert_eq!(round_trip(&b), b);
+    }
+
+    #[test]
+    fn recursive_enum_round_trips() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_enum(
+            "List",
+            EnumTemplate::new(
+                "List",
+                Type::U8,
+                [
+                    VariantTemplate::c_like("Nil", Some(0)),
+                    VariantTemplate::new(
+                        "Cons",
+                        TypeTemplate::ptr(TypeTemplate::rec("List")),
+                        Some(1),
+                    ),
+                ],
+            ),
+        );
+        let list = build_one(builder, "List");
+
+        assert_eq!(round_trip(&list), list);
+    }
+
+    #[test]
+    fn a_recursive_type_nested_inside_an_ordinary_one_round_trips() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [("next", TypeTemplate::ptr(TypeTemplate::rec("Node")))],
+            ),
+        );
+        let node = build_one(builder, "Node");
+        let outer = Type::from(StructType::named(
+            Arc::from("Outer"),
+            [(Arc::from("head"), node), (Arc::from("count"), Type::U32)],
+        ));
+
+        assert_eq!(round_trip(&outer), outer);
+    }
+
+    #[test]
+    fn a_back_reference_outside_a_group_body_is_rejected() {
+        // Tag 24 is only meaningful while decoding a group body; encountering it at the root
+        // would otherwise produce a type with an unbound back-reference.
+        let mut bytes = Vec::new();
+        bytes.write_u8(24);
+        bytes.write_u16(0);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("recursive type reference"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_group_larger_than_the_cap_is_rejected_on_decode() {
+        let count = MAX_RECURSIVE_GROUP_SIZE + 1;
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(count as u16);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("recursive"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_non_canonical_group_encoding_is_rejected() {
+        // Definitions are always written sorted by name, so an encoding that is not sorted would
+        // give a second wire form for a type that already has one.
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(2);
+        for name in ["B", "A"] {
+            bytes.write_usize(name.len());
+            bytes.write_bytes(name.as_bytes());
+            bytes.write_u8(0);
+        }
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("canonical order"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn an_empty_group_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(0);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("at least one definition"), "unexpected message: {message}");
+    }
 
     #[test]
     fn struct_type_round_trips_at_the_maximum_field_count() {
