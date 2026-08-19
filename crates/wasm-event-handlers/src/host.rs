@@ -228,8 +228,270 @@ fn charge_mutation(ctx: &mut HostCtx, felts: usize) -> Result<(), wasmi::Error> 
 /// The `Ok` status as the raw `i32` host functions return.
 const OK: i32 = Status::Ok.as_raw();
 
+// QUERIES
+// ================================================================================================
+
+/// Returns the depth of the operand stack.
+fn stack_depth(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    state(&caller).map(ProcessorState::stack_depth)
+}
+
+/// Returns the operand-stack element at position `pos` in canonical form.
+fn stack_get(caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
+    Ok(state(&caller)?.get_stack_item(pos as usize).as_canonical_u64())
+}
+
+/// Writes the `count` operand-stack elements at positions `start_pos..start_pos + count` to
+/// `out`, ordered from the top of the stack down.
+fn stack_read(
+    mut caller: Caller<'_, HostCtx>,
+    start_pos: u32,
+    out: u32,
+    count: u32,
+) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    // Reject a bad output range before collecting, so `count` is bounded by the
+    // guest memory size when the collection allocates.
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+    let state = state(&caller)?;
+    let felts: Vec<Felt> = (0..count as usize)
+        .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx)))
+        .collect();
+    write_felts(mem.data_mut(&mut caller), out, &felts)
+}
+
+/// Returns the current clock cycle.
+fn clk(caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
+    state(&caller).map(|state| u64::from(state.clock()))
+}
+
+/// Returns the current execution context ID.
+fn ctx(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    state(&caller).map(|state| u32::from(state.ctx()))
+}
+
+/// Writes the memory element at address `addr` of the current context to `out`, or returns
+/// [`Status::Uninit`] when the cell was never written.
+fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
+    let state = state(&caller)?;
+    let value = state.get_mem_value(state.ctx(), addr);
+    match value {
+        Some(felt) => {
+            let mem = memory(&mut caller)?;
+            write_felts(mem.data_mut(&mut caller), out, &[felt])?;
+            Ok(OK)
+        },
+        None => Ok(Status::Uninit.as_raw()),
+    }
+}
+
+/// Writes the `count` memory elements at addresses `addr..addr + count` of the current context
+/// to `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
+fn mem_read(
+    mut caller: Caller<'_, HostCtx>,
+    addr: u32,
+    out: u32,
+    count: u32,
+) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+    if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
+        return Ok(Status::OutOfBounds.as_raw());
+    }
+    let state = state(&caller)?;
+    let ctx = state.ctx();
+    let mut felts = Vec::with_capacity(count as usize);
+    for idx in 0..count {
+        match state.get_mem_value(ctx, addr + idx) {
+            Some(felt) => felts.push(felt),
+            // The whole range must be written; use `mem_get` for per-cell checks.
+            None => return Ok(Status::Uninit.as_raw()),
+        }
+    }
+    write_felts(mem.data_mut(&mut caller), out, &felts)?;
+    Ok(OK)
+}
+
+/// Returns the number of elements on the advice stack.
+fn adv_stack_len(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    state(&caller).map(|state| state.advice_provider().stack_len() as u32)
+}
+
+/// Writes `count` advice-stack elements starting at `offset` to `out`, or returns
+/// [`Status::OutOfBounds`] when the range goes past the advice-stack length.
+fn adv_stack_read(
+    mut caller: Caller<'_, HostCtx>,
+    offset: u32,
+    out: u32,
+    count: u32,
+) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
+    let provider = state(&caller)?.advice_provider();
+    let start = offset as usize;
+    let Some(end) = start.checked_add(count as usize) else {
+        return Ok(Status::OutOfBounds.as_raw());
+    };
+    if end > provider.stack_len() {
+        return Ok(Status::OutOfBounds.as_raw());
+    }
+    let felts: Vec<Felt> =
+        provider.stack_iter().skip(start).take(count as usize).copied().collect();
+    write_felts(mem.data_mut(&mut caller), out, &felts)?;
+    Ok(OK)
+}
+
+/// Writes the length of the advice-map value for `key` to `out_len`, or returns
+/// [`Status::NotFound`] when the map has no entry for `key`.
+fn adv_map_value_len(
+    mut caller: Caller<'_, HostCtx>,
+    key: u32,
+    out_len: u32,
+) -> Result<i32, wasmi::Error> {
+    let mem = memory(&mut caller)?;
+    let key = read_word(mem.data(&caller), key)?;
+    let Some(len) = state(&caller)?
+        .advice_provider()
+        .get_mapped_values(&key)
+        .map(|values| values.len() as u32)
+    else {
+        return Ok(Status::NotFound.as_raw());
+    };
+    write_u32(mem.data_mut(&mut caller), out_len, len)?;
+    Ok(OK)
+}
+
+/// Writes the advice-map value for `key` to the `cap`-element buffer `out`, or returns a status
+/// when the map has no entry for `key` or the value is longer than `cap`.
+fn adv_map_value_read(
+    mut caller: Caller<'_, HostCtx>,
+    key: u32,
+    out: u32,
+    cap: u32,
+) -> Result<i32, wasmi::Error> {
+    let mem = memory(&mut caller)?;
+    let key = read_word(mem.data(&caller), key)?;
+    let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
+    else {
+        return Ok(Status::NotFound.as_raw());
+    };
+    if len > cap as usize {
+        return Ok(Status::CapacityTooSmall.as_raw());
+    }
+    charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT)?;
+    let values = state(&caller)?
+        .advice_provider()
+        .get_mapped_values(&key)
+        .expect("the entry was present above")
+        .to_vec();
+    write_felts(mem.data_mut(&mut caller), out, &values)?;
+    Ok(OK)
+}
+
+// MUTATIONS
+// ================================================================================================
+
+/// Buffers `len` elements to extend the advice stack, ordered from the new top of the stack down.
+fn adv_stack_extend(
+    mut caller: Caller<'_, HostCtx>,
+    vals: u32,
+    len: u32,
+) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, u64::from(len) * FUEL_PER_FELT)?;
+    charge_mutation(caller.data_mut(), len as usize)?;
+    let mem = memory(&mut caller)?;
+    let felts = read_felts(mem.data(&caller), vals, len)?;
+    caller
+        .data_mut()
+        .mutations
+        .push(AdviceMutation::extend_advice_stack_with(felts));
+    Ok(())
+}
+
+/// Buffers an advice-map insertion of `len` elements under `key`.
+fn adv_map_insert(
+    mut caller: Caller<'_, HostCtx>,
+    key: u32,
+    vals: u32,
+    len: u32,
+) -> Result<(), wasmi::Error> {
+    charge_fuel(&mut caller, (u64::from(len) + 4) * FUEL_PER_FELT)?;
+    charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
+    let mem = memory(&mut caller)?;
+    let key = read_word(mem.data(&caller), key)?;
+    let values = read_felts(mem.data(&caller), vals, len)?;
+    let mut map = AdviceMap::default();
+    map.insert(key, values);
+    caller.data_mut().mutations.push(AdviceMutation::extend_map(map));
+    Ok(())
+}
+
+/// Buffers `len` inner nodes to extend the Merkle store.
+fn merkle_store_extend(
+    mut caller: Caller<'_, HostCtx>,
+    nodes: u32,
+    len: u32,
+) -> Result<(), wasmi::Error> {
+    let felt_count = (len as usize).saturating_mul(MERKLE_NODE_FELTS);
+    // Charge for the data moved and for the per-node digest verification hash.
+    let fuel = (felt_count as u64).saturating_mul(FUEL_PER_FELT)
+        + u64::from(len).saturating_mul(FUEL_PER_MERKLE_NODE);
+    charge_fuel(&mut caller, fuel)?;
+    charge_mutation(caller.data_mut(), felt_count)?;
+    let mem = memory(&mut caller)?;
+    let felts = read_felts(mem.data(&caller), nodes, felt_count as u32)?;
+    let nodes: Vec<InnerNodeInfo> = felts
+        .chunks_exact(MERKLE_NODE_FELTS)
+        .map(|chunk| {
+            let word =
+                |at: usize| Word::new([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]]);
+            InnerNodeInfo {
+                value: word(0),
+                left: word(4),
+                right: word(8),
+            }
+        })
+        .collect();
+    // The Merkle store does not verify digests on extension, so reject inconsistent
+    // nodes from the untrusted guest here.
+    for node in &nodes {
+        if Poseidon2::merge(&[node.left, node.right]) != node.value {
+            return Err(trap("merkle node digest does not match hash(left, right)"));
+        }
+    }
+    caller.data_mut().mutations.push(AdviceMutation::extend_merkle_store(nodes));
+    Ok(())
+}
+
+// FAILURE
+// ================================================================================================
+
+/// Records the guest message as the handler's error message and traps.
+fn fail(mut caller: Caller<'_, HostCtx>, msg_ptr: u32, msg_len: u32) -> Result<(), wasmi::Error> {
+    let mem = memory(&mut caller)?;
+    let len = msg_len.min(MAX_FAIL_MSG_BYTES);
+    let range = byte_range(mem.data(&caller).len(), msg_ptr, 1, len)?;
+    let msg = String::from_utf8_lossy(&mem.data(&caller)[range]).into_owned();
+    caller.data_mut().error_msg = Some(msg);
+    Err(trap("handler failed"))
+}
+
 // LINKER
 // ================================================================================================
+
+/// Defines the given host functions in the linker under the [`IMPORT_MODULE`] namespace.
+macro_rules! register {
+    ($linker:ident, $($name:path => $func:path),+ $(,)?) => {
+        $(
+            $linker
+                .func_wrap(IMPORT_MODULE, $name, $func)
+                .expect("no duplicate host function definitions");
+        )+
+    };
+}
 
 /// Builds the linker that provides the full `miden:event/v1` host function set.
 ///
@@ -238,277 +500,26 @@ const OK: i32 = Status::Ok.as_raw();
 pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
     let mut linker = Linker::new(engine);
 
-    // QUERIES
-    // --------------------------------------------------------------------------------------------
-
-    linker
-        .func_wrap(IMPORT_MODULE, host_fn::STACK_DEPTH, |caller: Caller<'_, HostCtx>| {
-            state(&caller).map(ProcessorState::stack_depth)
-        })
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::STACK_GET,
-            |caller: Caller<'_, HostCtx>, pos: u32| -> Result<u64, wasmi::Error> {
-                Ok(state(&caller)?.get_stack_item(pos as usize).as_canonical_u64())
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::STACK_READ,
-            |mut caller: Caller<'_, HostCtx>, start_pos: u32, out: u32, count: u32| {
-                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
-                let mem = memory(&mut caller)?;
-                // Reject a bad output range before collecting, so `count` is bounded by the
-                // guest memory size when the collection allocates.
-                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-                let state = state(&caller)?;
-                let felts: Vec<Felt> = (0..count as usize)
-                    .map(|idx| state.get_stack_item((start_pos as usize).saturating_add(idx)))
-                    .collect();
-                write_felts(mem.data_mut(&mut caller), out, &felts)
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(IMPORT_MODULE, host_fn::CLK, |caller: Caller<'_, HostCtx>| {
-            state(&caller).map(|state| u64::from(state.clock()))
-        })
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(IMPORT_MODULE, host_fn::CTX, |caller: Caller<'_, HostCtx>| {
-            state(&caller).map(|state| u32::from(state.ctx()))
-        })
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::MEM_GET,
-            |mut caller: Caller<'_, HostCtx>, addr: u32, out: u32| {
-                let state = state(&caller)?;
-                let value = state.get_mem_value(state.ctx(), addr);
-                match value {
-                    Some(felt) => {
-                        let mem = memory(&mut caller)?;
-                        write_felts(mem.data_mut(&mut caller), out, &[felt])?;
-                        Ok(OK)
-                    },
-                    None => Ok(Status::Uninit.as_raw()),
-                }
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::MEM_READ,
-            |mut caller: Caller<'_, HostCtx>, addr: u32, out: u32, count: u32| {
-                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
-                let mem = memory(&mut caller)?;
-                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-                if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
-                    return Ok(Status::OutOfBounds.as_raw());
-                }
-                let state = state(&caller)?;
-                let ctx = state.ctx();
-                let mut felts = Vec::with_capacity(count as usize);
-                for idx in 0..count {
-                    match state.get_mem_value(ctx, addr + idx) {
-                        Some(felt) => felts.push(felt),
-                        // The whole range must be written; use `mem_get` for per-cell checks.
-                        None => return Ok(Status::Uninit.as_raw()),
-                    }
-                }
-                write_felts(mem.data_mut(&mut caller), out, &felts)?;
-                Ok(OK)
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(IMPORT_MODULE, host_fn::ADV_STACK_LEN, |caller: Caller<'_, HostCtx>| {
-            state(&caller).map(|state| state.advice_provider().stack_len() as u32)
-        })
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::ADV_STACK_READ,
-            |mut caller: Caller<'_, HostCtx>, offset: u32, out: u32, count: u32| {
-                charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
-                let mem = memory(&mut caller)?;
-                byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-                let provider = state(&caller)?.advice_provider();
-                let start = offset as usize;
-                let Some(end) = start.checked_add(count as usize) else {
-                    return Ok(Status::OutOfBounds.as_raw());
-                };
-                if end > provider.stack_len() {
-                    return Ok(Status::OutOfBounds.as_raw());
-                }
-                let felts: Vec<Felt> =
-                    provider.stack_iter().skip(start).take(count as usize).copied().collect();
-                write_felts(mem.data_mut(&mut caller), out, &felts)?;
-                Ok(OK)
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::ADV_MAP_VALUE_LEN,
-            |mut caller: Caller<'_, HostCtx>, key: u32, out_len: u32| {
-                let mem = memory(&mut caller)?;
-                let key = read_word(mem.data(&caller), key)?;
-                let Some(len) = state(&caller)?
-                    .advice_provider()
-                    .get_mapped_values(&key)
-                    .map(|values| values.len() as u32)
-                else {
-                    return Ok(Status::NotFound.as_raw());
-                };
-                write_u32(mem.data_mut(&mut caller), out_len, len)?;
-                Ok(OK)
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::ADV_MAP_VALUE_READ,
-            |mut caller: Caller<'_, HostCtx>, key: u32, out: u32, cap: u32| {
-                let mem = memory(&mut caller)?;
-                let key = read_word(mem.data(&caller), key)?;
-                let Some(len) =
-                    state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
-                else {
-                    return Ok(Status::NotFound.as_raw());
-                };
-                if len > cap as usize {
-                    return Ok(Status::CapacityTooSmall.as_raw());
-                }
-                charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT)?;
-                let values = state(&caller)?
-                    .advice_provider()
-                    .get_mapped_values(&key)
-                    .expect("the entry was present above")
-                    .to_vec();
-                write_felts(mem.data_mut(&mut caller), out, &values)?;
-                Ok(OK)
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    // MUTATIONS
-    // --------------------------------------------------------------------------------------------
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::ADV_STACK_EXTEND,
-            |mut caller: Caller<'_, HostCtx>, vals: u32, len: u32| {
-                charge_fuel(&mut caller, u64::from(len) * FUEL_PER_FELT)?;
-                charge_mutation(caller.data_mut(), len as usize)?;
-                let mem = memory(&mut caller)?;
-                let felts = read_felts(mem.data(&caller), vals, len)?;
-                caller
-                    .data_mut()
-                    .mutations
-                    .push(AdviceMutation::extend_advice_stack_with(felts));
-                Ok(())
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::ADV_MAP_INSERT,
-            |mut caller: Caller<'_, HostCtx>, key: u32, vals: u32, len: u32| {
-                charge_fuel(&mut caller, (u64::from(len) + 4) * FUEL_PER_FELT)?;
-                charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
-                let mem = memory(&mut caller)?;
-                let key = read_word(mem.data(&caller), key)?;
-                let values = read_felts(mem.data(&caller), vals, len)?;
-                let mut map = AdviceMap::default();
-                map.insert(key, values);
-                caller.data_mut().mutations.push(AdviceMutation::extend_map(map));
-                Ok(())
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::MERKLE_STORE_EXTEND,
-            |mut caller: Caller<'_, HostCtx>, nodes: u32, len: u32| {
-                let felt_count = (len as usize).saturating_mul(MERKLE_NODE_FELTS);
-                // Charge for the data moved and for the per-node digest verification hash.
-                let fuel = (felt_count as u64).saturating_mul(FUEL_PER_FELT)
-                    + u64::from(len).saturating_mul(FUEL_PER_MERKLE_NODE);
-                charge_fuel(&mut caller, fuel)?;
-                charge_mutation(caller.data_mut(), felt_count)?;
-                let mem = memory(&mut caller)?;
-                let felts = read_felts(mem.data(&caller), nodes, felt_count as u32)?;
-                let nodes: Vec<InnerNodeInfo> = felts
-                    .chunks_exact(MERKLE_NODE_FELTS)
-                    .map(|chunk| {
-                        let word = |at: usize| {
-                            Word::new([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]])
-                        };
-                        InnerNodeInfo {
-                            value: word(0),
-                            left: word(4),
-                            right: word(8),
-                        }
-                    })
-                    .collect();
-                // The Merkle store does not verify digests on extension, so reject inconsistent
-                // nodes from the untrusted guest here.
-                for node in &nodes {
-                    if Poseidon2::merge(&[node.left, node.right]) != node.value {
-                        return Err(trap("merkle node digest does not match hash(left, right)"));
-                    }
-                }
-                caller.data_mut().mutations.push(AdviceMutation::extend_merkle_store(nodes));
-                Ok(())
-            },
-        )
-        .expect("no duplicate host function definitions");
-
-    // FAILURE
-    // --------------------------------------------------------------------------------------------
-
-    linker
-        .func_wrap(
-            IMPORT_MODULE,
-            host_fn::FAIL,
-            |mut caller: Caller<'_, HostCtx>,
-             msg_ptr: u32,
-             msg_len: u32|
-             -> Result<(), wasmi::Error> {
-                let mem = memory(&mut caller)?;
-                let len = msg_len.min(MAX_FAIL_MSG_BYTES);
-                let range = byte_range(mem.data(&caller).len(), msg_ptr, 1, len)?;
-                let msg = String::from_utf8_lossy(&mem.data(&caller)[range]).into_owned();
-                caller.data_mut().error_msg = Some(msg);
-                Err(trap("handler failed"))
-            },
-        )
-        .expect("no duplicate host function definitions");
+    register!(linker,
+        // queries
+        host_fn::STACK_DEPTH => stack_depth,
+        host_fn::STACK_GET => stack_get,
+        host_fn::STACK_READ => stack_read,
+        host_fn::CLK => clk,
+        host_fn::CTX => ctx,
+        host_fn::MEM_GET => mem_get,
+        host_fn::MEM_READ => mem_read,
+        host_fn::ADV_STACK_LEN => adv_stack_len,
+        host_fn::ADV_STACK_READ => adv_stack_read,
+        host_fn::ADV_MAP_VALUE_LEN => adv_map_value_len,
+        host_fn::ADV_MAP_VALUE_READ => adv_map_value_read,
+        // mutations
+        host_fn::ADV_STACK_EXTEND => adv_stack_extend,
+        host_fn::ADV_MAP_INSERT => adv_map_insert,
+        host_fn::MERKLE_STORE_EXTEND => merkle_store_extend,
+        // failure
+        host_fn::FAIL => fail,
+    );
 
     linker
 }
