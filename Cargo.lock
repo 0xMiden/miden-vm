@@ -2921,13 +2921,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-wasm-handler-guest-fixture"
-version = "0.30.0"
-dependencies = [
- "miden-event-handler-sdk",
-]
-
-[[package]]
 name = "midenc-hir-type"
 version = "1.0.0-rc.1"
 dependencies = [

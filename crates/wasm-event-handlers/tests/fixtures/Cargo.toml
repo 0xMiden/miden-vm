@@ -1,0 +1,9 @@
+# A standalone workspace for Wasm guest test fixtures.
+#
+# The fixtures are kept out of the main workspace on purpose: they compile only for their real
+# target (wasm32), so they need no host-build cfg-gating, and they are not part of workspace
+# linting or formatting. All fixtures share this workspace and its lockfile; add new fixture
+# crates as members here.
+[workspace]
+resolver = "3"
+members = ["guest"]
