@@ -1,6 +1,45 @@
 //! Safe wrappers over the raw host imports.
+//!
+//! The wrappers speak [`Felt`], [`Word`] and [`MerkleNode`] — the same types the imports take.
+//! There is no conversion layer: the in-memory form of these types *is* the wire encoding, one
+//! plain (non-Montgomery) `u64` residue per field element. See the wire-format section of the
+//! `miden-event-handler-abi` crate documentation.
+//!
+//! # Canonicalization
+//!
+//! The wire encoding needs the *canonical* residue (less than the field modulus), but a guest
+//! [`Felt`] may hold a lazy residue after arithmetic: a value in `[p, 2^64)` stands for the value
+//! minus `p`. Two rules follow:
+//!
+//! - Outgoing buffers get canonicalized first. The host traps the handler on a non-canonical
+//!   element, so sending a lazy residue would end the handler. The wrappers canonicalize caller
+//!   buffers in place, and stage a canonical copy of by-reference values such as keys.
+//! - Incoming buffers need no work. Every element the host writes is canonical, and a canonical
+//!   `u64` is the plain residue of the value it encodes, so the host writes straight into the
+//!   caller's buffer.
 
-use miden_event_handler_abi::{RawFelt, RawMerkleNode, RawWord, Status, guest};
+use miden_event_handler_abi::{Felt, MerkleNode, Status, Word, guest};
+
+// CANONICALIZATION
+// ================================================================================================
+
+/// Rewrites every element of `vals` as its canonical residue.
+///
+/// This does not change the field values; it only normalizes their representation for the wire.
+#[inline]
+fn canonicalize(vals: &mut [Felt]) {
+    for val in vals.iter_mut() {
+        *val = Felt::new_unchecked(val.as_canonical_u64());
+    }
+}
+
+/// Returns a copy of `word` with every element in canonical residue form.
+#[inline]
+fn canonical_word(word: &Word) -> Word {
+    let mut word = *word;
+    canonicalize(&mut word[0..Word::NUM_ELEMENTS]);
+    word
+}
 
 /// Decodes a raw status code; an unknown code ends the handler.
 fn status(raw: i32) -> Status {
@@ -20,21 +59,26 @@ pub fn stack_depth() -> u32 {
 
 /// Returns the operand-stack element at `pos`. Position `0` holds the event ID; positions past
 /// the stack depth read as zero.
-pub fn stack_get(pos: u32) -> RawFelt {
-    RawFelt::new(unsafe { guest::stack_get(pos) })
+pub fn stack_get(pos: u32) -> Felt {
+    // The host returns a canonical value, which is the plain residue of itself.
+    Felt::new_unchecked(unsafe { guest::stack_get(pos) })
 }
 
 /// Reads the `out.len()` operand-stack elements at positions `start_pos..start_pos + out.len()`,
 /// ordered from the top of the stack down. Positions past the stack depth read as zero.
-pub fn stack_read(start_pos: u32, out: &mut [RawFelt]) {
-    unsafe { guest::stack_read(start_pos, out.as_mut_ptr(), out.len() as u32) }
+pub fn stack_read(start_pos: u32, out: &mut [Felt]) {
+    let len = out.len() as u32;
+    unsafe { guest::stack_read(start_pos, out.as_mut_ptr(), len) }
 }
 
 /// Returns the word at operand-stack positions `start_pos..start_pos + 4`.
-pub fn stack_get_word(start_pos: u32) -> RawWord {
-    let mut out = RawWord::default();
-    stack_read(start_pos, &mut out.0);
-    out
+///
+/// Element `0` of the word is the element at `start_pos`, the one closest to the top of the
+/// stack.
+pub fn stack_get_word(start_pos: u32) -> Word {
+    let mut out = [Felt::ZERO; Word::NUM_ELEMENTS];
+    stack_read(start_pos, &mut out);
+    Word::new(out)
 }
 
 /// Returns the current clock cycle.
@@ -49,8 +93,8 @@ pub fn ctx() -> u32 {
 
 /// Returns the memory element at `addr` of the current context, or `None` when the cell was
 /// never written.
-pub fn mem_get(addr: u32) -> Option<RawFelt> {
-    let mut out = RawFelt::new(0);
+pub fn mem_get(addr: u32) -> Option<Felt> {
+    let mut out = Felt::ZERO;
     match status(unsafe { guest::mem_get(addr, &mut out) }) {
         Status::Ok => Some(out),
         Status::Uninit => None,
@@ -64,8 +108,9 @@ pub fn mem_get(addr: u32) -> Option<RawFelt> {
 /// Returns [`Status::OutOfBounds`] when the range goes past the `u32` address space and
 /// [`Status::Uninit`] when any cell in the range was never written; `out` is unchanged in both
 /// cases. Use [`mem_get`] for a per-cell presence check.
-pub fn mem_read(addr: u32, out: &mut [RawFelt]) -> Status {
-    let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), out.len() as u32) };
+pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
+    let len = out.len() as u32;
+    let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), len) };
     match status(raw) {
         result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
         _ => fail("mem_read failed"),
@@ -76,8 +121,9 @@ pub fn mem_read(addr: u32, out: &mut [RawFelt]) -> Status {
 ///
 /// The same contract as [`mem_read`], for an explicit execution context (for example the root
 /// context, ID `0`).
-pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [RawFelt]) -> Status {
-    let raw = unsafe { guest::mem_read_ctx(ctx, addr, out.as_mut_ptr(), out.len() as u32) };
+pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [Felt]) -> Status {
+    let len = out.len() as u32;
+    let raw = unsafe { guest::mem_read_ctx(ctx, addr, out.as_mut_ptr(), len) };
     match status(raw) {
         result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
         _ => fail("mem_read_ctx failed"),
@@ -88,9 +134,10 @@ pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [RawFelt]) -> Status {
 /// the store has no such tree or no node at this position.
 ///
 /// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
-pub fn merkle_get_node(root: &RawWord, depth: u32, index: u64) -> Option<RawWord> {
-    let mut out = RawWord::default();
-    match status(unsafe { guest::merkle_get_node(root, depth, index, &mut out) }) {
+pub fn merkle_get_node(root: &Word, depth: u32, index: u64) -> Option<Word> {
+    let root = canonical_word(root);
+    let mut out = Word::empty();
+    match status(unsafe { guest::merkle_get_node(&root, depth, index, &mut out) }) {
         Status::Ok => Some(out),
         Status::NotFound => None,
         _ => fail("merkle_get_node failed"),
@@ -101,8 +148,9 @@ pub fn merkle_get_node(root: &RawWord, depth: u32, index: u64) -> Option<RawWord
 /// `depth`/`index`.
 ///
 /// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
-pub fn merkle_has_path(root: &RawWord, depth: u32, index: u64) -> bool {
-    unsafe { guest::merkle_has_path(root, depth, index) != 0 }
+pub fn merkle_has_path(root: &Word, depth: u32, index: u64) -> bool {
+    let root = canonical_word(root);
+    unsafe { guest::merkle_has_path(&root, depth, index) != 0 }
 }
 
 /// Returns the number of elements on the advice stack.
@@ -113,8 +161,9 @@ pub fn adv_stack_len() -> u32 {
 /// Reads `out.len()` advice-stack elements starting at `offset` (offset `0` is the top).
 ///
 /// Returns `false` when the range goes past the advice-stack length; `out` is unchanged then.
-pub fn adv_stack_read(offset: u32, out: &mut [RawFelt]) -> bool {
-    let raw = unsafe { guest::adv_stack_read(offset, out.as_mut_ptr(), out.len() as u32) };
+pub fn adv_stack_read(offset: u32, out: &mut [Felt]) -> bool {
+    let len = out.len() as u32;
+    let raw = unsafe { guest::adv_stack_read(offset, out.as_mut_ptr(), len) };
     match status(raw) {
         Status::Ok => true,
         Status::OutOfBounds => false,
@@ -123,9 +172,10 @@ pub fn adv_stack_read(offset: u32, out: &mut [RawFelt]) -> bool {
 }
 
 /// Returns the length of the advice-map value for `key`, or `None` when the map has no entry.
-pub fn adv_map_value_len(key: &RawWord) -> Option<u32> {
+pub fn adv_map_value_len(key: &Word) -> Option<u32> {
+    let key = canonical_word(key);
     let mut out = 0u32;
-    match status(unsafe { guest::adv_map_value_len(key, &mut out) }) {
+    match status(unsafe { guest::adv_map_value_len(&key, &mut out) }) {
         Status::Ok => Some(out),
         Status::NotFound => None,
         _ => fail("adv_map_value_len failed"),
@@ -136,9 +186,11 @@ pub fn adv_map_value_len(key: &RawWord) -> Option<u32> {
 /// when the map has no entry.
 ///
 /// Ends the handler when `out` is smaller than the value; size it with [`adv_map_value_len`].
-pub fn adv_map_value_read(key: &RawWord, out: &mut [RawFelt]) -> Option<usize> {
+pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
     let len = adv_map_value_len(key)?;
-    let raw = unsafe { guest::adv_map_value_read(key, out.as_mut_ptr(), out.len() as u32) };
+    let key = canonical_word(key);
+    let cap = out.len() as u32;
+    let raw = unsafe { guest::adv_map_value_read(&key, out.as_mut_ptr(), cap) };
     match status(raw) {
         Status::Ok => Some(len as usize),
         Status::NotFound => None,
@@ -153,27 +205,35 @@ pub fn adv_map_value_read(key: &RawWord, out: &mut [RawFelt]) -> Option<usize> {
 /// Returns the Poseidon2 merge of the two words in `pair`, using `domain`.
 ///
 /// Domain `0` is the plain merge, the digest behind `adv.insert_hdword` advice keys and Merkle
-/// inner nodes. A non-canonical `domain` ends the handler.
-pub fn poseidon2_merge(pair: &[RawWord; 2], domain: u64) -> RawWord {
-    let mut out = RawWord::default();
-    unsafe { guest::poseidon2_merge(pair.as_ptr(), domain, &mut out) };
+/// inner nodes.
+pub fn poseidon2_merge(pair: &[Word; 2], domain: Felt) -> Word {
+    let pair = [canonical_word(&pair[0]), canonical_word(&pair[1])];
+    let mut out = Word::empty();
+    unsafe { guest::poseidon2_merge(pair.as_ptr(), domain.as_canonical_u64(), &mut out) };
     out
 }
 
 /// Returns the Poseidon2 sequential hash of `elems`, using `domain`.
 ///
-/// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys. A
-/// non-canonical `domain` ends the handler.
-pub fn poseidon2_hash(elems: &[RawFelt], domain: u64) -> RawWord {
-    let mut out = RawWord::default();
-    unsafe { guest::poseidon2_hash(elems.as_ptr(), elems.len() as u32, domain, &mut out) };
+/// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys.
+///
+/// This canonicalizes the elements of `elems` in place; the field values do not change.
+pub fn poseidon2_hash(elems: &mut [Felt], domain: Felt) -> Word {
+    canonicalize(elems);
+    let mut out = Word::empty();
+    let len = elems.len() as u32;
+    unsafe { guest::poseidon2_hash(elems.as_ptr(), len, domain.as_canonical_u64(), &mut out) };
     out
 }
 
 /// Applies the Poseidon2 permutation to the 12-element `state`, in place.
 ///
 /// This matches `adv.insert_hperm` advice keys: the digest is `state[4..8]` afterwards.
-pub fn poseidon2_permute(state: &mut [RawFelt; 12]) {
+///
+/// This canonicalizes the elements of `state` in place; the field values do not change.
+pub fn poseidon2_permute(state: &mut [Felt; 12]) {
+    // The host reads the state and writes the permuted state back into the same buffer.
+    canonicalize(state);
     unsafe { guest::poseidon2_permute(state.as_mut_ptr()) }
 }
 
@@ -209,19 +269,38 @@ pub fn blake3(data: &[u8]) -> [u8; 32] {
 // ================================================================================================
 
 /// Buffers elements to extend the advice stack, ordered from the new top of the stack down.
-pub fn adv_stack_extend(vals: &[RawFelt]) {
-    unsafe { guest::adv_stack_extend(vals.as_ptr(), vals.len() as u32) }
+///
+/// This canonicalizes the elements of `vals` in place; the field values do not change.
+pub fn adv_stack_extend(vals: &mut [Felt]) {
+    canonicalize(vals);
+    let len = vals.len() as u32;
+    unsafe { guest::adv_stack_extend(vals.as_ptr(), len) }
 }
 
 /// Buffers an advice-map insertion of `vals` under `key`.
-pub fn adv_map_insert(key: &RawWord, vals: &[RawFelt]) {
-    unsafe { guest::adv_map_insert(key, vals.as_ptr(), vals.len() as u32) }
+///
+/// This canonicalizes the elements of `vals` in place; the field values do not change.
+pub fn adv_map_insert(key: &Word, vals: &mut [Felt]) {
+    canonicalize(vals);
+    let key = canonical_word(key);
+    let len = vals.len() as u32;
+    unsafe { guest::adv_map_insert(&key, vals.as_ptr(), len) }
 }
 
-/// Buffers inner nodes to extend the Merkle store. Every node must satisfy
-/// `value == hash(left, right)`.
-pub fn merkle_store_extend(nodes: &[RawMerkleNode]) {
-    unsafe { guest::merkle_store_extend(nodes.as_ptr(), nodes.len() as u32) }
+/// Buffers inner nodes to extend the Merkle store.
+///
+/// Each node holds the node digest and its two child digests. Every node must satisfy
+/// `value == poseidon2_merge([left, right], 0)`.
+///
+/// This canonicalizes the elements of `nodes` in place; the field values do not change.
+pub fn merkle_store_extend(nodes: &mut [MerkleNode]) {
+    for node in nodes.iter_mut() {
+        for word in [&mut node.value, &mut node.left, &mut node.right] {
+            canonicalize(&mut word[0..Word::NUM_ELEMENTS]);
+        }
+    }
+    let len = nodes.len() as u32;
+    unsafe { guest::merkle_store_extend(nodes.as_ptr(), len) }
 }
 
 // FAILURE

@@ -24,6 +24,7 @@ default = []
 guest = []
 
 [dependencies]
+miden-field.workspace = true
 
 [dev-dependencies]
 miden-core.workspace = true

@@ -1,9 +1,18 @@
 //! ABI contract between the Miden VM host and Wasm-compiled event handlers.
 //!
 //! A Wasm event handler is a core Wasm module. The host runs it with an interpreter when the VM
-//! emits a custom event. The handler does not link any Miden crate. It talks to the host only
-//! through the functions it imports from the [`IMPORT_MODULE`] namespace, and through the plain
-//! `#[repr(C)]` data types in this crate.
+//! emits a custom event. The handler talks to the host only through the functions it imports
+//! from the [`IMPORT_MODULE`] namespace.
+//!
+//! # Wire format
+//!
+//! A field element crosses the wire as its canonical `u64` (less than [`FIELD_MODULUS`]),
+//! little-endian in Wasm memory; a word is four of them. The declarations use the off-chain
+//! [`Felt`] and [`Word`] types of `miden-field`, whose in-memory representation is exactly this
+//! encoding (checked at compile time below). The host validates every element it receives and
+//! traps the handler on a non-canonical value; every element the host writes is canonical.
+//! Guest-side `Felt` values may hold lazy, non-canonical residues after arithmetic, so guests
+//! must canonicalize outgoing buffers — the SDK wrappers do this.
 //!
 //! # Memory ownership
 //!
@@ -52,81 +61,13 @@ pub const MANIFEST_SECTION_NAME: &str = "miden:event-manifest";
 
 /// The modulus of the Miden field (Goldilocks): `2^64 - 2^32 + 1`.
 ///
-/// A [`RawFelt`] is canonical when its value is less than this modulus.
+/// A wire field element is canonical when its value is less than this modulus.
 pub const FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 
-/// The number of field elements in a word.
-pub const WORD_ELEMENTS: usize = 4;
-
-// RAW FELT
+// VALUE TYPES
 // ================================================================================================
 
-/// A field element in canonical `u64` form.
-///
-/// The value must be less than [`FIELD_MODULUS`]. The host validates every field element it
-/// receives from the guest and traps the handler on a non-canonical value. Every field element
-/// the host writes into guest memory is canonical.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct RawFelt(pub u64);
-
-impl RawFelt {
-    /// Creates a raw field element from a `u64` without a range check.
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the inner `u64` value.
-    pub const fn as_u64(&self) -> u64 {
-        self.0
-    }
-
-    /// Returns `true` when the value is less than [`FIELD_MODULUS`].
-    pub const fn is_canonical(&self) -> bool {
-        self.0 < FIELD_MODULUS
-    }
-}
-
-impl From<u64> for RawFelt {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-// RAW WORD
-// ================================================================================================
-
-/// A word: four field elements.
-///
-/// When a word comes from the operand stack, the element order is the order of
-/// `ProcessorState::get_stack_word`: element `0` of the word is the stack element at the start
-/// position (closest to the top of the stack).
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct RawWord(pub [RawFelt; WORD_ELEMENTS]);
-
-impl RawWord {
-    /// Creates a raw word from four `u64` values without a range check.
-    pub const fn new(elements: [u64; WORD_ELEMENTS]) -> Self {
-        Self([
-            RawFelt::new(elements[0]),
-            RawFelt::new(elements[1]),
-            RawFelt::new(elements[2]),
-            RawFelt::new(elements[3]),
-        ])
-    }
-
-    /// Returns `true` when all four elements are canonical.
-    pub const fn is_canonical(&self) -> bool {
-        self.0[0].is_canonical()
-            && self.0[1].is_canonical()
-            && self.0[2].is_canonical()
-            && self.0[3].is_canonical()
-    }
-}
-
-// RAW MERKLE NODE
-// ================================================================================================
+pub use miden_field::{Felt, word::Word};
 
 /// An inner node of a Merkle tree, for `merkle_store_extend`.
 ///
@@ -134,14 +75,26 @@ impl RawWord {
 /// The host checks `value == hash(left, right)` when it applies the mutation.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RawMerkleNode {
+pub struct MerkleNode {
     /// The digest of the node.
-    pub value: RawWord,
+    pub value: Word,
     /// The digest of the left child.
-    pub left: RawWord,
+    pub left: Word,
     /// The digest of the right child.
-    pub right: RawWord,
+    pub right: Word,
 }
+
+// The extern declarations pass `Felt` and `Word` buffers straight over the wire, so their
+// in-memory layout must be the wire encoding: one plain (non-Montgomery) `u64` residue per
+// element, little-endian in Wasm memory. This holds for the off-chain `Felt` of `miden-field`,
+// whose representation is documented there as load-bearing for this ABI. A build against the
+// on-chain (`cfg(miden)`, f32-backed) `Felt` fails here instead of producing wrong bytes.
+const _: () = {
+    assert!(size_of::<Felt>() == 8, "the ABI needs the off-chain u64-backed Felt");
+    assert!(align_of::<Felt>() == 8, "the ABI needs the off-chain u64-backed Felt");
+    assert!(size_of::<Word>() == 32, "the ABI needs the off-chain u64-backed Word");
+    assert!(size_of::<MerkleNode>() == 96, "MerkleNode must be three packed words");
+};
 
 // STATUS
 // ================================================================================================
@@ -264,7 +217,7 @@ pub mod host_fn {
 /// them.
 #[cfg(all(feature = "guest", target_arch = "wasm32"))]
 pub mod guest {
-    use super::{RawFelt, RawMerkleNode, RawWord};
+    use super::{Felt, MerkleNode, Word};
 
     #[link(wasm_import_module = "miden:event/v1")]
     unsafe extern "C" {
@@ -284,7 +237,7 @@ pub mod guest {
         /// `start_pos..start_pos + count` to `out`, ordered from the top of the stack down.
         ///
         /// Positions past the stack depth read as zero.
-        pub fn stack_read(start_pos: u32, out: *mut RawFelt, count: u32);
+        pub fn stack_read(start_pos: u32, out: *mut Felt, count: u32);
 
         /// Returns the current clock cycle.
         pub fn clk() -> u64;
@@ -296,7 +249,7 @@ pub mod guest {
         ///
         /// Returns `Status::Uninit` when the cell was never written; `out` is not changed in that
         /// case. Uninitialized memory is distinct from a zero value.
-        pub fn mem_get(addr: u32, out: *mut RawFelt) -> i32;
+        pub fn mem_get(addr: u32, out: *mut Felt) -> i32;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of the current
         /// context to `out`.
@@ -304,7 +257,7 @@ pub mod guest {
         /// Returns `Status::OutOfBounds` when `addr + count` goes past the `u32` address space,
         /// and `Status::Uninit` when any cell in the range was never written; `out` is not
         /// changed in either case. Use `mem_get` for a per-cell presence check.
-        pub fn mem_read(addr: u32, out: *mut RawFelt, count: u32) -> i32;
+        pub fn mem_read(addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of context
         /// `ctx` to `out`.
@@ -313,7 +266,7 @@ pub mod guest {
         /// root context, ID `0`). Returns `Status::OutOfBounds` when `addr + count` goes past
         /// the `u32` address space, and `Status::Uninit` when any cell in the range was never
         /// written; `out` is not changed in either case.
-        pub fn mem_read_ctx(ctx: u32, addr: u32, out: *mut RawFelt, count: u32) -> i32;
+        pub fn mem_read_ctx(ctx: u32, addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to
         /// `out`.
@@ -321,18 +274,13 @@ pub mod guest {
         /// Returns `Status::NotFound` when the store has no tree with this root or no node at
         /// this position; `out` is not changed in that case. A `depth` or `index` outside the
         /// valid range for a Merkle tree traps.
-        pub fn merkle_get_node(
-            root: *const RawWord,
-            depth: u32,
-            index: u64,
-            out: *mut RawWord,
-        ) -> i32;
+        pub fn merkle_get_node(root: *const Word, depth: u32, index: u64, out: *mut Word) -> i32;
 
         /// Returns `1` when the Merkle store has a path for the node of the tree with root
         /// `root` at `depth`/`index`, and `0` when it has not.
         ///
         /// A `depth` or `index` outside the valid range for a Merkle tree traps.
-        pub fn merkle_has_path(root: *const RawWord, depth: u32, index: u64) -> i32;
+        pub fn merkle_has_path(root: *const Word, depth: u32, index: u64) -> i32;
 
         // HASHING
         // ----------------------------------------------------------------------------------------
@@ -349,7 +297,7 @@ pub mod guest {
         /// Domain `0` is the plain merge, the digest behind `adv.insert_hdword` advice keys and
         /// Merkle inner nodes. Other domains match `adv.insert_hdword_d` and the SMT leaf
         /// domains.
-        pub fn poseidon2_merge(pair: *const RawWord, domain: u64, out: *mut RawWord);
+        pub fn poseidon2_merge(pair: *const Word, domain: u64, out: *mut Word);
 
         /// Writes the Poseidon2 sequential hash of `count` field elements at `elems` to `out`,
         /// using `domain`.
@@ -357,14 +305,14 @@ pub mod guest {
         /// Domain `0` is the plain hash, the digest behind `adv.insert_hqword` advice keys and
         /// commitment values. The elements are validated canonical; a non-canonical element
         /// traps.
-        pub fn poseidon2_hash(elems: *const RawFelt, count: u32, domain: u64, out: *mut RawWord);
+        pub fn poseidon2_hash(elems: *const Felt, count: u32, domain: u64, out: *mut Word);
 
         /// Applies the Poseidon2 permutation to the 12-element state at `state`, in place.
         ///
         /// This matches `adv.insert_hperm` advice keys: the digest is `state[4..8]` after the
         /// permutation. The state elements are validated canonical; a non-canonical element
         /// traps.
-        pub fn poseidon2_permute(state: *mut RawFelt);
+        pub fn poseidon2_permute(state: *mut Felt);
 
         /// Writes the Keccak-256 digest (32 bytes) of the `len` bytes at `data` to `out`.
         pub fn keccak256(data: *const u8, len: u32, out: *mut u8);
@@ -385,13 +333,13 @@ pub mod guest {
         ///
         /// Offset `0` is the top of the advice stack. Returns `Status::OutOfBounds` when
         /// `offset + count` goes past the advice-stack length; `out` is not changed in that case.
-        pub fn adv_stack_read(offset: u32, out: *mut RawFelt, count: u32) -> i32;
+        pub fn adv_stack_read(offset: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the length of the advice-map value for `key` to `out_len`.
         ///
         /// Returns `Status::NotFound` when the map has no entry for `key`; `out_len` is not
         /// changed in that case.
-        pub fn adv_map_value_len(key: *const RawWord, out_len: *mut u32) -> i32;
+        pub fn adv_map_value_len(key: *const Word, out_len: *mut u32) -> i32;
 
         /// Writes the advice-map value for `key` to `out`.
         ///
@@ -399,7 +347,7 @@ pub mod guest {
         /// entry for `key`, and `Status::CapacityTooSmall` when the value is longer than `cap`;
         /// `out` is not changed in either case. Call `adv_map_value_len` first to size the
         /// buffer.
-        pub fn adv_map_value_read(key: *const RawWord, out: *mut RawFelt, cap: u32) -> i32;
+        pub fn adv_map_value_read(key: *const Word, out: *mut Felt, cap: u32) -> i32;
 
         // MUTATIONS
         // ----------------------------------------------------------------------------------------
@@ -411,18 +359,18 @@ pub mod guest {
         /// stack down.
         ///
         /// A size-limit violation traps.
-        pub fn adv_stack_extend(vals: *const RawFelt, len: u32);
+        pub fn adv_stack_extend(vals: *const Felt, len: u32);
 
         /// Buffers an advice-map insertion of `len` elements under `key`.
         ///
         /// Inserting a key that exists with a different value makes the handler fail when the
         /// host applies the buffered mutations. A size-limit violation traps.
-        pub fn adv_map_insert(key: *const RawWord, vals: *const RawFelt, len: u32);
+        pub fn adv_map_insert(key: *const Word, vals: *const Felt, len: u32);
 
         /// Buffers `len` inner nodes to extend the Merkle store.
         ///
         /// A size-limit violation traps.
-        pub fn merkle_store_extend(nodes: *const RawMerkleNode, len: u32);
+        pub fn merkle_store_extend(nodes: *const MerkleNode, len: u32);
 
         // FAILURE
         // ----------------------------------------------------------------------------------------
@@ -444,23 +392,22 @@ mod tests {
 
     #[test]
     fn field_modulus_matches_miden_field() {
-        use miden_core::field::PrimeField64;
-        assert_eq!(FIELD_MODULUS, miden_core::Felt::ORDER_U64);
+        use miden_core::{Felt as CoreFelt, field::PrimeField64};
+        assert_eq!(FIELD_MODULUS, CoreFelt::ORDER_U64);
         // Cross-check the constant against its arithmetic definition.
         assert_eq!(FIELD_MODULUS as u128, (1u128 << 64) - (1u128 << 32) + 1);
     }
 
     #[test]
-    fn felt_canonical_bounds() {
-        assert!(RawFelt::new(0).is_canonical());
-        assert!(RawFelt::new(FIELD_MODULUS - 1).is_canonical());
-        assert!(!RawFelt::new(FIELD_MODULUS).is_canonical());
-        assert!(!RawFelt::new(u64::MAX).is_canonical());
-
-        let good = RawWord::new([1, 2, 3, FIELD_MODULUS - 1]);
-        assert!(good.is_canonical());
-        let bad = RawWord::new([1, 2, 3, FIELD_MODULUS]);
-        assert!(!bad.is_canonical());
+    fn wire_encoding_is_the_plain_residue() {
+        // A canonical `u64` written by the host must decode to the field value it encodes, and
+        // canonicalization of a lazy residue must produce the wire value. This pins the
+        // plain-residue representation the pointer-based wire depends on.
+        for value in [0u64, 1, FIELD_MODULUS - 1] {
+            assert_eq!(Felt::new_unchecked(value).as_canonical_u64(), value);
+        }
+        // A lazy residue `p + 1` stands for `1` and canonicalizes to it.
+        assert_eq!(Felt::new_unchecked(FIELD_MODULUS + 1).as_canonical_u64(), 1);
     }
 
     #[test]
@@ -482,12 +429,12 @@ mod tests {
     }
 
     #[test]
-    fn repr_c_layouts_are_stable() {
+    fn wire_layouts_are_stable() {
         use core::mem::{align_of, size_of};
 
-        assert_eq!(size_of::<RawFelt>(), 8);
-        assert_eq!(align_of::<RawFelt>(), 8);
-        assert_eq!(size_of::<RawWord>(), 32);
-        assert_eq!(size_of::<RawMerkleNode>(), 96);
+        assert_eq!(size_of::<Felt>(), 8);
+        assert_eq!(align_of::<Felt>(), 8);
+        assert_eq!(size_of::<Word>(), 32);
+        assert_eq!(size_of::<MerkleNode>(), 96);
     }
 }

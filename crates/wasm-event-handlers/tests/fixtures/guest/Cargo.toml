@@ -9,4 +9,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-miden-event-handler-sdk = { path = "../../../../event-handler-sdk", features = ["panic-handler"] }
+miden-event-handler-sdk = { path = "../../../../event-handler-sdk", features = [
+    "bump-allocator",
+    "panic-handler",
+] }

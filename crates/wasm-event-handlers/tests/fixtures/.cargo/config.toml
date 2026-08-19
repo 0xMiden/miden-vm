@@ -1,3 +1,8 @@
 # Fixtures only ever target Wasm; make ad-hoc cargo invocations and rust-analyzer follow suit.
 [build]
 target = "wasm32-unknown-unknown"
+
+[target.wasm32-unknown-unknown]
+# The repository root config turns on `simd128`; the handler host runs a non-SIMD Wasm
+# interpreter, so guest fixtures must not use SIMD instructions.
+rustflags = ["-C", "target-feature=-simd128"]

@@ -53,6 +53,11 @@ mod tests;
 // ================================================================================================
 
 /// A `Felt` backed by Plonky3's Goldilocks field element.
+///
+/// The representation — one plain (non-Montgomery) `u64` residue, `repr(transparent)` all the
+/// way down — is load-bearing for the Wasm event handler ABI (`miden-event-handler-abi`), which
+/// passes `Felt` buffers across the host/guest boundary as canonical `u64` wire values. Do not
+/// change the backing representation without updating that ABI.
 #[derive(Copy, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub struct Felt(Goldilocks);
