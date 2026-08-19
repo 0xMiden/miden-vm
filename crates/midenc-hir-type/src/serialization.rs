@@ -929,6 +929,68 @@ mod tests {
     }
 
     #[test]
+    fn recursion_through_list_and_function_barriers_round_trips() {
+        // Exercises the list and function arms of the open-type encoder, which the pointer cases
+        // never reach.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "Tree",
+                StructTemplate::named(
+                    "Tree",
+                    TypeRepr::Default,
+                    [("children", TypeTemplate::list(TypeTemplate::rec("Tree")))],
+                ),
+            )
+            .define_struct(
+                "Callback",
+                StructTemplate::named(
+                    "Callback",
+                    TypeRepr::Default,
+                    [(
+                        "call",
+                        TypeTemplate::function(
+                            CallConv::Fast,
+                            [TypeTemplate::rec("Callback")],
+                            [TypeTemplate::from(Type::U32)],
+                        ),
+                    )],
+                ),
+            );
+        let built = builder.build().expect("should build");
+
+        for name in ["Tree", "Callback"] {
+            let ty = built.get(name).expect("definition");
+            assert_eq!(&round_trip(ty), ty, "{name} should round trip");
+        }
+    }
+
+    #[test]
+    fn recursion_nested_below_a_barrier_round_trips() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [(
+                    "next",
+                    TypeTemplate::ptr(TypeTemplate::struct_type(
+                        TypeRepr::Default,
+                        [
+                            FieldTemplate::from(("some", TypeTemplate::rec("Node"))),
+                            FieldTemplate::from(("none", TypeTemplate::from(Type::U8))),
+                        ],
+                    )),
+                )],
+            ),
+        );
+        let node = build_one(builder, "Node");
+
+        assert_eq!(round_trip(&node), node);
+    }
+
+    #[test]
     fn mutually_recursive_structs_round_trip_from_either_root() {
         let mut builder = RecursiveTypeBuilder::new();
         builder

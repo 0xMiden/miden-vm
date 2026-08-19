@@ -1580,6 +1580,133 @@ mod tests {
     }
 
     #[test]
+    fn recursion_through_a_list_barrier() {
+        // struct Tree { children: list<Tree> }
+        //
+        // A list is a fat pointer, so its layout does not depend on its element type.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Tree",
+            StructTemplate::named(
+                "Tree",
+                TypeRepr::Default,
+                [("children", TypeTemplate::list(TypeTemplate::rec("Tree")))],
+            ),
+        );
+        let tree = build_one(builder, "Tree");
+
+        assert_eq!(tree.size_in_bytes(), 8);
+        assert_eq!(tree.min_alignment(), 4);
+
+        let Type::Struct(tree_ref) = &tree else {
+            panic!("expected a struct")
+        };
+        let body = tree_ref.get();
+        let Type::List(element) = &body.fields()[0].ty else {
+            panic!("expected a list")
+        };
+        assert_eq!(element.as_ref(), &tree);
+    }
+
+    #[test]
+    fn recursion_through_a_function_barrier() {
+        // struct Callback { call: fn(Callback) }
+        //
+        // A function reference is a 4-byte handle regardless of its signature.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Callback",
+            StructTemplate::named(
+                "Callback",
+                TypeRepr::Default,
+                [(
+                    "call",
+                    TypeTemplate::function(CallConv::Fast, [TypeTemplate::rec("Callback")], []),
+                )],
+            ),
+        );
+        let callback = build_one(builder, "Callback");
+
+        assert_eq!(callback.size_in_bytes(), 4);
+
+        let Type::Struct(callback_ref) = &callback else {
+            panic!("expected a struct")
+        };
+        let body = callback_ref.get();
+        let Type::Function(signature) = &body.fields()[0].ty else {
+            panic!("expected a function")
+        };
+        assert_eq!(&signature.params()[0], &callback);
+    }
+
+    #[test]
+    fn recursion_nested_arbitrarily_deep_below_a_barrier() {
+        // struct Node { next: *struct Option { some: Node, none: () } }
+        //
+        // This is the `Box<Option<T>>` shape: the back-reference is not the immediate pointee,
+        // but sits inside an anonymous aggregate beneath it. A design requiring the reference to
+        // be a barrier's direct operand could not express this.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [(
+                    "next",
+                    TypeTemplate::ptr(TypeTemplate::struct_type(
+                        TypeRepr::Default,
+                        [
+                            FieldTemplate::from(("some", TypeTemplate::rec("Node"))),
+                            FieldTemplate::from(("none", TypeTemplate::from(Type::U8))),
+                        ],
+                    )),
+                )],
+            ),
+        );
+        let node = build_one(builder, "Node");
+
+        assert_eq!(node.size_in_bytes(), 4);
+
+        let Type::Struct(node_ref) = &node else {
+            panic!("expected a struct")
+        };
+        let body = node_ref.get();
+        let Type::Ptr(next) = &body.fields()[0].ty else {
+            panic!("expected a pointer")
+        };
+        let Type::Struct(option_ref) = next.pointee() else {
+            panic!("expected a struct")
+        };
+        let option = option_ref.get();
+        assert_eq!(&option.fields()[0].ty, &node);
+    }
+
+    #[test]
+    fn definitions_differing_only_in_name_or_body_are_unequal() {
+        fn build(name: &str, field: Type) -> Type {
+            let mut builder = RecursiveTypeBuilder::new();
+            builder.define_struct(
+                name,
+                StructTemplate::named(
+                    name,
+                    TypeRepr::Default,
+                    [
+                        ("payload", TypeTemplate::from(field)),
+                        ("next", TypeTemplate::ptr(TypeTemplate::rec(name))),
+                    ],
+                ),
+            );
+            build_one(builder, name)
+        }
+
+        let base = build("Node", Type::U32);
+        assert_ne!(build("Other", Type::U32), base, "different name, same body");
+        assert_ne!(build("Node", Type::I32), base, "same name, different body");
+        assert_eq!(build("Node", Type::U32), base);
+    }
+
+    #[test]
     fn mutually_recursive_structs_through_pointers() {
         // struct A { b: *B }   struct B { a: *A }
         let mut builder = RecursiveTypeBuilder::new();
