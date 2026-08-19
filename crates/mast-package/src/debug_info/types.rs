@@ -1749,7 +1749,8 @@ mod tests {
         let mut builder = RecursiveTypeBuilder::new();
         builder.define_struct(
             "Node",
-            StructTemplate::new(
+            StructTemplate::named(
+                "Node",
                 TypeRepr::Default,
                 [
                     ("value", TypeTemplate::from(Type::U32)),
@@ -1774,7 +1775,25 @@ mod tests {
         let (recovered, _) = recover_type_at(node_idx, debug_info.as_ref(), &mut cache)
             .expect("a recursive struct should be recoverable");
 
-        assert_eq!(recovered, node);
+        // The debug format stores one name per aggregate row, so it cannot carry both a
+        // definition's binding key and its declared name. Recovery therefore reproduces the
+        // type's shape rather than its exact identity, in the same way it already cannot
+        // reproduce `TypeRepr`. What must survive is the recursion itself.
+        let Type::Struct(recovered_ref) = &recovered else {
+            panic!("expected a struct")
+        };
+        assert!(recovered_ref.is_recursive());
+        assert_eq!(recovered_ref.name().as_deref(), Some("Node"));
+        assert_eq!(recovered_ref.size(), node.size_in_bytes());
+
+        let body = recovered_ref.get();
+        assert_eq!(body.fields().len(), 2);
+        assert_eq!(body.fields()[0].ty, Type::U32);
+        let Type::Ptr(next) = &body.fields()[1].ty else {
+            panic!("expected a pointer")
+        };
+        // Descending through the backedge lands back on the recovered type.
+        assert_eq!(next.pointee(), &recovered);
     }
 
     #[test]
@@ -1787,14 +1806,16 @@ mod tests {
         builder
             .define_struct(
                 "A",
-                StructTemplate::new(
+                StructTemplate::named(
+                    "A",
                     TypeRepr::Default,
                     [("b", TypeTemplate::ptr(TypeTemplate::rec("B")))],
                 ),
             )
             .define_struct(
                 "B",
-                StructTemplate::new(
+                StructTemplate::named(
+                    "B",
                     TypeRepr::Default,
                     [("a", TypeTemplate::ptr(TypeTemplate::rec("A")))],
                 ),
@@ -1812,7 +1833,27 @@ mod tests {
         let (recovered, _) = recover_type_at(a_idx, debug_info.as_ref(), &mut cache)
             .expect("a mutual group should be recoverable");
 
-        assert_eq!(recovered, a);
+        // A -> b -> B -> a must come back around to A.
+        let Type::Struct(a_ref) = &recovered else {
+            panic!("expected a struct")
+        };
+        assert!(a_ref.is_recursive());
+        assert_eq!(a_ref.name().as_deref(), Some("A"));
+
+        let a_body = a_ref.get();
+        let Type::Ptr(to_b) = &a_body.fields()[0].ty else {
+            panic!("expected a pointer")
+        };
+        let Type::Struct(b_ref) = to_b.pointee() else {
+            panic!("expected a struct")
+        };
+        assert_eq!(b_ref.name().as_deref(), Some("B"));
+
+        let b_body = b_ref.get();
+        let Type::Ptr(to_a) = &b_body.fields()[0].ty else {
+            panic!("expected a pointer")
+        };
+        assert_eq!(to_a.pointee(), &recovered);
     }
 
     #[test]

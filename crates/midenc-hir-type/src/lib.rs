@@ -147,7 +147,7 @@ impl StructRef {
     pub fn name(&self) -> Option<Arc<str>> {
         match self {
             Self::Plain(ty) => ty.name(),
-            Self::Rec(ty) => Some(ty.name().clone()),
+            Self::Rec(ty) => ty.name(),
         }
     }
 
@@ -221,7 +221,8 @@ impl EnumRef {
     pub fn name(&self) -> Arc<str> {
         match self {
             Self::Plain(ty) => ty.name().clone(),
-            Self::Rec(ty) => ty.name().clone(),
+            // An enum definition always carries a name.
+            Self::Rec(ty) => ty.name().expect("an enum always has a name"),
         }
     }
 
@@ -278,9 +279,10 @@ impl PrettyPrint for StructRef {
         match self {
             Self::Plain(ty) => ty.render(),
             // A recursive struct renders by name, so that printing terminates.
-            Self::Rec(ty) => {
-                miden_formatting::prettier::text(alloc::format!("struct {}", ty.name()))
-            },
+            Self::Rec(ty) => miden_formatting::prettier::text(match ty.name() {
+                Some(name) => alloc::format!("struct {name}"),
+                None => alloc::format!("struct {}", ty.key()),
+            }),
         }
     }
 }
@@ -289,7 +291,9 @@ impl PrettyPrint for EnumRef {
     fn render(&self) -> miden_formatting::prettier::Document {
         match self {
             Self::Plain(ty) => ty.render(),
-            Self::Rec(ty) => miden_formatting::prettier::text(alloc::format!("enum {}", ty.name())),
+            Self::Rec(_) => {
+                miden_formatting::prettier::text(alloc::format!("enum {}", self.name()))
+            },
         }
     }
 }

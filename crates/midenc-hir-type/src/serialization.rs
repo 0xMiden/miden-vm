@@ -231,7 +231,7 @@ fn write_recursive_group<W: ByteWriter>(ty: &RecTypeRef, target: &mut W) {
 
     // Headers first, so a back-reference index can be resolved to a name while reading bodies.
     for def in defs {
-        write_str_with_len(&def.name, target);
+        write_str_with_len(&def.key, target);
         target.write_u8(match def.kind {
             AggregateKind::Struct => 0,
             AggregateKind::Enum => 1,

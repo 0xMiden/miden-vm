@@ -97,10 +97,25 @@ impl RecTypeRef {
         &self.group.defs[self.index as usize]
     }
 
-    /// The name of the definition this reference selects.
+    /// The binding key of the definition this reference selects.
+    ///
+    /// Unique within the group, and what canonical ordering sorts by. This is an identifier for
+    /// the definition, not the aggregate's declared name; see [`Self::name`].
     #[inline]
-    pub fn name(&self) -> &Arc<str> {
-        &self.def().name
+    pub fn key(&self) -> &Arc<str> {
+        &self.def().key
+    }
+
+    /// The declared name of the aggregate this reference selects, if it has one.
+    ///
+    /// This agrees with the name on the unfolded form, so the folded and unfolded views of a
+    /// recursive aggregate never disagree about what it is called.
+    #[inline]
+    pub fn name(&self) -> Option<Arc<str>> {
+        match &self.def().body {
+            OpenAggregate::Struct(body) => body.name.clone(),
+            OpenAggregate::Enum(body) => Some(body.name.clone()),
+        }
     }
 
     /// Whether this reference selects a struct or an enum definition.
@@ -231,8 +246,14 @@ impl Hash for RecGroup {
 /// A single definition within a [RecGroup].
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RecDef {
-    /// Ordering key within the group, and the display name.
-    pub(crate) name: Arc<str>,
+    /// The binding key: unique within the group, and the key canonical ordering sorts by.
+    ///
+    /// This is deliberately *not* the aggregate's own name. A frontend keys definitions by
+    /// something collision-free, such as a module-qualified path, while the aggregate keeps
+    /// whatever name it was declared with. Conflating the two would rewrite the name of every
+    /// aggregate routed through the builder, and `StructType::name` takes part in structural
+    /// equality.
+    pub(crate) key: Arc<str>,
     pub(crate) kind: AggregateKind,
     pub(crate) body: OpenAggregate,
     pub(crate) layout: TypeLayout,
@@ -495,11 +516,27 @@ pub struct StructTemplate {
 }
 
 impl StructTemplate {
+    /// An anonymous struct.
     pub fn new(repr: TypeRepr, fields: impl IntoIterator<Item = impl Into<FieldTemplate>>) -> Self {
         Self {
             name: None,
             repr,
             fields: fields.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// A struct declared with `name`.
+    ///
+    /// The name is the aggregate's own, and is independent of the binding key it is defined
+    /// under; see [`RecursiveTypeBuilder::define_struct`].
+    pub fn named(
+        name: impl Into<Arc<str>>,
+        repr: TypeRepr,
+        fields: impl IntoIterator<Item = impl Into<FieldTemplate>>,
+    ) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..Self::new(repr, fields)
         }
     }
 }
@@ -631,25 +668,26 @@ impl RecursiveTypeBuilder {
         Self::default()
     }
 
-    /// Define a struct named `name`.
+    /// Define a struct under the binding key `key`.
+    ///
+    /// The key identifies the definition within the group and is what back-references name; it
+    /// does not become the struct's name. Set `template.name` for that.
     pub fn define_struct(
         &mut self,
-        name: impl Into<Arc<str>>,
-        mut template: StructTemplate,
+        key: impl Into<Arc<str>>,
+        template: StructTemplate,
     ) -> &mut Self {
-        let name = name.into();
-        template.name = Some(name.clone());
         self.defs.push(TemplateDef {
-            name,
+            name: key.into(),
             kind: AggregateKind::Struct,
             body: AggregateTemplate::Struct(template),
         });
         self
     }
 
-    /// Define an enum named `name`.
-    pub fn define_enum(&mut self, name: impl Into<Arc<str>>, template: EnumTemplate) -> &mut Self {
-        let name = name.into();
+    /// Define an enum under the binding key `key`. See [`Self::define_struct`].
+    pub fn define_enum(&mut self, key: impl Into<Arc<str>>, template: EnumTemplate) -> &mut Self {
+        let name = key.into();
         self.defs.push(TemplateDef {
             name,
             kind: AggregateKind::Enum,
@@ -865,7 +903,7 @@ fn build_group(
         })?;
         let body = def.body.open(&probe, &slot_of, completed)?;
         rec_defs.push(RecDef {
-            name: def.name.clone(),
+            key: def.name.clone(),
             kind: def.kind,
             body,
             layout: layouts[slot].expect("layout computed above"),
@@ -874,8 +912,8 @@ fn build_group(
 
     let group = Arc::new(RecGroup::new(rec_defs.into_boxed_slice()));
     for slot in 0..component.len() {
-        let name = group.defs[slot].name.clone();
-        completed.insert(name, rec_type(group.clone(), slot as u16));
+        let key = group.defs[slot].key.clone();
+        completed.insert(key, rec_type(group.clone(), slot as u16));
     }
 
     Ok(())
@@ -1330,7 +1368,8 @@ mod tests {
         let mut builder = RecursiveTypeBuilder::new();
         builder.define_struct(
             "Node",
-            StructTemplate::new(
+            StructTemplate::named(
+                "Node",
                 TypeRepr::Default,
                 [
                     ("value", TypeTemplate::from(Type::U32)),
@@ -1428,6 +1467,55 @@ mod tests {
         };
 
         assert_eq!(next.pointee(), &node);
+    }
+
+    #[test]
+    fn the_binding_key_is_distinct_from_the_display_name() {
+        // A group's definitions are keyed by a name that must be unique within the group, which
+        // for a frontend means something like a module-qualified path. That key must not become
+        // the aggregate's own name, because `StructType::name` takes part in structural equality:
+        // routing an ordinary declaration through the builder would otherwise silently rename it.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "lib::list::Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [("next", TypeTemplate::ptr(TypeTemplate::rec("lib::list::Node")))],
+            ),
+        );
+        let node = build_one(builder, "lib::list::Node");
+
+        let Type::Struct(struct_ref) = &node else {
+            panic!("expected a struct")
+        };
+
+        // The folded and unfolded forms must agree about what the type is called.
+        assert_eq!(struct_ref.name().as_deref(), Some("Node"));
+        assert_eq!(struct_ref.get().name().as_deref(), Some("Node"));
+
+        let rec = struct_ref.as_recursive().expect("should be recursive");
+        assert_eq!(rec.key().as_ref(), "lib::list::Node");
+        assert_eq!(rec.name().as_deref(), Some("Node"));
+    }
+
+    #[test]
+    fn an_unnamed_aggregate_keeps_its_key_out_of_its_name() {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "lib::anon::Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [("next", TypeTemplate::ptr(TypeTemplate::rec("lib::anon::Node")))],
+            ),
+        );
+        let node = build_one(builder, "lib::anon::Node");
+
+        let Type::Struct(struct_ref) = &node else {
+            panic!("expected a struct")
+        };
+        assert_eq!(struct_ref.name(), None);
+        assert_eq!(struct_ref.get().name(), None);
     }
 
     #[test]
