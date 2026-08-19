@@ -1,10 +1,10 @@
 [package]
-name = "miden-test-serde-macros"
+name = "miden-test-serialization-macros"
 version = "0.30.0"
-description = "Proc macros for serde roundtrip testing in Miden VM"
+description = "Proc macros for serialization round-trip testing in Miden VM"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]
-keywords = ["miden", "serde", "testing", "proc-macro"]
+keywords = ["miden", "serialization", "testing", "proc-macro"]
 publish = false
 license.workspace = true
 authors.workspace = true
@@ -24,4 +24,3 @@ syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
-serde = { workspace = true, features = ["derive"] }

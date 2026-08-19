@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(transparent)]
 pub struct PackageId(Arc<str>);

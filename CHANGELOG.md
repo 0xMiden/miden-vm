@@ -24,6 +24,7 @@
 - Moved operation integration tests out of the obsolete `decorators` module ([#3449](https://github.com/0xMiden/miden-vm/issues/3449)).
 - [BREAKING] Factored recursive ACE circuits into per-order and shared sections, generalized the registry infrastructure to arbitrary AIR sets, and added the ten-AIR precompile VM registry. This changes the Miden VM and precompile VM ACE roots, relation digests, circuit shapes, and recursive-proof transcripts ([#3465](https://github.com/0xMiden/miden-vm/pull/3465)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
+- Removed unused Serde support and kept binary roundtrip coverage through `Serializable` and `Deserializable` ([#3578](https://github.com/0xMiden/miden-vm/pull/3578)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).
 - [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 - Made `Mmr::clone()` cheap by storing MMR nodes in chunked, `Arc`-shared storage. Clones share all chunk storage with the original; appending after a clone copies at most one 32 KiB chunk. Public API and serialization formats are unchanged. ([#3562](https://github.com/0xMiden/miden-vm/pull/3562)).
@@ -55,6 +56,7 @@
 
 #### Fixes
 
+- [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - [BREAKING] Validated `LeafIndex` on deserialization: `LeafIndex::read_from()` now routes through `TryFrom<NodeIndex>`, and the bypassing `serde` derives were removed from `LeafIndex`, `SmtLeaf`, `Smt`, and `PartialSmt` ([#3559](https://github.com/0xMiden/miden-vm/issues/3559)).
@@ -89,6 +91,10 @@
 - [BREAKING] Fixed collisions between empty input and full rate blocks in domain-separated field-element hashing by marking nonzero-domain empty input in capacity. This changes empty domain-separated commitments ([#3447](https://github.com/0xMiden/miden-vm/pull/3447)).
 - [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
 - Moved the `miden-precompiles` and `miden-precompiles-prover` crate sources from the repository root into `crates/`, aligning them with the rest of the workspace layout ([#3462](https://github.com/0xMiden/miden-vm/pull/3462)).
+
+#### Changes
+
+- Validated and retained `DebugInfo` when reading untrusted packages, with bounded decoding for hostile data and an explicit unmetered decoder for analysis ([#3460](https://github.com/0xMiden/miden-vm/pull/3460)).
 
 ## v0.28.0 (2026-08-01)
 
@@ -138,9 +144,14 @@
 - [BREAKING] Removed unused public APIs and narrowed test-only helper visibility across VM and crypto crates ([#3424](https://github.com/0xMiden/miden-vm/pull/3424)).
 - Enable simd128 Plonky3 backend for WASM builds and added related CI job ([#3433](https://github.com/0xMiden/miden-vm/pull/3433)).
 - [BREAKING] Bumped Plonky3 related dependencies to integrate SVE2 and WASM-SIMD128 speed-ups and include a NEON bugfix. ([#3441](https://github.com/0xMiden/miden-vm/pull/3441)).
+- [BREAKING] Changed `Package::read_from_trusted` and `Package::read_from_bytes_trusted` to skip embedded MAST and manifest cross-check validation, removed the package unchecked readers, and kept untrusted package reads on `Package::read_from` and `Package::read_from_bytes`, which validate MAST and drop debug sections ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
 
 #### Fixes
 
+- Restored public `miden-lifted-stark` testing constants to preserve compatibility with version 0.28.1.
+- Changed overspecified untrusted MAST forest input with wire hashes from an error log to a warning, and included the caller location in the warning ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
+- [BREAKING] Bound MMR peak commitments to the leaf count by hashing `[num_leaves, 0, 0, 0] || padded_peaks`, and updated the core library `mmr::pack`/`mmr::unpack` procedures to use the same preimage ([#3388](https://github.com/0xMiden/miden-vm/pull/3388)).
+- Documented the program-entrypoint locals invariant on `Procedure::set_num_locals` and now assert it at that AST mutation site, so setting locals on an executable module's `begin`..`end` block panics at the producer boundary. The existing assembler assertion is retained as a backstop for entrypoints built directly via `Procedure::new` ([#3382](https://github.com/0xMiden/miden-vm/pull/3382)).
 - Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
 - Fixed `hash_bytes(&[])` returning `Word::default()`; the empty-bytes input now absorbs a padding marker and permutes, producing a nonzero digest consistent with the 10\* sponge padding rule ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).
 - Fixed a latent `CryptoBox` (IES) key-derivation bug: HKDF-SHA256 output is now reduced into canonical Felts via `AeadScheme::key_from_uniform_bytes` instead of being fed into canonical decoding, which rejected noncanonical limbs at ~2^-30 per key ([#3366](https://github.com/0xMiden/miden-vm/pull/3366)).

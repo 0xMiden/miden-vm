@@ -12,7 +12,10 @@ use std::{
 };
 
 use miden_assembly_syntax::Report;
-use miden_core::{serde::Serializable, utils::DisplayHex};
+use miden_core::{
+    serde::{Deserializable, Serializable},
+    utils::DisplayHex,
+};
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
@@ -225,7 +228,7 @@ impl LocalPackageRegistry {
     ) -> Result<PublishedPackage, LocalRegistryError> {
         let package_path = package_path.as_ref();
         let bytes = fs::read(package_path).map_err(LocalRegistryError::IndexRead)?;
-        let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
+        let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: package_path.to_path_buf(),
                 error: error.to_string(),
@@ -435,7 +438,7 @@ impl LocalPackageRegistry {
                     let existing_version =
                         Version::new(existing_package.version.clone(), existing_package.digest());
                     if existing_package.name == package.name && existing_version == *version {
-                        if &existing_package == package {
+                        if Self::matches_after_trusted_package_read(&existing_package, package) {
                             write_file_atomically(artifact_path, &existing_bytes)
                                 .map_err(LocalRegistryError::IndexWrite)
                         } else {
@@ -467,7 +470,11 @@ impl LocalPackageRegistry {
     ) -> Result<(), LocalRegistryError> {
         match fs::read(artifact_path) {
             Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
-                Ok(existing_package) if &existing_package == package => Ok(()),
+                Ok(existing_package)
+                    if Self::matches_after_trusted_package_read(&existing_package, package) =>
+                {
+                    Ok(())
+                },
                 Ok(_) => Err(LocalRegistryError::DuplicateSemanticVersion {
                     package: package.name.clone(),
                     version: package.version.clone(),
@@ -488,6 +495,11 @@ impl LocalPackageRegistry {
                 bytes,
             ),
         }
+    }
+
+    fn matches_after_trusted_package_read(existing: &MastPackage, package: &MastPackage) -> bool {
+        MastPackage::read_from_bytes_trusted(&package.to_bytes())
+            .is_ok_and(|expected| existing == &expected)
     }
 
     /// Derive the path in the artifact store for a package with `digest`
@@ -819,7 +831,10 @@ impl PackageStore for LocalPackageRegistry {
 
 #[cfg(test)]
 mod tests {
-    use miden_mast_package::{Dependency, Package, Section, SectionId, TargetType};
+    use miden_core::serde::Serializable;
+    use miden_mast_package::{
+        Dependency, Package, Section, SectionId, TargetType, debug_info::PackageDebugInfoBuilder,
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -846,6 +861,10 @@ mod tests {
         let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
         let artifact_dir = tempdir.path().join("sysroot").join("lib");
         LocalPackageRegistry::load(index_path, artifact_dir).expect("failed to load registry")
+    }
+
+    fn valid_debug_info_section() -> Section {
+        Section::new(SectionId::DEBUG_INFO, PackageDebugInfoBuilder::default().build().to_bytes())
     }
 
     #[test]
@@ -1035,6 +1054,41 @@ mod tests {
     }
 
     #[test]
+    fn cache_accepts_existing_debug_enabled_package_artifact() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let mut package = build_package("pkg", "1.0.0", []);
+        package.sections.push(valid_debug_info_section());
+        let expected_sections = package.sections.clone();
+
+        let package = Arc::from(package);
+        let version = registry.cache_package(Arc::clone(&package)).unwrap();
+        let recached = registry.cache_package(package).unwrap();
+
+        assert_eq!(recached, version);
+        let loaded = registry.load_package(&PackageId::from("pkg"), &version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
+    }
+
+    #[test]
+    fn publish_preserves_debug_enabled_package_artifact_on_load() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+
+        let mut package = build_package("pkg", "1.0.0", []);
+        package.sections.push(valid_debug_info_section());
+        let expected_sections = package.sections.clone();
+
+        let package_path = tempdir.path().join("pkg.masp");
+        package.write_to_file(&package_path).unwrap();
+        let published = registry.publish(&package_path).unwrap();
+
+        let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
+        assert_eq!(loaded.sections, expected_sections);
+    }
+
+    #[test]
     fn cache_rejects_different_artifact_for_existing_exact_version() {
         let tempdir = TempDir::new().unwrap();
         let mut registry = load_registry(&tempdir);
@@ -1108,7 +1162,7 @@ mod tests {
         assert_eq!(Some(conflicting_package.digest()), published.version.digest);
         let error = second_registry
             .cache_package(conflicting_package.into())
-            .expect_err("cache repair should revalidate the artifact under the index lock");
+            .expect_err("cache repair should check the artifact under the index lock");
         assert!(matches!(error, LocalRegistryError::DuplicateSemanticVersion { .. }));
         assert_eq!(fs::read(&published.artifact_path).unwrap(), repaired_bytes);
     }

@@ -12,7 +12,7 @@ use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof},
+    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     serde::{ByteWriter, Serializable},
 };
 
@@ -227,15 +227,6 @@ fn generate_fuzz_seeds() {
         // Invalid seed: duplicate hashes should deserialize to Err (never panic).
         let duplicate_kernel = KernelDescriptor::from_hashes_unchecked(vec![b, a, a]);
         write_seed("kernel_deserialize", "duplicate_kernel.bin", &duplicate_kernel.to_bytes());
-
-        // Serde kernel seeds (JSON payloads) used by kernel_serde_deserialize fuzz target.
-        write_seed("kernel_serde_deserialize", "empty_kernel.json", b"[]");
-        write_seed("kernel_serde_deserialize", "duplicate_kernel.json", b"[[1,2,3,4],[1,2,3,4]]");
-        let too_many_hashes: Vec<[u64; 4]> =
-            (0u64..=255).map(|n| [n, n + 1, n + 2, n + 3]).collect();
-        let too_many_hashes_json =
-            serde_json::to_vec(&too_many_hashes).expect("failed to serialize too_many_hashes seed");
-        write_seed("kernel_serde_deserialize", "too_many_hashes.json", &too_many_hashes_json);
     }
 
     // Stack IO seeds
@@ -281,76 +272,6 @@ fn generate_fuzz_seeds() {
             "oversized_entry_count.bin",
             &oversized_entry_count,
         );
-
-        #[cfg(feature = "serde")]
-        {
-            let empty_json =
-                serde_json::to_vec(&empty).expect("failed to serialize empty wire seed");
-            write_seed("deferred_state_wire_serde_deserialize", "empty_wire.json", &empty_json);
-            let wire_json = serde_json::to_vec(&wire).expect("failed to serialize wire seed");
-            write_seed(
-                "deferred_state_wire_serde_deserialize",
-                "all_entries_wire.json",
-                &wire_json,
-            );
-
-            let vm = |precompile_root, marker| VmProof {
-                proof: StarkProof::new(vec![marker], HashFunction::Rpo256),
-                precompile_root,
-            };
-            let precompile = |roots| PrecompileProof {
-                proof: StarkProof::new(vec![2], HashFunction::Rpo256),
-                roots,
-            };
-            let deferred = ExecutionProof::Deferred { vm: vm(statement, 1), precompile: wire };
-            let complete_without_precompile =
-                ExecutionProof::Complete { vm: vm(TRUE_DIGEST, 3), precompile: None };
-            let complete_with_precompile = ExecutionProof::Complete {
-                vm: vm(statement, 4),
-                precompile: Some(precompile(vec![statement])),
-            };
-            let empty_roots = ExecutionProof::Complete {
-                vm: vm(statement, 5),
-                precompile: Some(precompile(Vec::new())),
-            };
-            let duplicate_roots = ExecutionProof::Complete {
-                vm: vm(statement, 6),
-                precompile: Some(precompile(vec![statement, statement])),
-            };
-            let true_root = ExecutionProof::Complete {
-                vm: vm(statement, 7),
-                precompile: Some(precompile(vec![TRUE_DIGEST])),
-            };
-
-            for (name, proof) in [
-                ("deferred_non_empty_wire.json", &deferred),
-                ("complete_without_precompile.json", &complete_without_precompile),
-                ("complete_with_precompile.json", &complete_with_precompile),
-                ("invalid_empty_roots.json", &empty_roots),
-                ("duplicate_roots.json", &duplicate_roots),
-                ("invalid_true_root.json", &true_root),
-            ] {
-                let json = serde_json::to_vec(proof)
-                    .expect("failed to serialize synthetic execution proof seed");
-                write_seed("execution_proof_serde_deserialize", name, &json);
-            }
-
-            let proofs = vec![
-                deferred.clone(),
-                complete_without_precompile,
-                complete_with_precompile,
-                empty_roots,
-                duplicate_roots,
-                true_root,
-            ];
-            let proofs_json = serde_json::to_vec(&proofs)
-                .expect("failed to serialize execution proof vector seed");
-            write_seed("execution_proof_serde_deserialize", "proof_vector.json", &proofs_json);
-            let option_json = serde_json::to_vec(&Some(deferred))
-                .expect("failed to serialize execution proof option seed");
-            write_seed("execution_proof_serde_deserialize", "proof_option.json", &option_json);
-            write_seed("execution_proof_serde_deserialize", "proof_option_none.json", b"null");
-        }
     }
 
     // Execution proof seed (minimal complete proof with no precompile obligation).

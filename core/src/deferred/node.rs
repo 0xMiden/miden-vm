@@ -4,8 +4,6 @@ use alloc::{sync::Arc, vec::Vec};
 use core::mem::size_of;
 
 use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::DeferredError;
 use crate::{
@@ -36,7 +34,6 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 /// decoded only by the owning [`super::Precompile`]. The canonical layout is
 /// `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Tag {
     id: Felt,
     args: [Felt; 3],

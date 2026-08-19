@@ -8,7 +8,7 @@ use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT,
+    MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT,
     ast::{Ident, Path},
     diagnostics::WrapErr,
 };
@@ -29,7 +29,7 @@ use miden_project::Linkage;
 
 use crate::{
     Assembler, PathBuf, SourceSpan, Span,
-    assembler::{MAX_CONTROL_FLOW_NESTING, MAX_PROC_LOCALS},
+    assembler::MAX_PROC_LOCALS,
     ast::{
         Block, Instruction, Module, Op, Procedure, ProcedureName, QualifiedProcedureName,
         Visibility,
@@ -2048,7 +2048,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
 #[test]
 fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
-    let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
+    let source = nested_if_source(1_500);
     let source = source_file!(&context, source.as_str());
     let error = context
         .assemble(source)

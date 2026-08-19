@@ -1,9 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::{
     Felt, WORD_SIZE, Word,
     advice::AdviceMap,
@@ -35,10 +32,9 @@ pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutp
 /// execution begins, and a definition of the kernel against which the program must be executed
 /// (the kernel can be an empty kernel).
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct Program {
     mast_forest: Arc<MastForest>,

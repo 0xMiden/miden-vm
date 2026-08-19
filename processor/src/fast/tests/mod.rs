@@ -264,7 +264,7 @@ fn test_syscall_fail() {
 }
 
 #[test]
-fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() {
+fn validated_debug_child_bearing_package_executes_with_debug_info() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Assembler::new(source_manager)
         .assemble_program(
@@ -289,7 +289,7 @@ fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() 
     assert!(package.debug_info().unwrap().is_some());
 
     let package = Package::read_from_bytes(&package.to_bytes()).unwrap();
-    assert!(package.debug_info().unwrap().is_none());
+    assert!(package.debug_info().unwrap().is_some());
 
     let program = package.unwrap_program();
     let output = FastProcessor::new(StackInputs::new(&[Felt::new_unchecked(3)]).unwrap())

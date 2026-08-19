@@ -56,6 +56,6 @@ thiserror.workspace = true
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest = { workspace = true, features = ["std"] }
 tempfile.workspace = true

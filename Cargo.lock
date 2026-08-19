@@ -2072,7 +2072,7 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "miden-utils-indexing",
  "p3-field",
  "proptest",
@@ -2093,7 +2093,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-project",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "proptest",
  "smallvec",
  "tempfile",
@@ -2109,7 +2109,7 @@ dependencies = [
  "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "miden-utils-diagnostics",
  "midenc-hir-type",
  "pretty_assertions",
@@ -2184,15 +2184,13 @@ dependencies = [
  "miden-debug-types",
  "miden-formatting",
  "miden-serde-utils",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "miden-test-utils",
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
  "proptest",
  "rstest",
- "serde",
- "serde_json",
  "thiserror",
  "trybuild",
 ]
@@ -2268,7 +2266,6 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-symmetric",
  "p3-util",
- "postcard",
  "proptest",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
@@ -2326,7 +2323,7 @@ dependencies = [
  "miden-crypto",
  "miden-formatting",
  "miden-miette",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "miden-utils-indexing",
  "miden-utils-sync",
  "paste",
@@ -2429,18 +2426,17 @@ dependencies = [
 name = "miden-mast-package"
 version = "0.30.0"
 dependencies = [
+ "codspeed-criterion-compat",
  "hashbrown 0.17.1",
- "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "miden-utils-indexing",
  "proptest",
  "proptest-derive",
  "rustc-hash",
  "serde",
- "serde_json",
  "thiserror",
  "zerocopy",
 ]
@@ -2488,11 +2484,9 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-mast-package",
- "miden-test-serde-macros",
  "proptest",
  "pubgrub",
  "serde",
- "serde_json",
  "smallvec",
  "thiserror",
 ]
@@ -2580,9 +2574,10 @@ version = "0.30.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
+ "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "proptest",
  "proptest-derive",
  "serde",
@@ -2654,14 +2649,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-test-serde-macros"
+name = "miden-test-serialization-macros"
 version = "0.30.0"
 dependencies = [
  "proc-macro2",
  "proptest",
  "proptest-derive",
  "quote",
- "serde",
  "syn 1.0.109",
 ]
 
@@ -2707,10 +2701,8 @@ name = "miden-utils-indexing"
 version = "0.30.0"
 dependencies = [
  "miden-serde-utils",
- "miden-test-serde-macros",
+ "miden-test-serialization-macros",
  "proptest",
- "serde",
- "serde_json",
  "thiserror",
 ]
 
@@ -2753,11 +2745,9 @@ dependencies = [
  "miden-precompiles",
  "miden-processor",
  "miden-prover",
- "miden-test-serde-macros",
  "miden-test-utils",
  "miden-verifier",
  "predicates",
- "proptest",
  "serde",
  "serde_json",
  "tempfile",

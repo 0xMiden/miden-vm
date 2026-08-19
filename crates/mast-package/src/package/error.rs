@@ -21,9 +21,9 @@ pub enum PackageDebugInfoError {
     #[error("package debug sections are present but are not trusted")]
     /// Package debug sections are present on a package that does not trust them.
     ///
-    /// Normal untrusted deserialization discards package-owned debug sections before returning a
+    /// Normal untrusted deserialization validates package-owned debug sections before returning a
     /// package. This error protects callers from manually constructed packages, or future
-    /// deserialization paths, that retain debug sections without marking them trusted.
+    /// deserialization paths, that retain debug sections without validating or trusting them.
     UntrustedSections,
     #[error("package contains multiple '{id}' debug sections")]
     DuplicateSection {
@@ -45,6 +45,8 @@ pub enum PackageDebugInfoError {
     },
     #[error("invalid package debug info: {message}")]
     InvalidReference { message: String },
+    #[error("invalid package debug info value: {message}")]
+    InvalidValue { message: String },
     #[error("invalid optional field discriminant for {context}: {err}")]
     InvalidOptionField {
         #[source]
