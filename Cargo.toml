@@ -39,7 +39,6 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "crates/wasm-event-handlers",
-    "crates/wasm-handler-guest-fixture",
     "miden-vm",
     "crates/precompiles",
     "crates/precompiles-air",

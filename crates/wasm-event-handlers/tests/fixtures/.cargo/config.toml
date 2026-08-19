@@ -1,0 +1,3 @@
+# Fixtures only ever target Wasm; make ad-hoc cargo invocations and rust-analyzer follow suit.
+[build]
+target = "wasm32-unknown-unknown"

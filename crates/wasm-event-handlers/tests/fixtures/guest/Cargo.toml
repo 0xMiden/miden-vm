@@ -1,0 +1,12 @@
+[package]
+name = "miden-wasm-handler-guest-fixture"
+version = "0.0.0"
+description = "Test fixture: a Rust guest crate with Wasm event handlers built through the SDK"
+publish = false
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+miden-event-handler-sdk = { path = "../../../../event-handler-sdk", features = ["panic-handler"] }

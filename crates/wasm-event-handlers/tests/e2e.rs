@@ -122,27 +122,38 @@ fn packaged_handler_reads_vm_memory() {
 
 /// Compiles the Rust guest fixture crate for `wasm32-unknown-unknown` and returns the module
 /// bytes. This exercises the guest SDK and its manifest-emitting macro with the real toolchain.
+///
+/// The fixtures live in their own standalone workspace (`tests/fixtures`), outside the main
+/// workspace, so they compile only for their real target and need no host-build cfg-gating.
 fn build_rust_guest_fixture() -> Vec<u8> {
-    use std::{path::Path, process::Command};
+    use std::{path::Path, process::Command, sync::OnceLock};
 
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
-    // A dedicated target dir avoids lock contention with the build that runs this test.
-    let target_dir = workspace_root.join("target").join("guest-fixture");
+    // Build once per test process; `get_or_init` blocks concurrent callers, so tests in the
+    // same binary never race two `cargo build` invocations (cargo's own file locks serialize
+    // builds across processes).
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    WASM.get_or_init(|| {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let fixtures_dir = manifest_dir.join("tests/fixtures");
+        let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
+        // A dedicated target dir avoids lock contention with the build that runs this test.
+        let target_dir = workspace_root.join("target").join("guest-fixture");
 
-    let status = Command::new(env!("CARGO"))
-        .current_dir(workspace_root)
-        .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
-        .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])
-        .arg(&target_dir)
-        .status()
-        .expect("cargo is available");
-    assert!(status.success(), "the guest fixture must build");
+        let status = Command::new(env!("CARGO"))
+            .current_dir(&fixtures_dir)
+            .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
+            .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])
+            .arg(&target_dir)
+            .status()
+            .expect("cargo is available");
+        assert!(status.success(), "the guest fixture must build");
 
-    let artifact = target_dir
-        .join("wasm32-unknown-unknown/release")
-        .join("miden_wasm_handler_guest_fixture.wasm");
-    std::fs::read(artifact).expect("the guest fixture artifact exists")
+        let artifact = target_dir
+            .join("wasm32-unknown-unknown/release")
+            .join("miden_wasm_handler_guest_fixture.wasm");
+        std::fs::read(artifact).expect("the guest fixture artifact exists")
+    })
+    .clone()
 }
 
 #[test]
