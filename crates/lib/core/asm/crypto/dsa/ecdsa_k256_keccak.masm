@@ -200,6 +200,20 @@ end
 # INTERNAL PROCEDURES — ECDSA
 # ================================================================================================
 
+#! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
+#!
+#! Input:  [Z_U32[8], pubkey_ptr, ...]
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [...]
+proc verify_digest_impl
+    exec.prepare_verify_inputs
+    # => [U1, Q, U2, SIG_R, ...]
+    exec.relation_point_2base
+    # => [VERIFY_POINT, SIG_R, ...]
+    exec.assert_x_eq_scalar_k1
+    # => [...]
+end
+
 #! Recovers and constrains a public key for a Keccak digest and native EVM recovery witness.
 #!
 #! Input:  [digest_ptr, SIG_PTR, ...]
@@ -299,49 +313,6 @@ proc load_keccak_digest_as_z
     # => [PREHASH_U32[8], ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 end
 
-#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
-#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
-#!
-#! Both callers derive `U1 = z/s` from a Keccak digest and intentionally assume it is nonzero. The
-#! only unsupported digest values are 0 and n, whose Keccak preimages are computationally infeasible
-#! to find. The deferred two-base MSM rejects zero-scalar terms.
-#! Input:  [U1, Q, U2, ...]
-#! Output: [RELATION_POINT, ...]
-proc relation_point_2base
-    dupw.1
-    # => [Q, U1, Q, U2, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, ...]
-    if.true
-        swapw dropw
-        # => [U1, U2, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, ...]
-        exec.secp256k1::mul_scalar_generator
-    else
-        exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, ...]
-        exec.secp256k1::msm2
-    end
-    # => [RELATION_POINT, ...]
-end
-
-#! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
-#!
-#! Input:  [Z_U32[8], pubkey_ptr, ...]
-#! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [...]
-proc verify_digest_impl
-    exec.prepare_verify_inputs
-    # => [U1, Q, U2, SIG_R, ...]
-    exec.relation_point_2base
-    # => [VERIFY_POINT, SIG_R, ...]
-    exec.assert_x_eq_scalar_k1
-    # => [...]
-end
-
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
@@ -403,6 +374,33 @@ proc load_recovery_signature_k1
     # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
 end
 
+#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests and returns SIG_S on top.
+#!
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+proc load_signature_k1
+    exec.load_scalar_k1_from_advice
+    # => [SIG_R, ...]
+
+    exec.load_scalar_k1_from_advice
+    # => [SIG_S, SIG_R, ...]
+end
+
+#! Loads one canonical k1 scalar from advice.
+#!
+#! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
+#! Output: [VALUE_SCALAR_DIGEST, ...]
+proc load_scalar_k1_from_advice
+    adv_pushw
+    # => [VALUE_LO_U32[4], ...]
+    adv_pushw
+    # => [VALUE_HI_U32[4], VALUE_LO_U32[4], ...]
+    swapw
+    # => [VALUE_LO_U32[4], VALUE_HI_U32[4], ...]
+    exec.k1_scalar::load
+    # => [VALUE_SCALAR_DIGEST, ...]
+end
+
 #! Checks the ECDSA signature scalars and computes `U1 = z/s` and `U2 = r/s`.
 #!
 #! Input:  [SIG_S, SIG_R, Z, Q, ...]
@@ -441,31 +439,33 @@ proc compute_ecdsa_scalars
     # => [U1, Q, U2, SIG_R, ...]
 end
 
-#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests and returns SIG_S on top.
+#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
+#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
 #!
-#! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-proc load_signature_k1
-    exec.load_scalar_k1_from_advice
-    # => [SIG_R, ...]
-
-    exec.load_scalar_k1_from_advice
-    # => [SIG_S, SIG_R, ...]
-end
-
-#! Loads one canonical k1 scalar from advice.
-#!
-#! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
-#! Output: [VALUE_SCALAR_DIGEST, ...]
-proc load_scalar_k1_from_advice
-    adv_pushw
-    # => [VALUE_LO_U32[4], ...]
-    adv_pushw
-    # => [VALUE_HI_U32[4], VALUE_LO_U32[4], ...]
-    swapw
-    # => [VALUE_LO_U32[4], VALUE_HI_U32[4], ...]
-    exec.k1_scalar::load
-    # => [VALUE_SCALAR_DIGEST, ...]
+#! Both callers derive `U1 = z/s` from a Keccak digest and intentionally assume it is nonzero. The
+#! only unsupported digest values are 0 and n, whose Keccak preimages are computationally infeasible
+#! to find. The deferred two-base MSM rejects zero-scalar terms.
+#! Input:  [U1, Q, U2, ...]
+#! Output: [RELATION_POINT, ...]
+proc relation_point_2base
+    dupw.1
+    # => [Q, U1, Q, U2, ...]
+    exec.secp256k1::push_generator
+    # => [G, Q, U1, Q, U2, ...]
+    exec.word::eq
+    # => [is_q_generator, U1, Q, U2, ...]
+    if.true
+        swapw dropw
+        # => [U1, U2, ...]
+        exec.k1_scalar::add
+        # => [U1_PLUS_U2, ...]
+        exec.secp256k1::mul_scalar_generator
+    else
+        exec.secp256k1::push_generator
+        # => [G, U1, Q, U2, ...]
+        exec.secp256k1::msm2
+    end
+    # => [RELATION_POINT, ...]
 end
 
 #! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
