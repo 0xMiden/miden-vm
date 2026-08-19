@@ -682,20 +682,20 @@ end
 # =============================================================================================
 
 #! Moves the signature from the advice map to the advice stack, where the signature is stored in
-#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the Poseidon2 hash. The signature is
+#! the hashmap at key `hash(PK || MSG)`, where `hash()` is the Poseidon2 hash. The signature is
 #! expected to be stored in reverse order, so that it gets pushed on the advice stack in the
 #! correct order.
 #!
 #! Inputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  []
-#!   Advice map: hash(MSG || PK) -> SIGNATURE
+#!   Advice map: hash(PK || MSG) -> SIGNATURE
 #! Outputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
 pub proc move_sig_from_map_to_adv_stack
     dupw.1 dupw.1 hmerge
-    #=> [hash(MSG || PK), PK, MSG, ...]
+    #=> [hash(PK || MSG), PK, MSG, ...]
 
     adv.push_mapval dropw
     #=> [PK, MSG, ...]
