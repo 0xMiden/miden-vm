@@ -141,9 +141,7 @@ pub mod hasher {
     };
 }
 
-/// Testing infrastructure: configurations, fixtures, and example AIRs.
+/// Shared test support and FRI vector generation.
 ///
-/// Available when the `testing` feature is enabled or during `cargo test`.
-/// Integration tests should use `cargo test --features testing`.
-#[cfg(any(test, feature = "testing"))]
+/// The `testing` feature adds hash configurations and example AIRs.
 pub mod testing;
