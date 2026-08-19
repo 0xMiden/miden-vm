@@ -238,6 +238,25 @@ impl StructType {
         Self { name, repr, size, fields }
     }
 
+    /// Reassemble a struct from already-computed layout metadata.
+    ///
+    /// This is how a recursive definition's open body is closed: the layout was computed once at
+    /// construction, so re-deriving it here would be both wasteful and a chance to disagree.
+    pub(crate) fn from_raw_parts(
+        name: Option<Arc<str>>,
+        repr: TypeRepr,
+        size: u32,
+        fields: SmallVec<[StructField; 2]>,
+    ) -> Self {
+        Self { name, repr, size, fields }
+    }
+
+    /// The raw, byte-valued size of this struct, as stored.
+    #[inline]
+    pub(crate) fn size_raw(&self) -> u32 {
+        self.size
+    }
+
     /// Get the name of this struct, if provided.
     #[inline]
     pub fn name(&self) -> Option<Arc<str>> {
@@ -289,7 +308,8 @@ impl TryFrom<Type> for StructType {
 
     fn try_from(ty: Type) -> Result<Self, Self::Error> {
         match ty {
-            Type::Struct(ty) => Ok(Arc::unwrap_or_clone(ty)),
+            // A recursive struct unfolds one level; see `StructRef::get`.
+            Type::Struct(ty) => Ok(ty.get().into_owned()),
             other => Err(other),
         }
     }

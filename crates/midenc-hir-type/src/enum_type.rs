@@ -231,6 +231,45 @@ impl EnumType {
         })
     }
 
+    /// Reassemble an enum from already-computed layout metadata.
+    ///
+    /// See `StructType::from_raw_parts` for why this exists.
+    pub(crate) fn from_raw_parts(
+        name: Arc<str>,
+        discriminant: Type,
+        variants: SmallVec<[Variant; 4]>,
+        offsets: SmallVec<[u32; 4]>,
+        size: u32,
+        align: u32,
+    ) -> Self {
+        Self {
+            name,
+            discriminant,
+            variants,
+            offsets,
+            size,
+            align,
+        }
+    }
+
+    /// The raw payload offsets of each variant, as stored.
+    #[inline]
+    pub(crate) fn offsets(&self) -> &[u32] {
+        &self.offsets
+    }
+
+    /// The raw, byte-valued size of this enum, as stored.
+    #[inline]
+    pub(crate) fn size_in_bytes_raw(&self) -> u32 {
+        self.size
+    }
+
+    /// The raw alignment of this enum, as stored.
+    #[inline]
+    pub(crate) fn align_raw(&self) -> u32 {
+        self.align
+    }
+
     /// Returns the name of this enum type
     #[inline]
     pub fn name(&self) -> &Arc<str> {

@@ -117,6 +117,11 @@ impl Serializable for Type {
                 ty.pointee().write_into(target);
             },
             Type::Struct(ty) => {
+                assert!(
+                    !ty.is_recursive(),
+                    "TODO(recursive-types): recursive struct serialization is not implemented yet"
+                );
+                let ty = ty.get();
                 target.write_u8(17);
                 if let Some(name) = ty.name() {
                     target.write_bool(true);
@@ -166,6 +171,11 @@ impl Serializable for Type {
                 ty.write_into(target);
             },
             Type::Enum(ty) => {
+                assert!(
+                    !ty.is_recursive(),
+                    "TODO(recursive-types): recursive enum serialization is not implemented yet"
+                );
+                let ty = ty.get();
                 target.write_u8(21);
                 target.write_usize(ty.name().len());
                 target.write_bytes(ty.name().as_bytes());
@@ -319,7 +329,7 @@ impl Type {
                             .to_string(),
                     ));
                 }
-                Type::Struct(Arc::new(StructType::from_parts(name, repr, fields)))
+                Type::from(StructType::from_parts(name, repr, fields))
             },
             18 => {
                 let arity = source.read_usize()?;
@@ -380,7 +390,7 @@ impl Type {
 
                 let enum_ty = EnumType::new(name, discriminant, variants)
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
-                Type::Enum(Arc::new(enum_ty))
+                Type::from(enum_ty)
             },
             22 => Type::Variadic,
             invalid => {
@@ -500,7 +510,7 @@ mod tests {
         let Type::Struct(struct_ty) = ty else {
             panic!("expected struct");
         };
-        assert_eq!(struct_ty.fields().len(), 2);
+        assert_eq!(struct_ty.get().fields().len(), 2);
         assert_eq!(struct_ty.size(), 8);
     }
 

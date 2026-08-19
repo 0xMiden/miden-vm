@@ -159,7 +159,7 @@ impl Type {
                     }
                 },
             },
-            Self::Struct(struct_ty) => match &*struct_ty {
+            Self::Struct(struct_ty) => match &*struct_ty.get() {
                 StructType { repr: TypeRepr::Transparent, fields, .. } => {
                     let underlying = fields
                         .into_iter()
@@ -385,10 +385,10 @@ impl Type {
             },
             Type::List(pointee_ty) => {
                 // The layout of a `List<T>` is `(len, ptr<T>)`
-                let list_repr_ty = Type::Struct(Arc::new(StructType::new([
+                let list_repr_ty = Type::from(StructType::new([
                     Type::U32,
                     Type::Ptr(Arc::new(PointerType::new(pointee_ty.as_ref().clone()))),
-                ])));
+                ]));
                 list_repr_ty.split(n)
             },
             // These types either have no size, or are 1 byte in size, so must have
@@ -450,7 +450,7 @@ impl Type {
             // Fat pointers are 64-bits, (32-bit metadata + raw pointer)
             Self::List(_) => 64,
             // Packed structs have no alignment padding between fields
-            Self::Struct(struct_ty) => struct_ty.size as usize * 8,
+            Self::Struct(struct_ty) => struct_ty.size() * 8,
             Self::Enum(enum_ty) => enum_ty.size_in_bits(),
             Self::Array(array_ty) => array_ty.size_in_bits(),
         }
@@ -530,6 +530,32 @@ mod tests {
     use smallvec::smallvec;
 
     use crate::*;
+
+    #[test]
+    fn self_recursive_struct_through_a_pointer_has_a_finite_layout() {
+        // struct Node { value: u32, next: *Node }
+        //
+        // The recursion crosses a pointer, so `Node` has a statically computable layout:
+        // a 4-byte u32 followed by a 4-byte pointer.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+        let mut built = builder.build().expect("Node should build");
+        let node = built.remove("Node").expect("Node should be present");
+
+        assert_eq!(node.size_in_bytes(), 8);
+        assert_eq!(node.min_alignment(), 4);
+        assert!(!node.is_zst());
+        assert!(node.is_struct());
+    }
 
     #[test]
     #[should_panic(expected = "expected no more than 255 fields")]

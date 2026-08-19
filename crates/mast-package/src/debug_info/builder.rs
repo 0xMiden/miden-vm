@@ -515,6 +515,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
                     _ => None,
                 });
                 let mut fields = vec![];
+                let struct_ty = struct_ty.get();
                 for (i, field) in struct_ty.fields().iter().enumerate() {
                     let decl = declared_field_tys.and_then(|fields| fields.get(i));
                     let field_name = decl
@@ -545,6 +546,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
                 self.add_type(DebugTypeInfo::Struct { name_idx, size, fields })
             },
             Type::Enum(enum_ty) => {
+                let enum_ty = enum_ty.get();
                 let discrim_ty = self.register_debug_type(None, None, enum_ty.discriminant())?;
                 let name_idx = self.add_string(enum_ty.name().clone());
                 let size = u32::try_from(enum_ty.size_in_bytes()).map_err(|_| {
@@ -658,7 +660,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
+        let ty = Type::from(Arc::new(enum_ty));
 
         let type_idx = builder.register_debug_type(None, None, &ty).unwrap();
 
@@ -700,7 +702,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
+        let ty = Type::from(Arc::new(enum_ty));
 
         let type_idx = builder.register_debug_type(None, None, &ty).unwrap();
 
@@ -717,11 +719,11 @@ mod tests {
 
     #[test]
     fn function_debug_types_preserve_resolved_struct_metadata() {
-        let felt_wrapper = Type::Struct(Arc::new(StructType::named(
+        let felt_wrapper = Type::from(Arc::new(StructType::named(
             "felt-wrapper".into(),
             [(Arc::from("inner"), Type::Felt)],
         )));
-        let account_id = Type::Struct(Arc::new(StructType::named(
+        let account_id = Type::from(Arc::new(StructType::named(
             "account-id".into(),
             [(Arc::from("prefix"), felt_wrapper.clone()), (Arc::from("suffix"), felt_wrapper)],
         )));

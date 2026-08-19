@@ -214,7 +214,7 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                     });
                 }
                 types::EnumType::new(ty.name().clone().into_inner(), ty.ty().clone(), variants)
-                    .map(|t| types::Type::Enum(Arc::new(t)))
+                    .map(|t| types::Type::from(Arc::new(t)))
                     .map_err(|err| LinkerError::Related {
                         errors: vec![RelatedError::from(Report::from(diagnostic!(
                             severity = Severity::Error,

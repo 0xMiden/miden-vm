@@ -904,7 +904,7 @@ impl DebugTypeInfo {
                 } else {
                     ast::types::StructType::named(name.clone(), structural_fields)
                 };
-                let ty = Type::Struct(Arc::new(structural_ty));
+                let ty = Type::from(structural_ty);
 
                 let declared_name = if is_anonymous {
                     Some(None)
@@ -1005,7 +1005,7 @@ impl DebugTypeInfo {
                 if enum_ty.size_in_bytes() != *size as usize {
                     return None;
                 }
-                Some((Type::Enum(Arc::new(enum_ty)), None))
+                Some((Type::from(Arc::new(enum_ty)), None))
             },
             Self::Variadic => Some((Type::Variadic, None)),
             Self::Unknown => Some((Type::Unknown, None)),
@@ -1405,7 +1405,7 @@ mod tests {
         use miden_assembly_syntax::ast::types::StructType;
 
         let mut builder = PackageDebugInfoBuilder::default();
-        let struct_ty = Type::Struct(Arc::new(StructType::named(
+        let struct_ty = Type::from(Arc::new(StructType::named(
             Arc::from("holder"),
             [
                 (Arc::from("count"), Type::U32),
@@ -1430,11 +1430,11 @@ mod tests {
         use miden_assembly_syntax::ast::types::{ArrayType, EnumType, StructType, Variant};
 
         let array = Type::Array(Arc::new(ArrayType::new(Type::U8, 2)));
-        let struct_ty = Type::Struct(Arc::new(StructType::named(
+        let struct_ty = Type::from(Arc::new(StructType::named(
             Arc::from("pair"),
             [(Arc::from("left"), Type::U32), (Arc::from("right"), array)],
         )));
-        let enum_ty = Type::Enum(Arc::new(
+        let enum_ty = Type::from(Arc::new(
             EnumType::new(
                 Arc::from("option_u32"),
                 Type::U8,

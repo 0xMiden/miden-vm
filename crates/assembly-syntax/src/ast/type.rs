@@ -367,11 +367,11 @@ impl TypeExpr {
                         return Ok(None);
                     }
                 }
-                Ok(Some(Type::Struct(Arc::new(types::StructType::from_parts(
+                Ok(Some(Type::from(types::StructType::from_parts(
                     t.name.clone().map(Ident::into_inner),
                     t.repr.into_inner(),
                     fields,
-                )))))
+                ))))
             },
         }
     }
@@ -383,6 +383,7 @@ impl From<Type> for TypeExpr {
             Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
             Type::Struct(t) => {
                 let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
+                let t = t.get();
                 let fields = t.fields().iter().enumerate().map(|(i, ft)| {
                     let name = ft
                         .name
@@ -1348,7 +1349,7 @@ mod tests {
 
     #[test]
     fn type_expr_from_type_preserves_struct_metadata() {
-        let ty = Type::Struct(Arc::new(types::StructType::from_parts(
+        let ty = Type::from(Arc::new(types::StructType::from_parts(
             Some(Arc::from("miden:base/core-types@1.0.0/account-id")),
             TypeRepr::align(16),
             [
@@ -1384,8 +1385,9 @@ mod tests {
             panic!("expected resolved struct type, got {resolved:?}");
         };
         assert_eq!(resolved_struct.repr(), TypeRepr::align(16));
-        assert_eq!(resolved_struct.fields()[0].name.as_deref(), Some("prefix"));
-        assert_eq!(resolved_struct.fields()[1].name.as_deref(), Some("suffix"));
+        let resolved_fields = resolved_struct.get();
+        assert_eq!(resolved_fields.fields()[0].name.as_deref(), Some("prefix"));
+        assert_eq!(resolved_fields.fields()[1].name.as_deref(), Some("suffix"));
 
         let TypeExpr::Struct(converted) = TypeExpr::from(resolved) else {
             panic!("expected concrete struct to convert back to struct type expression");
