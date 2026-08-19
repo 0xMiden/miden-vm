@@ -194,38 +194,6 @@ fn element_hash_procedures_reject_non_u32_length() {
     }
 }
 
-#[test]
-fn kernel_commitment_rejects_non_u32_procedure_count() {
-    use miden_processor::{ExecutionError, operation::OperationError};
-
-    // For the Goldilocks modulus p, 4 * ((3p + 1) / 4) = 1 mod p. Without validating the
-    // procedure count before multiplication, the helper would hash one element.
-    const WRAPPING_COUNT: u64 = 13_835_058_052_060_938_241;
-    const PTR: u64 = 1000;
-    const ERROR_MSG: &str = "number of kernel procedures must fit in a u32";
-
-    let source = format!(
-        "
-        use miden::core::sys::vm::claim
-
-        begin
-            push.{WRAPPING_COUNT}
-            push.{PTR}
-            exec.claim::kernel_commitment
-        end
-        "
-    );
-    let test = build_test!(source.as_str(), &[]);
-    let err = test.execute().expect_err("a non-u32 procedure count must be rejected");
-    match err {
-        ExecutionError::OperationError {
-            err: OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(ERROR_MSG)),
-        err => panic!("expected a u32 assertion failure, got {err:?}"),
-    }
-}
-
 /// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
 /// same `(verifier_root, claim_commitment)` pair.
 #[test]

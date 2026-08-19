@@ -7,8 +7,8 @@ pub mod ood_frames
 pub mod public_inputs
 
 use miden::core::mem
-use miden::core::stark::verifier
 use miden::core::stark::constants
+use miden::core::stark::verifier
 
 # Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
 # configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
@@ -21,6 +21,12 @@ const MAX_SECURITY_LEVEL = 128
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
+
+# Domain tag for the kernel commitment: the registered selector
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+const KERNEL_DOMAIN_TAG = 0x01000001
 
 const FELTS_PER_KERNEL_DIGEST = 4
 
@@ -259,15 +265,16 @@ proc materialize_kernel_witness
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::kernel_witness_ptr swap
-    exec.mem::pipe_words_to_memory
-    # The pipe computes an untagged hash; discard it and check the domain-tagged commitment below.
-    dropw dropw dropw drop
+    dup exec.constants::num_kernel_procedures_ptr mem_store
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::num_kernel_procedures_ptr mem_store
-    exec.constants::kernel_witness_ptr
-    exec.claim::kernel_commitment
+    exec.constants::kernel_witness_ptr swap
+    push.KERNEL_DOMAIN_TAG
+    exec.mem::pipe_words_to_memory_in_domain
+    # => [K', end_ptr, K, ...]
+
+    # Discard the end pointer, then authenticate the copied witness.
+    movup.4 drop
     # => [K', K, ...]
     assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
     # => [...]
