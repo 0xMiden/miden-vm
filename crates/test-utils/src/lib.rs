@@ -865,7 +865,7 @@ impl Test {
                 .iter()
                 .map(|(path, source)| (path.to_string(), source.clone()))
                 .collect(),
-            library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
+            library_digests: self.libraries.iter().map(|library| library.commitment()).collect(),
         }
     }
 }

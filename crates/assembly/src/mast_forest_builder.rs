@@ -169,9 +169,10 @@ impl<'a> StaticLibrary<'a> {
         Self {
             mast,
             debug_info,
-            // Direct forest-backed static libraries do not have a package digest, so their source
-            // identity is the full forest commitment. This keeps provenance hints scoped to the
-            // same roots, external dependencies, and advice as package-backed static libraries.
+            // Direct forest-backed static libraries do not have a package commitment, so their
+            // source identity is the full forest commitment. This keeps provenance
+            // hints scoped to the same roots, external dependencies, and advice as
+            // package-backed static libraries.
             source_library_commitment: mast.commitment(),
             alternate_source_library_commitment: None,
         }
@@ -183,7 +184,7 @@ impl<'a> StaticLibrary<'a> {
     ) -> Result<Self, ManifestValidationError> {
         Ok(Self::from_mast_forest(library.mast().as_ref(), debug_info)
             .with_source_library_commitment(library.commitment())
-            .with_alternate_source_library_commitment(library.interface_digest()?))
+            .with_alternate_source_library_commitment(library.interface_commitment()?))
     }
 
     fn with_source_library_commitment(mut self, source_library_commitment: Word) -> Self {

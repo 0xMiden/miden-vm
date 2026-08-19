@@ -179,8 +179,9 @@ pub struct Linker {
     libraries: BTreeMap<Word, LinkLibrary>,
     /// The statically linked libraries to pass to MAST forest construction.
     ///
-    /// This index is keyed by full MAST forest commitment, not package digest, so static libraries
-    /// with the same exported procedure roots but different stored advice are retained.
+    /// This index is keyed by full MAST forest commitment, not package commitment, so static
+    /// libraries with the same exported procedure roots but different stored advice are
+    /// retained.
     static_libraries: BTreeMap<Word, LinkLibrary>,
     /// The global set of items known to the linker
     modules: Vec<LinkModule>,
@@ -229,13 +230,12 @@ impl Linker {
                 reason: err.to_string(),
             }
         })?;
-        let library_interface_digest =
-            library
-                .interface_digest()
-                .map_err(|err| LinkerError::InvalidPackageModuleSurface {
-                    package: library.package.name.to_string(),
-                    reason: err.to_string(),
-                })?;
+        let library_interface_digest = library.interface_commitment().map_err(|err| {
+            LinkerError::InvalidPackageModuleSurface {
+                package: library.package.name.to_string(),
+                reason: err.to_string(),
+            }
+        })?;
 
         let static_library = matches!(library.linkage, Linkage::Static).then(|| library.clone());
         let result = match self.libraries.entry(library_interface_digest) {
@@ -1211,8 +1211,11 @@ mod tests {
             [(Word::from([1_u32, 2, 3, 4]), vec![Felt::from_u32(5)])],
         )));
 
-        assert_ne!(package.digest(), with_advice.digest());
-        assert_eq!(package.interface_digest().unwrap(), with_advice.interface_digest().unwrap());
+        assert_ne!(package.commitment(), with_advice.commitment());
+        assert_eq!(
+            package.interface_commitment().unwrap(),
+            with_advice.interface_commitment().unwrap()
+        );
         assert_ne!(package.mast_forest().commitment(), with_advice.mast_forest().commitment());
 
         let mut linker = Linker::new(context.source_manager());

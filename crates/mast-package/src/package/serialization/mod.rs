@@ -250,7 +250,7 @@ impl Package {
         let mut package = Self {
             name,
             version,
-            digest: Default::default(),
+            mast_forest_commitment: Default::default(),
             description,
             kind,
             mast,
@@ -269,7 +269,7 @@ impl Package {
 
         if validate_manifest {
             package
-                .compute_interface_digest()
+                .compute_interface_commitment()
                 .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         }
         package.recompute_mast_commitment();
