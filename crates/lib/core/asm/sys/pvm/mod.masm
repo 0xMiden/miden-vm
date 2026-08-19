@@ -17,10 +17,11 @@ const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
 
 # Minimum log2 trace height for each ChipletAir::all() instance. These are derived from the
 # AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
+# BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
 const MIN_LOG_HEIGHT_0 = 5
 const MIN_LOG_HEIGHT_1 = 4
 const MIN_LOG_HEIGHT_2 = 7
-const MIN_LOG_HEIGHT_3 = 16
+const FIXED_LOG_HEIGHT_3 = 16
 const MIN_LOG_HEIGHT_4 = 1
 const MIN_LOG_HEIGHT_5 = 3
 const MIN_LOG_HEIGHT_6 = 1
@@ -56,7 +57,7 @@ pub proc load_air_context
     push.MIN_LOG_HEIGHT_0 exec.load_air_height
     push.MIN_LOG_HEIGHT_1 exec.load_air_height
     push.MIN_LOG_HEIGHT_2 exec.load_air_height
-    push.MIN_LOG_HEIGHT_3 exec.load_air_height
+    push.FIXED_LOG_HEIGHT_3 exec.load_fixed_air_height
     push.MIN_LOG_HEIGHT_4 exec.load_air_height
     push.MIN_LOG_HEIGHT_5 exec.load_air_height
     push.MIN_LOG_HEIGHT_6 exec.load_air_height
@@ -87,6 +88,27 @@ end
 proc load_air_height
     adv_push
     exec.assert_shape_log
+    #=> [height, next_height_ptr, max_height]
+
+    dup dup.2 mem_store
+    movup.2 u32max
+    swap add.1
+end
+
+#! Loads, validates, stores, and folds one instance's log height, requiring it to equal the
+#! relation's fixed value.
+#!
+#! BytePairLut commits its traces at one fixed height and `deep_queries.masm` opens the setup
+#! tree at the matching fixed depth, so any other height would let the recursive and native
+#! verifiers disagree on proof shape.
+#!
+#! Inputs:  [fixed_log_height, next_height_ptr, max_height]
+#! Outputs: [next_height_ptr + 1, max(max_height, height)]
+proc load_fixed_air_height
+    adv_push
+    #=> [height, fixed_log_height, next_height_ptr, max_height]
+
+    dup.1 assert_eq.err="AIR log height must equal the relation's fixed height"
     #=> [height, next_height_ptr, max_height]
 
     dup dup.2 mem_store

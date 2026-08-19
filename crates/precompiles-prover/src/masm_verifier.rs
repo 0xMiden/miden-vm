@@ -37,7 +37,7 @@ use crate::{
     MAX_STARK_PROOF_BYTES,
     ace::{order_tag_from_log_heights, proof_order_from_log_heights},
     ace_registry::{factory, pvm_ace_registry_path},
-    session::{ChipletMultiAir, NUM_CHIPLETS, preprocessed_cache},
+    session::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed_cache},
     stark_config::{
         Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
     },
@@ -188,6 +188,16 @@ fn build_advice(
     let log_heights: [u8; NUM_CHIPLETS] = stark.log_trace_heights().try_into().map_err(|_| {
         PvmRecursiveVerifierInputsError::InvalidProofShape("unexpected AIR-height count")
     })?;
+    // Fixed-height instances must arrive at exactly their pinned height: the MASM verifier
+    // opens the setup tree at the matching fixed depth, so any other value would let the
+    // recursive and native verifiers disagree on proof shape.
+    for (air, &log_height) in ChipletAir::all().iter().zip(&log_heights) {
+        if air.fixed_log_height().is_some_and(|fixed| u32::from(log_height) != fixed) {
+            return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
+                "fixed-height AIR arrived at a different trace height",
+            ));
+        }
+    }
     if stark.all_aux_values.len() != NUM_CHIPLETS {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
             "unexpected number of aux-final groups",

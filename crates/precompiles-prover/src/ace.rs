@@ -533,7 +533,8 @@ mod tests {
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
         assert_eq!(masm_const(WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
-        let derived_minima: Vec<u64> = ChipletAir::all()
+        let airs = ChipletAir::all();
+        let derived_minima: Vec<u64> = airs
             .iter()
             .map(|air| {
                 let periodic_min = air.max_periodic_length().max(2);
@@ -541,11 +542,25 @@ mod tests {
                     air.preprocessed_trace().map(|trace| trace.height()).unwrap_or(0);
                 let min_height = periodic_min.max(preprocessed_min);
                 assert!(min_height.is_power_of_two());
-                min_height.ilog2() as u64
+                let log_height = min_height.ilog2();
+                if let Some(fixed) = air.fixed_log_height() {
+                    assert_eq!(fixed, log_height, "fixed AIR height drifted from its trace");
+                }
+                u64::from(log_height)
             })
             .collect();
-        let masm_minima: Vec<u64> = (0..NUM_CHIPLETS)
-            .map(|i| masm_const(WRAPPER_PATH, &alloc::format!("MIN_LOG_HEIGHT_{i}")))
+        let masm_minima: Vec<u64> = airs
+            .iter()
+            .enumerate()
+            .map(|(i, air)| {
+                // Fixed-height instances are pinned as equalities in the wrapper; the shared
+                // derivation still supplies the same value.
+                let name = match air.fixed_log_height() {
+                    Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
+                    None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
+                };
+                masm_const(WRAPPER_PATH, &name)
+            })
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
         for (prefix, expected) in [

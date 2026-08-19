@@ -17,6 +17,7 @@ const CURRENT_TRACE_ROW_PTR: u32 = 3_225_443_408;
 
 // Runtime call-site vector. The precompiles-prover oracle derives the matching MASM constants
 // directly from the AIRs.
+const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 10] = [5, 4, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
 const RELATION_DIGEST: [u64; 4] = [
@@ -93,7 +94,9 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
         }
     }
 
-    let maximum = [29; 10];
+    let mut maximum = [29; 10];
+    // BytePairLut's height is fixed; only the other instances range up to the ceiling.
+    maximum[BYTE_PAIR_LUT_AIR_INDEX] = MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX];
     build_test!(source(), &[], &maximum)
         .execute()
         .expect("every AIR must accept the maximum supported log height");
@@ -104,6 +107,17 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
         let test = build_test!(source(), &[], &heights);
         expect_assert_error_message!(test);
     }
+}
+
+/// BytePairLut commits its traces at one fixed height; the wrapper must reject any other
+/// value, or its fixed-depth setup openings would diverge from the native verifier.
+#[test]
+fn pvm_wrapper_rejects_non_fixed_byte_pair_height() {
+    let mut heights = MIN_LOG_HEIGHTS;
+    heights[BYTE_PAIR_LUT_AIR_INDEX] += 1;
+
+    let test = build_test!(source(), &[], &heights);
+    expect_assert_error_message!(test);
 }
 
 #[test]

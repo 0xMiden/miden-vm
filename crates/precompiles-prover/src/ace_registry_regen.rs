@@ -348,7 +348,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
 
     let root = fold_row_to_root(&row);
     let digest = relation_digest_for_root(&root);
-    let preprocessed_commitment = preprocessed_commitment();
+    let preprocessed_commitment = preprocessed_commitment(digest);
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len)?;
     let constraints_eval_masm = render_pvm_constraints_eval(shape, quotient_inputs)?;
     let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
@@ -381,11 +381,13 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
 
 /// Commitment to the setup (preprocessed) trace tree under the Poseidon2 config.
 ///
-/// Built through the same cache the prover and Rust verifier use, so the minted
-/// constant is by construction the value they observe into the transcript.
-fn preprocessed_commitment() -> Word {
+/// Built through the same cache the prover and Rust verifier use, seeded with the freshly
+/// minted relation digest, so the config matches production exactly and the minted constant
+/// is by construction the value they observe into the transcript. (The commitment itself
+/// is digest-independent; threading the digest avoids relying on that property here.)
+fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
     let params = crate::stark_config::precompile_pcs_params();
-    let config = crate::stark_config::poseidon2_config(params, [Felt::ZERO; 4]);
+    let config = crate::stark_config::poseidon2_config(params, digest);
     // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
     let commitment: [Felt; 4] =
         crate::session::preprocessed_cache::poseidon2(&config).commitment().into();
