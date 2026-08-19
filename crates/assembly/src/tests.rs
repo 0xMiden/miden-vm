@@ -5420,6 +5420,111 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 }
 
 #[test]
+fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::list
+
+        pub type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }
+
+        pub proc entry(head: ptr<Node, addrspace(byte)>)
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context
+        .assemble_library("lib", None, module, [])
+        .expect("a struct recursing through a pointer should resolve");
+
+    use miden_mast_package::PackageExport;
+
+    let node = package
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Type(ty) if ty.path.to_string().ends_with("Node") => Some(ty.ty.clone()),
+            _ => None,
+        })
+        .expect("Node should be exported");
+
+    // The declaration is recursive, and descending through the backedge comes back to it.
+    let miden_assembly_syntax::ast::types::Type::Struct(node_ref) = &node else {
+        panic!("expected a struct, got {node:?}");
+    };
+    assert!(node_ref.is_recursive());
+    assert_eq!(node.size_in_bytes(), 8);
+
+    let body = node_ref.get();
+    let miden_assembly_syntax::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
+        panic!("expected `next` to be a pointer");
+    };
+    assert_eq!(next.pointee(), &node);
+    Ok(())
+}
+
+#[test]
+fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::graph
+
+        pub type A = struct { b: ptr<B, addrspace(byte)> }
+        pub type B = struct { a: ptr<A, addrspace(byte)> }
+
+        pub proc entry(node: ptr<A, addrspace(byte)>)
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context
+        .assemble_library("lib", None, module, [])
+        .expect("mutually recursive structs should resolve");
+
+    use miden_mast_package::PackageExport;
+
+    let find = |suffix: &str| {
+        package
+            .manifest
+            .exports()
+            .find_map(|export| match export {
+                PackageExport::Type(ty) if ty.path.to_string().ends_with(suffix) => {
+                    Some(ty.ty.clone())
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{suffix} should be exported"))
+    };
+    let a = find("A");
+    let b = find("B");
+
+    // A -> b -> B -> a must come back around to A.
+    let miden_assembly_syntax::ast::types::Type::Struct(a_ref) = &a else {
+        panic!("expected a struct");
+    };
+    let a_body = a_ref.get();
+    let miden_assembly_syntax::ast::types::Type::Ptr(to_b) = &a_body.fields()[0].ty else {
+        panic!("expected a pointer");
+    };
+    assert_eq!(to_b.pointee(), &b);
+
+    let miden_assembly_syntax::ast::types::Type::Struct(b_ref) = &b else {
+        panic!("expected a struct");
+    };
+    let b_body = b_ref.get();
+    let miden_assembly_syntax::ast::types::Type::Ptr(to_a) = &b_body.fields()[0].ty else {
+        panic!("expected a pointer");
+    };
+    assert_eq!(to_a.pointee(), &a);
+    Ok(())
+}
+
+#[test]
 fn directly_self_referential_type_alias_is_diagnosed() -> TestResult {
     let context = TestContext::new();
     let module = context.parse_module(source_file!(

@@ -1,6 +1,6 @@
 mod symbol_resolver;
 
-use alloc::{collections::BTreeMap, string::ToString, sync::Arc};
+use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Report,
@@ -14,7 +14,6 @@ use miden_assembly_syntax::{
     diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
     module::ItemInfo,
 };
-use smallvec::SmallVec;
 
 pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
 use super::SymbolItem;
@@ -30,6 +29,14 @@ pub struct Resolver<'a, 'b: 'a> {
     pub current_module: ModuleIndex,
 }
 
+/// An aggregate declaration awaiting group construction.
+pub struct PendingTypeDef {
+    pub gid: GlobalItemIndex,
+    pub key: Arc<str>,
+    pub kind: types::AggregateKind,
+    pub template: types::TypeTemplate,
+}
+
 /// A [ResolverCache] is used to cache resolutions of type and constant expressions to concrete
 /// values that contain no references to other symbols. Since these resolutions can be expensive
 /// to compute, and often represent items which are referenced multiple times, we cache them to
@@ -39,6 +46,12 @@ pub struct ResolverCache {
     pub types: BTreeMap<GlobalItemIndex, types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
     pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
+    /// Aggregate declarations collected while resolving one outermost type expression.
+    ///
+    /// These are handed to the recursive type builder together, so that a group spanning several
+    /// declarations is built as a unit. Non-recursive declarations in the set simply come back
+    /// out as ordinary types.
+    pub pending_types: Vec<PendingTypeDef>,
     /// Type declarations currently being resolved, and where resolution of each began.
     ///
     /// Type references are expanded structurally, so this allows us to catch declaration cycles
@@ -177,34 +190,56 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
         &mut self,
         context: SourceSpan,
         gid: GlobalItemIndex,
-    ) -> Result<types::Type, LinkerError> {
+    ) -> Result<Option<types::TypeTemplate>, LinkerError> {
         if let Some(cached) = self.cache.types.get(&gid) {
-            return Ok(cached.clone());
+            return Ok(Some(types::TypeTemplate::Type(cached.clone())));
         }
 
+        let key = self.type_key(gid);
+
+        // Already being resolved: this reference closes a cycle. Only an aggregate can carry
+        // one, because only an aggregate can put a pointer between itself and the reference; a
+        // cycle through aliases alone has no finite representation.
         if let Some(start) = self.cache.evaluating_types.get(&gid).copied() {
-            return Err(LinkerError::RecursiveType {
-                span: start,
-                cycle_span: context,
-                source_file: self.get_source_file_for(start),
-            });
+            return if self.aggregate_kind(gid).is_some() {
+                Ok(Some(types::TypeTemplate::Rec(key)))
+            } else {
+                Err(LinkerError::RecursiveType {
+                    span: start,
+                    cycle_span: context,
+                    source_file: self.get_source_file_for(start),
+                })
+            };
+        }
+
+        // An aggregate declaration becomes a definition of the group under construction, and is
+        // referred to by key until the group is built. Anything else is expanded in place, as it
+        // always was.
+        let Some(kind) = self.aggregate_kind(gid) else {
+            return self.resolve_alias_template(context, gid);
+        };
+
+        if self.cache.pending_types.iter().any(|def| def.gid == gid) {
+            return Ok(Some(types::TypeTemplate::Rec(key)));
         }
 
         self.cache.evaluating_types.insert(gid, context);
-        let resolved = self.resolve_type_by_gid(context, gid);
+        let resolved = self.resolve_aggregate_template(context, gid);
         self.cache.evaluating_types.remove(&gid);
 
-        let ty = resolved?;
-        self.cache.types.insert(gid, ty.clone());
-        Ok(ty)
+        let template = resolved?;
+        self.cache
+            .pending_types
+            .push(PendingTypeDef { gid, key: key.clone(), kind, template });
+        Ok(Some(types::TypeTemplate::Rec(key)))
     }
 
     fn get_local_type(
         &mut self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<types::Type>, LinkerError> {
-        self.get_type(context, self.current_module + id).map(Some)
+    ) -> Result<Option<types::TypeTemplate>, LinkerError> {
+        self.get_type(context, self.current_module + id)
     }
 
     fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
@@ -219,24 +254,123 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
             path: Span::new(ty.span(), self.resolver.item_path(gid)),
         })
     }
+
+    fn finalize(
+        &mut self,
+        context: SourceSpan,
+        template: types::TypeTemplate,
+    ) -> Result<types::Type, LinkerError> {
+        let pending = core::mem::take(&mut self.cache.pending_types);
+        if pending.is_empty() {
+            // Nothing referred to an aggregate declaration, so the template is already closed.
+            return types::close_template(&template, |_| None)
+                .map_err(|err| self.recursive_type_error(context, err));
+        }
+
+        let mut builder = types::RecursiveTypeBuilder::new();
+        for def in &pending {
+            match (def.kind, &def.template) {
+                (types::AggregateKind::Struct, types::TypeTemplate::Struct(body)) => {
+                    builder.define_struct(def.key.clone(), (*body.clone()).clone());
+                },
+                (types::AggregateKind::Enum, types::TypeTemplate::Enum(body)) => {
+                    builder.define_enum(def.key.clone(), (*body.clone()).clone());
+                },
+                _ => {
+                    return Err(LinkerError::InvalidTypeRef {
+                        span: context,
+                        source_file: self.get_source_file_for(context),
+                    });
+                },
+            }
+        }
+
+        // The builder partitions the definitions into strongly connected components, so
+        // declarations which turned out not to be recursive come back out as ordinary types, and
+        // a cycle that crosses no pointer is rejected here.
+        let built = builder.build().map_err(|err| self.recursive_type_error(context, err))?;
+
+        for def in &pending {
+            if let Some(ty) = built.get(&def.key) {
+                self.cache.types.insert(def.gid, ty.clone());
+            }
+        }
+
+        types::close_template(&template, |key| built.get(key).cloned())
+            .map_err(|err| self.recursive_type_error(context, err))
+    }
 }
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
-    fn resolve_type_by_gid(
+    /// The binding key for a type declaration: its fully qualified path, which is unique across
+    /// the link and therefore usable as a group ordering key.
+    fn type_key(&self, gid: GlobalItemIndex) -> Arc<str> {
+        Arc::from(alloc::format!("{}", self.resolver.item_path(gid)))
+    }
+
+    /// Whether a declaration defines an aggregate, and which kind, determined syntactically so
+    /// that it can be answered while the declaration is still being resolved.
+    fn aggregate_kind(&self, gid: GlobalItemIndex) -> Option<types::AggregateKind> {
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Type(ast::TypeDecl::Enum(_)) => Some(types::AggregateKind::Enum),
+            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
+                matches!(ty.ty, ast::TypeExpr::Struct(_)).then_some(types::AggregateKind::Struct)
+            },
+            _ => None,
+        }
+    }
+
+    fn recursive_type_error(
+        &self,
+        context: SourceSpan,
+        err: types::RecursiveTypeError,
+    ) -> LinkerError {
+        LinkerError::Related {
+            errors: vec![RelatedError::from(Report::from(diagnostic!(
+                severity = Severity::Error,
+                labels = vec![LabeledSpan::at(context, err.to_string())],
+                "invalid recursive type"
+            )))]
+            .into_boxed_slice(),
+        }
+    }
+
+    /// Resolve a non-aggregate declaration, expanding it in place.
+    fn resolve_alias_template(
         &mut self,
         context: SourceSpan,
         gid: GlobalItemIndex,
-    ) -> Result<types::Type, LinkerError> {
+    ) -> Result<Option<types::TypeTemplate>, LinkerError> {
         match self.resolver.linker()[gid].item() {
-            SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
+            SymbolItem::Compiled(ItemInfo::Type(info)) => {
+                Ok(Some(types::TypeTemplate::Type(info.ty.clone())))
+            },
+            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
+                let body = ty.ty.clone();
+                self.cache.evaluating_types.insert(gid, context);
+                let resolved = body.resolve_template(self);
+                self.cache.evaluating_types.remove(&gid);
+                resolved
+            },
+            SymbolItem::Type(ast::TypeDecl::Enum(_))
+            | SymbolItem::Compiled(_)
+            | SymbolItem::Constant(_)
+            | SymbolItem::Procedure(_) => Err(LinkerError::InvalidTypeRef {
+                span: context,
+                source_file: self.get_source_file_for(context),
+            }),
+        }
+    }
+
+    /// Resolve an aggregate declaration to the template for its body.
+    fn resolve_aggregate_template(
+        &mut self,
+        context: SourceSpan,
+        gid: GlobalItemIndex,
+    ) -> Result<types::TypeTemplate, LinkerError> {
+        match self.resolver.linker()[gid].item() {
             SymbolItem::Type(ast::TypeDecl::Enum(ty)) => {
-                // When resolving an EnumType, we must do three things:
-                //
-                // * Resolve the discriminant type
-                // * Resolve the discriminant value and payload type for each variant
-                // * Construct the midenc_hir_type::EnumType, and validate that the enum is valid
-                //   according to the rules it enforces
-                let mut variants = SmallVec::<[types::Variant; 4]>::new_const();
+                let mut variants = Vec::with_capacity(ty.variants().len());
                 for variant in ty.variants() {
                     let discriminant_value = match self.resolver.linker().const_eval(
                         gid,
@@ -258,35 +392,32 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
                             });
                         },
                     };
-                    variants.push(types::Variant {
+                    variants.push(types::VariantTemplate {
                         name: variant.name.clone().into_inner(),
                         value: match variant.value_ty.as_ref() {
-                            Some(t) => t.resolve_type(self)?,
+                            Some(t) => t.resolve_template(self)?,
                             None => None,
                         },
                         discriminant_value,
                     });
                 }
-                types::EnumType::new(ty.name().clone().into_inner(), ty.ty().clone(), variants)
-                    .map(|t| types::Type::from(Arc::new(t)))
-                    .map_err(|err| LinkerError::Related {
-                        errors: vec![RelatedError::from(Report::from(diagnostic!(
-                            severity = Severity::Error,
-                            labels = vec![LabeledSpan::at(context, err.to_string())],
-                            "invalid enum type"
-                        )))]
-                        .into_boxed_slice(),
-                    })
+                Ok(types::TypeTemplate::Enum(Box::new(types::EnumTemplate {
+                    name: ty.name().clone().into_inner(),
+                    discriminant: ty.ty().clone(),
+                    variants,
+                })))
             },
             SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
-                Ok(ty.ty.resolve_type(self)?.expect("unreachable"))
-            },
-            SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Procedure(_) => {
-                Err(LinkerError::InvalidTypeRef {
+                let body = ty.ty.clone();
+                body.resolve_template(self)?.ok_or_else(|| LinkerError::UndefinedType {
                     span: context,
                     source_file: self.get_source_file_for(context),
                 })
             },
+            _ => Err(LinkerError::InvalidTypeRef {
+                span: context,
+                source_file: self.get_source_file_for(context),
+            }),
         }
     }
 }

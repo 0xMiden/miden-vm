@@ -1001,7 +1001,7 @@ impl Linker {
         span: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
-        use miden_assembly_syntax::ast::TypeResolver;
+        use miden_assembly_syntax::ast::{TypeResolver, constants::ConstEnvironment};
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
@@ -1011,7 +1011,11 @@ impl Linker {
             current_module: gid.module,
         };
 
-        resolver.get_type(span, gid)
+        let template = resolver.get_type(span, gid)?.ok_or_else(|| LinkerError::UndefinedType {
+            span,
+            source_file: resolver.get_source_file_for(span),
+        })?;
+        resolver.finalize(span, template)
     }
 
     /// Registers a [MastNodeId] as corresponding to a given [GlobalProcedureIndex].

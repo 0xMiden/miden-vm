@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-use midenc_hir_type::{AddressSpace, Type, TypeRepr};
+use midenc_hir_type::{AddressSpace, Type, TypeRepr, TypeTemplate};
 
 use super::{
     ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
@@ -32,15 +32,33 @@ pub trait TypeResolver<E> {
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
     /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
-    /// Get the [Type] corresponding to the item given by `gid`
-    fn get_type(&mut self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
-    /// Get the [Type] corresponding to the item in the current module given by `id`
-    fn get_local_type(&mut self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
+    /// Resolve the item given by `gid` to a type template.
+    ///
+    /// This yields a template rather than a [Type] because a declaration may be part of a
+    /// recursive group that is still being resolved, in which case the only thing that can be
+    /// produced for it is a back-reference. Nothing becomes a [Type] until the whole group is
+    /// known; see [`Self::finalize`].
+    fn get_type(
+        &mut self,
+        context: SourceSpan,
+        gid: GlobalItemIndex,
+    ) -> Result<Option<TypeTemplate>, E>;
+    /// Resolve the item in the current module given by `id` to a type template.
+    fn get_local_type(
+        &mut self,
+        context: SourceSpan,
+        id: ItemIndex,
+    ) -> Result<Option<TypeTemplate>, E>;
     /// Attempt to resolve a symbol path, given by a `TypeExpr::Ref`, to an item
     fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, E>;
+    /// Materialize a template as a concrete [Type], building any recursive group it takes part in.
+    fn finalize(&mut self, context: SourceSpan, template: TypeTemplate) -> Result<Type, E>;
     /// Resolve a [TypeExpr] to a concrete [Type]
     fn resolve(&mut self, ty: &TypeExpr) -> Result<Option<Type>, E> {
-        ty.resolve_type(self)
+        match ty.resolve_template(self)? {
+            Some(template) => self.finalize(ty.span(), template).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -281,18 +299,20 @@ impl TypeExpr {
     }
 
     /// Resolve this type expression to a concrete type, using `resolver`
-    pub fn resolve_type<E, R>(&self, resolver: &mut R) -> Result<Option<Type>, E>
+    /// Resolve this expression to a template, leaving references to declarations which are still
+    /// being resolved as back-references.
+    pub fn resolve_template<E, R>(&self, resolver: &mut R) -> Result<Option<TypeTemplate>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
-        self.resolve_type_with_depth(resolver, 0)
+        self.resolve_template_with_depth(resolver, 0)
     }
 
-    fn resolve_type_with_depth<E, R>(
+    fn resolve_template_with_depth<E, R>(
         &self,
         resolver: &mut R,
         depth: usize,
-    ) -> Result<Option<Type>, E>
+    ) -> Result<Option<TypeTemplate>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
@@ -323,7 +343,7 @@ impl TypeExpr {
                             current_path = path;
                         },
                         SymbolResolution::Exact { gid, .. } => {
-                            return resolver.get_type(current_path.span(), gid).map(Some);
+                            return resolver.get_type(current_path.span(), gid);
                         },
                         SymbolResolution::Module { path: module_path, .. } => {
                             break Err(resolver.resolve_local_failed(
@@ -348,30 +368,33 @@ impl TypeExpr {
                     }
                 }
             },
-            TypeExpr::Primitive(t) => Ok(Some(t.inner().clone())),
+            TypeExpr::Primitive(t) => Ok(Some(TypeTemplate::Type(t.inner().clone()))),
             TypeExpr::Array(t) => Ok(t
                 .elem
-                .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|elem| Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
+                .resolve_template_with_depth(resolver, depth + 1)?
+                .map(|elem| TypeTemplate::array(elem, t.arity))),
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
-                .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|pointee| Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
+                .resolve_template_with_depth(resolver, depth + 1)?
+                .map(TypeTemplate::ptr)),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {
-                    let field_ty = field.ty.resolve_type_with_depth(resolver, depth + 1)?;
+                    let field_ty = field.ty.resolve_template_with_depth(resolver, depth + 1)?;
                     if let Some(field_ty) = field_ty {
-                        fields.push((field.name.clone().into_inner(), field_ty));
+                        fields.push(types::FieldTemplate {
+                            name: Some(field.name.clone().into_inner()),
+                            ty: field_ty,
+                        });
                     } else {
                         return Ok(None);
                     }
                 }
-                Ok(Some(Type::from(types::StructType::from_parts(
-                    t.name.clone().map(Ident::into_inner),
-                    t.repr.into_inner(),
+                Ok(Some(TypeTemplate::Struct(Box::new(types::StructTemplate {
+                    name: t.name.clone().map(Ident::into_inner),
+                    repr: t.repr.into_inner(),
                     fields,
-                ))))
+                }))))
             },
         }
     }
@@ -1218,7 +1241,7 @@ mod tests {
             &mut self,
             context: SourceSpan,
             _gid: GlobalItemIndex,
-        ) -> Result<Type, SymbolResolutionError> {
+        ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
             Err(SymbolResolutionError::undefined(context, self.source_manager.as_ref()))
         }
 
@@ -1226,7 +1249,7 @@ mod tests {
             &mut self,
             _context: SourceSpan,
             _id: ItemIndex,
-        ) -> Result<Option<Type>, SymbolResolutionError> {
+        ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
             Ok(None)
         }
 
@@ -1235,6 +1258,17 @@ mod tests {
             ty: Span<&Path>,
         ) -> Result<SymbolResolution, SymbolResolutionError> {
             Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
+        }
+
+        fn finalize(
+            &mut self,
+            context: SourceSpan,
+            template: TypeTemplate,
+        ) -> Result<Type, SymbolResolutionError> {
+            // This resolver never produces back-references, so closing can never fail on one.
+            midenc_hir_type::close_template(&template, |_| None).map_err(|_| {
+                SymbolResolutionError::undefined(context, self.source_manager.as_ref())
+            })
         }
     }
 
@@ -1302,10 +1336,12 @@ mod tests {
         let mut resolver = DummyResolver::new();
 
         let ok_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING);
-        assert!(ok_expr.resolve_type(&mut resolver).is_ok());
+        assert!(ok_expr.resolve_template(&mut resolver).is_ok());
 
         let err_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING + 1);
-        let err = err_expr.resolve_type(&mut resolver).expect_err("expected depth-exceeded error");
+        let err = err_expr
+            .resolve_template(&mut resolver)
+            .expect_err("expected depth-exceeded error");
         assert!(
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)
@@ -1377,8 +1413,7 @@ mod tests {
         );
 
         let mut resolver = DummyResolver::new();
-        let resolved = expr
-            .resolve_type(&mut resolver)
+        let resolved = TypeResolver::resolve(&mut resolver, &expr)
             .expect("struct type should resolve")
             .expect("struct type should be concrete");
         let Type::Struct(resolved_struct) = &resolved else {

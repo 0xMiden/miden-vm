@@ -1093,6 +1093,19 @@ fn collect_unguarded(
 
 type Resolve<'a> = dyn Fn(Arc<str>) -> Option<Type> + 'a;
 
+/// Materialize a template as a completed [Type], resolving every back-reference through `resolve`.
+///
+/// This is for callers which hold a template that mentions definitions built elsewhere -- for
+/// example a procedure signature that refers to a recursive type declared alongside it. A
+/// reference `resolve` cannot answer is an error: a completed [Type] never contains an unbound
+/// back-reference.
+pub fn close_template(
+    template: &TypeTemplate,
+    resolve: impl Fn(&str) -> Option<Type>,
+) -> Result<Type, RecursiveTypeError> {
+    close_template_inner(template, &|name| resolve(name.as_ref()))
+}
+
 impl AggregateTemplate {
     /// Materialize this template as a closed [Type], resolving every reference through `resolve`.
     fn close_with(&self, resolve: &Resolve<'_>) -> Result<Type, RecursiveTypeError> {
@@ -1102,7 +1115,7 @@ impl AggregateTemplate {
                 for field in &ty.fields {
                     fields.push(crate::NameAndType {
                         name: field.name.clone(),
-                        ty: close_template(&field.ty, resolve)?,
+                        ty: close_template_inner(&field.ty, resolve)?,
                     });
                 }
                 Ok(Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields)))
@@ -1113,7 +1126,7 @@ impl AggregateTemplate {
                     variants.push(Variant {
                         name: variant.name.clone(),
                         value: match variant.value.as_ref() {
-                            Some(value) => Some(close_template(value, resolve)?),
+                            Some(value) => Some(close_template_inner(value, resolve)?),
                             None => None,
                         },
                         discriminant_value: variant.discriminant_value,
@@ -1129,7 +1142,7 @@ impl AggregateTemplate {
     }
 }
 
-fn close_template(
+fn close_template_inner(
     template: &TypeTemplate,
     resolve: &Resolve<'_>,
 ) -> Result<Type, RecursiveTypeError> {
@@ -1139,20 +1152,22 @@ fn close_template(
             .ok_or_else(|| RecursiveTypeError::UndefinedReference(name.clone()))?,
         TypeTemplate::Ptr(addrspace, pointee) => Type::Ptr(Arc::new(PointerType {
             addrspace: *addrspace,
-            pointee: close_template(pointee, resolve)?,
+            pointee: close_template_inner(pointee, resolve)?,
         })),
         TypeTemplate::Array(element, len) => {
-            Type::from(ArrayType::new(close_template(element, resolve)?, *len))
+            Type::from(ArrayType::new(close_template_inner(element, resolve)?, *len))
         },
-        TypeTemplate::List(element) => Type::List(Arc::new(close_template(element, resolve)?)),
+        TypeTemplate::List(element) => {
+            Type::List(Arc::new(close_template_inner(element, resolve)?))
+        },
         TypeTemplate::Function(ty) => {
             let mut params = SmallVec::<[Type; 4]>::new();
             for param in &ty.params {
-                params.push(close_template(param, resolve)?);
+                params.push(close_template_inner(param, resolve)?);
             }
             let mut results = SmallVec::<[Type; 1]>::new();
             for result in &ty.results {
-                results.push(close_template(result, resolve)?);
+                results.push(close_template_inner(result, resolve)?);
             }
             Type::from(FunctionType { abi: ty.abi.clone(), params, results })
         },
@@ -1161,7 +1176,7 @@ fn close_template(
             for field in &ty.fields {
                 fields.push(crate::NameAndType {
                     name: field.name.clone(),
-                    ty: close_template(&field.ty, resolve)?,
+                    ty: close_template_inner(&field.ty, resolve)?,
                 });
             }
             Type::from(StructType::from_parts(ty.name.clone(), ty.repr, fields))
@@ -1172,7 +1187,7 @@ fn close_template(
                 variants.push(Variant {
                     name: variant.name.clone(),
                     value: match variant.value.as_ref() {
-                        Some(value) => Some(close_template(value, resolve)?),
+                        Some(value) => Some(close_template_inner(value, resolve)?),
                         None => None,
                     },
                     discriminant_value: variant.discriminant_value,
