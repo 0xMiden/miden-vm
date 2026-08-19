@@ -74,11 +74,9 @@ pub enum Type {
     Enum(Arc<EnumType>),
     /// A vector of fixed size
     Array(Arc<ArrayType>),
-    /// A dynamically sized list of values of the given type
+    /// A dynamically sized list of values of the given type.
     ///
-    /// NOTE: Currently this only exists to support the Wasm Canonical ABI,
-    /// but it has no defined represenation yet, so in practice cannot be
-    /// used in most places except during initial translation in the Wasm frontend.
+    /// Lists use a fat pointer layout containing a pointer and a length.
     List(Arc<Type>),
     /// A reference to a function with the given type signature
     Function(Arc<FunctionType>),

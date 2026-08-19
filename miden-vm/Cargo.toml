@@ -53,7 +53,7 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
+arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = [
@@ -73,7 +73,6 @@ std = [
     "miden-precompiles/std",
     "miden-prover/std",
     "miden-verifier/std",
-    "proptest?/std",
     "serde?/std",
     "serde_json?/std",
 ]
@@ -97,7 +96,6 @@ clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-proptest = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
@@ -107,7 +105,6 @@ assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
 tempfile.workspace = true

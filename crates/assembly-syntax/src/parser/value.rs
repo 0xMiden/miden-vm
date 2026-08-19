@@ -5,8 +5,6 @@ use miden_core::{
     field::PrimeField64,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 // PUSH VALUE
 // ================================================================================================
@@ -75,11 +73,9 @@ impl crate::prettier::PrettyPrint for PushValue {
 // ================================================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -179,11 +175,9 @@ impl Deserializable for WordValue {
 /// Represents one of the various types of values that have a hex-encoded representation in Miden
 /// Assembly source files.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum IntValue {
     /// A tiny value

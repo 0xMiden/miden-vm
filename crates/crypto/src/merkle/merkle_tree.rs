@@ -9,7 +9,6 @@ use crate::utils::{assume_init_vec, uninit_vector, word_to_hex};
 
 /// A fully-balanced binary Merkle tree (i.e., a tree where the number of leaves is a power of two).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MerkleTree {
     nodes: Vec<Word>,
 }
@@ -263,40 +262,6 @@ pub fn path_to_text(path: &MerklePath) -> Result<String, fmt::Error> {
     s.push(']');
 
     Ok(s)
-}
-
-/// A manual impl (instead of a derive) so serde deserialization validates the full node buffer:
-/// the tree is rebuilt from the claimed leaves through [`MerkleTree::new`] and must reproduce the
-/// claimed internal nodes exactly, so untrusted input cannot carry a wrong shape or inconsistent
-/// hashes.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MerkleTree {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "MerkleTree")]
-        struct Raw {
-            nodes: Vec<Word>,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        let n = raw.nodes.len() / 2;
-        if raw.nodes.len() != 2 * n || n < 2 {
-            return Err(serde::de::Error::custom(format_args!(
-                "MerkleTree node buffer length {} is not twice a leaf count of at least two",
-                raw.nodes.len(),
-            )));
-        }
-        let rebuilt = MerkleTree::new(&raw.nodes[n..]).map_err(serde::de::Error::custom)?;
-        if rebuilt.nodes != raw.nodes {
-            return Err(serde::de::Error::custom(
-                "MerkleTree internal nodes are inconsistent with its leaves",
-            ));
-        }
-        Ok(rebuilt)
-    }
 }
 
 // TESTS

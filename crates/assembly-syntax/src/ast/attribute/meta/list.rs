@@ -4,21 +4,17 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Spanned};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::MetaExpr;
 use crate::ast::Ident;
 
 /// Represents the metadata of a named list [crate::ast::Attribute], i.e. `@name(item0, .., itemN)`
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct MetaList {
-    #[cfg_attr(feature = "serde", serde(skip, default))]
     pub span: SourceSpan,
     /// The identifier used as the name of this attribute
     pub name: Ident,

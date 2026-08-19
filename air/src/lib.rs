@@ -112,7 +112,7 @@ impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct PublicInputs {
     program_info: ProgramInfo,

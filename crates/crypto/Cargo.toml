@@ -86,7 +86,7 @@ default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
 internal          = ["concurrent"]
-persistent-forest = ["rocksdb", "serde"]
+persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
 std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
@@ -140,7 +140,6 @@ assert_matches = { workspace = true }
 hex            = { features = ["alloc"], workspace = true }
 itertools      = { features = ["use_std"], workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
-postcard       = { workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
 serde_json     = { workspace = true }
@@ -159,7 +158,3 @@ workspace = true
 [[test]]
 name              = "rocksdb_large_smt"
 required-features = ["concurrent", "rocksdb"]
-
-[[test]]
-name              = "merkle_serde"
-required-features = ["serde"]

@@ -177,17 +177,6 @@ fn test_forest_new_limit() {
     assert!(Forest::new(Forest::MAX_LEAVES + 1).is_err());
 }
 
-#[cfg(feature = "serde")]
-#[test]
-fn test_forest_serde_rejects_large_value() {
-    use serde::{Deserialize, de::value::UsizeDeserializer};
-
-    let result = Forest::deserialize(UsizeDeserializer::<serde::de::value::Error>::new(
-        Forest::MAX_LEAVES + 1,
-    ));
-    assert!(result.is_err());
-}
-
 #[test]
 fn test_forest_with_single_leaf_limit() {
     let forest = Forest::new(Forest::MAX_LEAVES).unwrap();

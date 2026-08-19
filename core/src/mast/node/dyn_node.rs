@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
     Felt, Word,
@@ -18,8 +15,6 @@ use crate::{
 
 /// A Dyn node specifies that the node to be executed next is defined dynamically via the stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct DynNode {
     is_dyncall: bool,
     digest: Word,
@@ -148,32 +143,6 @@ impl MastNodeExt for DynNode {
         };
         builder.with_digest(self.digest)
     }
-}
-
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for DynNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        // Generate whether it's a dyncall or dynexec
-        any::<bool>()
-            .prop_map(|is_dyncall| {
-                if is_dyncall {
-                    DynNodeBuilder::new_dyncall().build()
-                } else {
-                    DynNodeBuilder::new_dyn().build()
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 // ------------------------------------------------------------------------------------------------

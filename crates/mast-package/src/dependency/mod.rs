@@ -3,18 +3,15 @@ use alloc::string::ToString;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{PackageId, TargetType, Version, Word};
 
 /// A package dependency
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct Dependency {
     /// The package id of the dependency.

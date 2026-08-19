@@ -48,11 +48,11 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
                 formatter.write_str("a borrowed Path")
             }
 
-            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Path::validate(v).map_err(serde::de::Error::custom)
+                Path::validate(value).map_err(serde::de::Error::custom)
             }
         }
 

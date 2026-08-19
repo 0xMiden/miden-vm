@@ -145,7 +145,6 @@ impl PartialEq<&[Word]> for NodeStore {
 /// `O(num_nodes / 1024)` pointers instead of the full node buffer, and appending to the original
 /// after a clone copies at most one chunk.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Mmr {
     /// Refer to the `forest` method documentation for details of the semantics of this value.
     pub(super) forest: Forest,
@@ -584,72 +583,6 @@ impl Deserializable for Mmr {
     }
 }
 
-/// [Mmr] used to store its nodes as a flat `Vec<Word>` and derive serde directly, so a flat
-/// sequence of words is the wire format previously-serialized data was written in. Deriving serde
-/// on [NodeStore] would instead emit its chunked layout (a sequence of 1024-node sequences),
-/// breaking compatibility with that data and leaking the chunk size into the wire format. These
-/// impls preserve the original format by mirroring `Vec<Word>`'s serde representation — a length-
-/// hinted sequence — streaming directly from/into the chunks with no intermediate flat copy.
-#[cfg(feature = "serde")]
-impl serde::Serialize for NodeStore {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
-
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for node in self.iter() {
-            seq.serialize_element(node)?;
-        }
-        seq.end()
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for NodeStore {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct SeqVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for SeqVisitor {
-            type Value = NodeStore;
-
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a sequence of MMR nodes")
-            }
-
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> Result<NodeStore, A::Error> {
-                let mut store = NodeStore::new();
-                while let Some(node) = seq.next_element::<Word>()? {
-                    store.push(node);
-                }
-                Ok(store)
-            }
-        }
-
-        deserializer.deserialize_seq(SeqVisitor)
-    }
-}
-
-/// Applies the same structural and hash-consistency validation as binary deserialization.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Mmr {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "Mmr")]
-        struct Raw {
-            forest: Forest,
-            nodes: NodeStore,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        Mmr::from_serialized_parts(raw.forest, raw.nodes).map_err(serde::de::Error::custom)
-    }
-}
-
 // ITERATOR
 // ===============================================================================================
 
@@ -861,42 +794,6 @@ mod tests {
         let deserialized = Mmr::read_from_bytes(&expected).unwrap();
         assert_eq!(mmr.forest, deserialized.forest);
         assert_eq!(mmr.nodes, deserialized.nodes);
-    }
-
-    /// Verifies the custom serde impls on [NodeStore] produce the exact representation the
-    /// pre-[NodeStore] `Mmr` derive did (a flat `Vec<Word>` field), in both a self-describing
-    /// format (JSON: struct/field names, flat array shape) and a compact binary format
-    /// (postcard: length-prefixed, exercising the `serialize_seq` length hint).
-    #[cfg(feature = "serde")]
-    #[test]
-    fn test_serde_matches_vec_format() {
-        /// Replica of `Mmr` as it was when its nodes were a `Vec<Word>` and serde was derived.
-        #[derive(serde::Deserialize, serde::Serialize)]
-        #[serde(rename = "Mmr")]
-        struct VecMmr {
-            forest: Forest,
-            nodes: Vec<Word>,
-        }
-
-        // span multiple chunks to cover chunk boundaries
-        let num_leaves = NODE_CHUNK_CAPACITY as u64 + NODE_CHUNK_CAPACITY as u64 / 2;
-        let mmr = Mmr::try_from_iter(leaves(num_leaves)).unwrap();
-        let vec_mmr = VecMmr {
-            forest: mmr.forest,
-            nodes: mmr.nodes.iter().copied().collect(),
-        };
-
-        let json = serde_json::to_string(&mmr).unwrap();
-        assert_eq!(json, serde_json::to_string(&vec_mmr).unwrap());
-        let from_json: Mmr = serde_json::from_str(&json).unwrap();
-        assert_eq!(mmr.forest, from_json.forest);
-        assert_eq!(mmr.nodes, from_json.nodes);
-
-        let bytes = postcard::to_allocvec(&mmr).unwrap();
-        assert_eq!(bytes, postcard::to_allocvec(&vec_mmr).unwrap());
-        let from_bytes: Mmr = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(mmr.forest, from_bytes.forest);
-        assert_eq!(mmr.nodes, from_bytes.nodes);
     }
 
     #[test]

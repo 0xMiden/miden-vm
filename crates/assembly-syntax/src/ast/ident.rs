@@ -56,7 +56,7 @@ pub enum CaseKindError {
 #[derive(Clone)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct Ident {
     /// The source span associated with this identifier.
@@ -243,27 +243,6 @@ impl FromStr for Ident {
 impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
     fn from(value: Ident) -> Self {
         value.span.into()
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for Ident {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Ident {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(name).map_err(serde::de::Error::custom)
     }
 }
 

@@ -7,9 +7,6 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::{
     Felt, WORD_SIZE, Word,
     crypto::hash::Poseidon2,
@@ -29,11 +26,9 @@ use crate::{
 /// are enforced by the processor's `AdviceProvider`, which owns the active execution options and
 /// live resource accounting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 

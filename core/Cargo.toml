@@ -39,12 +39,6 @@ std = [
     "miden-utils-sync/std",
     "thiserror/std",
 ]
-serde = [
-    "dep:serde",
-    "miden-crypto/serde",
-    "miden-debug-types/serde",
-    "miden-utils-indexing/serde",
-]
 arbitrary = ["dep:proptest"]
 testing = ["arbitrary"]
 fuzzing = []
@@ -63,16 +57,14 @@ miden-utils-sync.workspace = true
 derive_more.workspace = true
 log.workspace = true
 proptest = { workspace = true, optional = true }
-serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
 insta.workspace = true
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 rstest = { workspace = true }
-serde_json = { workspace = true }
 miden-utils-testing.workspace = true
 trybuild.workspace = true
 
