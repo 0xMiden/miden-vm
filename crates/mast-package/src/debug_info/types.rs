@@ -462,9 +462,8 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
             if let Some(tid) = source_var.type_id {
                 if let Some((ty, declared_ty)) = type_cache.get(&tid) {
                     info.set_ty(ty.clone(), declared_ty.clone());
-                } else if let Some(type_info) = debug_info.get_type(tid)
-                    && let Some((ty, declared_type)) =
-                        type_info.recover_registered_type(debug_info, &mut type_cache)
+                } else if let Some((ty, declared_type)) =
+                    recover_type_at(tid, debug_info, &mut type_cache)
                 {
                     type_cache.insert(tid, (ty.clone(), declared_type.clone()));
                     info.set_ty(ty, declared_type);
@@ -792,6 +791,365 @@ pub struct DebugVariantInfo {
     pub payload_offset: Option<u32>,
     /// Discriminant value for this variant.
     pub discriminant: u128,
+}
+
+/// Recovers the type at `root`, including recursive types.
+///
+/// Recovery must start from an index rather than a row: a debug type graph records recursion as a
+/// cycle of indices, so without knowing the root's own index there is no way to tell that a child
+/// points back at it.
+///
+/// The reachable subgraph is partitioned into strongly connected components, which are recovered
+/// in dependency order. A component containing an aggregate is rebuilt through
+/// `RecursiveTypeBuilder`, which enforces the same guardedness rule as any other construction
+/// path, so a cycle that crosses no pointer, list, or function is rejected here too.
+pub fn recover_type_at<Exec: Idx, Src: Idx>(
+    root: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+    if let Some(recovered) = cached_types.get(&root) {
+        return Some(recovered.clone());
+    }
+
+    for component in reachable_components(root, debug_info)? {
+        recover_component(&component, debug_info, cached_types)?;
+    }
+
+    cached_types.get(&root).cloned()
+}
+
+/// The type table indices directly referenced by a row.
+fn row_children(ty: &DebugTypeInfo) -> Vec<DebugTypeIdx> {
+    match ty {
+        DebugTypeInfo::Pointer { pointee_type_idx } => alloc::vec![*pointee_type_idx],
+        DebugTypeInfo::Array { element_type_idx, .. } => alloc::vec![*element_type_idx],
+        DebugTypeInfo::Struct { fields, .. } => fields.iter().map(|f| f.type_idx).collect(),
+        DebugTypeInfo::Enum { discriminant_type_idx, variants, .. } => {
+            let mut children = alloc::vec![*discriminant_type_idx];
+            children.extend(variants.iter().filter_map(|v| v.type_idx));
+            children
+        },
+        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+            let mut children = Vec::new();
+            children.extend(return_type_idx.iter().copied());
+            children.extend(param_type_indices.iter().copied());
+            children
+        },
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Variadic | DebugTypeInfo::Unknown => {
+            Vec::new()
+        },
+    }
+}
+
+/// Strongly connected components of the subgraph reachable from `root`, dependencies first.
+fn reachable_components<Exec: Idx, Src: Idx>(
+    root: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+) -> Option<Vec<Vec<DebugTypeIdx>>> {
+    #[derive(Clone, Copy)]
+    struct State {
+        index: usize,
+        lowlink: usize,
+        on_stack: bool,
+    }
+
+    let mut state = FxHashMap::<DebugTypeIdx, State>::default();
+    let mut stack = Vec::new();
+    let mut components = Vec::new();
+    let mut next_index = 0usize;
+
+    debug_info.get_type(root)?;
+    let mut call_stack = alloc::vec![(root, 0usize)];
+    state.insert(root, State { index: 0, lowlink: 0, on_stack: true });
+    next_index += 1;
+    stack.push(root);
+
+    while let Some((node, edge)) = call_stack.last_mut() {
+        let node = *node;
+        let children = row_children(debug_info.get_type(node)?);
+        if *edge < children.len() {
+            let successor = children[*edge];
+            *edge += 1;
+            debug_info.get_type(successor)?;
+            match state.get(&successor).copied() {
+                None => {
+                    state.insert(
+                        successor,
+                        State {
+                            index: next_index,
+                            lowlink: next_index,
+                            on_stack: true,
+                        },
+                    );
+                    next_index += 1;
+                    stack.push(successor);
+                    call_stack.push((successor, 0));
+                },
+                Some(successor_state) if successor_state.on_stack => {
+                    let node_state = state.get_mut(&node).expect("visited");
+                    node_state.lowlink = node_state.lowlink.min(successor_state.index);
+                },
+                Some(_) => {},
+            }
+            continue;
+        }
+
+        call_stack.pop();
+        let node_state = *state.get(&node).expect("visited");
+        if node_state.lowlink == node_state.index {
+            let mut component = Vec::new();
+            while let Some(member) = stack.pop() {
+                state.get_mut(&member).expect("visited").on_stack = false;
+                component.push(member);
+                if member == node {
+                    break;
+                }
+            }
+            components.push(component);
+        }
+        if let Some((parent, _)) = call_stack.last() {
+            let child_lowlink = node_state.lowlink;
+            let parent_state = state.get_mut(parent).expect("visited");
+            parent_state.lowlink = parent_state.lowlink.min(child_lowlink);
+        }
+    }
+
+    Some(components)
+}
+
+fn is_aggregate_row(ty: &DebugTypeInfo) -> bool {
+    matches!(ty, DebugTypeInfo::Struct { .. } | DebugTypeInfo::Enum { .. })
+}
+
+/// Recover one strongly connected component, populating `cached_types` for each of its members.
+fn recover_component<Exec: Idx, Src: Idx>(
+    component: &[DebugTypeIdx],
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<()> {
+    let is_cyclic = component.len() > 1
+        || row_children(debug_info.get_type(component[0])?).contains(&component[0]);
+
+    if !is_cyclic {
+        // An ordinary type: every child is outside the component and already recovered.
+        let index = component[0];
+        if cached_types.contains_key(&index) {
+            return Some(());
+        }
+        let mut resolving = FxHashSet::default();
+        let recovered = debug_info.get_type(index)?.recover_registered_type_inner(
+            debug_info,
+            cached_types,
+            &mut resolving,
+        )?;
+        cached_types.insert(index, recovered);
+        return Some(());
+    }
+
+    recover_recursive_component(component, debug_info, cached_types)
+}
+
+fn recover_recursive_component<Exec: Idx, Src: Idx>(
+    component: &[DebugTypeIdx],
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<()> {
+    use miden_assembly_syntax::ast::types::RecursiveTypeBuilder;
+
+    // Only aggregates can be recursive definitions. Any other row in the component is part of
+    // some aggregate's body. A component with no aggregate at all is a degenerate cycle, such as
+    // a pointer row that points at itself, which denotes no type.
+    let mut definitions = Vec::new();
+    for index in component {
+        if is_aggregate_row(debug_info.get_type(*index)?) {
+            definitions.push(*index);
+        }
+    }
+    if definitions.is_empty() {
+        return None;
+    }
+
+    // Names are the group's ordering key and must be distinct within it. Debug rows carry a name,
+    // but it may be absent, anonymous, or shared, so fall back to the table index, which is
+    // unique by construction.
+    let mut names = FxHashMap::<DebugTypeIdx, Arc<str>>::default();
+    let mut seen = alloc::collections::BTreeSet::<Arc<str>>::new();
+    for index in &definitions {
+        let declared = match debug_info.get_type(*index)? {
+            DebugTypeInfo::Struct { name_idx, .. } | DebugTypeInfo::Enum { name_idx, .. } => {
+                debug_info.get_string(*name_idx)
+            },
+            _ => None,
+        };
+        let name = match declared {
+            Some(name) if name.as_ref() != "<anon>" && !seen.contains(&name) => name,
+            _ => Arc::from(alloc::format!("#{}", index.to_usize())),
+        };
+        if !seen.insert(name.clone()) {
+            return None;
+        }
+        names.insert(*index, name);
+    }
+
+    let mut builder = RecursiveTypeBuilder::new();
+    for index in &definitions {
+        match debug_info.get_type(*index)? {
+            DebugTypeInfo::Struct { .. } => {
+                let template = struct_template(*index, debug_info, &names, cached_types)?;
+                builder.define_struct(names[index].clone(), template);
+            },
+            DebugTypeInfo::Enum { .. } => {
+                let template = enum_template(*index, debug_info, &names, cached_types)?;
+                builder.define_enum(names[index].clone(), template);
+            },
+            _ => return None,
+        }
+    }
+
+    // The builder rejects unguarded recursion, which is what makes a cycle crossing no barrier,
+    // or crossing only fixed-length arrays, fail here rather than producing an infinite type.
+    let built = builder.build().ok()?;
+    for index in &definitions {
+        let ty = built.get(&names[index])?.clone();
+        cached_types.insert(*index, (ty, None));
+    }
+
+    Some(())
+}
+
+/// Build a struct definition template from a debug row, mapping references back into the group to
+/// named back-references and everything else to already-recovered types.
+fn struct_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<miden_assembly_syntax::ast::types::StructTemplate> {
+    use miden_assembly_syntax::ast::types::{FieldTemplate, StructTemplate, TypeRepr};
+
+    let DebugTypeInfo::Struct { name_idx, fields, .. } = debug_info.get_type(index)? else {
+        return None;
+    };
+    let name = debug_info.get_string(*name_idx);
+    let mut field_templates = Vec::with_capacity(fields.len());
+    for field in fields {
+        field_templates.push(FieldTemplate {
+            name: debug_info.get_string(field.name_idx),
+            ty: type_template(field.type_idx, debug_info, names, cached_types)?,
+        });
+    }
+    // `DebugTypeInfo::Struct` does not record the representation, so recovery is limited to the
+    // default one, exactly as it already is for non-recursive structs.
+    Some(StructTemplate {
+        name: name.filter(|n| n.as_ref() != "<anon>"),
+        repr: TypeRepr::Default,
+        fields: field_templates,
+    })
+}
+
+fn enum_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<miden_assembly_syntax::ast::types::EnumTemplate> {
+    use miden_assembly_syntax::ast::types::{EnumTemplate, VariantTemplate};
+
+    let DebugTypeInfo::Enum {
+        name_idx,
+        discriminant_type_idx,
+        variants,
+        ..
+    } = debug_info.get_type(index)?
+    else {
+        return None;
+    };
+    let name = debug_info.get_string(*name_idx)?;
+    // The discriminant is an integer primitive, so it is never part of the recursion.
+    let (discriminant, _) = cached_types.get(discriminant_type_idx)?.clone();
+    let mut variant_templates = Vec::with_capacity(variants.len());
+    for variant in variants {
+        variant_templates.push(VariantTemplate {
+            name: debug_info.get_string(variant.name_idx)?,
+            value: match variant.type_idx {
+                Some(ty) => Some(type_template(ty, debug_info, names, cached_types)?),
+                None => None,
+            },
+            discriminant_value: Some(variant.discriminant),
+        });
+    }
+    Some(EnumTemplate {
+        name,
+        discriminant,
+        variants: variant_templates,
+    })
+}
+
+fn type_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<miden_assembly_syntax::ast::types::TypeTemplate> {
+    use miden_assembly_syntax::ast::types::TypeTemplate;
+
+    // A reference back to a group member becomes a back-reference by name.
+    if let Some(name) = names.get(&index) {
+        return Some(TypeTemplate::rec(name.clone()));
+    }
+
+    // Anything already recovered is outside the group and is embedded as an ordinary type.
+    if let Some((ty, _)) = cached_types.get(&index) {
+        return Some(TypeTemplate::Type(ty.clone()));
+    }
+
+    // Otherwise this row is part of the group's body: structure on the path to a back-reference.
+    Some(match debug_info.get_type(index)? {
+        DebugTypeInfo::Pointer { pointee_type_idx } => {
+            TypeTemplate::ptr(type_template(*pointee_type_idx, debug_info, names, cached_types)?)
+        },
+        DebugTypeInfo::Array { element_type_idx, count } => {
+            let element = type_template(*element_type_idx, debug_info, names, cached_types)?;
+            match count {
+                Some(count) => TypeTemplate::array(element, usize::try_from(*count).ok()?),
+                None => TypeTemplate::list(element),
+            }
+        },
+        DebugTypeInfo::Struct { .. } => TypeTemplate::Struct(alloc::boxed::Box::new(
+            struct_template(index, debug_info, names, cached_types)?,
+        )),
+        DebugTypeInfo::Enum { .. } => TypeTemplate::Enum(alloc::boxed::Box::new(enum_template(
+            index,
+            debug_info,
+            names,
+            cached_types,
+        )?)),
+        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+            use miden_assembly_syntax::ast::types::CallConv;
+
+            let mut params = Vec::with_capacity(param_type_indices.len());
+            for param in param_type_indices {
+                params.push(type_template(*param, debug_info, names, cached_types)?);
+            }
+            let mut results = Vec::new();
+            if let Some(result) = return_type_idx {
+                // A void return is recorded as a primitive, and recovers as an empty result list.
+                if !matches!(
+                    debug_info.get_type(*result)?,
+                    DebugTypeInfo::Primitive(DebugPrimitiveType::Void)
+                ) {
+                    results.push(type_template(*result, debug_info, names, cached_types)?);
+                }
+            }
+            TypeTemplate::function(CallConv::Fast, params, results)
+        },
+        // A primitive reached here was not recovered as part of an earlier component, which
+        // means the graph is malformed.
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Variadic | DebugTypeInfo::Unknown => {
+            return None;
+        },
+    })
 }
 
 impl DebugTypeInfo {
@@ -1381,6 +1739,119 @@ mod tests {
         };
         assert_eq!(element.as_ref(), &Type::U16);
         assert!(dynamic_declared.is_none());
+    }
+
+    fn recursive_node_type() -> Type {
+        use miden_assembly_syntax::ast::types::{
+            RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate,
+        };
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+        builder.build().expect("Node should build").remove("Node").expect("Node")
+    }
+
+    #[test]
+    fn register_and_recover_a_self_recursive_struct() {
+        let node = recursive_node_type();
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let node_idx = builder
+            .register_debug_type(None, None, &node)
+            .expect("a recursive struct should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = recover_type_at(node_idx, debug_info.as_ref(), &mut cache)
+            .expect("a recursive struct should be recoverable");
+
+        assert_eq!(recovered, node);
+    }
+
+    #[test]
+    fn register_and_recover_mutually_recursive_structs() {
+        use miden_assembly_syntax::ast::types::{
+            RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate,
+        };
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "A",
+                StructTemplate::new(
+                    TypeRepr::Default,
+                    [("b", TypeTemplate::ptr(TypeTemplate::rec("B")))],
+                ),
+            )
+            .define_struct(
+                "B",
+                StructTemplate::new(
+                    TypeRepr::Default,
+                    [("a", TypeTemplate::ptr(TypeTemplate::rec("A")))],
+                ),
+            );
+        let built = builder.build().expect("should build");
+        let a = built.get("A").expect("A").clone();
+
+        let mut debug_builder = PackageDebugInfoBuilder::default();
+        let a_idx = debug_builder
+            .register_debug_type(None, None, &a)
+            .expect("a mutual group should be registerable");
+        let debug_info = debug_builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = recover_type_at(a_idx, debug_info.as_ref(), &mut cache)
+            .expect("a mutual group should be recoverable");
+
+        assert_eq!(recovered, a);
+    }
+
+    #[test]
+    fn recovery_rejects_a_cycle_that_crosses_no_barrier() {
+        // A struct whose field points straight back at the struct denotes an infinitely sized
+        // type. Emission cannot produce this, but a corrupt or hostile package can.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Bad");
+        let field_name = builder.add_string("self");
+        let reserved = builder.add_type(DebugTypeInfo::Unknown);
+        builder.replace_type_for_test(
+            reserved,
+            DebugTypeInfo::Struct {
+                name_idx,
+                size: 0,
+                fields: vec![DebugFieldInfo {
+                    name_idx: field_name,
+                    type_idx: reserved,
+                    offset: 0,
+                }],
+            },
+        );
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(reserved, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_rejects_a_cycle_with_no_aggregate() {
+        // A pointer row that points at itself denotes no type at all.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let reserved = builder.add_type(DebugTypeInfo::Unknown);
+        builder
+            .replace_type_for_test(reserved, DebugTypeInfo::Pointer { pointee_type_idx: reserved });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(reserved, debug_info.as_ref(), &mut cache).is_none());
     }
 
     #[test]
