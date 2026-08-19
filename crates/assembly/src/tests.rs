@@ -3055,48 +3055,6 @@ fn invalid_debug_variable_type_returns_error_instead_of_panicking() -> TestResul
     Ok(())
 }
 
-fn replace_nops_with_inline_call_markers(
-    context: &TestContext,
-    module: &mut Module,
-) -> Result<(), Report> {
-    use miden_assembly_syntax::ast::DebugInlineCallInfo;
-
-    let entrypoint = module
-        .procedures_mut()
-        .find(|procedure| procedure.is_entrypoint())
-        .expect("executable module should contain an entrypoint");
-    let mut replaced = 0usize;
-    for op in entrypoint.body_mut().iter_mut() {
-        let Op::Inst(instruction) = op else {
-            continue;
-        };
-        if !matches!(instruction.inner(), Instruction::Nop) {
-            continue;
-        }
-
-        let span = instruction.span();
-        let replacement = if replaced.is_multiple_of(2) {
-            Instruction::DebugInlineCallClear
-        } else {
-            let source_location = context
-                .source_manager()
-                .file_line_col(span)
-                .map_err(|error| Report::msg(error.to_string()))?;
-            Instruction::DebugInlineCall(DebugInlineCallInfo::new(
-                "source::inlined",
-                source_location.clone(),
-                source_location,
-            ))
-        };
-        *op = Op::Inst(Span::new(span, replacement));
-        replaced += 1;
-    }
-
-    assert!(replaced > 0, "test fixture must contain inline-call marker placeholders");
-    assert!(replaced.is_multiple_of(2), "markers must be emitted as clear/push pairs");
-    Ok(())
-}
-
 fn replace_nops_with_named_inline_call_markers(
     context: &TestContext,
     procedure: &mut Procedure,
@@ -3177,7 +3135,15 @@ fn inline_call_chains_are_recorded_on_call_and_structured_control_occurrences() 
         "
     );
     let mut module = context.parse_module(source)?;
-    replace_nops_with_inline_call_markers(&context, &mut module)?;
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+    replace_nops_with_named_inline_call_markers(
+        &context,
+        entrypoint,
+        &[None, Some("source::inlined"), None, Some("source::inlined")],
+    )?;
 
     let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
     let debug_info = package
@@ -3234,7 +3200,15 @@ fn inline_call_chains_cover_exec_source_occurrences() -> TestResult {
         "
     );
     let mut module = context.parse_module(source)?;
-    replace_nops_with_inline_call_markers(&context, &mut module)?;
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+    replace_nops_with_named_inline_call_markers(
+        &context,
+        entrypoint,
+        &[None, Some("source::inlined"), None, Some("source::inlined")],
+    )?;
 
     let package = Assembler::new(context.source_manager()).assemble_program("test", module)?;
     let debug_info = package
