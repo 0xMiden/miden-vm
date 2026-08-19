@@ -5,6 +5,13 @@ use miden::precompiles::fields::k1_scalar
 use miden::core::crypto::hashes::poseidon2
 use miden::core::word
 
+const ECRECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::ecrecover")
+
+# The last packed-u32 element of the 32-byte big-endian encodings of v = 27 and v = 28: the value
+# byte is byte 31 of the field, so it lands in the element's top byte.
+const ECRECOVER_V_27_LAST_ELEMENT = 0x1B000000
+const ECRECOVER_V_28_LAST_ELEMENT = 0x1C000000
+
 # ENCODING CONVENTIONS
 # ================================================================================================
 #
@@ -155,6 +162,110 @@ pub proc verify_bytes
     # => [...]
 end
 
+#! Recovers an Ethereum address from a secp256k1 signature and message hash.
+#!
+#! Input:  [INPUT_PTR, ...]
+#! Output: [ADDRESS_U32[8], ...]
+#!
+#! `INPUT_PTR` must be word-aligned and point to the standard 128-byte ECRECOVER input, packed into
+#! little-endian u32 memory elements:
+#!
+#!     HASH[32] || V[32] || R[32] || S[32]
+#!
+#! The four fields use Ethereum's big-endian encoding. `V` must encode 27 or 28, and `R` and `S`
+#! must be nonzero canonical secp256k1 scalars. High-s signatures are accepted.
+#!
+#! The result is the packed little-endian u32 form of
+#! `0[12] || Keccak256(QX_BE || QY_BE)[12..]`.
+#!
+#! Invalid input traps instead of returning the EVM precompile's empty failure output. The recovered
+#! key is untrusted advice; deferred curve and Keccak checks bind it to the input and result.
+#!
+#! Invocation: exec
+# loc: native Q[0..16] for the curve wrapper; serialized QX_BE || QY_BE[16..32] for the address
+# hash; the Keccak digest lands on [0..8] over the spent QX limbs.
+@locals(32)
+pub proc ecrecover
+    # Memory-backed precompile wrappers require word alignment.
+    dup u32mod.4 assertz.err="ECRECOVER input pointer must be word-aligned"
+
+    # Require V to be the 32-byte big-endian encoding of 27 or 28: the leading seven elements
+    # must be zero and the last element must be one of the two packed encodings. The v = 28
+    # comparison bit is the recovery parity, kept below the pointer.
+    padw dup.4 add.8 mem_loadw_le
+    repeat.4
+        assertz.err="ECRECOVER v must be 27 or 28"
+    end
+    padw dup.4 add.12 mem_loadw_le
+    repeat.3
+        assertz.err="ECRECOVER v must be 27 or 28"
+    end
+    # => [v_element, input_ptr, ...]
+    dup eq.ECRECOVER_V_28_LAST_ELEMENT
+    swap eq.ECRECOVER_V_27_LAST_ELEMENT
+    dup.1 or assert.err="ECRECOVER v must be 27 or 28"
+    swap
+    # => [input_ptr, recovery_parity, ...]
+
+    # Convert r and s to native limbs on the stack and register them as scalar VALUE digests,
+    # the same stack-resident registration the verifiers use for advice scalars.
+    dup add.16 exec.load_be_u256_mem
+    exec.k1_scalar::load movup.4
+    # => [input_ptr, SIG_R, recovery_parity, ...]
+    dup add.24 exec.load_be_u256_mem
+    exec.k1_scalar::load movup.4
+    # => [input_ptr, SIG_S, SIG_R, recovery_parity, ...]
+
+    # The host supplies Q as advice; the deferred checks below bind it to the input.
+    emit.ECRECOVER_EVENT
+    # => [input_ptr, SIG_S, SIG_R, recovery_parity, ...]
+
+    # Stream QX || QY into loc[0..16] for the curve wrapper. `adv_pipe` exposes each just-written
+    # chunk in the rate slots, so serialize that copy as QX_BE || QY_BE into loc[16..32] for the
+    # address hash instead of re-reading memory. No hperm runs, so the state words are scratch:
+    # `mem_storew_le` leaves each stored word in place as the next pipe's rate input.
+    locaddr.0 padw padw padw
+    adv_pipe
+    # => [QX_RATE[8], C, write_ptr=loc[8], input_ptr, ...]
+    exec.reverse_u256_bytes
+    locaddr.16 mem_storew_le
+    swapw
+    locaddr.20 mem_storew_le
+    # => [SCRATCH[8], C, write_ptr=loc[8], input_ptr, ...]
+    adv_pipe
+    # => [QY_RATE[8], C, write_ptr=loc[16], input_ptr, ...]
+    exec.reverse_u256_bytes
+    locaddr.24 mem_storew_le
+    swapw
+    locaddr.28 mem_storew_le
+    dropw dropw dropw drop
+    # => [input_ptr, SIG_S, SIG_R, recovery_parity, ...]
+
+    # Check that R = (z/s)G + (r/s)Q has the requested x-coordinate and parity.
+    locaddr.0 swap
+    # => [input_ptr, pubkey_ptr=loc[0], SIG_S, SIG_R, recovery_parity, ...]
+    exec.load_be_u256_mem
+    # => [Z_U32[8], pubkey_ptr, SIG_S, SIG_R, recovery_parity, ...]
+    exec.prepare_recover_inputs
+    # => [U1, Q, U2, SIG_R, recovery_parity, ...]
+    exec.recover_point_2base
+    # => [RECOVERY_POINT, SIG_R, recovery_parity, ...]
+    exec.assert_recovery_point
+    # => [...]
+
+    # Hash the serialized key.
+    locaddr.0 push.64 locaddr.16
+    # => [in_ptr=loc[16], len_bytes=64, out_ptr=loc[0], ...]
+    exec.keccak256::hash_2_chunks_mem
+    # => [...]  (DIGEST_U32[8] written to loc[0..8] over the spent QX limbs)
+
+    # Return 0[12] || digest[12..32] in packed-u32 byte order.
+    padw loc_loadw_le.4
+    loc_load.3
+    push.0.0.0
+    # => [ADDRESS_U32[8], ...]
+end
+
 # INTERNAL PROCEDURES — ECDSA
 # ================================================================================================
 
@@ -231,6 +342,25 @@ proc verify_point_2base
     # => [VERIFY_POINT, ...]
 end
 
+#! Computes `u1*G + u2*Q`. The deferred MSM requires nonzero scalars, so `u1 = 0` uses a single
+#! scalar multiplication.
+#!
+#! Input:  [U1, Q, U2, ...]
+#! Output: [RECOVERY_POINT, ...]
+proc recover_point_2base
+    dupw
+    exec.k1_scalar::is_zero
+    # => [is_u1_zero, U1, Q, U2, ...]
+    if.true
+        dropw
+        # => [Q, U2, ...]
+        exec.secp256k1::mul_scalar
+    else
+        exec.verify_point_2base
+    end
+    # => [RECOVERY_POINT, ...]
+end
+
 #! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
 #!
 #! Input:  [Z_U32[8], pubkey_ptr, ...]
@@ -254,7 +384,7 @@ end
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
 #! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by a public verifier;
-#! - SIG_R/S advice is untrusted and validated by `load_signature_k1`.
+#! - SIG_R/S advice is untrusted and loaded as canonical scalars by `load_signature_k1`.
 proc prepare_verify_inputs
     exec.k1_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
@@ -267,6 +397,42 @@ proc prepare_verify_inputs
     # => [Z, Q, ...]
 
     exec.load_signature_k1
+    # => [SIG_S, SIG_R, Z, Q, ...]
+    exec.compute_ecdsa_scalars
+    # => [U1, Q, U2, SIG_R, ...]
+end
+
+#! Loads Q from memory, takes r and s as already-registered scalar digests, and computes
+#! U1 = z/s and U2 = r/s.
+#!
+#! Input:  [Z_U32[8], pubkey_ptr, SIG_S_DIGEST, SIG_R_DIGEST, ...]
+#! Output: [U1_DIGEST, Q_DIGEST, U2_DIGEST, SIG_R_DIGEST, ...]
+#!
+#! `pubkey_ptr[0..16]` holds the native QX[8] || QY[8].
+proc prepare_recover_inputs
+    exec.k1_scalar::load_reduced_256
+    # => [Z, pubkey_ptr, SIG_S, SIG_R, ...]
+
+    movup.4
+    exec.secp256k1::load_mem
+    # => [Q, Z, SIG_S, SIG_R, ...]
+    swapw swapdw
+    # => [SIG_S, SIG_R, Z, Q, ...]
+
+    exec.compute_ecdsa_scalars
+    # => [U1, Q, U2, SIG_R, ...]
+end
+
+#! Checks r and s, then computes U1 = z/s and U2 = r/s.
+#!
+#! Input:  [SIG_S, SIG_R, Z, Q, ...]
+#! Output: [U1, Q, U2, SIG_R, ...]
+proc compute_ecdsa_scalars
+    # Inversion rejects s = 0; check r explicitly.
+    dupw.1
+    exec.k1_scalar::push_zero_digest
+    exec.word::eq
+    assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, Z, Q, ...]
 
     exec.k1_scalar::inv
@@ -282,17 +448,13 @@ proc prepare_verify_inputs
     exec.k1_scalar::mul
     # => [U2 = SIG_R*S_INV, U1, S_INV, SIG_R, Q, ...]
 
-    swapw.2
-    # => [S_INV, U1, U2, SIG_R, Q, ...]
-    dropw
+    swapw.2 dropw
     # => [U1, U2, SIG_R, Q, ...]
-
     movupw.3 swapw
     # => [U1, Q, U2, SIG_R, ...]
 end
 
-#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests, checks SIG_R != 0,
-#! and returns SIG_S on top because callers immediately invert SIG_S.
+#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests and returns SIG_S on top.
 #!
 #! Advice: [SIG_R[8] | SIG_S[8] | ...]
 #! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
@@ -301,18 +463,6 @@ proc load_signature_k1
     # => [SIG_R, ...]
 
     exec.load_scalar_k1_from_advice
-    # => [SIG_S, SIG_R, ...]
-
-    # ECDSA requires SIG_R != 0 and SIG_S != 0.
-    # Check SIG_R here. We do not check SIG_S here because k1_scalar::inv(SIG_S) traps on SIG_S = 0
-    # and binds the inverse relation for nonzero SIG_S.
-    dupw.1
-    # => [SIG_R, SIG_S, SIG_R, ...]
-    exec.k1_scalar::push_zero_digest
-    # => [ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
-    exec.word::eq
-    # => [is_sig_r_zero, SIG_S, SIG_R, ...]
-    assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, ...]
 end
 
@@ -372,6 +522,45 @@ proc assert_x_eq_scalar_k1
     # => [...]
 end
 
+#! Rejects identity and checks x(R) = r and parity(y(R)) = recovery_parity. The x-coordinate is
+#! compared exactly: recovery IDs 27 and 28 do not select the x = r + n branches.
+#!
+#! Input:  [RECOVERY_POINT_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, recovery_parity, ...]
+#! Output: [...]
+proc assert_recovery_point
+    exec.secp256k1::eval
+    # => [POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R, recovery_parity, ...]
+    exec.secp256k1::push_identity
+    exec.word::eq
+    assertz.err="invalid ECRECOVER recovery point: identity"
+    # => [X_DIGEST, Y_DIGEST, SIG_R, recovery_parity, ...]
+
+    # Compare y parity with v - 27.
+    swapw
+    movup.12 movdn.4
+    # => [Y_DIGEST, recovery_parity, X_DIGEST, SIG_R, ...]
+    exec.k1_base::open_value
+    # => [Y_U32[8], recovery_parity, X_DIGEST, SIG_R, ...]
+    push.1 u32and
+    movup.8 assert_eq.err="ECRECOVER recovery point has the wrong y parity"
+    repeat.7 drop end
+    # => [X_DIGEST, SIG_R, ...]
+
+    # Compare x and r directly, without reducing x modulo n.
+    exec.k1_base::open_value
+    # => [X_U32[8], SIG_R, ...]
+    movupw.2
+    exec.k1_scalar::open_value
+    # => [R_U32[8], X_U32[8], ...]
+    movupw.2
+    exec.word::eq
+    # => [lo_equal, R_HI, X_HI, ...]
+    movdn.8
+    exec.word::eq
+    and assert.err="ECRECOVER recovery point x-coordinate does not equal r"
+    # => [...]
+end
+
 # INTERNAL PROCEDURES — BYTE OPS
 # ================================================================================================
 
@@ -413,4 +602,31 @@ proc reverse_u32_bytes
     # => [(x << 16) mod 2^32, x >> 16, ...]
     u32xor
     # => [byte_reverse(x), ...]
+end
+
+#! Reverses the 32 bytes of a u256 held as eight packed u32 limbs on the stack. This converts
+#! between packed big-endian bytes and native little-endian numeric limbs in either direction.
+#!
+#! Input:  [PACKED_U32[8], ...]
+#! Output: [REVERSED_U32[8], ...]
+proc reverse_u256_bytes
+    reversedw
+    repeat.8
+        exec.reverse_u32_bytes movdn.7
+    end
+end
+
+#! Loads a packed 32-byte big-endian integer from memory as native little-endian u32 limbs.
+#!
+#! Input:  [source_ptr, ...]
+#! Output: [VALUE_U32[8], ...]
+#!
+#! `source_ptr` must be word-aligned. The least-significant limb is on top.
+proc load_be_u256_mem
+    padw dup.4 add.4 mem_loadw_le
+    # => [PACKED_BE_HI_U32[4], source_ptr, ...]
+    padw movup.8 mem_loadw_le
+    # => [PACKED_BE_U32[8], ...]
+    exec.reverse_u256_bytes
+    # => [VALUE_U32[8], ...]
 end

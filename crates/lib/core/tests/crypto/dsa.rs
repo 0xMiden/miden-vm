@@ -3,21 +3,26 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, Word,
-    deferred::DeferredState,
+    deferred::{DeferredError, DeferredState, PrecompileError},
     serde::{Deserializable, Serializable},
-    utils::bytes_to_packed_u32_elements,
+    utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
-use miden_core_lib::{CoreLibrary, dsa::ecdsa_k256_keccak};
+use miden_core_lib::{
+    CoreLibrary, dsa::ecdsa_k256_keccak, handlers::ecrecover::ECRECOVER_EVENT_NAME,
+};
 use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
     hash::keccak::Keccak256,
+    utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
 use miden_precompiles_prover::{HashFunction, prove_deferred_state, verify_deferred};
 use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
-    advice::{AdviceInputs, AdviceStack},
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, ProcessorState,
+    StackInputs,
+    advice::{AdviceInputs, AdviceMutation, AdviceStack},
+    event::{EventError, EventHandler},
 };
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
@@ -28,6 +33,119 @@ use crate::helpers::masm_store_felts;
 const VERIFY_EXPECTED_CYCLES: u64 = 1_587;
 const VERIFY_EXPECTED_WIRE_BYTES: usize = 2_455;
 const MESSAGE_PTR: u32 = 128;
+const ECRECOVER_INPUT_PTR: u32 = 256;
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_returns_ethereum_address() {
+    // Vector from Ethereum's CallEcrecover0 consensus test:
+    // https://github.com/ethereum/execution-spec-tests/blob/62035359cc4bd2d326844188f2003d29f6be1d97/tests/static/state_tests/stPreCompiledContracts2/CallEcrecover0Filler.json
+    let input = hex_to_bytes(concat!(
+        "0x18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c",
+        "000000000000000000000000000000000000000000000000000000000000001c",
+        "73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75f",
+        "eeb940b1d03b21e36b0e47e79769f095fe2ab855bd91e3a38756b7d75a9c4549",
+    ))
+    .expect("Ethereum ECRECOVER input vector must be valid hex");
+    let expected_address: [Felt; 8] = bytes_to_packed_u32_elements(
+        &hex_to_bytes::<32>("0x000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+            .expect("Ethereum address vector must be valid hex"),
+    )
+    .try_into()
+    .expect("an Ethereum address result has eight packed elements");
+
+    let output = run_ecrecover(&input)
+        .expect("valid Ethereum-shaped ECRECOVER input must recover an address");
+    assert_eq!(stack_elements(&output), expected_address);
+    assert_deferred_state_round_trips(&output);
+
+    assert_deferred_proof_verifies(&output);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_accepts_high_s() {
+    let mut fixture = ecrecover_fixture([0x36; 32], [0xb8; 32]);
+    let low_s = be_bytes_to_le_limbs(fixture.signature.s());
+    assert!(!is_high_s(low_s), "miden-crypto signer must produce low-s");
+    let high_s_signature = signature_with_s(&fixture.signature, negate_scalar_mod_n(low_s));
+    fixture.input = ecrecover_input([0xb8; 32], &high_s_signature);
+
+    let output = run_ecrecover(&fixture.input)
+        .expect("high-s ECRECOVER input with flipped recovery parity must succeed");
+    assert_eq!(stack_elements(&output), fixture.expected_address);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_accepts_zero_prehash() {
+    let fixture = ecrecover_fixture([0x37; 32], [0; 32]);
+
+    let output =
+        run_ecrecover(&fixture.input).expect("z mod n = 0 must use the single-base recovery path");
+    assert_eq!(stack_elements(&output), fixture.expected_address);
+
+    assert_deferred_proof_verifies(&output);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_traps_on_invalid_v() {
+    let fixture = ecrecover_fixture([0x38; 32], [0xc9; 32]);
+
+    for v in [0, 1, 26, 29] {
+        let mut input = fixture.input;
+        input[63] = v;
+        assert!(run_ecrecover(&input).is_err(), "v={v} must trap");
+    }
+
+    let mut nonzero_prefix = fixture.input;
+    nonzero_prefix[32] = 1;
+    run_ecrecover(&nonzero_prefix)
+        .expect_err("a nonzero high byte in the 32-byte v word must trap");
+
+    for recovery_id in 2..=3 {
+        let signature = Signature::from_sec1_bytes_and_recovery_id(
+            fixture.signature.to_sec1_bytes(),
+            recovery_id,
+        )
+        .expect("recovery ID must be valid for a generic recoverable signature");
+        assert!(ecdsa_k256_keccak::encode_ecrecover_input([0; 32], &signature).is_none());
+    }
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_traps_on_unaligned_input() {
+    let fixture = ecrecover_fixture([0x3b; 32], [0x9d; 32]);
+
+    run_ecrecover_at(&fixture.input, ECRECOVER_INPUT_PTR + 1)
+        .expect_err("an unaligned ECRECOVER input pointer must trap");
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_traps_on_invalid_scalars() {
+    let fixture = ecrecover_fixture([0x39; 32], [0xda; 32]);
+
+    let modulus = le_limbs_to_be_bytes(K1Scalar::MODULUS);
+    for (name, offset, scalar, is_noncanonical) in [
+        ("r = 0", 64, [0; 32], false),
+        ("s = 0", 96, [0; 32], false),
+        ("r = n", 64, modulus, true),
+        ("s = n", 96, modulus, true),
+    ] {
+        let mut input = fixture.input;
+        input[offset..offset + 32].copy_from_slice(&scalar);
+        let error = run_ecrecover_with_handler(&input, Arc::new(push_wrong_ecrecover_public_key))
+            .expect_err(&format!("{name} must trap"));
+        if is_noncanonical {
+            assert_invalid_deferred_payload(error);
+        }
+    }
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_ecrecover_rejects_forged_public_key_advice() {
+    let fixture = ecrecover_fixture([0x3a; 32], [0xeb; 32]);
+
+    run_ecrecover_with_handler(&fixture.input, Arc::new(push_wrong_ecrecover_public_key))
+        .expect_err("a valid but unrelated public-key witness must not satisfy recovery");
+}
 
 #[test]
 fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
@@ -279,6 +397,60 @@ struct Fixture {
     advice: Vec<Felt>,
 }
 
+struct EcrecoverFixture {
+    signature: Signature,
+    input: [u8; 128],
+    expected_address: [Felt; 8],
+}
+
+fn ecrecover_fixture(signing_key_seed: [u8; 32], prehash: [u8; 32]) -> EcrecoverFixture {
+    let mut rng = ChaCha20Rng::from_seed(signing_key_seed);
+    let signing_key = SigningKey::with_rng(&mut rng);
+    let public_key = signing_key.public_key();
+    let signature = signing_key.sign_prehash(prehash);
+    assert!(
+        public_key.verify_prehash(prehash, &signature),
+        "Rust prehash signature must verify before passing it to MASM",
+    );
+    let input = ecrecover_input(prehash, &signature);
+
+    EcrecoverFixture {
+        input,
+        expected_address: ethereum_address_felts(&public_key),
+        signature,
+    }
+}
+
+fn ecrecover_input(prehash: [u8; 32], signature: &Signature) -> [u8; 128] {
+    let input = ecdsa_k256_keccak::encode_ecrecover_input(prehash, signature)
+        .expect("test signatures must use an Ethereum recovery ID");
+    packed_u32_elements_to_bytes(&input)
+        .try_into()
+        .expect("ECRECOVER input must contain 128 bytes")
+}
+
+fn ethereum_address_felts(public_key: &PublicKey) -> [Felt; 8] {
+    let coordinates = public_key_elements(public_key);
+    let mut uncompressed = [0u8; 64];
+    for coordinate_index in 0..2 {
+        for limb_index in 0..8 {
+            let limb: u32 = coordinates[coordinate_index * 8 + limb_index]
+                .as_canonical_u64()
+                .try_into()
+                .expect("public-key coordinate limbs are u32");
+            let byte_offset = coordinate_index * 32 + (7 - limb_index) * 4;
+            uncompressed[byte_offset..byte_offset + 4].copy_from_slice(&limb.to_be_bytes());
+        }
+    }
+
+    let digest: [u8; 32] = Keccak256::hash(&uncompressed).into();
+    let mut address = [0u8; 32];
+    address[12..].copy_from_slice(&digest[12..]);
+    bytes_to_packed_u32_elements(&address)
+        .try_into()
+        .expect("an Ethereum address result has eight packed elements")
+}
+
 fn valid_fixture() -> Fixture {
     fixture_from_signing_key(default_signing_key())
 }
@@ -366,6 +538,13 @@ fn le_limbs_to_be_bytes(limbs: [u32; 8]) -> [u8; 32] {
     bytes
 }
 
+fn be_bytes_to_le_limbs(bytes: &[u8; 32]) -> [u32; 8] {
+    core::array::from_fn(|i| {
+        let offset = bytes.len() - (i + 1) * 4;
+        u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 limb"))
+    })
+}
+
 fn negate_scalar_mod_n(value: [u32; 8]) -> [u32; 8] {
     let mut borrow = 0u64;
     let result = core::array::from_fn(|i| {
@@ -385,6 +564,71 @@ fn negate_scalar_mod_n(value: [u32; 8]) -> [u32; 8] {
 
 fn run_verify(fixture: &Fixture) -> Result<ExecutionOutput, ExecutionError> {
     run_core_program_with_advice(&verify_source(fixture), &fixture.advice)
+}
+
+fn run_ecrecover(input: &[u8; 128]) -> Result<ExecutionOutput, ExecutionError> {
+    run_ecrecover_at(input, ECRECOVER_INPUT_PTR)
+}
+
+fn run_ecrecover_at(input: &[u8; 128], input_ptr: u32) -> Result<ExecutionOutput, ExecutionError> {
+    run_ecrecover_with_optional_handler(input, input_ptr, None)
+}
+
+fn run_ecrecover_with_handler(
+    input: &[u8; 128],
+    handler: Arc<dyn EventHandler>,
+) -> Result<ExecutionOutput, ExecutionError> {
+    run_ecrecover_with_optional_handler(input, ECRECOVER_INPUT_PTR, Some(handler))
+}
+
+fn run_ecrecover_with_optional_handler(
+    input: &[u8; 128],
+    input_ptr: u32,
+    handler: Option<Arc<dyn EventHandler>>,
+) -> Result<ExecutionOutput, ExecutionError> {
+    let input_felts = bytes_to_packed_u32_elements(input);
+    let stores = masm_store_felts(&input_felts, input_ptr);
+    let source = format!(
+        r#"
+        begin
+            {stores}
+            push.{input_ptr}
+            exec.::miden::core::crypto::dsa::ecdsa_k256_keccak::ecrecover
+            exec.::miden::core::sys::truncate_stack
+        end
+        "#,
+    );
+
+    run_core_program(&source, &[], handler)
+}
+
+fn stack_elements<const N: usize>(output: &ExecutionOutput) -> [Felt; N] {
+    core::array::from_fn(|index| output.stack.get_element(index).expect("stack output element"))
+}
+
+fn assert_deferred_proof_verifies(output: &ExecutionOutput) {
+    let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
+        .expect("ECRECOVER deferred claims must be provable");
+    verify_deferred(&proof, output.deferred_state.root())
+        .expect("ECRECOVER deferred proof must verify against the committed root");
+}
+
+fn assert_invalid_deferred_payload(error: ExecutionError) {
+    let ExecutionError::DeferredError { err, .. } = error else {
+        panic!("expected deferred invalid-payload error, got {error:?}");
+    };
+    assert!(matches!(err.root(), PrecompileError::Other(DeferredError::InvalidPayload)));
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn push_wrong_ecrecover_public_key(
+    _process: &ProcessorState<'_>,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    let mut rng = ChaCha20Rng::from_seed([0xfc; 32]);
+    let wrong_public_key = SigningKey::with_rng(&mut rng).public_key();
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.append_for_adv_pipe(&public_key_elements(&wrong_public_key));
+    Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])
 }
 
 fn verify_source(fixture: &Fixture) -> String {
@@ -444,6 +688,14 @@ fn run_core_program_with_advice(
     source: &str,
     advice: &[Felt],
 ) -> Result<ExecutionOutput, ExecutionError> {
+    run_core_program(source, advice, None)
+}
+
+fn run_core_program(
+    source: &str,
+    advice: &[Felt],
+    ecrecover_handler: Option<Arc<dyn EventHandler>>,
+) -> Result<ExecutionOutput, ExecutionError> {
     let core_lib = CoreLibrary::default();
     let program = Assembler::default()
         .with_package(core_lib.package(), Linkage::Dynamic)
@@ -455,6 +707,12 @@ fn run_core_program_with_advice(
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
+    if let Some(handler) = ecrecover_handler {
+        assert!(
+            host.replace_handler(ECRECOVER_EVENT_NAME, handler),
+            "the default ECRECOVER handler must already be registered",
+        );
+    }
 
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_elements(advice.iter().copied());

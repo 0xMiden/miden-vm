@@ -7,6 +7,7 @@ pub mod aead_decrypt;
 use alloc::vec::Vec;
 
 pub mod debug;
+pub mod ecrecover;
 pub mod falcon_div;
 pub mod precompiles;
 pub mod readonly;

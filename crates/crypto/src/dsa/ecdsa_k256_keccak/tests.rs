@@ -91,6 +91,11 @@ mod signing_key {
         .into();
         let recovered_pk = PublicKey::recover_from(message, &signature).unwrap();
         assert!(public_key != recovered_pk);
+
+        let message_digest = [0xa5; 32];
+        let signature = secret_key.sign_prehash(message_digest);
+        let recovered_pk = PublicKey::recover_from_prehash(message_digest, &signature).unwrap();
+        assert_eq!(public_key, recovered_pk);
     }
 
     #[test]

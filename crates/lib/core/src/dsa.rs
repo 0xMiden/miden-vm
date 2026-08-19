@@ -15,17 +15,15 @@
 
 /// ECDSA secp256k1 with Keccak256 signature helpers.
 ///
-/// Functions in this module generate the public-key commitment and native advice witness expected
-/// by the `ecdsa_k256_keccak::verify` and `ecdsa_k256_keccak::verify_bytes` ABIs. The public-key
-/// coordinates are bound by that commitment, but `r` and `s` are not committed to a particular
-/// signature encoding. Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally
-/// accepts high-s values.
+/// This module encodes inputs for the `verify`, `verify_bytes`, and `ecrecover` MASM procedures.
+/// The MASM procedures accept high-s signatures. For verification, the public key is committed but
+/// the signature itself remains uncommitted advice.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Word};
+    use miden_core::{Felt, Word, utils::bytes_to_packed_u32_elements};
     use miden_crypto::{
         SequentialCommit,
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
@@ -76,6 +74,29 @@ pub mod ecdsa_k256_keccak {
     /// native-coordinate element sequence returned by [`SequentialCommit::to_elements()`].
     pub fn public_key_commitment(pk: &PublicKey) -> Word {
         pk.to_commitment()
+    }
+
+    /// Encodes a message hash and recoverable signature for the MASM `ecrecover` procedure.
+    ///
+    /// The result is the packed-u32 form of Ethereum's 128-byte `hash || v || r || s` input, with
+    /// `v` encoded as 27 or 28. Recovery IDs 2 and 3 return `None` because ECRECOVER does not
+    /// accept them.
+    pub fn encode_ecrecover_input(prehash: [u8; 32], signature: &Signature) -> Option<[Felt; 32]> {
+        if signature.v() > 1 {
+            return None;
+        }
+
+        let mut input = [0u8; 128];
+        input[..32].copy_from_slice(&prehash);
+        input[63] = signature.v() + 27;
+        input[64..96].copy_from_slice(signature.r());
+        input[96..].copy_from_slice(signature.s());
+
+        Some(
+            bytes_to_packed_u32_elements(&input)
+                .try_into()
+                .expect("128 bytes always encode as 32 packed u32 elements"),
+        )
     }
 
     fn signature_felts(signature: &Signature) -> [Felt; 16] {

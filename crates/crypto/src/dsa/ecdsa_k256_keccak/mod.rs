@@ -263,10 +263,17 @@ impl PublicKey {
         }
     }
 
-    /// Recovers from the signature the public key associated to the secret key used to sign the
-    /// message.
+    /// Recovers the public key for a signature over the supplied message.
     pub fn recover_from(message: Word, signature: &Signature) -> Result<Self, PublicKeyError> {
         let message_digest = hash_message(message);
+        Self::recover_from_prehash(message_digest, signature)
+    }
+
+    /// Recovers the public key for a signature over the supplied 32-byte message digest.
+    pub fn recover_from_prehash(
+        message_digest: [u8; 32],
+        signature: &Signature,
+    ) -> Result<Self, PublicKeyError> {
         let signature_data = ecdsa::Signature::from_scalars(*signature.r(), *signature.s())
             .map_err(|_| PublicKeyError::RecoveryFailed)?;
 

@@ -13,7 +13,8 @@ use super::helpers::{
     read_memory_felts, run_precompile_program,
 };
 
-const MEM_PTR: u32 = 0;
+// Word-aligned but deliberately not double-word aligned.
+const MEM_PTR: u32 = 4;
 const OUT_PTR: u32 = 32;
 
 const ZERO: U32x8 = [0, 0, 0, 0, 0, 0, 0, 0];
