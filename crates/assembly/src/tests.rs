@@ -5466,6 +5466,62 @@ fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
 }
 
 #[test]
+fn a_recursive_type_survives_a_full_package_round_trip() -> TestResult {
+    use miden_mast_package::{Package, PackageExport};
+
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::tree
+
+        pub type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }
+
+        pub proc entry(head: ptr<Node, addrspace(byte)>)
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context.assemble_library("lib", None, module, [])?;
+
+    let mut bytes = Vec::new();
+    package.write_into(&mut bytes);
+    let decoded = Package::read_from_bytes(&bytes).expect("package should decode");
+
+    let find = |package: &Package| {
+        package
+            .manifest
+            .exports()
+            .find_map(|export| match export {
+                PackageExport::Type(ty) if ty.path.to_string().ends_with("Node") => {
+                    Some(ty.ty.clone())
+                },
+                _ => None,
+            })
+            .expect("Node should be exported")
+    };
+
+    let original = find(&package);
+    let recovered = find(&decoded);
+
+    // The whole stack agrees: what assembly resolved, the wire format encoded, and decoding
+    // rebuilt are the same type, backedge and all.
+    assert_eq!(recovered, original);
+
+    let miden_assembly_syntax::ast::types::Type::Struct(node_ref) = &recovered else {
+        panic!("expected a struct");
+    };
+    assert!(node_ref.is_recursive());
+    let body = node_ref.get();
+    let miden_assembly_syntax::ast::types::Type::Ptr(next) = &body.fields()[1].ty else {
+        panic!("expected a pointer");
+    };
+    assert_eq!(next.pointee(), &recovered);
+    Ok(())
+}
+
+#[test]
 fn mutually_recursive_structs_through_pointers_resolve() -> TestResult {
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
