@@ -19,6 +19,10 @@ doctest = false
 
 [features]
 default = []
+# Installs a #[global_allocator]: a bump allocator over the guest's own memory. The value types
+# link the `alloc` crate, so a no_std handler crate needs one. Enable it in the final handler
+# crate; leave it off in libraries so the final crate stays free to choose.
+bump-allocator = []
 # Installs a #[panic_handler] that forwards the panic message through `fail`. Enable it in the
 # final handler crate; leave it off in libraries so the final crate stays free to choose.
 panic-handler = []

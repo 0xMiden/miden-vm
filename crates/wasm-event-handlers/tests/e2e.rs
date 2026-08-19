@@ -165,7 +165,14 @@ fn rust_guest_fixture_end_to_end() {
     let section = section_from_module(wasm).expect("the fixture embeds its manifest");
     let mut events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
     events.sort_unstable();
-    assert_eq!(events, ["test::wasm::add_hundred", "test::wasm::always_panics"]);
+    assert_eq!(
+        events,
+        [
+            "test::wasm::add_hundred",
+            "test::wasm::always_panics",
+            "test::wasm::merge_words"
+        ]
+    );
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Assembler::new(source_manager)
@@ -193,6 +200,58 @@ fn rust_guest_fixture_end_to_end() {
     FastProcessor::new(StackInputs::default())
         .execute_sync(&decoded.unwrap_program(), &mut host)
         .expect("the Rust handler's advice satisfies the in-VM check");
+}
+
+/// The `merge_words` handler goes through the SDK's `Word` staging and hash wrappers: it reads
+/// two operand-stack words and answers with the Poseidon2 merge of the pair.
+#[test]
+fn rust_guest_merges_words() {
+    use miden_processor::{Felt, Word, crypto::hash::Poseidon2};
+    use miden_wasm_event_handlers::section_from_module;
+
+    let wasm = build_rust_guest_fixture();
+    let section = section_from_module(wasm).expect("the fixture embeds its manifest");
+
+    // `push.1.2.3.4 push.5.6.7.8` leaves 8 closest to the top of the stack, and the event ID
+    // takes position 0 during the event. The handler's words are therefore the elements at
+    // positions 1..5 and 5..9, top-down.
+    let top = Word::new([8, 7, 6, 5].map(Felt::from_u32));
+    let bottom = Word::new([4, 3, 2, 1].map(Felt::from_u32));
+    let digest = Poseidon2::merge(&[top, bottom]);
+
+    // The handler extends the advice stack top-down with the digest elements, so the pops come
+    // back in digest order. Every `adv_push`/`assert_eq` pair leaves the operand stack as it was.
+    let checks: String = digest
+        .as_elements()
+        .iter()
+        .map(|element| format!("adv_push push.{} assert_eq\n", element.as_canonical_u64()))
+        .collect();
+    let source = format!(
+        r#"
+        begin
+            push.1.2.3.4
+            push.5.6.7.8
+            emit.event("test::wasm::merge_words")
+            dropw dropw
+            {checks}
+        end"#
+    );
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager)
+        .assemble_program("rust_guest_merge", source)
+        .expect("program assembles");
+    let package = (*package).with_event_handlers(&section).expect("section attaches");
+    let program = package.unwrap_program();
+
+    let library = host_library_from_package(&Arc::new(package), WasmHandlerLimits::default())
+        .expect("handlers load from the package");
+    let mut host = DefaultHost::default();
+    host.load_library(library).expect("handlers register");
+
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect("the handler's digest matches the natively computed merge");
 }
 
 #[test]
