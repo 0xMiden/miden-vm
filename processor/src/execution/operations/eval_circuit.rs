@@ -11,6 +11,9 @@ use crate::{
 
 /// Checks that the evaluation of an arithmetic circuit is equal to zero.
 ///
+/// The encoded circuit defines the relation being checked. Callers relying on a specific circuit
+/// must authenticate its encoding.
+///
 /// The inputs are composed of:
 ///
 /// 1. a pointer to the memory region containing the arithmetic circuit description, which itself is
@@ -46,11 +49,13 @@ where
     Ok(())
 }
 
-/// Evaluates an arithmetic circuit encoded in memory starting at `ptr`.
+/// Constructs a witness for an arithmetic circuit encoded in memory starting at `ptr`.
 ///
 /// This reads `num_vars` quadratic extension field elements from memory (the READ section), then
 /// reads `num_eval` base field element gate encodings (the EVAL section), evaluating each gate
-/// in sequence. Returns the resulting [`CircuitEvaluation`] if the circuit evaluates to zero.
+/// in sequence. Each operand must therefore have been resolved when its gate is encountered. This
+/// is a limitation of this witness-construction strategy, not a causality check enforced by the
+/// ACE AIR. Returns the resulting [`CircuitEvaluation`] if the circuit evaluates to zero.
 pub(crate) fn eval_circuit_impl(
     ctx: ContextId,
     ptr: Felt,

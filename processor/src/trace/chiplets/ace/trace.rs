@@ -236,7 +236,10 @@ fn quad_to_expr(v: QuadFelt) -> QuadFeltExpr<Felt> {
     QuadFeltExpr(c[0], c[1])
 }
 
-/// A LogUp-based bus used for wiring the gates of the circuit.
+/// Processor-local state used to construct the circuit witness sequentially.
+///
+/// Unlike the ACE AIR's order-independent wiring relation, this resolves only wires already
+/// inserted by the processor.
 ///
 /// Gates are fan-in 2 but can have fan-out up to the field characteristic which, given the bounds
 /// on the execution trace length, means practically arbitrary fan-out.
@@ -274,7 +277,7 @@ impl WireBus {
     }
 
     /// Reads the value of a wire with given `id`, incrementing its multiplicity.
-    /// Returns `None` if the requested wire has not been inserted yet.
+    /// Returns `None` if the sequential witness construction has not resolved the wire yet.
     fn read_value(&mut self, id: u32) -> Option<QuadFelt> {
         // Ensures subtracting the id from num_wires results in a valid wire index
         let (v, m) = self
