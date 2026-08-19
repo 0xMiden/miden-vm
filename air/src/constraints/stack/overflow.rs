@@ -24,6 +24,8 @@
 //!
 //! 3. **Overflow index** (degree 7, 8):
 //!    - On right shift: b1' = clk (record when item was pushed)
+//!    - On CALL/SYSCALL/DYNCALL: b1' = 0 (start with an empty overflow table)
+//!    - On operations which do not modify or restore the overflow table: b1' = b1
 //!    - On left shift with depth = 16: stack[15]' = 0 (no item to restore)
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -146,9 +148,11 @@ fn enforce_stack_depth_constraints<AB>(
 
 /// Enforces overflow bookkeeping index constraints.
 ///
-/// Two constraints:
+/// Overflow pointer constraints:
 /// 1. On right shift: b1' = clk (record the clock cycle when item was pushed to overflow)
-/// 2. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
+/// 2. On CALL/SYSCALL/DYNCALL: b1' = 0 (start the new context with no overflow)
+/// 3. On operations which do not modify or restore the overflow table: b1' = b1
+/// 4. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
 fn enforce_overflow_index_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -157,12 +161,34 @@ fn enforce_overflow_index_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
+    let overflow_addr = local.stack.b1;
     let overflow_addr_next = next.stack.b1;
     let clk = local.system.clk;
     let last_stack_item_next = next.stack.get(15);
 
     // On right shift, the overflow address should be set to current clk
     builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next, clk);
+
+    // A new call context starts with an empty overflow table.
+    let context_start = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
+    builder
+        .when_transition()
+        .when(context_start.clone())
+        .assert_zero(overflow_addr_next);
+
+    // END restores the caller's overflow address through the block stack lookup. A right shift
+    // creates a new overflow record, while a left shift with non-empty overflow restores the
+    // previous address through the overflow table lookup. All other transitions preserve b1.
+    let context_end = op_flags.end()
+        * (local.decoder.hasher_state[6].into() + local.decoder.hasher_state[7].into());
+    let pointer_changes = context_start
+        + context_end
+        + op_flags.right_shift()
+        + op_flags.left_shift() * op_flags.overflow();
+    builder
+        .when_transition()
+        .when(AB::Expr::ONE - pointer_changes)
+        .assert_eq(overflow_addr_next, overflow_addr);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     builder
@@ -234,5 +260,51 @@ mod tests {
             evaluations.iter().any(|value| *value != QuadFelt::ZERO),
             "FRIE2F4 must zero s15 when no overflow item can be restored"
         );
+    }
+
+    #[test]
+    fn noop_preserves_overflow_address() {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(17);
+        next.stack.b1 = local.stack.b1;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.b1 += ONE;
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "NOOP must preserve the overflow address"
+        );
+    }
+
+    #[test]
+    fn call_family_resets_overflow_address() {
+        for opcode in [opcodes::CALL, opcodes::DYNCALL, opcodes::SYSCALL] {
+            let mut local = generate_test_row(opcode.into());
+            local.stack.b0 = Felt::new_unchecked(17);
+            local.stack.b1 = Felt::new_unchecked(11);
+            local.stack.h0 = ONE;
+
+            let mut next = generate_test_row(0);
+            next.stack.b0 = Felt::new_unchecked(16);
+            next.stack.b1 = ZERO;
+
+            let evaluations = eval_stack_overflow(&local, &next);
+            assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+            next.stack.b1 = ONE;
+            let evaluations = eval_stack_overflow(&local, &next);
+            assert!(
+                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                "opcode {opcode} must reset the overflow address"
+            );
+        }
     }
 }
