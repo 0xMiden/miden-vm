@@ -47,11 +47,10 @@ use super::message::LookupMessage;
 /// ## Semantics by call site
 ///
 /// - **Single interactions** ([`LookupGroup::add`], `remove`, `insert`, `insert_encoded`, and the
-///   corresponding [`LookupBatch`] methods): `(v, u) = (deg(m · D) + deg(f), deg(D) + deg(f))`
-///   where `m` is the interaction's signed multiplicity, `D` is its denominator polynomial, and `f`
-///   is the gating flag (the enclosing batch flag for `LookupBatch` methods). The standalone
-///   post-flag contribution this interaction would make if folded directly into the enclosing
-///   group's `(V_g, U_g)`.
+///   corresponding [`LookupBatch`] methods): `(v, u) = (deg(m) + deg(f), deg(D) + deg(f))`, where
+///   `m` is the signed multiplicity, `D` is the denominator, and `f` is the gate. For batch
+///   entries, `f` is the batch gate. These values describe the interaction itself; the batch fold
+///   later multiplies its numerator by the other entries' denominators.
 ///
 /// - **Batch outer** ([`LookupGroup::batch`]): the post-flag contribution the *whole* batch makes
 ///   to the enclosing group's `(V_g, U_g)` — `(deg(N) + deg(f), deg(D) + deg(f))` where `(N, D)` is

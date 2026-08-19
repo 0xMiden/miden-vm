@@ -3,6 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
+use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
@@ -344,6 +345,8 @@ pub enum OperationError {
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
     MalformedMastForestInHost { root_digest: Word },
+    #[error("Merkle tree depth must be in the range 1..={MAX_MERKLE_DEPTH}, but was {depth}")]
+    MerkleDepthOutOfRange { depth: Felt },
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
       value = to_hex(inner.value.as_bytes()),
       root = to_hex(inner.root.as_bytes()),

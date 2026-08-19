@@ -6,10 +6,10 @@ use miden::core::sys::vm::constraints_eval_inputs
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 624
+const NUM_INPUTS_CIRCUIT = 628
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 5328
+const NUM_EVAL_GATES_CIRCUIT = 5392
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 4
@@ -20,10 +20,10 @@ const ACE_REGISTRY_DEPTH = 3
 # Poseidon2 digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), H_COMMON).
-const H_COMMON_0 = 864947263830285166
-const H_COMMON_1 = 14478784471931351919
-const H_COMMON_2 = 6998102532366390626
-const H_COMMON_3 = 13975925580041346572
+const H_COMMON_0 = 15433024867901467812
+const H_COMMON_1 = 8913262848297184576
+const H_COMMON_2 = 10266320086976787717
+const H_COMMON_3 = 3183468947319856490
 
 # ERRORS
 # =================================================================================================
@@ -69,7 +69,7 @@ proc load_and_authenticate_ace_circuit
     exec.constants::ace_circuit_stream_ptr
     padw padw padw
     # => [ZERO, ZERO, ZERO, ptr, LEAF]
-    repeat.104
+    repeat.105
         adv_pipe
         exec.poseidon2::permute
     end
@@ -78,7 +78,7 @@ proc load_and_authenticate_ace_circuit
     movup.4
     # => [ptr, H_PREFIX, LEAF]
     padw padw padw
-    repeat.635
+    repeat.643
         adv_pipe
         exec.poseidon2::permute
     end

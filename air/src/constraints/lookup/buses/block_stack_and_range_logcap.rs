@@ -1,7 +1,7 @@
 //! Packs four buses onto one main-trace lookup column:
 //!
 //! - Block-stack table: control-flow block nesting.
-//! - u32 range-check removes: gated by u32 opcodes.
+//! - u32 and Merkle-depth range-check removes: gated by u32 or Merkle opcodes.
 //! - Log-deferred transcript-state: gated by the log deferred opcode.
 //! - Range-table response: always active and isolated in its own group.
 //!
@@ -18,6 +18,7 @@
 //!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
 //!     batch (7 branches, mutually exclusive via decoder opcode flags).
 //!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
+//!   - Merkle-depth range-check batch: 2 removes gated by MPVERIFY / MRUPDATE.
 //!   - Log-deferred transcript-state batch: 1 remove + 1 add gated by `log_deferred`.
 //! - **Sibling group** (always on):
 //!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
@@ -33,6 +34,7 @@
 //! - Block-stack: {JOIN, SPLIT, SPAN, DYN, LOOP, DYNCALL, CALL, SYSCALL, END, RESPAN}
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
 //!   U32MADD, …} — prefix_100 in the opcode encoding.
+//! - Merkle: {MPVERIFY, MRUPDATE}.
 //! - LOGDEFERRED: {LOGDEFERRED} — a single opcode.
 //!
 //! No row can fire two of these simultaneously. The END-simple / END-call/syscall split
@@ -53,6 +55,7 @@
 //! | END call/syscall remove (Full msg) | 5 | Full, denom 1 | 6 | 5 |
 //! | RESPAN batch (k=2, f=respan deg 4) | — | Simple | 6 | 5 |
 //! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
+//! | Merkle-depth batch (k=2, f=mpverify + mrupdate deg 5) | — | Range, denom 1 | **7** | **6** |
 //! | logpre batch (k=2, f=log_deferred deg 5) | — | LogDeferred, denom 1 | **7** | **6** |
 //!
 //! Main group max: `U_g = 7, V_g = 6`.
@@ -76,20 +79,24 @@ use crate::{
         messages::{BlockStackMsg, LogDeferredMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
+    trace::{
+        chiplets::hasher::MERKLE_DEPTH_RANGE_SCALE,
+        log_deferred::{HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE},
+    },
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Main group per-row max is `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (logpre)) = 4`
-/// — the u32rc 4-remove batch is the dominant branch.
+/// Main group per-row max is
+/// `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (Merkle depth), 2 (logpre)) = 4` — the
+/// u32rc 4-remove batch is the dominant branch.
 /// Sibling range-table group always contributes 1 fraction.
 /// Both groups run unconditionally (the main group fires at most one branch per row but
 /// the per-column accumulator allocates the worst-case slot budget), so the per-row max is
 /// the sum: `4 + 1 = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
-/// Emit the merged block-stack + u32rc + logpre + range-table column.
+/// Emit the merged block-stack + u32/Merkle-depth range-check + logpre + range-table column.
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -134,11 +141,13 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let range_m = local.range.multiplicity;
     let range_v = local.range.value;
 
-    // ---- u32rc + logpre captures (from range_logcap.rs) ----
+    // ---- u32 and Merkle-depth range-check + logpre captures (from range_logcap.rs) ----
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
+    let f_merkle_depth = op_flags.mpverify() + op_flags.mrupdate();
     let f_log_deferred = op_flags.log_deferred();
+    let merkle_depth = stk.get(4);
 
     // u32rc helpers: first 4 of the 6 user_op_helpers.
     let u32rc_helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
@@ -327,9 +336,37 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (3 + 3, 4 + 3)
                     );
 
+                    // ---- Merkle depth range-check removes (BusId::RangeCheck) ----
+                    //
+                    // Two simultaneous checks enforce `1 <= depth <= MAX_MERKLE_DEPTH`. The first
+                    // constrains `depth` to its canonical 16-bit value. The second checks
+                    // `(depth - 1) * (2^16 / MAX_MERKLE_DEPTH)`, which fits in 16 bits exactly for
+                    // the supported positive depths. The first check is also what prevents the
+                    // scaled expression from wrapping through the field modulus.
+                    //
+                    // MPVERIFY and MRUPDATE are disjoint from every other opcode family in this
+                    // group. Their summed flag has degree 5, so this matches the existing group
+                    // maximum and does not increase the column's degree.
+                    g.batch(
+                        "merkle_depth_range_check",
+                        f_merkle_depth,
+                        move |b| {
+                            let depth: LB::Expr = merkle_depth.into();
+                            let scaled_depth = (depth.clone() - LB::Expr::ONE)
+                                * LB::Expr::from_u16(MERKLE_DEPTH_RANGE_SCALE);
+                            b.remove("merkle_depth", RangeMsg { value: depth }, Deg { v: 5, u: 6 });
+                            b.remove(
+                                "merkle_depth_scaled",
+                                RangeMsg { value: scaled_depth },
+                                Deg { v: 5, u: 6 },
+                            );
+                        },
+                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
+                    );
+
                     // ---- Log-deferred root update (BusId::LogDeferredRoot) ----
                     // Remove the previous deferred root, add the next. Mutually exclusive with all
-                    // block-stack branches and with u32rc.
+                    // block-stack branches and with the u32 and Merkle-depth range checks.
                     g.batch(
                         "log_deferred_state",
                         f_log_deferred,

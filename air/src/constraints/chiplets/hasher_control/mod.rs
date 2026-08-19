@@ -45,6 +45,7 @@ use crate::{
         chiplets::{columns::ControllerCols, selectors::ChipletFlags},
         utils::BoolNot,
     },
+    trace::chiplets::hasher::MAX_MERKLE_INDEX_HALF,
 };
 
 // ENTRY POINT
@@ -197,9 +198,14 @@ pub fn enforce_controller_constraints<AB>(
     // output. Without this, a prover could inject arbitrary capacity values on
     // continuation rows, corrupting the sponge state.
     //
-    // `is_sponge_input_next` restricts this to LINEAR_HASH continuations only (Merkle
-    // ops zero capacity at each level). The `!is_boundary_next` factor restricts to
-    // continuations (not new operation starts, which set fresh capacity).
+    // `is_sponge_input_next` restricts this to LINEAR_HASH continuations. Merkle permutations use
+    // zero logical capacity on every input. On the level-0 Merkle input row, however, the four
+    // physical controller capacity columns hold the canonical-index witness; the permutation-link
+    // lookup sends zeros to Poseidon2 instead. On later Merkle input rows, those columns are
+    // physically constrained to zero by the Merkle input constraints below.
+    //
+    // The `!is_boundary_next` factor restricts this to continuations rather than new operation
+    // starts, which set fresh capacity.
     // `is_transition` guarantees both rows are controller rows.
     // Degree: is_transition(3) * is_sponge_input_next(3) * !is_boundary_next(1) * diff(1) = 8.
     {
@@ -231,11 +237,10 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Merkle input state ---
     // On each Merkle input row:
-    //   - index decomposition: `idx = 2 * idx_next + direction_bit` threads the path bits down one
-    //     level at a time
-    //   - direction_bit is binary (left/right child selector)
-    //   - capacity lanes h[8..12] are zeroed so each 2-to-1 compression starts with a clean sponge
-    //     capacity
+    //   - `idx = 2 * idx_next + direction_bit` removes one path bit from the index;
+    //   - `direction_bit` is a boolean left/right selector;
+    //   - after level 0, the capacity lanes are zero. Level 0 uses those columns for the
+    //     canonical-index witness described below.
     // Degree: is_active(1) * is_merkle_input(3) * diff(1) = 5 (on the decomp assert).
     {
         let gate = chiplet.is_active.clone() * rows.is_merkle_input.clone();
@@ -248,9 +253,86 @@ pub fn enforce_controller_constraints<AB>(
 
         // direction_bit is binary
         builder.assert_bool(cols.direction_bit);
+    }
 
-        // Capacity lanes h[8..12] must be zero on Merkle input rows.
-        builder.assert_zeros(cols.capacity());
+    // --- Canonical Merkle index witness ---
+    //
+    // The index decomposition is evaluated in F_Q, where Q = 2^64 - 2^32 + 1. A reconstructed
+    // 64-bit index can therefore wrap modulo Q. We first bound the path suffix after level 0.
+    //
+    // Let d be the path depth and b_k the direction bit at level k. Starting from the terminal
+    // constraint `node_index_d = 0` and applying the decomposition backwards gives
+    //
+    //   x = sum_(k=1)^(d-1) 2^(k-1) * b_k,
+    //
+    // where x is the level-1 index. The sum is empty when d = 1. Because d <= 64, the sum
+    // contains at most 63 boolean bits and, read over the integers, stays below 2^63 < Q. This
+    // part of the reconstruction therefore cannot wrap, and x is an ordinary integer with
+    // 0 <= x < 2^63. Three parts of the AIR establish this bound. This module enforces
+    // decomposition, bit booleanity, continuity, and the terminal zero on HOUT rows. The stack
+    // AIR bounds d to [1, 64]. Finally, the stack/hasher lookup addresses bind the computation
+    // to exactly d levels. See the MPVERIFY, MRUPDATE, and Merkle range checks sections in
+    // docs/src/design/stack/crypto_ops.md.
+    //
+    // The full path index is n = 2*x + b_0. It may contain 64 bits, so it still needs a
+    // canonicality check. Write b = b_0 and M = (Q - 1) / 2 = 2^63 - 2^31. Since b is boolean,
+    //
+    //   n < Q  iff  2*x + b <= 2*M  iff  x + b <= M
+    //
+    // If b = 0, both bounds say x <= M. If b = 1, integrality turns
+    // `2*x <= 2*M - 1` into x <= M - 1.
+    //
+    // The AIR proves `x + b <= M` with a non-negative slack y. Its four limbs reuse the capacity
+    // columns on the level-0 input row:
+    //
+    //   x + b + y = M,
+    //   y = y_0 + 2^16*y_1 + 2^32*y_2 + 2^48*y_3.
+    //
+    // The range-check bus checks every limb and also checks 2*y_3. The limb check gives
+    // y_3 < 2^16, so doubling it cannot wrap in F_Q (2*y_3 < 2^17 < Q). The doubled check then
+    // gives y_3 < 2^15. Therefore 0 <= y < 2^63, and recombining the limbs cannot wrap either.
+    //
+    // The five RangeCheck requests are split across three lookup columns:
+    // chiplet_responses: y_0; wiring: y_1 and y_2; hash_kernel: y_3 and 2*y_3. All use
+    // BusId::RangeCheck, so only their combined multiset matters.
+    //
+    // The slack equation is still checked in F_Q. However,
+    //
+    //   0 <= x + y + b <= 2^64 - 1 < M + Q.
+    //
+    // The interval above contains only one integer congruent to M modulo Q: M itself. The field
+    // equation is therefore an integer equality, which gives x + b <= M and hence n < Q.
+    // Conversely, every canonical n < Q has the valid slack y = M - x - b. At n = Q - 1,
+    // this slack is zero.
+    //
+    // Gate degree: is_active(1) * is_merkle_input(3) * is_boundary(1) = 5.
+    // Constraint degree: gate(5) * diff(1) = 6.
+    {
+        const TWO_POW_16: u64 = 1 << 16;
+        const TWO_POW_32: u64 = 1 << 32;
+        const TWO_POW_48: u64 = 1 << 48;
+        let is_boundary: AB::Expr = cols.is_boundary.into();
+        let gate = chiplet.is_active.clone() * rows.is_merkle_input.clone() * is_boundary;
+        let capacity = cols.capacity();
+        let slack = AB::Expr::from(capacity[0])
+            + AB::Expr::from(capacity[1]) * AB::Expr::from_u64(TWO_POW_16)
+            + AB::Expr::from(capacity[2]) * AB::Expr::from_u64(TWO_POW_32)
+            + AB::Expr::from(capacity[3]) * AB::Expr::from_u64(TWO_POW_48);
+        let index_next: AB::Expr = cols_next.node_index.into();
+        let direction_bit: AB::Expr = cols.direction_bit.into();
+
+        builder.when(gate).assert_eq(
+            index_next + slack + direction_bit,
+            AB::Expr::from_u64(MAX_MERKLE_INDEX_HALF),
+        );
+    }
+
+    // Later Merkle input rows do not carry this witness. Their capacity columns are constrained to
+    // zero, matching the state sent to the permutation AIR.
+    {
+        let is_boundary: AB::Expr = cols.is_boundary.into();
+        let gate = chiplet.is_active.clone() * rows.is_merkle_input.clone() * is_boundary.not();
+        builder.when(gate).assert_zeros(cols.capacity());
     }
 
     // --- Cross-step Merkle index continuity ---

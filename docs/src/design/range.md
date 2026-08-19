@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Range Checker
 
-Miden VM relies very heavily on 16-bit range-checks (checking if a field element is smaller than $2^{16}$). Most [u32 operations](./stack/u32_ops.md) perform between two and four 16-bit range-checks; `U32DIV` performs six. Each active memory row requires five 16-bit range-checks.
+Miden VM relies heavily on 16-bit range checks, which prove that a field element represents an integer in $[0, 2^{16})$. Selected [u32 operations](./stack/u32_ops.md) request checks for four helper values; `U32DIV` requests two additional checks. Each active memory row requests five checks. `MPVERIFY` and `MRUPDATE` request two checks for their Merkle-path depth, and each Merkle path leg requests five checks for its canonical-index witness.
 
 Thus, it is very important for the VM to be able to perform a large number of 16-bit range checks very efficiently. In this note we describe how this can be achieved using the [LogUp](./lookups/logup.md) lookup argument.
 
@@ -64,7 +64,7 @@ $$
 
 This addresses the limitations we had as follows:
 1. We no longer need to pad the column we want to range-check with extra values because we can skip the values we don't care about by setting the multiplicity to $0$.
-2. We can range check as many unique values as there are rows in the trace, and there is essentially no limit to how many times each of these values can be range-checked. (The only restriction on the multiplicity value is that it must be less than the size of the set of lookup values. Therefore, for long traces where $n > 2^{16}$, $m < 2^{16}$ must hold, and for short traces $m < n$ must be true.)
+2. Repeated checks of the same value do not require additional table rows; they only increase that value's multiplicity. The number of distinct values remains bounded by the available table rows.
 
 Additionally, the constraint degree has not increased versus the naive approach, and the only additional cost is a single trace column.
 
@@ -98,7 +98,7 @@ $$
 (r' - r) = \sum_{i=0}^{7} x_i \cdot 3^i
 $$
 
-Then for each $x_i$ except the first, we add a bridge row at a gap of $3^i$.
+Starting from the current value, we add one bridge row for each power-of-three step in this decomposition except the final step, which lands on the next requested value. A coefficient $x_i = 2$ therefore uses two steps of size $3^i$.
 
 ## Miden approach
 
@@ -107,14 +107,14 @@ This construction is implemented in Miden with the following requirements, capab
 ### Requirements
 
 - 2 columns of the main trace: $m, v$, where $v$ contains the value being range-checked and $m$ is the number of times the value is checked (its multiplicity).
-- 1 [bus](./lookups/index.md#communication-buses-in-miden-vm) $b_{range}$ to ensure that the range checks performed in the range checker match those requested by other VM components (the [stack](./stack/u32_ops.md#range-checks) and the [memory chiplet](./chiplets/memory.md)).
+- 1 domain-separated [communication bus](./lookups/index.md#communication-buses-in-miden-vm), `RangeCheck`, to ensure that the table multiplicities match the requests from [u32 operations](./stack/u32_ops.md#range-checks), [Merkle operations](./stack/crypto_ops.md#merkle-range-checks), and the [memory chiplet](./chiplets/memory.md).
 
 ### Capabilities
 
 The construction gives us the following capabilities:
-- For long traces (when $n > 2^{16}$), we can do an essentially unlimited number of arbitrary 16-bit range-checks.
-- For short traces ($2^5 < n \le 2^{16}$), we can range-check slightly fewer than $n$ unique values, but there is essentially no practical limit to the total number of range checks.
 
+- A table with enough rows can contain every 16-bit value and therefore serve any range-check request produced by the execution trace.
+- With fewer rows, the number of distinct requested values is limited by the requested-value rows and the bridge rows between them. Repeated requests for an existing value consume no additional rows because they are aggregated into its multiplicity.
 
 ### Execution trace
 
@@ -125,8 +125,8 @@ The range checker's execution trace looks as follows:
 The columns have the following meanings:
 - $m$ is the multiplicity column that indicates the number of times the value in that row should be range checked (included into the computation of the logarithmic derivative).
 - $v$ contains the values to be range checked.
-  - These values go from $0$ to $65535$. Values must either stay the same or increase by powers of 3 less than or equal to $3^7$.
-  - The final 2 rows of the 16-bit section of the trace must both equal $65535$. The extra value of $65535$ is required in order to [pad the trace](./lookups/index.md#length-of-auxiliary-columns-for-lookup-arguments) so the [$b_{range}$](#communication-bus) bus column can be computed correctly.
+  - The first value is $0$ and the last value is $65535$.
+  - Consecutive values must either stay the same or increase by a power of 3 no greater than $3^7$.
 
 ### Execution trace constraints
 
@@ -144,38 +144,39 @@ In addition to the transition constraints described above, we also need to enfor
 
 ### Communication bus
 
-$b_{range}$ is the [bus](./lookups/index.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
+The domain-separated `RangeCheck` [communication bus](./lookups/index.md#communication-buses-in-miden-vm) connects components that require 16-bit checks to the range table. It encodes a value as $d_{\mathrm{range}}(x) = \operatorname{prefix}_{\mathrm{RangeCheck}} + \beta^0 x$. A request made under flag $f$ contributes
 
-Requests are sent to the range checker bus by the following components:
-- The Stack sends four requests during each range-checked [`u32` operation](./stack/u32_ops.md#range-checks), plus two more for `U32DIV`.
-- The [Memory chiplet](./chiplets/memory.md) sends five requests per active row for its delta and word-address decompositions.
+$$
+-\frac{f}{d_{\mathrm{range}}(x)},
+$$
 
-Responses are provided by the range checker using the transition constraint for the LogUp construction described above.
+while a range-table row contributes
 
-> $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
-> $$
+$$
+\frac{m}{d_{\mathrm{range}}(v)}.
+$$
 
-To describe the requests sent to the bus, we'll define the following variables:
+The current requesters are:
 
-- $f_{stack}$: the boolean flag that indicates whether or not a stack operation requiring range checks is occurring. This flag has degree 3.
-- $f_{div}$: the boolean flag that indicates whether or not a `U32DIV` operation is occurring. This flag has degree 6.
-- $f_{mem}$: the boolean flag that indicates whether or not a memory operation requiring range checks is occurring. This flag has degree 3.
-- $s_0, s_1, s_2, s_3$: the values for which range checks are requested from the stack when $f_{stack}$ is set.
-- $s_4, s_5$: the low and high 16-bit limbs of `divisor - remainder - 1` for `U32DIV`.
-- $m_0, ..., m_4$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
+- Selected [`u32` operations](./stack/u32_ops.md#range-checks), which request checks for four decoder helper values. `U32DIV` requests two additional checks for its remainder bound.
+- `MPVERIFY` and `MRUPDATE`, which request checks for the depth $d$ and the scaled value $2^{10}(d - 1)$. Together these enforce $1 \le d \le 64$.
+- Each MPVERIFY path and each of MRUPDATE's old and new paths, which request checks for the four
+  limbs $y_0, y_1, y_2, y_3$ of the level-0 canonical-index slack and for $2y_3$. The limb checks
+  give $y_j < 2^{16}$, and the extra check gives $y_3 < 2^{15}$. Thus the complete slack is less
+  than $2^{63}$; see
+  [Merkle range checks](./stack/crypto_ops.md#merkle-range-checks).
+- The [memory chiplet](./chiplets/memory.md), which requests five checks per active row for the delta limbs $d_0$ and $d_1$ and the word-address values $w_0$, $w_1$, and $4w_1$.
 
-> $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)} - \frac{f_{div}}{(\alpha - s_4)} - \frac{f_{div}}{(\alpha - s_5)} - \sum_{i=0}^{4}\frac{f_{mem}}{(\alpha - m_i)}
-> $$
+These interactions do not use a dedicated $b_{\mathrm{range}}$ accumulator. They are packed with other lookup interactions in the Core and Chiplets AIRs. For AIR $i$, let $\sigma_i$ be the sum of all its lookup contributions and $n_i$ its trace length. The AIR commits the normalized sum
 
-The equation above shows the combined range-bus contribution. The implementation distributes these
-terms across several LogUp accumulator columns and multiplies through only the denominators assigned
-to each column. This packing keeps the maximum constraint degree at $9$.
+$$
+\sigma'_i = \frac{\sigma_i}{n_i}.
+$$
 
-If $b_{range}$ is initialized to $0$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 0$.
+The verifier enforces the cross-AIR identity
 
-Therefore, in addition to the transition constraint described above, we also need to enforce the following boundary constraints:
+$$
+\sum_i n_i \sigma'_i + c_{\mathrm{boundary}} = 0,
+$$
 
-- The value of $b_{range}$ in the first row $0$.
-- The value of $b_{range}$ in the last row $0$.
+where $c_{\mathrm{boundary}}$ contains the explicit boundary messages required by other buses. The `RangeCheck` bus has no boundary messages, so its table responses must cancel its requests. Internally, the first lookup accumulator is anchored at zero and follows a normalized cyclic recurrence, including the last-to-first edge; there is no separate requirement that a terminal $b_{\mathrm{range}}$ value be zero.

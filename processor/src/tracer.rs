@@ -154,6 +154,7 @@ pub trait Tracer {
         &mut self,
         _node: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _output_root: Word,
     ) {
@@ -170,6 +171,7 @@ pub trait Tracer {
         _old_value: Word,
         _new_value: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _old_root: Word,
         _new_root: Word,

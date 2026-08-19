@@ -478,16 +478,12 @@ fn initialize_range_checker(
 ) -> RangeChecker {
     let mut range_checker = RangeChecker::new();
 
-    // Add all u32 range checks recorded during execution.
-    let (u32_checks, u32div_remainder_diffs) = range_checker_replay.into_parts();
-    for values in u32_checks {
-        range_checker.add_range_checks(&values);
-    }
-    for values in u32div_remainder_diffs {
-        range_checker.add_range_checks(&values);
+    // Add all range checks recorded during execution.
+    for values in range_checker_replay {
+        range_checker.add_range_checks(values.as_ref());
     }
 
-    // Add all memory-related range checks
+    // Add all hasher- and memory-related range checks.
     chiplets.append_range_checks(&mut range_checker);
 
     range_checker

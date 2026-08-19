@@ -19,6 +19,9 @@ Miden assembly provides a set of instructions for performing common cryptographi
 | mtree_merge <br /> - *(16 cycles)* | [L, R, ...]        | [M, ...]          | Merges two Merkle trees with the provided roots L (left), R (right) into a new Merkle tree with root M (merged). The input trees are retained in the advice provider.                                                                                                                                                                                  |
 | mtree_verify  <br /> - *(1 cycle)* | [V, d, i, R, ...]  | [V, d, i, R, ...] | Verifies that a Merkle tree with root $R$ opens to node $V$ at depth $d$ and index $i$. Merkle tree with root $R$ must be present in the advice provider, otherwise execution fails.                                                                                                                                                                   |
 
+The `mtree_get`, `mtree_set`, and `mtree_verify` instructions require the Merkle depth $d$ to be
+an integer in the inclusive range $[1, 64]$. Values outside this range are rejected.
+
 The `mtree_verify` instruction can also be parametrized with an error code which can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). For example:
 ```
 mtree_verify.err=123
