@@ -1651,7 +1651,7 @@ end
 #[test]
 fn test_event_immediate_roundtrip_formatting() {
     let trace_name = "test::trace::roundtrip";
-    let event_name = "test::emit::roundtrip";
+    let event_name = r#"test::emit::a\"b"#;
     let constant_name = "test::constant::roundtrip";
 
     let source = format!(

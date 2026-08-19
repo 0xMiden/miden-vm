@@ -366,12 +366,8 @@ fn inst_with_event_imm(name: &'static str, imm: &EventImmediate) -> Document {
 fn inline_event_imm(name: &'static str, event: &str) -> Document {
     use crate::prettier::*;
 
-    flatten(
-        const_text(name)
-            + const_text(".event(\"")
-            + text(format!("{}", event.escape_debug()))
-            + const_text("\")"),
-    )
+    // Event names retain their source escapes during lowering, so preserve the lexeme here.
+    flatten(const_text(name) + const_text(".event(\"") + text(event) + const_text("\")"))
 }
 
 fn inst_with_imm(name: &'static str, imm: &dyn PrettyPrint) -> Document {
