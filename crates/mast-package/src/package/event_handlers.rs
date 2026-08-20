@@ -20,7 +20,10 @@ use alloc::{
 
 use miden_core::{
     events::EventName,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        validate_bounded_len,
+    },
 };
 
 // CONSTANTS
@@ -34,6 +37,9 @@ pub const MAX_HANDLERS: usize = 256;
 
 /// The maximum length of an event name or an export name, in bytes.
 pub const MAX_NAME_BYTES: usize = 255;
+
+/// The smallest serialized size of one manifest entry: two empty length-prefixed names.
+const MIN_ENTRY_BYTES: usize = 2;
 
 // EVENT HANDLER SECTION
 // ================================================================================================
@@ -83,6 +89,10 @@ pub enum EventHandlerSectionError {
     #[error("failed to decode 'event_handlers' section: {0}")]
     Decode(#[from] DeserializationError),
 
+    /// The section payload has bytes after the encoded section.
+    #[error("'event_handlers' section has trailing bytes")]
+    TrailingBytes,
+
     /// A field of the section goes over its size cap.
     #[error("'event_handlers' section {field} length {actual} goes over the cap of {max}")]
     OverSizeCap {
@@ -108,19 +118,31 @@ fn check_cap(field: &'static str, actual: usize, max: usize) -> Result<(), Deser
     Ok(())
 }
 
-/// Writes a length-prefixed string.
-fn write_str<W: ByteWriter>(target: &mut W, value: &str) {
-    target.write_usize(value.len());
-    target.write_bytes(value.as_bytes());
+/// Reads a length prefix, checks it against `max`, and checks that the source still holds the
+/// bytes the length claims.
+///
+/// `min_element_size` is the smallest serialized size of one of the elements the length counts.
+fn read_capped_len<R: ByteReader>(
+    source: &mut R,
+    field: &'static str,
+    max: usize,
+    min_element_size: usize,
+) -> Result<usize, DeserializationError> {
+    let len = source.read_usize()?;
+    check_cap(field, len, max)?;
+    validate_bounded_len(source, field, len, min_element_size)?;
+    Ok(len)
 }
 
 /// Reads a length-prefixed string with `field` capped at [`MAX_NAME_BYTES`].
+///
+/// The [`Deserializable`] impl of `String` reads the same bytes, but it applies no cap before it
+/// allocates, so the untrusted decode keeps this reader.
 fn read_str<R: ByteReader>(
     source: &mut R,
     field: &'static str,
 ) -> Result<String, DeserializationError> {
-    let len = source.read_usize()?;
-    check_cap(field, len, MAX_NAME_BYTES)?;
+    let len = read_capped_len(source, field, MAX_NAME_BYTES, 1)?;
     let bytes = source.read_slice(len)?;
     let value = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in {field}: {err}"))
@@ -135,8 +157,8 @@ impl Serializable for EventHandlerSection {
         target.write_bytes(&self.module);
         target.write_usize(self.handlers.len());
         for entry in &self.handlers {
-            write_str(target, entry.event.as_str());
-            write_str(target, &entry.export);
+            entry.event.write_into(target);
+            entry.export.write_into(target);
         }
     }
 }
@@ -145,12 +167,11 @@ impl Deserializable for EventHandlerSection {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let abi_version = source.read_u32()?;
 
-        let module_len = source.read_usize()?;
-        check_cap("module", module_len, MAX_MODULE_BYTES)?;
+        let module_len = read_capped_len(source, "module", MAX_MODULE_BYTES, 1)?;
         let module = source.read_slice(module_len)?.to_vec();
 
-        let handler_count = source.read_usize()?;
-        check_cap("handler count", handler_count, MAX_HANDLERS)?;
+        let handler_count =
+            read_capped_len(source, "handler count", MAX_HANDLERS, MIN_ENTRY_BYTES)?;
         let mut handlers = Vec::with_capacity(handler_count);
         for _ in 0..handler_count {
             let event = EventName::from_string(read_str(source, "event name")?);
