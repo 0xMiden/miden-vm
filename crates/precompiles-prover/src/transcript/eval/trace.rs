@@ -767,24 +767,27 @@ impl TranscriptEvalRequires {
         let val = msm.value(expr);
         let chiplet = msm.terms(expr);
 
-        // Fully-merged claim: one pair per chiplet term, distinct bases, each
-        // pair a real term of `expr`. With distinct bases + matching count +
-        // each-pair-a-term, the pairs *are* the chiplet's term set — so the
-        // seam's set match is well-defined and the root tracks the term set,
-        // not an unmerged split.
+        // `terms` must match `expr`'s own term rows as an exact multiset —
+        // each chiplet row claimed exactly once, repeats included — so the
+        // seam's set match is well-defined and the root tracks the term set
+        // exactly as declared. (A bare existence check would let a claim
+        // over-consume a row — e.g. naming the same base twice when the
+        // chiplet has only one row for it — which the LogUp bus would still
+        // catch, just at prove time instead of here.) Repeated bases and
+        // zero scalars are fine as long as they survive as their own row —
+        // see `msm::require::combine_terms_preserving`.
         assert_eq!(
             terms.len(),
             chiplet.len(),
             "ec_msm needs exactly one (base, scalar) pair per claim term",
         );
-        for i in 0..terms.len() {
-            for j in (i + 1)..terms.len() {
-                assert_ne!(terms[i].0.point, terms[j].0.point, "duplicate base in ec_msm claim");
-            }
-            assert!(
-                chiplet.iter().any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
-                "(base, scalar) pair is not a term of this MSM expression",
-            );
+        let mut remaining = chiplet;
+        for (base, scalar) in terms {
+            let pos = remaining
+                .iter()
+                .position(|&(b, s)| b == base.point && s == scalar.ptr)
+                .expect("(base, scalar) pair is not a term of this MSM expression");
+            remaining.swap_remove(pos);
         }
 
         let blocks: Vec<_> = terms

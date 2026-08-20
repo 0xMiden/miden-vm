@@ -467,38 +467,15 @@ proc compute_ecdsa_scalars
     # => [U1, Q, U2, SIG_R, ...]
 end
 
-#! Computes `R = u1*G + u2*Q`, omitting the `u1*G` term when U1 is zero. Otherwise, uses a plain
-#! 2-base joint wNAF MSM, folding the degenerate `Q == G` case into a single `(u1+u2)*G` multiply,
-#! the one collision a 2-base MSM has.
+#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM. Neither a zero `U1`/`U2` nor
+#! `Q == G` is special-cased: the generic MSM precompile accepts zero scalars and a repeated base
+#! directly.
 #! Input:  [U1, Q, U2, ...]
 #! Output: [RELATION_POINT, ...]
 proc relation_point_2base
-    dupw
-    exec.k1_scalar::is_zero
-    # => [is_u1_zero, U1, Q, U2, ...]
-    if.true
-        dropw
-        # => [Q, U2, ...]
-        exec.secp256k1::mul_scalar
-    else
-        dupw.1
-        # => [Q, U1, Q, U2, ...]
-        exec.secp256k1::push_generator
-        # => [G, Q, U1, Q, U2, ...]
-        exec.word::eq
-        # => [is_q_generator, U1, Q, U2, ...]
-        if.true
-            swapw dropw
-            # => [U1, U2, ...]
-            exec.k1_scalar::add
-            # => [U1_PLUS_U2, ...]
-            exec.secp256k1::mul_scalar_generator
-        else
-            exec.secp256k1::push_generator
-            # => [G, U1, Q, U2, ...]
-            exec.secp256k1::msm2
-        end
-    end
+    exec.secp256k1::push_generator
+    # => [G, U1, Q, U2, ...]
+    exec.secp256k1::msm2
     # => [RELATION_POINT, ...]
 end
 

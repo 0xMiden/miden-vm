@@ -10,7 +10,7 @@ use miden_precompiles::{
 };
 
 use crate::{
-    ec::trace::EcPointPtr,
+    ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
     transcript::poseidon2::P2Digest,
@@ -46,9 +46,6 @@ pub(crate) enum DeferredSessionError {
 
     #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
     RootMismatch { expected: P2Digest, actual: P2Digest },
-
-    #[error("deferred MSM node {digest:?} has no nonzero scalar")]
-    UnsupportedMsmAllZeroScalars { digest: Digest },
 }
 
 pub(crate) fn session_from_deferred_state(
@@ -271,39 +268,28 @@ impl<'a> DeferredSessionBuilder<'a> {
         curve: CurveId,
         pairs: Vec<(Digest, Digest)>,
     ) -> Result<EcNode, DeferredSessionError> {
+        // A nonempty PairList carries the curve context every term below
+        // relies on; an empty one has none, so it stays invalid.
+        if pairs.is_empty() {
+            return Err(DeferredSessionError::UnsupportedMsm {
+                digest,
+                reason: "an empty PairList has no curve context",
+            });
+        }
+
         let mut terms = Vec::with_capacity(pairs.len());
         for (point_digest, scalar_digest) in pairs {
             let point = self.translate_ec(point_digest)?;
             let scalar = self.translate_uint(scalar_digest)?;
             debug_assert_eq!(point.curve, curve);
             debug_assert_eq!(scalar.domain, curve.scalar_domain());
-            terms.push((point, scalar));
-        }
-
-        if terms.iter().all(|(_, scalar)| scalar.value == U256::ZERO) {
-            return Err(DeferredSessionError::UnsupportedMsmAllZeroScalars { digest });
-        }
-
-        let mut bases = BTreeSet::new();
-        for (point, scalar) in &terms {
-            if !bases.insert(point.node.point) {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "duplicate canonical bases are not supported",
-                });
-            }
-            if scalar.value == U256::ZERO {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "zero-scalar terms are not supported",
-                });
-            }
             if self.session.is_pai(&point.node) {
                 return Err(DeferredSessionError::UnsupportedMsm {
                     digest,
                     reason: "an identity (point-at-infinity) base is not supported",
                 });
             }
+            terms.push((point, scalar));
         }
 
         if let Some((point, _)) = terms.first() {
@@ -311,28 +297,61 @@ impl<'a> DeferredSessionBuilder<'a> {
                 .constrain_scalar_bound(&point.node, curve.scalar_domain().bound_ptr());
         }
 
+        // Zero scalars are always fine (0·P = 𝒪); repeated canonical bases —
+        // including two structurally different point nodes that resolve to
+        // the same canonical point — are fine too. Both need the
+        // term-preserving fallback below rather than the fast joint ladder:
+        // a zero scalar has no wNAF digit expansion to interleave (the
+        // ladder's `intro`-only leaves are always nonzero), and a repeated
+        // base would otherwise auto-merge two distinct claim terms onto one
+        // chiplet row. When every declared base is distinct and every
+        // scalar nonzero, the fast path already produces one row per
+        // declared term (auto-merge never fires across distinct bases), so
+        // it stays the default.
+        let mut bases = BTreeSet::new();
+        let fast_path_eligible = terms
+            .iter()
+            .all(|(point, scalar)| scalar.value != U256::ZERO && bases.insert(point.node.point));
+
+        let expr = if fast_path_eligible {
+            self.msm_joint_expr(curve, &terms)
+        } else {
+            self.msm_term_preserving_expr(curve, &terms)
+        };
+
+        let claim_terms = terms
+            .iter()
+            .map(|(point, scalar)| (point.node, scalar.node))
+            .collect::<Vec<_>>();
+        Ok(self.session.ec_msm(expr, &claim_terms))
+    }
+
+    /// The joint/interleaved addition chain for a PairList whose declared
+    /// bases are pairwise distinct and every scalar nonzero. `joint_wnaf`'s
+    /// per-column cost is linear in the term count (unlike Straus's `2^k`
+    /// subset-sum table), so an arbitrary-arity pair-list never needs a
+    /// term-count cap here.
+    ///
+    /// GLV curves split each term's scalar in half (`glv_joint_wnaf_with_tables`),
+    /// trading ~half the ladder height for twice the virtual bases —
+    /// `msm_combine`'s shared-base merge folds each pair's plain/endo
+    /// legs back onto the caller's original term, so the claim is
+    /// unaffected either way. Both tables are cached per `(point,
+    /// window)` the same way the plain path's are (a recurring base —
+    /// the ECDSA generator across a batch of signatures — lays each
+    /// table once); sign rides the digit selection inside
+    /// `glv_joint_wnaf_with_tables`, not the table's seed, so a shared
+    /// base's tables serve every claim's GLV split regardless of sign.
+    fn msm_joint_expr(
+        &mut self,
+        curve: CurveId,
+        terms: &[(TranslatedEc, TranslatedUint)],
+    ) -> EcExprPtr {
         let expr_terms = terms
             .iter()
             .map(|(point, scalar)| (point.node, scalar.value))
             .collect::<Vec<_>>();
-        // `joint_wnaf`'s per-column cost is linear in the term count (unlike
-        // Straus's 2^k subset-sum table), so an arbitrary-arity pair-list
-        // never needs a term-count cap here.
-        //
-        // GLV curves split each term's scalar in half (`glv_joint_wnaf_with_tables`),
-        // trading ~half the ladder height for twice the virtual bases —
-        // `msm_combine`'s shared-base merge folds each pair's plain/endo
-        // legs back onto the caller's original term, so the claim below is
-        // unaffected either way. Both tables are cached per `(point,
-        // window)` the same way the plain path's are (a recurring base —
-        // the ECDSA generator across a batch of signatures — lays each
-        // table once); sign rides the digit selection inside
-        // `glv_joint_wnaf_with_tables`, not the table's seed, so a shared
-        // base's tables serve every claim's GLV split regardless of sign.
-        //
-        // Every base here already cleared the identity check above, so each
-        // one gets an endomorphism image and an endo table.
-        let expr = if curve.endomorphism().is_some() {
+        if curve.endomorphism().is_some() {
             for (base, _) in &expr_terms {
                 self.ensure_wnaf_table(base, MSM_WNAF_WINDOW);
                 self.ensure_wnaf_table_endo(base, MSM_WNAF_WINDOW);
@@ -359,13 +378,38 @@ impl<'a> DeferredSessionBuilder<'a> {
                 })
                 .collect();
             strategies::joint_wnaf_with_tables(&mut self.session, &table_terms)
-        };
+        }
+    }
 
-        let claim_terms = terms
-            .iter()
-            .map(|(point, scalar)| (point.node, scalar.node))
-            .collect::<Vec<_>>();
-        Ok(self.session.ec_msm(expr, &claim_terms))
+    fn msm_term_preserving_expr(
+        &mut self,
+        curve: CurveId,
+        terms: &[(TranslatedEc, TranslatedUint)],
+    ) -> EcExprPtr {
+        let mut acc: Option<EcExprPtr> = None;
+        for (point, scalar) in terms {
+            let leaf = if scalar.value == U256::ZERO {
+                self.session.msm_intro_zero(&point.node)
+            } else if curve.endomorphism().is_some() {
+                self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
+                self.ensure_wnaf_table_endo(&point.node, MSM_WNAF_WINDOW);
+                let plain = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+                let endo = self.glv_endo_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+                strategies::glv_joint_wnaf_with_tables(
+                    &mut self.session,
+                    &[(plain, Some(endo), scalar.value)],
+                )
+            } else {
+                self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
+                let table = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+                strategies::wnaf_scalarmul(&mut self.session, table, scalar.value)
+            };
+            acc = Some(match acc {
+                None => leaf,
+                Some(a) => self.session.msm_combine_terms_preserving(a, leaf),
+            });
+        }
+        acc.expect("translate_ec_msm guarantees a nonempty PairList")
     }
 
     /// Ensures `base`'s [`WnafTable`](strategies::WnafTable) at window `w` is

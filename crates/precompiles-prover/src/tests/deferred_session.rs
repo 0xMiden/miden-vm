@@ -3,7 +3,10 @@ use alloc::{sync::Arc, vec, vec::Vec};
 use miden_core::deferred::{DeferredState, Node};
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
-use crate::deferred::{DeferredSession, session_from_deferred_state};
+use crate::{
+    deferred::{DeferredSession, session_from_deferred_state},
+    math::{U256, from_hex, to_limbs32},
+};
 
 fn state() -> DeferredState {
     DeferredState::new(Arc::new(miden_precompiles::registry()))
@@ -135,7 +138,9 @@ fn register_affine_curve_value(
 }
 
 #[test]
-fn deferred_session_inputs_reject_zero_scalar_msm() {
+fn deferred_session_lowers_zero_scalar_msm() {
+    // 0·P = 𝒪: a single zero-scalar term registers and lowers to a session
+    // whose resolved value is the point at infinity.
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -144,11 +149,15 @@ fn deferred_session_inputs_reject_zero_scalar_msm() {
     state.register(zero.clone()).expect("zero scalar must register");
 
     let msm = curve_msm_node(vec![(generator, zero)]);
-    assert!(state.register(msm).is_err(), "zero-scalar MSM must be rejected");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state).expect("zero-scalar MSM should lower");
 }
 
 #[test]
-fn deferred_session_inputs_reject_duplicate_base_msm() {
+fn deferred_session_lowers_duplicate_base_msm() {
+    // a·P + b·P = (a + b)·P: two terms naming the same generator lower
+    // (via the term-preserving fallback path) into one session.
     let mut state = state();
     let curve = CurveId::Secp256k1;
     let generator = CurvePrecompile::generator_node(curve);
@@ -159,7 +168,110 @@ fn deferred_session_inputs_reject_duplicate_base_msm() {
     state.register(three.clone()).expect("scalar must register");
 
     let msm = curve_msm_node(vec![(generator.clone(), two), (generator, three)]);
-    assert!(state.register(msm).is_err(), "duplicate-base MSM must be rejected");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state).expect("duplicate-base MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_mixed_zero_and_nonzero_msm() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let two_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve
+            .mul_scalar(curve.generator(), limbs(2))
+            .expect("valid scalar multiplication"),
+    );
+    let zero = UintPrecompile::value_node(curve.scalar_domain(), limbs(0));
+    let three = UintPrecompile::value_node(curve.scalar_domain(), limbs(3));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(zero.clone()).expect("zero scalar must register");
+    state.register(three.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(generator, zero), (two_g, three)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state).expect("mixed zero/nonzero MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_all_zero_msm_with_multiple_terms() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let two_g = register_affine_curve_value(
+        &mut state,
+        curve,
+        curve
+            .mul_scalar(curve.generator(), limbs(2))
+            .expect("valid scalar multiplication"),
+    );
+    let zero = UintPrecompile::value_node(curve.scalar_domain(), limbs(0));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(zero.clone()).expect("zero scalar must register");
+
+    let msm = curve_msm_node(vec![(generator, zero.clone()), (two_g, zero)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state).expect("all-zero MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_repeated_base_coefficients_that_cancel() {
+    // A repeated base whose scalars sum to the curve order mod n cancels to
+    // the identity: k·P + (n − k)·P = n·P = 𝒪.
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let k = limbs(7);
+    let order = from_hex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+    let n_minus_k = to_limbs32(order - U256::from(7u64));
+    let k_node = UintPrecompile::value_node(curve.scalar_domain(), k);
+    let n_minus_k_node = UintPrecompile::value_node(curve.scalar_domain(), n_minus_k);
+    state.register(generator.clone()).expect("generator must register");
+    state.register(k_node.clone()).expect("scalar must register");
+    state.register(n_minus_k_node.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(generator.clone(), k_node), (generator, n_minus_k_node)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state).expect("cancelling repeated-base MSM should lower");
+}
+
+#[test]
+fn deferred_session_lowers_structurally_different_nodes_at_the_same_canonical_point() {
+    // `G` and `identity + G` are structurally different DAG nodes that both
+    // evaluate to the generator — the same repeated-canonical-base path as
+    // `deferred_session_lowers_duplicate_base_msm`, reached structurally.
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let identity = CurvePrecompile::identity_node(curve);
+    state.register(generator.clone()).expect("generator must register");
+    state.register(identity.clone()).expect("identity must register");
+    let generator_via_add = Node::join(
+        CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+        identity.digest(),
+        generator.digest(),
+    )
+    .expect("tag is curve-owned");
+    let generator_via_add =
+        state.register(generator_via_add).expect("identity + generator must register");
+
+    let two = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
+    let three = UintPrecompile::value_node(curve.scalar_domain(), limbs(3));
+    state.register(two.clone()).expect("scalar must register");
+    state.register(three.clone()).expect("scalar must register");
+
+    let pairs = vec![(generator.digest(), two.digest()), (generator_via_add, three.digest())];
+    let msm = Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned");
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    session_from_deferred_state(&state)
+        .expect("MSM over structurally different same-point nodes should lower");
 }
 
 #[test]

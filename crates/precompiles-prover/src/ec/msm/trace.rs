@@ -16,9 +16,10 @@ use super::{
     COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
     COL_CLAIM_MULT, COL_ENDO_BASE_X, COL_ENDO_MINTED, COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR,
     COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_COMBINE, COL_IS_INTRO,
-    COL_IS_INTRO_ENDO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
-    COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
-    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir, NUM_MAIN_COLS,
+    COL_IS_INTRO_ENDO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT,
+    COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR,
+    COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir,
+    NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
@@ -75,6 +76,7 @@ pub struct NegRow {
 enum ExprKind {
     Intro,
     IntroEndo,
+    IntroZero,
     Combine,
     Neg,
 }
@@ -150,8 +152,16 @@ enum DedupKey {
     Intro(u32),
     /// `⟨base × λ⟩` — keyed by the base point.
     IntroEndo(u32),
+    /// `⟨base × 0⟩` — keyed by the base point.
+    IntroZero(u32),
     /// `combine(a, b)` — keyed by the two operand expression ptrs.
     Combine(u32, u32),
+    /// `combine_concat(a, b)` — the term-preserving (never-merge) fold,
+    /// keyed separately from [`Self::Combine`] so a merged and an unmerged
+    /// combine of the *same* operand pair can never alias onto each
+    /// other's cached result — they compute different term-list shapes
+    /// (though the same value) from the same inputs.
+    ConcatCombine(u32, u32),
     /// `neg(a)` — keyed by the operand expression ptr.
     Neg(u32),
 }
@@ -180,6 +190,13 @@ impl EcMsmRequires {
     /// The expression a prior `combine(a, b)` produced, if any.
     pub fn lookup_combine(&self, a: EcExprPtr, b: EcExprPtr) -> Option<EcExprPtr> {
         self.dedup.get(&DedupKey::Combine(a.addr(), b.addr())).copied()
+    }
+
+    /// The expression a prior `combine_concat(a, b)` produced, if any —
+    /// tracked separately from [`Self::lookup_combine`] (see
+    /// [`DedupKey::ConcatCombine`]).
+    pub fn lookup_concat_combine(&self, a: EcExprPtr, b: EcExprPtr) -> Option<EcExprPtr> {
+        self.dedup.get(&DedupKey::ConcatCombine(a.addr(), b.addr())).copied()
     }
 
     /// The expression a prior `neg(a)` produced, if any.
@@ -228,6 +245,61 @@ impl EcMsmRequires {
         });
         let e = EcExprPtr(self.exprs.len() as u32);
         self.dedup.insert(DedupKey::Intro(base.addr()), e);
+        e
+    }
+
+    /// The expression a prior `intro_zero(base)` produced, if any — a
+    /// repeat reuses it instead of laying a second `⟨base × 0⟩`.
+    pub fn lookup_intro_zero(&self, base: EcPointPtr) -> Option<EcExprPtr> {
+        self.dedup.get(&DedupKey::IntroZero(base.addr())).copied()
+    }
+
+    /// Record an `intro_zero` — `⟨base × 0⟩` with `val` the group's
+    /// canonical point-at-infinity row. `scalar` must be the store ptr of
+    /// the value `0` under `sbound`; `val` must be `group`'s PAI point
+    /// (the boundary's `EcPoint(val, is_pai = 1)` consume authenticates
+    /// it — see [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
+    /// Returns the handle.
+    pub fn intro_zero(
+        &mut self,
+        group: EcGroupPtr,
+        sbound: UintPtr,
+        base: EcPointPtr,
+        scalar: UintPtr,
+        val: EcPointPtr,
+    ) -> EcExprPtr {
+        self.exprs.push(ExprRecord {
+            kind: ExprKind::IntroZero,
+            group: group.addr(),
+            sbound: sbound.addr(),
+            val: val.addr(),
+            a_expr: 0,
+            b_expr: 0,
+            val_a: 0,
+            val_b: 0,
+            a_ptr: 0,
+            b_ptr: 0,
+            bound_ptr: 0,
+            beta_ptr: 0,
+            lambda_ptr: 0,
+            neg_x: 0,
+            neg_ya: 0,
+            neg_yr: 0,
+            neg_minted: 0,
+            endo_base_x: 0,
+            endo_y: 0,
+            endo_val_x: 0,
+            endo_minted: 0,
+            rows: vec![RowVals {
+                base: base.addr(),
+                scalar: scalar.addr(),
+                ..RowVals::default()
+            }],
+            mult: 0,
+            claim_mult: 0,
+        });
+        let e = EcExprPtr(self.exprs.len() as u32);
+        self.dedup.insert(DedupKey::IntroZero(base.addr()), e);
         e
     }
 
@@ -319,6 +391,61 @@ impl EcMsmRequires {
         val: EcPointPtr,
         rows: Vec<CombineRow>,
     ) -> EcExprPtr {
+        let e = self.record_combine(
+            group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
+            val_b, val, rows,
+        );
+        self.dedup.insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
+        e
+    }
+
+    /// Record a `combine_concat(a, b) = c` — the term-preserving fold (see
+    /// [`DedupKey::ConcatCombine`]): identical AIR shape to [`Self::combine`]
+    /// (still an ordinary `is_combine` run), only the dedup namespace and,
+    /// by construction, `rows`' take-flag pattern (never `take_both`)
+    /// differ. Returns the handle.
+    #[allow(clippy::too_many_arguments)]
+    pub fn combine_concat(
+        &mut self,
+        group: EcGroupPtr,
+        sbound: UintPtr,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        bound_ptr: UintPtr,
+        beta_ptr: UintPtr,
+        lambda_ptr: UintPtr,
+        a_expr: EcExprPtr,
+        b_expr: EcExprPtr,
+        val_a: EcPointPtr,
+        val_b: EcPointPtr,
+        val: EcPointPtr,
+        rows: Vec<CombineRow>,
+    ) -> EcExprPtr {
+        let e = self.record_combine(
+            group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, a_expr, b_expr, val_a,
+            val_b, val, rows,
+        );
+        self.dedup.insert(DedupKey::ConcatCombine(a_expr.addr(), b_expr.addr()), e);
+        e
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_combine(
+        &mut self,
+        group: EcGroupPtr,
+        sbound: UintPtr,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        bound_ptr: UintPtr,
+        beta_ptr: UintPtr,
+        lambda_ptr: UintPtr,
+        a_expr: EcExprPtr,
+        b_expr: EcExprPtr,
+        val_a: EcPointPtr,
+        val_b: EcPointPtr,
+        val: EcPointPtr,
+        rows: Vec<CombineRow>,
+    ) -> EcExprPtr {
         let rows = rows
             .into_iter()
             .map(|r| RowVals {
@@ -361,9 +488,7 @@ impl EcMsmRequires {
             mult: 0,
             claim_mult: 0,
         });
-        let e = EcExprPtr(self.exprs.len() as u32);
-        self.dedup.insert(DedupKey::Combine(a_expr.addr(), b_expr.addr()), e);
-        e
+        EcExprPtr(self.exprs.len() as u32)
     }
 
     /// Record a `neg(a) = c` with value `val = −val_a` and the precomputed
@@ -504,6 +629,7 @@ pub fn generate_trace(
         let k = e.rows.len();
         let is_intro = e.kind == ExprKind::Intro;
         let is_intro_endo = e.kind == ExprKind::IntroEndo;
+        let is_intro_zero = e.kind == ExprKind::IntroZero;
         let is_combine = e.kind == ExprKind::Combine;
         let is_neg = e.kind == ExprKind::Neg;
         for (idx, rv) in e.rows.iter().enumerate() {
@@ -525,6 +651,7 @@ pub fn generate_trace(
             set(COL_IS_INTRO_ENDO, is_intro_endo as u32);
             set(COL_IS_COMBINE, is_combine as u32);
             set(COL_IS_NEG, is_neg as u32);
+            set(COL_IS_INTRO_ZERO, is_intro_zero as u32);
             if is_combine {
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_B_EXPR, e.b_expr);
@@ -600,7 +727,8 @@ pub fn generate_trace(
                 set(COL_ENDO_VAL_X, e.endo_val_x);
                 set(COL_ENDO_MINTED, e.endo_minted);
             } else {
-                // intro: the literal-1 scalar's two UintVal halves.
+                // intro / intro_zero: the literal-1 or literal-0 scalar's
+                // UintVal demand.
                 store.require_uintval(UintPtr::from_addr(rv.scalar));
             }
             vals.extend(r);
@@ -879,6 +1007,50 @@ mod tests {
             .find(|&r| main.values[r * NUM_MAIN_COLS + COL_ACT] == Felt::ONE)
             .expect("an active row exists");
         main.values[intro * NUM_MAIN_COLS + COL_TAKE_A] = Felt::ONE;
+
+        crate::tests::check_local(EcMsmAir, &main);
+    }
+
+    #[test]
+    fn intro_zero_constraints_hold() {
+        // ⟨P × 0⟩ with val = the group's PAI point — the zero-scalar leaf.
+        // Chiplet-local: the `EcPoint(val, is_pai)` / literal-0 `UintVal`
+        // bus edges balance against nothing outside this trace (mult 0),
+        // only the native one-hot / boundary constraints are exercised here.
+        let group = EcGroupPtr::from_addr(1);
+        let sbound = UintPtr::from_addr(7);
+        let zero = UintPtr::from_addr(9);
+        let base = EcPointPtr::from_addr(3);
+        let pai = EcPointPtr::from_addr(4);
+        let mut req = EcMsmRequires::new();
+        let e = req.intro_zero(group, sbound, base, zero, pai);
+        req.consume_op(e, 1);
+        local_check(req);
+    }
+
+    #[test]
+    #[should_panic]
+    fn forged_take_flag_on_intro_zero_rejected() {
+        // Same linchpin as `forged_take_flag_on_intro_rejected`, exercised
+        // on an intro_zero row instead: a stray `take_a` (is_combine = 0)
+        // breaks the take one-hot `take_a + take_b + take_both = is_combine`.
+        let mut store = UintStoreRequires::new();
+        let mut bpl = BytePairLutRequires::new();
+        let mut req = EcMsmRequires::new();
+        let e = req.intro_zero(
+            EcGroupPtr::from_addr(1),
+            UintPtr::from_addr(7),
+            EcPointPtr::from_addr(3),
+            UintPtr::from_addr(9),
+            EcPointPtr::from_addr(4),
+        );
+        req.consume_op(e, 1);
+        let mut main = generate_trace(req, &mut store, &mut bpl);
+
+        let row = (0..main.height())
+            .find(|&r| main.values[r * NUM_MAIN_COLS + COL_ACT] == Felt::ONE)
+            .expect("an active row exists");
+        main.values[row * NUM_MAIN_COLS + COL_TAKE_A] = Felt::ONE;
 
         crate::tests::check_local(EcMsmAir, &main);
     }

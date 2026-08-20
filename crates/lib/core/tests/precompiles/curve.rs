@@ -27,7 +27,7 @@ fn supported_curves_satisfy_public_contract() {
         assert_constant_digests(curve);
         assert_arithmetic_assertions(curve.module);
         assert_scalar_mul_wrappers(curve);
-        assert_zero_scalar_mul_rejected(curve);
+        assert_zero_scalar_mul_evaluates_to_identity(curve);
         assert_eval_generator(curve);
         assert_predicates_have_expected_polarity(curve.module);
         assert_identity_assertions_have_expected_polarity(curve.module);
@@ -90,7 +90,7 @@ fn assert_scalar_mul_wrappers(curve: CurveCase) {
     });
 }
 
-fn assert_zero_scalar_mul_rejected(curve: CurveCase) {
+fn assert_zero_scalar_mul_evaluates_to_identity(curve: CurveCase) {
     let module = curve.module;
     let scalar_module = curve.scalar_module;
     let source = format!(
@@ -101,11 +101,14 @@ fn assert_zero_scalar_mul_rejected(curve: CurveCase) {
             exec.{scalar_module}::push_zero_digest
             exec.{module}::push_generator
             exec.{module}::mul_scalar
-            exec.{module}::eval
+            exec.{module}::push_identity
+            exec.{module}::assert_eq
         end
         ",
     );
-    expect_precompile_trap(&source);
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!("{module} zero-scalar multiplication must evaluate to the identity: {err:?}");
+    });
 }
 
 fn assert_eval_generator(curve: CurveCase) {

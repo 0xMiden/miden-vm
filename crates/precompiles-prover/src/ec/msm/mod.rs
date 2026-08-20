@@ -278,9 +278,18 @@ pub const COL_ENDO_VAL_X: usize = 43;
 /// `EcOnCurveCert(group, val)` provide that vouches its (trio-free)
 /// membership — `φ(P)` on-curve because `P` is.
 pub const COL_ENDO_MINTED: usize = 44;
-pub const NUM_MAIN_COLS: usize = 45;
+/// Op-family flag for `intro_zero` — the fifth one-hot member (`is_intro +
+/// is_intro_endo + is_combine + is_neg + is_intro_zero = act`). An
+/// `intro_zero(P)` is a 1-row run recording the term `⟨P × 0⟩` with value
+/// the group's canonical point-at-infinity — the zero-scalar leaf dual to
+/// plain `intro`'s `⟨P × 1⟩` / `val = P`. Unlike `intro`, `val ≠ base` here,
+/// so the value relation isn't a native ptr equality; it's proved by the
+/// `EcPoint(val, is_pai = 1)` consume below (see
+/// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
+pub const COL_IS_INTRO_ZERO: usize = 45;
+pub const NUM_MAIN_COLS: usize = 46;
 
-// Aux: 13 columns, flattened via `frac_col!` over the 24 fractions so
+// Aux: 14 columns, flattened via `frac_col!` over the 26 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
 // 1 (folding the intermediate 12-column flatten and the follow-on
 // singleton-pack into one step):
@@ -297,9 +306,10 @@ pub const NUM_MAIN_COLS: usize = 45;
 //  col 10: ordering Range16 — b_lo + b_hi.
 //  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
 //  col 12: UintMul (intro_endo's x_φ = β·x_P) + EcOnCurveCert provide (intro_endo value).
-const NUM_LOGUP_COLS: usize = 13;
-const AUX_WIDTH: usize = 13;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+//  col 13: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
+const NUM_LOGUP_COLS: usize = 14;
+const AUX_WIDTH: usize = 14;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -353,6 +363,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let is_intro_endo: AB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: AB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: AB::Expr = local[COL_IS_NEG].into();
+        let is_intro_zero: AB::Expr = local[COL_IS_INTRO_ZERO].into();
         let neg_minted: AB::Expr = local[COL_NEG_MINTED].into();
         let endo_minted: AB::Expr = local[COL_ENDO_MINTED].into();
         let idx: AB::Expr = local[COL_IDX].into();
@@ -364,6 +375,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_bool(local[COL_IS_INTRO_ENDO]);
         builder.assert_bool(local[COL_IS_COMBINE]);
         builder.assert_bool(local[COL_IS_NEG]);
+        builder.assert_bool(local[COL_IS_INTRO_ZERO]);
         // The neg-value mint flag is boolean and lives only on neg rows — so a
         // forged `neg_minted` elsewhere can't provide a phantom `EcOnCurveCert`
         // (the provide is gated `−neg_minted · is_boundary`).
@@ -378,7 +390,11 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         // pads are no op).
         builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
         builder.assert_zero(
-            is_intro.clone() + is_intro_endo.clone() + is_combine.clone() + is_neg.clone()
+            is_intro.clone()
+                + is_intro_endo.clone()
+                + is_combine.clone()
+                + is_neg.clone()
+                + is_intro_zero.clone()
                 - act.clone(),
         );
         // A boundary only on active rows; pads carry `is_boundary = 0` so
@@ -423,6 +439,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_IS_INTRO_ENDO,
             COL_IS_COMBINE,
             COL_IS_NEG,
+            COL_IS_INTRO_ZERO,
             COL_A_EXPR,
             COL_B_EXPR,
             COL_VAL_A,
@@ -456,6 +473,13 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let lambda_ptr: AB::Expr = local[COL_LAMBDA_PTR].into();
         let scalar: AB::Expr = local[COL_SCALAR].into();
         builder.assert_zero(is_intro_endo * (scalar - lambda_ptr));
+
+        // intro_zero: also a 1-row run (boundary). Neither the scalar (0)
+        // nor the value (the group's PAI point) is an AIR-known constant
+        // and neither is a native ptr equality (unlike plain intro's
+        // `val = base`) — both ride LogUp consumes below (§ intro_zero):
+        // the literal-0 `UintVal` and the `EcPoint(val, is_pai = 1)` tie.
+        builder.assert_zero(is_intro_zero * (AB::Expr::ONE - is_boundary.clone()));
 
         // ---- combine ----------------------------------------------------
         // Per-row take one-hot: each combine row emits one output term.
@@ -569,6 +593,7 @@ where
         let is_intro_endo: LB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: LB::Expr = local[COL_IS_NEG].into();
+        let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].into();
 
         let expr_ptr: LB::Expr = local[COL_EXPR_PTR].into();
         let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
@@ -629,6 +654,7 @@ where
         let bnd_neg = is_neg.clone() * is_boundary.clone();
         let bnd_group = (is_combine + is_neg.clone() + is_intro_endo.clone()) * is_boundary.clone();
         let bnd_endo = is_intro_endo * is_boundary.clone();
+        let bnd_intro_zero = is_intro_zero.clone() * is_boundary.clone();
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
@@ -982,7 +1008,53 @@ where
             (
                 "provide-oncurvecert-endo",
                 LB::Expr::ZERO - endo_minted,
-                EcOnCurveCertMsg { group_ptr, r_ptr: val },
+                EcOnCurveCertMsg {
+                    group_ptr: group_ptr.clone(),
+                    r_ptr: val.clone()
+                },
+                two_deg
+            ),
+        );
+
+        // col 13 (paired, lqd-1): intro_zero's own two ties — the literal-0
+        // scalar `UintVal`, mirroring intro's literal-1 (col 2), and the
+        // `EcPoint(val, is_pai = 1)` consume tying `val` to `group_ptr`'s
+        // canonical PAI row (unlike plain intro's `val = base` native
+        // equality, `val ≠ base` here so this can't be a native constraint —
+        // see [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
+        frac_col!(
+            builder,
+            "ec-msm-intro-zero",
+            pair_deg,
+            (
+                "consume-zero",
+                is_intro_zero,
+                UintValMsg {
+                    ptr: scalar,
+                    bound_ptr: sbound_ptr,
+                    limbs: [
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                        LB::Expr::ZERO,
+                    ],
+                },
+                one_deg
+            ),
+            (
+                "consume-ecpoint-intro-zero-val",
+                bnd_intro_zero,
+                EcPointMsg {
+                    point_ptr: val,
+                    group_ptr,
+                    x_ptr: LB::Expr::ZERO,
+                    y_ptr: LB::Expr::ZERO,
+                    is_pai: LB::Expr::ONE,
+                },
                 two_deg
             ),
         );
