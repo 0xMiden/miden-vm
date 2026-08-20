@@ -143,5 +143,7 @@ pub mod hasher {
 
 /// Shared test support and FRI vector generation.
 ///
-/// The `testing` feature adds hash configurations and example AIRs.
+/// Available during `cargo test`; external consumers must enable the `testing` feature. That
+/// feature also exposes hash configurations and example AIRs.
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;

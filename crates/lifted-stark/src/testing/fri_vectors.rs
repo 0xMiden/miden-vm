@@ -8,7 +8,10 @@
 //! hashing components (the Miden VM tests need the miden-crypto Poseidon2 permutation, not the
 //! plain Plonky3 one used by this crate's own test configs).
 
-use alloc::{collections::BTreeSet, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 
 use miden_stark_transcript::{ProverTranscript, TranscriptChallenger, VerifierTranscript};
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
@@ -25,7 +28,7 @@ use super::canonical_domain;
 use crate::{
     domain::Coset,
     lmcs::{Lmcs, proof::BatchProofView, tree_indices::TreeIndices},
-    pcs::fri::{FriParams, proof::FriProof, prover::FriPolys},
+    pcs::fri::{FriParams, proof::FriProof, prover::FriPolys, verifier::FriOracle},
     testing::params::FRI_FOLD_ARITY_4,
 };
 
@@ -87,11 +90,13 @@ pub struct Fold4Ext2TestVectors {
 }
 
 /// Proves a FRI claim over a random polynomial of degree less than `2^log_poly_degree` using
-/// fold-4 layer folding over the quadratic extension field, then unpacks the proof.
+/// fold-4 layer folding over the quadratic extension field, verifies it, then unpacks the proof.
 ///
 /// Folding proceeds until the final polynomial has exactly `2^log_final_degree` coefficients, so
-/// `log_poly_degree - log_final_degree` must be even. Folding PoW is disabled: these vectors
-/// exercise fold consistency, Merkle authentication, and the remainder check, not the transcript.
+/// `log_poly_degree - log_final_degree` must be even. Folding PoW is disabled and query positions
+/// are selected by the fixture rather than sampled from the transcript. These vectors exercise
+/// transcript-derived folding challenges, fold consistency, Merkle authentication, and the
+/// remainder check.
 ///
 /// The LMCS must be non-hiding: leaf digests are recomputed from the opened rows without salt.
 ///
@@ -173,6 +178,25 @@ where
     let fri_polys = FriPolys::<F, EF, _>::new(&params, lmcs, &domain, evals.clone(), &mut channel);
     fri_polys.prove_queries(&params, tree_indices.clone(), &mut channel);
     let (_digest, transcript) = channel.finalize();
+
+    // Verify the proof before exporting it as test vectors. The verifier consumes a fresh view of
+    // the transcript because the next pass re-parses the same data into its plain-data form.
+    let initial_evals: BTreeMap<usize, EF> = query_positions
+        .iter()
+        .map(|&position| {
+            let bit_reversed = reverse_bits_len(position, log_domain as usize);
+            (position, evals[bit_reversed])
+        })
+        .collect();
+    let mut verify_channel = VerifierTranscript::from_data(challenger.clone(), &transcript);
+    let oracle = FriOracle::<F, EF, L>::new(&params, &domain, &mut verify_channel)
+        .expect("FRI verifier should read the commit phase");
+    oracle
+        .test_low_degree(lmcs, &params, initial_evals, tree_indices.clone(), &mut verify_channel)
+        .expect("generated FRI proof should verify");
+    verify_channel
+        .finalize()
+        .expect("verified FRI transcript should be fully consumed");
 
     // Re-parse the transcript: commit-phase data first, then the per-round batch openings.
     let mut channel = VerifierTranscript::from_data(challenger.clone(), &transcript);
