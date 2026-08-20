@@ -13,7 +13,7 @@ use miden_processor::{
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventName},
 };
-use wasmi::{Config, Engine, Linker, Module, Store};
+use wasmi::{Config, Engine, EnforcedLimits, Linker, Module, Store};
 
 use crate::{
     error::{WasmHandlerLoadError, WasmHandlerRunError},
@@ -35,6 +35,11 @@ pub struct WasmHandlerLimits {
     pub fuel: u64,
     /// The maximum size of the guest linear memory, in bytes.
     pub max_memory_bytes: usize,
+    /// The maximum total number of table elements. Tables are allocated eagerly, so without
+    /// this cap a tiny module could demand a multi-gigabyte allocation before any fuel applies.
+    pub max_table_elements: usize,
+    /// The maximum size of the Wasm binary, in bytes.
+    pub max_module_bytes: usize,
     /// The maximum total number of field elements across all mutations one call buffers.
     pub max_mutation_felts: usize,
     /// Permits float instructions in the handler module. Off by default: handler output must be
@@ -47,6 +52,8 @@ impl Default for WasmHandlerLimits {
         Self {
             fuel: 10_000_000,
             max_memory_bytes: 16 * 1024 * 1024,
+            max_table_elements: 4096,
+            max_module_bytes: 16 * 1024 * 1024,
             max_mutation_felts: 1 << 16,
             allow_floats: false,
         }
@@ -76,7 +83,9 @@ impl WasmHandlerModule {
     /// # Errors
     /// Returns an error when:
     /// - `abi_version` is not the version this crate implements;
-    /// - the Wasm binary does not parse or validate;
+    /// - the Wasm binary is larger than `limits.max_module_bytes`;
+    /// - the Wasm binary does not parse or validate, or oversteps the structural compilation
+    ///   limits ([`EnforcedLimits::strict`]);
     /// - the module imports from a namespace other than `miden:event/v1`, or an import has a
     ///   signature the host function set does not provide;
     /// - the module has a start section;
@@ -97,6 +106,15 @@ impl WasmHandlerModule {
             });
         }
 
+        // The package decode path has its own module-size cap, but this constructor is public,
+        // so it enforces the limit itself before handing the bytes to the compiler.
+        if wasm.len() > limits.max_module_bytes {
+            return Err(WasmHandlerLoadError::ModuleTooLarge {
+                size: wasm.len(),
+                max: limits.max_module_bytes,
+            });
+        }
+
         // Validate the manifest before touching the Wasm binary.
         let mut seen = BTreeSet::new();
         for (event, _) in &manifest {
@@ -111,6 +129,9 @@ impl WasmHandlerModule {
         let mut config = Config::default();
         config.consume_fuel(true);
         config.floats(limits.allow_floats);
+        // Structural compilation limits (function/global/segment counts, signature sizes)
+        // defend `Module::new` itself against compilation bombs in untrusted binaries.
+        config.enforced_limits(EnforcedLimits::strict());
         let engine = Engine::new(&config);
 
         let module = Module::new(&engine, wasm)

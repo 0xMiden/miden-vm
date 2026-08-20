@@ -775,6 +775,36 @@ fn mutation_size_limit_is_enforced() {
 // ================================================================================================
 
 #[test]
+fn oversized_table_is_rejected_at_load() {
+    // 100M funcref elements would be an ~800 MB eager allocation at every instantiation,
+    // before any fuel applies. The table-element cap refuses it at the load-time dry run.
+    let wat_src =
+        format!("(module {IMPORTS} (table 100000000 funcref) (func (export \"handler\")))");
+    let err = try_load(&wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(matches!(err, WasmHandlerLoadError::Instantiation(_)), "unexpected error: {err}");
+}
+
+#[test]
+fn structural_bomb_is_rejected_at_load() {
+    // 1001 globals overstep wasmi's strict enforced limits (at most 1000 globals), which
+    // defend module compilation itself.
+    let globals = "(global i32 (i32.const 0))".repeat(1001);
+    let wat_src = format!("(module {globals} (func (export \"handler\")))");
+    let err = try_load(&wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(matches!(err, WasmHandlerLoadError::InvalidModule(_)), "unexpected error: {err}");
+}
+
+#[test]
+fn oversized_module_is_rejected_at_load() {
+    let wat_src = fixture("(nop)");
+    let wasm = wat::parse_str(&wat_src).expect("fixture WAT must parse");
+    let limits = WasmHandlerLimits { max_module_bytes: 16, ..Default::default() };
+    let manifest = vec![(EVENT, "handler".to_string())];
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, limits).unwrap_err();
+    assert!(matches!(err, WasmHandlerLoadError::ModuleTooLarge { .. }), "unexpected error: {err}");
+}
+
+#[test]
 fn foreign_imports_are_rejected() {
     let wat_src = r#"(module
         (import "wasi_snapshot_preview1" "proc_exit" (func (param i32)))
