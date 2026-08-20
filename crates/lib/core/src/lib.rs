@@ -106,23 +106,20 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
 pub struct CoreLibrary {
-    core_package: Arc<Package>,
-    precompiles_package: Arc<Package>,
-    mast_forest: Arc<MastForest>,
+    package: Arc<Package>,
 }
 
-impl AsRef<Package> for CoreLibrary {
-    fn as_ref(&self) -> &Package {
-        &self.core_package
+impl AsRef<Arc<Package>> for CoreLibrary {
+    fn as_ref(&self) -> &Arc<Package> {
+        &self.package
     }
 }
 
 impl From<&CoreLibrary> for HostLibrary {
     fn from(core_lib: &CoreLibrary) -> Self {
         Self {
-            mast_forest: Arc::clone(core_lib.mast_forest()),
-            package_debug_info: Ok(None),
             handlers: core_lib.handlers(),
+            ..HostLibrary::from(core_lib.package.clone())
         }
     }
 }
@@ -132,29 +129,15 @@ impl CoreLibrary {
     pub const SERIALIZED: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-core.masp"));
 
-    /// Serialized representation of the `miden-precompiles` package used by the core library.
-    pub const PRECOMPILES_SERIALIZED: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-precompiles.masp"));
-
     /// Returns a reference to the merged [MastForest] used to execute the core library and its
     /// precompiles dependency.
     pub fn mast_forest(&self) -> &Arc<MastForest> {
-        &self.mast_forest
+        self.package.mast_forest()
     }
 
     /// Returns the `miden-core` package.
     pub fn package(&self) -> Arc<Package> {
-        Arc::clone(&self.core_package)
-    }
-
-    /// Returns the `miden-precompiles` package required by `miden-core`.
-    pub fn precompiles_package(&self) -> Arc<Package> {
-        Arc::clone(&self.precompiles_package)
-    }
-
-    /// Returns the core package followed by its precompiles dependency.
-    pub fn packages(&self) -> [Arc<Package>; 2] {
-        [self.package(), self.precompiles_package()]
+        Arc::clone(&self.package)
     }
 
     /// Returns the MAST root of `sys::vm::verify_vm_proof` — the verifier identity under
@@ -165,7 +148,7 @@ impl CoreLibrary {
     /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
     /// agree without a shared constant; consumers key their proof fetches by this root.
     pub fn recursive_verifier_root(&self) -> Word {
-        self.core_package
+        self.package
             .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
             .expect("verify_vm_proof is exported from the core library")
     }
@@ -176,7 +159,7 @@ impl CoreLibrary {
     /// A host passes this root to the PVM advice builder when registering a package. A consumer
     /// derives the same root in-VM with `procref`, avoiding a duplicated constant.
     pub fn pvm_recursive_verifier_root(&self) -> Word {
-        self.core_package
+        self.package
             .get_procedure_root_by_path("::miden::core::sys::pvm::verify_proof")
             .expect("pvm::verify_proof is exported from the core library")
     }
@@ -211,25 +194,12 @@ impl CoreLibrary {
 impl Default for CoreLibrary {
     fn default() -> Self {
         static CORELIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
-            let core_package = Arc::new(
+            let package = Arc::new(
                 Package::read_from_bytes_trusted(CoreLibrary::SERIALIZED)
                     .expect("failed to read core package!"),
             );
-            let precompiles_package = Arc::new(
-                Package::read_from_bytes_trusted(CoreLibrary::PRECOMPILES_SERIALIZED)
-                    .expect("failed to read precompiles package!"),
-            );
-            let (mast_forest, _) = MastForest::merge([
-                core_package.mast_forest().as_ref(),
-                precompiles_package.mast_forest().as_ref(),
-            ])
-            .expect("failed to merge core and precompiles MAST forests");
 
-            CoreLibrary {
-                core_package,
-                precompiles_package,
-                mast_forest: Arc::new(mast_forest),
-            }
+            CoreLibrary { package }
         });
         CORELIB.clone()
     }
@@ -249,20 +219,18 @@ mod tests {
             .parse::<miden_mast_package::Version>()
             .expect("crate version should be a valid package version");
 
-        for package in core_lib.packages() {
-            assert_eq!(
-                &package.version, &crate_version,
-                "embedded package {} should track the miden-core-lib crate version",
-                package.name,
-            );
-        }
+        assert_eq!(
+            &core_lib.package.version, &crate_version,
+            "embedded package {} should track the miden-core-lib crate version",
+            core_lib.package.name,
+        );
     }
 
     #[test]
     fn test_compile() {
         let core_lib = CoreLibrary::default();
         let exists = core_lib
-            .core_package
+            .package
             .get_procedure_root_by_path("::miden::core::math::u64::overflowing_add")
             .is_some();
 
