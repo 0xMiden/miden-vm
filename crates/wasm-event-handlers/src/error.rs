@@ -88,12 +88,21 @@ pub enum WasmHandlerLoadError {
 }
 
 /// An error raised while a handler runs. Converted into the boxed
-/// [`EventError`](miden_processor::event::EventError) the processor expects.
+/// [`EventError`](miden_processor::event::EventError) the processor expects, from which it can
+/// be recovered with `downcast_ref`.
+///
+/// The variants separate the causes, so operators can tell a handler defect
+/// ([`Trapped`](Self::Trapped)) from a host-side resource-limit violation
+/// ([`OutOfFuel`](Self::OutOfFuel), [`LimitExceeded`](Self::LimitExceeded)). Limits are host
+/// policy: all hosts in one proving pipeline must run the same
+/// [`WasmHandlerLimits`](crate::WasmHandlerLimits), and a divergence between hosts surfaces as
+/// one of the two limit variants.
 ///
 /// The processor enriches the error with the event name, the event ID, and the source location
 /// of the `emit`, so these messages carry only the handler-local cause.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum WasmHandlerRunError {
+#[non_exhaustive]
+pub enum WasmHandlerRunError {
     /// The guest reported an error through the `fail` host function.
     #[error("{0}")]
     Failed(String),
@@ -102,9 +111,13 @@ pub(crate) enum WasmHandlerRunError {
     #[error("handler ran out of fuel (limit: {0})")]
     OutOfFuel(u64),
 
-    /// The handler trapped: a Wasm trap, a defect the host functions detected (bad pointer
-    /// range, non-canonical field element, mutation over the size limit), or a resource-limit
-    /// violation.
+    /// The handler hit a host-side resource limit other than fuel: the mutation-size budget, or
+    /// a memory or table growth over the store limits.
+    #[error("handler exceeded a resource limit: {0}")]
+    LimitExceeded(String),
+
+    /// The handler trapped: a Wasm trap, or a defect the host functions detected (bad pointer
+    /// range, non-canonical field element).
     #[error("handler trapped: {0}")]
     Trapped(String),
 
@@ -113,14 +126,30 @@ pub(crate) enum WasmHandlerRunError {
     Instantiation(String),
 }
 
-/// A defect the host functions detected in guest-provided data. Raised as a Wasm trap so the
-/// handler stops immediately and its buffered mutations are discarded.
+/// The cause category of a [`HostTrap`], used to classify the run error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostTrapKind {
+    /// A defect in guest-provided data.
+    Defect,
+    /// The fuel budget ran out during a host call.
+    OutOfFuel,
+    /// The per-call mutation-size budget was exceeded.
+    MutationLimit,
+}
+
+/// A trap the host functions raise, so the handler stops immediately and its buffered mutations
+/// are discarded.
 #[derive(Debug)]
-pub(crate) struct HostTrap(pub String);
+pub(crate) struct HostTrap {
+    /// The trap message.
+    pub msg: String,
+    /// The cause category.
+    pub kind: HostTrapKind,
+}
 
 impl core::fmt::Display for HostTrap {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.msg)
     }
 }
 

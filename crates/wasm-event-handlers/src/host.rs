@@ -24,7 +24,10 @@ use miden_processor::{
 };
 use wasmi::{Caller, Engine, Linker, Memory, StoreLimits, StoreLimitsBuilder};
 
-use crate::{error::HostTrap, module::WasmHandlerLimits};
+use crate::{
+    error::{HostTrap, HostTrapKind},
+    module::WasmHandlerLimits,
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -49,6 +52,13 @@ const MAX_FAIL_MSG_BYTES: u32 = 4096;
 /// makes host-moved data cost the guest about as much fuel as moving it itself would.
 const FUEL_PER_FELT: u64 = 1;
 
+/// Flat fuel charged on entry to every host call, for the guest-to-host transition.
+///
+/// The transition costs tens of nanoseconds (one fuel unit is ~0.8 ns, see [`FUEL_PER_FELT`]),
+/// so without this charge a loop of zero-work host calls would cost the guest only its own
+/// `call` instructions while it burns a host transition per iteration.
+const HOST_CALL_BASE_FUEL: u64 = 25;
+
 /// Fuel charged per Poseidon2 permutation the host computes for the guest.
 ///
 /// Calibrated with `benches/handler_call.rs` (Apple M-series): one merge measures ~1.5 us,
@@ -60,7 +70,8 @@ const FUEL_PER_POSEIDON2_PERM: u64 = 2000;
 /// One node costs one Poseidon2 merge.
 const FUEL_PER_MERKLE_NODE: u64 = FUEL_PER_POSEIDON2_PERM;
 
-/// Flat fuel charged per byte-hash call, for the call and the digest setup.
+/// Flat fuel charged per byte-hash call on top of [`HOST_CALL_BASE_FUEL`], for the digest
+/// setup and finalization.
 const HASH_BASE_FUEL: u64 = 100;
 
 /// Fuel charged per input byte of `keccak256`.
@@ -157,7 +168,10 @@ impl HostCtx {
 
 /// Creates a wasmi trap with the given defect message.
 fn trap(msg: impl Into<String>) -> wasmi::Error {
-    wasmi::Error::host(HostTrap(msg.into()))
+    wasmi::Error::host(HostTrap {
+        msg: msg.into(),
+        kind: HostTrapKind::Defect,
+    })
 }
 
 /// Returns the processor state for the current call.
@@ -254,15 +268,18 @@ fn write_bytes(data: &mut [u8], ptr: u32, bytes: &[u8]) -> Result<(), wasmi::Err
 /// Charges fuel for host-side work; traps when the budget is exhausted.
 ///
 /// wasmi meters guest instructions, but a host call costs the guest only its call overhead.
-/// Without this charge, a small loop of host calls could make the host move data far out of
-/// proportion to the guest's fuel budget. Charging per element moved (and per hash computed)
-/// keeps the fuel budget a bound on the total work a handler causes. The charge applies to the
-/// requested size, before validation, so failed probes are not free.
+/// Every host function therefore charges [`HOST_CALL_BASE_FUEL`] for the transition plus the
+/// cost of the work it was asked to do (per element moved, per hash computed). Charges land
+/// before the work and before validation, so failed probes are not free. The one exception is
+/// `fail`, which always ends the call, so a charge would change nothing.
 fn charge_fuel(caller: &mut Caller<'_, HostCtx>, cost: u64) -> Result<(), wasmi::Error> {
     let fuel = caller.get_fuel().expect("fuel metering is enabled in the engine config");
     let Some(rest) = fuel.checked_sub(cost) else {
         caller.set_fuel(0).expect("fuel metering is enabled in the engine config");
-        return Err(trap("handler ran out of fuel during a host call"));
+        return Err(wasmi::Error::host(HostTrap {
+            msg: "handler ran out of fuel during a host call".into(),
+            kind: HostTrapKind::OutOfFuel,
+        }));
     };
     caller.set_fuel(rest).expect("fuel metering is enabled in the engine config");
     Ok(())
@@ -272,10 +289,13 @@ fn charge_fuel(caller: &mut Caller<'_, HostCtx>, cost: u64) -> Result<(), wasmi:
 fn charge_mutation(ctx: &mut HostCtx, felts: usize) -> Result<(), wasmi::Error> {
     ctx.mutation_felts = ctx.mutation_felts.saturating_add(felts);
     if ctx.mutation_felts > ctx.max_mutation_felts {
-        return Err(trap(format!(
-            "mutation size limit exceeded (at most {} field elements per event)",
-            ctx.max_mutation_felts
-        )));
+        return Err(wasmi::Error::host(HostTrap {
+            msg: format!(
+                "mutation size limit exceeded (at most {} field elements per event)",
+                ctx.max_mutation_felts
+            ),
+            kind: HostTrapKind::MutationLimit,
+        }));
     }
     Ok(())
 }
@@ -287,12 +307,14 @@ const OK: i32 = Status::Ok.as_raw();
 // ================================================================================================
 
 /// Returns the depth of the operand stack.
-fn stack_depth(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+fn stack_depth(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     state(&caller).map(ProcessorState::stack_depth)
 }
 
 /// Returns the operand-stack element at position `pos` in canonical form.
-fn stack_get(caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
+fn stack_get(mut caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
     Ok(state(&caller)?.get_stack_item(pos as usize).as_canonical_u64())
 }
 
@@ -304,7 +326,7 @@ fn stack_read(
     out: u32,
     count: u32,
 ) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     // Reject a bad output range before collecting, so `count` is bounded by the
     // guest memory size when the collection allocates.
@@ -317,18 +339,21 @@ fn stack_read(
 }
 
 /// Returns the current clock cycle.
-fn clk(caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
+fn clk(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     state(&caller).map(|state| u64::from(state.clock()))
 }
 
 /// Returns the current execution context ID.
-fn ctx(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+fn ctx(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     state(&caller).map(|state| u32::from(state.ctx()))
 }
 
 /// Writes the memory element at address `addr` of the current context to `out`, or returns
 /// [`Status::Uninit`] when the cell was never written.
 fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
     let state = state(&caller)?;
     let value = state.get_mem_value(state.ctx(), addr);
     match value {
@@ -349,7 +374,7 @@ fn mem_read(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
@@ -378,7 +403,7 @@ fn mem_read_ctx(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
@@ -408,7 +433,7 @@ fn merkle_get_node(
     out: u32,
 ) -> Result<i32, wasmi::Error> {
     // The lookup walks one level per depth unit, and moves the root in and the node out.
-    charge_fuel(&mut caller, u64::from(depth) * FUEL_PER_FELT + 8)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
     let mem = memory(&mut caller)?;
     let root = read_word(mem.data(&caller), root)?;
     let index = felt_arg(index)?;
@@ -436,7 +461,7 @@ fn merkle_has_path(
     depth: u32,
     index: u64,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(depth) * FUEL_PER_FELT + 8)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
     let mem = memory(&mut caller)?;
     let root = read_word(mem.data(&caller), root)?;
     let index = felt_arg(index)?;
@@ -451,7 +476,8 @@ fn merkle_has_path(
 }
 
 /// Returns the number of elements on the advice stack.
-fn adv_stack_len(caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+fn adv_stack_len(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
     state(&caller).map(|state| state.advice_provider().stack_len() as u32)
 }
 
@@ -463,7 +489,7 @@ fn adv_stack_read(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(count) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     let provider = state(&caller)?.advice_provider();
@@ -487,6 +513,8 @@ fn adv_map_value_len(
     key: u32,
     out_len: u32,
 ) -> Result<i32, wasmi::Error> {
+    // The call reads a key word and performs a map lookup.
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;
     let Some(len) = state(&caller)?
@@ -508,6 +536,10 @@ fn adv_map_value_read(
     out: u32,
     cap: u32,
 ) -> Result<i32, wasmi::Error> {
+    // The key read and the map lookup are charged up front, so a probe that comes back
+    // `NotFound` or `CapacityTooSmall` still pays for the work it causes. The value copy is
+    // charged below, when its size is known.
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;
     let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
@@ -537,7 +569,7 @@ fn poseidon2_merge(
     domain: u64,
     out: u32,
 ) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, FUEL_PER_POSEIDON2_PERM + 12 * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_POSEIDON2_PERM + 12 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), pair, 8)?;
     let word = |at: usize| Word::new([felts[at], felts[at + 1], felts[at + 2], felts[at + 3]]);
@@ -563,7 +595,9 @@ fn poseidon2_hash(
 ) -> Result<(), wasmi::Error> {
     // The sponge absorbs eight elements per permutation, and always runs a final one.
     let permutations = u64::from(count) / 8 + 1;
-    let fuel = FUEL_PER_POSEIDON2_PERM * permutations + u64::from(count) * FUEL_PER_FELT;
+    let fuel = HOST_CALL_BASE_FUEL
+        + FUEL_PER_POSEIDON2_PERM * permutations
+        + u64::from(count) * FUEL_PER_FELT;
     charge_fuel(&mut caller, fuel)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), elems, count)?;
@@ -579,7 +613,7 @@ fn poseidon2_hash(
 
 /// Applies the Poseidon2 permutation to the 12-element state at `state_ptr`, in place.
 fn poseidon2_permute(mut caller: Caller<'_, HostCtx>, state_ptr: u32) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, FUEL_PER_POSEIDON2_PERM + 24 * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_POSEIDON2_PERM + 24 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), state_ptr, POSEIDON2_STATE_FELTS as u32)?;
     let mut sponge: [Felt; POSEIDON2_STATE_FELTS] =
@@ -597,7 +631,10 @@ fn hash_bytes<const N: usize>(
     fuel_per_byte: u64,
     hash: impl Fn(&[u8]) -> [u8; N],
 ) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, HASH_BASE_FUEL + u64::from(len) * fuel_per_byte)?;
+    charge_fuel(
+        &mut caller,
+        HOST_CALL_BASE_FUEL + HASH_BASE_FUEL + u64::from(len) * fuel_per_byte,
+    )?;
     let mem = memory(&mut caller)?;
     let range = byte_range(mem.data(&caller).len(), data, 1, len)?;
     let digest = hash(&mem.data(&caller)[range]);
@@ -646,7 +683,12 @@ fn adv_stack_extend(
     vals: u32,
     len: u32,
 ) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, u64::from(len) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(len) * FUEL_PER_FELT)?;
+    // An empty extension changes nothing; buffering a record for it would let a loop
+    // accumulate mutation records without touching the mutation budget.
+    if len == 0 {
+        return Ok(());
+    }
     charge_mutation(caller.data_mut(), len as usize)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), vals, len)?;
@@ -664,7 +706,7 @@ fn adv_map_insert(
     vals: u32,
     len: u32,
 ) -> Result<(), wasmi::Error> {
-    charge_fuel(&mut caller, (u64::from(len) + 4) * FUEL_PER_FELT)?;
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + (u64::from(len) + 4) * FUEL_PER_FELT)?;
     charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;
@@ -683,9 +725,14 @@ fn merkle_store_extend(
 ) -> Result<(), wasmi::Error> {
     let felt_count = (len as usize).saturating_mul(MERKLE_NODE_FELTS);
     // Charge for the data moved and for the per-node digest verification hash.
-    let fuel = (felt_count as u64).saturating_mul(FUEL_PER_FELT)
+    let fuel = HOST_CALL_BASE_FUEL
+        + (felt_count as u64).saturating_mul(FUEL_PER_FELT)
         + u64::from(len).saturating_mul(FUEL_PER_MERKLE_NODE);
     charge_fuel(&mut caller, fuel)?;
+    // An empty extension changes nothing; see `adv_stack_extend`.
+    if len == 0 {
+        return Ok(());
+    }
     charge_mutation(caller.data_mut(), felt_count)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), nodes, felt_count as u32)?;
@@ -716,6 +763,8 @@ fn merkle_store_extend(
 // ================================================================================================
 
 /// Records the guest message as the handler's error message and traps.
+///
+/// This call charges no fuel: it always ends the call, so it cannot amplify work.
 fn fail(mut caller: Caller<'_, HostCtx>, msg_ptr: u32, msg_len: u32) -> Result<(), wasmi::Error> {
     let mem = memory(&mut caller)?;
     let len = msg_len.min(MAX_FAIL_MSG_BYTES);

@@ -19,9 +19,11 @@ use miden_processor::{
         hash::Poseidon2,
         merkle::{InnerNodeInfo, MerkleStore},
     },
-    event::EventName,
+    event::{EventError, EventName},
 };
-use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule};
+use miden_wasm_event_handlers::{
+    WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule, WasmHandlerRunError,
+};
 
 // FIXTURE HELPERS
 // ================================================================================================
@@ -97,12 +99,32 @@ fn run(
     module: &Arc<WasmHandlerModule>,
     processor: &FastProcessor,
 ) -> Result<Vec<AdviceMutation>, String> {
+    run_raw(module, processor).map_err(|err| err.to_string())
+}
+
+/// Runs the fixture's `handler` export and keeps the raw error, so tests can match the
+/// [`WasmHandlerRunError`] variant with `downcast_ref`.
+fn run_raw(
+    module: &Arc<WasmHandlerModule>,
+    processor: &FastProcessor,
+) -> Result<Vec<AdviceMutation>, EventError> {
     let handlers = module.handlers();
     let (_, handler) = handlers
         .iter()
         .find(|(event, _)| *event == EVENT)
         .expect("event is in the manifest");
-    handler.on_event(&processor.state()).map_err(|err| err.to_string())
+    handler.on_event(&processor.state())
+}
+
+/// Asserts that the raw event error is the given [`WasmHandlerRunError`] variant.
+macro_rules! assert_run_error {
+    ($err:expr, $variant:pat) => {
+        let err = $err;
+        assert!(
+            matches!(err.downcast_ref::<WasmHandlerRunError>(), Some($variant)),
+            "unexpected error: {err}"
+        );
+    };
 }
 
 fn processor() -> FastProcessor {
@@ -732,8 +754,8 @@ fn mutations_before_fail_are_discarded() {
 fn infinite_loop_runs_out_of_fuel() {
     let wat_src = fixture("(loop $l (br $l))");
     let module = load(&wat_src);
-    let err = run(&module, &processor()).expect_err("handler must trap");
-    assert!(err.contains("out of fuel"), "unexpected error: {err}");
+    let err = run_raw(&module, &processor()).expect_err("handler must trap");
+    assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
 }
 
 #[test]
@@ -747,8 +769,9 @@ fn host_call_work_is_metered() {
     );
     let limits = WasmHandlerLimits { fuel: 1000, ..Default::default() };
     let module = load_with_limits(&wat_src, limits);
-    let err = run(&module, &processor()).expect_err("handler must trap");
-    assert!(err.contains("out of fuel"), "unexpected error: {err}");
+    let err = run_raw(&module, &processor()).expect_err("handler must trap");
+    // Fuel exhaustion inside a host call must classify as `OutOfFuel`, not `Trapped`.
+    assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
 }
 
 #[test]
@@ -756,7 +779,37 @@ fn memory_growth_is_capped() {
     // 512 pages = 32 MiB, above the 16 MiB default cap; the failed grow traps.
     let wat_src = fixture("(drop (memory.grow (i32.const 512)))");
     let module = load(&wat_src);
-    run(&module, &processor()).expect_err("handler must trap");
+    let err = run_raw(&module, &processor()).expect_err("handler must trap");
+    assert_run_error!(err, WasmHandlerRunError::LimitExceeded(_));
+}
+
+#[test]
+fn zero_length_mutations_buffer_no_records() {
+    let wat_src = fixture(
+        "(call $adv_stack_extend (i32.const 0) (i32.const 0))
+         (call $merkle_store_extend (i32.const 0) (i32.const 0))",
+    );
+    let module = load(&wat_src);
+    let mutations = run(&module, &processor()).expect("handler succeeds");
+    assert!(mutations.is_empty(), "empty extensions must buffer no records: {mutations:?}");
+}
+
+#[test]
+fn empty_host_calls_cost_fuel() {
+    // Every host call pays a flat transition charge, so a loop of zero-length extends cannot
+    // burn host transitions (or accumulate mutation records) for free.
+    let wat_src = fixture(
+        "(local $i i32)
+         (local.set $i (i32.const 100000))
+         (loop $l
+           (call $adv_stack_extend (i32.const 0) (i32.const 0))
+           (local.tee $i (i32.sub (local.get $i) (i32.const 1)))
+           (br_if $l))",
+    );
+    let limits = WasmHandlerLimits { fuel: 100_000, ..Default::default() };
+    let module = load_with_limits(&wat_src, limits);
+    let err = run_raw(&module, &processor()).expect_err("handler must run out of fuel");
+    assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
 }
 
 #[test]
@@ -767,8 +820,8 @@ fn mutation_size_limit_is_enforced() {
         ..Default::default()
     };
     let module = load_with_limits(&wat_src, limits);
-    let err = run(&module, &processor()).expect_err("handler must trap");
-    assert!(err.contains("mutation size limit"), "unexpected error: {err}");
+    let err = run_raw(&module, &processor()).expect_err("handler must trap");
+    assert_run_error!(err, WasmHandlerRunError::LimitExceeded(_));
 }
 
 // LOAD-TIME VALIDATION TESTS
@@ -798,10 +851,16 @@ fn structural_bomb_is_rejected_at_load() {
 fn oversized_module_is_rejected_at_load() {
     let wat_src = fixture("(nop)");
     let wasm = wat::parse_str(&wat_src).expect("fixture WAT must parse");
-    let limits = WasmHandlerLimits { max_module_bytes: 16, ..Default::default() };
+    let limits = WasmHandlerLimits {
+        max_module_bytes: 16,
+        ..Default::default()
+    };
     let manifest = vec![(EVENT, "handler".to_string())];
     let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, limits).unwrap_err();
-    assert!(matches!(err, WasmHandlerLoadError::ModuleTooLarge { .. }), "unexpected error: {err}");
+    assert!(
+        matches!(err, WasmHandlerLoadError::ModuleTooLarge { .. }),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
