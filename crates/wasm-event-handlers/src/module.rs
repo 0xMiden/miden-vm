@@ -92,9 +92,8 @@ impl WasmHandlerModule {
     /// - the Wasm binary is larger than `limits.max_module_bytes`;
     /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
     ///   ([`EnforcedLimits::strict`]);
-    /// - the module imports from a namespace other than `miden:event/v1`, imports the same
-    ///   function more than once, or an import has a signature the host function set does not
-    ///   provide;
+    /// - the module imports from a namespace other than `miden:event/v1`, imports the same function
+    ///   more than once, or an import has a signature the host function set does not provide;
     /// - the module has a start section;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
     /// - a manifest entry has an empty event name or an empty export name;
@@ -190,19 +189,22 @@ impl WasmHandlerModule {
             }
         }
 
+        // One section walk answers both questions below.
+        let statics = module_statics(wasm).ok_or_else(|| {
+            WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
+        })?;
+
         // No guest code may run before the fuel budget and the limits are installed, and a start
         // function would also re-run on every instantiate-per-call. wasmi's instantiation always
         // runs the start function, so modules with a start section are rejected here instead.
-        if has_start_section(wasm) {
+        if statics.has_start_section {
             return Err(WasmHandlerLoadError::StartSection);
         }
 
         // wasmi meters no instantiation work (memory zeroing, segment copies), so the static
         // cost is computed once here and deducted from the fuel budget of every call. A module
         // whose instantiation alone eats the whole budget can never run; refuse it now.
-        let instantiation_fuel = instantiation_fuel(wasm).ok_or_else(|| {
-            WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
-        })?;
+        let instantiation_fuel = statics.instantiation_fuel;
         if instantiation_fuel >= limits.fuel {
             return Err(WasmHandlerLoadError::InstantiationOverBudget {
                 cost: instantiation_fuel,
@@ -251,7 +253,6 @@ impl WasmHandlerModule {
             .linker
             .instantiate_and_start(&mut store, &self.module)
             .map_err(|err| WasmHandlerLoadError::Instantiation(err.to_string()))?;
-        cache_memory(&mut store, instance);
         for (_, export) in &self.manifest {
             instance.get_typed_func::<(), ()>(&store, export).map_err(|err| {
                 WasmHandlerLoadError::BadExport {
@@ -412,7 +413,16 @@ fn read_leb_u64(data: &[u8], mut pos: usize) -> Option<(u64, usize)> {
     Some((value, pos))
 }
 
-/// Computes the fuel charge for one instantiation of the module.
+/// The load-time facts one walk of the module sections provides.
+struct ModuleStatics {
+    /// The fuel charge for one instantiation.
+    instantiation_fuel: u64,
+    /// `true` when the module has a start section.
+    has_start_section: bool,
+}
+
+/// Computes the fuel charge for one instantiation of the module and reports whether the module
+/// has a start section.
 ///
 /// wasmi meters no instantiation work: it allocates and zeroes the declared initial memory,
 /// allocates the initial tables, and copies the data and element segments before any guest
@@ -422,12 +432,14 @@ fn read_leb_u64(data: &[u8], mut pos: usize) -> Option<(u64, usize)> {
 ///
 /// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
 /// invalid module.
-fn instantiation_fuel(wasm: &[u8]) -> Option<u64> {
+fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
     /// The section IDs whose contents instantiation materializes.
     const TABLE_SECTION_ID: u8 = 4;
     const MEMORY_SECTION_ID: u8 = 5;
     const ELEMENT_SECTION_ID: u8 = 9;
     const DATA_SECTION_ID: u8 = 11;
+    /// The section ID of the start section.
+    const START_SECTION_ID: u8 = 8;
     /// The size of one Wasm linear-memory page.
     const PAGE_BYTES: u64 = 65536;
     /// The size of one table element (a reference) on a 64-bit host.
@@ -435,6 +447,7 @@ fn instantiation_fuel(wasm: &[u8]) -> Option<u64> {
 
     let mut bytes: u64 = 0;
     let mut malformed = false;
+    let mut has_start_section = false;
     walk_wasm_sections(wasm, |id, payload| match id {
         MEMORY_SECTION_ID => match limits_min_total(payload, false) {
             Some(pages) => bytes = bytes.saturating_add(pages.saturating_mul(PAGE_BYTES)),
@@ -447,12 +460,16 @@ fn instantiation_fuel(wasm: &[u8]) -> Option<u64> {
         DATA_SECTION_ID | ELEMENT_SECTION_ID => {
             bytes = bytes.saturating_add(payload.len() as u64);
         },
+        START_SECTION_ID => has_start_section = true,
         _ => {},
     })?;
     if malformed {
         return None;
     }
-    Some(bytes.div_ceil(8).saturating_mul(FUEL_PER_FELT))
+    Some(ModuleStatics {
+        instantiation_fuel: bytes.div_ceil(8).saturating_mul(FUEL_PER_FELT),
+        has_start_section,
+    })
 }
 
 /// Sums the limit minimums of a memory or table section payload: the pages (memory) or
@@ -481,19 +498,6 @@ fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
         total = total.saturating_add(min);
     }
     Some(total)
-}
-
-/// Returns `true` when the Wasm binary has a start section (section ID 8).
-///
-/// The walk runs after wasmi validated the binary, so the section layout is well formed. Out of
-/// caution, a malformed walk is also reported as a start section.
-fn has_start_section(wasm: &[u8]) -> bool {
-    /// The section ID of the start section.
-    const START_SECTION_ID: u8 = 8;
-
-    let mut found = false;
-    let walked = walk_wasm_sections(wasm, |id, _| found |= id == START_SECTION_ID);
-    walked.is_none() || found
 }
 
 impl core::fmt::Debug for WasmHandlerModule {

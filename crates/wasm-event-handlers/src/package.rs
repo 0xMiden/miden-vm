@@ -51,7 +51,7 @@ pub fn host_library_from_package(
     limits: WasmHandlerLimits,
 ) -> Result<HostLibrary, WasmHandlerLoadError> {
     let handlers = handlers_from_package(package, limits)?;
-    Ok(HostLibrary::from(package.clone()).with_handlers(handlers))
+    Ok(HostLibrary::from(package.clone()).set_handlers(handlers))
 }
 
 // MANIFEST DERIVATION

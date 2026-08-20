@@ -262,11 +262,11 @@ pub struct HostLibrary {
 }
 
 impl HostLibrary {
-    /// Sets the event handlers of this library.
+    /// Replaces the event handlers of this library.
     ///
-    /// Use this to add handlers that the source of the library does not provide, for example the
-    /// Wasm event handlers of a package.
-    pub fn with_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
+    /// Use this to supply handlers that the source of the library does not provide, for example
+    /// the Wasm event handlers of a package.
+    pub fn set_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
         self.handlers = handlers;
         self
     }
@@ -346,7 +346,7 @@ mod tests {
                 (EventName::new(event), Arc::new(NoopEventHandler) as Arc<dyn EventHandler>)
             })
             .collect();
-        HostLibrary::from(Arc::new(mast_forest)).with_handlers(handlers)
+        HostLibrary::from(Arc::new(mast_forest)).set_handlers(handlers)
     }
 
     fn is_registered(host: &DefaultHost, event: &'static str) -> bool {
