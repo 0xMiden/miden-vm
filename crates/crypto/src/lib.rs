@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 #[macro_use]
 extern crate alloc;

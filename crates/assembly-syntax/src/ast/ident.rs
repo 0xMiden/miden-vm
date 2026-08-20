@@ -330,6 +330,7 @@ pub mod arbitrary {
     prop_compose! {
         /// A strategy to produce a random character from a more restricted dictionary for bare
         /// identifiers
+        #[allow(clippy::single_range_in_vec_init)]
         fn bare_ident_chars()
                       (c in CharStrategy::new_borrowed(
                           &['_'],

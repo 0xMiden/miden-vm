@@ -254,6 +254,7 @@ fn fold_levels(row: &[Word]) -> Vec<Vec<Word>> {
     levels.push(row.to_vec());
     while levels.last().expect("at least the row").len() > 1 {
         let below = levels.last().expect("level exists");
+        #[allow(clippy::chunks_exact_to_as_chunks)]
         let above: Vec<Word> = below
             .as_chunks::<2>()
             .0

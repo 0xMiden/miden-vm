@@ -927,6 +927,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             .fold(QuadFelt::ZERO, |acc, m| acc * beta + QuadFelt::from(Felt::new_unchecked(*m)))
     };
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let kernel_corr = kernel_digest_felts
         .as_chunks::<WORD_SIZE>()
         .0
