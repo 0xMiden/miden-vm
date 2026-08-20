@@ -13,7 +13,10 @@ use miden_air::{
     config::{ACE_CIRCUIT_REGISTRY_DEPTH, relation_digest},
 };
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-use miden_crypto::{merkle::MerkleTree, stark::air::BaseAir};
+use miden_crypto::{
+    merkle::MerkleTree,
+    stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -26,8 +29,10 @@ const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_CIRCUIT_REGISTRY_DEPTH;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
-const STARK_CONSTANTS_PATH: &str = "asm/stark/constants.masm";
+const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
+const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
+const PVM_LAYOUT_PATH: &str = "asm/sys/pvm/layout.masm";
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(registry_root: &[Felt; 4]) -> [Felt; 4] {
@@ -64,6 +69,18 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     // section.
     let factory = RecursiveAceCircuitFactory::new()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let num_quotient_chunks = factory.num_quotient_chunks();
+    if !num_quotient_chunks.is_power_of_two() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("quotient chunk count {num_quotient_chunks} is not a power of two"),
+        ));
+    }
+    let quotient_inputs = quotient_recomposition_inputs::<Felt>(
+        num_quotient_chunks.ilog2() as u8,
+        miden_air::config::pcs_params().log_blowup(),
+    )
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     // Retain the first order's common-section bytes and require exact equality for later orders.
     // Comparing cached digests alone would not establish that the emitted sections are equal.
     let mut common_section: Option<Vec<Felt>> = None;
@@ -136,8 +153,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let registry = AceCircuitRegistry::from_order_artifacts(&order_artifacts)?;
     let registry_root = registry.root;
     let relation_digest = compute_relation_digest(&registry_root);
-    let constraints_eval = render_constraints_eval_file(&order_artifacts)?;
-    let order_tag_count = PROOF_ORDER_COUNT;
+    let constraints_eval = render_constraints_eval_file(&order_artifacts, quotient_inputs)?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH)?;
     for (i, elem) in relation_digest.iter().enumerate() {
@@ -159,39 +175,65 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     replace_felt_array_const(&mut air_config, "RELATION_DIGEST", &relation_digest)?;
     replace_felt_array_const(&mut air_config, "ACE_CIRCUIT_REGISTRY_ROOT", &registry_root)?;
 
-    let mut stark_constants = read_file(STARK_CONSTANTS_PATH)?;
-    replace_masm_const(&mut stark_constants, "ORDER_TAG_COUNT", &order_tag_count.to_string())?;
-
     let first = order_artifacts.first().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "at least one ACE circuit is required")
     })?;
+    ensure_vm_ace_stream_fits(first.stream_len)?;
 
     Ok(ComputedArtifacts {
         num_inputs: first.num_inputs,
         num_eval_gates: first.num_eval_gates,
         prefix_rows: first.shuffle_prefix_len / 8,
         common_rows: (first.stream_len - first.shuffle_prefix_len) / 8,
-        order_tag_count,
         registry_root,
         relation_digest,
         constraints_eval,
         relation_mod,
         air_config,
-        stark_constants,
     })
+}
+
+fn ensure_vm_ace_stream_fits(stream_len: usize) -> io::Result<()> {
+    let vm_layout = read_file(VM_LAYOUT_PATH)?;
+    let pvm_layout = read_file(PVM_LAYOUT_PATH)?;
+    let stream_start =
+        parse_masm_const::<usize>(&vm_layout, "ACE_CIRCUIT_STREAM_PTR", VM_LAYOUT_PATH)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let pvm_start = parse_masm_const::<usize>(&pvm_layout, "PUBLIC_INPUTS_PTR", PVM_LAYOUT_PATH)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+
+    check_vm_ace_stream_capacity(stream_start, pvm_start, stream_len)
+}
+
+fn check_vm_ace_stream_capacity(
+    stream_start: usize,
+    pvm_start: usize,
+    stream_len: usize,
+) -> io::Result<()> {
+    let capacity = pvm_start.checked_sub(stream_start).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "PVM allocation starts before the VM ACE stream")
+    })?;
+    if stream_len > capacity {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "VM ACE stream requires {stream_len} felts but its fixed reservation holds \
+                 {capacity}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
     write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
     write_file(RELATION_DIGEST_PATH, &artifact.relation_mod)?;
     write_file(AIR_CONFIG_PATH, &artifact.air_config)?;
-    write_file(STARK_CONSTANTS_PATH, &artifact.stark_constants)?;
     println!(
         "wrote asm/sys/vm/constraints_eval.masm ({} inputs, {} eval gates, repeat.{}+{})",
         artifact.num_inputs, artifact.num_eval_gates, artifact.prefix_rows, artifact.common_rows
     );
     println!("wrote asm/sys/vm/mod.masm (relation digest and ACE registry root)");
-    println!("wrote asm/stark/constants.masm ({} proof-order tags)", artifact.order_tag_count);
     println!("wrote air/src/config.rs (relation digest and ACE registry)");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
@@ -289,135 +331,35 @@ impl AceCircuitRegistry {
     }
 }
 
-fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result<String> {
+fn render_constraints_eval_file(
+    order_artifacts: &[OrderArtifact],
+    quotient_inputs: QuotientRecompositionInputs<Felt>,
+) -> io::Result<String> {
     let Some(first) = order_artifacts.first() else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "at least one ACE circuit is required",
         ));
     };
-    if !first.stream_len.is_multiple_of(8) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "ACE stream must be 8-felt aligned",
-        ));
-    }
-    if !first.shuffle_prefix_len.is_multiple_of(8) || first.shuffle_prefix_len >= first.stream_len {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "ACE shuffle prefix must be a proper 8-felt-aligned stream prefix",
-        ));
-    }
-
-    let prefix_rows = first.shuffle_prefix_len / 8;
-    let common_rows = (first.stream_len - first.shuffle_prefix_len) / 8;
     let max_cycle_len_log = max_periodic_cycle_len_log();
     let h_common = first.common_commitment;
 
-    Ok(format!(
-        concat!(
-            "use miden::core::crypto::hashes::poseidon2\n",
-            "use miden::core::stark::constants\n",
-            "use miden::core::sys::vm::constraints_eval_inputs\n\n",
-            "# CONSTANTS\n",
-            "# =================================================================================================\n\n",
-            "# Number of READ variables (inputs + constants) for the constraint evaluation circuit.\n",
-            "const NUM_INPUTS_CIRCUIT = {num_inputs}\n\n",
-            "# Number of evaluation gates in the constraint evaluation circuit\n",
-            "const NUM_EVAL_GATES_CIRCUIT = {num_eval_gates}\n\n",
-            "# Max cycle length for periodic columns\n",
-            "const MAX_CYCLE_LEN_LOG = {max_cycle_len_log}\n\n",
-            "# Depth of the ACE circuit registry tree.\n",
-            "const ACE_REGISTRY_DEPTH = {ace_registry_depth}\n\n",
-            "# Poseidon2 digest of the order-invariant common section of the ACE circuit stream\n",
-            "# (common ops + root padding). The registry leaf for each ORDER_TAG is\n",
-            "# merge(H(constants | shuffle ops), H_COMMON).\n",
-            "const H_COMMON_0 = {h_common_0}\n",
-            "const H_COMMON_1 = {h_common_1}\n",
-            "const H_COMMON_2 = {h_common_2}\n",
-            "const H_COMMON_3 = {h_common_3}\n\n",
-            "# ERRORS\n",
-            "# =================================================================================================\n\n",
-            "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"merged ACE circuit segment digests do not match the registry commitment\"\n\n",
-            "const ERR_COMMON_SECTION_MISMATCH = \"common ACE circuit section does not match the compiled-in digest\"\n\n",
-            "# CONSTRAINT EVALUATION CHECKER\n",
-            "# =================================================================================================\n\n",
-            "#! Executes the constraints evaluation check for the proof order selected by ORDER_TAG.\n",
-            "#!\n",
-            "#! Inputs:  []\n",
-            "#! Outputs: []\n",
-            "pub proc execute_constraint_evaluation_check()\n",
-            "    exec.constants::assert_valid_order_tag\n\n",
-            "    push.MAX_CYCLE_LEN_LOG\n",
-            "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n\n",
-            "    exec.load_and_authenticate_ace_circuit\n\n",
-            "    push.NUM_EVAL_GATES_CIRCUIT\n",
-            "    push.NUM_INPUTS_CIRCUIT\n",
-            "    exec.constants::public_inputs_address_ptr mem_load\n",
-            "    eval_circuit\n",
-            "    drop drop drop\n",
-            "end\n\n",
-            "#! Loads and authenticates the ACE circuit selected by ORDER_TAG.\n",
-            "#!\n",
-            "#! The circuit stream is factored into two adv_pipe-aligned segments: a per-order\n",
-            "#! prefix [constants | shuffle ops] and an order-invariant common section\n",
-            "#! [common ops | root padding]. Both are hashed separately; the common digest is\n",
-            "#! pinned to the compiled-in H_COMMON (so a batch verifier may keep the common\n",
-            "#! section resident and re-authenticate only the shuffle), and the registry leaf\n",
-            "#! selected by ORDER_TAG must equal merge(H_PREFIX, H_COMMON).\n",
-            "proc load_and_authenticate_ace_circuit\n",
-            "    exec.load_ace_registry_commitment\n",
-            "    # => [LEAF]\n",
-            "    adv.push_mapval\n",
-            "    exec.constants::ace_circuit_stream_ptr\n",
-            "    padw padw padw\n",
-            "    # => [ZERO, ZERO, ZERO, ptr, LEAF]\n",
-            "    repeat.{prefix_rows}\n",
-            "        adv_pipe\n",
-            "        exec.poseidon2::permute\n",
-            "    end\n",
-            "    exec.poseidon2::squeeze_digest\n",
-            "    # => [H_PREFIX, ptr, LEAF]\n",
-            "    movup.4\n",
-            "    # => [ptr, H_PREFIX, LEAF]\n",
-            "    padw padw padw\n",
-            "    repeat.{common_rows}\n",
-            "        adv_pipe\n",
-            "        exec.poseidon2::permute\n",
-            "    end\n",
-            "    exec.poseidon2::squeeze_digest\n",
-            "    # => [H_COMMON, ptr, H_PREFIX, LEAF]\n",
-            "    movup.4 drop\n",
-            "    # => [H_COMMON, H_PREFIX, LEAF]\n",
-            "    dupw push.H_COMMON_3.H_COMMON_2.H_COMMON_1.H_COMMON_0\n",
-            "    assert_eqw.err=ERR_COMMON_SECTION_MISMATCH\n",
-            "    # => [H_COMMON, H_PREFIX, LEAF]\n",
-            "    swapw\n",
-            "    # => [H_PREFIX, H_COMMON, LEAF]\n",
-            "    exec.poseidon2::merge\n",
-            "    # => [MERGED, LEAF]\n",
-            "    assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH\n",
-            "end\n\n",
-            "#! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.\n",
-            "proc load_ace_registry_commitment\n",
-            "    padw exec.constants::ace_registry_root_ptr mem_loadw_le\n",
-            "    exec.constants::get_order_tag\n",
-            "    push.ACE_REGISTRY_DEPTH\n",
-            "    mtree_get\n",
-            "    swapw dropw\n",
-            "end\n",
-        ),
-        num_inputs = first.num_inputs,
-        num_eval_gates = first.num_eval_gates,
-        max_cycle_len_log = max_cycle_len_log,
-        ace_registry_depth = ACE_CIRCUIT_REGISTRY_DEPTH,
-        h_common_0 = h_common[0].as_canonical_u64(),
-        h_common_1 = h_common[1].as_canonical_u64(),
-        h_common_2 = h_common[2].as_canonical_u64(),
-        h_common_3 = h_common[3].as_canonical_u64(),
-        prefix_rows = prefix_rows,
-        common_rows = common_rows,
-    ))
+    miden_ace_codegen::render_masm_constraints_eval(&miden_ace_codegen::MasmConstraintsEvalConfig {
+        generated_by: "cargo run -p miden-core-lib --features constraints-tools --bin \
+                           regenerate-constraints -- --write",
+        layout_module: "miden::core::sys::vm::layout",
+        num_inputs: first.num_inputs,
+        num_eval_gates: first.num_eval_gates,
+        stream_len: first.stream_len,
+        shuffle_prefix_len: first.shuffle_prefix_len,
+        max_cycle_len_log,
+        registry_depth: ACE_CIRCUIT_REGISTRY_DEPTH,
+        order_tag_count: PROOF_ORDER_COUNT,
+        num_airs: MIDEN_AIR_COUNT,
+        quotient_inputs,
+        common_commitment: Word::new(h_common),
+    })
+    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))
 }
 
 fn max_periodic_cycle_len_log() -> u32 {
@@ -484,13 +426,6 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
         return Err("ACE registry root in sys/vm/mod.masm is stale".into());
     }
 
-    let constants = read_file(STARK_CONSTANTS_PATH).map_err(|e| e.to_string())?;
-    let order_tag_count =
-        parse_masm_const::<usize>(&constants, "ORDER_TAG_COUNT", "stark/constants.masm")?;
-    if order_tag_count != artifact.order_tag_count {
-        return Err("ORDER_TAG_COUNT in stark/constants.masm is stale".into());
-    }
-
     // `derive_order_tag` sweeps this many AIRs and weights each inversion by
     // `(NUM_MIDEN_AIRS - 1 - pos)!`, so a stale value silently mis-ranks proof orders.
     let num_miden_airs = parse_masm_const::<usize>(&masm, "NUM_MIDEN_AIRS", "sys/vm/mod.masm")?;
@@ -498,35 +433,13 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
         return Err("NUM_MIDEN_AIRS in sys/vm/mod.masm is stale".into());
     }
 
-    air_log_height_cells_are_consecutive(&constants)?;
-
-    Ok(())
-}
-
-/// Verify the per-AIR log-height cells form one consecutive array in instance order.
-///
-/// `derive_order_tag` reads them as `air_trace_length_logs_ptr + k`, so a reordered or gapped
-/// cell would silently feed it another verifier field (or an uninitialised zero) as a height.
-fn air_log_height_cells_are_consecutive(constants: &str) -> Result<(), String> {
-    const CELL_NAMES: [&str; MIDEN_AIR_COUNT] = [
-        "CORE_TRACE_LENGTH_LOG_PTR",
-        "CHIPLETS_TRACE_LENGTH_LOG_PTR",
-        "POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR",
-    ];
-
-    let mut previous = None;
-    for (index, name) in CELL_NAMES.iter().enumerate() {
-        let address = parse_masm_const::<u64>(constants, name, "stark/constants.masm")?;
-        if let Some(previous) = previous
-            && address != previous + 1
-        {
-            return Err(format!(
-                "{name} must directly follow {} in stark/constants.masm: `derive_order_tag` \
-                 indexes the per-AIR log-height cells as one consecutive array",
-                CELL_NAMES[index - 1]
-            ));
-        }
-        previous = Some(address);
+    // The VM aux hook dispatches the three weighted boundary sums by proof-order tag. Keep its
+    // active-tag bound tied to the same AIR-derived order count as the generated evaluator.
+    let aux_trace = read_file(VM_AUX_TRACE_PATH).map_err(|e| e.to_string())?;
+    let order_tag_count =
+        parse_masm_const::<usize>(&aux_trace, "ORDER_TAG_COUNT", VM_AUX_TRACE_PATH)?;
+    if order_tag_count != PROOF_ORDER_COUNT {
+        return Err("ORDER_TAG_COUNT in sys/vm/aux_trace.masm is stale".into());
     }
 
     Ok(())
@@ -616,13 +529,11 @@ struct ComputedArtifacts {
     num_eval_gates: usize,
     prefix_rows: usize,
     common_rows: usize,
-    order_tag_count: usize,
     registry_root: [Felt; 4],
     relation_digest: [Felt; 4],
     constraints_eval: String,
     relation_mod: String,
     air_config: String,
-    stark_constants: String,
 }
 
 struct OrderArtifact {
@@ -633,4 +544,29 @@ struct OrderArtifact {
     shuffle_prefix_len: usize,
     common_commitment: [Felt; 4],
     circuit_commitment: [Felt; 4],
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::ToString;
+
+    use super::check_vm_ace_stream_capacity;
+
+    #[test]
+    fn vm_ace_stream_capacity_accepts_exact_fit_and_rejects_overflow() {
+        let stream_start = 1_000;
+        let pvm_start = 1_100;
+
+        check_vm_ace_stream_capacity(stream_start, pvm_start, 100).expect("exact fit");
+        let error = check_vm_ace_stream_capacity(stream_start, pvm_start, 101)
+            .expect_err("one felt beyond the reservation must fail");
+        assert!(error.to_string().contains("requires 101 felts"));
+    }
+
+    #[test]
+    fn vm_ace_stream_capacity_rejects_reversed_anchors() {
+        let error = check_vm_ace_stream_capacity(1_100, 1_000, 0)
+            .expect_err("the PVM allocation must follow the VM stream");
+        assert!(error.to_string().contains("PVM allocation starts before"));
+    }
 }

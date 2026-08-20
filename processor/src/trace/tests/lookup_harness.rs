@@ -21,7 +21,7 @@ use miden_air::{
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
-use miden_core::field::QuadFelt;
+use miden_core::{field::QuadFelt, utils::RowMajorMatrix};
 use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, VmTrace};
@@ -50,6 +50,15 @@ impl InteractionLog {
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
+        Self::from_air_matrices(&core_matrix, &chip_matrix, &poseidon2_matrix)
+    }
+
+    /// Drive the prover-path lookup emitter with caller-supplied per-AIR trace matrices.
+    pub(super) fn from_air_matrices(
+        core_matrix: &RowMajorMatrix<Felt>,
+        chip_matrix: &RowMajorMatrix<Felt>,
+        poseidon2_matrix: &RowMajorMatrix<Felt>,
+    ) -> Self {
         let chip_periodic = MidenAir::Chiplets.periodic_columns();
         let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();
 
@@ -60,13 +69,12 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let core_fractions =
-            build_lookup_fractions(&MidenAir::Core, &core_matrix, &[], &challenges);
+        let core_fractions = build_lookup_fractions(&MidenAir::Core, core_matrix, &[], &challenges);
         let chip_fractions =
-            build_lookup_fractions(&MidenAir::Chiplets, &chip_matrix, &chip_periodic, &challenges);
+            build_lookup_fractions(&MidenAir::Chiplets, chip_matrix, &chip_periodic, &challenges);
         let poseidon2_fractions = build_lookup_fractions(
             &MidenAir::Poseidon2Permutation,
-            &poseidon2_matrix,
+            poseidon2_matrix,
             &poseidon2_periodic,
             &challenges,
         );
@@ -98,6 +106,19 @@ impl InteractionLog {
                 self.rows[row],
             );
         }
+    }
+
+    /// Return the net multiplicity emitted for `message` across the complete trace.
+    pub fn net_multiplicity<M>(&self, message: &M) -> Felt
+    where
+        M: LookupMessage<Felt, QuadFelt>,
+    {
+        let denominator = message.encode(&self.challenges);
+        self.rows
+            .iter()
+            .flatten()
+            .filter_map(|&(multiplicity, encoded)| (encoded == denominator).then_some(multiplicity))
+            .sum()
     }
 }
 

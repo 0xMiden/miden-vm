@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 miden-processor = { workspace = true, features = ["concurrent"] }
-miden-vm        = { path = "../../miden-vm", features = ["concurrent"] }
+miden-vm        = { path = "../../miden-vm", features = ["concurrent", "internal"] }
 serde           = { workspace = true, features = ["std"] }
 serde_json      = { workspace = true, features = ["std"] }
 thiserror       = { workspace = true, features = ["std"] }
@@ -23,6 +23,7 @@ codspeed-criterion-compat = { workspace = true }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-core = { workspace = true, features = ["std"] }
 miden-core-lib = { workspace = true, features = ["std"] }
+miden-precompiles-prover = { workspace = true, features = ["concurrent"] }
 miden-verifier = { workspace = true, features = ["std"] }
 
 [[bench]]

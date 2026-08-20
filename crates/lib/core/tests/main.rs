@@ -260,6 +260,7 @@ mod math;
 mod mem;
 mod precompiles;
 mod stark_asserts;
+mod support;
 mod sys;
 mod word;
 

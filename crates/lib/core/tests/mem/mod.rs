@@ -302,6 +302,69 @@ fn test_pipe_words_to_memory() {
     );
 }
 
+/// The advice pipe, the memory-based hasher, and the native hasher must agree for empty, odd,
+/// even, and maximum-size inputs. A second domain checks that the pipe does not bake in the
+/// kernel tag.
+#[test]
+fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
+    use miden_core::{chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+
+    const MEM_ADDR: u64 = 1000;
+    const OTHER_DOMAIN: u64 = 42;
+    const CANARY: [u64; 4] = [91, 92, 93, 94];
+
+    let kernel_domain = KERNEL_DOMAIN_TAG.as_canonical_u64();
+    let cases = [
+        (0, 0),
+        (0, kernel_domain),
+        (1, kernel_domain),
+        (2, kernel_domain),
+        (3, kernel_domain),
+        (4, kernel_domain),
+        (255, kernel_domain),
+        (3, OTHER_DOMAIN),
+    ];
+
+    for (num_words, domain) in cases {
+        let num_felts = num_words * 4;
+        let data: Vec<u64> = (1..=num_felts as u64).collect();
+        let felts: Vec<Felt> = data.iter().copied().map(Felt::new_unchecked).collect();
+        let guard_addr = MEM_ADDR + num_felts as u64;
+
+        let source = format!(
+            "
+            use miden::core::mem
+            use miden::core::crypto::hashes::poseidon2
+
+            begin
+                push.[91,92,93,94] push.{guard_addr} mem_storew_le dropw
+
+                push.{MEM_ADDR} push.{num_words} push.{domain}
+                exec.mem::pipe_words_to_memory_in_domain
+                movup.4 eq.{guard_addr} assert
+
+                dupw
+                push.{domain} push.{num_felts} push.{MEM_ADDR}
+                exec.poseidon2::hash_elements_in_domain
+                assert_eqw
+
+                swapw dropw
+            end
+            "
+        );
+
+        let digest = hasher::hash_elements_in_domain(&felts, Felt::new_unchecked(domain));
+        let mut expected_stack = felt_slice_to_ints(digest.as_elements());
+        expected_stack.resize(16, 0);
+        let expected_memory: Vec<u64> = data.iter().copied().chain(CANARY).collect();
+        build_test!(source.as_str(), &[], data.as_slice()).expect_stack_and_memory(
+            &expected_stack,
+            MEM_ADDR as u32,
+            &expected_memory,
+        );
+    }
+}
+
 #[test]
 fn test_pipe_preimage_to_memory() {
     let mem_addr = 1000;

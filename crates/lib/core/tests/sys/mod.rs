@@ -194,38 +194,6 @@ fn element_hash_procedures_reject_non_u32_length() {
     }
 }
 
-#[test]
-fn kernel_commitment_rejects_non_u32_procedure_count() {
-    use miden_processor::{ExecutionError, operation::OperationError};
-
-    // For the Goldilocks modulus p, 4 * ((3p + 1) / 4) = 1 mod p. Without validating the
-    // procedure count before multiplication, the helper would hash one element.
-    const WRAPPING_COUNT: u64 = 13_835_058_052_060_938_241;
-    const PTR: u64 = 1000;
-    const ERROR_MSG: &str = "number of kernel procedures must fit in a u32";
-
-    let source = format!(
-        "
-        use miden::core::sys::vm::claim
-
-        begin
-            push.{WRAPPING_COUNT}
-            push.{PTR}
-            exec.claim::kernel_commitment
-        end
-        "
-    );
-    let test = build_test!(source.as_str(), &[]);
-    let err = test.execute().expect_err("a non-u32 procedure count must be rejected");
-    match err {
-        ExecutionError::OperationError {
-            err: OperationError::U32AssertionFailed { err_code, .. },
-            ..
-        } => assert_eq!(err_code, miden_core::mast::error_code_from_msg(ERROR_MSG)),
-        err => panic!("expected a u32 assertion failure, got {err:?}"),
-    }
-}
-
 /// The MASM `sys::build_proof_request_key` must agree with the native `proof_request_key` on the
 /// same `(verifier_root, claim_commitment)` pair.
 #[test]
@@ -356,7 +324,7 @@ fn proof_request_round_trip_retrieves_registered_package() {
     .expect_stack(&expected);
 }
 
-/// The MASM `sys::vm::compute_conjectured_security_level` procedure must agree with the native
+/// The MASM `stark::utils::conjectured_security_level` procedure must agree with the native
 /// `miden_air::config::conjectured_security_level` on every input in the verifier's domain:
 /// `num_queries` is effectively a `u8` (the generic verifier bounds it to `<= 150`) and
 /// `query_pow_bits < 32`. One VM run evaluates the whole grid, storing the MASM level for
@@ -373,7 +341,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
 
     let source = format!(
         "
-        use miden::core::sys::vm
+        use miden::core::stark::utils
 
         begin
             push.0
@@ -386,7 +354,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
                     # => [pow, nq]
                     dup dup.2
                     # => [nq, pow, pow, nq]
-                    exec.vm::compute_conjectured_security_level
+                    exec.utils::conjectured_security_level
                     # => [level, pow, nq]
                     dup.2 push.{POW_BOUND} mul dup.2 add
                     # => [nq*POW_BOUND + pow, level, pow, nq]
@@ -435,11 +403,11 @@ fn security_level_threshold_rejects_below_target() {
 
     let source = format!(
         "
-        use miden::core::sys::vm
+        use miden::core::stark::utils
 
         begin
             # Stack: [num_queries, query_pow_bits] - as returned by `verify_vm_proof`.
-            exec.vm::compute_conjectured_security_level
+            exec.utils::conjectured_security_level
             u32lt.{TARGET} assertz
         end
         "

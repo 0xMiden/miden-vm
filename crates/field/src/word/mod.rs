@@ -33,14 +33,6 @@ mod tests;
 /// For ordering a word with `Ord` the word's elements are treated as limbs of an integer
 /// in little-endian limb order and thus comparison starts from the most significant element.
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(
-    not(all(target_family = "wasm", miden)),
-    derive(serde::Deserialize, serde::Serialize)
-)]
-#[cfg_attr(
-    not(all(target_family = "wasm", miden)),
-    serde(into = "String", try_from = "&str")
-)]
 #[repr(C)]
 #[cfg_attr(all(target_family = "wasm", miden), repr(align(16)))]
 pub struct Word {

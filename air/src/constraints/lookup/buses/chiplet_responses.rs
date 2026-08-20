@@ -9,8 +9,9 @@
 //! matching `chiplet_active.{bitwise, memory, ace, kernel_rom}` flag.
 //!
 //! Memory uses the runtime-muxed [`MemoryResponseMsg`] encoding (label + is_word mux)
-//! rather than splitting into 4 per-label variants. This keeps the response-column
-//! transition degree at 8. A per-variant split would raise it to 9.
+//! rather than splitting into 4 per-label variants, which would add a degree to the memory
+//! branch. The column's transition degree is 9, set by the Merkle-init batches
+//! (gate 5 + init message 2 + slack-limb range check 1).
 
 use core::{array, borrow::Borrow};
 
@@ -23,7 +24,7 @@ use crate::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
                 AceInitMsg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
-                MemoryResponseMsg,
+                MemoryResponseMsg, MerkleInitFromSelectorsMsg, RangeMsg,
             },
         },
         utils::BoolNot,
@@ -33,6 +34,8 @@ use crate::{
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// The Merkle-init and kernel-ROM batches each emit two fractions; every other branch emits one.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus.
@@ -126,38 +129,43 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // Merkle leaf-word inputs for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
-                    // Each path has its own controller flag. All three encode
-                    // `leaf = (1-bit)*rate_0 + bit*rate_1` with
-                    // `bit = node_index - 2*node_index_next` (the current Merkle direction bit).
-                    for (name, flag, kind) in [
-                        ("mp_verify_input", hasher_flags.f_mp, BusId::HasherMerkleVerifyInit),
-                        ("mr_update_old_input", hasher_flags.f_mv, BusId::HasherMerkleOldInit),
-                        ("mr_update_new_input", hasher_flags.f_mu, BusId::HasherMerkleNewInit),
-                    ] {
-                        g.add(
-                            name,
-                            flag,
-                            || {
-                                let addr = clk_plus_one.clone();
-                                let node_index: LB::Expr = ctrl.node_index.into();
-                                let bit: LB::Expr =
-                                    node_index.clone() - ctrl_next.node_index.into().double();
-                                let one_minus_bit = bit.not();
-                                let word: [LB::Expr; 4] = array::from_fn(|i| {
-                                    one_minus_bit.clone() * rate_0[i].into()
-                                        + bit.clone() * rate_1[i].into()
-                                });
-                                HasherMsg {
-                                    kind,
-                                    addr,
+                    // Merkle leaf-word input for MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW.
+                    // The boolean `(s1, s2)` selectors choose MP, MV, or MU. The direction bit
+                    // chooses the rate half containing the leaf. One message handles all cases.
+                    //
+                    // The first slack limb is range-checked in the same level-0 batch. Both batch
+                    // entries are always active together.
+                    //
+                    // Degrees: gate 5, init message 2, RangeMsg 1.
+                    //   U = 5 + (2 + 1) = 8, V = 5 + max(1, 2) = 7. Both under the ceiling.
+                    g.batch(
+                        "merkle_input",
+                        hasher_flags.f_merkle_init,
+                        |b| {
+                            let node_index: LB::Expr = ctrl.node_index.into();
+                            let direction_bit: LB::Expr =
+                                node_index.clone() - ctrl_next.node_index.into().double();
+                            b.add(
+                                "merkle_init",
+                                MerkleInitFromSelectorsMsg {
+                                    s1: ctrl.s1.into(),
+                                    s2: ctrl.s2.into(),
+                                    direction_bit,
+                                    addr: clk_plus_one.clone(),
                                     node_index,
-                                    payload: HasherPayload::Word(word),
-                                }
-                            },
-                            Deg { v: 5, u: 7 },
-                        );
-                    }
+                                    rate_0: rate_0.map(Into::into),
+                                    rate_1: rate_1.map(Into::into),
+                                },
+                                Deg { v: 5, u: 7 },
+                            );
+                            b.remove(
+                                "merkle_index_slack_0",
+                                RangeMsg { value: ctrl.capacity()[0].into() },
+                                Deg { v: 5, u: 6 },
+                            );
+                        },
+                        Deg { v: 7, u: 8 },
+                    );
 
                     // HOUT: digest = rate_0.
                     g.add(
@@ -283,19 +291,19 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 7, u: 7 }, // (V, U) = (2 + 5, 2 + 5); kernel_rom flag deg 5
                     );
                 },
-                Deg { v: 7, u: 7 },
+                // The Merkle-init batches carry `merkle_index_slack_0`, so their U degree is
+                // gate 5 + init message 2 + RangeMsg 1 = 8. The ceiling is 9.
+                Deg { v: 7, u: 8 },
             );
         },
-        Deg { v: 7, u: 7 },
+        Deg { v: 7, u: 8 },
     );
 }
 
 struct HasherResponseFlags<E> {
     f_sponge_start: E,
     f_sponge_respan: E,
-    f_mp: E,
-    f_mv: E,
-    f_mu: E,
+    f_merkle_init: E,
     f_hout: E,
     f_sout: E,
 }
@@ -330,15 +338,10 @@ where
         * not_hs2.clone()
         * is_boundary.not();
 
-    // Merkle tree input rows (is_boundary=1):
-    //   f_mp = ctrl * hs0 * (1-hs1) * hs2 * is_boundary
-    //   f_mv = ctrl * hs0 * hs1 * (1-hs2) * is_boundary
-    //   f_mu = ctrl * hs0 * hs1 * hs2 * is_boundary
-    let f_mp =
-        controller_flag.clone() * hs0.clone() * not_hs1.clone() * hs2.clone() * is_boundary.clone();
-    let f_mv =
-        controller_flag.clone() * hs0.clone() * hs1.clone() * not_hs2.clone() * is_boundary.clone();
-    let f_mu = controller_flag.clone() * hs0 * hs1 * hs2.clone() * is_boundary.clone();
+    // Merkle tree input rows (is_boundary=1). For boolean selectors,
+    // `s1 + s2 - s1*s2` is `s1 OR s2`, selecting exactly MP, MV, and MU inputs.
+    let is_merkle = hs1.clone() + hs2.clone() - hs1 * hs2.clone();
+    let f_merkle_init = controller_flag.clone() * hs0 * is_merkle * is_boundary.clone();
 
     // HOUT output: hs0=hs1=hs2=0 (always responds on digest). Degree 4 (no is_boundary).
     let f_hout = controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
@@ -349,9 +352,7 @@ where
     HasherResponseFlags {
         f_sponge_start,
         f_sponge_respan,
-        f_mp,
-        f_mv,
-        f_mu,
+        f_merkle_init,
         f_hout,
         f_sout,
     }

@@ -13,15 +13,12 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
-[package.metadata.cargo-shear]
-ignored = ["serde_json"]
-
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-mast-package/serde"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std", "serde?/std"]
-serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
@@ -35,9 +32,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-core = { workspace = true, features = ["testing"] }
-miden-test-serde-macros.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
 
 [lints.rust]
 unused_assignments = "allow"

@@ -9,7 +9,6 @@ use crate::utils::{assume_init_vec, uninit_vector, word_to_hex};
 
 /// A fully-balanced binary Merkle tree (i.e., a tree where the number of leaves is a power of two).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MerkleTree {
     nodes: Vec<Word>,
 }

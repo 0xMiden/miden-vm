@@ -354,7 +354,31 @@ pub fn path_in_verified_tree(
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    fn registry_path_case() -> impl Strategy<Value = (RegistryLayout, u32, u32)> {
+        (2usize..=6).prop_flat_map(|num_airs| {
+            let tree_depth = ceil_log2(factorial(num_airs));
+            (0..tree_depth).prop_flat_map(move |row_depth| {
+                let layout = RegistryLayout::new(num_airs, row_depth).expect("valid layout");
+                let mut boundary_tags = vec![0, layout.order_count() as u32 - 1];
+                if layout.order_count() < layout.leaf_count() {
+                    boundary_tags.push(layout.order_count() as u32);
+                }
+                boundary_tags.push(layout.leaf_count() as u32 - 1);
+                (
+                    Just(layout),
+                    prop_oneof![
+                        3 => proptest::sample::select(boundary_tags),
+                        5 => 0..layout.leaf_count() as u32,
+                    ],
+                    any::<u32>(),
+                )
+            })
+        })
+    }
 
     #[test]
     fn order_tags_round_trip_over_the_whole_range() {
@@ -366,6 +390,63 @@ mod tests {
             assert_eq!(order_from_tag(factorial(num_airs) as u32, num_airs), None);
             let identity: Vec<usize> = (0..num_airs).collect();
             assert_eq!(order_tag(&identity), 0, "the identity ordering must be tag 0");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn larger_order_tags_round_trip(raw_tags in any::<[u32; 6]>()) {
+            for (num_airs, raw_tag) in (7..=MAX_REGISTRY_AIRS).zip(raw_tags) {
+                let tag = raw_tag % factorial(num_airs) as u32;
+                let order = order_from_tag(tag, num_airs).expect("tag in range");
+                prop_assert_eq!(order_tag(&order), tag);
+            }
+        }
+
+        #[test]
+        fn spliced_paths_match_varied_registry_layouts(
+            (layout, tag, salt) in registry_path_case(),
+        ) {
+            let mut leaves: Vec<Word> = (0..layout.order_count())
+                .map(|index| {
+                    Poseidon2::hash_elements(&[
+                        Felt::new_unchecked(u64::from(salt)),
+                        Felt::new_unchecked(index as u64),
+                    ])
+                })
+                .collect();
+            leaves.resize(layout.leaf_count(), padding_leaf());
+
+            let tree = MerkleTree::new(&leaves).expect("complete tree");
+            let row: Vec<Word> = if layout.row_depth() == 0 {
+                vec![tree.root()]
+            } else {
+                (0..layout.row_len())
+                    .map(|index| {
+                        tree.get_node(
+                            NodeIndex::new(layout.row_depth() as u8, index as u64)
+                                .expect("row index"),
+                        )
+                        .expect("row node")
+                    })
+                    .collect()
+            };
+            let pyramid = verify_row(&layout, &row, tree.root(), "toy row must authenticate");
+            let subtree_index = tag as usize / layout.leaves_per_subtree();
+            let start = subtree_index * layout.leaves_per_subtree();
+            let subtree = MerkleTree::new(&leaves[start..start + layout.leaves_per_subtree()])
+                .expect("complete subtree");
+
+            let (leaf, path) =
+                path_in_verified_tree(&layout, &pyramid, &subtree, tag, "toy path")
+                    .expect("valid path");
+            prop_assert_eq!(leaf, leaves[tag as usize]);
+            prop_assert_eq!(
+                path.compute_root(u64::from(tag), leaf).expect("path root"),
+                tree.root(),
+            );
         }
     }
 

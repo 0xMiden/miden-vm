@@ -767,12 +767,14 @@ impl Tracer for ExecutionTracer {
         &mut self,
         node: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         output_root: Word,
     ) {
         let path = path.expect("execution tracer expects a valid Merkle path");
         self.hasher_chiplet_shim.record_build_merkle_root(path, output_root);
         self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]
@@ -781,6 +783,7 @@ impl Tracer for ExecutionTracer {
         old_value: Word,
         new_value: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         old_root: Word,
         new_root: Word,
@@ -793,6 +796,7 @@ impl Tracer for ExecutionTracer {
             path.clone(),
             index,
         );
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]
@@ -903,6 +907,18 @@ impl Tracer for ExecutionTracer {
         let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
         self.range_checker.record_range_check_u32([t0, t1, t2, t3]);
+    }
+
+    #[inline(always)]
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+        let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
+        self.range_checker.record_u32div_remainder_diff([d0, d1]);
     }
 
     #[inline(always)]

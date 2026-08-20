@@ -115,14 +115,10 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     }
 
     let addr_range = start_addr as u32..end_addr as u32;
+    let key = processor.stack_get_word(1);
 
-    let max_value_size = processor.options.max_adv_map_value_size();
-    if addr_range.len() > max_value_size {
-        return Err(AdviceError::AdvMapValueSizeExceeded {
-            size: addr_range.len(),
-            max: max_value_size,
-        }
-        .into());
+    if !processor.advice.contains_map_key(&key) {
+        processor.advice.check_map_value_allocation(addr_range.len())?;
     }
 
     let ctx = processor.ctx;
@@ -131,7 +127,6 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
         .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))
         .collect();
 
-    let key = processor.stack_get_word(1);
     processor.advice.insert_into_map(key, values)?;
     Ok(())
 }
@@ -552,7 +547,10 @@ fn push_transformed_stack_top(
 mod tests {
     use alloc::vec;
 
-    use miden_core::{Felt, ZERO, crypto::hash::Poseidon2};
+    use miden_core::{
+        Felt, ZERO,
+        crypto::{hash::Poseidon2, merkle::MerkleStore},
+    };
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
@@ -594,9 +592,11 @@ mod tests {
     }
 
     #[test]
-    fn insert_hdword_into_adv_map_respects_max_adv_map_value_size() {
+    fn insert_hdword_into_adv_map_respects_advice_size_budget() {
         let stack_values = stack_with_values(8, 1);
-        let options = ExecutionOptions::default().with_max_adv_map_value_size(7);
+        let base = MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE * 8;
+        let added = (WORD_SIZE + 8) * 8;
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(base + added - 1);
         let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
             .with_options(options)
             .expect("test advice inputs should fit advice map limits");
@@ -604,14 +604,17 @@ mod tests {
         let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::Advice(AdviceError::AdvMapValueSizeExceeded { size: 8, max: 7 })
+            SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
+                if current == base && actual == added && max == base + added - 1
         ));
     }
 
     #[test]
-    fn insert_hqword_into_adv_map_respects_max_adv_map_value_size() {
+    fn insert_hqword_into_adv_map_respects_advice_size_budget() {
         let stack_values = stack_with_values(15, 1);
-        let options = ExecutionOptions::default().with_max_adv_map_value_size(15);
+        let base = MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE * 8;
+        let added = (WORD_SIZE + 16) * 8;
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(base + added - 1);
         let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
             .with_options(options)
             .expect("test advice inputs should fit advice map limits");
@@ -619,14 +622,18 @@ mod tests {
         let err = insert_hqword_into_adv_map(&mut processor).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::Advice(AdviceError::AdvMapValueSizeExceeded { size: 16, max: 15 })
+            SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
+                if current == base && actual == added && max == base + added - 1
         ));
     }
 
     #[test]
-    fn repeated_hdword_insertions_respect_adv_map_element_budget() {
+    fn repeated_hdword_insertions_respect_combined_advice_budget() {
         let stack_values = stack_with_values(8, 1);
-        let options = ExecutionOptions::default().with_max_adv_map_elements(24);
+        let base = MerkleStore::default().num_internal_nodes() * 3 * WORD_SIZE * 8;
+        let entry_bytes = (WORD_SIZE + 2 * WORD_SIZE) * 8;
+        let options =
+            ExecutionOptions::default().with_max_advice_size_bytes(base + 2 * entry_bytes);
         let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
             .with_options(options)
             .expect("test advice inputs should fit advice map limits");
@@ -638,15 +645,13 @@ mod tests {
 
         write_stack_values(&mut processor, 8, 17);
         let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
-        let SystemEventError::Advice(AdviceError::AdvMapElementBudgetExceeded {
-            current,
-            added: 12,
-            max: 24,
-        }) = err
+        let SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added, max }) = err
         else {
             panic!("expected advice map element budget error, got {err:?}");
         };
-        assert_eq!(current, 2 * (WORD_SIZE + 2 * WORD_SIZE));
+        assert_eq!(current, base + 2 * entry_bytes);
+        assert_eq!(added, entry_bytes);
+        assert_eq!(max, base + 2 * entry_bytes);
     }
 
     fn stack_with_values(count: usize, start: u64) -> Vec<Felt> {

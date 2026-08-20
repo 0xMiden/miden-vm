@@ -35,7 +35,15 @@ impl SetSourceId for PackageTable {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageDetail {
     /// The semantic version assigned to this package
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            serialize_with = "semver_serde::serialize",
+            deserialize_with = "semver_serde::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     pub version: Option<Span<MaybeInherit<SemVer>>>,
     /// An (optional) brief description of this project
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
@@ -43,6 +51,109 @@ pub struct PackageDetail {
     /// Custom metadata which can be used by third-party/downstream tooling
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
     pub metadata: MetadataSet,
+}
+
+#[cfg(feature = "serde")]
+mod semver_serde {
+    use alloc::string::{String, ToString};
+    use core::{fmt, marker::PhantomData};
+
+    use serde::{
+        Serialize,
+        de::{self, MapAccess, Visitor},
+        ser::SerializeMap,
+    };
+
+    use super::{MaybeInherit, SemVer, Span};
+
+    pub fn serialize<S>(
+        value: &Option<Span<MaybeInherit<SemVer>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match value.as_deref() {
+            None => serializer.serialize_none(),
+            Some(MaybeInherit::Inherit) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("workspace", &true)?;
+                map.end()
+            },
+            Some(MaybeInherit::Value(version)) => version.to_string().serialize(serializer),
+        }
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<Span<MaybeInherit<SemVer>>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SemVerVisitor(PhantomData<()>);
+
+        impl<'de> Visitor<'de> for SemVerVisitor {
+            type Value = Option<Span<MaybeInherit<SemVer>>>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a semantic version or { workspace = true }")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                value
+                    .parse()
+                    .map(|version| Some(Span::unknown(MaybeInherit::Value(version))))
+                    .map_err(|error: miden_assembly_syntax::VersionError| {
+                        E::custom(error.to_string())
+                    })
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&value)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let workspace = map
+                    .next_entry::<String, bool>()?
+                    .ok_or_else(|| de::Error::missing_field("workspace"))?;
+                if workspace.0 != "workspace" {
+                    return Err(de::Error::unknown_field(&workspace.0, &["workspace"]));
+                }
+                if !workspace.1 {
+                    return Err(de::Error::custom("the 'workspace' field may only be true"));
+                }
+                if map.next_entry::<String, de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::custom("unexpected field in inherited version"));
+                }
+                Ok(Some(Span::unknown(MaybeInherit::Inherit)))
+            }
+        }
+
+        deserializer.deserialize_any(SemVerVisitor(PhantomData))
+    }
+
+    #[test]
+    fn inherited_version_roundtrips() {
+        let detail = super::PackageDetail {
+            version: Some(Span::unknown(MaybeInherit::Inherit)),
+            ..Default::default()
+        };
+
+        let encoded = toml::to_string(&detail).unwrap();
+        assert_eq!(encoded, "[version]\nworkspace = true\n");
+
+        let decoded: super::PackageDetail = toml::from_str(&encoded).unwrap();
+        assert!(matches!(decoded.version.as_deref(), Some(MaybeInherit::Inherit)));
+    }
 }
 
 impl SetSourceId for PackageDetail {

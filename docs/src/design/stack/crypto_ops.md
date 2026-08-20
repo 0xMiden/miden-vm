@@ -125,6 +125,66 @@ The above constraint enforces that the specified input and output controller row
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
 
+## Merkle range checks
+
+`MPVERIFY` and `MRUPDATE` request 16-bit range checks for $d$ and
+$1024(d - 1)$. Together, the checks accept exactly $1 \le d \le 64$.
+
+The hasher controller must also show that the path bits describe the canonical
+integer represented by the node-index field element. At each level it enforces
+
+$$
+i_k = 2i_{k+1} + b_k
+$$
+
+where $b_k$ is a boolean direction bit. This is a field equality modulo
+$Q = 2^{64} - 2^{32} + 1$. By itself, it does not distinguish an integer
+index from that index plus $Q$.
+
+The stack/hasher lookup addresses bind the computation to exactly $d$ levels,
+and the controller ends with $i_d = 0$. Working backwards, $i_1$ is built from
+at most $d - 1 \le 63$ direction bits. Therefore $0 \le i_1 < 2^{63} < Q$,
+so this suffix cannot wrap in the field.
+
+The complete index is $n = 2i_1 + b_0$, which may use all 64 bits. Let
+$M = (Q - 1)/2$. Because $b_0$ is boolean,
+
+$$
+n < Q \quad\Longleftrightarrow\quad i_1 + b_0 \le M.
+$$
+
+For $b_0 = 0$, both bounds require $i_1 \le M$. For $b_0 = 1$, both
+require $i_1 \le M - 1$.
+
+The controller proves this inequality with a non-negative slack $y$:
+
+$$
+i_1 + b_0 + y = M,
+$$
+
+where
+
+$$
+y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3.
+$$
+
+The range bus checks all four limbs and also checks $2y_3$. The first four
+checks give $y_j < 2^{16}$. Since doubling $y_3$ cannot wrap modulo $Q$, the
+extra check gives $y_3 < 2^{15}$. Hence $0 \le y < 2^{63}$. The five requests
+are spread across the chiplet-responses, wiring, and hash-kernel columns to fit
+the existing per-row interaction budgets without adding another lookup column.
+All target the same `RangeCheck` bus, so only their combined multiset matters.
+
+The slack equation is checked in the field, but its left-hand side is at most
+$2^{64} - 1$, which is less than $M + Q$. In this interval, $M$ is the only
+integer congruent to $M$ modulo $Q$. The equation therefore also holds over the
+integers, proving $n < Q$. Conversely, every canonical index has the slack
+$y = M - i_1 - b_0$; when $n = Q - 1$, the slack is zero.
+
+The four slack limbs reuse the controller's capacity columns on the level-0
+Merkle input row. The permutation-link lookup sends zeros in those positions,
+so the Poseidon2 input and the resulting Merkle root do not change.
+
 ## CRYPTOSTREAM
 The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
 top 8 stack elements (the rate), writes the resulting ciphertext back to memory,

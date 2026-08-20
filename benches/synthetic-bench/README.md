@@ -238,6 +238,51 @@ Env vars:
 The `prove` and `verify` axes use `HashFunction::Poseidon2` for STARK
 proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`).
 
+## Recursive-verification benchmarks
+
+The `recursive_verify` benchmark measures recursive verification of synthetic transaction proofs.
+First emit the `consume-single-p2id-note` transaction fixture:
+
+```sh
+SYNTH_SCENARIO="consume single P2ID note" \
+SYNTH_BENCH_AXES=exec \
+SYNTH_MASM_WRITE=1 \
+cargo bench -p miden-vm-synthetic-bench --bench synthetic_bench --profile optimized
+```
+
+Then pass the generated MASM program to the recursive benchmark. By default it measures two
+through eight MVM proofs:
+
+```sh
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note.masm" \
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
+
+Set `RECURSION_BENCH_TX_PROOF_CACHE_DIR` to reuse the generated transaction proofs across runs.
+Relative cache paths are resolved from the workspace root.
+
+### PVM comparison
+
+The focused comparison places mixed cases containing one proof of the canonical
+100-Keccak/4-ECDSA deferred workload beside pure-MVM baselines:
+
+```sh
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note.masm" \
+RECURSION_PVM_COMPARISON=1 \
+RECURSION_BENCH_TX_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/tx" \
+RECURSION_BENCH_PVM_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/pvm" \
+RECURSION_PROFILE_PROVE=1 \
+RECURSION_PROFILE_PROVE_REPEATS=10 \
+RECURSION_PROFILE_PROVE_WARMUPS=1 \
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
+
+The four cases are `4 MVM + 1 PVM`, `7 MVM`, `5 MVM + 1 PVM`, and `8 MVM`, in that order. Eight
+distinct proofs of the same synthetic transaction program and the single PVM proof are loaded or
+generated before any timed section. Set `RECURSION_PROFILE_ONLY=1` to print trace shapes without
+Criterion timing, or `RECURSION_PROFILE_PROVE=1` to record repeated outer-proof measurements. The
+profile mode rotates the starting case in each round to limit cache and thermal ordering bias.
+
 ## License
 
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.

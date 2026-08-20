@@ -3,18 +3,35 @@ use alloc::vec::Vec;
 use miden_ace_codegen::{
     AceConfig, AceError, FactoredCircuitFactory, LayoutKind, ShuffleEncodeBuffer,
 };
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2, field::QuadFelt};
 use miden_crypto::merkle::MerklePath;
 
 use super::multi_air::build_factored_multi_air_ace_circuit;
-use crate::{MIDEN_AIR_COUNT, ProofOrder};
+use crate::{AIRS, MIDEN_AIR_COUNT, ProofOrder};
+
+/// Number of quotient chunks the recursive verifier and its ACE circuit consume.
+///
+/// This is the same symbolic derivation the lifted-STARK prover and verifier use. Keeping it
+/// executable matters even though the Miden relation currently derives eight chunks: the MASM
+/// quotient-recomposition inputs are functions of this value, not of the coincidentally equal
+/// blowup factor.
+fn recursive_verifier_num_quotient_chunks() -> usize {
+    let max_log_quotient_degree = AIRS
+        .iter()
+        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .max()
+        .expect("the Miden AIR set is non-empty");
+    1usize << max_log_quotient_degree
+}
 
 /// ACE codegen settings used by the recursive verifier's MASM evaluator.
-const RECURSIVE_VERIFIER_ACE_CONFIG: AceConfig = AceConfig {
-    num_quotient_chunks: 8,
-    layout: LayoutKind::Masm,
-    num_airs: MIDEN_AIR_COUNT,
-};
+fn recursive_verifier_ace_config() -> AceConfig {
+    AceConfig {
+        num_quotient_chunks: recursive_verifier_num_quotient_chunks(),
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    }
+}
 
 /// Encoded recursive-verifier ACE circuit and the metadata consumed by MASM.
 ///
@@ -57,7 +74,7 @@ pub struct RecursiveAceCircuitFactory {
     /// The generic factory owns all order-invariant caching (post-constants sponge
     /// state, common-section digest) and the construction cross-checks; this type only
     /// maps [`ProofOrder`]s onto instance-index permutations.
-    inner: FactoredCircuitFactory<miden_core::field::QuadFelt>,
+    inner: FactoredCircuitFactory<QuadFelt>,
 }
 
 impl RecursiveAceCircuitFactory {
@@ -68,7 +85,7 @@ impl RecursiveAceCircuitFactory {
     /// encode-only shuffle bytes against the assembled stream, and the resumed prefix
     /// hash against hashing the full prefix.
     pub fn new() -> Result<Self, AceError> {
-        let factored = build_factored_multi_air_ace_circuit(RECURSIVE_VERIFIER_ACE_CONFIG)?;
+        let factored = build_factored_multi_air_ace_circuit(recursive_verifier_ace_config())?;
         let inner = FactoredCircuitFactory::new(factored.into_inner())?;
         Ok(Self { inner })
     }
@@ -76,6 +93,11 @@ impl RecursiveAceCircuitFactory {
     /// Instance-index permutation for one proof order.
     fn order_indices(order: &ProofOrder) -> Vec<usize> {
         order.airs().iter().map(|air| air.instance_index()).collect()
+    }
+
+    /// Quotient chunk count recorded in the factored circuit's actual READ layout.
+    pub fn num_quotient_chunks(&self) -> usize {
+        self.inner.factored().layout().counts.num_quotient_chunks
     }
 
     /// Compute the registry leaf for one proof order without assembling its circuit.
@@ -125,33 +147,14 @@ pub(crate) fn shared_recursive_factory() -> &'static RecursiveAceCircuitFactory 
     })
 }
 
-/// One proof order's complete registry entry: the encoded circuit the verifier evaluates
-/// and the leaf-plus-path that authenticates it in the registry tree.
-///
-/// Fields are private so an entry only exists once the constructor's leaf-equals-commitment
-/// check has passed; consume it with [`Self::into_parts`].
-pub struct RecursiveRegistryEntry {
-    /// Encoded circuit for the order.
-    circuit: RecursiveAceCircuit,
-    /// Registry leaf: the circuit's commitment.
-    leaf: Word,
-    /// Authentication path from the leaf to the registry root.
-    path: MerklePath,
-}
-
-impl RecursiveRegistryEntry {
-    /// Consumes the entry into `(circuit, leaf, path)`.
-    pub fn into_parts(self) -> (RecursiveAceCircuit, Word, MerklePath) {
-        (self.circuit, self.leaf, self.path)
-    }
-}
-
-/// Derives circuit, leaf, and path for one proof order from a single factory.
+/// Derives the circuit and its authentication path for one proof order from a single factory.
 ///
 /// `std` uses the process-wide factory and the cached registry tree; without `std` one
 /// factory and one tree are built for this call and serve both outputs, instead of one
 /// build for the path and another for the circuit.
-pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryEntry, AceError> {
+pub fn recursive_registry_entry(
+    order: &ProofOrder,
+) -> Result<(RecursiveAceCircuit, MerklePath), AceError> {
     #[cfg(feature = "std")]
     {
         let circuit = shared_recursive_factory().circuit_for_order(order)?;
@@ -161,7 +164,7 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+        Ok((circuit, path))
     }
     #[cfg(not(feature = "std"))]
     {
@@ -174,7 +177,7 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
             circuit.commitment, leaf,
             "ACE registry tree drifted from the factory's circuits"
         );
-        Ok(RecursiveRegistryEntry { circuit, leaf, path })
+        Ok((circuit, path))
     }
 }
 
@@ -192,7 +195,7 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
 pub fn build_recursive_verifier_ace_circuit(
     order: &ProofOrder,
 ) -> Result<RecursiveAceCircuit, AceError> {
-    let factored = build_factored_multi_air_ace_circuit(RECURSIVE_VERIFIER_ACE_CONFIG)?;
+    let factored = build_factored_multi_air_ace_circuit(recursive_verifier_ace_config())?;
     let circuit = factored.circuit_for_order(order)?;
     let encoded = circuit.to_ace()?;
     let instructions = encoded.instructions();

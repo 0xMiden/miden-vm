@@ -239,8 +239,6 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(transparent))]
     pub struct DebugSourceNodeId;
 );
 
@@ -431,10 +429,8 @@ pub struct SourceNode<Exec: Idx, Src: Idx> {
 
 impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
     pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops
-            .iter()
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        let insertion_index = self.asm_ops.partition_point(|row| row.op_idx <= op_idx);
+        insertion_index.checked_sub(1).and_then(|index| self.asm_ops.get(index))
     }
 
     pub fn debug_vars_for_operation(
@@ -450,14 +446,14 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
         debug_info: &DebugInfo<Exec, Src>,
     ) -> impl Iterator<Item = DebugVarInfo> {
         let mut type_cache = FxHashMap::<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>::default();
-        self.debug_vars_for_operation(op_idx).map(move |source_var| {
-            let name = debug_info[source_var.name_idx].clone();
+        self.debug_vars_for_operation(op_idx).filter_map(move |source_var| {
+            let name = debug_info.get_string(source_var.name_idx)?;
             let mut info = DebugVarInfo::new(name, source_var.value_location.clone());
             if let Some(arg_idx) = source_var.arg_idx {
                 info.set_arg_index(arg_idx.get())
             }
             if let Some(loc) = source_var.location_idx {
-                info.set_location(debug_info.get_location(loc).unwrap())
+                info.set_location(debug_info.get_location(loc)?)
             }
             if let Some(tid) = source_var.type_id {
                 if let Some((ty, declared_ty)) = type_cache.get(&tid) {
@@ -470,7 +466,7 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
                     info.set_ty(ty, declared_type);
                 }
             }
-            info
+            Some(info)
         })
     }
 }
@@ -529,11 +525,15 @@ impl DebugSourceAsmOp {
         }
     }
 
-    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> AssemblyOp {
-        let location = self.location_idx.into_option().and_then(|loc| debug_info.get_location(loc));
-        let context_name = debug_info[self.context_name_idx].clone();
-        let op = debug_info[self.op_name_idx].clone();
-        AssemblyOp::new(location, context_name, self.num_cycles, op)
+    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> Option<AssemblyOp> {
+        let location = self
+            .location_idx
+            .try_into_option()
+            .ok()?
+            .and_then(|loc| debug_info.get_location(loc));
+        let context_name = debug_info.get_string(self.context_name_idx)?;
+        let op = debug_info.get_string(self.op_name_idx)?;
+        Some(AssemblyOp::new(location, context_name, self.num_cycles, op))
     }
 }
 

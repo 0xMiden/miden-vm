@@ -257,20 +257,26 @@ impl Type {
                 let repr = match source.read_u8()? {
                     0 => TypeRepr::Default,
                     1 => {
-                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: alignment must be a non-zero value".to_string(),
-                            )
-                        })?;
+                        let align = source.read_u16()?;
+                        if !align.is_power_of_two() {
+                            return Err(DeserializationError::InvalidValue(
+                                "invalid type repr: alignment must be a power of two".to_string(),
+                            ));
+                        }
+                        let align =
+                            NonZeroU16::new(align).expect("power-of-two alignment is non-zero");
                         TypeRepr::Align(align)
                     },
                     2 => {
-                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: packed alignment must be a non-zero value"
+                        let align = source.read_u16()?;
+                        if !align.is_power_of_two() {
+                            return Err(DeserializationError::InvalidValue(
+                                "invalid type repr: packed alignment must be a power of two"
                                     .to_string(),
-                            )
-                        })?;
+                            ));
+                        }
+                        let align =
+                            NonZeroU16::new(align).expect("power-of-two alignment is non-zero");
                         TypeRepr::Packed(align)
                     },
                     3 => TypeRepr::Transparent,
@@ -290,13 +296,37 @@ impl Type {
                         None
                     };
                     let ty = Type::read_from_with_depth(source, next_depth)?;
+                    if u32::try_from(ty.size_in_bytes()).is_err() {
+                        return Err(DeserializationError::InvalidValue(
+                            "invalid struct field: size exceeds u32::MAX bytes".to_string(),
+                        ));
+                    }
                     fields.push(NameAndType { name, ty });
+                }
+                if repr == TypeRepr::Transparent
+                    && fields.iter().filter(|field| field.ty.size_in_bytes() != 0).count() > 1
+                {
+                    return Err(DeserializationError::InvalidValue(
+                        "invalid transparent struct: expected at most one non-zero-sized field"
+                            .to_string(),
+                    ));
                 }
                 Type::Struct(Arc::new(StructType::from_parts(name, repr, fields)))
             },
             18 => {
                 let arity = source.read_usize()?;
                 let ty = Type::read_from_with_depth(source, next_depth)?;
+                let element_size = u64::try_from(ty.size_in_bytes()).unwrap_or(u64::MAX);
+                let element_align = u64::try_from(ty.min_alignment()).unwrap_or(u64::MAX);
+                let padded_element_size = element_size.checked_next_multiple_of(element_align);
+                let size_in_bytes = padded_element_size.and_then(|padded_size| {
+                    u64::try_from(arity).ok().and_then(|arity| padded_size.checked_mul(arity))
+                });
+                if size_in_bytes.is_none_or(|size| size > u64::from(u32::MAX)) {
+                    return Err(DeserializationError::InvalidValue(
+                        "invalid array: size exceeds u32::MAX bytes".to_string(),
+                    ));
+                }
                 Type::Array(Arc::new(ArrayType { ty, len: arity }))
             },
             19 => {
@@ -362,7 +392,7 @@ impl Deserializable for Type {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{format, vec::Vec};
+    use alloc::{format, sync::Arc, vec::Vec};
 
     use miden_serde_utils::{BudgetedReader, ByteWriter, SliceReader};
 
@@ -422,6 +452,93 @@ mod tests {
 
         let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
         assert!(matches!(ty, Type::Ptr(_)));
+    }
+
+    #[test]
+    fn list_type_has_fat_pointer_layout() {
+        let ty = Type::List(Arc::new(Type::U8));
+
+        assert_eq!(ty.min_alignment(), 4);
+        assert_eq!(ty.size_in_bytes(), 8);
+    }
+
+    #[test]
+    fn struct_type_allows_zero_sized_and_list_fields() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(17);
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(2);
+        bytes.write_bool(false);
+        bytes.write_u8(1);
+        bytes.write_bool(false);
+        bytes.write_u8(19);
+        bytes.write_u8(4);
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        let Type::Struct(struct_ty) = ty else {
+            panic!("expected struct");
+        };
+        assert_eq!(struct_ty.fields().len(), 2);
+        assert_eq!(struct_ty.size(), 8);
+    }
+
+    #[test]
+    fn transparent_struct_allows_only_zero_sized_fields() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(17);
+        bytes.write_bool(false);
+        bytes.write_u8(3);
+        bytes.write_u8(1);
+        bytes.write_bool(false);
+        bytes.write_u8(1);
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        let Type::Struct(struct_ty) = ty else {
+            panic!("expected struct");
+        };
+        assert_eq!(struct_ty.size(), 0);
+    }
+
+    #[test]
+    fn array_type_allows_zero_sized_elements_at_large_arity() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(18);
+        bytes.write_usize(usize::MAX);
+        bytes.write_u8(1);
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        assert!(ty.is_zst());
+    }
+
+    #[test]
+    fn array_type_rejects_oversized_non_zero_elements() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(18);
+        bytes.write_usize(usize::MAX);
+        bytes.write_u8(4);
+
+        let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("invalid array"));
+    }
+
+    #[test]
+    fn enum_type_allows_zero_sized_variant_payloads() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(21);
+        write_str(&mut bytes, "E");
+        bytes.write_u8(4);
+        bytes.write_usize(1);
+        write_str(&mut bytes, "V");
+        bytes.write_bool(true);
+        bytes.write_u8(1);
+        bytes.write_bool(false);
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        assert!(matches!(ty, Type::Enum(_)));
     }
 
     #[test]

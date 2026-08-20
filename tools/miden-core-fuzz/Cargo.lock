@@ -179,6 +179,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -716,6 +741,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "miden-ace-codegen"
+version = "0.30.0"
+dependencies = [
+ "miden-constraint-compiler",
+ "miden-core",
+ "miden-crypto",
+ "miden-field",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-air"
+version = "0.30.0"
+dependencies = [
+ "miden-ace-codegen",
+ "miden-core",
+ "miden-crypto",
+ "miden-utils-indexing",
+ "p3-field",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "miden-assembly"
 version = "0.30.0"
 dependencies = [
@@ -759,6 +808,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-constraint-compiler"
+version = "0.30.0"
+dependencies = [
+ "miden-core",
+ "miden-crypto",
+]
+
+[[package]]
 name = "miden-core"
 version = "0.30.0"
 dependencies = [
@@ -771,7 +828,6 @@ dependencies = [
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
- "serde",
  "thiserror",
 ]
 
@@ -785,8 +841,8 @@ dependencies = [
  "miden-core",
  "miden-mast-package",
  "miden-package-registry",
+ "miden-processor",
  "miden-project",
- "serde_json",
  "toml",
 ]
 
@@ -919,7 +975,6 @@ name = "miden-mast-package"
 version = "0.30.0"
 dependencies = [
  "hashbrown",
- "log",
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
@@ -981,11 +1036,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-precompiles"
+version = "0.30.0"
+dependencies = [
+ "miden-core",
+ "miden-crypto",
+ "ruint",
+]
+
+[[package]]
+name = "miden-processor"
+version = "0.30.0"
+dependencies = [
+ "hashbrown",
+ "itertools",
+ "miden-air",
+ "miden-core",
+ "miden-debug-types",
+ "miden-mast-package",
+ "miden-precompiles",
+ "miden-utils-diagnostics",
+ "miden-utils-indexing",
+ "paste",
+ "rayon",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "miden-project"
 version = "0.30.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
+ "miden-debug-types",
  "miden-mast-package",
  "miden-package-registry",
  "proptest",
@@ -1056,7 +1140,6 @@ version = "0.30.0"
 dependencies = [
  "miden-serde-utils",
  "proptest",
- "serde",
  "thiserror",
 ]
 
@@ -1631,6 +1714,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1677,6 +1780,21 @@ dependencies = [
  "crypto-bigint",
  "hmac",
 ]
+
+[[package]]
+name = "ruint"
+version = "1.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e99bff0393163bb25029a6af25d3d8d202ba5b5438a74d1bd8789f5c822970"
+dependencies = [
+ "ruint-macro",
+]
+
+[[package]]
+name = "ruint-macro"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
 
 [[package]]
 name = "rustc-hash"

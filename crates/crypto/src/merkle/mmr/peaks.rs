@@ -10,7 +10,6 @@ use crate::{
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MmrPeaks {
     /// The number of leaves (represented by [`Forest`]) is used to differentiate MMRs that have
     /// the same number of peaks. This happens because the number of peaks goes up-and-down as

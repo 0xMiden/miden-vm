@@ -76,6 +76,7 @@ impl Type {
             | Self::Ptr(_)
             | Self::I16
             | Self::U16
+            | Self::List(_)
             | Self::Function(_)
             | Self::Enum(_)) => {
                 let len = ty.size_in_bytes();
@@ -383,9 +384,6 @@ impl Type {
                     }
                 },
             },
-            Type::List(_) => {
-                panic!("invalid type: list has no defined representation yet, so cannot be split")
-            },
             // These types either have no size, or are 1 byte in size, so must have
             // been handled above when checking if the size of the type is <= the
             // requested split size
@@ -407,7 +405,7 @@ impl Type {
             // 64-bit integers and floats must be element-aligned
             Self::I64 | Self::U64 | Self::F64 => 4,
             // 32-bit integers and pointers must be element-aligned
-            Self::I32 | Self::U32 | Self::Ptr(_) | Self::Function(..) => 4,
+            Self::I32 | Self::U32 | Self::Ptr(_) | Self::Function(..) | Self::List(_) => 4,
             // 16-bit integers can be naturally aligned
             Self::I16 | Self::U16 => 2,
             // 8-bit integers and booleans can be naturally aligned
@@ -418,8 +416,6 @@ impl Type {
             Self::Enum(enum_ty) => enum_ty.min_alignment(),
             // Arrays use the minimum alignment of their element type
             Self::Array(array_ty) => array_ty.min_alignment(),
-            // Lists use the minimum alignment of their element type
-            Self::List(element_ty) => element_ty.min_alignment(),
         }
     }
 
@@ -444,14 +440,12 @@ impl Type {
             Self::U256 => 256,
             // Raw pointers  are 32-bits, the same size as the native integer width, u32
             Self::Ptr(_) | Self::Function(_) => 32,
+            // Lists are fat pointers containing a pointer and a length.
+            Self::List(_) => 64,
             // Packed structs have no alignment padding between fields
             Self::Struct(struct_ty) => struct_ty.size as usize * 8,
             Self::Enum(enum_ty) => enum_ty.size_in_bits(),
             Self::Array(array_ty) => array_ty.size_in_bits(),
-            Type::List(_) => panic!(
-                "invalid type: list has no defined representation yet, so its size cannot be \
-                 determined"
-            ),
         }
     }
 

@@ -15,9 +15,10 @@ use miden_core::chiplets::hasher::Hasher;
 use rayon::prelude::*;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
-    perm_id_felt,
+    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, RATE_LEN, STATE_WIDTH, Selectors,
+    ZERO, perm_id_felt,
 };
+use crate::trace::range::RangeChecker;
 
 // HASHER OPERATION
 // ================================================================================================
@@ -37,6 +38,9 @@ enum HasherOp {
         is_boundary: Felt,
         direction_bit: Felt,
         perm_id: Felt,
+        /// Values written into the capacity columns when this row is materialized. `state` keeps
+        /// the zero-capacity permutation input used by requests and memoized replay.
+        canonicality_witness: Option<[Felt; 4]>,
     },
     /// Padding rows used to align the controller region inside `ChipletsAir`.
     Padding { count: usize, mrupdate_id: Felt },
@@ -113,6 +117,7 @@ impl HasherTrace {
         is_boundary: Felt,
         direction_bit: Felt,
         perm_id: Felt,
+        canonicality_witness: Option<[Felt; 4]>,
     ) {
         self.ops.push(HasherOp::Controller {
             selectors,
@@ -122,6 +127,7 @@ impl HasherTrace {
             is_boundary,
             direction_bit,
             perm_id,
+            canonicality_witness,
         });
         self.row_count += 1;
     }
@@ -136,6 +142,25 @@ impl HasherTrace {
             let count = CONTROLLER_TRACE_ALIGNMENT - remainder;
             self.ops.push(HasherOp::Padding { count, mrupdate_id });
             self.row_count += count;
+        }
+    }
+
+    /// Adds range checks for the four slack limbs and the doubled top limb of each level-0 Merkle
+    /// canonicality witness.
+    pub(super) fn append_range_checks(&self, range_checker: &mut RangeChecker) {
+        for op in &self.ops {
+            let HasherOp::Controller { canonicality_witness: Some(witness), .. } = op else {
+                continue;
+            };
+
+            let [slack_0, slack_1, slack_2, slack_3] = witness.map(|value| {
+                u16::try_from(value.as_canonical_u64())
+                    .expect("Merkle canonicality witness limb must fit in 16 bits")
+            });
+            let slack_3_double = slack_3
+                .checked_mul(2)
+                .expect("Merkle canonicality top slack limb must fit in 15 bits");
+            range_checker.add_range_checks(&[slack_0, slack_1, slack_2, slack_3, slack_3_double]);
         }
     }
 
@@ -199,6 +224,7 @@ impl HasherTrace {
                     is_boundary,
                     direction_bit,
                     perm_id,
+                    canonicality_witness,
                 } => {
                     write_controller_row(
                         &mut chunk_rows[0],
@@ -209,6 +235,7 @@ impl HasherTrace {
                         *is_boundary,
                         *direction_bit,
                         *perm_id,
+                        *canonicality_witness,
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
@@ -224,6 +251,7 @@ impl HasherTrace {
                             ZERO,
                             ZERO,
                             ZERO,
+                            None,
                         );
                     }
                 },
@@ -248,6 +276,7 @@ fn write_controller_row(
     is_boundary: Felt,
     direction_bit: Felt,
     perm_id: Felt,
+    canonicality_witness: Option<[Felt; 4]>,
 ) {
     let cols: &mut ControllerCols<Felt> = row.as_mut_slice().borrow_mut();
     let [s0, s1, s2] = selectors;
@@ -255,6 +284,9 @@ fn write_controller_row(
     cols.s1 = s1;
     cols.s2 = s2;
     cols.state = *state;
+    if let Some(witness) = canonicality_witness {
+        cols.state[RATE_LEN..].copy_from_slice(&witness);
+    }
     cols.node_index = node_index;
     cols.mrupdate_id = mrupdate_id;
     cols.is_boundary = is_boundary;

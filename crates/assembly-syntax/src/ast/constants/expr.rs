@@ -5,8 +5,6 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, Path,
@@ -275,10 +273,9 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 /// Represents the set of binary arithmetic operators supported in Miden Assembly syntax.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum ConstantOp {
     Add,
@@ -380,10 +377,9 @@ impl proptest::arbitrary::Arbitrary for ConstantOp {
 /// Represents the type of the final value to which some string value should be converted.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum HashKind {
     /// Reduce a string to a word using Blake3 hash function

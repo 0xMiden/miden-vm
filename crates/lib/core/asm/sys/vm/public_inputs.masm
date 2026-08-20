@@ -2,6 +2,7 @@ use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
 use miden::core::crypto::hashes::poseidon2
+use miden::core::sys::vm::layout
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -105,11 +106,12 @@ pub proc process_public_inputs
 
     # 1) Store the ACE public-input pointer.
     exec.get_num_fixed_len_public_inputs
+    exec.layout::aux_rand_elem_ptr
     exec.public_inputs::compute_and_store_public_inputs_address
     # => [...]
 
     # 2) Absorb [CLAIM_HASH | D].
-    padw exec.constants::claim_commitment_ptr mem_loadw_le
+    padw exec.layout::claim_commitment_ptr mem_loadw_le
     # => [CLAIM_HASH, ...]
     exec.absorb_claim_and_deferred_into_fs
     # => [...]
@@ -135,14 +137,14 @@ end
 #! Output: [...]
 pub proc stage_boundary_inputs
     # program_digest: claim region (+0) -> boundary_inputs (+0).
-    padw exec.constants::claim_ptr mem_loadw_le
+    padw exec.layout::claim_ptr mem_loadw_le
     # => [P, ...]
-    exec.constants::boundary_inputs_ptr mem_storew_le
+    exec.layout::boundary_inputs_ptr mem_storew_le
     # => [P, ...]
 
     # deferred_root from advice -> boundary_inputs (+4), loaded over the dead P word.
     adv_loadw
-    exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
+    exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_storew_le dropw
     # => [...]
 end
 
@@ -151,7 +153,7 @@ end
 #! Input:  [...]
 #! Output: [D, ...]
 pub proc load_deferred_root
-    padw exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
+    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
 end
 
 # HELPER PROCEDURES
@@ -173,7 +175,7 @@ proc compute_bus_gamma
     dup.1 dup.1 ext2mul   # β^8
     dup.1 dup.1 ext2mul   # β^16 = γ
     push.0.0 movup.3 movup.3
-    exec.constants::bus_gamma_ptr mem_storew_le
+    exec.layout::bus_gamma_ptr mem_storew_le
     dropw
 end
 
@@ -182,8 +184,8 @@ end
 #! Input:  [...]
 #! Output: [β0, β1, ...]
 proc push_beta
-    exec.constants::aux_rand_elem_ptr add.1 mem_load
-    exec.constants::aux_rand_elem_ptr mem_load
+    exec.layout::aux_rand_elem_ptr add.1 mem_load
+    exec.layout::aux_rand_elem_ptr mem_load
 end
 
 #! Computes the bus prefix `α + i·γ` for bus scale factor `i = bus_id + 1`.
@@ -192,13 +194,13 @@ end
 #! Output: [p0, p1, ...]
 proc push_alpha_plus_i_gamma
     dup
-    exec.constants::bus_gamma_ptr add.1 mem_load mul
+    exec.layout::bus_gamma_ptr add.1 mem_load mul
     # => [i·γ1, i, ...]
     swap
-    exec.constants::bus_gamma_ptr mem_load mul
+    exec.layout::bus_gamma_ptr mem_load mul
     # => [i·γ0, i·γ1, ...]
-    exec.constants::aux_rand_elem_ptr add.3 mem_load
-    exec.constants::aux_rand_elem_ptr add.2 mem_load
+    exec.layout::aux_rand_elem_ptr add.3 mem_load
+    exec.layout::aux_rand_elem_ptr add.2 mem_load
     # => [α0, α1, i·γ0, i·γ1, ...]
     ext2add
     # => [p0, p1, ...]
@@ -268,7 +270,7 @@ end
 proc fold_boundary_word_inv_term
     padw
     # => [0, 0, 0, 0, bus_id, offset, ...]
-    exec.constants::boundary_inputs_ptr
+    exec.layout::boundary_inputs_ptr
     dup.6 add
     # => [target, 0, 0, 0, 0, bus_id, offset, ...]
     mem_loadw_le
@@ -306,8 +308,8 @@ pub proc compute_outer_logup_correction
 
     # acc = 0; build [acc0, acc1, base, N] for the kernel fold.
     push.0.0
-    exec.constants::kernel_witness_ptr movdn.2
-    exec.constants::num_kernel_procedures_ptr mem_load movdn.3
+    exec.layout::kernel_witness_ptr movdn.2
+    exec.layout::num_kernel_procedures_ptr mem_load movdn.3
     # => [acc0, acc1, base, N, ...]   (acc = 0)
 
     #    Request a) kernel digests: Σ_i 1 / ((α + γ) + msg(digest_i)).
@@ -335,8 +337,8 @@ pub proc compute_outer_logup_correction
     # => [acc0, acc1, ...]   (acc = requests − response)
 
     #    Store c_total once.
-    exec.constants::c_total_ptr mem_store
-    exec.constants::c_total_ptr add.1 mem_store
+    exec.layout::c_total_ptr mem_store
+    exec.layout::c_total_ptr add.1 mem_store
     # => [...]
 end
 
@@ -351,7 +353,7 @@ end
 #! Output: [...]
 proc absorb_claim_and_deferred_into_fs
     # D from the boundary-inputs window
-    padw exec.constants::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
+    padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
     # => [D, CLAIM_HASH, ...]
 
     push.0 exec.constants::random_coin_output_len_ptr mem_store
@@ -383,7 +385,7 @@ end
 proc load_public_inputs
     padw padw padw
     # => [SCRATCH(12), ...]
-    exec.constants::claim_ptr add.8
+    exec.layout::claim_ptr add.8
     movdn.12
     exec.constants::public_inputs_address_ptr mem_load
     movdn.12
@@ -407,9 +409,9 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc observe_miden_air_shape
-    exec.constants::get_poseidon2_permutation_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    exec.constants::get_core_trace_length_log
+    exec.layout::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_chiplets_trace_length_log
+    exec.layout::get_core_trace_length_log
     push.NUM_MIDEN_AIRS
     # => [NUM_MIDEN_AIRS, core_log, chiplets_log, poseidon2_log, ...]
     exec.random_coin::observe_word

@@ -25,12 +25,6 @@ use miden::core::mem
 # Must match miden_core::program::CLAIM_DOMAIN_TAG (enforced by cross-tests).
 const CLAIM_DOMAIN_TAG = 0x01000101
 
-# Domain tag for the kernel commitment: the registered selector
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
-# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
-const KERNEL_DOMAIN_TAG = 0x01000001
-
 # Number of field elements in the canonical claim encoding.
 const NUM_CLAIM_ELEMENTS = 40
 
@@ -74,27 +68,4 @@ pub proc claim_commitment
     # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
     exec.poseidon2::hash_elements_in_domain
     # => [CLAIM_HASH, ...]
-end
-
-#! Computes the canonical kernel commitment over a raw kernel-procedure digest list.
-#!
-#! Mirrors miden_core::program::KernelDescriptor::commitment: the domain-tagged sequential hash
-#! of the flattened digests, length-bound by the sponge's padding rule, in the descriptor's
-#! canonical order.
-#!
-#! Inputs:  [kernel_ptr, num_kernel_procedures, ...]
-#! Outputs: [K, ...]
-#!
-#! Where:
-#! - kernel_ptr is the word-aligned address of the digest list.
-#! - num_kernel_procedures is the number of procedure digests in the list and must fit in a u32.
-#! - K is the kernel commitment.
-pub proc kernel_commitment
-    swap u32assert.err="number of kernel procedures must fit in a u32"
-    mul.4 swap
-    # => [kernel_ptr, num_elements, ...]
-    push.KERNEL_DOMAIN_TAG movdn.2
-    # => [kernel_ptr, num_elements, KERNEL_DOMAIN_TAG, ...]
-    exec.poseidon2::hash_elements_in_domain
-    # => [K, ...]
 end

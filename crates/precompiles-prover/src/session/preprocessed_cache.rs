@@ -23,7 +23,7 @@ use crate::{
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
 /// callers dereference to the underlying [`Preprocessed`] either way.
-pub(super) enum PreprocessedHandle<'a, L>
+pub(crate) enum PreprocessedHandle<'a, L>
 where
     L: Lmcs<F = Felt>,
 {
@@ -69,7 +69,7 @@ where
 
 macro_rules! cached_preprocessed {
     ($fn_name:ident, $config:ty) => {
-        pub(super) fn $fn_name(
+        pub(crate) fn $fn_name(
             config: &$config,
         ) -> PreprocessedHandle<'static, <$config as StarkConfig<Felt, QuadFelt>>::Lmcs> {
             #[cfg(feature = "std")]

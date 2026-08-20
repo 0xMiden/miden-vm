@@ -49,6 +49,6 @@ thiserror.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

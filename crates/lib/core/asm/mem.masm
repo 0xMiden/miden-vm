@@ -163,6 +163,36 @@ pub proc pipe_double_words_to_memory
   # [R0', R1', C', write_ptr', ...]
 end
 
+# Absorbs the even-word prefix and, when present, one final padded word.
+#
+# Inputs:  [C, write_ptr, end_ptr, needs_padding]
+# Outputs: [R0, R1, C', write_ptr']
+proc pipe_words_to_memory_with_capacity
+  # Set the initial rate to zero and absorb all complete rate blocks.
+  padw padw
+  exec.pipe_double_words_to_memory
+  # => [R0, R1, C', write_ptr, needs_padding, ...]
+
+  movup.13
+  # => [needs_padding, R0, R1, C', write_ptr, ...]
+
+  if.true
+    # Poseidon2 uses overwrite mode. Replace the rate with the final word and zero padding.
+    swapw dropw
+    adv_loadw
+    # => [R0', C', write_ptr, ...]
+
+    # Store the final word and advance write_ptr.
+    movup.8 dup add.4 movdn.5
+    mem_storew_le
+    movup.4 movdn.8
+    # => [R0', C', write_ptr+4, ...]
+
+    padw swapw exec.poseidon2::permute
+    # => [R0'', R1', C'', write_ptr+4, ...]
+  end
+end
+
 #! Copies an arbitrary number of words from the advice stack to memory, computing their permutation.
 #!
 #! Inputs:  [num_words, write_ptr]
@@ -199,48 +229,55 @@ pub proc pipe_words_to_memory
   # => [C, write_ptr, end_ptr, needs_padding, ...]
   # (C is the capacity word)
 
-  # set initial hasher state (8 cycles)
-  padw padw
-  # => [R0, R1, C, write_ptr, end_ptr, needs_padding, ...]
+  exec.pipe_words_to_memory_with_capacity
+end
 
-  # (9 + 6 * num_words cycles)
-  exec.pipe_double_words_to_memory
-  # => [R0, R1, C, write_ptr, needs_padding, ...]
-
-  # (4 cycles)
-  movup.13
-  # => [needs_padding, R0, R1, C, write_ptr, ...]
-
-  # if(needs_padding) (17 cycles)
+#! Copies advice words to memory while computing their domain-tagged hash.
+#!
+#! Inputs:  [domain, num_words, write_ptr]
+#! Outputs: [DIGEST, write_ptr']
+#!
+#! Where:
+#! - domain identifies the Poseidon2 hash domain.
+#! - num_words is the number of words copied from the advice stack.
+#! - write_ptr is the word-aligned destination address.
+#! - write_ptr' points immediately after the copied words.
+#! - DIGEST matches `Poseidon2::hash_elements_in_domain` over the copied felts.
+#!
+#! Total cycles:
+#! - empty, zero domain: 74 cycles
+#! - empty, nonzero domain: 71 cycles
+#! - non-empty and even `num_words`: 55 + 9 * num_words / 2
+#! - non-empty and odd `num_words`: 72 + 9 * round_down(num_words / 2)
+pub proc pipe_words_to_memory_in_domain
+  # Empty input has a distinct encoding under a nonzero domain. Reuse the canonical memory-based
+  # implementation; it does not read memory when num_elements is zero.
+  dup.1 eq.0
   if.true
-    # Poseidon2 uses overwrite mode, drop R1. (4 cycles)
-    swapw dropw
-    # => [R0, C, write_ptr, ...]
+    swap drop dup.1 push.0 swap
+    # => [write_ptr, num_elements=0, domain, write_ptr, ...]
+    exec.poseidon2::hash_elements_in_domain
+    # => [DIGEST, write_ptr, ...]
+  else
+    # Keep the domain below the word count while deriving the even-word prefix.
+    movdn.2
+    # => [num_words, write_ptr, domain, ...]
 
-    # Overwrite R0 with new data from advice stack (1 cycles)
-    adv_loadw
-    # => [R0', C, write_ptr, ...]
+    dup is_odd
+    dup movdn.4
+    # => [is_odd, num_words, write_ptr, domain, needs_padding, ...]
 
-    # - get the memory address that R0' should be saved to
-    # - update the write_ptr to point to the next address (4 cycles)
-    movup.8 dup.0 add.4 movdn.5
-    # => [write_ptr, R0', write_ptr+4, C, ...]
+    sub mul.4 dup.1 add swap
+    # => [write_ptr, end_ptr, domain, needs_padding, ...]
 
-    # save data to memory (1 cycles)
-    mem_storew_le
-    # => [R0', write_ptr+4, C, ...]
+    # Build capacity [num_felts % 8, domain, 0, 0]. For whole words, the remainder is
+    # needs_padding * 4.
+    movup.2 dup.3 mul.4 push.0.0 movup.3 movup.3
+    # => [C, write_ptr, end_ptr, needs_padding, ...]
 
-    # Fix write_ptr position (2 cycles)
-    movup.4 movdn.8
-    # => [R0', C, write_ptr+4, ...]
-
-    # Push padding word (4 cycles)
-    padw swapw
-    # => [R0', R1, C, write_ptr+4, ...]
-
-    # Run Poseidon2 permutation (1 cycles)
-    exec.poseidon2::permute
-    # => [R0'', R1', C', write_ptr+4, ...]
+    exec.pipe_words_to_memory_with_capacity
+    exec.poseidon2::squeeze_digest
+    # => [DIGEST, write_ptr', ...]
   end
 end
 

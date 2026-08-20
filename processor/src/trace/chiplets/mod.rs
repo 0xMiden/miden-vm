@@ -162,9 +162,10 @@ impl Chiplets {
     // EXECUTION TRACE
     // --------------------------------------------------------------------------------------------
 
-    /// Adds all range checks required by the memory chiplet to the provided `RangeChecker``
-    /// instance.
+    /// Adds all range checks required by the hasher and memory chiplets to the provided
+    /// `RangeChecker` instance.
     pub fn append_range_checks(&self, range_checker: &mut RangeChecker) {
+        self.hasher.append_range_checks(range_checker);
         self.memory.append_range_checks(self.memory_start(), range_checker);
     }
 

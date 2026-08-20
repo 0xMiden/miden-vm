@@ -48,7 +48,7 @@ pub type Digest512 = Digest<DIGEST512_BYTES>;
 /// defaulting to 32 bytes (256 bits).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(into = "String", try_from = "&str"))]
+#[cfg_attr(feature = "serde", serde(into = "String", try_from = "String"))]
 #[repr(transparent)]
 pub struct Digest<const N: usize = DIGEST256_BYTES>([u8; N]);
 
@@ -141,6 +141,14 @@ impl<const N: usize> TryFrom<&str> for Digest<N> {
         }
 
         hex_to_bytes(value).map(Self)
+    }
+}
+
+impl<const N: usize> TryFrom<String> for Digest<N> {
+    type Error = HexParseError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
     }
 }
 
@@ -261,6 +269,17 @@ mod tests {
         let hex: String = digest.into();
         let recovered = Digest::<24>::try_from(hex.as_str()).unwrap();
         assert_eq!(recovered.as_bytes(), &bytes);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_digest_deserializes_owned_json_string() {
+        let bytes = [0xab; 32];
+        let value = serde_json::Value::String(bytes_to_hex_string(bytes));
+
+        let digest: Digest<32> = serde_json::from_value(value).unwrap();
+
+        assert_eq!(digest.as_bytes(), &bytes);
     }
 
     #[test]

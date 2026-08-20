@@ -32,7 +32,6 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::{KernelDescriptor, Program, StackInputs},
 };
-use miden_utils_testing::rand::rand_value;
 
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
@@ -1572,8 +1571,8 @@ fn test_dyn_node_decoding() {
 // ================================================================================================
 
 #[test]
-fn set_user_op_helpers_many() {
-    // --- user operation with 4 helper values ----------------------------------------------------
+fn u32div_sets_all_user_op_helpers() {
+    // --- user operation with 6 helper values ----------------------------------------------------
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -1584,25 +1583,25 @@ fn set_user_op_helpers_many() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
+    let dividend = u32::MAX - 1;
+    let divisor = 1_000_003;
     let (trace, ..) = build_trace_helper(&[divisor as u64, dividend as u64], &program);
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.
-    // h2 to h5 are expected to hold the values for range checks.
-    let quot = dividend / divisor;
-    let rem = dividend - quot * divisor;
-    let check_1 = dividend - quot;
-    let check_2 = divisor as i128 - rem as i128 - 1; // note that `check2` is non-negative
+    // h2 to h7 are expected to hold the values for range checks.
+    let quotient = dividend / divisor;
+    let remainder = dividend - quotient * divisor;
+    let remainder_diff = divisor - remainder - 1;
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new_unchecked((check_1 as u16).into()),
-        Felt::new_unchecked(((check_1 >> 16) as u16).into()),
-        Felt::new_unchecked((check_2 as u16).into()),
-        Felt::new_unchecked(((check_2 >> 16) as u16).into()),
+        Felt::new_unchecked((quotient as u16).into()),
+        Felt::new_unchecked(((quotient >> 16) as u16).into()),
+        Felt::new_unchecked((remainder as u16).into()),
+        Felt::new_unchecked(((remainder >> 16) as u16).into()),
+        Felt::new_unchecked((remainder_diff as u16).into()),
+        Felt::new_unchecked(((remainder_diff >> 16) as u16).into()),
     ]);
 
     assert_eq!(expected, hasher_state);

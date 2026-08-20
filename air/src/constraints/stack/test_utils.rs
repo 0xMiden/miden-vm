@@ -11,18 +11,21 @@ use miden_crypto::stark::{
 
 use crate::trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH};
 
-pub(super) struct ConstraintEvalBuilder {
+pub(in crate::constraints) struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
     aux: RowMajorMatrix<QuadFelt>,
     randomness: Vec<QuadFelt>,
     permutation_values: Vec<QuadFelt>,
     periodic_values: Vec<Felt>,
-    pub(super) evaluations: Vec<QuadFelt>,
+    pub(in crate::constraints) evaluations: Vec<QuadFelt>,
     preprocessed_window: RowWindow<'static, Felt>,
+    first_row: Felt,
+    last_row: Felt,
+    transition: Felt,
 }
 
 impl ConstraintEvalBuilder {
-    pub(super) fn new() -> Self {
+    pub(in crate::constraints) fn new() -> Self {
         Self {
             main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
             aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2], AUX_TRACE_WIDTH),
@@ -31,7 +34,22 @@ impl ConstraintEvalBuilder {
             periodic_values: Vec::new(),
             evaluations: Vec::new(),
             preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+            first_row: Felt::ZERO,
+            last_row: Felt::ZERO,
+            transition: Felt::ONE,
         }
+    }
+
+    pub(in crate::constraints) fn with_row_flags(
+        mut self,
+        first_row: bool,
+        last_row: bool,
+        transition: bool,
+    ) -> Self {
+        self.first_row = Felt::from_bool(first_row);
+        self.last_row = Felt::from_bool(last_row);
+        self.transition = Felt::from_bool(transition);
+        self
     }
 }
 
@@ -53,15 +71,15 @@ impl AirBuilder for ConstraintEvalBuilder {
     }
 
     fn is_first_row(&self) -> Self::Expr {
-        Felt::ZERO
+        self.first_row
     }
 
     fn is_last_row(&self) -> Self::Expr {
-        Felt::ZERO
+        self.last_row
     }
 
     fn is_transition(&self) -> Self::Expr {
-        Felt::ONE
+        self.transition
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

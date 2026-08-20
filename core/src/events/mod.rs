@@ -5,8 +5,6 @@ use miden_crypto::{
     field::PrimeField64,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{Felt, utils::hash_string_to_word};
 
@@ -29,11 +27,9 @@ pub use sys_events::SystemEvent;
 ///
 /// Event IDs are derived from event names using blake3 hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct EventId(u64);
 
@@ -99,11 +95,9 @@ impl Display for EventId {
 /// For event identification during execution (e.g., reading from the stack), use [`EventId`]
 /// directly. Names can be looked up via the event registry when needed for error reporting.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct EventName(Cow<'static, str>);
 

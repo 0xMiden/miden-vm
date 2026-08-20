@@ -140,7 +140,7 @@ mod tests {
     fn program_executor_reports_invalid_advice_inputs() {
         let advice_inputs =
             AdviceInputs::default().with_map([(crate::Word::default(), vec![crate::Felt::ONE])]);
-        let options = ExecutionOptions::default().with_max_adv_map_elements(0);
+        let options = ExecutionOptions::default().with_max_advice_size_bytes(0);
 
         let result =
             <FastProcessor as ProgramExecutor>::new(StackInputs::default(), advice_inputs, options);

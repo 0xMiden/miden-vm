@@ -122,6 +122,19 @@ fn test_all_hash_functions_prove_verify() {
 }
 
 #[test]
+fn test_u32div_prove_verify() {
+    // Together, these divisions exercise both quotient limbs, both limbs of the remainder and its
+    // bound, and replay of more than one U32DIV range-check batch.
+    let source = "
+        begin
+            push.3866705 push.524299 u32divmod drop drop
+            push.196612 push.3 u32divmod drop drop
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+}
+
+#[test]
 fn test_keccak_precompile_wrapper_prove_verify_final() {
     let core_lib = CoreLibrary::default();
     let input: Vec<u8> = (0u8..32).collect();

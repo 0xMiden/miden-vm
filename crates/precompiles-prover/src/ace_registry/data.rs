@@ -21,6 +21,21 @@ pub const PVM_RELATION_DIGEST: [u64; 4] = [
     1141539045039940094,
 ];
 
+/// Commitment to the preprocessed (setup) trace tree under the Poseidon2 config (raw canonical
+/// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier cannot
+/// rebuild the bundle, so it observes this pinned value into the transcript.
+pub const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [
+    7881474831680931516,
+    14394696689869899287,
+    1264609894509183924,
+    18313229530128768945,
+];
+
+/// Encoded circuit shape, identical for every proof order: (READ variables, evaluation
+/// gates, stream length in felts). An in-VM verifier needs these as compile-time
+/// constants to size its reads and its ACE evaluation.
+pub const PVM_CIRCUIT_SHAPE: (usize, usize, usize) = (3104, 10776, 13792);
+
 /// The registry tree's 4096 nodes at depth 12 (raw canonical u64 limbs).
 #[rustfmt::skip]
 pub static PVM_ACE_REGISTRY_LEVEL12_ROW: [[u64; 4]; 4096] = [

@@ -11,7 +11,10 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{FileLineCol, Position, Selection, SourceId, SourceSpan, Uri};
+use super::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, FileLineCol, Position, Selection,
+    Serializable, SourceId, SourceSpan, Uri,
+};
 
 // SOURCE LANGUAGE
 // ================================================================================================
@@ -803,8 +806,23 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 )]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ByteIndex(pub u32);
+
+impl Serializable for ByteIndex {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for ByteIndex {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        u32::read_from(source).map(Self)
+    }
+}
 
 impl ByteIndex {
     /// Create a [ByteIndex] from a raw `u32` index
@@ -985,8 +1003,23 @@ macro_rules! declare_dual_number_and_index_type {
         )]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
-        #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+        #[cfg_attr(
+            all(feature = "arbitrary", test),
+            miden_test_serialization_macros::serialization_test
+        )]
         pub struct $index_name(pub u32);
+
+        impl Serializable for $index_name {
+            fn write_into<W: ByteWriter>(&self, target: &mut W) {
+                self.0.write_into(target);
+            }
+        }
+
+        impl Deserializable for $index_name {
+            fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+                u32::read_from(source).map(Self)
+            }
+        }
 
         impl $index_name {
             #[doc = concat!("Convert to a [", stringify!($number_name), "]")]
@@ -1121,7 +1154,7 @@ macro_rules! declare_dual_number_and_index_type {
         #[cfg_attr(feature = "serde", serde(transparent))]
         #[cfg_attr(
             all(feature = "arbitrary", test),
-            miden_test_serde_macros::serde_test(binary_serde(true))
+            miden_test_serialization_macros::serialization_test
         )]
         pub struct $number_name(NonZeroU32);
 
@@ -1268,10 +1301,6 @@ declare_dual_number_and_index_type!(Column, "column");
 
 // SERIALIZATION FOR LINE/COLUMN NUMBERS
 // ================================================================================================
-
-use miden_crypto::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-};
 
 impl Serializable for LineNumber {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

@@ -4,7 +4,9 @@ use assert_matches::assert_matches;
 
 use super::{
     super::{InnerNodeInfo, Poseidon2, Word},
-    Mmr, MmrError, MmrPeaks, PartialMmr, nodes_from_mask,
+    Mmr, MmrError, MmrPeaks, PartialMmr,
+    full::NodeStore,
+    nodes_from_mask,
 };
 use crate::{
     Felt,
@@ -175,17 +177,6 @@ fn test_forest_new_limit() {
     assert!(Forest::new(Forest::MAX_LEAVES + 1).is_err());
 }
 
-#[cfg(feature = "serde")]
-#[test]
-fn test_forest_serde_rejects_large_value() {
-    use serde::{Deserialize, de::value::UsizeDeserializer};
-
-    let result = Forest::deserialize(UsizeDeserializer::<serde::de::value::Error>::new(
-        Forest::MAX_LEAVES + 1,
-    ));
-    assert!(result.is_err());
-}
-
 #[test]
 fn test_forest_with_single_leaf_limit() {
     let forest = Forest::new(Forest::MAX_LEAVES).unwrap();
@@ -221,7 +212,7 @@ fn test_forest_without_trees_does_not_add_bits() {
 fn test_mmr_add_limit_prevents_mutation() {
     let mut mmr = Mmr {
         forest: Forest::new(Forest::MAX_LEAVES).unwrap(),
-        nodes: Vec::new(),
+        nodes: NodeStore::new(),
     };
     let result = mmr.add(Word::empty());
     assert_matches!(result, Err(MmrError::ForestSizeExceeded { .. }));
@@ -597,7 +588,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[0]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 1);
     assert_eq!(mmr.nodes.len(), 1);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 1);
@@ -606,7 +597,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[1]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 2);
     assert_eq!(mmr.nodes.len(), 3);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 2);
@@ -615,7 +606,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[2]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 3);
     assert_eq!(mmr.nodes.len(), 4);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 3);
@@ -624,7 +615,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[3]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 4);
     assert_eq!(mmr.nodes.len(), 7);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 4);
@@ -633,7 +624,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[4]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 5);
     assert_eq!(mmr.nodes.len(), 8);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 5);
@@ -642,7 +633,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[5]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 6);
     assert_eq!(mmr.nodes.len(), 10);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 6);
@@ -651,7 +642,7 @@ fn test_mmr_simple() {
     mmr.add(LEAVES[6]).unwrap();
     assert_eq!(mmr.forest().num_leaves(), 7);
     assert_eq!(mmr.nodes.len(), 11);
-    assert_eq!(mmr.nodes.as_slice(), &postorder[0..mmr.nodes.len()]);
+    assert_eq!(mmr.nodes, &postorder[0..mmr.nodes.len()]);
 
     let acc = mmr.peaks();
     assert_eq!(acc.num_leaves(), 7);

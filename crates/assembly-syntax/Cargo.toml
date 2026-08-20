@@ -24,13 +24,7 @@ std = [
     "thiserror/std",
     "proptest?/std",
 ]
-serde = [
-    "dep:serde",
-    "miden-core/serde",
-    "miden-debug-types/serde",
-    "semver/serde",
-    "smallvec/serde",
-]
+serde = ["dep:serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
@@ -56,10 +50,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }
-serde_json = { workspace = true }
+serde_json.workspace = true
 
 [build-dependencies]
 rustc_version = "0.4"

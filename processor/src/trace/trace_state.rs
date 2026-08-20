@@ -2,7 +2,7 @@ use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HasherState, RATE_LEN, STATE_WIDTH},
+    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, RATE_LEN, STATE_WIDTH},
 };
 use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
 
@@ -858,12 +858,26 @@ impl IntoIterator for AceReplay {
 // RANGE CHECKER REPLAY
 // ================================================================================================
 
+/// Values requested from the 16-bit range-check table by a single operation.
+#[derive(Debug)]
+pub enum RangeCheckReplayValues {
+    Two([u16; 2]),
+    Four([u16; 4]),
+}
+
+impl AsRef<[u16]> for RangeCheckReplayValues {
+    fn as_ref(&self) -> &[u16] {
+        match self {
+            Self::Two(values) => values,
+            Self::Four(values) => values,
+        }
+    }
+}
+
 /// Replay data for range checking operations.
-///
-/// This currently only records
 #[derive(Debug, Default)]
 pub struct RangeCheckerReplay {
-    range_checks_u32_ops: VecDeque<[u16; 4]>,
+    range_checks: VecDeque<RangeCheckReplayValues>,
 }
 
 impl RangeCheckerReplay {
@@ -872,17 +886,34 @@ impl RangeCheckerReplay {
 
     /// Records the set of range checks which result from a u32 operation.
     pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
-        self.range_checks_u32_ops.push_back(u16_limbs);
+        self.range_checks.push_back(RangeCheckReplayValues::Four(u16_limbs));
+    }
+
+    /// Records the two range checks which enforce that a Merkle depth is in `[1, 64]`.
+    pub fn record_merkle_depth(&mut self, depth: Felt) {
+        let depth =
+            u16::try_from(depth.as_canonical_u64()).expect("Merkle depth must fit in 16 bits");
+        let scaled_depth = depth
+            .checked_sub(1)
+            .and_then(|depth_minus_one| depth_minus_one.checked_mul(MERKLE_DEPTH_RANGE_SCALE))
+            .expect("Merkle depth must be in the range 1..=64");
+
+        self.range_checks.push_back(RangeCheckReplayValues::Two([depth, scaled_depth]));
+    }
+
+    /// Records the two 16-bit limbs of `divisor - remainder - 1` for U32DIV.
+    pub fn record_u32div_remainder_diff(&mut self, u16_limbs: [u16; 2]) {
+        self.range_checks.push_back(RangeCheckReplayValues::Two(u16_limbs));
     }
 }
 
 impl IntoIterator for RangeCheckerReplay {
-    type Item = [u16; 4];
-    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
+    type Item = RangeCheckReplayValues;
+    type IntoIter = <VecDeque<RangeCheckReplayValues> as IntoIterator>::IntoIter;
 
-    /// Returns an iterator over all recorded range checks resulting from u32 operations.
+    /// Returns an iterator over all range checks recorded during execution.
     fn into_iter(self) -> Self::IntoIter {
-        self.range_checks_u32_ops.into_iter()
+        self.range_checks.into_iter()
     }
 }
 

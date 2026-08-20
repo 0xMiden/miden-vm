@@ -21,6 +21,13 @@ use rstest::rstest;
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
+mod pvm_aux_trace;
+mod pvm_deep_queries;
+mod pvm_ood_frames;
+mod pvm_public_inputs;
+mod pvm_settlement;
+mod pvm_verifier;
+mod pvm_wrapper;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -146,14 +153,15 @@ fn folding_reseed_helper_matches_reference_sampler() {
 }
 
 #[test]
-fn word_observe_helpers_match_scalar_observe() {
+fn word_and_pair_observe_helpers_match_scalar_observe() {
     fn source(use_word_helpers: bool) -> String {
         let observe = if use_word_helpers {
             "
             push.11.7.5.3
             exec.random_coin::observe_word
-            push.23.19.17.13
-            exec.random_coin::observe_word_and_flush_buffer
+            push.17.13
+            exec.random_coin::observe_pair
+            exec.random_coin::flush_buffer
             "
         } else {
             "
@@ -163,8 +171,7 @@ fn word_observe_helpers_match_scalar_observe() {
             push.11 exec.random_coin::observe_felt
             push.13 exec.random_coin::observe_felt
             push.17 exec.random_coin::observe_felt
-            push.19 exec.random_coin::observe_felt
-            push.23 exec.random_coin::observe_felt
+            exec.random_coin::flush_buffer
             "
         };
 
@@ -199,9 +206,20 @@ fn word_observe_helpers_match_scalar_observe() {
     assert_eq!(
         optimized.stack.get_num_elements(13),
         reference.stack.get_num_elements(13),
-        "word observe helpers changed random coin state"
+        "batched observe helpers changed random coin state"
     );
     assert_eq!(optimized.stack.get_element(12), Some(Felt::from_u32(8)));
+
+    let invalid = build_test!(
+        "
+        use miden::core::stark::random_coin
+        begin
+            push.2.1 exec.random_coin::observe_pair
+        end
+        ",
+        &[]
+    );
+    expect_assert_error_message!(invalid);
 }
 
 #[test]
@@ -347,6 +365,7 @@ fn request_consumer_source() -> String {
     format!(
         "
         use miden::core::sys
+        use miden::core::stark::utils
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
 
@@ -376,7 +395,7 @@ fn request_consumer_source() -> String {
             #    threshold (>= 96 conjectured bits).
             swapw
             # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
-            exec.vm::compute_conjectured_security_level
+            exec.utils::conjectured_security_level
             # => [conjectured_level, deep_pow_bits, folding_pow_bits, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             drop drop
@@ -466,6 +485,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
     let source = format!(
         "
         use miden::core::sys
+        use miden::core::stark::utils
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
 
@@ -482,7 +502,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
             exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
-            swapw exec.vm::compute_conjectured_security_level # => [level, deep_pow, fold_pow, D]
+            swapw exec.utils::conjectured_security_level # => [level, deep_pow, fold_pow, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             drop drop                                    # => [D]
         end
@@ -812,6 +832,7 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
         "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
+        use miden::core::sys::vm::layout
         use miden::core::sys::vm::public_inputs
 
         {COPY_ADVICE_TO_MEM}
@@ -821,28 +842,28 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
             # Copy kernel digests (4·num_kernel_procedures felts) from advice into the witness
             # region. Build [dst=KERNEL_WITNESS_PTR, count=4N].
-            dup mul.4 exec.constants::kernel_witness_ptr
+            dup mul.4 exec.layout::kernel_witness_ptr
             exec.copy_advice_to_mem
 
             # Copy the full claim encoding P | K | I | O into verifier-owned memory.
-            push.{NUM_CLAIM_ELEMENTS} exec.constants::claim_ptr
+            push.{NUM_CLAIM_ELEMENTS} exec.layout::claim_ptr
             exec.copy_advice_to_mem
 
-            exec.constants::num_kernel_procedures_ptr mem_store
+            exec.layout::num_kernel_procedures_ptr mem_store
             exec.public_inputs::stage_boundary_inputs
 
-            push.10 exec.constants::set_core_trace_length_log
-            push.10 exec.constants::set_chiplets_trace_length_log
-            push.10 exec.constants::set_poseidon2_permutation_trace_length_log
+            push.10 exec.layout::set_core_trace_length_log
+            push.10 exec.layout::set_chiplets_trace_length_log
+            push.10 exec.layout::set_poseidon2_permutation_trace_length_log
             push.10 exec.constants::set_trace_length_log
             push.4.3.2.1 exec.constants::relation_digest_ptr mem_storew_le dropw
             push.{claim_c3}.{claim_c2}.{claim_c1}.{claim_c0}
-            exec.constants::claim_commitment_ptr mem_storew_le dropw
+            exec.layout::claim_commitment_ptr mem_storew_le dropw
 
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
 
-            padw adv_loadw exec.constants::aux_rand_elem_ptr mem_storew_le dropw
+            padw adv_loadw exec.layout::aux_rand_elem_ptr mem_storew_le dropw
             exec.public_inputs::compute_outer_logup_correction
         end
         "
@@ -861,10 +882,10 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             .as_canonical_u64()
     };
 
-    // Must match `crates/lib/core/asm/stark/constants.masm`.
+    // Must match `stark/constants.masm` and `sys/vm/layout.masm`.
     const BOUNDARY_INPUTS_PTR: u32 = 3223322836;
-    const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
-    const C_TOTAL_PTR: u32 = 3223322704;
+    const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
+    const C_TOTAL_PTR: u32 = 3223322772;
 
     let pi_ptr = read_elem(PUBLIC_INPUTS_ADDRESS_PTR) as u32;
 
@@ -935,19 +956,15 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
 
 #[test]
 fn quotient_recomposition_constants_match_derivation() {
-    // The quotient recomposition constants in `asm/stark/constants.masm` are precomputed for the
-    // fixed blowup factor. Re-derive them from `BLOWUP_FACTOR_LOG` and the field so that changing
-    // the blowup without regenerating the constants fails here instead of shipping stale values.
-
-    // Goldilocks two-adicity: p - 1 = 2^32 * (2^32 - 1), so the largest power-of-two subgroup has
-    // order 2^32.
-    const TWO_ADICITY: u32 = 32;
-    // Goldilocks multiplicative generator.
-    const GENERATOR: u32 = 7;
-
-    let masm =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/asm/stark/constants.masm"))
-            .expect("read constants.masm");
+    // The generated evaluator serializes values derived from two independent protocol inputs:
+    // quotient arity from the AIRs, and the canonical LDE shift from the PCS configuration. The
+    // VM currently has arity = blowup = 8, so deriving all three from the blowup would produce the
+    // same numbers and conceal the conflation that breaks relations where they differ.
+    let masm = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/asm/sys/vm/constraints_eval.masm"
+    ))
+    .expect("read generated VM constraints evaluator");
     let masm_const = |name: &str| -> u64 {
         masm.lines()
             .find_map(|line| {
@@ -957,31 +974,27 @@ fn quotient_recomposition_constants_match_derivation() {
                 }
                 Some(rhs.split_whitespace().next()?.parse().expect("parse const value"))
             })
-            .unwrap_or_else(|| panic!("const {name} not found in constants.masm"))
+            .unwrap_or_else(|| panic!("const {name} not found in VM constraints evaluator"))
     };
 
-    let blowup_log = masm_const("BLOWUP_FACTOR_LOG") as u32;
-    let root_unity = Felt::new(masm_const("ROOT_UNITY")).unwrap();
     let shift_ratio = Felt::new(masm_const("QUOTIENT_SHIFT_RATIO")).unwrap();
     let first_shift = Felt::new(masm_const("QUOTIENT_FIRST_SHIFT")).unwrap();
     let first_weight = Felt::new(masm_const("QUOTIENT_FIRST_WEIGHT")).unwrap();
 
-    // With log_lde = log_trace + BLOWUP_FACTOR_LOG, both lde_g^N and offset^N collapse to one
-    // exponent that is independent of the trace length N = 2^log_trace.
-    let exp = 1u64 << (TWO_ADICITY - blowup_log);
-    let blowup = 1u32 << blowup_log;
+    let log_quotient_degree = miden_air::AIRS
+        .iter()
+        .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
+        .max()
+        .expect("the Miden AIR set is non-empty");
+    let expected = miden_crypto::stark::quotient_recomposition_inputs::<Felt>(
+        log_quotient_degree,
+        miden_air::config::pcs_params().log_blowup(),
+    )
+    .expect("the Miden quotient degree fits its PCS blowup");
 
-    // f = lde_g^N: the primitive 2^BLOWUP_FACTOR_LOG-th root of unity.
-    assert_eq!(root_unity.exp_u64(exp), shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
-
-    // s0 = offset^N with offset = GENERATOR^(2^(TWO_ADICITY - log_lde)).
-    let s0 = Felt::from_u32(GENERATOR).exp_u64(exp);
-    assert_eq!(s0, first_shift, "QUOTIENT_FIRST_SHIFT is stale");
-
-    // First barycentric weight = 1 / (BLOWUP_FACTOR * s0^(BLOWUP_FACTOR - 1)); check it as a
-    // reciprocal to avoid an explicit field inversion.
-    let denom = Felt::from_u32(blowup) * s0.exp_u64((blowup - 1) as u64);
-    assert_eq!((first_weight * denom).as_canonical_u64(), 1, "QUOTIENT_FIRST_WEIGHT is stale");
+    assert_eq!(shift_ratio, expected.shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
+    assert_eq!(first_shift, expected.first_shift, "QUOTIENT_FIRST_SHIFT is stale");
+    assert_eq!(first_weight, expected.first_weight, "QUOTIENT_FIRST_WEIGHT is stale");
 }
 
 // HELPERS
