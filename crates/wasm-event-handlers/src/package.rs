@@ -95,15 +95,25 @@ pub fn manifest_from_module(
 /// Builds an [`EventHandlerSection`] for a compiled guest module, deriving the manifest from
 /// the module's embedded `miden:event-manifest` records.
 ///
+/// The entries are sorted by event name. The record order in the module is wasm-ld link order,
+/// which changes with the toolchain, and the manifest order is part of the package identity, so
+/// derivation must canonicalize the order.
+///
 /// # Errors
-/// Same failure conditions as [`manifest_from_module`].
+/// Same failure conditions as [`manifest_from_module`], plus the section rules of
+/// [`EventHandlerSection::validate`].
 pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHandlerLoadError> {
-    let handlers = manifest_from_module(&wasm)?;
-    Ok(EventHandlerSection {
+    let mut handlers = manifest_from_module(&wasm)?;
+    handlers.sort_by(|a, b| a.event.as_str().cmp(b.event.as_str()));
+    let section = EventHandlerSection {
+        // While only ABI v1 exists, the module cannot need more than the current version. Once
+        // ABI v2 exists, derivation must compute the lowest version the module's imports need.
         abi_version: ABI_VERSION,
         module: wasm,
         handlers,
-    })
+    };
+    section.validate()?;
+    Ok(section)
 }
 
 /// Fuzzing support: returns `true` when the top-level section walk of `wasm` succeeds and every
@@ -171,4 +181,75 @@ fn parse_manifest_records(
         records = rest;
     }
     Ok(())
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use super::*;
+
+    /// Encodes `value` as LEB128.
+    fn leb_u32(mut value: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value == 0 {
+                out.push(byte);
+                return out;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    /// Builds a Wasm binary whose only section is the `miden:event-manifest` custom section, with
+    /// one record per `(event, export)` pair, in the given order.
+    fn module_with_manifest(handlers: &[(&str, &str)]) -> Vec<u8> {
+        let mut payload = leb_u32(MANIFEST_SECTION_NAME.len() as u32);
+        payload.extend_from_slice(MANIFEST_SECTION_NAME.as_bytes());
+        for (event, export) in handlers {
+            payload.push(MANIFEST_RECORD_VERSION);
+            for name in [event, export] {
+                payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+                payload.extend_from_slice(name.as_bytes());
+            }
+        }
+
+        // The 8-byte module header, then the custom section: ID 0, the LEB128 payload size, the
+        // payload.
+        let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x00];
+        wasm.extend_from_slice(&leb_u32(payload.len() as u32));
+        wasm.extend_from_slice(&payload);
+        wasm
+    }
+
+    #[test]
+    fn derived_manifest_is_sorted_by_event_name() {
+        let wasm = module_with_manifest(&[("test::wasm::b", "b"), ("test::wasm::a", "a")]);
+
+        // The raw records keep the link order of the module.
+        let entries = manifest_from_module(&wasm).expect("the manifest parses");
+        assert_eq!(entries[0].event.as_str(), "test::wasm::b");
+
+        // Derivation canonicalizes the order, so the link order cannot change the identity of
+        // the package.
+        let section = section_from_module(wasm).expect("the section derives");
+        let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
+        assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
+    }
+
+    #[test]
+    fn derived_section_applies_the_section_rules() {
+        // Two handlers for one event.
+        let wasm = module_with_manifest(&[("test::wasm::a", "a"), ("test::wasm::a", "b")]);
+        assert!(matches!(section_from_module(wasm), Err(WasmHandlerLoadError::Section(_))));
+
+        // An event in the reserved namespace.
+        let wasm = module_with_manifest(&[("sys::a", "a")]);
+        assert!(matches!(section_from_module(wasm), Err(WasmHandlerLoadError::Section(_))));
+    }
 }

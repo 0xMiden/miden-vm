@@ -7,13 +7,19 @@
 //! The section is semantic package content: handler code decides the advice a program receives,
 //! so the section is part of [`Package::dependency_commitment`](crate::Package::dependency_commitment). The
 //! manifest order inside the section is canonical — reordering entries changes the package
-//! identity.
+//! identity. Tooling that derives the manifest from a guest module sorts the entries by event
+//! name, so link order does not change the identity.
+//!
+//! [`EventHandlerSection::validate`] holds the rules that all paths share. Attaching, decoding,
+//! and deriving a section apply the same check, so every host sees the same set of accepted
+//! sections.
 //!
 //! Decoding applies explicit size caps ([`MAX_MODULE_BYTES`], [`MAX_HANDLERS`],
 //! [`MAX_NAME_BYTES`]), rejects oversized payloads before allocation, and rejects empty event
 //! and export names, since the section is untrusted input.
 
 use alloc::{
+    collections::BTreeSet,
     string::{String, ToString},
     vec::Vec,
 };
@@ -38,6 +44,9 @@ pub const MAX_HANDLERS: usize = 256;
 /// The maximum length of an event name or an export name, in bytes.
 pub const MAX_NAME_BYTES: usize = 255;
 
+/// The lowest ABI version a section can declare. Version 0 names no host/guest contract.
+const MIN_ABI_VERSION: u32 = 1;
+
 /// A lower bound on the serialized size of one manifest entry: the two name length prefixes.
 const MIN_ENTRY_BYTES: usize = 2;
 
@@ -51,7 +60,11 @@ pub struct EventHandlerSection {
     pub abi_version: u32,
     /// The Wasm binary of the handler module.
     pub module: Vec<u8>,
-    /// The manifest: one entry per handler the module provides. The order is canonical.
+    /// The manifest: one entry per handler the module provides.
+    ///
+    /// The order is canonical: it is part of the package identity. Derivation from a guest
+    /// module canonicalizes the order by event name, because the record order in the module is
+    /// link order and changes with the toolchain.
     pub handlers: Vec<EventHandlerManifestEntry>,
 }
 
@@ -69,6 +82,70 @@ impl EventHandlerManifestEntry {
     pub fn new(event: EventName, export: impl Into<String>) -> Self {
         Self { event, export: export.into() }
     }
+}
+
+// VALIDATION
+// ================================================================================================
+
+impl EventHandlerSection {
+    /// Checks the section against the rules that every path shares.
+    ///
+    /// The rules are: the ABI version is at least 1; the module, the handler count, and each
+    /// name stay inside their caps; each name is not empty; no two entries name the same event;
+    /// and no entry names an event in
+    /// [`EventName::RESERVED_NAMESPACE`](miden_core::events::EventName::RESERVED_NAMESPACE).
+    ///
+    /// Attaching, decoding, and deriving a section apply this check. The format decode does not:
+    /// it applies only the caps it needs before it allocates.
+    ///
+    /// # Errors
+    /// Returns an error when the section breaks one of the rules above.
+    pub fn validate(&self) -> Result<(), EventHandlerSectionError> {
+        if self.abi_version < MIN_ABI_VERSION {
+            return Err(EventHandlerSectionError::UnsupportedAbiVersion {
+                version: self.abi_version,
+            });
+        }
+        check_size_cap("module", self.module.len(), MAX_MODULE_BYTES)?;
+        check_size_cap("handler count", self.handlers.len(), MAX_HANDLERS)?;
+
+        let mut seen = BTreeSet::new();
+        for entry in &self.handlers {
+            for (field, name) in
+                [("event name", entry.event.as_str()), ("export name", entry.export.as_str())]
+            {
+                if name.is_empty() {
+                    return Err(EventHandlerSectionError::EmptyName { field });
+                }
+                check_size_cap(field, name.len(), MAX_NAME_BYTES)?;
+            }
+            if entry.event.is_reserved() {
+                return Err(EventHandlerSectionError::ReservedEventName {
+                    event: entry.event.clone(),
+                });
+            }
+            // A host registers handlers by event ID, so two entries with the same ID cannot both
+            // register.
+            if !seen.insert(entry.event.to_event_id()) {
+                return Err(EventHandlerSectionError::DuplicateEvent {
+                    event: entry.event.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Checks a length against its cap.
+fn check_size_cap(
+    field: &'static str,
+    actual: usize,
+    max: usize,
+) -> Result<(), EventHandlerSectionError> {
+    if actual > max {
+        return Err(EventHandlerSectionError::OverSizeCap { field, actual, max });
+    }
+    Ok(())
 }
 
 // ERRORS
@@ -102,6 +179,37 @@ pub enum EventHandlerSectionError {
         actual: usize,
         /// The cap for the field.
         max: usize,
+    },
+
+    /// The section declares an ABI version that no host/guest contract uses.
+    #[error("'event_handlers' section declares unsupported abi version {version}")]
+    UnsupportedAbiVersion {
+        /// The declared version.
+        version: u32,
+    },
+
+    /// A name of a manifest entry is empty.
+    #[error("'event_handlers' section {field} is empty")]
+    EmptyName {
+        /// The offending field.
+        field: &'static str,
+    },
+
+    /// More than one manifest entry names the same event.
+    #[error("'event_handlers' section has more than one handler for event '{event}'")]
+    DuplicateEvent {
+        /// The event with more than one handler.
+        event: EventName,
+    },
+
+    /// A manifest entry names an event in the reserved namespace, which only the VM can handle.
+    #[error(
+        "'event_handlers' section handles event '{event}' in the reserved '{namespace}' namespace",
+        namespace = EventName::RESERVED_NAMESPACE
+    )]
+    ReservedEventName {
+        /// The reserved event name.
+        event: EventName,
     },
 }
 
