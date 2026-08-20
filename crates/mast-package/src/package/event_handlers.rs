@@ -10,8 +10,8 @@
 //! identity.
 //!
 //! Decoding applies explicit size caps ([`MAX_MODULE_BYTES`], [`MAX_HANDLERS`],
-//! [`MAX_NAME_BYTES`]) and rejects oversized payloads before allocation, since the section is
-//! untrusted input.
+//! [`MAX_NAME_BYTES`]), rejects oversized payloads before allocation, and rejects empty event
+//! and export names, since the section is untrusted input.
 
 use alloc::{
     string::{String, ToString},
@@ -38,7 +38,7 @@ pub const MAX_HANDLERS: usize = 256;
 /// The maximum length of an event name or an export name, in bytes.
 pub const MAX_NAME_BYTES: usize = 255;
 
-/// The smallest serialized size of one manifest entry: two empty length-prefixed names.
+/// A lower bound on the serialized size of one manifest entry: the two name length prefixes.
 const MIN_ENTRY_BYTES: usize = 2;
 
 // EVENT HANDLER SECTION
@@ -137,12 +137,18 @@ fn read_capped_len<R: ByteReader>(
 /// Reads a length-prefixed string with `field` capped at [`MAX_NAME_BYTES`].
 ///
 /// The [`Deserializable`] impl of `String` reads the same bytes, but it applies no cap before it
-/// allocates, so the untrusted decode keeps this reader.
+/// allocates, so the untrusted decode keeps this reader. An empty name is refused: it names no
+/// event and no export.
 fn read_str<R: ByteReader>(
     source: &mut R,
     field: &'static str,
 ) -> Result<String, DeserializationError> {
     let len = read_capped_len(source, field, MAX_NAME_BYTES, 1)?;
+    if len == 0 {
+        return Err(DeserializationError::InvalidValue(alloc::format!(
+            "'event_handlers' section {field} is empty"
+        )));
+    }
     let bytes = source.read_slice(len)?;
     let value = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in {field}: {err}"))
@@ -242,6 +248,32 @@ mod tests {
         bytes.write_usize(MAX_NAME_BYTES + 1);
         let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         assert!(err.to_string().contains("cap"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn empty_event_name_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.write_u32(1);
+        bytes.write_usize(0);
+        bytes.write_usize(1);
+        // An empty event name, followed by a valid export name.
+        bytes.write_usize(0);
+        "handler".to_string().write_into(&mut bytes);
+        let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        assert!(err.to_string().contains("event name is empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn empty_export_name_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.write_u32(1);
+        bytes.write_usize(0);
+        bytes.write_usize(1);
+        EventName::new("test::wasm::a").write_into(&mut bytes);
+        // An empty export name.
+        bytes.write_usize(0);
+        let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        assert!(err.to_string().contains("export name is empty"), "unexpected error: {err}");
     }
 
     #[test]

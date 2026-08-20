@@ -180,8 +180,13 @@ pub enum AceEvalError {
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    #[error(
+        "attempted to add event handler for '{event}' (reserved '{namespace}' namespace)",
+        namespace = EventName::RESERVED_NAMESPACE
+    )]
     ReservedEventNamespace { event: EventName },
+    #[error("attempted to add event handler with an empty event name")]
+    EmptyEventName,
 }
 
 // IO ERROR

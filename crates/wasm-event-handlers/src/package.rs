@@ -137,6 +137,9 @@ fn split_custom_section(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 
 /// Parses concatenated manifest records: one version byte, then the event name and the export
 /// name, each as a little-endian `u32` length followed by the bytes.
+///
+/// The records come from an untrusted module, so empty names are refused here, before the
+/// manifest reaches [`WasmHandlerModule::new`].
 fn parse_manifest_records(
     mut records: &[u8],
     entries: &mut Vec<EventHandlerManifestEntry>,
@@ -160,6 +163,11 @@ fn parse_manifest_records(
         }
         let (event, rest) = read_name(rest).ok_or_else(malformed)?;
         let (export, rest) = read_name(rest).ok_or_else(malformed)?;
+        if event.is_empty() || export.is_empty() {
+            return Err(WasmHandlerLoadError::InvalidModule(
+                "manifest record has an empty event or export name".to_string(),
+            ));
+        }
         entries.push(EventHandlerManifestEntry::new(
             EventName::from_string(event.to_string()),
             export,

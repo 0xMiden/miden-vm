@@ -92,6 +92,7 @@ impl WasmHandlerModule {
     ///   signature the host function set does not provide;
     /// - the module has a start section;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
+    /// - a manifest entry has an empty event name or an empty export name;
     /// - the manifest contains a duplicate event or a reserved `sys::` event name.
     pub fn new(
         wasm: &[u8],
@@ -119,8 +120,11 @@ impl WasmHandlerModule {
 
         // Validate the manifest before touching the Wasm binary.
         let mut seen = BTreeSet::new();
-        for (event, _) in &manifest {
-            if event.as_str().starts_with("sys::") {
+        for (event, export) in &manifest {
+            if event.as_str().is_empty() || export.is_empty() {
+                return Err(WasmHandlerLoadError::EmptyManifestName);
+            }
+            if event.is_reserved() {
                 return Err(WasmHandlerLoadError::ReservedEvent { event: event.clone() });
             }
             if !seen.insert(event.to_event_id()) {
