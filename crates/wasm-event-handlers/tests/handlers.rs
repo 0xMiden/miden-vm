@@ -769,7 +769,10 @@ fn host_call_work_is_metered() {
     );
     // The budget covers the 13-page instantiation charge plus 1000 fuel for the body — far
     // less than the 100k-felt read the host call asks for.
-    let limits = WasmHandlerLimits { fuel: 13 * 65536 / 8 + 1000, ..Default::default() };
+    let limits = WasmHandlerLimits {
+        fuel: 13 * 65536 / 8 + 1000,
+        ..Default::default()
+    };
     let module = load_with_limits(&wat_src, limits);
     let err = run_raw(&module, &processor()).expect_err("handler must trap");
     // Fuel exhaustion inside a host call must classify as `OutOfFuel`, not `Trapped`.
@@ -789,9 +792,8 @@ fn memory_growth_is_capped() {
 fn instantiation_cost_over_the_fuel_budget_is_rejected_at_load() {
     // 16 initial pages (1 MiB) cost 131072 fuel to zero on every instantiation, far over a
     // 1000-fuel budget: no call could ever run.
-    let wat_src = format!(
-        "(module {IMPORTS} (memory (export \"memory\") 16) (func (export \"handler\")))"
-    );
+    let wat_src =
+        format!("(module {IMPORTS} (memory (export \"memory\") 16) (func (export \"handler\")))");
     let wasm = wat::parse_str(&wat_src).expect("fixture WAT must parse");
     let limits = WasmHandlerLimits { fuel: 1000, ..Default::default() };
     let manifest = vec![(EVENT, "handler".to_string())];
@@ -886,8 +888,7 @@ fn mutation_size_limit_is_enforced() {
 fn oversized_table_is_rejected_at_load() {
     // 1M funcref elements fit the fuel budget (the instantiation charge) but overstep the
     // table-element cap, so the load-time dry run refuses the eager 8 MB allocation.
-    let wat_src =
-        format!("(module {IMPORTS} (table 1000000 funcref) (func (export \"handler\")))");
+    let wat_src = format!("(module {IMPORTS} (table 1000000 funcref) (func (export \"handler\")))");
     let err = try_load(&wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
     assert!(matches!(err, WasmHandlerLoadError::Instantiation(_)), "unexpected error: {err}");
 }

@@ -13,7 +13,7 @@ use miden_processor::{
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventName},
 };
-use wasmi::{Config, EnforcedLimits, Engine, Linker, Module, Store};
+use wasmi::{Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
 
 use crate::{
     error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
@@ -214,6 +214,7 @@ impl WasmHandlerModule {
             .linker
             .instantiate_and_start(&mut store, &self.module)
             .map_err(|err| WasmHandlerLoadError::Instantiation(err.to_string()))?;
+        cache_memory(&mut store, &instance);
         for (_, export) in &self.manifest {
             instance.get_typed_func::<(), ()>(&store, export).map_err(|err| {
                 WasmHandlerLoadError::BadExport {
@@ -257,6 +258,7 @@ impl WasmHandlerModule {
             .linker
             .instantiate_and_start(&mut store, &self.module)
             .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
+        cache_memory(&mut store, &instance);
         let func = instance
             .get_typed_func::<(), ()>(&store, export)
             .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
@@ -274,6 +276,16 @@ impl WasmHandlerModule {
             },
         }
     }
+}
+
+/// Stores the instance's exported linear memory in the store data.
+///
+/// Host functions read the handle from there, so no host call repeats the export lookup. The
+/// handle stays unset for a module that exports no memory under the name `memory`; the first
+/// host call that takes a guest pointer then traps.
+fn cache_memory(store: &mut Store<HostCtx>, instance: &Instance) {
+    let memory = instance.get_memory(&*store, "memory");
+    store.data_mut().memory = memory;
 }
 
 /// Maps a wasmi error to the run-error variant, so resource-limit violations are
@@ -392,9 +404,7 @@ fn instantiation_fuel(wasm: &[u8]) -> Option<u64> {
             None => malformed = true,
         },
         TABLE_SECTION_ID => match limits_min_total(payload, true) {
-            Some(elems) => {
-                bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES))
-            },
+            Some(elems) => bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES)),
             None => malformed = true,
         },
         DATA_SECTION_ID | ELEMENT_SECTION_ID => {

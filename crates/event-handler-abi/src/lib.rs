@@ -59,6 +59,12 @@ pub const IMPORT_MODULE: &str = "miden:event/v1";
 /// read the section to construct the package manifest mechanically.
 pub const MANIFEST_SECTION_NAME: &str = "miden:event-manifest";
 
+/// The version byte that leads each record in the [`MANIFEST_SECTION_NAME`] custom section.
+///
+/// A record is this byte, then the event name and the export name, each as a little-endian `u32`
+/// length followed by the bytes.
+pub const MANIFEST_RECORD_VERSION: u8 = 1;
+
 /// The modulus of the Miden field (Goldilocks): `2^64 - 2^32 + 1`.
 ///
 /// A wire field element is canonical when its value is less than this modulus.
@@ -219,6 +225,8 @@ pub mod host_fn {
 pub mod guest {
     use super::{Felt, MerkleNode, Word};
 
+    // The attribute takes only a string literal, so the namespace is repeated here. Keep it in
+    // sync with [`IMPORT_MODULE`](super::IMPORT_MODULE).
     #[link(wasm_import_module = "miden:event/v1")]
     unsafe extern "C" {
         // QUERIES
@@ -271,6 +279,10 @@ pub mod guest {
         /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to
         /// `out`.
         ///
+        /// `index` is a field element in canonical form, not a plain integer: a value that is
+        /// not less than [`crate::FIELD_MODULUS`] traps. `depth` is a plain `u32`, which is
+        /// always canonical.
+        ///
         /// Returns `Status::NotFound` when the store has no tree with this root or no node at
         /// this position; `out` is not changed in that case. A `depth` or `index` outside the
         /// valid range for a Merkle tree traps.
@@ -279,7 +291,8 @@ pub mod guest {
         /// Returns `1` when the Merkle store has a path for the node of the tree with root
         /// `root` at `depth`/`index`, and `0` when it has not.
         ///
-        /// A `depth` or `index` outside the valid range for a Merkle tree traps.
+        /// `index` and `depth` follow the rules of `merkle_get_node`: a non-canonical `index`
+        /// traps, and so does a `depth` or `index` outside the valid range for a Merkle tree.
         pub fn merkle_has_path(root: *const Word, depth: u32, index: u64) -> i32;
 
         // HASHING

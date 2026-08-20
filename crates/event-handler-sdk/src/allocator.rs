@@ -26,6 +26,9 @@ struct Bump {
 // SAFETY: a handler runs alone in its instance, and the guest has no threads.
 unsafe impl Sync for Bump {}
 
+// SAFETY: `alloc` returns either null or the start of a region inside the pages this allocator
+// reserved, aligned to `layout.align()` and `layout.size()` bytes long. `next` only moves
+// forward, so no two live allocations overlap, and `dealloc` never reuses memory.
 unsafe impl GlobalAlloc for Bump {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: the cells are reachable only through this allocator, and the guest is
@@ -52,6 +55,9 @@ unsafe impl GlobalAlloc for Bump {
         match fit(previous * PAGE_SIZE, layout) {
             Some((start, stop)) => {
                 *next = stop;
+                // A successful grow means the host reserved `previous + pages` pages, and the
+                // host caps the handler memory far below the 4 GiB of the 32-bit address space,
+                // so the byte count of the reserved region fits in a 32-bit `usize`.
                 *end = (previous + pages) * PAGE_SIZE;
                 start as *mut u8
             },
