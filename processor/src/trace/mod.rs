@@ -37,7 +37,7 @@ mod tests;
 pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air::trace::RowIndex;
 pub use miden_core::deferred::PrecompileWitness;
-pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
+pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_budget};
 // Re-exported for the streaming trace-build path
 // (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
 // uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.

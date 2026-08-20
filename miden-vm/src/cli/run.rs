@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -37,6 +37,10 @@ pub struct RunCmd {
     /// Maximum number of cycles a program is allowed to consume
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
+
+    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    #[arg(long = "max-prover-memory", default_value = "64Gi", value_parser = parse_byte_size)]
+    max_prover_memory: u64,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -144,7 +148,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
     )
-    .map_err(|err| Report::msg(format!("{err}")))?;
+    .map_err(|err| Report::msg(format!("{err}")))?
+    .with_max_prover_memory_bytes(params.max_prover_memory);
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
@@ -203,7 +208,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
     )
-    .map_err(|err| Report::msg(format!("{err}")))?;
+    .map_err(|err| Report::msg(format!("{err}")))?
+    .with_max_prover_memory_bytes(params.max_prover_memory);
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;

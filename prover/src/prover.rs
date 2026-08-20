@@ -101,21 +101,23 @@ impl Prover {
     #[tracing::instrument(name = "miden_vm", skip_all)]
     fn prove_vm_trace(&self, trace: VmTrace) -> Result<VmProof, ProverError> {
         let trace_len_summary = trace.trace_len_summary();
+        let params = config::pcs_params();
         tracing::event!(
             tracing::Level::INFO,
-            "Generated execution traces: core={}, range={}, chiplets={}, poseidon2={}, padded={}",
+            "Generated execution traces: core={}, range={}, chiplets={}, poseidon2={}, padded={}, \
+             estimated_prover_memory_bytes={:?}",
             trace_len_summary.core_trace_len(),
             trace_len_summary.range_trace_len(),
             trace_len_summary.chiplets_trace_len().trace_len(),
             trace_len_summary.poseidon2_permutation_trace_len(),
-            trace_len_summary.padded_trace_len()
+            trace_len_summary.padded_trace_len(),
+            trace_len_summary.prover_memory_bytes(&params)
         );
 
         let precompile_root = trace.precompile_root();
         let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
         let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.into_air_matrices();
 
-        let params = config::pcs_params();
         let proof_bytes = match self.hash_fn {
             HashFunction::Blake3_256 => {
                 let config = config::blake3_256_config(params, config::RELATION_DIGEST);

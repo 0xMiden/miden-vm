@@ -154,13 +154,24 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
+        use miden_air::{config, memory};
+
         use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 
         let stack_inputs = self.initial_stack_inputs();
+        let max_prover_memory_bytes = self.options.max_prover_memory_bytes();
+        // Derived the same way `build_trace_inner` derives its tier-1 row cap: the streamed
+        // hasher builds concurrently with execution, ahead of that call, so it needs its own
+        // copy of the cap.
+        let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
+            max_prover_memory_bytes,
+            &config::pcs_params(),
+        ));
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            max_prover_memory_bytes,
             sender,
         );
 
@@ -171,7 +182,7 @@ impl FastProcessor {
             let span = tracing::Span::current();
             let hasher = scope.spawn(move || {
                 let _span = span.entered();
-                build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
+                build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len)
             });
 
             // Liveness invariant: both match arms consume `tracer` by value, so the scope
@@ -243,6 +254,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
         Ok(Self::execution_witness_from_parts(
@@ -266,6 +278,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self.execute_with_package_debug_info_and_tracer_sync(
             program,
@@ -299,6 +312,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self.execute_with_package_debug_info_and_tracer_sync(
             program,
@@ -327,6 +341,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
         Ok(Self::execution_witness_from_parts(
@@ -351,6 +366,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self
             .execute_with_package_debug_info_and_tracer(
@@ -385,6 +401,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(
             self.options.core_trace_fragment_size(),
             self.options.max_stack_depth(),
+            self.options.max_prover_memory_bytes(),
         );
         let execution_output = self
             .execute_with_package_debug_info_and_tracer(

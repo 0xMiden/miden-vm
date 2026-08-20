@@ -1112,67 +1112,74 @@ fn chiplet_preflight_caps_combined_trace_len() {
     );
 }
 
-/// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
-/// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
-/// appended by `build_trace_with_max_len`.
-///
-/// `max_trace_len_offset_from_core_trace_len` is added to `core_trace_len` to compute
-/// `max_trace_len`.
+/// Tests `build_trace_with_budget` behavior at the exact byte-budget boundary computed from the
+/// actual padded per-AIR heights of a small program.
 #[rstest]
-// Case 1: max_trace_len is 1 less than core_trace_len, so the core trace check should fail.
+// Case 1: budget is 1 byte less than the exact modelled peak, so the budget check should fail.
 #[case(-1, false)]
-// Case 2: max_trace_len is equal to core_trace_len, so the core trace check should pass (not
-// strictly greater), and the function should succeed.
+// Case 2: budget equals the exact modelled peak, so the budget check should pass (not strictly
+// greater), and the function should succeed.
 #[case(0, true)]
-fn test_build_trace_with_max_len_corner_cases(
-    #[case] max_trace_len_offset_from_core_trace_len: isize,
+fn test_build_trace_with_budget_corner_cases(
+    #[case] budget_offset_from_exact_peak: i64,
     #[case] build_trace_succeeds: bool,
 ) {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+    fn build_witness() -> VmWitness {
+        let program = basic_block_program_small();
+        let processor = FastProcessor::new_with_options(
+            StackInputs::new(DEFAULT_STACK).unwrap(),
+            AdviceInputs::default(),
+            // A fragment size close to the program's real row count keeps the tier-1 allocation
+            // precheck (based on `fragment_size`, not the actual padded height) from dominating
+            // the exact byte-budget boundary this test targets.
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(MIN_TRACE_LEN)
+                .unwrap(),
+        )
+        .expect("processor advice inputs should fit advice map limits");
+        let mut host = DefaultHost::default();
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0
+    }
 
-    let program = basic_block_program_small();
+    // Measure the actual padded per-AIR heights under the default (generous) budget, then derive
+    // the exact modelled peak for those heights.
+    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let summary = measured.trace_len_summary();
+    let pcs_params = config::pcs_params();
+    let heights: [usize; MIDEN_AIR_COUNT] = [
+        pad_to_trace_length(summary.core_trace_len().max(summary.range_trace_len())),
+        pad_to_trace_length(summary.chiplets_trace_len().trace_len()),
+        pad_to_trace_length(summary.poseidon2_permutation_trace_len()),
+    ];
+    let exact_peak =
+        memory::prover_peak_bytes(&heights, &pcs_params).expect("modelled peak fits in u64");
+    let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    let mut host = DefaultHost::default();
-    let vm_witness =
-        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
-
-    // Compute the number of core trace rows generated, which includes the HALT row inserted by
-    // `build_trace_with_max_len`.
-    let core_trace_len = vm_witness.trace_replay().core_trace_contexts.len()
-        * vm_witness.trace_replay().fragment_size
-        + 1;
-
-    let max_trace_len = core_trace_len
-        .checked_add_signed(max_trace_len_offset_from_core_trace_len)
-        .unwrap();
-    let result = build_trace_with_max_len(vm_witness, max_trace_len);
+    let result = build_trace_with_budget(build_witness(), budget);
 
     assert_eq!(
         result.is_ok(),
         build_trace_succeeds,
-        "with max_trace_len={max_trace_len} (core_trace_len={core_trace_len}), \
+        "with budget={budget} (exact peak={exact_peak}), \
          expected build_trace_succeeds={build_trace_succeeds}"
     );
 
-    // Additionally, if we expect an error, verify that it's the expected `TraceLenExceeded` error
-    // with the correct `max_len`.
+    // Additionally, if we expect an error, verify that it's the expected `ProverMemoryExceeded`
+    // error with the correct fields.
     if !build_trace_succeeds {
         assert!(
-            matches!(result, Err(ExecutionError::TraceLenExceeded(max_len)) if max_len == max_trace_len),
-            "expected TraceLenExceeded({max_trace_len}), got: {result:?}"
+            matches!(
+                result,
+                Err(ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes })
+                    if estimated_bytes == exact_peak && budget_bytes == budget
+            ),
+            "expected ProverMemoryExceeded {{ estimated_bytes: {exact_peak}, budget_bytes: {budget} }}, \
+             got: {result:?}"
         );
     }
 }
 
-/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` (instead of panicking due
+/// Verifies that `build_trace_with_budget` returns `TraceLenExceeded` (instead of panicking due
 /// to arithmetic overflow) when `core_trace_contexts.len() * fragment_size` overflows `usize`.
 #[test]
 fn test_build_trace_returns_err_on_fragment_size_overflow() {
@@ -1195,7 +1202,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     vm_witness.trace_replay_mut().fragment_size = usize::MAX;
 
-    let result = build_trace_with_max_len(vm_witness, usize::MAX);
+    let result = build_trace_with_budget(vm_witness, u64::MAX);
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1203,51 +1210,72 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
 }
 
-/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the Poseidon2
-/// permutation trace exceeds `max_trace_len`, even though the core trace rows fit.
+/// Verifies that `build_trace_with_budget` returns `ProverMemoryExceeded` when the Poseidon2
+/// permutation trace pushes the exact modelled peak over budget, even though the core trace rows
+/// and the hasher chiplet's own trace fit comfortably: the AIRs pad independently, so a cheap
+/// core/chiplets trace does not bound the Poseidon2 AIR height.
 #[test]
-fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_max_len() {
+fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     // Use the DYN program because it exercises both hasher and memory chiplets.
     let program = dyn_program();
     let stack_inputs = dyn_target_proc_hash();
 
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    )
-    .expect("processor advice inputs should fit advice map limits");
-    let mut host = DefaultHost::default();
-    let mut vm_witness =
-        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0;
-
-    // Note: the last fragment may have fewer rows than the fragment size, so this is really an
-    // upper bound on the number of core trace rows
-    let core_trace_rows = vm_witness.trace_replay().core_trace_contexts.len()
-        * vm_witness.trace_replay().fragment_size;
-
-    // Inject enough unique permutation requests so the Poseidon2 permutation trace exceeds
-    // core_trace_rows. Each unique state adds one HASH_CYCLE_LEN cycle.
-    let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
-    for i in 0..num_permutations {
-        let mut state = [ZERO; 12];
-        state[0] = Felt::from_u32(i as u32);
-        vm_witness.trace_replay_mut().hasher_for_chiplet.record_permute_input(state);
+    fn build_witness(program: &Program, stack_inputs: &[Felt]) -> VmWitness {
+        let processor = FastProcessor::new_with_options(
+            StackInputs::new(stack_inputs).unwrap(),
+            AdviceInputs::default(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+                .unwrap(),
+        )
+        .expect("processor advice inputs should fit advice map limits");
+        let mut host = DefaultHost::default();
+        processor.execute_for_proving_sync(program, &mut host).unwrap().into_parts().0
     }
 
-    // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
-    // greater), but the Poseidon2 permutation trace will exceed it.
-    let max_trace_len = core_trace_rows;
+    // Inject enough unique permutation requests that the Poseidon2 permutation trace dominates
+    // the other two AIRs' heights. Each unique state adds one HASH_CYCLE_LEN cycle.
+    fn inject_extra_permutations(vm_witness: &mut VmWitness) {
+        let core_trace_rows = vm_witness.trace_replay().core_trace_contexts.len()
+            * vm_witness.trace_replay().fragment_size;
+        let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
+        for i in 0..num_permutations {
+            let mut state = [ZERO; 12];
+            state[0] = Felt::from_u32(i as u32);
+            vm_witness.trace_replay_mut().hasher_for_chiplet.record_permute_input(state);
+        }
+    }
 
-    let result = build_trace_with_max_len(vm_witness, max_trace_len);
+    // Measure the actual padded per-AIR heights under the default (generous) budget.
+    let mut measuring_witness = build_witness(&program, stack_inputs);
+    inject_extra_permutations(&mut measuring_witness);
+    let measured = build_trace(measuring_witness).expect("default budget must succeed");
+    let summary = measured.trace_len_summary();
+    let pcs_params = config::pcs_params();
+    let heights: [usize; MIDEN_AIR_COUNT] = [
+        pad_to_trace_length(summary.core_trace_len().max(summary.range_trace_len())),
+        pad_to_trace_length(summary.chiplets_trace_len().trace_len()),
+        pad_to_trace_length(summary.poseidon2_permutation_trace_len()),
+    ];
+    assert!(
+        heights[MidenAir::Poseidon2Permutation.instance_index()]
+            > heights[MidenAir::Core.instance_index()]
+            && heights[MidenAir::Poseidon2Permutation.instance_index()]
+                > heights[MidenAir::Chiplets.instance_index()],
+        "test setup must make the Poseidon2 AIR the dominant height: {heights:?}"
+    );
+    let exact_peak =
+        memory::prover_peak_bytes(&heights, &pcs_params).expect("modelled peak fits in u64");
+
+    let mut vm_witness = build_witness(&program, stack_inputs);
+    inject_extra_permutations(&mut vm_witness);
+    let result = build_trace_with_budget(vm_witness, exact_peak - 1);
 
     assert!(
-        matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
-        "expected TraceLenExceeded, got: {result:?}"
+        matches!(result, Err(ExecutionError::ProverMemoryExceeded { .. })),
+        "expected ProverMemoryExceeded, got: {result:?}"
     );
 }
 

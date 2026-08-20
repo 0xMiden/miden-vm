@@ -35,6 +35,12 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed in the processor's memory at any point during
     /// execution, rounded up to the nearest multiple of 4.
     max_memory_elements: usize,
+    /// Maximum memory, in bytes, the prover is permitted to allocate for a proof over this
+    /// execution's trace.
+    ///
+    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; it does
+    /// not cover the precompile prover's memory footprint.
+    max_prover_memory_bytes: u64,
 }
 
 impl Default for ExecutionOptions {
@@ -48,6 +54,7 @@ impl Default for ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             overlapped_trace_build: true,
         }
     }
@@ -88,6 +95,11 @@ impl ExecutionOptions {
     /// use a large amount of memory while still providing a finite host-memory backstop against
     /// unbounded growth from writes to arbitrarily many unique addresses.
     pub const DEFAULT_MAX_MEMORY_ELEMENTS: usize = 1 << 28;
+
+    /// Default maximum memory, in bytes, the prover is permitted to allocate for a proof. Set to
+    /// 64 GiB, comfortably above every workload in-repo and far below what the previous
+    /// row-count cap admitted; operators are expected to lower it to their actual box.
+    pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -149,6 +161,7 @@ impl ExecutionOptions {
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
             overlapped_trace_build: true,
         })
     }
@@ -249,6 +262,12 @@ impl ExecutionOptions {
         self.max_memory_elements
     }
 
+    /// Returns the maximum memory, in bytes, the prover is permitted to allocate for a proof.
+    #[inline]
+    pub fn max_prover_memory_bytes(&self) -> u64 {
+        self.max_prover_memory_bytes
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
@@ -274,6 +293,12 @@ impl ExecutionOptions {
     /// Sets the maximum number of field elements allowed in the processor's memory.
     pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
         self.max_memory_elements = max_memory_elements;
+        self
+    }
+
+    /// Sets the maximum memory, in bytes, the prover is permitted to allocate for a proof.
+    pub fn with_max_prover_memory_bytes(mut self, max_prover_memory_bytes: u64) -> Self {
+        self.max_prover_memory_bytes = max_prover_memory_bytes;
         self
     }
 }

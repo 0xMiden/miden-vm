@@ -1,7 +1,7 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air::trace::MIN_TRACE_LEN;
+use miden_air::{MIDEN_AIR_COUNT, PcsParams, memory, trace::MIN_TRACE_LEN};
 
 use super::chiplets::Chiplets;
 use crate::{Felt, ONE};
@@ -194,9 +194,10 @@ pub struct TraceLenSummary {
     range_trace_len: usize,
     chiplets_trace_len: ChipletsLengths,
     poseidon2_permutation_trace_len: usize,
-    /// Set by the trace builder when known. `None` falls back to deriving from the
-    /// unpadded component lengths via `next_power_of_two`.
-    padded_trace_len: Option<usize>,
+    /// Set by the trace builder when known, in [`miden_air::AIRS`] order. `None` falls back to
+    /// deriving [`Self::padded_trace_len`] from the unpadded component lengths via
+    /// `next_power_of_two`.
+    padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
 }
 
 impl TraceLenSummary {
@@ -210,24 +211,25 @@ impl TraceLenSummary {
             range_trace_len,
             chiplets_trace_len,
             poseidon2_permutation_trace_len: 0,
-            padded_trace_len: None,
+            padded_heights: None,
         }
     }
 
-    /// Builds a summary after the trace builder has computed the padded proof height.
+    /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
+    /// [`miden_air::AIRS`] order.
     pub fn new_with_padded(
         core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
         poseidon2_permutation_trace_len: usize,
-        padded_trace_len: usize,
+        padded_heights: [usize; MIDEN_AIR_COUNT],
     ) -> Self {
         TraceLenSummary {
             core_trace_len,
             range_trace_len,
             chiplets_trace_len,
             poseidon2_permutation_trace_len,
-            padded_trace_len: Some(padded_trace_len),
+            padded_heights: Some(padded_heights),
         }
     }
 
@@ -261,8 +263,20 @@ impl TraceLenSummary {
 
     /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.
     pub fn padded_trace_len(&self) -> usize {
-        self.padded_trace_len
+        self.padded_heights
+            .map(|heights| heights.into_iter().max().expect("heights is non-empty"))
             .unwrap_or_else(|| self.trace_len().next_power_of_two().max(MIN_TRACE_LEN))
+    }
+
+    /// Returns the padded per-AIR heights, in [`miden_air::AIRS`] order, if known.
+    pub fn padded_heights(&self) -> Option<&[usize; MIDEN_AIR_COUNT]> {
+        self.padded_heights.as_ref()
+    }
+
+    /// Returns the modelled peak prover memory, in bytes, for the padded per-AIR heights, if
+    /// known. See [`miden_air::memory::prover_peak_bytes`] for what this does and does not cover.
+    pub fn prover_memory_bytes(&self, params: &PcsParams) -> Option<u64> {
+        memory::prover_peak_bytes(self.padded_heights()?, params)
     }
 
     /// Returns the percent (0 - 100) of rows added by padding.
