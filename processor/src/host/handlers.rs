@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::events::{EventId, EventName, SystemEvent};
+use miden_core::events::{EventId, EventName};
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
@@ -70,6 +70,28 @@ impl EventHandler for NoopEventHandler {
 /// ```
 pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
+// EVENT NAME VALIDATION
+// ================================================================================================
+
+/// Checks that `event` can name a host handler.
+///
+/// The whole [`EventName::RESERVED_NAMESPACE`] belongs to the VM, so a host handler cannot use
+/// it, even for a name that no system event uses now.
+///
+/// # Errors
+/// Returns an error if the name is empty or is in the reserved namespace.
+fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
+    if event.as_str().is_empty() {
+        return Err(crate::errors::HostError::EmptyEventName.into());
+    }
+    if event.is_reserved() {
+        return Err(
+            crate::errors::HostError::ReservedEventNamespace { event: event.clone() }.into()
+        );
+    }
+    Ok(())
+}
+
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 
@@ -115,17 +137,15 @@ impl EventHandlerRegistry {
     ///
     /// # Errors
     /// Returns an error if:
-    /// - The event is a reserved system event
+    /// - The event name is empty
+    /// - The event name is in the reserved [`EventName::RESERVED_NAMESPACE`]
     /// - A handler with the same event ID is already registered
     pub fn register(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        // Check if the event is a reserved system event
-        if SystemEvent::from_name(event.as_str()).is_some() {
-            return Err(crate::errors::HostError::ReservedEventNamespace { event }.into());
-        }
+        validate_event_name(&event)?;
 
         // Compute EventId from the event name
         let id = event.to_event_id();
@@ -181,9 +201,9 @@ impl Debug for EventHandlerRegistry {
 /// Handles an optional, read-only trace event emitted by the VM.
 ///
 /// Assembly programs emit trace events with `trace`, `trace.CONST`, or `trace.event("...")`. When
-/// the handler runs, [`SystemEvent::TraceEvent`] is at stack position 0 and the user trace event ID
-/// is at position 1. The handler receives a read-only [`ProcessorState`] and cannot return advice
-/// mutations.
+/// the handler runs, [`SystemEvent::TraceEvent`](miden_core::events::SystemEvent::TraceEvent) is
+/// at stack position 0 and the user trace event ID is at position 1. The handler receives a
+/// read-only [`ProcessorState`] and cannot return advice mutations.
 ///
 /// The instruction expansions are:
 ///
@@ -235,17 +255,15 @@ impl TraceHandlerRegistry {
     ///
     /// # Errors
     /// Returns an error if:
-    /// - The event is a reserved system event
+    /// - The event name is empty
+    /// - The event name is in the reserved [`EventName::RESERVED_NAMESPACE`]
     /// - A handler with the same event ID is already registered
     pub fn register(
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
     ) -> Result<(), ExecutionError> {
-        // Check if the event is a reserved system event
-        if SystemEvent::from_name(event.as_str()).is_some() {
-            return Err(crate::errors::HostError::ReservedEventNamespace { event }.into());
-        }
+        validate_event_name(&event)?;
 
         let id = event.to_event_id();
         match self.handlers.entry(id) {
@@ -421,6 +439,30 @@ mod tests {
     }
 
     #[test]
+    fn event_register_rejects_unknown_reserved_name() {
+        // The whole namespace is reserved, so a name that no system event uses is refused too.
+        let reserved = EventName::new("sys::not_a_real_event");
+        let mut registry = EventHandlerRegistry::new();
+        let err = registry.register(reserved.clone(), Arc::new(NoopEventHandler)).unwrap_err();
+        match err {
+            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+                assert_eq!(event, reserved);
+            },
+            other => panic!("expected ReservedEventNamespace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_register_rejects_empty_name() {
+        let mut registry = EventHandlerRegistry::new();
+        let err = registry.register(EventName::new(""), Arc::new(NoopEventHandler)).unwrap_err();
+        assert!(
+            matches!(err, ExecutionError::HostError(HostError::EmptyEventName)),
+            "expected EmptyEventName, got {err:?}"
+        );
+    }
+
+    #[test]
     fn event_register_rejects_duplicate() {
         const NAME: EventName = EventName::new("test::event::duplicate");
         let mut registry = EventHandlerRegistry::new();
@@ -509,6 +551,29 @@ mod tests {
             },
             other => panic!("expected ReservedEventNamespace, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn trace_register_rejects_unknown_reserved_name() {
+        let reserved = EventName::new("sys::not_a_real_event");
+        let mut registry = TraceHandlerRegistry::new();
+        let err = registry.register(reserved.clone(), Arc::new(NoopTraceHandler)).unwrap_err();
+        match err {
+            ExecutionError::HostError(HostError::ReservedEventNamespace { event }) => {
+                assert_eq!(event, reserved);
+            },
+            other => panic!("expected ReservedEventNamespace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trace_register_rejects_empty_name() {
+        let mut registry = TraceHandlerRegistry::new();
+        let err = registry.register(EventName::new(""), Arc::new(NoopTraceHandler)).unwrap_err();
+        assert!(
+            matches!(err, ExecutionError::HostError(HostError::EmptyEventName)),
+            "expected EmptyEventName, got {err:?}"
+        );
     }
 
     #[test]

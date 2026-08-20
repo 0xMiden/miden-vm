@@ -89,11 +89,18 @@ pub enum WasmHandlerLoadError {
     },
 
     /// The manifest uses a name in the reserved `sys::` namespace.
-    #[error("event '{event}' uses the reserved 'sys::' namespace")]
+    #[error(
+        "event '{event}' uses the reserved '{namespace}' namespace",
+        namespace = EventName::RESERVED_NAMESPACE
+    )]
     ReservedEvent {
         /// The offending event name.
         event: EventName,
     },
+
+    /// A manifest entry has an empty event name or an empty export name.
+    #[error("manifest entries must have non-empty event and export names")]
+    EmptyManifestName,
 
     /// The package's `event_handlers` section is malformed.
     #[error("invalid 'event_handlers' package section")]

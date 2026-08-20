@@ -981,6 +981,34 @@ fn reserved_event_names_are_rejected() {
 }
 
 #[test]
+fn unknown_reserved_event_names_are_rejected() {
+    // The whole namespace is reserved, so a name that no system event uses is refused too.
+    let manifest = vec![(EventName::new("sys::not_a_real_event"), "handler".to_string())];
+    let err = try_load("(module)", manifest).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::ReservedEvent { .. }),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn empty_manifest_names_are_rejected() {
+    let empty_event = vec![(EventName::new(""), "handler".to_string())];
+    let err = try_load("(module)", empty_event).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::EmptyManifestName),
+        "unexpected error: {err}"
+    );
+
+    let empty_export = vec![(EVENT, String::new())];
+    let err = try_load("(module)", empty_export).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::EmptyManifestName),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn abi_version_policy_is_enforced() {
     let wasm = wat::parse_str("(module)").expect("valid WAT");
     let load = |version: u32| {
