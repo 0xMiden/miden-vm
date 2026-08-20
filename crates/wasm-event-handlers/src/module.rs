@@ -214,7 +214,7 @@ impl WasmHandlerModule {
             .linker
             .instantiate_and_start(&mut store, &self.module)
             .map_err(|err| WasmHandlerLoadError::Instantiation(err.to_string()))?;
-        cache_memory(&mut store, &instance);
+        cache_memory(&mut store, instance);
         for (_, export) in &self.manifest {
             instance.get_typed_func::<(), ()>(&store, export).map_err(|err| {
                 WasmHandlerLoadError::BadExport {
@@ -258,7 +258,7 @@ impl WasmHandlerModule {
             .linker
             .instantiate_and_start(&mut store, &self.module)
             .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
-        cache_memory(&mut store, &instance);
+        cache_memory(&mut store, instance);
         let func = instance
             .get_typed_func::<(), ()>(&store, export)
             .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
@@ -283,7 +283,7 @@ impl WasmHandlerModule {
 /// Host functions read the handle from there, so no host call repeats the export lookup. The
 /// handle stays unset for a module that exports no memory under the name `memory`; the first
 /// host call that takes a guest pointer then traps.
-fn cache_memory(store: &mut Store<HostCtx>, instance: &Instance) {
+fn cache_memory(store: &mut Store<HostCtx>, instance: Instance) {
     let memory = instance.get_memory(&*store, "memory");
     store.data_mut().memory = memory;
 }
