@@ -944,6 +944,9 @@ dependencies = [
 [[package]]
 name = "miden-event-handler-abi"
 version = "0.30.0"
+dependencies = [
+ "miden-field",
+]
 
 [[package]]
 name = "miden-field"
