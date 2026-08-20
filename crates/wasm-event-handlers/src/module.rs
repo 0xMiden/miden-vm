@@ -44,6 +44,10 @@ pub struct WasmHandlerLimits {
     pub max_mutation_felts: usize,
     /// Permits float instructions in the handler module. Off by default: handler output must be
     /// deterministic across hosts, and handlers have no use for floats.
+    ///
+    /// This flag is validation policy, like the rest of the limits: enabling it voids the
+    /// cross-host determinism guarantee, and hosts with different settings accept different
+    /// modules.
     pub allow_floats: bool,
 }
 
@@ -135,6 +139,28 @@ impl WasmHandlerModule {
 
         let mut config = Config::default();
         config.consume_fuel(true);
+        // The accepted Wasm feature set is validation policy: it decides which modules load,
+        // on every host, so it is stated explicitly instead of inherited from wasmi's
+        // defaults (which change with wasmi versions and with Cargo feature unification).
+        //
+        // On: the post-MVP features rustc emits for wasm32-unknown-unknown by default.
+        config.wasm_mutable_global(true);
+        config.wasm_sign_extension(true);
+        config.wasm_multi_value(true);
+        config.wasm_bulk_memory(true);
+        config.wasm_reference_types(true);
+        config.wasm_saturating_float_to_int(true);
+        // Off: SIMD and relaxed SIMD are not deterministic across platforms, and the rest
+        // widens the sandbox surface with no use for handlers.
+        config.wasm_simd(false);
+        config.wasm_relaxed_simd(false);
+        config.wasm_memory64(false);
+        config.wasm_multi_memory(false);
+        config.wasm_tail_call(false);
+        config.wasm_extended_const(false);
+        config.wasm_custom_page_sizes(false);
+        config.wasm_wide_arithmetic(false);
+        // Floats follow the host policy; enabling them voids cross-host determinism.
         config.floats(limits.allow_floats);
         // Structural compilation limits (function/global/segment counts, signature sizes)
         // defend `Module::new` itself against compilation bombs in untrusted binaries.
