@@ -24,7 +24,7 @@ std = [
     "thiserror/std",
     "proptest?/std",
 ]
-serde = ["dep:serde", "semver/serde"]
+serde = ["dep:serde", "miden-debug-types/serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
