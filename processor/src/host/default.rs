@@ -243,6 +243,17 @@ pub struct HostLibrary {
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
+impl HostLibrary {
+    /// Sets the event handlers of this library.
+    ///
+    /// Use this to add handlers that the source of the library does not provide, for example the
+    /// Wasm event handlers of a package.
+    pub fn with_handlers(mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) -> Self {
+        self.handlers = handlers;
+        self
+    }
+}
+
 impl Default for HostLibrary {
     fn default() -> Self {
         Self {
@@ -253,6 +264,11 @@ impl Default for HostLibrary {
     }
 }
 
+/// Converts a package into a host library.
+///
+/// The packaged Wasm event handlers are NOT loaded: this crate cannot depend on the Wasm runner
+/// crate. To get a library with the handlers of the `event_handlers` section, use
+/// `miden_wasm_event_handlers::host_library_from_package`.
 impl From<Arc<miden_mast_package::Package>> for HostLibrary {
     fn from(package: Arc<miden_mast_package::Package>) -> Self {
         let package_debug_info = match package.debug_info() {
