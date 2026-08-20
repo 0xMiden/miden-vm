@@ -2235,6 +2235,7 @@ version = "0.30.0"
 dependencies = [
  "miden-core",
  "miden-precompiles",
+ "tempfile",
 ]
 
 [[package]]
