@@ -660,14 +660,10 @@ impl SourceContent {
 
         // Exclude any trailing line terminator from the content this searches: see the
         // rejection rationale above.
-        let terminator_len = if line_src.ends_with("\r\n") {
-            2
-        } else if line_src.ends_with('\n') {
-            1
-        } else {
-            0
-        };
-        let content = &line_src[..line_src.len() - terminator_len];
+        let content = line_src
+            .strip_suffix("\r\n")
+            .or_else(|| line_src.strip_suffix('\n'))
+            .unwrap_or(line_src);
 
         // Chain `content.len()` onto the char boundaries (as the one-past-the-end position) so
         // a single `nth` call covers both "column falls within the content" and "column is
