@@ -1,7 +1,9 @@
 //! Determinism pins for the Wasm event handler host.
 //!
-//! A handler must give the same answer on every machine. SIMD and relaxed-SIMD instructions do
-//! not give that guarantee, so the host must refuse a module that contains them.
+//! A handler must give the same answer on every machine, and the same module must validate the
+//! same way on every host. SIMD and relaxed-SIMD instructions give neither guarantee, so the
+//! loader must refuse a module that contains them — on every host, whatever its dependency
+//! graph looks like.
 
 use miden_event_handler_abi::ABI_VERSION;
 use miden_processor::event::EventName;
@@ -16,10 +18,11 @@ const SIMD_WAT: &str = r#"(module
 
 /// Pins the rejection of SIMD instructions at load time.
 ///
-/// The host gets this rejection from wasmi, which is built without its `simd` cargo feature.
-/// Cargo unifies features over the whole dependency graph, so any crate that turns on
-/// `wasmi/simd` also turns it on here. This test makes such a change fail loudly instead of
-/// letting it void the determinism guarantee in silence.
+/// The loader enables wasmi's `simd` cargo feature on purpose and turns the SIMD features off
+/// through `Config` — that is the only form of "off" that Cargo feature unification in a
+/// consumer's dependency graph cannot flip back on. This test pins the rejection itself, and
+/// its message check pins that the module was refused *because of SIMD*, not for an unrelated
+/// reason.
 #[test]
 fn simd_instructions_are_rejected() {
     let wasm = wat::parse_str(SIMD_WAT).expect("fixture WAT must parse");
@@ -27,4 +30,6 @@ fn simd_instructions_are_rejected() {
     let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, WasmHandlerLimits::default())
         .expect_err("a module with SIMD instructions must not load");
     assert!(matches!(err, WasmHandlerLoadError::InvalidModule(_)), "unexpected error: {err}");
+    let msg = err.to_string().to_lowercase();
+    assert!(msg.contains("simd"), "the rejection must name SIMD as the cause: {err}");
 }

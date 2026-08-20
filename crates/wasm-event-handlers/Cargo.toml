@@ -36,7 +36,11 @@ miden-processor.workspace = true
 
 # External dependencies
 thiserror.workspace = true
-wasmi.workspace = true
+# The 'simd' feature is enabled ON PURPOSE: only with it does wasmi expose the
+# Config::wasm_simd/wasm_relaxed_simd setters, and the loader calls both with `false`. Without
+# the feature, SIMD acceptance would follow `cfg!(feature = "simd")` — any crate in a
+# consumer's dependency graph could then flip it through Cargo feature unification.
+wasmi = { workspace = true, features = ["simd"] }
 
 [dev-dependencies]
 miden-assembly.workspace = true
