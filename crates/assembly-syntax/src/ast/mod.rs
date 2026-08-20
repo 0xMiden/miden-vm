@@ -33,7 +33,7 @@ pub use self::{
     docstring::DocString,
     form::Form,
     ident::{CaseKindError, Ident, IdentError},
-    immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
+    immediate::{ErrorMsg, EventImmediate, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
     import::{
         Import, ImportDecl, ImportKind, ImportSpec, ItemImport, ItemImportGroup, ModuleImport,
     },

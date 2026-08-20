@@ -143,8 +143,8 @@ where
     }
     fn visit_mut_inst(&mut self, inst: &mut Span<Instruction>) -> ControlFlow<()> {
         use crate::ast::Instruction;
-        if let Instruction::EmitImm(Immediate::Constant(name))
-        | Instruction::TraceImm(Immediate::Constant(name)) = &**inst
+        if let Instruction::EmitImm(EventImmediate::Immediate(Immediate::Constant(name)))
+        | Instruction::TraceImm(EventImmediate::Immediate(Immediate::Constant(name))) = &**inst
         {
             let span = name.span();
             match self.env.get(name) {

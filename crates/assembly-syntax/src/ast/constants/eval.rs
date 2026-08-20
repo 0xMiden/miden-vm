@@ -399,12 +399,7 @@ where
                         };
                         stack.push(ConstantExpr::Int(Span::new(span, result)));
                     },
-                    operands @ ((
-                        ConstantExpr::Int(_) | ConstantExpr::Var(_),
-                        ConstantExpr::Var(_),
-                    )
-                    | (ConstantExpr::Var(_), ConstantExpr::Int(_))) => {
-                        let (lhs, rhs) = operands;
+                    (lhs, rhs) if is_integer_expr(&lhs) && is_integer_expr(&rhs) => {
                         stack.push(ConstantExpr::BinaryOp {
                             span,
                             op,
@@ -412,7 +407,7 @@ where
                             rhs: rhs.into(),
                         });
                     },
-                    (ConstantExpr::Int(_) | ConstantExpr::Var(_), rhs) => {
+                    (lhs, rhs) if is_integer_expr(&lhs) => {
                         let operand = rhs.span();
                         return Err(ConstEvalError::InvalidConstExprOperand {
                             span,
@@ -449,4 +444,11 @@ where
     // SAFETY: The above assertion guarantees that the stack has an element, and that `pop` will
     // always succeed, thus the safety requirements of `unwrap_unchecked` are upheld
     Ok(unsafe { stack.pop().unwrap_unchecked() })
+}
+
+fn is_integer_expr(expr: &ConstantExpr) -> bool {
+    matches!(
+        expr,
+        ConstantExpr::Int(_) | ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }
+    )
 }

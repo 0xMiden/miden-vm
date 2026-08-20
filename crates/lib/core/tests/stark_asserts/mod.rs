@@ -410,7 +410,15 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     };
 
     use miden_assembly::{
-        ModuleParser, PathBuf as MasmPathBuf, ast::ConstantExpr, debuginfo::DefaultSourceManager,
+        ModuleParser, Path as MasmPath, PathBuf as MasmPathBuf,
+        ast::{
+            ConstantExpr, Ident,
+            constants::{
+                ConstEnvironment, ConstEvalError,
+                eval::{self, CachedConstantValue},
+            },
+        },
+        debuginfo::{DefaultSourceManager, SourceFile, SourceSpan, Span},
     };
 
     /// `(name, offset from the declared address, extent in felts)`.
@@ -532,11 +540,37 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         hi: u64,
     }
 
+    struct LocalConstantEnv<'a> {
+        constants: BTreeMap<String, &'a ConstantExpr>,
+    }
+
+    impl ConstEnvironment for LocalConstantEnv<'_> {
+        type Error = ConstEvalError;
+
+        fn get_source_file_for(&self, _span: SourceSpan) -> Option<Arc<SourceFile>> {
+            None
+        }
+
+        fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+            Ok(self.constants.get(name.as_str()).copied().map(CachedConstantValue::Miss))
+        }
+
+        fn get_by_path(
+            &mut self,
+            path: Span<&MasmPath>,
+        ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+            match path.as_ident() {
+                Some(name) => self.get(&name),
+                None => Ok(None),
+            }
+        }
+    }
+
     /// Semantically evaluated fixed-memory declarations in a MASM module.
     ///
     /// MASM constants may be expressions (`const NEW_PTR = OLD_PTR + 1`), so this uses
-    /// semantic analysis rather than text parsing: local expressions fold to integers, and
-    /// anything numeric that remains unresolved fails closed instead of escaping the manifest.
+    /// the semantic constant evaluator rather than text parsing. Anything numeric that remains
+    /// unresolved fails closed instead of escaping the manifest.
     /// Relation layout modules are address-only, so every numeric constant in them is included.
     /// Elsewhere, pointer-named constants are included at any address; other numeric constants
     /// are treated as addresses only in the verifier's high 32-bit address band.
@@ -548,25 +582,39 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         let module = parser
             .parse_file(Some(&module_path), path, Arc::new(DefaultSourceManager::default()))
             .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
+
+        let mut env = LocalConstantEnv {
+            constants: module
+                .constants()
+                .map(|constant| (constant.name().as_str().to_string(), &constant.value))
+                .collect(),
+        };
         module
             .constants()
-            .filter_map(|constant| match &constant.value {
-                ConstantExpr::Int(value) => {
-                    let value = value.inner().as_int();
-                    let name = constant.name().as_str();
-                    let pointer_name =
-                        name.ends_with("_PTR") || matches!(name, "TMP1" | "TMP2" | "TMP3" | "TMP4");
-                    (address_only_module
-                        || pointer_name
-                        || ((1 << 31)..=u32::MAX as u64).contains(&value))
-                    .then(|| (name.to_string(), value))
-                },
-                ConstantExpr::String(_) | ConstantExpr::Word(_) | ConstantExpr::Hash(..) => None,
-                ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. } => panic!(
-                    "{}:{} has an unevaluated numeric constant expression",
-                    path.display(),
-                    constant.name()
-                ),
+            .filter_map(|constant| {
+                let value = eval::expr(&constant.value, &mut env).unwrap_or_else(|err| {
+                    panic!("failed to evaluate {}:{}: {err}", path.display(), constant.name())
+                });
+                match value {
+                    ConstantExpr::Int(value) => {
+                        let value = value.inner().as_int();
+                        let name = constant.name().as_str();
+                        let pointer_name = name.ends_with("_PTR")
+                            || matches!(name, "TMP1" | "TMP2" | "TMP3" | "TMP4");
+                        (address_only_module
+                            || pointer_name
+                            || ((1 << 31)..=u32::MAX as u64).contains(&value))
+                        .then(|| (name.to_string(), value))
+                    },
+                    ConstantExpr::String(_) | ConstantExpr::Word(_) | ConstantExpr::Hash(..) => {
+                        None
+                    },
+                    ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. } => panic!(
+                        "{}:{} has an unevaluated numeric constant expression",
+                        path.display(),
+                        constant.name()
+                    ),
+                }
             })
             .collect()
     }

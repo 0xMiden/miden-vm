@@ -941,14 +941,15 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     /// with its binding power.
     fn current_constant_operator(&self) -> Option<(u8, ast::ConstantOp)> {
         let token = self.current()?;
-        match token.kind() {
-            SyntaxKind::Plus => Some((1, ast::ConstantOp::Add)),
-            SyntaxKind::Minus => Some((1, ast::ConstantOp::Sub)),
-            SyntaxKind::Star => Some((2, ast::ConstantOp::Mul)),
-            SyntaxKind::Slash => Some((2, ast::ConstantOp::Div)),
-            SyntaxKind::SlashSlash => Some((2, ast::ConstantOp::IntDiv)),
-            _ => None,
-        }
+        let op = match token.kind() {
+            SyntaxKind::Plus => ast::ConstantOp::Add,
+            SyntaxKind::Minus => ast::ConstantOp::Sub,
+            SyntaxKind::Star => ast::ConstantOp::Mul,
+            SyntaxKind::Slash => ast::ConstantOp::Div,
+            SyntaxKind::SlashSlash => ast::ConstantOp::IntDiv,
+            _ => return None,
+        };
+        Some((op.precedence(), op))
     }
 
     fn expect_keyword(

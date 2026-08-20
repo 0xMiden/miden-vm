@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
     ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, module::ItemInfo,
     sema::ConstEvalVisitor,
 };
-use miden_core::Felt;
+use miden_core::{Felt, events::EventId};
 
 use crate::{
     ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
@@ -154,6 +154,27 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
 }
 
 impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
+    fn visit_mut_inst(&mut self, inst: &mut Span<ast::Instruction>) -> ControlFlow<LinkerError> {
+        match &mut **inst {
+            ast::Instruction::EmitImm(event) | ast::Instruction::TraceImm(event) => {
+                if let ast::EventImmediate::Name(name) = event {
+                    let value = EventId::from_name(name.inner()).as_felt();
+                    *event = ast::EventImmediate::Immediate(ast::Immediate::Value(Span::new(
+                        name.span(),
+                        value,
+                    )));
+                }
+
+                let mut visitor = ConstEvalVisitor::new(self);
+                let _ = visitor.visit_mut_inst(inst);
+                wrap_const_control_flow!(visitor)
+            },
+            _ => {},
+        }
+
+        visit::visit_mut_inst(self, inst)
+    }
+
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<LinkerError> {
         log::debug!(target: "linker", "  | visiting {}", procedure.name());
         self.invoked.clear();

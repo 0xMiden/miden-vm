@@ -1643,6 +1643,121 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
 }
 
 #[test]
+fn link_time_const_evaluation_deferred_expressions_succeed() -> TestResult {
+    let context = TestContext::default();
+    let constants = parse_module!(
+        &context,
+        r#"
+            namespace lib::constants
+
+            pub const WORD_NUM_ELEMENTS = 4
+
+            pub proc noop
+                nop
+            end
+        "#
+    );
+    let lib = Assembler::new(context.source_manager()).assemble_library(
+        "lib",
+        constants,
+        None::<Box<Module>>,
+    )?;
+
+    let program = source_file!(
+        &context,
+        r#"
+            use {WORD_NUM_ELEMENTS} from lib::constants
+
+            const OFFSET_1 = WORD_NUM_ELEMENTS + 1
+            const OFFSET_2 = OFFSET_1 + 1
+            const IMPORTED_ON_RHS = 10 - WORD_NUM_ELEMENTS
+            const MULTIPLE_DEFERRED_SUBTREES =
+                (WORD_NUM_ELEMENTS + 1) * (WORD_NUM_ELEMENTS - 1)
+            const FIELD_DIVISION = WORD_NUM_ELEMENTS / 2
+            const INTEGER_DIVISION = (WORD_NUM_ELEMENTS + 3) // 2
+
+            begin
+                push.OFFSET_2
+                push.6
+                assert_eq
+
+                push.IMPORTED_ON_RHS
+                push.6
+                assert_eq
+
+                push.MULTIPLE_DEFERRED_SUBTREES
+                push.15
+                assert_eq
+
+                push.FIELD_DIVISION
+                push.2
+                assert_eq
+
+                push.INTEGER_DIVISION
+                push.3
+                assert_eq
+            end
+        "#
+    );
+
+    Assembler::new(context.source_manager())
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", program)?;
+
+    Ok(())
+}
+
+#[test]
+fn link_time_event_constants_must_be_event_hashes() -> TestResult {
+    let context = TestContext::default();
+    let constants = parse_module!(
+        &context,
+        r#"
+            namespace lib::constants
+
+            pub const INT = 100
+            pub const WORD = word("foo")
+            pub const EVENT = event("miden::test::imported")
+
+            pub proc noop
+                nop
+            end
+        "#
+    );
+    let lib: Arc<Package> = Arc::from(Assembler::new(context.source_manager()).assemble_library(
+        "lib",
+        constants,
+        None::<Box<Module>>,
+    )?);
+
+    for (instruction, constant) in
+        [("emit", "INT"), ("emit", "WORD"), ("trace", "INT"), ("trace", "WORD")]
+    {
+        let program = source_file!(
+            &context,
+            format!(
+                "use {{{constant}}} from lib::constants\nbegin\n    {instruction}.{constant}\nend"
+            )
+        );
+        let err = Assembler::new(context.source_manager())
+            .with_package(lib.clone(), Linkage::Dynamic)?
+            .assemble_program("program", program)
+            .expect_err("imported event constant must be defined via event() hashing");
+        assert_diagnostic!(&err, "expected an event name");
+    }
+
+    let program = source_file!(
+        &context,
+        "use {EVENT} from lib::constants\nbegin\n    emit.EVENT\n    trace.EVENT\nend"
+    );
+    Assembler::new(context.source_manager())
+        .with_package(lib, Linkage::Dynamic)?
+        .assemble_program("program", program)?;
+
+    Ok(())
+}
+
+#[test]
 fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     let context = TestContext::default();
     let a = r#"
