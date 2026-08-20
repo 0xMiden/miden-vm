@@ -112,7 +112,7 @@ pub enum WasmHandlerLoadError {
     EmptyManifestName,
 
     /// The package's `event_handlers` section is malformed.
-    #[error("invalid 'event_handlers' package section")]
+    #[error("invalid 'event_handlers' package section: {0}")]
     Section(#[from] miden_mast_package::EventHandlerSectionError),
 }
 

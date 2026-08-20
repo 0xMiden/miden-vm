@@ -526,7 +526,7 @@ impl crate::prettier::PrettyPrint for SystemEvent {
 
 impl fmt::Display for SystemEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const PREFIX_LEN: usize = "sys::".len();
+        const PREFIX_LEN: usize = EventName::RESERVED_NAMESPACE.len();
 
         let (_prefix, rest) = Self::LOOKUP[*self as usize].name.split_at(PREFIX_LEN);
         write!(f, "{rest}")

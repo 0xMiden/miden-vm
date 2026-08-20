@@ -892,22 +892,45 @@ fn zero_length_mutations_buffer_no_records() {
     assert!(mutations.is_empty(), "empty extensions must buffer no records: {mutations:?}");
 }
 
-#[test]
-fn empty_host_calls_cost_fuel() {
-    // Every host call pays a flat transition charge, so a loop of zero-length extends cannot
-    // burn host transitions (or accumulate mutation records) for free.
-    let wat_src = fixture(
+/// A handler that calls `adv_stack_extend` with a zero length 1000 times.
+///
+/// Fuel arithmetic, measured on this fixture: the 1-page memory costs 8192 fuel per
+/// instantiation and the guest instructions of the loop cost 4192 more, so the run costs 12384
+/// fuel without the flat host-call charge. The 1000 host calls add 1000 * 25 = 25000, for a
+/// total of 37384. The two tests below sit on either side of that gap.
+fn empty_host_call_loop() -> String {
+    fixture(
         "(local $i i32)
-         (local.set $i (i32.const 100000))
+         (local.set $i (i32.const 1000))
          (loop $l
            (call $adv_stack_extend (i32.const 0) (i32.const 0))
            (local.tee $i (i32.sub (local.get $i) (i32.const 1)))
            (br_if $l))",
+    )
+}
+
+#[test]
+fn empty_host_calls_cost_fuel() {
+    // Every host call pays a flat transition charge, so a loop of zero-length extends cannot
+    // burn host transitions (or accumulate mutation records) for free. The budget is over the
+    // 12384 fuel the guest instructions cost, so only the flat charge can exhaust it.
+    let module = load_with_limits(
+        &empty_host_call_loop(),
+        WasmHandlerLimits { fuel: 20_000, ..Default::default() },
     );
-    let limits = WasmHandlerLimits { fuel: 100_000, ..Default::default() };
-    let module = load_with_limits(&wat_src, limits);
     let err = run_raw(&module, &processor()).expect_err("handler must run out of fuel");
     assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
+}
+
+#[test]
+fn empty_host_calls_fit_a_budget_above_their_cost() {
+    // The counterpart of `empty_host_calls_cost_fuel`: a budget over the full 37384 fuel of the
+    // same loop, so the flat charge bounds the host calls without refusing a legitimate handler.
+    let module = load_with_limits(
+        &empty_host_call_loop(),
+        WasmHandlerLimits { fuel: 60_000, ..Default::default() },
+    );
+    run(&module, &processor()).expect("handler succeeds");
 }
 
 #[test]

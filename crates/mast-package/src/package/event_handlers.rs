@@ -27,8 +27,8 @@ use alloc::{
 use miden_core::{
     events::EventName,
     serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        validate_bounded_len,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, validate_bounded_len,
     },
 };
 
@@ -294,6 +294,29 @@ impl Deserializable for EventHandlerSection {
         }
 
         Ok(Self { abi_version, module, handlers })
+    }
+}
+
+impl EventHandlerSection {
+    /// Decodes the payload of an `event_handlers` package section.
+    ///
+    /// The payload is untrusted input, so the reader gets a budget of the payload size, bytes
+    /// after the encoded section are refused, and the decoded section must pass
+    /// [`Self::validate`]. This is the full decode path:
+    /// [`Package::event_handlers`](crate::Package::event_handlers) and the fuzz target both call
+    /// it, so neither can drift from the other.
+    ///
+    /// # Errors
+    /// Returns an error when the payload fails to decode (including size-cap violations), when
+    /// bytes follow the encoded section, or when the section breaks a rule of [`Self::validate`].
+    pub fn from_payload(bytes: &[u8]) -> Result<Self, EventHandlerSectionError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        let section = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(EventHandlerSectionError::TrailingBytes);
+        }
+        section.validate()?;
+        Ok(section)
     }
 }
 

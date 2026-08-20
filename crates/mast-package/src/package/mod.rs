@@ -33,7 +33,7 @@ use miden_core::{
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::KernelDescriptor,
-    serde::{BudgetedReader, ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
+    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
 
 pub use self::{
@@ -1244,15 +1244,7 @@ impl Package {
         if sections.next().is_some() {
             return Err(EventHandlerSectionError::DuplicateSection);
         }
-        // The section is untrusted input, so the reader gets a budget of the payload size.
-        let bytes = section.data.as_ref();
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        let decoded = EventHandlerSection::read_from(&mut reader)?;
-        if reader.has_more_bytes() {
-            return Err(EventHandlerSectionError::TrailingBytes);
-        }
-        decoded.validate()?;
-        Ok(Some(decoded))
+        EventHandlerSection::from_payload(section.data.as_ref()).map(Some)
     }
 
     /// Attaches an [`EventHandlerSection`] to this package.
