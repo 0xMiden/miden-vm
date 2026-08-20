@@ -24,6 +24,15 @@ pub enum WasmHandlerLoadError {
     #[error("invalid Wasm module: {0}")]
     InvalidModule(String),
 
+    /// The Wasm binary is larger than the configured module-size limit.
+    #[error("handler module is {size} bytes, over the {max}-byte limit")]
+    ModuleTooLarge {
+        /// The size of the Wasm binary.
+        size: usize,
+        /// The configured maximum, from `WasmHandlerLimits::max_module_bytes`.
+        max: usize,
+    },
+
     /// The module imports from a namespace other than `miden:event/v1`.
     #[error(
         "handler module imports '{module}::{name}', but only imports from \

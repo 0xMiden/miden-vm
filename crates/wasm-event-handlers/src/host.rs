@@ -141,6 +141,9 @@ impl HostCtx {
                 .memory_size(limits.max_memory_bytes)
                 .memories(1)
                 .tables(1)
+                // Tables are allocated eagerly at instantiation, before any fuel applies, so
+                // the element count needs its own cap.
+                .table_elements(limits.max_table_elements)
                 .instances(1)
                 // A failed grow traps the untrusted handler instead of returning -1.
                 .trap_on_grow_failure(true)
