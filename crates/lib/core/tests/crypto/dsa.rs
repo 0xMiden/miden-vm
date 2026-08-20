@@ -12,7 +12,7 @@ use miden_core_lib::{
     handlers::ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
 };
 use miden_crypto::{
-    SequentialCommit,
+    SequentialCommit, Word,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
     hash::keccak::Keccak256,
     utils::hex_to_bytes,
@@ -50,6 +50,26 @@ fn core_ecdsa_k256_keccak_recover_returns_public_key() {
     assert_eq!(stack_elements::<16>(&output), public_key_elements(&fixture.public_key));
     assert_deferred_state_round_trips(&output);
     assert_deferred_proof_verifies(&output);
+}
+
+#[test]
+fn core_ecdsa_k256_keccak_recover_loads_signature_before_local_write() {
+    let fixture = valid_fixture();
+    // Deliberately bypass the caller-owned-memory precondition to preserve the defensive
+    // load-before-local-write ordering requested in review.
+    // `recover` owns locals [2^31, 2^31 + 8), so the nested `recover_digest` frame begins here.
+    // Its candidate-key `adv_pipe` overwrites this region after the signature has been loaded.
+    let recover_digest_locals_ptr = (1_u32 << 31) + 8;
+
+    let output = run_recover_with_native_signature(
+        fixture.message,
+        &native_recovery_signature(&fixture.signature),
+        recover_digest_locals_ptr,
+        None,
+    )
+    .expect("signature inputs must be bound before candidate-key locals overwrite their memory");
+
+    assert_eq!(stack_elements::<16>(&output), public_key_elements(&fixture.public_key));
 }
 
 #[test]
@@ -204,7 +224,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_valid_signature() {
     assert_deferred_state_round_trips(&output);
 
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    assert_eq!(wire.to_bytes().len(), 2455);
+    assert_eq!(wire.to_bytes().len(), 2635);
 }
 
 /// Full round trip through the real precompile side prover: `verify` logs a plain 2-base MSM
@@ -315,7 +335,7 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let output = run_core_program_with_advice(&verify_cycle_source(&fixture), &fixture.advice)
         .expect("valid core ECDSA K256/Keccak signature must verify");
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
-    assert_eq!(cycles, 1470);
+    assert_eq!(cycles, 1467);
 }
 
 #[test]

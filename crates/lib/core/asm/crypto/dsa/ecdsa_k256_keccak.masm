@@ -142,7 +142,8 @@ end
 #!
 #! `SIG_PTR` must be word-aligned and address the native EVM recovery witness
 #! `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is exactly 27 or 28. The Word is encoded and hashed
-#! exactly as it is by `verify`.
+#! exactly as it is by `verify`. It must point to caller-owned memory that remains unchanged until
+#! the procedure returns.
 #!
 #! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. The
 #! procedure traps on malformed memory, invalid scalars or recovery byte, an invalid recovery point,
@@ -176,7 +177,8 @@ end
 #!
 #! The message uses the same packed-byte representation, alignment, length bound, and final-chunk
 #! padding rules as `verify_bytes`. `SIG_PTR` must be word-aligned and address the native EVM
-#! recovery witness `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is exactly 27 or 28.
+#! recovery witness `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is exactly 27 or 28. It must point
+#! to caller-owned memory that remains unchanged until the procedure returns.
 #!
 #! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. The
 #! procedure traps on malformed memory, invalid scalars or recovery byte, an invalid recovery point,
@@ -228,8 +230,9 @@ proc recover_digest
     emit.ECDSA_RECOVER_EVENT
     # => [digest_ptr, SIG_PTR, ...]  Advice: [QX[8] | QY[8] | ...]
 
-    # Bind every caller-memory input before writing candidate-point advice into procedure locals.
-    # Caller pointers are absolute addresses and may overlap the local-memory range.
+    # Bind the digest and signature before writing candidate-point advice into procedure locals.
+    # SIG_PTR must be caller-owned; this ordering is also robust to an out-of-contract absolute
+    # pointer into this local frame.
     exec.load_keccak_digest_as_z
     # => [PREHASH_U32[8], SIG_PTR, ...]
     exec.k1_scalar::load_reduced_256
@@ -439,31 +442,37 @@ proc compute_ecdsa_scalars
     # => [U1, Q, U2, SIG_R, ...]
 end
 
-#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
-#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
-#!
-#! Both callers derive `U1 = z/s` from a Keccak digest and intentionally assume it is nonzero. The
-#! only unsupported digest values are 0 and n, whose Keccak preimages are computationally infeasible
-#! to find. The deferred two-base MSM rejects zero-scalar terms.
+#! Computes `R = u1*G + u2*Q`, omitting the `u1*G` term when U1 is zero. Otherwise, uses a plain
+#! 2-base joint wNAF MSM, folding the degenerate `Q == G` case into a single `(u1+u2)*G` multiply,
+#! the one collision a 2-base MSM has.
 #! Input:  [U1, Q, U2, ...]
 #! Output: [RELATION_POINT, ...]
 proc relation_point_2base
-    dupw.1
-    # => [Q, U1, Q, U2, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, ...]
+    dupw
+    exec.k1_scalar::is_zero
+    # => [is_u1_zero, U1, Q, U2, ...]
     if.true
-        swapw dropw
-        # => [U1, U2, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, ...]
-        exec.secp256k1::mul_scalar_generator
+        dropw
+        # => [Q, U2, ...]
+        exec.secp256k1::mul_scalar
     else
+        dupw.1
+        # => [Q, U1, Q, U2, ...]
         exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, ...]
-        exec.secp256k1::msm2
+        # => [G, Q, U1, Q, U2, ...]
+        exec.word::eq
+        # => [is_q_generator, U1, Q, U2, ...]
+        if.true
+            swapw dropw
+            # => [U1, U2, ...]
+            exec.k1_scalar::add
+            # => [U1_PLUS_U2, ...]
+            exec.secp256k1::mul_scalar_generator
+        else
+            exec.secp256k1::push_generator
+            # => [G, U1, Q, U2, ...]
+            exec.secp256k1::msm2
+        end
     end
     # => [RELATION_POINT, ...]
 end

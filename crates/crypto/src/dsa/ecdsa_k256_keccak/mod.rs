@@ -271,6 +271,16 @@ impl PublicKey {
     }
 
     /// Recovers the public key associated with a signature over a pre-hashed message.
+    ///
+    /// # Security
+    ///
+    /// `message_digest` must be produced by a cryptographically secure hash of the intended
+    /// message. If an attacker can choose it as arbitrary algebraic data, they can construct a
+    /// signature that recovers a target public key without knowing the corresponding secret key.
+    ///
+    /// Recovery returns a key consistent with the supplied digest and signature; it does not by
+    /// itself authenticate an identity. Before authorizing an action, callers must compare the
+    /// recovered key with an expected key from trusted state.
     pub fn recover_from_prehash(
         message_digest: [u8; 32],
         signature: &Signature,
