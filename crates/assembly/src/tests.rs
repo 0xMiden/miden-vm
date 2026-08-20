@@ -161,7 +161,9 @@ fn empty_while() {
 fn empty_repeat() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let err = context.assemble(source).expect_err("expected empty repeat block to be rejected");
+    let err = context
+        .assemble(source)
+        .expect_err("expected empty repeat block to be rejected");
     assert_diagnostic!(&err, "invalid syntax: expected a non-empty `repeat` block");
     assert_diagnostic!(&err, "begin repeat.5 end end");
 }
