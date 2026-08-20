@@ -135,6 +135,9 @@ pub(crate) struct HostCtx {
     pub error_msg: Option<String>,
     /// The wasmi resource limits (linear memory size, instance/table counts).
     pub limits: StoreLimits,
+    /// The guest's exported linear memory, resolved once after instantiation. `None` when the
+    /// module exports no memory under the name `memory`.
+    pub memory: Option<Memory>,
 }
 
 impl HostCtx {
@@ -149,6 +152,7 @@ impl HostCtx {
             mutation_felts: 0,
             max_mutation_felts: limits.max_mutation_felts,
             error_msg: None,
+            memory: None,
             limits: StoreLimitsBuilder::new()
                 .memory_size(limits.max_memory_bytes)
                 .memories(1)
@@ -187,10 +191,12 @@ fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c ProcessorState<'c>, 
 }
 
 /// Returns the guest's exported linear memory.
+///
+/// The handle is resolved once per instantiation, so this is a field read, not an export lookup.
 fn memory(caller: &mut Caller<'_, HostCtx>) -> Result<Memory, wasmi::Error> {
     caller
-        .get_export("memory")
-        .and_then(wasmi::Extern::into_memory)
+        .data()
+        .memory
         .ok_or_else(|| trap("handler module does not export its linear memory as 'memory'"))
 }
 
@@ -367,22 +373,27 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
     }
 }
 
-/// Writes the `count` memory elements at addresses `addr..addr + count` of the current context
-/// to `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
-fn mem_read(
-    mut caller: Caller<'_, HostCtx>,
+/// Writes the `count` memory elements at addresses `addr..addr + count` to `out`, reading from
+/// `ctx` or, when it is `None`, from the current context. Returns a status when the range is out
+/// of bounds or any cell is uninitialized.
+///
+/// `mem_read` and `mem_read_ctx` are both this function, so the single charge here is the whole
+/// fuel charge of one call.
+fn mem_read_range(
+    caller: &mut Caller<'_, HostCtx>,
+    ctx: Option<ContextId>,
     addr: u32,
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
-    let mem = memory(&mut caller)?;
+    charge_fuel(caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
+    let mem = memory(caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
         return Ok(Status::OutOfBounds.as_raw());
     }
-    let state = state(&caller)?;
-    let ctx = state.ctx();
+    let state = state(caller)?;
+    let ctx = ctx.unwrap_or_else(|| state.ctx());
     let mut felts = Vec::with_capacity(count as usize);
     for idx in 0..count {
         match state.get_mem_value(ctx, addr + idx) {
@@ -391,8 +402,19 @@ fn mem_read(
             None => return Ok(Status::Uninit.as_raw()),
         }
     }
-    write_felts(mem.data_mut(&mut caller), out, &felts)?;
+    write_felts(mem.data_mut(caller), out, &felts)?;
     Ok(OK)
+}
+
+/// Writes the `count` memory elements at addresses `addr..addr + count` of the current context
+/// to `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
+fn mem_read(
+    mut caller: Caller<'_, HostCtx>,
+    addr: u32,
+    out: u32,
+    count: u32,
+) -> Result<i32, wasmi::Error> {
+    mem_read_range(&mut caller, None, addr, out, count)
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of context `ctx` to
@@ -404,24 +426,23 @@ fn mem_read_ctx(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
-    let mem = memory(&mut caller)?;
-    byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-    if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
-        return Ok(Status::OutOfBounds.as_raw());
-    }
-    let ctx = ContextId::from(ctx);
-    let state = state(&caller)?;
-    let mut felts = Vec::with_capacity(count as usize);
-    for idx in 0..count {
-        match state.get_mem_value(ctx, addr + idx) {
-            Some(felt) => felts.push(felt),
-            // The whole range must be written; use `mem_get` for per-cell checks.
-            None => return Ok(Status::Uninit.as_raw()),
-        }
-    }
-    write_felts(mem.data_mut(&mut caller), out, &felts)?;
-    Ok(OK)
+    mem_read_range(&mut caller, Some(ContextId::from(ctx)), addr, out, count)
+}
+
+/// Charges the fuel of one Merkle-store lookup and decodes its arguments. Returns the guest
+/// memory with the root word, the depth, and the index.
+fn merkle_lookup_args(
+    caller: &mut Caller<'_, HostCtx>,
+    root: u32,
+    depth: u32,
+    index: u64,
+) -> Result<(Memory, Word, Felt, Felt), wasmi::Error> {
+    // The lookup walks one level per depth unit, and moves the root in and the node out.
+    charge_fuel(caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
+    let mem = memory(caller)?;
+    let root = read_word(mem.data(&caller), root)?;
+    let index = felt_arg(index)?;
+    Ok((mem, root, Felt::new_unchecked(u64::from(depth)), index))
 }
 
 /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to `out`, or
@@ -433,12 +454,7 @@ fn merkle_get_node(
     index: u64,
     out: u32,
 ) -> Result<i32, wasmi::Error> {
-    // The lookup walks one level per depth unit, and moves the root in and the node out.
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
-    let mem = memory(&mut caller)?;
-    let root = read_word(mem.data(&caller), root)?;
-    let index = felt_arg(index)?;
-    let depth = Felt::new_unchecked(u64::from(depth));
+    let (mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
     let node = state(&caller)?.advice_provider().get_tree_node(root, depth, index);
     match node {
         Ok(node) => {
@@ -462,11 +478,7 @@ fn merkle_has_path(
     depth: u32,
     index: u64,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
-    let mem = memory(&mut caller)?;
-    let root = read_word(mem.data(&caller), root)?;
-    let index = felt_arg(index)?;
-    let depth = Felt::new_unchecked(u64::from(depth));
+    let (_mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
     match state(&caller)?.advice_provider().has_merkle_path(root, depth, index) {
         Ok(has_path) => Ok(i32::from(has_path)),
         Err(AdviceError::InvalidMerkleTreeNodeIndex { .. }) => {
@@ -575,13 +587,9 @@ fn poseidon2_merge(
     let felts = read_felts(mem.data(&caller), pair, 8)?;
     let word = |at: usize| Word::new([felts[at], felts[at + 1], felts[at + 2], felts[at + 3]]);
     let pair = [word(0), word(4)];
-    let domain_felt = felt_arg(domain)?;
-    // Domain zero is the plain merge, not a merge in the zero domain.
-    let digest = if domain == 0 {
-        Poseidon2::merge(&pair)
-    } else {
-        Poseidon2::merge_in_domain(&pair, domain_felt)
-    };
+    // A merge in domain zero is the plain merge: the domain goes into a capacity element that
+    // is already zero.
+    let digest = Poseidon2::merge_in_domain(&pair, felt_arg(domain)?);
     write_felts(mem.data_mut(&mut caller), out, digest.as_elements())
 }
 
@@ -602,13 +610,9 @@ fn poseidon2_hash(
     charge_fuel(&mut caller, fuel)?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), elems, count)?;
-    let domain_felt = felt_arg(domain)?;
-    // Domain zero is the plain hash, not a hash in the zero domain.
-    let digest = if domain == 0 {
-        Poseidon2::hash_elements(&felts)
-    } else {
-        Poseidon2::hash_elements_in_domain(&felts, domain_felt)
-    };
+    // A hash in domain zero is the plain hash: the domain goes into a capacity element that is
+    // already zero, and the empty-input marker fires only for a nonzero domain.
+    let digest = Poseidon2::hash_elements_in_domain(&felts, felt_arg(domain)?);
     write_felts(mem.data_mut(&mut caller), out, digest.as_elements())
 }
 
@@ -735,8 +739,11 @@ fn merkle_store_extend(
         return Ok(());
     }
     charge_mutation(caller.data_mut(), felt_count)?;
+    // The fuel and mutation charges above trap long before the count can leave the `u32` range,
+    // so this conversion cannot fail; it must not wrap if a limit ever grows.
+    let felt_count = u32::try_from(felt_count).map_err(|_| trap("merkle node count overflows"))?;
     let mem = memory(&mut caller)?;
-    let felts = read_felts(mem.data(&caller), nodes, felt_count as u32)?;
+    let felts = read_felts(mem.data(&caller), nodes, felt_count)?;
     let nodes: Vec<InnerNodeInfo> = felts
         .chunks_exact(MERKLE_NODE_FELTS)
         .map(|chunk| {

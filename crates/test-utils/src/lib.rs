@@ -27,10 +27,7 @@ pub use miden_core::{
     program::{ExecutionClaim, MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{
-    chiplets::hasher::apply_permutation,
-    events::{EventName, SystemEvent},
-};
+use miden_core::{chiplets::hasher::apply_permutation, events::EventName};
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
@@ -367,7 +364,7 @@ impl Test {
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         for (event, handler) in handlers {
             let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
+            if event.is_reserved() {
                 panic!("tried to register handler for reserved system event: {event_name}")
             }
             let event_id = event.to_event_id();
@@ -387,7 +384,7 @@ impl Test {
     pub fn add_trace_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn TraceHandler>)>) {
         for (event, handler) in handlers {
             let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
+            if event.is_reserved() {
                 panic!("tried to register trace handler for reserved system event: {event_name}")
             }
             let event_id = event.to_event_id();

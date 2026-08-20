@@ -17,6 +17,19 @@
 //! - Incoming buffers need no work. Every element the host writes is canonical, and a canonical
 //!   `u64` is the plain residue of the value it encodes, so the host writes straight into the
 //!   caller's buffer.
+//!
+//! # Safety contract
+//!
+//! Every host import is `unsafe` because it takes raw pointers. All call sites below meet the
+//! same contract, which the per-site comments only add to:
+//!
+//! - each pointer comes from a live binding that outlives the call — a caller slice, a caller
+//!   reference, or a local of this function — so it is non-null, aligned, and valid to read for
+//!   `*const` arguments and to write for `*mut` arguments;
+//! - each length or capacity argument is the element count of the buffer its pointer names, so the
+//!   host stays inside that buffer;
+//! - the host writes only through `*mut` pointers, and keeps no pointer past the call, so no borrow
+//!   outlives the call.
 
 use miden_event_handler_abi::{Felt, MerkleNode, Status, Word, guest};
 
@@ -54,12 +67,14 @@ fn status(raw: i32) -> Status {
 
 /// Returns the depth of the operand stack.
 pub fn stack_depth() -> u32 {
+    // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::stack_depth() }
 }
 
 /// Returns the operand-stack element at `pos`. Position `0` holds the event ID; positions past
 /// the stack depth read as zero.
 pub fn stack_get(pos: u32) -> Felt {
+    // SAFETY: the module contract; the call takes no pointer.
     // The host returns a canonical value, which is the plain residue of itself.
     Felt::new_unchecked(unsafe { guest::stack_get(pos) })
 }
@@ -68,6 +83,7 @@ pub fn stack_get(pos: u32) -> Felt {
 /// ordered from the top of the stack down. Positions past the stack depth read as zero.
 pub fn stack_read(start_pos: u32, out: &mut [Felt]) {
     let len = out.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `out`.
     unsafe { guest::stack_read(start_pos, out.as_mut_ptr(), len) }
 }
 
@@ -83,11 +99,13 @@ pub fn stack_get_word(start_pos: u32) -> Word {
 
 /// Returns the current clock cycle.
 pub fn clk() -> u64 {
+    // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::clk() }
 }
 
 /// Returns the current execution context ID.
 pub fn ctx() -> u32 {
+    // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::ctx() }
 }
 
@@ -95,6 +113,7 @@ pub fn ctx() -> u32 {
 /// never written.
 pub fn mem_get(addr: u32) -> Option<Felt> {
     let mut out = Felt::ZERO;
+    // SAFETY: the module contract; the host writes one element into the local `out`.
     match status(unsafe { guest::mem_get(addr, &mut out) }) {
         Status::Ok => Some(out),
         Status::Uninit => None,
@@ -110,6 +129,7 @@ pub fn mem_get(addr: u32) -> Option<Felt> {
 /// cases. Use [`mem_get`] for a per-cell presence check.
 pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
     let len = out.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read(addr, out.as_mut_ptr(), len) };
     match status(raw) {
         result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
@@ -123,6 +143,7 @@ pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
 /// context, ID `0`).
 pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [Felt]) -> Status {
     let len = out.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::mem_read_ctx(ctx, addr, out.as_mut_ptr(), len) };
     match status(raw) {
         result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
@@ -137,6 +158,8 @@ pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [Felt]) -> Status {
 pub fn merkle_get_node(root: &Word, depth: u32, index: u64) -> Option<Word> {
     let root = canonical_word(root);
     let mut out = Word::empty();
+    // SAFETY: the module contract; the host reads the local `root` and writes the local `out`,
+    // one word each.
     match status(unsafe { guest::merkle_get_node(&root, depth, index, &mut out) }) {
         Status::Ok => Some(out),
         Status::NotFound => None,
@@ -150,11 +173,13 @@ pub fn merkle_get_node(root: &Word, depth: u32, index: u64) -> Option<Word> {
 /// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
 pub fn merkle_has_path(root: &Word, depth: u32, index: u64) -> bool {
     let root = canonical_word(root);
+    // SAFETY: the module contract; the host reads one word from the local `root`.
     unsafe { guest::merkle_has_path(&root, depth, index) != 0 }
 }
 
 /// Returns the number of elements on the advice stack.
 pub fn adv_stack_len() -> u32 {
+    // SAFETY: the module contract; the call takes no pointer.
     unsafe { guest::adv_stack_len() }
 }
 
@@ -163,6 +188,7 @@ pub fn adv_stack_len() -> u32 {
 /// Returns `false` when the range goes past the advice-stack length; `out` is unchanged then.
 pub fn adv_stack_read(offset: u32, out: &mut [Felt]) -> bool {
     let len = out.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `out`.
     let raw = unsafe { guest::adv_stack_read(offset, out.as_mut_ptr(), len) };
     match status(raw) {
         Status::Ok => true,
@@ -175,6 +201,8 @@ pub fn adv_stack_read(offset: u32, out: &mut [Felt]) -> bool {
 pub fn adv_map_value_len(key: &Word) -> Option<u32> {
     let key = canonical_word(key);
     let mut out = 0u32;
+    // SAFETY: the module contract; the host reads one word from the local `key` and writes the
+    // local `out`.
     match status(unsafe { guest::adv_map_value_len(&key, &mut out) }) {
         Status::Ok => Some(out),
         Status::NotFound => None,
@@ -190,6 +218,8 @@ pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
     let len = adv_map_value_len(key)?;
     let key = canonical_word(key);
     let cap = out.len() as u32;
+    // SAFETY: the module contract; `cap` is the element count of `out`, and the host writes no
+    // more than `cap` elements.
     let raw = unsafe { guest::adv_map_value_read(&key, out.as_mut_ptr(), cap) };
     match status(raw) {
         Status::Ok => Some(len as usize),
@@ -209,6 +239,8 @@ pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
 pub fn poseidon2_merge(pair: &[Word; 2], domain: Felt) -> Word {
     let pair = [canonical_word(&pair[0]), canonical_word(&pair[1])];
     let mut out = Word::empty();
+    // SAFETY: the module contract; the host reads the two words the local `pair` holds and
+    // writes one word into the local `out`.
     unsafe { guest::poseidon2_merge(pair.as_ptr(), domain.as_canonical_u64(), &mut out) };
     out
 }
@@ -222,6 +254,8 @@ pub fn poseidon2_hash(elems: &mut [Felt], domain: Felt) -> Word {
     canonicalize(elems);
     let mut out = Word::empty();
     let len = elems.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `elems`, and the host writes
+    // one word into the local `out`.
     unsafe { guest::poseidon2_hash(elems.as_ptr(), len, domain.as_canonical_u64(), &mut out) };
     out
 }
@@ -234,12 +268,15 @@ pub fn poseidon2_hash(elems: &mut [Felt], domain: Felt) -> Word {
 pub fn poseidon2_permute(state: &mut [Felt; 12]) {
     // The host reads the state and writes the permuted state back into the same buffer.
     canonicalize(state);
+    // SAFETY: the module contract; the host reads and writes exactly the 12 elements of `state`.
     unsafe { guest::poseidon2_permute(state.as_mut_ptr()) }
 }
 
 /// Returns the Keccak-256 digest of `data`.
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
+    // SAFETY: the module contract; the length is that of `data`, and `out` holds the 32 bytes of
+    // a Keccak-256 digest.
     unsafe { guest::keccak256(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
     out
 }
@@ -247,6 +284,8 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 /// Returns the SHA-256 digest of `data`.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
+    // SAFETY: the module contract; the length is that of `data`, and `out` holds the 32 bytes of
+    // a SHA-256 digest.
     unsafe { guest::sha256(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
     out
 }
@@ -254,6 +293,8 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 /// Returns the SHA-512 digest of `data`.
 pub fn sha512(data: &[u8]) -> [u8; 64] {
     let mut out = [0u8; 64];
+    // SAFETY: the module contract; the length is that of `data`, and `out` holds the 64 bytes of
+    // a SHA-512 digest.
     unsafe { guest::sha512(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
     out
 }
@@ -261,6 +302,8 @@ pub fn sha512(data: &[u8]) -> [u8; 64] {
 /// Returns the BLAKE3 digest of `data`.
 pub fn blake3(data: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
+    // SAFETY: the module contract; the length is that of `data`, and `out` holds the 32 bytes of
+    // a BLAKE3 digest.
     unsafe { guest::blake3(data.as_ptr(), data.len() as u32, out.as_mut_ptr()) };
     out
 }
@@ -274,6 +317,7 @@ pub fn blake3(data: &[u8]) -> [u8; 32] {
 pub fn adv_stack_extend(vals: &mut [Felt]) {
     canonicalize(vals);
     let len = vals.len() as u32;
+    // SAFETY: the module contract; `len` is the element count of `vals`.
     unsafe { guest::adv_stack_extend(vals.as_ptr(), len) }
 }
 
@@ -284,6 +328,8 @@ pub fn adv_map_insert(key: &Word, vals: &mut [Felt]) {
     canonicalize(vals);
     let key = canonical_word(key);
     let len = vals.len() as u32;
+    // SAFETY: the module contract; the host reads one word from the local `key`, and `len` is
+    // the element count of `vals`.
     unsafe { guest::adv_map_insert(&key, vals.as_ptr(), len) }
 }
 
@@ -300,6 +346,7 @@ pub fn merkle_store_extend(nodes: &mut [MerkleNode]) {
         }
     }
     let len = nodes.len() as u32;
+    // SAFETY: the module contract; `len` is the node count of `nodes`.
     unsafe { guest::merkle_store_extend(nodes.as_ptr(), len) }
 }
 
@@ -310,5 +357,7 @@ pub fn merkle_store_extend(nodes: &mut [MerkleNode]) {
 ///
 /// The host discards all buffered mutations.
 pub fn fail(msg: &str) -> ! {
+    // SAFETY: the module contract; the length is the byte length of `msg`. The host always
+    // traps, so the call does not return.
     unsafe { guest::fail(msg.as_ptr(), msg.len() as u32) }
 }

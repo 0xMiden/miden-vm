@@ -5,7 +5,7 @@ sidebar_position: 3
 
 # Wasm event handlers
 
-Custom [event](./assembly/events.md) handlers can ship as untrusted WebAssembly modules inside a `.masp` package. Any host runs them with the [wasmi](https://crates.io/crates/wasmi) interpreter — native hosts and hosts that are themselves compiled to Wasm (for example in a browser) get the same behavior. The handler code does not link any Miden crate: it talks to the host only through imported functions and plain `#[repr(C)]` data types.
+Custom [event](./assembly/events.md) handlers can ship as untrusted WebAssembly modules inside a `.masp` package. Any host runs them with the [wasmi](https://crates.io/crates/wasmi) interpreter — native hosts and hosts that are themselves compiled to Wasm (for example in a browser) get the same behavior. The handler code links no VM crate: it talks to the host only through imported functions and plain `#[repr(C)]` data types, which the small guest SDK supplies together with the `Felt` and `Word` types it re-exports.
 
 ## Model
 

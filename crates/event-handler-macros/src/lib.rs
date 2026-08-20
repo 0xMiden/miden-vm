@@ -16,7 +16,17 @@ use quote::{format_ident, quote};
 use syn2::{ItemFn, LitStr, ReturnType, parse_macro_input, spanned::Spanned};
 
 /// The version byte of one manifest record.
+///
+/// This crate repeats the wire constants instead of depending on the ABI crate, which a
+/// proc-macro crate would build for the host. Keep the value in sync with
+/// `miden_event_handler_abi::MANIFEST_RECORD_VERSION`.
 const RECORD_VERSION: u8 = 1;
+
+/// The name of the custom section that carries the manifest records.
+///
+/// Keep it in sync with `miden_event_handler_abi::MANIFEST_SECTION_NAME`; see
+/// [`RECORD_VERSION`].
+const MANIFEST_SECTION_NAME: &str = "miden:event-manifest";
 
 /// Declares a function as a Wasm event handler for the given event name.
 ///
@@ -50,7 +60,7 @@ pub fn miden_event_handler(attr: TokenStream, item: TokenStream) -> TokenStream 
                 #fn_ident()
             }
 
-            #[unsafe(link_section = "miden:event-manifest")]
+            #[unsafe(link_section = #MANIFEST_SECTION_NAME)]
             #[used]
             static MANIFEST_RECORD: [u8; #record_len] = [#(#record),*];
         };

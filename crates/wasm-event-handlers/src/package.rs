@@ -3,7 +3,7 @@
 
 use alloc::{format, string::ToString, sync::Arc, vec::Vec};
 
-use miden_event_handler_abi::{ABI_VERSION, MANIFEST_SECTION_NAME};
+use miden_event_handler_abi::{ABI_VERSION, MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
 use miden_mast_package::{EventHandlerManifestEntry, EventHandlerSection, Package};
 use miden_processor::{
     HostLibrary,
@@ -56,10 +56,6 @@ pub fn host_library_from_package(
 
 // MANIFEST DERIVATION
 // ================================================================================================
-
-/// The version byte of one `miden:event-manifest` record. Kept in sync with the record format
-/// the `miden-event-handler-macros` crate emits.
-const MANIFEST_RECORD_VERSION: u8 = 1;
 
 /// Reads the handler manifest embedded in a compiled guest module.
 ///
