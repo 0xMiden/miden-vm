@@ -49,8 +49,9 @@ const MAX_FAIL_MSG_BYTES: u32 = 4096;
 ///
 /// Calibrated with `benches/handler_call.rs` (Apple M-series, wasmi 1.1): one fuel unit of
 /// guest execution costs ~0.8 ns and one host-moved felt costs ~0.7-0.9 ns, so a 1:1 charge
-/// makes host-moved data cost the guest about as much fuel as moving it itself would.
-const FUEL_PER_FELT: u64 = 1;
+/// makes host-moved data cost the guest about as much fuel as moving it itself would. The
+/// instantiation charge in `module.rs` uses the same rate per 8 bytes.
+pub(crate) const FUEL_PER_FELT: u64 = 1;
 
 /// Flat fuel charged on entry to every host call, for the guest-to-host transition.
 ///
