@@ -920,6 +920,21 @@ fn oversized_module_is_rejected_at_load() {
 }
 
 #[test]
+fn duplicate_imports_are_rejected_at_load() {
+    // wasmi re-resolves every import on each per-call instantiation and meters none of it, so
+    // an import-bomb module (the same import declared many times) must be refused at load.
+    let wat_src = r#"(module
+        (import "miden:event/v1" "clk" (func (result i64)))
+        (import "miden:event/v1" "clk" (func (result i64)))
+        (func (export "handler")))"#;
+    let err = try_load(wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::DuplicateImport { ref name } if name == "clk"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn foreign_imports_are_rejected() {
     let wat_src = r#"(module
         (import "wasi_snapshot_preview1" "proc_exit" (func (param i32)))

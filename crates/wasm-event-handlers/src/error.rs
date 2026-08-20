@@ -46,6 +46,15 @@ pub enum WasmHandlerLoadError {
         name: String,
     },
 
+    /// The module imports the same host function more than once. A module never needs a
+    /// duplicate import; rejecting them bounds the per-instantiation import-resolution work,
+    /// which no fuel meters.
+    #[error("handler module imports '{name}' more than once")]
+    DuplicateImport {
+        /// The import name.
+        name: String,
+    },
+
     /// The module has a start section. No guest code may run before fuel and limits are
     /// installed, so start functions are rejected.
     #[error("handler module has a start section; start functions are not allowed")]

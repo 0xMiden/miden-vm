@@ -88,8 +88,9 @@ impl WasmHandlerModule {
     /// - the Wasm binary is larger than `limits.max_module_bytes`;
     /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
     ///   ([`EnforcedLimits::strict`]);
-    /// - the module imports from a namespace other than `miden:event/v1`, or an import has a
-    ///   signature the host function set does not provide;
+    /// - the module imports from a namespace other than `miden:event/v1`, imports the same
+    ///   function more than once, or an import has a signature the host function set does not
+    ///   provide;
     /// - the module has a start section;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
     /// - a manifest entry has an empty event name or an empty export name;
@@ -144,10 +145,20 @@ impl WasmHandlerModule {
             .map_err(|err| WasmHandlerLoadError::InvalidModule(err.to_string()))?;
 
         // The import allowlist closes the sandbox: no WASI, no other namespaces.
+        let mut import_names = BTreeSet::new();
         for import in module.imports() {
             if import.module() != IMPORT_MODULE {
                 return Err(WasmHandlerLoadError::ForbiddenImport {
                     module: import.module().to_string(),
+                    name: import.name().to_string(),
+                });
+            }
+            // wasmi resolves every import against the linker on each per-call instantiation,
+            // and no engine limit bounds the import count. A module never needs the same
+            // import twice, so duplicates exist only to inflate that unmetered work; with
+            // this check the import count is bounded by the host function set.
+            if !import_names.insert(import.name().to_string()) {
+                return Err(WasmHandlerLoadError::DuplicateImport {
                     name: import.name().to_string(),
                 });
             }
