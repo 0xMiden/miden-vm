@@ -5420,6 +5420,40 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 }
 
 #[test]
+fn variadic_procedure_signatures_resolve() -> TestResult {
+    use miden_assembly_syntax::ast::types::Type;
+    use miden_mast_package::PackageExport;
+
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::variadic
+
+        pub proc log(prefix: felt, ...)
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context.assemble_library("lib", None, module, [])?;
+
+    let signature = package
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Procedure(proc) if proc.path.to_string().ends_with("log") => {
+                proc.signature.clone()
+            },
+            _ => None,
+        })
+        .expect("log should be exported with a signature");
+
+    assert_eq!(signature.params(), &[Type::Felt, Type::Variadic]);
+    Ok(())
+}
+
+#[test]
 fn self_recursive_struct_through_a_pointer_resolves() -> TestResult {
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
