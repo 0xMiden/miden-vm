@@ -7,7 +7,8 @@
 //!   handler through [`HostTrap`], which discards all buffered mutations.
 //!
 //! All pointers are offsets into the guest's exported linear memory. Range checks use checked
-//! arithmetic; nothing wraps.
+//! arithmetic; nothing wraps. Output pointers are validated before the host computes the
+//! result, so a defect traps even when the call would come back with a status.
 
 use alloc::{format, string::String, vec::Vec};
 
@@ -361,11 +362,13 @@ fn ctx(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
 /// [`Status::Uninit`] when the cell was never written.
 fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
+    let mem = memory(&mut caller)?;
+    // Output pointers are validated before the lookup, so a defect traps even when the
+    // result would be a status.
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, 1)?;
     let state = state(&caller)?;
-    let value = state.get_mem_value(state.ctx(), addr);
-    match value {
+    match state.get_mem_value(state.ctx(), addr) {
         Some(felt) => {
-            let mem = memory(&mut caller)?;
             write_felts(mem.data_mut(&mut caller), out, &[felt])?;
             Ok(OK)
         },
@@ -455,6 +458,8 @@ fn merkle_get_node(
     out: u32,
 ) -> Result<i32, wasmi::Error> {
     let (mem, root, depth, index) = merkle_lookup_args(&mut caller, root, depth, index)?;
+    // Validate the output pointer before the lookup; see `mem_get`.
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let node = state(&caller)?.advice_provider().get_tree_node(root, depth, index);
     match node {
         Ok(node) => {
@@ -529,36 +534,45 @@ fn adv_map_value_len(
     // The call reads a key word and performs a map lookup.
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
+    // Validate the output pointer before the lookup; see `mem_get`.
+    byte_range(mem.data(&caller).len(), out_len, 4, 1)?;
     let key = read_word(mem.data(&caller), key)?;
-    let Some(len) = state(&caller)?
-        .advice_provider()
-        .get_mapped_values(&key)
-        .map(|values| values.len() as u32)
+    let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
     else {
         return Ok(Status::NotFound.as_raw());
     };
+    let len = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
     write_u32(mem.data_mut(&mut caller), out_len, len)?;
     Ok(OK)
 }
 
-/// Writes the advice-map value for `key` to the `cap`-element buffer `out`, or returns a status
-/// when the map has no entry for `key` or the value is longer than `cap`.
+/// Writes the advice-map value for `key` to the `cap`-element buffer `out` and its element
+/// count to `out_len`, or returns a status when the map has no entry for `key` or the value is
+/// longer than `cap`. The count is written on `CapacityTooSmall` too, so one retry with a
+/// grown buffer suffices.
 fn adv_map_value_read(
     mut caller: Caller<'_, HostCtx>,
     key: u32,
     out: u32,
     cap: u32,
+    out_len: u32,
 ) -> Result<i32, wasmi::Error> {
     // The key read and the map lookup are charged up front, so a probe that comes back
     // `NotFound` or `CapacityTooSmall` still pays for the work it causes. The value copy is
     // charged below, when its size is known.
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
+    let data_len = mem.data(&caller).len();
+    // Validate both output pointers before the lookup; see `mem_get`.
+    byte_range(data_len, out, FELT_BYTES, cap)?;
+    byte_range(data_len, out_len, 4, 1)?;
     let key = read_word(mem.data(&caller), key)?;
     let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
     else {
         return Ok(Status::NotFound.as_raw());
     };
+    let count = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
+    write_u32(mem.data_mut(&mut caller), out_len, count)?;
     if len > cap as usize {
         return Ok(Status::CapacityTooSmall.as_raw());
     }

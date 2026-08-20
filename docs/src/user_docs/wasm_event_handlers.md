@@ -53,7 +53,7 @@ The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`)
 
 Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
 
-**Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them.
+**Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
 
 **Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
 
@@ -69,7 +69,7 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
 | `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. |
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
-| `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap) -> status` | Two-phase advice-map reads; `NotFound` when the key has no entry. |
+| `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap, out_len) -> status` | Advice-map reads; `NotFound` when the key has no entry. `adv_map_value_read` writes the element count to `out_len` on success and on `CapacityTooSmall`, so one call (plus at most one retry with a grown buffer) suffices. |
 
 **Mutations** are buffered, return nothing (limit violations trap), and map one-to-one onto the processor's advice mutations:
 

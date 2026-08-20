@@ -52,7 +52,7 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "adv_stack_len" (func $adv_stack_len (result i32)))
   (import "miden:event/v1" "adv_stack_read" (func $adv_stack_read (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "adv_map_value_len" (func $adv_map_value_len (param i32 i32) (result i32)))
-  (import "miden:event/v1" "adv_map_value_read" (func $adv_map_value_read (param i32 i32 i32) (result i32)))
+  (import "miden:event/v1" "adv_map_value_read" (func $adv_map_value_read (param i32 i32 i32 i32) (result i32)))
   (import "miden:event/v1" "adv_stack_extend" (func $adv_stack_extend (param i32 i32)))
   (import "miden:event/v1" "adv_map_insert" (func $adv_map_insert (param i32 i32 i32)))
   (import "miden:event/v1" "merkle_store_extend" (func $merkle_store_extend (param i32 i32)))
@@ -342,7 +342,7 @@ fn advice_map_value_read_after_len() {
     let wat_src = fixture_with(
         &items,
         "(drop (call $adv_map_value_len (i32.const 0) (i32.const 32)))
-         (drop (call $adv_map_value_read (i32.const 0) (i32.const 48) (i32.const 8)))
+         (drop (call $adv_map_value_read (i32.const 0) (i32.const 48) (i32.const 8) (i32.const 40)))
          (call $adv_stack_extend (i32.const 48) (i32.const 3))",
     );
     let module = load(&wat_src);
@@ -368,6 +368,47 @@ fn advice_map_missing_key_status() {
     let mutations = run(&module, &processor).expect("handler succeeds");
     let status = Felt::new_unchecked(Status::NotFound.as_raw() as u64);
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([status])]);
+}
+
+#[test]
+fn adv_map_value_read_reports_the_count_when_the_capacity_is_too_small() {
+    let key_values = [1u64, 2, 3, 4];
+    let key = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let values: Vec<Felt> = [10u64, 11, 12].into_iter().map(Felt::new_unchecked).collect();
+
+    // The key sits at offset 0; the 1-element buffer at 64 is too small for the 3-element
+    // value, so the call returns `CapacityTooSmall` and writes the needed count to 40.
+    let items = format!("(data (i32.const 0) \"{}\")", data_bytes(&key_values));
+    let wat_src = fixture_with(
+        &items,
+        "(i64.store (i32.const 48)
+             (i64.extend_i32_u
+                 (call $adv_map_value_read
+                     (i32.const 0) (i32.const 64) (i32.const 1) (i32.const 40))))
+         (i64.store (i32.const 56) (i64.extend_i32_u (i32.load (i32.const 40))))
+         (call $adv_stack_extend (i32.const 48) (i32.const 2))",
+    );
+    let module = load(&wat_src);
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default().with_map([(key, values)]))
+        .expect("advice inputs fit");
+
+    let mutations = run(&module, &processor).expect("handler succeeds");
+    let expected = [
+        Felt::new_unchecked(Status::CapacityTooSmall.as_raw() as u64),
+        Felt::new_unchecked(3),
+    ];
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
+#[test]
+fn status_calls_validate_output_pointers() {
+    // The key is absent, so the result would be `NotFound` — but the bad output pointer is a
+    // defect and must trap first.
+    let wat_src = fixture("(drop (call $adv_map_value_len (i32.const 0) (i32.const 100000000)))");
+    let module = load(&wat_src);
+    let err = run_raw(&module, &processor()).expect_err("a bad output pointer must trap");
+    assert_run_error!(err, WasmHandlerRunError::Trapped(_));
 }
 
 #[test]
