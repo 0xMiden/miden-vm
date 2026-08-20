@@ -211,16 +211,16 @@ pub fn adv_map_value_len(key: &Word) -> Option<u32> {
 }
 
 /// Reads the advice-map value for `key` into `out` and returns the element count, or `None`
-/// when the map has no entry.
+/// when the map has no entry. One host call.
 ///
 /// Ends the handler when `out` is smaller than the value; size it with [`adv_map_value_len`].
 pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
-    let len = adv_map_value_len(key)?;
     let key = canonical_word(key);
     let cap = out.len() as u32;
-    // SAFETY: the module contract; `cap` is the element count of `out`, and the host writes no
-    // more than `cap` elements.
-    let raw = unsafe { guest::adv_map_value_read(&key, out.as_mut_ptr(), cap) };
+    let mut len = 0u32;
+    // SAFETY: the module contract; `cap` is the element count of `out`, the host writes no
+    // more than `cap` elements, and the element count goes to the local `len`.
+    let raw = unsafe { guest::adv_map_value_read(&key, out.as_mut_ptr(), cap, &mut len) };
     match status(raw) {
         Status::Ok => Some(len as usize),
         Status::NotFound => None,

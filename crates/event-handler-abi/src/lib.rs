@@ -354,13 +354,20 @@ pub mod guest {
         /// changed in that case.
         pub fn adv_map_value_len(key: *const Word, out_len: *mut u32) -> i32;
 
-        /// Writes the advice-map value for `key` to `out`.
+        /// Writes the advice-map value for `key` to `out` and its element count to `out_len`.
         ///
-        /// `cap` is the element capacity of `out`. Returns `Status::NotFound` when the map has no
-        /// entry for `key`, and `Status::CapacityTooSmall` when the value is longer than `cap`;
-        /// `out` is not changed in either case. Call `adv_map_value_len` first to size the
-        /// buffer.
-        pub fn adv_map_value_read(key: *const Word, out: *mut Felt, cap: u32) -> i32;
+        /// `cap` is the element capacity of `out`; the host validates both output pointers
+        /// before the lookup, so a bad pointer traps even when the result would be a status.
+        /// Returns `Status::NotFound` when the map has no entry for `key` (`out` and `out_len`
+        /// are not changed), and `Status::CapacityTooSmall` when the value is longer than
+        /// `cap` — the element count is still written to `out_len` then, so one retry with a
+        /// grown buffer suffices.
+        pub fn adv_map_value_read(
+            key: *const Word,
+            out: *mut Felt,
+            cap: u32,
+            out_len: *mut u32,
+        ) -> i32;
 
         // MUTATIONS
         // ----------------------------------------------------------------------------------------
