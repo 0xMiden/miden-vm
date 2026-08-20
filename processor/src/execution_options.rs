@@ -63,8 +63,8 @@ impl ExecutionOptions {
     /// Default fragment size for core trace generation.
     pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
 
-    /// Default maximum combined logical size of the advice provider. Set to 4 MiB.
-    pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 4 * 1024 * 1024;
+    /// Default maximum combined logical size of the advice provider. Set to 16 MiB.
+    pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
     /// Default maximum number of input bytes for a single hash precompile invocation.
     /// Set to 2^20 (1 MB).
@@ -355,6 +355,15 @@ mod tests {
         let opts = ExecutionOptions::new(Some(100), 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
+    }
+
+    #[test]
+    fn default_advice_size_limit_covers_protocol_lower_bound() {
+        const PROTOCOL_LOWER_BOUND_BYTES: usize = 8_445_856;
+        let options = ExecutionOptions::default();
+
+        assert!(options.max_advice_size_bytes() > PROTOCOL_LOWER_BOUND_BYTES);
+        assert_eq!(options.max_advice_size_bytes(), 16 * 1024 * 1024);
     }
 
     #[test]
