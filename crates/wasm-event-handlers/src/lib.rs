@@ -33,7 +33,7 @@ mod host;
 mod module;
 mod package;
 
-pub use error::WasmHandlerLoadError;
+pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
 #[doc(hidden)]
 pub use package::fuzz_walk_sections;

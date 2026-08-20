@@ -13,10 +13,10 @@ use miden_processor::{
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventName},
 };
-use wasmi::{Config, Engine, EnforcedLimits, Linker, Module, Store};
+use wasmi::{Config, EnforcedLimits, Engine, Linker, Module, Store};
 
 use crate::{
-    error::{WasmHandlerLoadError, WasmHandlerRunError},
+    error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
     host::{HostCtx, build_linker},
 };
 
@@ -84,8 +84,8 @@ impl WasmHandlerModule {
     /// Returns an error when:
     /// - `abi_version` is not the version this crate implements;
     /// - the Wasm binary is larger than `limits.max_module_bytes`;
-    /// - the Wasm binary does not parse or validate, or oversteps the structural compilation
-    ///   limits ([`EnforcedLimits::strict`]);
+    /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
+    ///   ([`EnforcedLimits::strict`]);
     /// - the module imports from a namespace other than `miden:event/v1`, or an import has a
     ///   signature the host function set does not provide;
     /// - the module has a start section;
@@ -236,18 +236,39 @@ impl WasmHandlerModule {
         match func.call(&mut store, ()) {
             Ok(()) => Ok(store.into_data().mutations),
             Err(err) => {
-                let out_of_fuel = matches!(err.as_trap_code(), Some(wasmi::TrapCode::OutOfFuel));
                 let data = store.into_data();
                 let run_err = if let Some(msg) = data.error_msg {
                     WasmHandlerRunError::Failed(msg)
-                } else if out_of_fuel {
-                    WasmHandlerRunError::OutOfFuel(self.limits.fuel)
                 } else {
-                    WasmHandlerRunError::Trapped(err.to_string())
+                    classify_trap(&err, self.limits.fuel)
                 };
                 Err(run_err.into())
             },
         }
+    }
+}
+
+/// Maps a wasmi error to the run-error variant, so resource-limit violations are
+/// distinguishable from handler defects.
+///
+/// Fuel can run out in two places: wasmi's own metering of guest instructions (a
+/// [`wasmi::TrapCode`]) and [`HostTrap`]s raised by the host-call fuel charges. Both map to
+/// [`WasmHandlerRunError::OutOfFuel`].
+fn classify_trap(err: &wasmi::Error, fuel: u64) -> WasmHandlerRunError {
+    if let Some(trap) = err.downcast_ref::<HostTrap>() {
+        return match trap.kind {
+            HostTrapKind::OutOfFuel => WasmHandlerRunError::OutOfFuel(fuel),
+            HostTrapKind::MutationLimit => WasmHandlerRunError::LimitExceeded(trap.msg.clone()),
+            HostTrapKind::Defect => WasmHandlerRunError::Trapped(err.to_string()),
+        };
+    }
+    match err.as_trap_code() {
+        Some(wasmi::TrapCode::OutOfFuel) => WasmHandlerRunError::OutOfFuel(fuel),
+        // The store limits refused a memory or table growth (`trap_on_grow_failure`).
+        Some(wasmi::TrapCode::GrowthOperationLimited) => {
+            WasmHandlerRunError::LimitExceeded(err.to_string())
+        },
+        _ => WasmHandlerRunError::Trapped(err.to_string()),
     }
 }
 
