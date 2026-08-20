@@ -121,15 +121,13 @@ fn simple_instructions() -> TestResult {
     Ok(())
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly?
 #[test]
-#[ignore]
-fn empty_program() -> TestResult {
+fn empty_program() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context.assemble(source).expect_err("expected empty entry block to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected a non-empty entry block");
+    assert_diagnostic!(&err, "begin end");
 }
 
 #[test]
@@ -150,26 +148,22 @@ fn empty_if_true_then_branch() -> TestResult {
     Ok(())
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly
 #[test]
-#[ignore]
-fn empty_while() -> TestResult {
+fn empty_while() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context.assemble(source).expect_err("expected empty while block to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected a non-empty `while` block");
+    assert_diagnostic!(&err, "begin while.true end end");
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly
 #[test]
-#[ignore]
-fn empty_repeat() -> TestResult {
+fn empty_repeat() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context.assemble(source).expect_err("expected empty repeat block to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected a non-empty `repeat` block");
+    assert_diagnostic!(&err, "begin repeat.5 end end");
 }
 
 /// This test ensures that all iterations of a repeat control block are merged into a single basic
