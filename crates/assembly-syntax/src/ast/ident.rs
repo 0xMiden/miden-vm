@@ -343,8 +343,10 @@ pub mod arbitrary {
     const PREFERRED_RANGES: &[core::ops::RangeInclusive<char>] = &['a'..='z', 'A'..='Z'];
     const EXTRA_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9', 'à'..='ö', 'ø'..='ÿ'];
 
-    const PREFERRED_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['A'..='Z'];
-    const EXTRA_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9'];
+    const PREFERRED_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] =
+        core::slice::from_ref(&('A'..='Z'));
+    const EXTRA_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] =
+        core::slice::from_ref(&('0'..='9'));
 
     prop_compose! {
         /// A strategy to produce a random character from a more restricted dictionary for bare
@@ -353,7 +355,7 @@ pub mod arbitrary {
                       (c in CharStrategy::new_borrowed(
                           &['_'],
                           PREFERRED_RANGES,
-                          &['0'..='9']
+                          core::slice::from_ref(&('0'..='9'))
                       )) -> char {
             c
         }

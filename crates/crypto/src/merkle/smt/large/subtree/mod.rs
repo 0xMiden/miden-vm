@@ -403,8 +403,8 @@ impl Subtree {
             let (bits_data, hash_data) = payload.split_at(Self::BITMASK_SIZE);
 
             let mut child_bits = [0u64; 8];
-            for (i, chunk) in bits_data.chunks_exact(8).enumerate() {
-                child_bits[i] = u64::from_le_bytes(chunk.try_into().unwrap());
+            for (i, chunk) in bits_data.as_chunks::<8>().0.iter().enumerate() {
+                child_bits[i] = u64::from_le_bytes(*chunk);
             }
 
             // Bits 510-511 are unused - reject corrupted data where these bits are set.
@@ -422,7 +422,9 @@ impl Subtree {
             }
 
             let hashes: Vec<Word> = hash_data
-                .chunks_exact(Self::HASH_SIZE)
+                .as_chunks::<{ Self::HASH_SIZE }>()
+                .0
+                .iter()
                 .map(|chunk| Word::try_from(chunk).map_err(|_| SubtreeError::InvalidHashData))
                 .collect::<Result<_, _>>()?;
 

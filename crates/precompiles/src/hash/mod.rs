@@ -219,7 +219,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     fn digest_chunks<H: HashFunction>(input: &[u8]) -> Vec<[Felt; 8]> {
         let mut felts = bytes_to_packed_u32_elements(&H::hash(input));
         felts.resize(HashPrecompile::<H>::digest_chunks() * 8, ZERO);
-        felts.chunks_exact(8).map(|c| core::array::from_fn(|i| c[i])).collect()
+        felts
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| core::array::from_fn(|i| c[i]))
+            .collect()
     }
 
     let fresh = || {

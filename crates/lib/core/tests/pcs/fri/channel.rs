@@ -57,7 +57,7 @@ where
     }
 
     pub fn layer_proofs(&mut self) -> Vec<BatchMerkleProof<H>> {
-        self.layer_proofs.drain(..).collect()
+        core::mem::take(&mut self.layer_proofs)
     }
 
     pub fn layer_queries(&mut self) -> Vec<Vec<E>> {
@@ -65,7 +65,7 @@ where
     }
 
     pub fn read_fri_layer_commitments(&mut self) -> Vec<H::Digest> {
-        self.layer_commitments.drain(..).collect()
+        core::mem::take(&mut self.layer_commitments)
     }
 
     pub fn read_remainder(
