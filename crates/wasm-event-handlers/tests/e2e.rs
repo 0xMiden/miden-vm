@@ -139,14 +139,24 @@ fn build_rust_guest_fixture() -> Vec<u8> {
         // A dedicated target dir avoids lock contention with the build that runs this test.
         let target_dir = workspace_root.join("target").join("guest-fixture");
 
-        let status = Command::new(env!("CARGO"))
+        // An inherited `RUSTFLAGS` replaces the rustflags of the fixture's `.cargo/config.toml`
+        // and silently drops `-simd128`, which gives a SIMD module the handler loader rejects.
+        // Set the flags that config specifies, so the fixture builds the same way whatever the
+        // caller's environment holds.
+        let output = Command::new(env!("CARGO"))
             .current_dir(&fixtures_dir)
+            .env("RUSTFLAGS", "-C target-feature=-simd128")
             .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
             .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])
             .arg(&target_dir)
-            .status()
+            .output()
             .expect("cargo is available");
-        assert!(status.success(), "the guest fixture must build");
+        assert!(
+            output.status.success(),
+            "the guest fixture must build; if the target is missing, run \
+             `rustup target add wasm32-unknown-unknown`\n{}",
+            String::from_utf8_lossy(&output.stderr),
+        );
 
         let artifact = target_dir
             .join("wasm32-unknown-unknown/release")
