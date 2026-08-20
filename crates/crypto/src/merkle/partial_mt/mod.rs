@@ -32,7 +32,6 @@ const EMPTY_DIGEST: Word = EMPTY_WORD;
 ///
 /// The root of the tree is recomputed on each new leaf update.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct PartialMerkleTree {
     max_depth: u8,
     nodes: BTreeMap<NodeIndex, Word>,
@@ -485,44 +484,5 @@ impl Deserializable for PartialMerkleTree {
     /// Minimum serialized size: u64 length prefix (0 entries).
     fn min_serialized_size() -> usize {
         8
-    }
-}
-
-/// Rebuilds the tree from its leaves and rejects any different claimed state.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for PartialMerkleTree {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "PartialMerkleTree")]
-        struct Raw {
-            max_depth: u8,
-            nodes: BTreeMap<NodeIndex, Word>,
-            leaves: BTreeSet<NodeIndex>,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        let leaf_nodes = raw
-            .leaves
-            .iter()
-            .map(|index| {
-                raw.nodes.get(index).map(|value| (*index, *value)).ok_or_else(|| {
-                    serde::de::Error::custom(format_args!(
-                        "PartialMerkleTree leaf {index} has no value in the node map",
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let rebuilt =
-            PartialMerkleTree::with_leaves(leaf_nodes).map_err(serde::de::Error::custom)?;
-        if rebuilt.max_depth != raw.max_depth || rebuilt.nodes != raw.nodes {
-            return Err(serde::de::Error::custom(
-                "PartialMerkleTree state is inconsistent with its leaves",
-            ));
-        }
-        Ok(rebuilt)
     }
 }

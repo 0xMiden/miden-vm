@@ -1,8 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_crypto::Word;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     chiplets::hasher,
@@ -25,11 +23,9 @@ pub const KERNEL_DOMAIN_TAG: crate::Felt =
 /// The internally-stored list always has a consistent order, regardless of the order of procedure
 /// list used to instantiate a descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct KernelDescriptor(Vec<Word>);
 
@@ -129,17 +125,6 @@ impl Deserializable for KernelDescriptor {
         let len = source.read_u8()? as usize;
         let kernel = source.read_many_iter::<Word>(len)?.collect::<Result<_, _>>()?;
         Self::from_hashes(kernel).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for KernelDescriptor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let kernel = Vec::<Word>::deserialize(deserializer)?;
-        Self::from_hashes(kernel).map_err(serde::de::Error::custom)
     }
 }
 
@@ -245,54 +230,6 @@ mod tests {
         assert!(
             result.is_err(),
             "expected KernelDescriptor::read_from to reject duplicate procedure hashes"
-        );
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn kernel_serde_deserialisation_rejects_duplicate_procedure_hashes() {
-        let a: Word = [
-            Felt::new_unchecked(1),
-            Felt::new_unchecked(2),
-            Felt::new_unchecked(3),
-            Felt::new_unchecked(4),
-        ]
-        .into();
-
-        assert!(
-            KernelDescriptor::new(&[a, a]).is_err(),
-            "test precondition: KernelDescriptor::new must reject duplicates"
-        );
-
-        // KernelDescriptor deserialization should reject duplicates.
-        let json = serde_json::to_string(&vec![a, a]).unwrap();
-        let result: Result<KernelDescriptor, _> = serde_json::from_str(&json);
-        assert!(
-            result.is_err(),
-            "expected serde deserialization to reject duplicate procedure hashes"
-        );
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn kernel_serde_deserialisation_rejects_too_many_procedure_hashes() {
-        let proc_hashes: Vec<Word> = (0u64..=255)
-            .map(|n| {
-                [
-                    Felt::new_unchecked(n),
-                    Felt::new_unchecked(n + 1),
-                    Felt::new_unchecked(n + 2),
-                    Felt::new_unchecked(n + 3),
-                ]
-                .into()
-            })
-            .collect();
-
-        let json = serde_json::to_string(&proc_hashes).unwrap();
-        let result: Result<KernelDescriptor, _> = serde_json::from_str(&json);
-        assert!(
-            result.is_err(),
-            "expected serde deserialization to reject more than MAX_NUM_PROCEDURES hashes"
         );
     }
 }

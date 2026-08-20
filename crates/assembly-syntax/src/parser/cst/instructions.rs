@@ -9,7 +9,6 @@ use miden_assembly_syntax_cst::{
     ast::{AstNode, Instruction as CstInstruction},
     rowan,
 };
-use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span};
 
 use super::{
@@ -1363,7 +1362,7 @@ fn lower_event_imm_instruction(
     instruction_span: SourceSpan,
     tokens: &[SyntaxToken],
     keyword: &str,
-    builder: fn(ast::ImmFelt) -> Instruction,
+    builder: fn(ast::EventImmediate) -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     if tokens.len() < 3
         || tokens[0].kind() != SyntaxKind::Ident
@@ -1376,7 +1375,10 @@ fn lower_event_imm_instruction(
     match &tokens[2..] {
         [name] if name.kind() == SyntaxKind::Ident && name.text() != "event" => {
             let name = context.lower_constant_ident_token(name)?;
-            Ok(Some(vec![inst_op(instruction_span, builder(Immediate::Constant(name)))]))
+            Ok(Some(vec![inst_op(
+                instruction_span,
+                builder(ast::EventImmediate::Immediate(Immediate::Constant(name))),
+            )]))
         },
         [event, lparen, string, rparen]
             if event.kind() == SyntaxKind::Ident
@@ -1386,10 +1388,12 @@ fn lower_event_imm_instruction(
                 && rparen.kind() == SyntaxKind::RParen =>
         {
             let value = unquote_string_token(string, context.parse().span_for_token(string))?;
-            let event_id = EventId::from_name(value.as_ref()).as_felt();
             Ok(Some(vec![inst_op(
                 instruction_span,
-                builder(Immediate::Value(Span::new(instruction_span, event_id))),
+                builder(ast::EventImmediate::Name(Span::new(
+                    context.parse().span_for_token(string),
+                    value,
+                ))),
             )]))
         },
         _ => Ok(None),

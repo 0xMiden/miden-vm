@@ -1,10 +1,14 @@
-//! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput,
-//! HasherPermLinkOutput}`).
+//! `v_wiring` shared interaction column. It carries `BusId::{AceWiring, HasherPermLinkInput,
+//! HasherPermLinkOutput}` messages and, in the Merkle level-0 batch, `BusId::RangeCheck`
+//! messages.
 //!
 //! ACE rows and hasher-controller rows are mutually exclusive in the chiplets selector system, so
-//! both buses can share one group without multiplying sibling `(V, U)` pairs.
+//! their interactions can share one group without multiplying sibling `(V, U)` pairs.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
+//!
+//! ACE wiring is an order-independent global consistency relation over wire identifiers and
+//! values. It does not enforce causal or topological ordering between rows.
 //!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
 //! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
@@ -19,13 +23,16 @@
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Hasher perm-link (`BusId::HasherPermLink{Input,Output}`)
+//! ## Hasher perm-link and Merkle range checks
 //!
 //! Binds hasher controller rows to the Poseidon2 permutation AIR. The `perm_id` column ties each
 //! controller input/output row pair to one permutation cycle.
 //!
-//! - Controller input (`controller_active * is_input`, multiplicity `+1`): controller side of a
-//!   `(perm_id, input_state)` message. Routed to `BusId::HasherPermLinkInput`.
+//! - Ordinary controller inputs emit one `(perm_id, input_state)` message to
+//!   `BusId::HasherPermLinkInput`.
+//! - Merkle level-0 inputs batch three entries: the same permutation-link message, with logical
+//!   zero capacity, goes to `BusId::HasherPermLinkInput`; two canonical-index range-check messages
+//!   go to `BusId::RangeCheck`.
 //! - Controller output (`controller_active * is_output`, multiplicity `+1`): controller side of a
 //!   `(perm_id, output_state)` message. Routed to `BusId::HasherPermLinkOutput`.
 //!
@@ -42,12 +49,12 @@ use crate::{
         chiplets::hasher_control::flags::ControllerFlags,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{AceWireMsg, HasherPermLinkMsg},
+            messages::{AceWireMsg, HasherPermLinkMsg, RangeMsg},
         },
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::chiplets::hasher::STATE_WIDTH,
+    trace::chiplets::hasher::{RATE_LEN, STATE_WIDTH},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -56,10 +63,12 @@ use crate::{
 /// given row only one of:
 /// - ACE wiring batch on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally when
 ///   the outer `ace_flag` fires).
-/// - Perm-link on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
-///   `s0`).
+/// - Ordinary controller input: 1 perm-link fraction.
+/// - Merkle level-0 controller input: 3 fractions (perm-link plus two canonical-index range
+///   checks).
+/// - Controller output: 1 perm-link fraction.
 ///
-/// Per-row max is therefore `max(3, 1) = 3`.
+/// Per-row max is therefore still `max(3, 3, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the `v_wiring` shared column: ACE wiring + hasher perm-link.
@@ -112,6 +121,18 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     let ctrl_state: [LB::Var; STATE_WIDTH] = array::from_fn(|i| ctrl.state[i]);
     let perm_id = ctrl.perm_id;
+
+    // On input rows, `(s1 OR s2) * is_boundary` selects level 0 of MP, MV, and MU while excluding
+    // sponge inputs. This branch includes two range checks; every other input uses the ordinary
+    // permutation-link interaction below.
+    let hs1: LB::Expr = ctrl.s1.into();
+    let hs2: LB::Expr = ctrl.s2.into();
+    let is_merkle_input = hs1.clone() + hs2.clone() - hs1 * hs2;
+    let is_merkle_level0 = is_merkle_input * LB::Expr::from(ctrl.is_boundary);
+    let f_merkle_level0 = f_ctrl_input.clone() * is_merkle_level0.clone();
+    let f_ctrl_input_ordinary = f_ctrl_input * is_merkle_level0.not();
+    let slack_1 = ctrl.capacity()[1];
+    let slack_2 = ctrl.capacity()[2];
 
     builder.next_column(
         |col| {
@@ -166,15 +187,50 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
 
-                    // Controller input: +1 / encode(perm_id, ctrl.state) on HasherPermLinkInput.
+                    // Ordinary inputs send the state stored in the trace. Later Merkle levels have
+                    // zero capacity, while sponge inputs keep their actual capacity.
                     g.add(
                         "perm_ctrl_input",
-                        f_ctrl_input,
+                        f_ctrl_input_ordinary,
                         move || {
                             let state: [LB::Expr; STATE_WIDTH] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg::Input { perm_id: perm_id.into(), state }
                         },
-                        Deg { v: 2, u: 3 },
+                        Deg { v: 5, u: 6 },
+                    );
+
+                    // At Merkle level 0, the trace's capacity columns hold the slack witness. The
+                    // permutation message substitutes zeros for those four positions. The batch
+                    // also range-checks slack limbs 1 and 2. All three entries are active together,
+                    // giving (V, U) = (7, 8).
+                    g.batch(
+                        "perm_ctrl_input_merkle_level0",
+                        f_merkle_level0,
+                        move |b| {
+                            let state: [LB::Expr; STATE_WIDTH] = array::from_fn(|i| {
+                                if i < RATE_LEN {
+                                    ctrl_state[i].into()
+                                } else {
+                                    LB::Expr::ZERO
+                                }
+                            });
+                            b.add(
+                                "perm_ctrl_input",
+                                HasherPermLinkMsg::Input { perm_id: perm_id.into(), state },
+                                Deg { v: 5, u: 6 },
+                            );
+                            b.remove(
+                                "merkle_index_slack_1",
+                                RangeMsg { value: slack_1.into() },
+                                Deg { v: 5, u: 6 },
+                            );
+                            b.remove(
+                                "merkle_index_slack_2",
+                                RangeMsg { value: slack_2.into() },
+                                Deg { v: 5, u: 6 },
+                            );
+                        },
+                        Deg { v: 7, u: 8 },
                     );
 
                     // Controller output: +1 / encode(perm_id, ctrl.state) on HasherPermLinkOutput.
@@ -188,9 +244,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { v: 3, u: 4 },
                     );
                 },
-                Deg { v: 8, u: 7 },
+                Deg { v: 8, u: 8 },
             );
         },
-        Deg { v: 8, u: 7 },
+        Deg { v: 8, u: 8 },
     );
 }

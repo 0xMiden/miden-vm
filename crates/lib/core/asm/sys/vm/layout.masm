@@ -1,0 +1,167 @@
+use miden::core::stark::constants
+
+### Memory-map constants and accessors specific to the Miden VM relation.
+###
+### The per-AIR log heights live in the generic array (`constants::air_trace_length_logs_ptr`);
+### this module only fixes which AIR occupies which offset: core 0, chiplets 1,
+### poseidon2_permutation 2 — the canonical instance order the proof order sorts against.
+###
+### The generic verifier in `stark/` owns the addresses it dereferences; everything
+### named after this relation's AIRs, statement, or bus lives here so the generic layer
+### carries no relation vocabulary and a second relation is a sibling module.
+###
+### The VM control frame occupies the half-open range 3223322764..3223323864, immediately
+### after the generic verifier frame. It contains relation metadata, the authenticated claim,
+### boundary inputs, and the maximum 255-word kernel witness.
+
+### Number of kernel procedures in the authenticated witness.
+const NUM_KERNEL_PROCEDURES_PTR = 3223322764
+
+### Reserved alignment cells before the word-aligned scratch region.
+const CONTROL_ALIGNMENT_PADDING_PTR = 3223322765
+
+### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
+### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
+### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness.
+const BUS_GAMMA_PTR = 3223322768
+### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
+### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness and the
+### statement values staged before the transcript starts, then asserted via
+### `c_total + aux_sum == 0`. The remaining two cells are reserved so a future word write
+### cannot overwrite unrelated state.
+const C_TOTAL_PTR = 3223322772
+
+### Caller-provided claim commitment. The verifier checks the advice-supplied preimage against it.
+const CLAIM_COMMITMENT_PTR = 3223322776
+
+### Verifier-owned claim preimage (40 felts: P | K | I | O).
+const CLAIM_PTR = 3223322780
+
+### Reserved cells preserving the established boundary and witness anchors.
+const BOUNDARY_ANCHOR_PADDING_PTR = 3223322820
+
+### Boundary block [program_digest | deferred_root].
+const BOUNDARY_INPUTS_PTR = 3223322836
+
+### Kernel digest witness (up to 255 word-aligned procedure digests).
+const KERNEL_WITNESS_PTR = 3223322844
+
+## VM ACE READ section
+##
+## Starts at 3225419776 = 2**31 + 2**30 + 2**22. The 32 fixed-length public-input
+## felts grow backward from AUX_RAND_ELEM_PTR; the remaining regions grow forward.
+## The relation's statement block is not part of this section.
+##
+##   pi_ptr             -->  [ stack I/O public inputs  ]
+##   AUX_RAND_ELEM_PTR  -->  [ aux randomness           ]  4 felts
+##                           [ alignment pad            ]  4 felts
+##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  544 felts
+##   AUX_BUS_BOUNDARY_PTR -> [ three LogUp finals       ]  6 felts + 2 padding
+##   AUXILIARY_ACE_INPUTS_PTR
+##                       --> [ fixed stark vars         ]  slots 0..10
+##                           [ core selectors           ]  slots 11..13
+##                           [ chiplets selectors       ]  slots 14..16
+##                           [ Poseidon2 selectors      ]  slots 17..19
+##   ACE_CIRCUIT_STREAM_PTR
+##                       --> [ stream + reserved tail   ]  6040 felts
+
+### Two extension-field elements: beta followed by alpha, four base felts total.
+const AUX_RAND_ELEM_PTR = 3225419776
+
+### OOD evaluations in the VM ACE READ section. The LMCS-aligned current and next rows each occupy
+### 272 felts: 96 main EF slots, 24 aux-coordinate EF slots, and 16 quotient EF slots.
+const OOD_EVALUATIONS_PTR = 3225419784
+
+### Three LogUp finals in proof order, padded from 6 to 8 base felts.
+const AUX_BUS_BOUNDARY_PTR = 3225420328
+
+### Twenty extension-field stark-var slots: 11 fixed slots followed by three selector slots
+### for each of the VM's core, chiplets, and Poseidon2-permutation AIRs.
+const AUXILIARY_ACE_INPUTS_PTR = 3225420336
+
+### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
+### `ACE_COMMON_BLOCKS`. The region reserves 6040 felts; the tail beyond the stream keeps the
+### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
+const ACE_CIRCUIT_STREAM_PTR = 3225420376
+
+### Scratch row for DEEP query openings: 96 main, 24 auxiliary-coordinate, and 16 quotient felts.
+const CURRENT_TRACE_ROW_PTR = 3238002688
+
+pub proc set_core_trace_length_log
+    exec.constants::air_trace_length_logs_ptr mem_store
+end
+
+pub proc get_core_trace_length_log
+    exec.constants::air_trace_length_logs_ptr mem_load
+end
+
+pub proc set_chiplets_trace_length_log
+    exec.constants::air_trace_length_logs_ptr add.1 mem_store
+end
+
+pub proc get_chiplets_trace_length_log
+    exec.constants::air_trace_length_logs_ptr add.1 mem_load
+end
+
+pub proc set_poseidon2_permutation_trace_length_log
+    exec.constants::air_trace_length_logs_ptr add.2 mem_store
+end
+
+pub proc get_poseidon2_permutation_trace_length_log
+    exec.constants::air_trace_length_logs_ptr add.2 mem_load
+end
+
+### Relation-facing pointer accessors used by the generated constraint evaluator.
+### Keeping the anchors here gives the shared renderer one contract for VM and PVM while
+### keeping relation-sized regions out of the generic layer.
+pub proc aux_rand_elem_ptr
+    push.AUX_RAND_ELEM_PTR
+end
+
+pub proc aux_bus_boundary_ptr
+    push.AUX_BUS_BOUNDARY_PTR
+end
+
+pub proc auxiliary_ace_inputs_ptr
+    push.AUXILIARY_ACE_INPUTS_PTR
+end
+
+pub proc ace_circuit_stream_ptr
+    push.ACE_CIRCUIT_STREAM_PTR
+end
+
+pub proc ood_evaluations_ptr
+    push.OOD_EVALUATIONS_PTR
+end
+
+pub proc current_trace_row_ptr
+    push.CURRENT_TRACE_ROW_PTR
+end
+
+pub proc bus_gamma_ptr
+    push.BUS_GAMMA_PTR
+end
+
+pub proc c_total_ptr
+    push.C_TOTAL_PTR
+end
+
+pub proc boundary_inputs_ptr
+    push.BOUNDARY_INPUTS_PTR
+end
+
+pub proc claim_commitment_ptr
+    push.CLAIM_COMMITMENT_PTR
+end
+
+pub proc claim_ptr
+    push.CLAIM_PTR
+end
+
+pub proc num_kernel_procedures_ptr
+    push.NUM_KERNEL_PROCEDURES_PTR
+end
+
+pub proc kernel_witness_ptr
+    push.KERNEL_WITNESS_PTR
+end

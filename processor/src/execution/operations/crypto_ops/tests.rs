@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, apply_permutation},
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    crypto::merkle::{MerklePath, MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     program::StackInputs,
 };
@@ -11,6 +11,7 @@ use proptest::prelude::*;
 
 use super::{
     op_crypto_stream, op_horner_eval_base, op_horner_eval_ext, op_hperm, op_mpverify, op_mrupdate,
+    validate_materialized_merkle_path_length, validate_merkle_depth, validate_merkle_path_length,
 };
 use crate::{
     AdviceInputs, ContextId,
@@ -848,6 +849,141 @@ fn test_op_mrupdate_merge_subtree() {
 
     // assert the expected root now exists in the advice provider
     assert!(processor.advice_provider().has_merkle_root(expected_root));
+}
+
+// MERKLE VALIDATION
+// --------------------------------------------------------------------------------------------
+
+mod merkle_validation {
+    use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
+    use miden_core::field::PrimeCharacteristicRing;
+
+    use super::*;
+    use crate::errors::{CryptoError, OperationError};
+
+    #[test]
+    fn validator_accepts_supported_boundaries() {
+        for depth in [1, u64::from(MAX_MERKLE_DEPTH)] {
+            validate_merkle_depth(felt(depth))
+                .unwrap_or_else(|err| panic!("depth {depth} must be accepted: {err}"));
+        }
+    }
+
+    #[test]
+    fn materialized_path_length_must_match_depth() {
+        let path = MerklePath::new(vec![init_node(1); 3]);
+
+        validate_merkle_path_length(None, felt(3)).expect("an absent path is allowed");
+        validate_merkle_path_length(Some(&path), felt(3)).expect("path length should match");
+
+        let err = validate_merkle_path_length(Some(&path), felt(2))
+            .expect_err("a materialized path must match the stack depth");
+        assert!(matches!(
+            err,
+            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+                path_len: 3,
+                depth,
+            }) if depth == felt(2)
+        ));
+    }
+
+    #[test]
+    fn materialized_path_length_is_not_narrowed() {
+        let err = validate_materialized_merkle_path_length(257, felt(1))
+            .expect_err("the actual path length must not wrap to the expected depth");
+        assert!(matches!(
+            err,
+            CryptoError::Operation(OperationError::InvalidMerklePathLength {
+                path_len: 257,
+                depth,
+            }) if depth == felt(1)
+        ));
+    }
+
+    /// The execution path must enforce the same depth range as the AIR. In particular, the generic
+    /// Merkle API accepts a zero-depth opening when the node equals the root.
+    #[test]
+    fn operations_reject_out_of_range_depths() {
+        let leaves: Vec<Word> = (1..=8).map(init_node).collect();
+        let tree = MerkleTree::new(&leaves).unwrap();
+        let root = tree.root();
+        let advice = AdviceInputs::default().with_merkle_store(MerkleStore::from(&tree));
+        let first_unsupported_depth = felt(u64::from(MAX_MERKLE_DEPTH) + 1);
+
+        for depth in [ZERO, first_unsupported_depth, Felt::NEG_ONE] {
+            // `node == root` is the zero-depth shape that the generic Merkle API accepts.
+            let node = if depth == ZERO { root } else { leaves[0] };
+            let stack = mpverify_stack(node, depth, root);
+            let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap())
+                .with_advice(advice.clone())
+                .expect("advice inputs should fit");
+            let err = op_mpverify(&mut processor, ZERO, &mut NoopTracer)
+                .expect_err(&alloc::format!("MPVERIFY must reject depth {depth}"));
+            assert_merkle_depth_error(err, depth, "MPVERIFY");
+
+            let stack = mrupdate_stack(leaves[0], depth, root, init_node(99));
+            let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap())
+                .with_advice(advice.clone())
+                .expect("advice inputs should fit");
+            let err = op_mrupdate(&mut processor, &mut NoopTracer)
+                .expect_err(&alloc::format!("MRUPDATE must reject depth {depth}"));
+            assert_merkle_depth_error(err, depth, "MRUPDATE");
+        }
+    }
+
+    /// An MRUPDATE rejected for an invalid depth must leave the advice tree unchanged.
+    #[test]
+    fn rejected_mrupdate_does_not_mutate_the_advice_tree() {
+        let leaves: Vec<Word> = (1..=8).map(init_node).collect();
+        let tree = MerkleTree::new(&leaves).unwrap();
+        let root = tree.root();
+        let new_value = init_node(99);
+
+        let mut updated_leaves = leaves.clone();
+        updated_leaves[0] = new_value;
+        let updated_root = MerkleTree::new(updated_leaves).unwrap().root();
+
+        let stack = mrupdate_stack(leaves[0], ZERO, root, new_value);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack).unwrap())
+            .with_advice(AdviceInputs::default().with_merkle_store(MerkleStore::from(&tree)))
+            .expect("advice inputs should fit");
+        let err =
+            op_mrupdate(&mut processor, &mut NoopTracer).expect_err("depth zero must be rejected");
+        assert_merkle_depth_error(err, ZERO, "MRUPDATE");
+
+        assert!(processor.advice_provider().has_merkle_root(root));
+        assert!(
+            !processor.advice_provider().has_merkle_root(updated_root),
+            "rejected MRUPDATE inserted the updated tree into the advice store"
+        );
+    }
+
+    /// Builds an MPVERIFY stack with node index zero.
+    fn mpverify_stack(node: Word, depth: Felt, root: Word) -> [Felt; 16] {
+        [
+            node[0], node[1], node[2], node[3], depth, ZERO, root[0], root[1], root[2], root[3],
+            ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
+        ]
+    }
+
+    /// Builds an MRUPDATE stack with node index zero.
+    fn mrupdate_stack(old: Word, depth: Felt, root: Word, new: Word) -> [Felt; 16] {
+        [
+            old[0], old[1], old[2], old[3], depth, ZERO, root[0], root[1], root[2], root[3],
+            new[0], new[1], new[2], new[3], ZERO, ZERO,
+        ]
+    }
+
+    fn assert_merkle_depth_error(error: CryptoError, expected_depth: Felt, operation: &str) {
+        match error {
+            CryptoError::Operation(OperationError::MerkleDepthOutOfRange { depth }) => {
+                assert_eq!(depth, expected_depth, "{operation} reported the wrong depth");
+            },
+            other => panic!(
+                "{operation} rejected depth {expected_depth} for the wrong reason: {other:?}"
+            ),
+        }
+    }
 }
 
 // HELPER FUNCTIONS

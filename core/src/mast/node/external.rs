@@ -5,8 +5,6 @@ use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, text},
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeContext, MastNodeExt};
 use crate::{
@@ -27,8 +25,6 @@ use crate::{
 /// The hash of an external node is the hash of the procedure it represents, such that an external
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ExternalNode {
     digest: Word,
 }
@@ -107,31 +103,6 @@ impl MastNodeExt for ExternalNode {
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         ExternalNodeBuilder::new(self.digest)
     }
-}
-
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for ExternalNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate a random Word to use as the procedure hash/digest
-        any::<[u64; 4]>()
-            .prop_map(|[a, b, c, d]| {
-                let word = Word::from([Felt::new_unchecked(a), Felt::new_unchecked(b), Felt::new_unchecked(c), Felt::new_unchecked(d)]);
-                ExternalNodeBuilder::new(word).build()
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 // ------------------------------------------------------------------------------------------------

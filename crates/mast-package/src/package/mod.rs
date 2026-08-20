@@ -97,10 +97,9 @@ pub struct Package {
     pub sections: Vec<Section>,
     /// Whether package-owned debug sections may be decoded as trusted debug info.
     ///
-    /// Normal package deserialization validates the embedded MAST forest, warns on package debug
-    /// sections, and discards those sections as untrusted metadata. Trusted local/cache readers
-    /// and in-process package construction preserve package debug sections and expose them through
-    /// [`Package::debug_info`].
+    /// Normal package deserialization validates both the embedded MAST forest and package debug
+    /// sections before marking them trusted. Trusted local/cache readers and in-process package
+    /// construction may defer debug validation until [`Package::debug_info`] is called.
     debug_sections_trusted: bool,
 }
 
@@ -209,7 +208,9 @@ impl Package {
     /// package if one is present.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
-            let mut kernel_package = Self::read_from_bytes(section.data.as_ref())
+            // Debug metadata is about to be removed, so validate the nested MAST while deferring
+            // debug validation that could otherwise prevent stripping malformed metadata.
+            let mut kernel_package = Self::read_from_bytes_trusted(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
             kernel_package.strip_debug_info()?;
             section.data = Cow::Owned(kernel_package.to_bytes());
@@ -354,13 +355,16 @@ impl Package {
         Ok(Some(kernel_dependency))
     }
 
-    /// Decodes trusted package-owned debug sections, if any are present.
+    /// Decodes validated or trusted package-owned debug sections, if any are present.
     ///
-    /// Package debug sections are trusted only for packages constructed in-process or read via the
-    /// trusted same-domain readers such as [`Self::read_from_trusted`],
-    /// [`Self::read_from_bytes_trusted`], [`Self::read_from_unchecked`], and
-    /// [`Self::read_from_bytes_unchecked`]. Normal untrusted readers discard debug sections before
-    /// returning the package.
+    /// Normal package readers validate debug sections before returning. Explicit trusted readers
+    /// and in-process construction may defer validation until this method is called.
+    ///
+    /// Decoding uses the fixed resource limits of [`Deserializable::read_from`]. Analysis tools
+    /// that intentionally accept larger debug information can locate [`SectionId::DEBUG_INFO`]
+    /// in [`Package::sections`] and call [`PackageDebugInfo::read_from_bytes_unmetered`] on its
+    /// data. That alternative does not perform this method's package-level reference
+    /// validation.
     ///
     /// This does not read legacy debug metadata from the embedded [`MastForest`].
     pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
@@ -710,8 +714,18 @@ impl Package {
                     });
                 }
             }
+            if let (Some(first), Some(last)) =
+                (source_node.asm_ops.first(), source_node.asm_ops.last())
+                && (first.op_idx < source_node.op_start || last.op_idx >= source_node.op_end)
+            {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "assembly op rows for source node {source_id:?} span operation indices {}..={}, outside source range {}..{}",
+                        first.op_idx, last.op_idx, source_node.op_start, source_node.op_end,
+                    ),
+                });
+            }
             for row in source_node.asm_ops.iter() {
-                self.validate_source_map_row(source_id, source_node, row.op_idx, "assembly op")?;
                 self.validate_string_index(row.context_name_idx, debug_info, || {
                     format!("debug source node {source_id:?} assembly op context name")
                 })?;
@@ -899,6 +913,15 @@ impl Package {
             })?;
         }
         for (location_index, location) in debug_info.locations().iter().enumerate() {
+            if location.start.to_usize() > location.end.to_usize() {
+                return Err(PackageDebugInfoError::InvalidValue {
+                    message: format!(
+                        "debug source location {location_index} starts at byte {} after ending at byte {}",
+                        location.start.to_usize(),
+                        location.end.to_usize(),
+                    ),
+                });
+            }
             if debug_info.get_file(location.file_idx).is_none() {
                 return Err(PackageDebugInfoError::InvalidReference {
                     message: format!(
@@ -1183,19 +1206,15 @@ impl Package {
             )));
         }
 
-        if self.debug_sections_trusted {
-            Self::read_from_bytes_trusted(section.data.as_ref())
-        } else {
-            Self::read_from_bytes(section.data.as_ref())
-        }
-        .map(Box::new)
-        .map(Some)
-        .map_err(|error| {
-            Report::msg(format!(
-                "failed to decode embedded kernel package for '{}': {error}",
-                self.name
-            ))
-        })
+        Self::read_from_bytes(section.data.as_ref())
+            .map(Box::new)
+            .map(Some)
+            .map_err(|error| {
+                Report::msg(format!(
+                    "failed to decode embedded kernel package for '{}': {error}",
+                    self.name
+                ))
+            })
     }
 
     fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
@@ -1346,9 +1365,10 @@ impl Package {
     #[cfg(feature = "std")]
     /// Reads a trusted local package file.
     ///
-    /// This preserves package-owned debug sections and should be used only for files/cache entries
-    /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
-    /// bytes received across a trust boundary.
+    /// This skips embedded MAST and manifest cross-check validation, preserves package-owned debug
+    /// sections, and should be used only for files/cache entries controlled by the same trusted
+    /// build or execution system. Use [`Self::read_from_bytes`] for bytes received across a trust
+    /// boundary.
     pub fn deserialize_from_file_trusted(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, DeserializationError> {
@@ -2061,7 +2081,7 @@ mod tests {
     }
 
     #[test]
-    fn untrusted_embedded_kernel_decode_discards_nested_debug_info() {
+    fn untrusted_embedded_kernel_decode_preserves_validated_nested_debug_info() {
         let kernel =
             build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
         assert!(kernel.debug_info().unwrap().is_some());
@@ -2095,10 +2115,13 @@ mod tests {
             .expect("embedded kernel should decode")
             .expect("kernel should be present");
         assert!(
-            !untrusted_kernel.sections.iter().any(|section| section.id.is_debug()),
-            "untrusted embedded-kernel decode should discard nested debug sections"
+            untrusted_kernel
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_INFO),
+            "untrusted embedded-kernel decode should retain validated nested debug sections"
         );
-        assert!(untrusted_kernel.debug_info().unwrap().is_none());
+        assert!(untrusted_kernel.debug_info().unwrap().is_some());
     }
 
     #[test]

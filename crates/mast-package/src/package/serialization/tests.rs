@@ -210,24 +210,21 @@ fn executable_package_entrypoint_roundtrips() {
 }
 
 #[test]
-fn package_checked_deserialization_discards_untrusted_debug_sections() {
+fn package_checked_deserialization_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let bytes = package.to_bytes();
 
     let deserialized = Package::read_from_bytes(&bytes).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
     let debug_info_id = SectionId::DEBUG_INFO.as_str().as_bytes();
     assert!(
-        !deserialized
+        deserialized
             .to_bytes()
             .windows(debug_info_id.len())
             .any(|window| window == debug_info_id),
-        "discarded debug sections should not be reserialized"
+        "validated debug sections should be reserialized"
     );
 }
 
@@ -242,20 +239,9 @@ fn package_trusted_deserialization_preserves_trusted_debug_sections() {
     assert!(deserialized.debug_info().unwrap().is_some());
 }
 
-#[test]
-fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
-    let package = build_package_with_debug_info();
-    let bytes = package.to_bytes();
-
-    let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
-
-    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
-    assert!(deserialized.debug_info().unwrap().is_some());
-}
-
 #[cfg(feature = "std")]
 #[test]
-fn package_deserialize_from_file_discards_untrusted_debug_sections() {
+fn package_deserialize_from_file_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let path = std::env::temp_dir().join(format!(
         "miden-package-deserialize-{}-{}.masp",
@@ -267,11 +253,8 @@ fn package_deserialize_from_file_discards_untrusted_debug_sections() {
     let deserialized = Package::deserialize_from_file(&path).unwrap();
     fs::remove_file(&path).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package file reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
 }
 
 #[cfg(feature = "std")]
@@ -702,7 +685,7 @@ fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
 }
 
 #[test]
-fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
+fn trusted_package_deserialisation_accepts_spoofed_mast_hashes() {
     // Build mast for:
     //
     // pub proc p
@@ -732,14 +715,21 @@ fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
         debug_sections_trusted: true,
     };
 
-    let (bytes, _spoofed_digest) =
+    let (bytes, spoofed_digest) =
         build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-library-digest");
-    let err = Package::read_from_bytes_unchecked(&bytes)
-        .expect_err("expected package deserialization to reject inconsistent node digests");
+    let trusted = Package::read_from_bytes_trusted(&bytes)
+        .expect("trusted package deserialization should not recompute MAST hashes");
+    assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
+
+    let err = Package::read_from_bytes(&bytes)
+        .expect_err("untrusted package deserialization should reject spoofed MAST hashes");
     assert!(
-        err.to_string()
-            .contains("declared node id and digest do not correspond to a procedure root"),
-        "expected package manifest validation failure, got: {err}"
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
     );
 }
 
@@ -844,7 +834,7 @@ fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
 }
 
 #[test]
-fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() {
+fn trusted_kernel_package_deserialisation_accepts_spoofed_mast_hashes() {
     // Build mast for:
     //
     // pub proc k1
@@ -874,16 +864,11 @@ fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() 
         debug_sections_trusted: true,
     };
 
-    let (bytes, _spoofed_digest) =
+    let (bytes, spoofed_digest) =
         build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
-    let err = Package::read_from_bytes_unchecked(&bytes).expect_err(
-        "expected unchecked kernel deserialization to reject inconsistent node digests",
-    );
-    assert!(
-        err.to_string()
-            .contains("declared node id and digest do not correspond to a procedure root"),
-        "expected package manifest validation failure, got: {err}"
-    );
+    let trusted = Package::read_from_bytes_trusted(&bytes)
+        .expect("trusted kernel deserialization should not recompute MAST hashes");
+    assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
 }
 
 fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {

@@ -12,7 +12,7 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ExportedTypeUse, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
+    ExportedTypeUse, MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -47,12 +47,6 @@ use crate::{
     },
     mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceNodeRef, StaticLibrary},
 };
-
-/// Maximum allowed nesting of control-flow blocks during compilation.
-///
-/// This limit is intended to prevent stack overflows from maliciously deep block nesting while
-/// remaining far above typical program structure depth.
-pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
 
 /// Maximum number of locals a single procedure may allocate.
 ///

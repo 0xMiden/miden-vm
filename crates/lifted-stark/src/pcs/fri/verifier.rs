@@ -39,7 +39,7 @@ use crate::{
 ///
 /// Uses a single base-field LMCS. Opened base field values are reconstructed
 /// to extension field for folding verification.
-pub(in crate::pcs) struct FriOracle<F, EF, L>
+pub(crate) struct FriOracle<F, EF, L>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,

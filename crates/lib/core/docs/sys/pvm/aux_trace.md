@@ -1,0 +1,5 @@
+
+## miden::core::sys::pvm::aux_trace
+| Procedure | Description |
+| ----------- | ------------- |
+| observe_aux_trace | Observes the PVM auxiliary trace commitment and its ten per-chiplet sigma values.<br /><br />The advice provider supplies `[commitment, sigma_0, ..., sigma_9]`, with the sigmas in proof<br />order. Every chiplet exposes exactly one extension-field sigma. Their sum is order-invariant,<br />so no proof-to-instance reorder is needed for the external LogUp assertion.<br /><br />Unlike the Miden VM's word-plus-tail layout, this stream is exactly 24 base felts: the<br />four-felt commitment followed by twenty sigma coordinates. It is absorbed as three complete<br />eight-felt rate blocks, each carrying its own absorbed-length tag.<br /><br />The hook also adds the verifier-side consumes for the fixed uint/curve environment and asserts<br />`fixed_boundary_correction + sum(sigma_i) == 0` coordinate-wise.<br /><br />Precondition:  input_len=0 (the main commitment was flushed before this hook).<br />Postcondition: input_len=0, output_len=8.<br /><br />Input:  [...]<br />Output: [...]<br /> |

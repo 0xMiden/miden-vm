@@ -41,5 +41,5 @@ tracing.workspace = true
 insta.workspace = true
 miden-ace-codegen = { workspace = true, features = ["testing"] }
 miden-constraint-compiler.workspace = true
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true

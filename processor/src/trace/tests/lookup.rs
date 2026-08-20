@@ -159,7 +159,7 @@ fn controller_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut Con
     matrix.values[start..start + CONTROLLER_WIDTH].borrow_mut()
 }
 
-fn assert_trace_constraints_reject(
+pub(super) fn assert_trace_constraints_reject(
     trace: &VmTrace,
     core_matrix: RowMajorMatrix<Felt>,
     chip_matrix: RowMajorMatrix<Felt>,

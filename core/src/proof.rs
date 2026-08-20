@@ -5,8 +5,6 @@ use alloc::{
 
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
@@ -22,10 +20,9 @@ use crate::{
 
 /// A hash function used during STARK proof generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(u8)]
 pub enum HashFunction {
@@ -133,7 +130,6 @@ pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 /// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VmProof {
     pub proof: StarkProof,
     pub precompile_root: DeferredRoot,
@@ -174,7 +170,6 @@ impl Deserializable for VmProof {
 /// Binary decoding enforces the fixed root ceiling before reserving root storage, but otherwise
 /// preserves the encoded artifact shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PrecompileProof {
     pub proof: StarkProof,
     pub roots: Vec<DeferredRoot>,
@@ -225,7 +220,6 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 ///
 /// This type preserves proof artifacts without establishing their validity.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExecutionProof {
     /// The VM STARK and deferred precompile wire are available.
     Deferred {
@@ -342,7 +336,6 @@ pub enum ExecutionProofError {
 
 /// A serialized STARK proof and the hash function used during proof generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StarkProof {
     bytes: Vec<u8>,
     hash_fn: HashFunction,
@@ -621,45 +614,6 @@ mod tests {
         for proof in &proofs {
             round_trip_execution_proof(proof);
         }
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn proof_artifact_serde_round_trips_preserve_representations() {
-        fn round_trip<T>(value: &T) -> T
-        where
-            T: Serialize + for<'de> Deserialize<'de>,
-        {
-            let encoded = serde_json::to_vec(value).unwrap();
-            serde_json::from_slice(&encoded).unwrap()
-        }
-
-        let stark = dummy_stark_proof(&[1, 2, 3]);
-        assert_eq!(round_trip(&stark).to_bytes(), stark.to_bytes());
-
-        let vm = vm_proof(root(1));
-        assert_eq!(round_trip(&vm).to_bytes(), vm.to_bytes());
-
-        let precompile = PrecompileProof {
-            proof: dummy_stark_proof(&[2]),
-            roots: alloc::vec![root(1), TRUE_DIGEST],
-        };
-        assert_eq!(round_trip(&precompile).to_bytes(), precompile.to_bytes());
-
-        let (precompile_wire, _) = wire();
-        let deferred = ExecutionProof::Deferred {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: precompile_wire,
-        };
-        let decoded_deferred = round_trip(&deferred);
-        assert_eq!(decoded_deferred, deferred);
-
-        let complete = ExecutionProof::Complete {
-            vm: vm_proof(TRUE_DIGEST),
-            precompile: Some(precompile),
-        };
-        let decoded_complete = round_trip(&complete);
-        assert_eq!(decoded_complete, complete);
     }
 
     #[test]

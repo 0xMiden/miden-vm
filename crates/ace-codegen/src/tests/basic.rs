@@ -912,12 +912,13 @@ fn packed_leaves_match_the_scalar_path() {
 fn stream_geometry_rejects_the_node_id_packing_bound() {
     use crate::encode::StreamGeometry;
 
-    // Node ids occupy 30 bits, so exactly 2^30 nodes fit: their ids are 0..2^30-1.
-    let at_limit = StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
-    assert!(at_limit.validate().is_ok(), "the largest encodable shape must validate");
+    // Valid streams have an even node count because READ and EVAL rows are word-aligned. Thus,
+    // 2^30 - 2 is the largest realizable shape below the runtime's strict 2^30-wire bound.
+    let below_limit = StreamGeometry::from_counts((1 << 30) - 8, 2, 4);
+    assert!(below_limit.validate().is_ok(), "the largest aligned shape must validate");
 
-    let over = StreamGeometry::from_counts((1 << 30) - 4, 2, 4);
-    assert!(over.validate().is_err(), "a shape above 2^30 nodes must be rejected");
+    let at_limit = StreamGeometry::from_counts((1 << 30) - 6, 2, 4);
+    assert!(at_limit.validate().is_err(), "a shape with 2^30 nodes must be rejected");
 }
 
 #[test]

@@ -58,7 +58,8 @@ pub enum InputKey {
     IsTransitionAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
-    /// `f = h^N`, the chunk shift ratio between cosets.
+    /// Primitive `D`-th root of unity, where `D` is the quotient chunk count; the chunk shift
+    /// ratio between cosets after taking the trace-height power.
     F,
     /// `s0 = offset^N`, the first chunk shift.
     S0,

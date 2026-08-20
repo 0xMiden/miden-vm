@@ -133,7 +133,7 @@ jobs:
         run: make check-constraints
 
   check-pvm-registry:
-    name: check PVM ACE registry constants
+    name: check PVM registry and MASM artifacts
     runs-on: warp-ubuntu-latest-x64-8x
     timeout-minutes: 15
     steps:
@@ -147,7 +147,7 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Check PVM registry constants for drift (full 10! recompute)
+      - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
         run: make check-pvm-registry
 
   run-examples:

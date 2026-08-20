@@ -476,7 +476,12 @@ where
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
         | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
-        EmitImm(imm) | TraceImm(imm) => visitor.visit_immediate_felt(imm),
+        EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
+            visitor.visit_immediate_felt(imm)
+        },
+        EmitImm(EventImmediate::Name(_)) | TraceImm(EventImmediate::Name(_)) => {
+            ControlFlow::Continue(())
+        },
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
@@ -1040,7 +1045,12 @@ where
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
         | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
-        EmitImm(imm) | TraceImm(imm) => visitor.visit_mut_immediate_felt(imm),
+        EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
+            visitor.visit_mut_immediate_felt(imm)
+        },
+        EmitImm(EventImmediate::Name(_)) | TraceImm(EventImmediate::Name(_)) => {
+            ControlFlow::Continue(())
+        },
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),

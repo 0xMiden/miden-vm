@@ -258,8 +258,10 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
+mod pcs;
 mod precompiles;
 mod stark_asserts;
+mod support;
 mod sys;
 mod word;
 

@@ -308,6 +308,8 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
 | `crypto_stream` | `[rate(8), cap(4), src_ptr, dst_ptr, ...]` | `[ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]` | 1 | Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces rate on stack with ciphertext, preserves capacity, increments both pointers by 8. Primitive used by `miden::core::crypto::aead`. |
 
+`mtree_get`, `mtree_set`, and `mtree_verify` require `1 <= d <= 64`; other depths are rejected.
+
 ## Flow Control Operations
 
 High-level constructs for controlling the execution flow.

@@ -28,7 +28,7 @@ members = [
     "crates/serde-utils",
     "crates/stark-transcript",
     "crates/stateful-hasher",
-    "crates/test-serde-macros",
+    "crates/test-serialization-macros",
     "crates/test-utils",
     "crates/utils-core-derive",
     "crates/utils-diagnostics",
@@ -100,7 +100,7 @@ miden-precompiles       = { path = "./crates/precompiles", version = "0.30", def
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "0.30", default-features = false }
 miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.30", default-features = false }
 miden-processor         = { path = "./processor", version = "0.30", default-features = false }
-miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
+miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "0.30", default-features = false }
 miden-prover            = { path = "./prover", version = "0.30", default-features = false }
 miden-core-lib          = { path = "./crates/lib/core", version = "0.30", default-features = false }

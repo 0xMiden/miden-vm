@@ -3,12 +3,11 @@
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::{Word, merkle::smt::VersionId};
 
 /// The basic metadata stored for each tree in the forest.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TreeMetadata {
     /// The version to which the tree belongs.
     pub version: VersionId,

@@ -14,7 +14,7 @@ use crate::{
         CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
     },
-    operations::{AssemblyOp, Operation},
+    operations::Operation,
     program::{KernelDescriptor, Program},
 };
 
@@ -512,38 +512,6 @@ impl Arbitrary for MastForest {
                     forest.build().expect("generated MAST forest should be valid")
                 },
             )
-            .boxed()
-    }
-}
-
-// ---------- Arbitrary implementations for missing types ----------
-
-impl Arbitrary for AssemblyOp {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<bool>(),
-            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
-                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
-            }),
-            prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| {
-                Arc::from(chars.into_iter().collect::<String>().into_boxed_str())
-            }),
-            any::<u8>(),
-        )
-            .prop_map(|(has_location, context_name, op, num_cycles)| {
-                use miden_debug_types::{ByteIndex, Location, Uri};
-
-                let location = if has_location {
-                    Some(Location::new(Uri::new("dummy.rs"), ByteIndex(0), ByteIndex(0)))
-                } else {
-                    None
-                };
-
-                AssemblyOp::new(location, context_name, num_cycles, op)
-            })
             .boxed()
     }
 }

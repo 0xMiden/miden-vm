@@ -767,12 +767,14 @@ impl Tracer for ExecutionTracer {
         &mut self,
         node: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         output_root: Word,
     ) {
         let path = path.expect("execution tracer expects a valid Merkle path");
         self.hasher_chiplet_shim.record_build_merkle_root(path, output_root);
         self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]
@@ -781,6 +783,7 @@ impl Tracer for ExecutionTracer {
         old_value: Word,
         new_value: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         old_root: Word,
         new_root: Word,
@@ -793,6 +796,7 @@ impl Tracer for ExecutionTracer {
             path.clone(),
             index,
         );
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]

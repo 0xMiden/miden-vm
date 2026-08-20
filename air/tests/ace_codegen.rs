@@ -618,17 +618,16 @@ fn factored_circuits_reproduce_the_canonical_fold_for_every_proof_order() {
     }
 }
 
-/// The registry-entry constructor checks circuit-to-leaf coherence. This test checks that
-/// every served leaf and path authenticate under the protocol root.
+/// `recursive_registry_entry` checks circuit-to-leaf coherence. This test checks that every
+/// served circuit commitment and path authenticate under the protocol root.
 #[test]
 fn registry_entry_paths_authenticate_under_the_protocol_root() {
     use miden_air::{ProofOrder, ace::recursive_registry_entry, config::ACE_CIRCUIT_REGISTRY_ROOT};
 
     for order in ProofOrder::variants() {
-        let entry = recursive_registry_entry(&order).expect("registry entry must build");
-        let (_, leaf, path) = entry.into_parts();
+        let (circuit, path) = recursive_registry_entry(&order).expect("registry entry must build");
         assert_eq!(
-            path.compute_root(u64::from(order.tag()), leaf)
+            path.compute_root(u64::from(order.tag()), circuit.commitment)
                 .expect("path must fold to a root"),
             miden_core::Word::new(ACE_CIRCUIT_REGISTRY_ROOT),
             "the served path must authenticate the leaf under the protocol root"

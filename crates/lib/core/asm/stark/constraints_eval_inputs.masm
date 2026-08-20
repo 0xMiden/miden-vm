@@ -1,0 +1,268 @@
+use miden::core::stark::constants
+
+# Base-field offsets from the relation's `stark_vars_ptr` into the stark-vars block. The
+# fixed prologue occupies EF slots 0-9 (base offsets 0-19); slot 10 (offset 20) is the
+# multi-air fold challenge; AIR `k`'s selector triple starts at offset 22 + 6k, in the
+# relation's canonical instance order.
+const MULTI_AIR_FOLD_BETA_OFFSET = 20
+const FIRST_SELECTOR_OFFSET = 22
+const SELECTOR_STRIDE = 6
+
+#! Sets up the multi-AIR ACE input layout shared by relation verifiers.
+#!
+#! The stark-vars block starts with 10 EF slots:
+#!
+#!   Word 0 (slots 0-1): alpha, z^N
+#!   Word 1 (slots 2-3): z_k, is_first
+#!   Word 2 (slots 4-5): is_last, is_transition
+#!   Word 3 (slots 6-7): reserved, weight0
+#!   Word 4 (slots 8-9): f, s0
+#!
+#! The multi-AIR layout then appends:
+#!   slot 10: multi-air fold beta (sampled by the generic random coin)
+#!   slots 11 + 3k .. 13 + 3k: AIR k's lifted selectors, canonical instance order
+#!
+#! `heights_ptr` addresses the relation's `num_airs` consecutive per-AIR log-height
+#! cells; AIR k's selectors are derived from the height at `heights_ptr + k`.
+#!
+#! `stark_vars_ptr` is the relation's stark-vars base. The ACE READ section is one dense
+#! vector whose region spacing must equal the relation's circuit layout spacing, so this
+#! base is relation-local rather than a shared constant.
+#!
+#! The three quotient recomposition inputs are relation-supplied, and they do NOT all
+#! derive from the same quantity:
+#!   `quot_shift_ratio` (f)  the primitive D-th root of unity, D = the quotient arity
+#!   `quot_first_weight`     1 / (D * s0^(D-1)) — a function of BOTH D and s0
+#!   `quot_first_shift` (s0) shift^N — a PCS-configuration value (LDE shift and blowup),
+#!                           independent of D
+#! When a relation's arity and blowup factor coincide, a value derived from either quantity
+#! is numerically identical; a relation whose arity differs from its blowup needs different
+#! values, which is why these cannot stay shared constants.
+#!
+#! Input:  [max_cycle_len_log, num_airs, heights_ptr, stark_vars_ptr, quot_first_weight,
+#!          quot_first_shift, quot_shift_ratio, ...]
+#! Output: [...]
+@locals(1)
+pub proc set_up_auxiliary_inputs_ace
+    # The block base is dereferenced many times below; a local keeps it out of the working
+    # stack instead of threading it through every intermediate.
+    movup.3 loc_store.0
+    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, s0, f, ...]
+
+    # f and s0 (word 4), then the reserved slot with weight0 (word 3).
+    movup.5 push.0 movup.6 push.0 movup.3
+    # => [f, 0, s0, 0, max_cycle_len_log, num_airs, heights_ptr, weight0, ...]
+    loc_load.0 add.16
+    mem_storew_le
+    dropw
+    # => [max_cycle_len_log, num_airs, heights_ptr, weight0, ...]
+
+    movup.3
+    # => [weight0, max_cycle_len_log, num_airs, heights_ptr, ...]
+    push.0.0
+    # => [0, 0, weight0, ...]
+    push.0 movdn.3
+    # => [0, 0, weight0, 0, max_cycle_len_log, num_airs, heights_ptr, ...]
+    loc_load.0 add.12
+    mem_storew_le
+    dropw
+    # => [max_cycle_len_log, num_airs, heights_ptr, ...]
+
+    padw exec.constants::composition_coef_ptr mem_loadw_le
+    # => [alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
+
+    # multi-air fold beta.
+    dup.3 dup.3
+    # => [beta0, beta1, alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
+    push.0.0
+    movup.3 movup.3
+    # => [beta0, beta1, 0, 0, alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
+    loc_load.0 add.MULTI_AIR_FOLD_BETA_OFFSET
+    mem_storew_le dropw
+    # => [alpha0, alpha1, beta0, beta1, max_cycle_len_log, ...]
+
+    # alpha, z^N.
+    movup.3 movup.3
+    push.0.0 exec.constants::z_ptr mem_loadw_le
+    # => [z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, max_cycle_len_log, ...]
+
+    # Compute z_k = z^(N / max_cycle_len) by repeated squaring.
+    exec.constants::get_trace_length_log
+    movup.7
+    sub
+    # => [k, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
+
+    dup.4 dup.4
+    # => [z_0, z_1, k, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
+
+    push.1
+    while.true
+        dup.1 dup.1
+        ext2mul
+        dup.2 sub.1 swap.3
+        push.1 neq
+    end
+
+    movup.2 drop
+    # => [z_k_0, z_k_1, z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, ...]
+
+    movup.3 movup.3
+    # => [z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, alpha0, alpha1, ...]
+    movup.7 movup.7
+    # => [alpha0, alpha1, z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, ...]
+
+    loc_load.0
+    mem_storew_le
+    drop drop
+    # => [z_n_0, z_n_1, z_k_0, z_k_1, z_0, z_1, ...]
+
+    # is_first, is_last, is_transition.
+    sub.1
+    # => [van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
+
+    dup.5 dup.5
+    # => [z_0, z_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
+    sub.1 ext2inv
+    # => [inv_z1_0, inv_z1_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
+    dup.3 dup.3
+    # => [van_0, van_1, inv_z1_0, inv_z1_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
+    ext2mul
+    # => [is_first_0, is_first_1, van_0, van_1, z_k_0, z_k_1, z_0, z_1, ...]
+
+    movup.5 movup.5
+    # => [z_k_0, z_k_1, is_first_0, is_first_1, van_0, van_1, z_0, z_1, ...]
+    loc_load.0 add.4
+    mem_storew_le
+    dropw
+    # => [van_0, van_1, z_0, z_1, ...]
+
+    exec.constants::get_trace_domain_generator
+    inv
+    # => [g_inv, van_0, van_1, z_0, z_1, ...]
+    movup.3 swap sub
+    # => [is_trans_0, van_0, van_1, z_1, ...]
+    movup.3
+    swap
+    # => [is_trans_0, is_trans_1, van_0, van_1, ...]
+
+    dup.1 dup.1
+    # => [is_trans_0, is_trans_1, is_trans_0, is_trans_1, van_0, van_1, ...]
+    ext2inv
+    # => [inv_t_0, inv_t_1, is_trans_0, is_trans_1, van_0, van_1, ...]
+    movup.5 movup.5
+    # => [van_0, van_1, inv_t_0, inv_t_1, is_trans_0, is_trans_1, ...]
+    ext2mul
+    # => [is_last_0, is_last_1, is_trans_0, is_trans_1, ...]
+
+    loc_load.0 add.8
+    mem_storew_le
+    dropw
+    # => [...]
+
+    # Per-AIR lifted selectors: AIR k's triple at offset FIRST_SELECTOR_OFFSET + 6k,
+    # from the log height at heights_ptr + k.
+    # => [num_airs, heights_ptr]
+    push.0
+    # => [k = 0, num_airs, heights_ptr]
+    dup.1 dup.1 u32gt
+    while.true
+        # => [k, num_airs, heights_ptr]
+        dup.2 dup.1 add mem_load
+        # => [h_k, k, num_airs, heights_ptr]
+        dup.1 mul.SELECTOR_STRIDE push.FIRST_SELECTOR_OFFSET add
+        # => [offset_k, h_k, k, num_airs, heights_ptr]
+        loc_load.0 movdn.2
+        # => [offset_k, h_k, stark_vars_ptr, k, num_airs, heights_ptr]
+        exec.compute_per_air_selectors
+        # => [k, num_airs, heights_ptr]
+        add.1
+        dup.1 dup.1 u32gt
+    end
+    drop drop drop
+end
+
+#! Load the quad field element stored at `[addr, addr + 1]`.
+#!
+#! Input:  [addr, ...]
+#! Output: [q0, q1, ...]
+proc load_quad
+    dup add.1 mem_load
+    swap mem_load
+end
+
+#! Compute one AIR's lifted selectors in the ACE input region.
+#!
+#! Procedure locals do not cross procedure boundaries, so the relation's stark-vars base
+#! is passed in and stored here rather than read from a shared constant.
+#!
+#! Input:  [out_offset, log_air, stark_vars_ptr, ...]
+#! Output: [...]
+@locals(1)
+proc compute_per_air_selectors
+    movup.2 loc_store.0
+    # => [out_offset, log_air, ...]
+    swap
+    exec.constants::get_trace_length_log
+    swap sub
+    # => [r_log, out_offset, ...]
+    dup
+    # => [r_log, saved_r_log, out_offset, ...]
+
+    exec.constants::z_ptr add.2 exec.load_quad
+    movup.2
+    # => [r_log, z_0, z_1, saved_r_log, out_offset, ...]
+    dup push.0 neq
+    while.true
+        movdn.2
+        dup.1 dup.1 ext2mul
+        movup.2 sub.1
+        dup push.0 neq
+    end
+    drop
+    # => [z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+
+    loc_load.0 add.2 exec.load_quad
+    sub.1
+    # => [van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+
+    dup.3 dup.3
+    sub.1 ext2inv
+    dup.3 dup.3 ext2mul
+    # => [if_0, if_1, van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+    dup.7 loc_load.0 add mem_store
+    dup.6 loc_load.0 add.1 add mem_store
+    # => [van_0, van_1, z_lift_0, z_lift_1, saved_r_log, out_offset, ...]
+
+    exec.constants::get_trace_domain_generator
+    inv
+    movup.5
+    # => [r_log, g_max_inv, van_0, van_1, z_lift_0, z_lift_1, out_offset, ...]
+    dup push.0 neq
+    while.true
+        swap dup mul
+        swap sub.1
+        dup push.0 neq
+    end
+    drop
+    # => [g_air_inv, van_0, van_1, z_lift_0, z_lift_1, out_offset, ...]
+
+    movup.3 swap sub
+    movup.3
+    swap
+    # => [it_0, it_1, van_0, van_1, out_offset, ...]
+
+    dup.1 dup.1
+    ext2inv
+    movup.5 movup.5
+    ext2mul
+    # => [il_0, il_1, it_0, it_1, out_offset, ...]
+
+    dup.4 loc_load.0 add.2 add mem_store
+    dup.3 loc_load.0 add.3 add mem_store
+    # => [it_0, it_1, out_offset, ...]
+
+    dup.2 loc_load.0 add.4 add mem_store
+    dup.1 loc_load.0 add.5 add mem_store
+    # => [out_offset, ...]
+    drop
+end

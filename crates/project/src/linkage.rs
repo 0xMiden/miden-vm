@@ -9,7 +9,7 @@ use miden_core::serde::{Deserializable, Serializable};
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(
     all(feature = "arbitrary", feature = "serde", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(u8)]
 pub enum Linkage {

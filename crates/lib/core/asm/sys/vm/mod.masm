@@ -1,111 +1,68 @@
 pub mod aux_trace
 pub mod claim
 pub mod constraints_eval
-pub mod constraints_eval_inputs
 pub mod deep_queries
+pub mod layout
 pub mod ood_frames
 pub mod public_inputs
 
 use miden::core::mem
-use miden::core::stark::verifier
+use miden::core::stark::utils
 use miden::core::stark::constants
-
-# Fixed-point (16 fractional bits) conjectured security bits per FRI query for this
-# configuration's blowup (8) and ~128-bit challenge field, per the random-words formula
-# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
-# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
-const CONJECTURED_BITS_PER_QUERY_FP = 193382
-
-# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
-const MAX_SECURITY_LEVEL = 128
+use miden::core::stark::verifier
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
+
+# Domain tag for the kernel commitment: the registered selector
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
+# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
+const KERNEL_DOMAIN_TAG = 0x01000001
 
 const FELTS_PER_KERNEL_DIGEST = 4
 
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
-
 # Number of AIR instances contributing to the proof order.
 const NUM_MIDEN_AIRS = 3
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 11152379026975152382
-const RELATION_DIGEST_1 = 11723301119990130618
-const RELATION_DIGEST_2 = 5452208419771849585
-const RELATION_DIGEST_3 = 6256455131283933367
+const RELATION_DIGEST_0 = 8001155700388371521
+const RELATION_DIGEST_1 = 10401107199630226870
+const RELATION_DIGEST_2 = 16097540092429316788
+const RELATION_DIGEST_3 = 5987438047465362013
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 14759897082361414749
-const ACE_REGISTRY_ROOT_1 = 9435612991474202858
-const ACE_REGISTRY_ROOT_2 = 9571969710586011685
-const ACE_REGISTRY_ROOT_3 = 5456669840223338561
-
-#! Loads security parameters from the advice stack and stores them in memory.
-#!
-#! The advice stack must contain, in order:
-#!   [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-#!
-#! After this procedure, all four values are available in memory via the corresponding
-#! accessors in constants.masm (get_number_queries, get_query_pow_bits, etc.).
-#!
-#! Input:  [...]
-#! Output: [...]
-proc load_security_params
-    adv_push exec.constants::set_number_queries
-    adv_push exec.constants::set_query_pow_bits
-    adv_push exec.constants::set_deep_pow_bits
-    adv_push exec.constants::set_folding_pow_bits
-end
-
-#! Computes the conjectured security level (in bits) attained by the given proof parameters.
-#!
-#! Evaluates `min(((num_queries * C) >> 16) + query_pow_bits, 128)` using integer fixed point.
-#! Must match miden_air::config::conjectured_security_level bit-for-bit (enforced by
-#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
-#!
-#! PRECONDITION: `num_queries <= 150`, so `num_queries * C` fits in a u32 (the `u32shr` below
-#! requires that). Parameters returned by `verify_vm_proof` satisfy this bound: the generic
-#! verifier enforces it.
-#!
-#! Inputs:  [num_queries, query_pow_bits, ...]
-#! Outputs: [level, ...]
-pub proc compute_conjectured_security_level(
-    num_queries: u32,
-    query_pow_bits: u32,
-) -> u32
-    push.CONJECTURED_BITS_PER_QUERY_FP mul
-    u32shr.16
-    add
-    push.MAX_SECURITY_LEVEL u32min
-    # => [level, ...]
-end
+const ACE_REGISTRY_ROOT_0 = 4203939832410250299
+const ACE_REGISTRY_ROOT_1 = 12914527915593930096
+const ACE_REGISTRY_ROOT_2 = 3268125648964005028
+const ACE_REGISTRY_ROOT_3 = 5037431390707430717
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
 #!   [log_core, log_chiplets, log_poseidon2_permutation]
 #!
-#! Writes per-AIR log heights, the maximum log height, ORDER_TAG, RELATION_DIGEST, and
-#! ACE_REGISTRY_ROOT to memory.
+#! Writes the trace shape, proof-order tag, relation commitments, and fixed OOD/query-row
+#! addresses to verifier memory.
 pub proc load_air_context
     adv_push
     exec.assert_shape_log
-    exec.constants::set_core_trace_length_log
+    exec.layout::set_core_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_chiplets_trace_length_log
+    exec.layout::set_chiplets_trace_length_log
 
     adv_push
     exec.assert_shape_log
-    exec.constants::set_poseidon2_permutation_trace_length_log
+    exec.layout::set_poseidon2_permutation_trace_length_log
 
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
+    exec.layout::get_core_trace_length_log
+    exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_poseidon2_permutation_trace_length_log
     u32max
     exec.constants::set_trace_length_log
 
@@ -114,6 +71,10 @@ pub proc load_air_context
 
     exec.store_relation_digest
     exec.store_ace_registry_root
+    exec.layout::ood_evaluations_ptr
+    exec.constants::set_ood_evaluations_address
+    exec.layout::current_trace_row_ptr
+    exec.constants::set_current_trace_row_address
 end
 
 proc assert_shape_log
@@ -139,11 +100,10 @@ end
 #! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
 #! factorial argument never underflows the field.
 #!
-#! Adding AIRs needs three coordinated edits, none of which this procedure can detect on its
-#! own: NUM_MIDEN_AIRS here, the matching constant in `public_inputs.masm`, and the per-AIR
-#! log-height cells in `stark/constants.masm` — which this reads as one consecutive array and
-#! where only two spare cells remain before `MAIN_TRACE_COM_PTR` (so beyond 5 AIRs the memory
-#! map has to move).
+#! This VM-local specialization keeps the three-AIR loop bounds compile-time constants. New
+#! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
+#! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
+#! layout accessors, and the public-input schema; regeneration checks pin those copies.
 #!
 #! Input:  []
 #! Output: [tag]
@@ -228,14 +188,14 @@ proc store_relation_digest
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+    dropw
 end
 
 proc store_ace_registry_root
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw dropw
+    dropw
 end
 
 #! Materializes and authenticates the kernel witness named by the staged claim.
@@ -245,7 +205,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc materialize_kernel_witness
-    padw exec.constants::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+    padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
     # => [K, ...]
     adv.push_mapvaln
     adv_push
@@ -259,15 +219,16 @@ proc materialize_kernel_witness
     assert.err="number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::kernel_witness_ptr swap
-    exec.mem::pipe_words_to_memory
-    # The pipe computes an untagged hash; discard it and check the domain-tagged commitment below.
-    dropw dropw dropw drop
+    dup exec.layout::num_kernel_procedures_ptr mem_store
     # => [num_kernel_procedures, K, ...]
 
-    dup exec.constants::num_kernel_procedures_ptr mem_store
-    exec.constants::kernel_witness_ptr
-    exec.claim::kernel_commitment
+    exec.layout::kernel_witness_ptr swap
+    push.KERNEL_DOMAIN_TAG
+    exec.mem::pipe_words_to_memory_in_domain
+    # => [K', end_ptr, K, ...]
+
+    # Discard the end pointer, then authenticate the copied witness.
+    movup.4 drop
     # => [K', K, ...]
     assert_eqw.err="fetched kernel digests do not hash to the claim's kernel commitment"
     # => [...]
@@ -288,16 +249,16 @@ end
 #! from the advice stack and stored in memory for the generic verifier, which enforces their
 #! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
 #! parameters it was not produced with. This procedure holds no security-estimate formula and
-#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade
-#! (e.g. with `compute_conjectured_security_level`) under its own policy. An estimate or policy
-#! change therefore never moves this procedure's root - request keys and registered proof
-#! packages stay valid across such changes.
+#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade (e.g.
+#! with `stark::utils::conjectured_security_level`) under its own policy. An estimate or policy
+#! change therefore never moves this procedure's root - request keys and registered proof packages
+#! stay valid across such changes.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
 #!
 #! The verifier fetches the kernel digest list from the advice map under K, copies it to
-#! `constants::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
+#! `layout::kernel_witness_ptr`, and checks that it hashes to K. It binds the transcript to the
 #! claim commitment and checks the kernel-ROM boundary against this list.
 #!
 #! The returned deferred root is bound by the verified statement. The caller must settle it or
@@ -321,13 +282,13 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
     # --- Authenticate execution claim -----------------------------------------------------------
 
     # Preserve the commitment until public inputs are absorbed after transcript initialization.
-    exec.constants::claim_commitment_ptr mem_storew_le
-    exec.constants::claim_ptr exec.claim::materialize_claim
+    exec.layout::claim_commitment_ptr mem_storew_le
+    exec.layout::claim_ptr exec.claim::materialize_claim
     # => [...]
 
     # --- Prepare VM verifier state ---------------------------------------------------------------
 
-    exec.load_security_params
+    exec.utils::load_security_params
     exec.materialize_kernel_witness
     exec.public_inputs::stage_boundary_inputs
     exec.load_air_context
@@ -346,10 +307,6 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
 
     # --- Return result ---------------------------------------------------------------------------
 
-    exec.constants::get_folding_pow_bits
-    exec.constants::get_deep_pow_bits
-    exec.constants::get_query_pow_bits
-    exec.constants::get_number_queries
     # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
     exec.public_inputs::load_deferred_root
     # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]

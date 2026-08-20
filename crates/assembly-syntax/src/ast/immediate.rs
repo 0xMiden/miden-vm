@@ -17,6 +17,42 @@ pub type ImmU32 = Immediate<u32>;
 /// A field element immediate
 pub type ImmFelt = Immediate<Felt>;
 
+/// An event identifier given as a constant reference, a felt value, or an inline event name.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EventImmediate {
+    /// A constant reference or literal felt value.
+    Immediate(ImmFelt),
+    /// An inline `event("...")` expression.
+    Name(Span<Arc<str>>),
+}
+
+impl EventImmediate {
+    /// Unwrap the resolved event identifier or panic.
+    pub fn expect_value(&self) -> Felt {
+        match self {
+            Self::Immediate(imm) => imm.expect_value(),
+            Self::Name(name) => {
+                panic!("tried to unwrap unresolved event name: '{}'", name.inner())
+            },
+        }
+    }
+}
+
+impl Spanned for EventImmediate {
+    fn span(&self) -> SourceSpan {
+        match self {
+            Self::Immediate(imm) => imm.span(),
+            Self::Name(name) => name.span(),
+        }
+    }
+}
+
+impl From<ImmFelt> for EventImmediate {
+    fn from(imm: ImmFelt) -> Self {
+        Self::Immediate(imm)
+    }
+}
+
 /// The type of error messages used in MASM assertions.
 pub type ErrorMsg = Immediate<Arc<str>>;
 
@@ -28,8 +64,7 @@ pub enum Immediate<T> {
     ///
     /// This must refer to a constant definition in the current module.
     ///
-    /// All immediates of this type are folded to `Value` during
-    /// semantic analysis, once all constant definitions are evaluated.
+    /// All immediates of this type are folded to `Value` during linking.
     Constant(Ident),
 }
 

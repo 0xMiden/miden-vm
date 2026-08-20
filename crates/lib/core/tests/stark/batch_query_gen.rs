@@ -10,16 +10,15 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
-// Memory layout constants (must match constants.masm).
 // Must match the constants in `crates/lib/core/asm/stark/constants.masm`.
-const R1_PTR: u32 = 3223322676;
-const R2_PTR: u32 = 3223322680;
-const C_PTR: u32 = 3223322672;
+const R1_PTR: u32 = 3223322672;
+const R2_PTR: u32 = 3223322676;
+const C_PTR: u32 = 3223322668;
 const NUM_QUERIES_PTR: u32 = 3223322628;
 const LDE_DOMAIN_LOG_SIZE_PTR: u32 = 3223322625;
 const FRI_QUERIES_ADDRESS_PTR: u32 = 3223322633;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322760;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322761;
+const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322759;
+const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322760;
 
 // Fixed query storage address.
 const QUERY_PTR: u32 = 100_000;
