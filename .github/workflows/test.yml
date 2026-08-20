@@ -75,6 +75,31 @@ jobs:
       - name: Run doc-tests
         run: make test-docs
 
+  wasm-handlers-host:
+    name: wasm event handlers on a wasm32 host
+    runs-on: warp-ubuntu-latest-x64-8x
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: |
+          rustup update --no-self-update
+          rustup target add wasm32-wasip1
+      # Keep this on a released install-action commit with an explicit tool; see
+      # the nextest install above for the zizmor/tool-shortcut rationale.
+      - name: Install wasmtime
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        with:
+          tool: wasmtime-cli@45.0.2
+      - name: Run the Wasm event handler tests inside a wasm32 host
+        run: make test-wasm-handlers-host
+
   check-core-lib-docs:
     name: check core library docs
     runs-on: warp-ubuntu-latest-x64-8x
