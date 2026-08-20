@@ -9,6 +9,8 @@
 
 #### Changes
 
+- Added a semantic warning for unused private MASM constants, while keeping exported constants out
+  of scope ([#2898](https://github.com/0xMiden/miden-vm/issues/2898)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word

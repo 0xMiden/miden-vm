@@ -12,6 +12,9 @@
 xclippy = [
     "clippy", "--workspace", "--all-targets", "--all-features", "--",
     "-Wclippy::all",
+    "-Aunknown-lints",
+    "-Aclippy::chunks_exact_to_as_chunks",
+    "-Aclippy::single_range_in_vec_init",
     # Lints that currently pass in the codebase:
     "-Wclippy::await_holding_lock",
     "-Wclippy::char_lit_as_u8",

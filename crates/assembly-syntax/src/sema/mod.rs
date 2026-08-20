@@ -11,8 +11,9 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::ops::ControlFlow;
 
-use miden_core::{Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2};
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -22,7 +23,10 @@ pub use self::{
     errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
     passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
-use crate::{ast::*, parser::WordValue};
+use crate::{
+    ast::*,
+    parser::{PushValue, WordValue},
+};
 
 /// Constructs and validates a [Module], given the forms constituting the module body.
 ///
@@ -60,6 +64,8 @@ pub fn analyze(
         Module::new(kind.unwrap_or_default(), module_path).with_span(source.source_span()),
     );
 
+    let used_constants = should_check_unused_private_constants(&source, &forms)
+        .then(|| collect_used_constants(&forms));
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();
     let mut docs = None;
@@ -274,6 +280,10 @@ pub fn analyze(
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.unused_span() });
         }
+    }
+
+    if let Some(used_constants) = used_constants.as_ref() {
+        check_unused_private_constants(&module, used_constants, &mut analyzer);
     }
 
     analyzer.into_result().map(move |_| module)
@@ -532,6 +542,143 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             Import::Item(import) => import.uses = 1,
         }
     }
+}
+
+#[derive(Default)]
+struct UsedConstantCollector {
+    used: BTreeSet<Ident>,
+}
+
+impl UsedConstantCollector {
+    fn visit_immediate<T>(&mut self, imm: &Immediate<T>) {
+        if let Immediate::Constant(name) = imm {
+            self.used.insert(name.clone());
+        }
+    }
+}
+
+impl Visit for UsedConstantCollector {
+    fn visit_op(&mut self, op: &Op) -> ControlFlow<()> {
+        if let Op::Repeat { count, body, .. } = op {
+            self.visit_immediate_u32(count)?;
+            return self.visit_block(body);
+        }
+
+        visit::visit_op(self, op)
+    }
+
+    fn visit_constant_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<()> {
+        if let Some(name) = path.as_ident() {
+            self.used.insert(name);
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_u8(&mut self, imm: &Immediate<u8>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_u16(&mut self, imm: &Immediate<u16>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_u32(&mut self, imm: &Immediate<u32>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_felt(&mut self, imm: &Immediate<Felt>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_word_value(&mut self, imm: &Immediate<WordValue>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_push_value(&mut self, imm: &Immediate<PushValue>) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+
+    fn visit_immediate_error_message(&mut self, imm: &ErrorMsg) -> ControlFlow<()> {
+        self.visit_immediate(imm);
+        ControlFlow::Continue(())
+    }
+}
+
+fn collect_used_constants(forms: &[Form]) -> BTreeSet<Ident> {
+    let mut collector = UsedConstantCollector::default();
+
+    for form in forms {
+        match form {
+            Form::Type(ty) => {
+                let _ = collector.visit_type_alias(ty);
+            },
+            Form::Enum(ty) => {
+                let _ = collector.visit_enum(ty);
+            },
+            Form::Constant(constant) => {
+                let _ = collector.visit_constant_expr(&constant.value);
+            },
+            Form::Begin(block) => {
+                let _ = collector.visit_block(block);
+            },
+            Form::Procedure(procedure) => {
+                let _ = collector.visit_procedure(procedure);
+            },
+            Form::AdviceMapEntry(entry) => {
+                collector.used.insert(entry.name.clone());
+            },
+            Form::ModuleDoc(_)
+            | Form::Doc(_)
+            | Form::Namespace(_)
+            | Form::ExternPackage(_)
+            | Form::Submodule(_)
+            | Form::Import(_) => (),
+        }
+    }
+
+    collector.used
+}
+
+fn check_unused_private_constants(
+    module: &Module,
+    used_constants: &BTreeSet<Ident>,
+    analyzer: &mut AnalysisContext,
+) {
+    for constant in module.constants() {
+        if constant.visibility.is_public()
+            || constant.docs.is_some()
+            || used_constants.contains(&constant.name)
+        {
+            continue;
+        }
+
+        analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.name.span() });
+    }
+}
+
+fn is_generated_source(source: &SourceFile) -> bool {
+    source
+        .as_str()
+        .lines()
+        .take(3)
+        .any(|line| line.contains("GENERATED") && line.contains("do not edit"))
+}
+
+fn should_check_unused_private_constants(source: &SourceFile, forms: &[Form]) -> bool {
+    !is_generated_source(source)
+        && !is_core_library_source(source)
+        && forms.iter().any(|form| matches!(form, Form::Begin(_) | Form::Procedure(_)))
+}
+
+fn is_core_library_source(source: &SourceFile) -> bool {
+    source.uri().as_str().contains("/crates/lib/core/asm/")
 }
 
 fn define_import(
