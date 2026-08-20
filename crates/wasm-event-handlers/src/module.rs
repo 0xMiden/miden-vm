@@ -17,7 +17,7 @@ use wasmi::{Config, EnforcedLimits, Engine, Linker, Module, Store};
 
 use crate::{
     error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
-    host::{HostCtx, build_linker},
+    host::{FUEL_PER_FELT, HostCtx, build_linker},
 };
 
 // LIMITS
@@ -73,6 +73,8 @@ pub struct WasmHandlerModule {
     linker: Linker<HostCtx>,
     limits: WasmHandlerLimits,
     manifest: Vec<(EventName, String)>,
+    /// The fuel charge for one instantiation, deducted from the budget of every call.
+    instantiation_fuel: u64,
 }
 
 impl WasmHandlerModule {
@@ -154,8 +156,28 @@ impl WasmHandlerModule {
             return Err(WasmHandlerLoadError::StartSection);
         }
 
+        // wasmi meters no instantiation work (memory zeroing, segment copies), so the static
+        // cost is computed once here and deducted from the fuel budget of every call. A module
+        // whose instantiation alone eats the whole budget can never run; refuse it now.
+        let instantiation_fuel = instantiation_fuel(wasm).ok_or_else(|| {
+            WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
+        })?;
+        if instantiation_fuel >= limits.fuel {
+            return Err(WasmHandlerLoadError::InstantiationOverBudget {
+                cost: instantiation_fuel,
+                fuel: limits.fuel,
+            });
+        }
+
         let linker = build_linker(&engine);
-        let this = Self { engine, module, linker, limits, manifest };
+        let this = Self {
+            engine,
+            module,
+            linker,
+            limits,
+            manifest,
+            instantiation_fuel,
+        };
         this.validate_instantiation()?;
         Ok(this)
     }
@@ -204,8 +226,10 @@ impl WasmHandlerModule {
     fn new_store(&self, state: *const ProcessorState<'static>) -> Store<HostCtx> {
         let mut store = Store::new(&self.engine, HostCtx::new(state, &self.limits));
         store.limiter(|ctx| &mut ctx.limits);
+        // The static instantiation cost is charged up front; the load-time check keeps it
+        // under the budget.
         store
-            .set_fuel(self.limits.fuel)
+            .set_fuel(self.limits.fuel.saturating_sub(self.instantiation_fuel))
             .expect("fuel metering is enabled in the engine config");
         store
     }
@@ -313,6 +337,99 @@ pub(crate) fn walk_wasm_sections<'a>(
         pos = payload_end;
     }
     Some(())
+}
+
+/// Decodes a LEB128-encoded `u64` from `data` at `pos`; returns the value and the next
+/// position.
+fn read_leb_u64(data: &[u8], mut pos: usize) -> Option<(u64, usize)> {
+    let mut value: u64 = 0;
+    let mut shift = 0u32;
+    loop {
+        let byte = *data.get(pos)?;
+        pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= 70 {
+            return None;
+        }
+    }
+    Some((value, pos))
+}
+
+/// Computes the fuel charge for one instantiation of the module.
+///
+/// wasmi meters no instantiation work: it allocates and zeroes the declared initial memory,
+/// allocates the initial tables, and copies the data and element segments before any guest
+/// code runs. The sizes are static, so the charge is computed once at load time. The rate is
+/// one fuel unit per 8 bytes, the same as [`FUEL_PER_FELT`] for host-moved data; the byte
+/// count is an upper bound that counts passive segments as if they were copied.
+///
+/// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
+/// invalid module.
+fn instantiation_fuel(wasm: &[u8]) -> Option<u64> {
+    /// The section IDs whose contents instantiation materializes.
+    const TABLE_SECTION_ID: u8 = 4;
+    const MEMORY_SECTION_ID: u8 = 5;
+    const ELEMENT_SECTION_ID: u8 = 9;
+    const DATA_SECTION_ID: u8 = 11;
+    /// The size of one Wasm linear-memory page.
+    const PAGE_BYTES: u64 = 65536;
+    /// The size of one table element (a reference) on a 64-bit host.
+    const TABLE_ELEMENT_BYTES: u64 = 8;
+
+    let mut bytes: u64 = 0;
+    let mut malformed = false;
+    walk_wasm_sections(wasm, |id, payload| match id {
+        MEMORY_SECTION_ID => match limits_min_total(payload, false) {
+            Some(pages) => bytes = bytes.saturating_add(pages.saturating_mul(PAGE_BYTES)),
+            None => malformed = true,
+        },
+        TABLE_SECTION_ID => match limits_min_total(payload, true) {
+            Some(elems) => {
+                bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES))
+            },
+            None => malformed = true,
+        },
+        DATA_SECTION_ID | ELEMENT_SECTION_ID => {
+            bytes = bytes.saturating_add(payload.len() as u64);
+        },
+        _ => {},
+    })?;
+    if malformed {
+        return None;
+    }
+    Some(bytes.div_ceil(8).saturating_mul(FUEL_PER_FELT))
+}
+
+/// Sums the limit minimums of a memory or table section payload: the pages (memory) or
+/// elements (table) allocated at instantiation. `skip_reftype` skips the reference-type byte
+/// that leads each table entry.
+fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
+    let (count, mut pos) = read_leb_u32(payload, 0)?;
+    let mut total: u64 = 0;
+    for _ in 0..count {
+        if skip_reftype {
+            payload.get(pos)?;
+            pos += 1;
+        }
+        let flags = *payload.get(pos)?;
+        pos += 1;
+        // Valid limit flags: bit 0 = maximum present, bit 1 = shared, bit 2 = 64-bit.
+        if flags > 0b111 {
+            return None;
+        }
+        let (min, next) = read_leb_u64(payload, pos)?;
+        pos = next;
+        if flags & 1 != 0 {
+            let (_, next) = read_leb_u64(payload, pos)?;
+            pos = next;
+        }
+        total = total.saturating_add(min);
+    }
+    Some(total)
 }
 
 /// Returns `true` when the Wasm binary has a start section (section ID 8).

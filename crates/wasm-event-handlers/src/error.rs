@@ -51,6 +51,19 @@ pub enum WasmHandlerLoadError {
     #[error("handler module has a start section; start functions are not allowed")]
     StartSection,
 
+    /// The static instantiation cost (initial memory, tables, data and element segments) does
+    /// not fit the per-call fuel budget, so no call could ever run.
+    #[error(
+        "module instantiation costs {cost} fuel (initial memory, tables, and segments), which \
+         does not fit the fuel budget {fuel}"
+    )]
+    InstantiationOverBudget {
+        /// The fuel charge of one instantiation.
+        cost: u64,
+        /// The configured per-call fuel budget.
+        fuel: u64,
+    },
+
     /// The module could not be instantiated against the host function set. This covers imports
     /// with a wrong signature.
     #[error("handler module failed to instantiate: {0}")]

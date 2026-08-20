@@ -767,7 +767,9 @@ fn host_call_work_is_metered() {
            (func (export \"handler\")
              (drop (call $adv_stack_read (i32.const 0) (i32.const 0) (i32.const 100000)))))"
     );
-    let limits = WasmHandlerLimits { fuel: 1000, ..Default::default() };
+    // The budget covers the 13-page instantiation charge plus 1000 fuel for the body — far
+    // less than the 100k-felt read the host call asks for.
+    let limits = WasmHandlerLimits { fuel: 13 * 65536 / 8 + 1000, ..Default::default() };
     let module = load_with_limits(&wat_src, limits);
     let err = run_raw(&module, &processor()).expect_err("handler must trap");
     // Fuel exhaustion inside a host call must classify as `OutOfFuel`, not `Trapped`.
@@ -781,6 +783,59 @@ fn memory_growth_is_capped() {
     let module = load(&wat_src);
     let err = run_raw(&module, &processor()).expect_err("handler must trap");
     assert_run_error!(err, WasmHandlerRunError::LimitExceeded(_));
+}
+
+#[test]
+fn instantiation_cost_over_the_fuel_budget_is_rejected_at_load() {
+    // 16 initial pages (1 MiB) cost 131072 fuel to zero on every instantiation, far over a
+    // 1000-fuel budget: no call could ever run.
+    let wat_src = format!(
+        "(module {IMPORTS} (memory (export \"memory\") 16) (func (export \"handler\")))"
+    );
+    let wasm = wat::parse_str(&wat_src).expect("fixture WAT must parse");
+    let limits = WasmHandlerLimits { fuel: 1000, ..Default::default() };
+    let manifest = vec![(EVENT, "handler".to_string())];
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, limits).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::InstantiationOverBudget { .. }),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn data_segments_count_toward_the_instantiation_cost() {
+    // One initial page costs 8192 fuel; the 4096-byte data segment adds 512 more. A budget
+    // between the two accepts the module without the segment and refuses it with the segment.
+    let segment = format!("(data (i32.const 0) \"{}\")", data_bytes(&vec![0u64; 512]));
+    let with_segment = fixture_with(&segment, "(nop)");
+    let without_segment = fixture("(nop)");
+    let limits = WasmHandlerLimits { fuel: 8500, ..Default::default() };
+    load_with_limits(&without_segment, limits.clone());
+    let wasm = wat::parse_str(&with_segment).expect("fixture WAT must parse");
+    let manifest = vec![(EVENT, "handler".to_string())];
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, limits).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::InstantiationOverBudget { .. }),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn instantiation_cost_is_charged_on_every_call() {
+    // Two initial pages cost 16384 fuel per instantiation. A margin of 5 above that cannot
+    // pay for the host call in the body (flat charge 25); a comfortable margin can.
+    let wat_src = format!(
+        "(module {IMPORTS} (memory (export \"memory\") 2)
+           (func (export \"handler\") (drop (call $clk))))"
+    );
+    let starved = WasmHandlerLimits { fuel: 16384 + 5, ..Default::default() };
+    let module = load_with_limits(&wat_src, starved);
+    let err = run_raw(&module, &processor()).expect_err("handler must run out of fuel");
+    assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
+
+    let comfortable = WasmHandlerLimits { fuel: 16384 + 1000, ..Default::default() };
+    let module = load_with_limits(&wat_src, comfortable);
+    run(&module, &processor()).expect("handler succeeds");
 }
 
 #[test]
@@ -829,10 +884,10 @@ fn mutation_size_limit_is_enforced() {
 
 #[test]
 fn oversized_table_is_rejected_at_load() {
-    // 100M funcref elements would be an ~800 MB eager allocation at every instantiation,
-    // before any fuel applies. The table-element cap refuses it at the load-time dry run.
+    // 1M funcref elements fit the fuel budget (the instantiation charge) but overstep the
+    // table-element cap, so the load-time dry run refuses the eager 8 MB allocation.
     let wat_src =
-        format!("(module {IMPORTS} (table 100000000 funcref) (func (export \"handler\")))");
+        format!("(module {IMPORTS} (table 1000000 funcref) (func (export \"handler\")))");
     let err = try_load(&wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
     assert!(matches!(err, WasmHandlerLoadError::Instantiation(_)), "unexpected error: {err}");
 }
