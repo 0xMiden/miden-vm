@@ -59,9 +59,8 @@ impl Plan {
     }
 }
 
-/// Solve for the iteration counts that reproduce `target`'s per-component row counts. Per-chiplet
-/// targets come from the snapshot's advisory `shape` breakdown -- the solver uses them to keep the
-/// synthetic program representative, but the verifier only hard-asserts totals/brackets.
+/// Solve for iteration counts that reproduce the target's hard core, chiplets, and Poseidon2
+/// totals plus its range and advisory memory composition.
 pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let mut iters: BTreeMap<&'static str, f64> =
         SNIPPETS.iter().map(|s| (s.name, 0.0_f64)).collect();
@@ -70,7 +69,7 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
         match c {
             Component::Core => target.totals.core_rows as f64,
             Component::Hasher => target.hasher_work_rows() as f64,
-            Component::Bitwise => target.breakdown.bitwise_rows as f64,
+            Component::Chiplets => target.totals.chiplets_rows as f64,
             Component::Memory => target.breakdown.memory_target() as f64,
             Component::Range => target.totals.range_rows as f64,
         }
@@ -134,12 +133,13 @@ mod tests {
     fn shape_of(
         core_rows: u64,
         range_rows: u64,
-        hasher: u64,
+        poseidon2: u64,
+        controller_hasher: u64,
         bitwise: u64,
         memory: u64,
     ) -> TraceShape {
         let breakdown = TraceBreakdown {
-            hasher_rows: hasher,
+            hasher_rows: controller_hasher,
             bitwise_rows: bitwise,
             memory_rows: memory,
             kernel_rom_rows: 0,
@@ -148,7 +148,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: hasher,
+            poseidon2_permutation_rows: poseidon2,
             range_rows,
         };
         TraceShape::new(totals, breakdown)
@@ -158,12 +158,13 @@ mod tests {
         // core/hasher ratio of ~8, well below the intrinsic core/4 floor. Memory kept modest
         // (ratio core/memory ~30) so the test exercises the hasher-feasibility path without making
         // it infeasible via memory overshoot into core.
-        shape_of(68900, 40000, 8200, 0, 2300)
+        shape_of(68900, 40000, 8200, 8200, 0, 2300)
     }
 
     fn high_hasher_target() -> TraceShape {
-        // main/hasher ratio of ~2, above the intrinsic main/4 floor.
-        shape_of(16000, 0, 8000, 0, 0)
+        // A high standalone Poseidon2 target with a much smaller controller-chiplets target cannot
+        // be supplied by the memory filler alone, so the plan must contain explicit hperm work.
+        shape_of(16000, 0, 32000, 1000, 0, 2000)
     }
 
     #[test]
@@ -207,7 +208,7 @@ mod tests {
     #[test]
     fn zero_target_yields_empty_program() {
         let cal = calibrate().expect("calibrate");
-        let target = shape_of(0, 0, 0, 0, 0);
+        let target = shape_of(0, 0, 0, 0, 0, 0);
         let plan = solve(&cal, &target);
         for snippet in SNIPPETS {
             assert_eq!(plan.iters(snippet.name), 0, "{}", snippet.name);
