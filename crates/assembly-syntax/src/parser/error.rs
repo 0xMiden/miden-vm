@@ -177,6 +177,20 @@ pub enum ParsingError {
         span: SourceSpan,
         max_depth: usize,
     },
+    #[error("constant expression nesting depth exceeded")]
+    #[diagnostic(help("constant expression nesting exceeded the maximum depth of {max_depth}"))]
+    ConstantExpressionNestingDepthExceeded {
+        #[label("constant expression nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
+    #[error("type expression nesting depth exceeded")]
+    #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
+    TypeExpressionNestingDepthExceeded {
+        #[label("type expression nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
         #[label]

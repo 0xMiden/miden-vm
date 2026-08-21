@@ -18,11 +18,11 @@ use miden_assembly_syntax_cst::{
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
-use super::context::LoweringContext;
+use super::{super::MAX_CONSTANT_EXPR_NESTING, context::LoweringContext};
 use crate::{
     Path,
     ast::{
-        self, PathBuf,
+        self, MAX_TYPE_EXPR_NESTING, PathBuf,
         types::{AddressSpace, Type, TypeRepr},
     },
     parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
@@ -115,6 +115,8 @@ struct FragmentParser<'a, 'b> {
     tokens: Vec<SyntaxToken>,
     pos: usize,
     span: SourceSpan,
+    constant_expr_nesting: usize,
+    type_expr_nesting: usize,
 }
 
 impl<'a, 'b> FragmentParser<'a, 'b> {
@@ -134,6 +136,8 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             tokens: node.significant_tokens().collect(),
             pos: 0,
             span,
+            constant_expr_nesting: 0,
+            type_expr_nesting: 0,
         };
         let parsed = action(&mut parser)?;
         parser.expect_eof(format!("unexpected trailing tokens in {}", node.describe()))?;
@@ -205,8 +209,11 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
     fn parse_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
-            self.bump();
-            let expr = self.parse_constant_expr()?;
+            let lparen = self.bump().expect("opening parenthesis should be present");
+            self.enter_constant_expr_nesting(self.token_span(&lparen))?;
+            let expr = self.parse_constant_expr();
+            self.constant_expr_nesting -= 1;
+            let expr = expr?;
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close constant expression")?;
             return Ok(expr);
         }
@@ -255,8 +262,11 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     /// the constant-expression precedence parser without permitting non-numeric operands.
     fn parse_numeric_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
-            self.bump();
-            let expr = self.parse_constant_arithmetic_expr()?;
+            let lparen = self.bump().expect("opening parenthesis should be present");
+            self.enter_constant_expr_nesting(self.token_span(&lparen))?;
+            let expr = self.parse_constant_arithmetic_expr();
+            self.constant_expr_nesting -= 1;
+            let expr = expr?;
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close constant expression")?;
             return Ok(expr);
         }
@@ -376,6 +386,22 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
 
         Ok(ast::TypeExpr::Ref(path))
+    }
+
+    fn parse_nested_type_expr(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        let span = self.current_span();
+        let next_depth = self.type_expr_nesting + 1;
+        if next_depth > MAX_TYPE_EXPR_NESTING {
+            return Err(ParsingError::TypeExpressionNestingDepthExceeded {
+                span,
+                max_depth: MAX_TYPE_EXPR_NESTING,
+            });
+        }
+
+        self.type_expr_nesting = next_depth;
+        let ty = self.parse_type_expr();
+        self.type_expr_nesting -= 1;
+        ty
     }
 
     /// Parses a full procedure signature fragment.
@@ -728,7 +754,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_pointer_type(&mut self) -> Result<ast::PointerType, ParsingError> {
         let ptr = self.expect_keyword("ptr", "expected `ptr`")?;
         self.expect_kind(SyntaxKind::LAngle, "expected `<` after `ptr`")?;
-        let pointee = self.parse_type_expr()?;
+        let pointee = self.parse_nested_type_expr()?;
 
         let mut ty = ast::PointerType::new(pointee);
         if self.at_kind(SyntaxKind::Comma) {
@@ -747,7 +773,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     fn parse_array_type(&mut self) -> Result<ast::ArrayType, ParsingError> {
         let lbracket =
             self.expect_kind(SyntaxKind::LBracket, "expected `[` to start array type")?;
-        let elem = self.parse_type_expr()?;
+        let elem = self.parse_nested_type_expr()?;
         self.expect_kind(SyntaxKind::Semicolon, "expected `;` in array type")?;
         let arity = self.parse_decimal_usize("expected an array length")?;
         let rbracket =
@@ -791,7 +817,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         let name_token = self.expect_ident("expected a struct field name")?;
         let name = self.context.lower_ident_token(&name_token)?;
         self.expect_kind(SyntaxKind::Colon, "expected `:` after struct field name")?;
-        let ty = self.parse_type_expr()?;
+        let ty = self.parse_nested_type_expr()?;
         let span = join_spans(self.context.parse().span_for_token(&name_token), ty.span());
         Ok(ast::StructField { span, name, ty })
     }
@@ -1191,6 +1217,18 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         self.current()
             .map(|token| self.token_span(&token))
             .unwrap_or_else(|| SourceSpan::at(self.span.source_id(), self.span.end()))
+    }
+
+    fn enter_constant_expr_nesting(&mut self, span: SourceSpan) -> Result<(), ParsingError> {
+        let next_depth = self.constant_expr_nesting + 1;
+        if next_depth > MAX_CONSTANT_EXPR_NESTING {
+            return Err(ParsingError::ConstantExpressionNestingDepthExceeded {
+                span,
+                max_depth: MAX_CONSTANT_EXPR_NESTING,
+            });
+        }
+        self.constant_expr_nesting = next_depth;
+        Ok(())
     }
 
     /// Constructs a generic syntax error anchored at the current cursor position.

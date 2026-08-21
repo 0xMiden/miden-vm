@@ -16,6 +16,9 @@ pub use self::{
 };
 use crate::{Path, ast, sema};
 
+/// Maximum allowed nesting depth of parenthesized constant expressions.
+pub(crate) const MAX_CONSTANT_EXPR_NESTING: usize = 256;
+
 // MODULE PARSER
 // ================================================================================================
 
