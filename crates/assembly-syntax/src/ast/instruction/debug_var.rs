@@ -5,6 +5,8 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
 use miden_debug_types::Location;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
