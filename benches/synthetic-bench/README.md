@@ -134,8 +134,9 @@ more scenarios than this focused suite. The bench selects the canonical
 create-one, consume-one, and consume-two P2ID transactions for both
 Falcon and ECDSA, and runs one Criterion group per selected
 `(producer_file, scenario_key)` pair, named
-`<producer-stem>/<scenario-slug>`. See the [Running](#running) section
-below for `SYNTH_SNAPSHOT` / `SYNTH_SCENARIO` filters.
+`<producer-stem>/<scenario-slug>`. Both Falcon and ECDSA scenario slugs
+carry an explicit signer suffix. See the [Running](#running) section below for
+`SYNTH_SNAPSHOT` / `SYNTH_SCENARIO` filters.
 
 There is no schema-version field; the on-disk shape is the contract.
 If the producer changes that shape, the loader fails loudly (serde
@@ -235,10 +236,10 @@ proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`)
 ## Recursive-verification benchmarks
 
 The `recursive_verify` benchmark measures recursive verification of synthetic transaction proofs.
-First emit the `consume-single-p2id-note` transaction fixture:
+First emit the Falcon `consume-single-p2id-note` transaction fixture:
 
 ```sh
-SYNTH_SCENARIO="consume single P2ID note" \
+SYNTH_SCENARIO="consume single P2ID note with Falcon signing" \
 SYNTH_BENCH_AXES=exec \
 SYNTH_MASM_WRITE=1 \
 cargo bench -p miden-vm-synthetic-bench --bench synthetic_bench --profile optimized
@@ -248,7 +249,7 @@ Then pass the generated MASM program to the recursive benchmark. By default it m
 through eight MVM proofs:
 
 ```sh
-RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note.masm" \
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm" \
 cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
 ```
 
@@ -261,7 +262,7 @@ The focused comparison places mixed cases containing one proof of the canonical
 100-Keccak/4-ECDSA deferred workload beside pure-MVM baselines:
 
 ```sh
-RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note.masm" \
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm" \
 RECURSION_PVM_COMPARISON=1 \
 RECURSION_BENCH_TX_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/tx" \
 RECURSION_BENCH_PVM_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/pvm" \
