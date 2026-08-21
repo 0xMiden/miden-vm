@@ -346,10 +346,7 @@ fn normalize(value: &str) -> String {
                 }
                 if brace_depth > 0 {
                     let next = if i < n { Some(chars[i]) } else { None };
-                    if has_newline
-                        && pending_field_sep
-                        && !matches!(next, None | Some('}' | ','))
-                    {
+                    if has_newline && pending_field_sep && !matches!(next, None | Some('}' | ',')) {
                         pass1.push(',');
                         pending_field_sep = false;
                     } else if !pass1.is_empty() && !pass1.ends_with(' ') {
@@ -408,8 +405,7 @@ mod tests {
 
     #[test]
     fn compare_exports_rejects_changed_procedure() {
-        let previous =
-            Exports::from([("existing_proc".to_string(), procedure("0x01"))]);
+        let previous = Exports::from([("existing_proc".to_string(), procedure("0x01"))]);
         let current = Exports::from([("existing_proc".to_string(), procedure("0x02"))]);
 
         assert!(compare_exports(previous, current).is_err());
@@ -535,9 +531,6 @@ mod current {
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
-        store
-            .cache_package(CoreLibrary::default().precompiles_package())
-            .map_err(|err| format!("current: failed to cache precompiles package: {err}"))?;
         let mut project =
             Assembler::default().for_project_at_path(input, &mut store).map_err(|err| {
                 format!("current: failed to load project '{}': {err}", input.display())
@@ -589,9 +582,6 @@ mod previous {
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
-        store
-            .cache_package(CoreLibrary::default().precompiles_package())
-            .map_err(|err| format!("previous: failed to cache precompiles package: {err}"))?;
         let mut project =
             Assembler::default().for_project_at_path(input, &mut store).map_err(|err| {
                 format!("previous: failed to load project '{}': {err}", input.display())

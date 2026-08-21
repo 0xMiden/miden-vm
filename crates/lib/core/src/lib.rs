@@ -57,7 +57,8 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 
 /// The Miden core library, providing a set of optimized procedures for Miden programs.
 ///
-/// This library wraps the `miden-core` [`Package`] and its `miden-precompiles` runtime dependency.
+/// This library wraps the `miden-core` [`Package`].
+///
 /// When the core library is dynamically linked during assembly time, procedures can be called from
 /// any Miden program and are serialized as 32 bytes, reducing the amount of code that needs to be
 /// shared between parties for proving and verifying program execution.
@@ -85,9 +86,7 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 ///
 /// let core_lib = CoreLibrary::default();
 /// let mut assembler = Assembler::new(source_manager);
-/// for package in core_lib.packages() {
-///     assembler.link_package(package, Linkage::Dynamic).unwrap();
-/// }
+/// assembler.link_package(package, Linkage::Dynamic).unwrap();
 /// ```
 ///
 /// For program execution, you'll also need to register the event handlers:
@@ -129,8 +128,7 @@ impl CoreLibrary {
     pub const SERIALIZED: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-core.masp"));
 
-    /// Returns a reference to the merged [MastForest] used to execute the core library and its
-    /// precompiles dependency.
+    /// Returns a reference to the [MastForest] used to execute the core library
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         self.package.mast_forest()
     }

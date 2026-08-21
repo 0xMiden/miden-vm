@@ -290,10 +290,12 @@ fn write_file_if_changed(path: &Path, contents: &str) -> Result<(), String> {
     match fs::read_to_string(path) {
         Ok(actual) if actual == contents => Ok(()),
         Ok(_) | Err(_) => {
+            let parent = path.parent().unwrap();
             let name = path.file_stem().unwrap();
-            let mut tmpfile = tempfile::NamedTempFile::with_prefix(name).map_err(|error| {
-                format!("failed to create temporary file for {}: {error}", path.display())
-            })?;
+            let mut tmpfile =
+                tempfile::NamedTempFile::with_prefix_in(name, parent).map_err(|error| {
+                    format!("failed to create temporary file for {}: {error}", path.display())
+                })?;
             tmpfile.write_all(contents.as_bytes()).map_err(|error| {
                 format!(
                     "failed to write contents to temporary file for {}: {error}",
