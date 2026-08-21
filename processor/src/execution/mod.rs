@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, ExecutionError, KernelDescriptor, Stopper, Word,
-    continuation_stack::{Continuation, ContinuationStack},
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::PackageSourceDebugContext,
     host::default::NoopHost,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
@@ -49,11 +49,19 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub stopper: &'a S,
     pub source_debug_info: Option<Arc<PackageDebugInfo>>,
     pub current_source_node_id: Option<DebugSourceNodeId>,
+    pub inline_call_contexts: &'a mut Vec<Option<SourceInlineCallContext>>,
 }
 
 impl<'a, P, H: BaseHost, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     pub fn current_source_node_id(&self) -> Option<DebugSourceNodeId> {
         self.current_source_node_id
+    }
+
+    pub fn current_inline_call_context(&self) -> Option<SourceInlineCallContext> {
+        SourceInlineCallContext::for_source_boundary(
+            self.source_debug_info.clone()?,
+            self.current_source_node_id,
+        )
     }
 
     pub fn child_source_node_id(
@@ -184,6 +192,7 @@ pub(crate) fn execute_impl<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -200,6 +209,7 @@ where
         tracer,
         stopper,
         source_debug_info,
+        inline_call_contexts,
     )
 }
 
@@ -212,6 +222,7 @@ pub(crate) fn execute_impl_noop_host<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -228,6 +239,7 @@ where
         tracer,
         stopper,
         source_debug_info,
+        inline_call_contexts,
     )
 }
 
@@ -240,6 +252,7 @@ fn execute_impl_inner<P, H, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -268,6 +281,7 @@ where
             tracer,
             stopper,
             source_debug_info,
+            inline_call_contexts,
         )
     }
 }
@@ -282,6 +296,7 @@ fn execute_impl_with_source<P, H, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -299,6 +314,7 @@ where
         stopper,
         source_debug_info: source_debug_info.clone(),
         current_source_node_id: None,
+        inline_call_contexts,
     };
 
     while let Some((continuation, source_node_id)) =
@@ -392,11 +408,16 @@ where
                 basic_block::finish_basic_block(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::EnterForest { forest, package_debug_info } => {
+            Continuation::EnterForest {
+                forest,
+                package_debug_info,
+                inline_context_depth,
+            } => {
                 // Restore the previous forest
                 *current_forest = forest;
                 state.source_debug_info = package_debug_info.clone();
                 *source_debug_info = package_debug_info;
+                state.inline_call_contexts.truncate(inline_context_depth);
             },
         }
     }
@@ -422,6 +443,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    let mut inline_call_contexts = Vec::new();
     let mut state = ExecutionState {
         processor,
         continuation_stack,
@@ -431,6 +453,7 @@ where
         stopper,
         source_debug_info: None,
         current_source_node_id: None,
+        inline_call_contexts: &mut inline_call_contexts,
     };
 
     while let Some(continuation) = state.continuation_stack.pop_continuation() {

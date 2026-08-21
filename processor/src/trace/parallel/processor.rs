@@ -149,6 +149,7 @@ impl ReplayProcessor {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         while let ControlFlow::Break(internal_break_reason) = execute_impl_noop_host(
             self,
@@ -159,6 +160,7 @@ impl ReplayProcessor {
             tracer,
             stopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
@@ -201,6 +203,7 @@ impl ReplayProcessor {
                         self,
                         current_forest,
                         &mut package_debug_info,
+                        &inline_call_contexts,
                         continuation_stack,
                         tracer,
                         stopper,
@@ -232,9 +235,11 @@ impl ReplayProcessor {
                         new_forest,
                         None,
                         None,
+                        None,
                         external_node_id,
                         current_forest,
                         &mut package_debug_info,
+                        &mut inline_call_contexts,
                         continuation_stack,
                         tracer,
                     )?;

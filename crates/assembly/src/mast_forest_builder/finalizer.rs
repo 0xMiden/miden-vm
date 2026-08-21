@@ -360,14 +360,23 @@ impl MastForestFinalizer {
 
             let source_id = source_id_by_ref[&source_ref];
             let exec_node = debug_info[source_id].exec_node;
-            let (_, inline_call_indices) = compute_operations_and_adjust_mappings(
-                &mast_forest[exec_node],
+            let inline_call_indices = if mast_forest[exec_node].is_external() {
                 pending_source_node
                     .inline_calls
                     .iter()
                     .map(|inline_call| inline_call.op_idx as usize)
-                    .collect(),
-            );
+                    .collect()
+            } else {
+                compute_operations_and_adjust_mappings(
+                    &mast_forest[exec_node],
+                    pending_source_node
+                        .inline_calls
+                        .iter()
+                        .map(|inline_call| inline_call.op_idx as usize)
+                        .collect(),
+                )
+                .1
+            };
             let inline_calls = pending_source_node
                 .inline_calls
                 .iter()

@@ -20,7 +20,7 @@ use super::{
 use crate::PrecompileWitness;
 use crate::{
     ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
         MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
     },
@@ -416,6 +416,7 @@ impl FastProcessor {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
         let flow = self
@@ -427,6 +428,7 @@ impl FastProcessor {
                 tracer,
                 &NeverStopper,
                 &mut package_debug_info,
+                &mut inline_call_contexts,
             )
             .await;
         Self::execution_result_from_flow(flow, self)
@@ -452,6 +454,7 @@ impl FastProcessor {
         )?;
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = Some(Arc::new(package_debug_info.clone()));
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
         let flow = self
@@ -463,6 +466,7 @@ impl FastProcessor {
                 tracer,
                 &NeverStopper,
                 &mut package_debug_info,
+                &mut inline_call_contexts,
             )
             .await;
         Self::execution_result_from_flow(flow, self)
@@ -481,6 +485,7 @@ impl FastProcessor {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
         let flow = self.execute_impl(
@@ -491,6 +496,7 @@ impl FastProcessor {
             tracer,
             &NeverStopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         );
         Self::execution_result_from_flow(flow, self)
     }
@@ -515,6 +521,7 @@ impl FastProcessor {
         )?;
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = Some(Arc::new(package_debug_info.clone()));
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
         let flow = self.execute_impl(
@@ -525,6 +532,7 @@ impl FastProcessor {
             tracer,
             &NeverStopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         );
         Self::execution_result_from_flow(flow, self)
     }
@@ -540,6 +548,7 @@ impl FastProcessor {
             mut continuation_stack,
             kernel,
             mut package_debug_info,
+            mut inline_call_contexts,
         } = resume_ctx;
 
         let flow = self.execute_impl(
@@ -550,6 +559,7 @@ impl FastProcessor {
             &mut NoopTracer,
             &StepStopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         );
         Self::resume_context_from_flow(
             flow,
@@ -557,6 +567,7 @@ impl FastProcessor {
             current_forest,
             kernel,
             package_debug_info,
+            inline_call_contexts,
         )
     }
 
@@ -572,6 +583,7 @@ impl FastProcessor {
             mut continuation_stack,
             kernel,
             package_debug_info: mut active_package_debug_info,
+            mut inline_call_contexts,
         } = resume_ctx;
         Self::ensure_source_aware_step_context(
             &mut continuation_stack,
@@ -587,6 +599,7 @@ impl FastProcessor {
             &mut NoopTracer,
             &StepStopper,
             &mut active_package_debug_info,
+            &mut inline_call_contexts,
         );
         Self::resume_context_from_flow(
             flow,
@@ -594,6 +607,7 @@ impl FastProcessor {
             current_forest,
             kernel,
             active_package_debug_info,
+            inline_call_contexts,
         )
     }
 
@@ -609,6 +623,7 @@ impl FastProcessor {
             mut continuation_stack,
             kernel,
             mut package_debug_info,
+            mut inline_call_contexts,
         } = resume_ctx;
 
         let flow = self
@@ -620,6 +635,7 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &StepStopper,
                 &mut package_debug_info,
+                &mut inline_call_contexts,
             )
             .await;
         Self::resume_context_from_flow(
@@ -628,6 +644,7 @@ impl FastProcessor {
             current_forest,
             kernel,
             package_debug_info,
+            inline_call_contexts,
         )
     }
 
@@ -644,6 +661,7 @@ impl FastProcessor {
             mut continuation_stack,
             kernel,
             package_debug_info: mut active_package_debug_info,
+            mut inline_call_contexts,
         } = resume_ctx;
         Self::ensure_source_aware_step_context(
             &mut continuation_stack,
@@ -660,6 +678,7 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &StepStopper,
                 &mut active_package_debug_info,
+                &mut inline_call_contexts,
             )
             .await;
         Self::resume_context_from_flow(
@@ -668,6 +687,7 @@ impl FastProcessor {
             current_forest,
             kernel,
             active_package_debug_info,
+            inline_call_contexts,
         )
     }
 
@@ -747,6 +767,7 @@ impl FastProcessor {
             )?,
             kernel: program.kernel().clone(),
             package_debug_info: Some(Arc::new(package_debug_info.clone())),
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -795,9 +816,10 @@ impl FastProcessor {
     fn resume_context_from_flow(
         flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         mut continuation_stack: ContinuationStack<Arc<MastForest>>,
-        current_forest: Arc<MastForest>,
+        mut current_forest: Arc<MastForest>,
         kernel: KernelDescriptor,
-        package_debug_info: Option<Arc<PackageDebugInfo>>,
+        mut package_debug_info: Option<Arc<PackageDebugInfo>>,
+        mut inline_call_contexts: Vec<Option<SourceInlineCallContext>>,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         match flow {
             ControlFlow::Continue(_) => Ok(None),
@@ -808,11 +830,32 @@ impl FastProcessor {
                         continuation_stack.push_with_source_node_id(continuation, source_node_id);
                     }
 
+                    while matches!(
+                        continuation_stack.peek_continuation(),
+                        Some(Continuation::EnterForest { .. })
+                    ) {
+                        let Some((
+                            Continuation::EnterForest {
+                                forest,
+                                package_debug_info: restored_debug_info,
+                                inline_context_depth,
+                            },
+                            _,
+                        )) = continuation_stack.pop_continuation_with_source_node_id()
+                        else {
+                            unreachable!("peeked continuation must still be EnterForest")
+                        };
+                        current_forest = forest;
+                        package_debug_info = restored_debug_info;
+                        inline_call_contexts.truncate(inline_context_depth);
+                    }
+
                     Ok(Some(ResumeContext {
                         current_forest,
                         continuation_stack,
                         kernel,
                         package_debug_info,
+                        inline_call_contexts,
                     }))
                 },
             },
@@ -846,6 +889,7 @@ impl FastProcessor {
         tracer: &mut T,
         stopper: &S,
         package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+        inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
@@ -860,6 +904,7 @@ impl FastProcessor {
             tracer,
             stopper,
             package_debug_info,
+            inline_call_contexts,
         ) {
             let current_package_debug_info = package_debug_info.as_deref();
             let source_aware_execution =
@@ -900,6 +945,7 @@ impl FastProcessor {
                         self,
                         current_forest,
                         package_debug_info,
+                        inline_call_contexts.as_slice(),
                         continuation_stack,
                         tracer,
                         stopper,
@@ -910,6 +956,9 @@ impl FastProcessor {
                     procedure_hash,
                     source_node_id,
                 } => {
+                    let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
+                        SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
+                    });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self.load_mast_forest_sync(
                             procedure_hash,
@@ -935,9 +984,11 @@ impl FastProcessor {
                         new_forest,
                         new_package_debug_info,
                         new_source_node_id,
+                        inline_call_context,
                         external_node_id,
                         current_forest,
                         package_debug_info,
+                        inline_call_contexts,
                         continuation_stack,
                         tracer,
                     )?;
@@ -968,6 +1019,7 @@ impl FastProcessor {
         tracer: &mut T,
         stopper: &S,
         package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+        inline_call_contexts: &mut Vec<Option<SourceInlineCallContext>>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
@@ -982,6 +1034,7 @@ impl FastProcessor {
             tracer,
             stopper,
             package_debug_info,
+            inline_call_contexts,
         ) {
             let current_package_debug_info = package_debug_info.as_deref();
             let source_aware_execution =
@@ -1025,6 +1078,7 @@ impl FastProcessor {
                         self,
                         current_forest,
                         package_debug_info,
+                        inline_call_contexts.as_slice(),
                         continuation_stack,
                         tracer,
                         stopper,
@@ -1035,6 +1089,9 @@ impl FastProcessor {
                     procedure_hash,
                     source_node_id,
                 } => {
+                    let inline_call_context = package_debug_info.clone().and_then(|debug_info| {
+                        SourceInlineCallContext::for_source_boundary(debug_info, source_node_id)
+                    });
                     let (root_id, new_forest, new_package_debug_info, new_source_node_id) =
                         match self
                             .load_mast_forest(
@@ -1063,9 +1120,11 @@ impl FastProcessor {
                         new_forest,
                         new_package_debug_info,
                         new_source_node_id,
+                        inline_call_context,
                         external_node_id,
                         current_forest,
                         package_debug_info,
+                        inline_call_contexts,
                         continuation_stack,
                         tracer,
                     )?;
@@ -1387,6 +1446,7 @@ impl FastProcessor {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
@@ -1398,6 +1458,7 @@ impl FastProcessor {
             &mut NoopTracer,
             &NeverStopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         );
         Self::stack_result_from_flow(flow)
     }
@@ -1413,6 +1474,7 @@ impl FastProcessor {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
@@ -1425,6 +1487,7 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &NeverStopper,
                 &mut package_debug_info,
+                &mut inline_call_contexts,
             )
             .await;
         Self::stack_result_from_flow(flow)

@@ -38,7 +38,9 @@ pub use self::{
     import::{
         Import, ImportDecl, ImportKind, ImportSpec, ItemImport, ItemImportGroup, ModuleImport,
     },
-    instruction::{DebugVarInfo, DebugVarLocation, Instruction, SystemEventNode},
+    instruction::{
+        DebugInlineCallInfo, DebugVarInfo, DebugVarLocation, Instruction, SystemEventNode,
+    },
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     item::*,
     module::{Module, ModuleKind},

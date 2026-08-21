@@ -342,7 +342,9 @@ impl PrettyPrint for Instruction {
             Self::TraceImm(value) => inst_with_event_imm("trace", value),
 
             // Handled by the early return for !has_textual_representation()
-            Self::DebugVar(_) => unreachable!(),
+            Self::DebugVar(_) | Self::DebugInlineCall(_) | Self::DebugInlineCallClear => {
+                unreachable!()
+            },
         }
     }
 }

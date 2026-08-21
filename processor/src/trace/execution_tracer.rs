@@ -255,11 +255,14 @@ impl ExecutionTracer {
         let mut translated: ContinuationStack<MastForestId> = ContinuationStack::default();
         for cont in live.into_inner() {
             let translated_cont = match cont {
-                Continuation::EnterForest { forest, package_debug_info } => {
-                    Continuation::EnterForest {
-                        forest: self.forest_id(&forest),
-                        package_debug_info,
-                    }
+                Continuation::EnterForest {
+                    forest,
+                    package_debug_info,
+                    inline_context_depth,
+                } => Continuation::EnterForest {
+                    forest: self.forest_id(&forest),
+                    package_debug_info,
+                    inline_context_depth,
                 },
                 Continuation::StartNode(id) => Continuation::StartNode(id),
                 Continuation::FinishJoin(id) => Continuation::FinishJoin(id),

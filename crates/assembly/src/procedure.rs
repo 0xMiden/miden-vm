@@ -10,7 +10,7 @@ use miden_core::Word;
 use super::{
     GlobalItemIndex,
     assembler::{MAX_PROC_LOCALS, error::AssemblerError},
-    mast_forest_builder::MastNodeRef,
+    mast_forest_builder::{MastNodeRef, MastNodeUse, SourceNodeRef},
 };
 
 // PROCEDURE CONTEXT
@@ -136,7 +136,7 @@ impl ProcedureContext {
     /// `mast_root` and `body_node` must be consistent. That is, `body_node` must resolve to a MAST
     /// node whose digest equals `mast_root`.
     /// </div>
-    pub(crate) fn into_procedure(self, mast_root: Word, body_node_ref: MastNodeRef) -> Procedure {
+    pub(crate) fn into_procedure(self, mast_root: Word, body_node: MastNodeUse) -> Procedure {
         let is_syscall = self.is_kernel && self.visibility.is_public();
         Procedure::new(
             self.path,
@@ -145,7 +145,7 @@ impl ProcedureContext {
             is_syscall,
             self.num_locals as u32,
             mast_root,
-            body_node_ref,
+            body_node,
         )
         .with_span(self.span)
     }
@@ -181,6 +181,8 @@ pub struct Procedure {
     mast_root: Word,
     /// The assembly-time node reference which resolves to the above MAST root.
     body_node_ref: MastNodeRef,
+    /// The exact source/debug occurrence for this procedure body.
+    body_source_ref: SourceNodeRef,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -193,7 +195,7 @@ impl Procedure {
         is_syscall: bool,
         num_locals: u32,
         mast_root: Word,
-        body_node_ref: MastNodeRef,
+        body_node: MastNodeUse,
     ) -> Self {
         Self {
             span: SourceSpan::default(),
@@ -203,7 +205,8 @@ impl Procedure {
             is_syscall,
             num_locals,
             mast_root,
-            body_node_ref,
+            body_node_ref: body_node.node_ref(),
+            body_source_ref: body_node.source_ref(),
         }
     }
 
@@ -260,6 +263,14 @@ impl Procedure {
     /// Returns the assembly-time node reference of this procedure.
     pub(crate) fn body_node_ref(&self) -> MastNodeRef {
         self.body_node_ref
+    }
+
+    pub(crate) fn body_node_use(&self) -> MastNodeUse {
+        MastNodeUse::new(self.body_node_ref, self.body_source_ref)
+    }
+
+    pub(crate) fn body_source_ref(&self) -> SourceNodeRef {
+        self.body_source_ref
     }
 }
 
