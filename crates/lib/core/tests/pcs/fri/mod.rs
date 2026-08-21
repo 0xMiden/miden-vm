@@ -259,7 +259,7 @@ fn prepare_advice_stack(depth: usize, fri: &FriResult) -> Vec<u64> {
     );
 
     stack.push((fri.remainder.len() / WORD_SIZE) as u64);
-    for word in fri.remainder.chunks_exact(WORD_SIZE) {
+    for word in fri.remainder.as_chunks::<WORD_SIZE>().0 {
         stack.extend_from_slice(word);
     }
 

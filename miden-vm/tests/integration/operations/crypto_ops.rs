@@ -2,11 +2,9 @@
 use miden_core::field::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
 #[cfg(feature = "arbitrary")]
-use miden_utils_testing::build_test;
-#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_hash, build_expected_perm, build_op_test,
+    Felt, build_expected_hash, build_expected_perm, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
 };
 
@@ -489,6 +487,33 @@ fn crypto_stream_rejects_dst_range_overflow() {
             ..
         }
     ));
+}
+
+#[test]
+fn crypto_stream_allows_range_ending_at_memory_limit() {
+    const LAST_DOUBLE_WORD_ADDR: u64 = (u32::MAX as u64) + 1 - 8;
+
+    // The range [LAST_DOUBLE_WORD_ADDR, 2^32) contains the final eight valid memory addresses.
+    for (src_addr, dst_addr) in [(LAST_DOUBLE_WORD_ADDR, 0), (0, LAST_DOUBLE_WORD_ADDR)] {
+        let source = format!(
+            "
+            begin
+                push.{dst_addr}              # dst_ptr
+                push.{src_addr}              # src_ptr
+                padw                         # capacity
+                push.1.2.3.4                 # rate[0-3]
+                push.5.6.7.8                 # rate[4-7]
+
+                crypto_stream
+                # Keep cleanup stack-only: the destination case overwrites the word containing
+                # FMP_ADDR, so a local-memory-based cleanup would observe the new value.
+                dropw dropw dropw drop drop
+            end
+            "
+        );
+
+        build_test!(&source, &[]).check_constraints();
+    }
 }
 
 #[test]

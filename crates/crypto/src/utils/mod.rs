@@ -208,11 +208,8 @@ pub fn bytes_to_elements_exact(bytes: &[u8]) -> Option<Vec<Felt>> {
 
     let mut result = Vec::with_capacity(bytes.len() / Felt::NUM_BYTES);
 
-    for chunk in bytes.chunks_exact(Felt::NUM_BYTES) {
-        let chunk_array: [u8; Felt::NUM_BYTES] =
-            chunk.try_into().expect("should succeed given the length check above");
-
-        let value = u64::from_le_bytes(chunk_array);
+    for chunk in bytes.as_chunks::<{ Felt::NUM_BYTES }>().0 {
+        let value = u64::from_le_bytes(*chunk);
 
         // Validate that the value represents a valid field element
         let felt = Felt::from_canonical_checked(value)?;

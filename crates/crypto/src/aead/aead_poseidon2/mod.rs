@@ -247,9 +247,9 @@ impl SecretKey {
         // Encrypt the data
         let mut ciphertext = Vec::with_capacity(data.len() + RATE_WIDTH);
         let data = pad(data);
-        let mut data_block_iterator = data.chunks_exact(RATE_WIDTH);
+        let data_blocks = data.as_chunks::<RATE_WIDTH>().0;
 
-        data_block_iterator.by_ref().for_each(|data_block| {
+        data_blocks.iter().for_each(|data_block| {
             let keystream = sponge.duplex_add(data_block);
             for (i, &plaintext_felt) in data_block.iter().enumerate() {
                 ciphertext.push(plaintext_felt + keystream[i]);
@@ -369,8 +369,8 @@ impl SecretKey {
 
         // Decrypt the data
         let mut plaintext = Vec::with_capacity(encrypted_data.ciphertext.len());
-        let mut ciphertext_block_iterator = encrypted_data.ciphertext.chunks_exact(RATE_WIDTH);
-        ciphertext_block_iterator.by_ref().for_each(|ciphertext_data_block| {
+        let ciphertext_blocks = encrypted_data.ciphertext.as_chunks::<RATE_WIDTH>().0;
+        ciphertext_blocks.iter().for_each(|ciphertext_data_block| {
             let keystream = sponge.duplex_add(&[]);
             for (i, &ciphertext_felt) in ciphertext_data_block.iter().enumerate() {
                 let plaintext_felt = ciphertext_felt - keystream[i];
@@ -793,9 +793,8 @@ impl AeadScheme for AeadPoseidon2 {
         }
 
         let mut elements = [ZERO; SECRET_KEY_SIZE];
-        for (i, chunk) in bytes.chunks_exact(Felt::NUM_BYTES).enumerate() {
-            let value =
-                u64::from_le_bytes(chunk.try_into().map_err(|_| EncryptionError::FailedOperation)?);
+        for (i, chunk) in bytes.as_chunks::<{ Felt::NUM_BYTES }>().0.iter().enumerate() {
+            let value = u64::from_le_bytes(*chunk);
             elements[i] = Felt::new_unchecked(value);
         }
         Ok(SecretKey::from_elements(elements))

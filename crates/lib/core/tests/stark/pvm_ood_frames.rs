@@ -104,7 +104,9 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
 
     let alpha = QuadFelt::new(ALPHA.map(Felt::new_unchecked));
     let expected_acc = row
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|coords| QuadFelt::new([coords[0], coords[1]]))
         .fold(QuadFelt::new(INITIAL_ACC.map(Felt::new_unchecked)), |acc, coefficient| {
             coefficient + alpha * acc
@@ -116,7 +118,7 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
     let mut challenger =
         DuplexChallenger::<Felt, Poseidon2Permutation256, 12, 8>::new(Poseidon2Permutation256);
     challenger.sponge_state = INITIAL_SPONGE.map(Felt::new_unchecked);
-    for block in row.chunks_exact(8) {
+    for block in row.as_chunks::<8>().0 {
         challenger.observe_slice(block);
     }
     for (i, expected) in challenger.sponge_state.iter().enumerate() {
