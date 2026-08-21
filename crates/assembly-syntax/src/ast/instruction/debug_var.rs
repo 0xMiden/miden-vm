@@ -660,6 +660,44 @@ mod tests {
     }
 
     #[test]
+    fn debug_location_expression_wire_encoding_is_stable() {
+        let expression = DebugLocationExpression::new(vec![
+            DebugLocationExpressionOp::ReadStack(0x2a),
+            DebugLocationExpressionOp::ReadMemory(0x1234_5678),
+            DebugLocationExpressionOp::ReadLocal(-2),
+            DebugLocationExpressionOp::ConstU64(0x0102_0304_0506_0708),
+            DebugLocationExpressionOp::ConstI64(-2),
+            DebugLocationExpressionOp::AddUnsigned(0x1112_1314_1516_1718),
+            DebugLocationExpressionOp::Add,
+            DebugLocationExpressionOp::Sub,
+            DebugLocationExpressionOp::DerefBytes,
+            DebugLocationExpressionOp::FrameBaseAddress {
+                base: DebugFrameBase::Local(-4),
+                byte_offset: 0x0102_0304_0506_0708,
+            },
+            DebugLocationExpressionOp::FrameBaseAddress {
+                base: DebugFrameBase::Memory(0xa1b2_c3d4),
+                byte_offset: -3,
+            },
+        ])
+        .unwrap();
+        let expected = vec![
+            0x17, 0x00, 0x2a, 0x01, 0x78, 0x56, 0x34, 0x12, 0x02, 0xfe, 0xff, 0x03, 0x08, 0x07,
+            0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x04, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0x05, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x06, 0x07, 0x08, 0x09,
+            0x00, 0xfc, 0xff, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x09, 0x01, 0xd4,
+            0xc3, 0xb2, 0xa1, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ];
+
+        let mut bytes = Vec::new();
+        expression.write_into(&mut bytes);
+        assert_eq!(bytes, expected);
+
+        let mut reader = SliceReader::new(&expected);
+        assert_eq!(DebugLocationExpression::read_from(&mut reader).unwrap(), expression);
+    }
+
+    #[test]
     fn debug_var_location_min_serialized_size_matches_shortest_variant() {
         let location = DebugVarLocation::Unavailable;
         let min_serialized_size = DebugVarLocation::min_serialized_size();
