@@ -86,7 +86,7 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 ///
 /// let core_lib = CoreLibrary::default();
 /// let mut assembler = Assembler::new(source_manager);
-/// assembler.link_package(package, Linkage::Dynamic).unwrap();
+/// assembler.link_package(core_lib.package(), Linkage::Dynamic).unwrap();
 /// ```
 ///
 /// For program execution, you'll also need to register the event handlers:
@@ -106,12 +106,6 @@ pub const PVM_PROOF_REQUEST_EVENT_NAME: EventName =
 #[derive(Clone)]
 pub struct CoreLibrary {
     package: Arc<Package>,
-}
-
-impl AsRef<Arc<Package>> for CoreLibrary {
-    fn as_ref(&self) -> &Arc<Package> {
-        &self.package
-    }
 }
 
 impl From<&CoreLibrary> for HostLibrary {
