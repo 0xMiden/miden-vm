@@ -244,9 +244,9 @@ impl BasicBlockBuilder<'_> {
     /// epilogue of the builder.
     pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
         if !self.ops.is_empty() {
-            let ops = self.ops.drain(..).collect();
+            let ops = core::mem::take(&mut self.ops);
             let asm_ops = core::mem::take(&mut self.asm_ops);
-            let debug_vars = self.debug_vars.drain(..).collect();
+            let debug_vars = core::mem::take(&mut self.debug_vars);
 
             let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
                 ops,

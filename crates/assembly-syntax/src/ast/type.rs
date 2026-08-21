@@ -1,12 +1,11 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-pub use midenc_hir_type as types;
 use midenc_hir_type::{AddressSpace, Type, TypeRepr};
 
 use super::{
     ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
-    SymbolResolutionError, Visibility,
+    SymbolResolutionError, Visibility, types,
 };
 
 /// Maximum allowed nesting depth of type expressions during resolution.

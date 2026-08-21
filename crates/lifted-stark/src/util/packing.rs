@@ -12,6 +12,9 @@ use p3_field::{ExtensionField, Field};
 /// Reconstruct each EF element: `vᵢ = Σⱼ basisⱼ·row[i·DIM + j]`.
 ///
 /// Returns `None` if `row.len()` is not a multiple of `EF::DIMENSION`.
+// `EF::DIMENSION` cannot be used as an `as_chunks` const argument while generic const
+// expressions remain unsupported.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub(crate) fn row_to_packed_ext<F, EF>(row: &[EF]) -> Option<Vec<EF>>
 where
     F: Field,

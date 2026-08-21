@@ -249,7 +249,7 @@ impl SmtLeaf {
         }
 
         let mut entries = Vec::with_capacity(elements.len() / DOUBLE_WORD_LEN);
-        for entry in elements.chunks_exact(DOUBLE_WORD_LEN) {
+        for entry in elements.as_chunks::<DOUBLE_WORD_LEN>().0 {
             let key = Word::new([entry[0], entry[1], entry[2], entry[3]]);
             let value = Word::new([entry[4], entry[5], entry[6], entry[7]]);
             entries.push((key, value));

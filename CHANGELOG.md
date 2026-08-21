@@ -77,6 +77,16 @@
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
 - Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
 
+## v0.29.2 (2026-08-20)
+
+#### Features
+
+- Added `ast::types::TypedProcInfo`, a typed view over a procedure signature, with argument encoding and range-checked result decoding ([#3276](https://github.com/0xMiden/miden-vm/pull/3276)).
+
+#### Fixes
+
+- Fixed `Felt`'s `Debug` impl on the `miden` target by formatting the canonical `u64` value instead of the `f32` backing type. The `Debug` output format changed from `Felt { inner: .. }` to `Felt(..)` ([#3693](https://github.com/0xMiden/miden-vm/pull/3693)).
+
 ## v0.29.1 (2026-08-11)
 
 #### Fixes

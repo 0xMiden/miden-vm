@@ -19,6 +19,7 @@ mod procedure;
 #[cfg(test)]
 mod tests;
 mod r#type;
+pub mod types;
 mod visibility;
 pub mod visit;
 
