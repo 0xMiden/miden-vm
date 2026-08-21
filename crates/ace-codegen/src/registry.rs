@@ -255,7 +255,9 @@ fn fold_levels(row: &[Word]) -> Vec<Vec<Word>> {
     while levels.last().expect("at least the row").len() > 1 {
         let below = levels.last().expect("level exists");
         let above: Vec<Word> = below
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| Poseidon2::merge(&[pair[0], pair[1]]))
             .collect();
         levels.push(above);

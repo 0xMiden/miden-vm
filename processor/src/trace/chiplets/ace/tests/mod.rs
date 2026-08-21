@@ -262,7 +262,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     assert_eq!(inputs.len(), circuit.num_inputs());
 
     // Inputs are store two by two in the fest set of words, followed by the instructions.
-    let mut mem = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
+    let mut mem: Vec<Felt> = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
     // Add inputs
     mem.extend(
         inputs
@@ -273,12 +273,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     mem.extend(circuit.encoded_circuit().iter());
 
     // Convert to words
-    mem.chunks_exact(4)
-        .map(|word| {
-            let result: [Felt; WORD_SIZE] = word.try_into().unwrap();
-            result.into()
-        })
-        .collect()
+    mem.as_chunks::<4>().0.iter().map(|word| Word::new(*word)).collect()
 }
 
 /// Given an EvaluationContext
