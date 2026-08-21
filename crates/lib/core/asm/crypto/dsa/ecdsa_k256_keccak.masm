@@ -1,8 +1,8 @@
-use miden::precompiles::hashes::keccak256
-use miden::precompiles::curves::secp256k1
-use miden::precompiles::fields::k1_base
-use miden::precompiles::fields::k1_scalar
 use miden::core::crypto::hashes::poseidon2
+use miden::core::precompiles::hashes::keccak256
+use miden::core::precompiles::curves::secp256k1
+use miden::core::precompiles::fields::k1_base
+use miden::core::precompiles::fields::k1_scalar
 use miden::core::word
 
 # ENCODING CONVENTIONS

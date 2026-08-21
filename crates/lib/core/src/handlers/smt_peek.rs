@@ -107,6 +107,7 @@ fn get_smt_leaf_preimage(
         return Err(SmtPeekError::InvalidSmtNodePreimage { node, preimage_len: kv_pairs.len() });
     }
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     Ok(kv_pairs
         .as_chunks::<{ WORD_SIZE * 2 }>()
         .0
