@@ -19,7 +19,9 @@ The chiplet expects the caller to have prepared a region of memory containing
 
 The term **variable** refers to a value, which is either an input or a constant.
 
-Mathematically, we can represent an arithmetic circuit as a DAG, where leaves correspond to inputs and constants, and the nodes are the operations computing the result (which must be zero).
+The circuit encoding defines the relation checked by ACE. Callers relying on a specific circuit must authenticate its encoding.
+
+The standard circuit builder represents an arithmetic circuit as a topologically ordered DAG, where leaves correspond to inputs and constants, and the nodes are the operations computing the result (which must be zero).
 For example, take the following composition polynomial to be evaluated by the chiplet
 
 $$
@@ -85,14 +87,14 @@ flowchart BT
     input --> sub4
 ```
 
-The chiplet constructs and verifies the correctness of such a DAG by using a logUp argument, which we interpret as a _wiring bus_.
-In each row, the chiplet can either insert a new node with the next fresh identifier and desired value or request a node’s value by providing the identifier of a previously inserted node.
-Whenever we create a new node in the DAG (when loading a variable or evaluating an operation), we “insert” it onto the wiring bus by emitting a tuple $(id,v)$ together with its final fan‐out count $m$.
-In other words, at insertion time we record $(id,v)$ with multiplicity $m$, where $m$ is exactly the number of times this node will later be used as an input to downstream operations.
-Then, each time some later instruction reads that node $(id,v)$, we “consume” one copy of $(id,v)$ - i.e., we remove it once from the wiring bus — decrementing the stored multiplicity by exactly 1.
-By the time we finish inserting and consuming all nodes, two things must hold:
+The processor evaluates such a DAG and records its wiring for a logUp argument, which we interpret as a _wiring bus_.
+In each row, the processor can either insert a new node with the next fresh identifier and desired value or request a node's value by providing the identifier of a previously inserted node.
+Whenever the processor creates a new node (when loading a variable or evaluating an operation), it inserts $(id,v)$ onto the wiring bus with its final fan-out count $m$.
+Each later use of that node consumes one copy of $(id,v)$ from the wiring bus.
+At the AIR level, these contributions balance globally across the section; the wiring bus does not require a wire to be produced before it is used.
+By the end of the section, two things must hold:
 
-1. The very last node we produced (the root of the DAG) has value 0.
+1. The final output wire has value 0.
 2. Every inserted tuple has been consumed exactly $m$ times, so the wiring bus is empty.
 
 ## Trace layout
@@ -442,7 +444,8 @@ To ensure the circuit has finished evaluating and that the final output value is
 ### Wire bus
 
 Each row of the chip makes up to 3 requests to the circuit's wire bus.
-For $i = 0, 1, 2$, each request has the form $(ctx, clk, id_i, v_{i,0}, v_{i,1})$, which uniquely identifies a node in the DAG representing the evaluation of the circuit.
+For $i = 0, 1, 2$, each request has the form $(ctx, clk, id_i, v_{i,0}, v_{i,1})$, which uniquely identifies a wire in the encoded relation.
+The bus balances these requests across the whole section and does not impose an order on them.
 Sending this message to the bus can be viewed as updating the total degree of the node in the graph.
 When performing a READ operation, a node is added to the graph, and we set its degree update $e_i$ to be equal to its final fan-out degree at the end of the evaluation.
 This value is also referred to as the _multiplicity_ $m_i$.

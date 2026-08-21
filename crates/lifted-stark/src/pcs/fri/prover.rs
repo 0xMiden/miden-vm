@@ -243,14 +243,13 @@ where
 
     /// Stream all FRI query proofs into a transcript channel.
     ///
-    /// `tree_indices` are bit-reversed tree positions (sorted, deduplicated).
+    /// `tree_indices` are natural domain indices (sorted and deduplicated).
     ///
-    /// Indices shift by `log_arity` per round because each FRI folding round groups `arity`
-    /// consecutive bit-reversed indices into one coset, reducing the domain size by `arity`.
-    /// The committed matrix at round r has height `domain_size / arity^r`, so the tree index
-    /// for a query at round r is the original index right-shifted by `log_arity * r` bits —
-    /// the high bits select the coset (row), and the discarded low bits identify which
-    /// position within the coset the original query fell in.
+    /// Each FRI folding round groups `arity` domain points into a coset and reduces the domain
+    /// size by `arity`. The committed matrix row is selected by the low bits of the original
+    /// domain index, so shrinking an index masks off `log_arity` high bits per round. Those high
+    /// bits identify the queried position within the folded row (whose physical columns are in
+    /// bit-reversed order).
     pub fn prove_queries<Ch>(
         &self,
         params: &FriParams,

@@ -10,6 +10,7 @@
 
 #### Changes
 
+- Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
   slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
@@ -27,6 +28,7 @@
 - [BREAKING] Added `miden::core::sys::pvm::verify_proof`, a MASM recursive verifier for the precompile VM, and generalized the shared MASM STARK verifier ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
 - Added `DeferredClaim`, a typed deferred-root claim whose commitment is the root itself; the PVM MASM adapter uses it for proof-request addressing and verifies its root as the STARK public input. `PrecompileProof` remains `{ proof, roots }` ([#3467](https://github.com/0xMiden/miden-vm/pull/3467)).
 - [BREAKING] Factored recursive ACE circuits into per-order and shared sections, generalized the registry infrastructure to arbitrary AIR sets, and added the ten-AIR precompile VM registry. This changes the Miden VM and precompile VM ACE roots, relation digests, circuit shapes, and recursive-proof transcripts ([#3465](https://github.com/0xMiden/miden-vm/pull/3465)).
+- [BREAKING] Parsed assembly modules now keep constant expressions and inline event names until linking. This preserves source syntax and allows nested expressions to use imported constants ([#3612](https://github.com/0xMiden/miden-vm/pull/3612)).
 - [BREAKING] Reduced the precompile STARK relation from 12 AIRs to 10 by merging the chunk/node/sponge and EC point/group stores ([#3464](https://github.com/0xMiden/miden-vm/pull/3464)).
 - Removed unused Serde support and kept binary roundtrip coverage through `Serializable` and `Deserializable` ([#3578](https://github.com/0xMiden/miden-vm/pull/3578)).
 - Raised the minimum supported Plonky3 version to 0.6.3 to match the `num-bigint` 0.5 types used by `miden-field` ([#3569](https://github.com/0xMiden/miden-vm/pull/3569)).

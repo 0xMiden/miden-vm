@@ -7,6 +7,9 @@
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
 //!
+//! ACE wiring is an order-independent global consistency relation over wire identifiers and
+//! values. It does not enforce causal or topological ordering between rows.
+//!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
 //! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
 //! `wire_0` fires with the same multiplicity `m_0` on both READ and EVAL rows, so it

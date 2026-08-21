@@ -286,11 +286,11 @@ pub enum Instruction {
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
-    EmitImm(ImmFelt),
+    EmitImm(EventImmediate),
 
     // ----- traces (read-only events) -----------------------------------------------------------
     Trace,
-    TraceImm(ImmFelt),
+    TraceImm(EventImmediate),
 }
 
 impl Instruction {
