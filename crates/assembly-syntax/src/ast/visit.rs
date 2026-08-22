@@ -509,8 +509,10 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit
-        | LogDeferred | Emit | Trace => ControlFlow::Continue(()),
+        | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
+        | HornerExt | CryptoStream | EvalCircuit | LogDeferred | Emit | Trace => {
+            ControlFlow::Continue(())
+        },
     }
 }
 
@@ -1078,8 +1080,10 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream
-        | LogDeferred | Emit | Trace => ControlFlow::Continue(()),
+        | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
+        | HornerExt | EvalCircuit | CryptoStream | LogDeferred | Emit | Trace => {
+            ControlFlow::Continue(())
+        },
     }
 }
 

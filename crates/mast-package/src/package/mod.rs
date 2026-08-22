@@ -761,7 +761,17 @@ impl Package {
             }
 
             for row in source_node.inline_calls.iter() {
-                self.validate_source_map_row(source_id, source_node, row.op_idx, "inline call")?;
+                let is_external_boundary = exec_node.is_external()
+                    && source_node.op_start == source_node.op_end
+                    && row.op_idx == source_node.op_start;
+                if !is_external_boundary {
+                    self.validate_source_map_row(
+                        source_id,
+                        source_node,
+                        row.op_idx,
+                        "inline call",
+                    )?;
+                }
                 if debug_info.get_function(row.callee_idx).is_none() {
                     return Err(PackageDebugInfoError::InvalidReference {
                         message: format!(

@@ -23,6 +23,7 @@ where
     if !row.len().is_multiple_of(EF::DIMENSION) {
         return None;
     }
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     Some(
         row.chunks_exact(EF::DIMENSION)
             .map(|chunk| EF::from_ext_basis_coefficients(chunk).unwrap())

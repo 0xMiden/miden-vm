@@ -836,6 +836,35 @@ mod tests {
     }
 
     #[test]
+    fn default_advice_budget_accepts_protocol_lower_bound_and_rejects_over_limit() {
+        const NUM_NOTES: u64 = 1024;
+        const STORAGE_FELTS_PER_NOTE: usize = 1024;
+
+        let map = (0..NUM_NOTES).map(|seed| {
+            let key = make_leaf(seed * WORD_SIZE as u64);
+            (key, vec![Felt::ZERO; STORAGE_FELTS_PER_NOTE])
+        });
+        let inputs = AdviceInputs::default()
+            .with_stack(AdviceStack::from(vec![Felt::ZERO]))
+            .with_map(map);
+        let provider = AdviceProvider::new(inputs, &ExecutionOptions::default()).unwrap();
+        assert!(provider.advice_size_bytes > 8_445_856);
+
+        let base_size_bytes = AdviceProvider::default().advice_size_bytes;
+        let max_size_bytes = ExecutionOptions::DEFAULT_MAX_ADVICE_SIZE_BYTES;
+        assert_eq!(max_size_bytes, 16 * 1024 * 1024);
+        let felt_size_bytes = AdviceProvider::felt_bytes(1).unwrap();
+        let stack_len = (max_size_bytes - base_size_bytes) / felt_size_bytes + 1;
+        let inputs =
+            AdviceInputs::default().with_stack(AdviceStack::from(vec![Felt::ZERO; stack_len]));
+        let err = AdviceProvider::new(inputs, &ExecutionOptions::default()).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::SizeBudgetExceeded { max, .. } if max == max_size_bytes
+        ));
+    }
+
+    #[test]
     fn advice_map_insert_respects_combined_budget() {
         let base = AdviceProvider::default().advice_size_bytes;
         let entry_bytes = AdviceProvider::map_entry_bytes(1).unwrap();

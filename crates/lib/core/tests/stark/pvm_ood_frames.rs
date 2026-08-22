@@ -1,4 +1,5 @@
 //! Behavioral oracle for the PVM out-of-domain row hook.
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 use miden_core::{
     Felt,

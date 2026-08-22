@@ -536,9 +536,9 @@ impl<M: UintSpec> UintModule<M> {
 
     fn module_use_path(&self) -> String {
         if M::IS_PRIME_FIELD {
-            format!("miden::precompiles::fields::{}", self.module)
+            format!("miden::core::precompiles::fields::{}", self.module)
         } else {
-            format!("miden::precompiles::{}", self.module)
+            format!("miden::core::precompiles::{}", self.module)
         }
     }
 }
@@ -556,8 +556,8 @@ pub fn assert_cross_modulus_children_rejected(lhs: &'static str, rhs: &'static s
 
     let source = format!(
         "
-        use miden::precompiles::fields::{lhs}
-        use miden::precompiles::fields::{rhs}
+        use miden::core::precompiles::fields::{lhs}
+        use miden::core::precompiles::fields::{rhs}
         begin
             exec.{rhs}::push_one_digest
             exec.{lhs}::push_one_digest
@@ -575,8 +575,8 @@ pub fn assert_cross_modulus_open_rejected(expected: &'static str, actual: &'stat
 
     let source = format!(
         "
-        use miden::precompiles::fields::{expected}
-        use miden::precompiles::fields::{actual}
+        use miden::core::precompiles::fields::{expected}
+        use miden::core::precompiles::fields::{actual}
         begin
             exec.{actual}::push_one_digest
             exec.{expected}::open_value
