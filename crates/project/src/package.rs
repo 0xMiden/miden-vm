@@ -3,7 +3,7 @@ use alloc::{
     string::{String, ToString},
 };
 #[cfg(feature = "std")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -298,12 +298,15 @@ impl Package {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Box<Self>, Report> {
-        let manifest_path = Path::new(source.uri().path());
-        let manifest_path = if manifest_path.try_exists().is_ok_and(|exists| exists) {
-            Some(manifest_path.to_path_buf().into_boxed_path())
-        } else {
-            None
-        };
+        // `Uri::to_path` rather than `uri().path()`: on Windows the manifest is
+        // loaded from a canonicalized path, which carries the `\\?\` verbatim
+        // prefix. `path()` reads that prefix as an authority separator and
+        // returns a drive-less remainder that no longer exists on disk, so the
+        // manifest path would be silently dropped and the project would resolve
+        // its targets relative to the process working directory instead.
+        let manifest_path = source.uri().to_path();
+        let manifest_path = manifest_path.filter(|path| path.try_exists().is_ok_and(|e| e));
+        let manifest_path = manifest_path.map(PathBuf::into_boxed_path);
 
         // Parse the manifest into an AST for further processing
         let package_ast = ast::ProjectFile::parse(source.clone())?;

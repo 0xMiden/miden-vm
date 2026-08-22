@@ -254,10 +254,11 @@ impl DependencyVersionScheme {
         // dependency resolution
         match Self::try_from(spec)? {
             Self::Path { path: uri, version } => {
-                let workspace_path = workspace
-                    .source_file
-                    .as_ref()
-                    .map(|file| Path::new(file.content().uri().path()));
+                // `to_path()` handles the Windows verbatim (`\\?\`) prefix a
+                // canonicalized workspace manifest carries; `uri().path()`
+                // would strip the drive and this lookup would silently miss.
+                let workspace_path =
+                    workspace.source_file.as_ref().and_then(|file| file.content().uri().to_path());
                 if uri.scheme().is_none_or(|scheme| scheme == "file")
                     && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
                     && let Some(workspace_root) = workspace_path.parent()

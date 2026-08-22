@@ -1,7 +1,10 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 use std::string::{String, ToString};
 #[cfg(feature = "std")]
-use std::{boxed::Box, path::Path};
+use std::{
+    boxed::Box,
+    path::{Path, PathBuf},
+};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
@@ -76,8 +79,22 @@ impl Workspace {
         let file = ast::WorkspaceFile::parse(source.clone())?;
 
         let manifest_uri = source.content().uri();
+        // `to_path()` rather than `Path::new(uri.path())`: a canonicalized
+        // manifest carries the Windows verbatim `\\?\` prefix, which `path()`
+        // reads as an authority separator and strips the drive from. The
+        // resulting path has no usable parent, so `workspace_root()` returns
+        // `None` and every member load fails as if this were a virtual
+        // manifest.
+        //
+        // Canonicalize here so the root is in the same form as the member
+        // directories, which `absolutize_path` canonicalizes below. Member
+        // lookups compare the two, and a mixed pair (`D:\ws/member` vs
+        // `\\?\D:\ws\member`) never matches.
         let manifest_path = if manifest_uri.scheme().is_none_or(|scheme| scheme == "file") {
-            Some(Path::new(manifest_uri.path()).to_path_buf().into_boxed_path())
+            manifest_uri
+                .to_path()
+                .map(|path| path.canonicalize().unwrap_or(path))
+                .map(PathBuf::into_boxed_path)
         } else {
             None
         };
@@ -108,7 +125,13 @@ impl Workspace {
                     span: Label::new(member.span(), err.to_string()),
                 }
             })?;
-            if member_dir.strip_prefix(workspace_root).is_err() {
+            // `absolutize_path` canonicalizes, which on Windows returns a
+            // verbatim `\\?\` path. The root is canonicalized at construction
+            // for the same reason, but fall back defensively here so a
+            // non-canonical root can still contain its members.
+            let canonical_root =
+                workspace_root.canonicalize().unwrap_or_else(|_| workspace_root.to_path_buf());
+            if member_dir.strip_prefix(&canonical_root).is_err() {
                 return Err(ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
                     span: Label::new(

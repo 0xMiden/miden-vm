@@ -8,7 +8,7 @@ use miden_assembly_syntax::{
 };
 use tempfile::TempDir;
 
-use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace};
+use crate::{DependencyVersionScheme, Linkage, Package, Project, TargetType, Workspace};
 
 struct TestContext {
     pub source_manager: Arc<dyn SourceManager>,
@@ -473,4 +473,48 @@ path = "lib.masm"
         .expect_err("duplicate member package names should be rejected");
 
     assert!(format!("{error}").contains("duplicate"), "{error}");
+}
+
+/// A manifest loaded from a canonicalized path must keep its manifest path.
+///
+/// `Project::load` canonicalizes before loading, which on Windows yields a
+/// verbatim `\\?\C:\...` path. Deriving the manifest path from `Uri::path()`
+/// treats that prefix as an authority separator and returns a drive-less
+/// remainder that no longer exists, so the path is dropped and target
+/// resolution silently falls back to the process working directory — the whole
+/// workspace then fails to build with a bare relative path in the error
+/// (`invalid root module path 'mod.masm'`).
+#[test]
+fn manifest_path_survives_a_canonicalized_source_uri() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let project_dir = tempdir.path().join("pkg");
+    fs::create_dir_all(&project_dir).unwrap();
+
+    let manifest = project_dir.join("miden-project.toml");
+    fs::write(
+        &manifest,
+        r#"[package]
+name = "pkg"
+version = "0.1.0"
+
+[lib]
+path = "mod.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(project_dir.join("mod.masm"), "export.foo\nend\n").unwrap();
+
+    // Load through the canonicalized path, exactly as `Project::load` does.
+    let canonical_manifest = manifest.canonicalize().unwrap();
+    let context = TestContext::default();
+    let source_file = context.source_manager.load_file(&canonical_manifest).map_err(Report::msg)?;
+    let package = Package::load(source_file)?;
+
+    assert_eq!(
+        package.manifest_path(),
+        Some(canonical_manifest.as_path()),
+        "manifest path was dropped for a canonicalized source uri"
+    );
+
+    Ok(())
 }
