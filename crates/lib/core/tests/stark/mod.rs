@@ -368,6 +368,7 @@ fn request_consumer_source() -> String {
         use miden::core::stark::constants
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
+        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -397,7 +398,9 @@ fn request_consumer_source() -> String {
             swapw
             # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
             exec.constants::get_trace_length_log movdn.4
-            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_height, D]
+            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
+            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_height,
+            #     num_kernel_procedures, D]
             exec.vm::compute_conjectured_security_level
             # => [conjectured_level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
@@ -490,6 +493,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
         use miden::core::stark::constants
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
+        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -505,6 +509,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
             exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
             swapw exec.constants::get_trace_length_log movdn.4
+            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
             exec.vm::compute_conjectured_security_level  # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]

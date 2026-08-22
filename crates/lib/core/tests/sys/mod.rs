@@ -330,11 +330,12 @@ fn proof_request_round_trip_retrieves_registered_package() {
 /// integer MASM over precomputed round bases — so only an exhaustive comparison establishes that
 /// a proof grades identically whether it is verified natively or recursively.
 ///
-/// The domain has five axes, covered by three two-dimensional sweeps: the query parameters
-/// against each other at the maximum trace height, where the height-bearing rounds are largest
-/// and any underflow would surface; then each grinding site against every supported height. One
-/// VM run evaluates each grid, storing the MASM level for `(outer, inner)` at address
-/// `outer * inner_bound + inner`; the host then checks every cell.
+/// The domain has six axes, covered by four two-dimensional sweeps: the query parameters against
+/// each other at the maximum trace height, where the height-bearing rounds are largest and any
+/// underflow would surface; each grinding site against every supported height; and the kernel
+/// procedure count (the lookup round's boundary correction) against every supported height, its
+/// own trace-height-scaled term. One VM run evaluates each grid, storing the MASM level for
+/// `(outer, inner)` at address `outer * inner_bound + inner`; the host then checks every cell.
 #[test]
 fn masm_compute_conjectured_security_level_matches_native() {
     use Axis::{Fixed, Inner, Outer};
@@ -346,19 +347,31 @@ fn masm_compute_conjectured_security_level_matches_native() {
     // Heights the verifier accepts, per `assert_shape_log`.
     const LOG_HEIGHT_MIN: u64 = 6;
     const LOG_HEIGHT_SPAN: u64 = 24;
+    // Matches `KernelDescriptor::MAX_NUM_PROCEDURES`.
+    const NUM_KERNEL_PROCEDURES_BOUND: u64 = 256;
 
-    // The deployed preset, held fixed on whichever axes a sweep is not varying.
+    // The deployed preset, held fixed on whichever axes a sweep is not varying. Kernel procedure
+    // count is held at its maximum off the dedicated sweep, to combine the boundary correction's
+    // largest magnitude with the other axes' extremes.
     const QUERIES: u64 = 27;
     const QUERY_POW: u64 = 17;
     const DEEP_POW: u64 = 12;
     const FOLDING_POW: u64 = 4;
     const MAX_HEIGHT: u64 = LOG_HEIGHT_MIN + LOG_HEIGHT_SPAN - 1;
+    const MAX_KERNEL_PROCEDURES: u64 = NUM_KERNEL_PROCEDURES_BOUND - 1;
 
     // Query count against query grinding, at the maximum supported height.
     sweep(
         NQ_BOUND,
         POW_BOUND,
-        [Outer(0), Inner(0), Fixed(DEEP_POW), Fixed(FOLDING_POW), Fixed(MAX_HEIGHT)],
+        [
+            Outer(0),
+            Inner(0),
+            Fixed(DEEP_POW),
+            Fixed(FOLDING_POW),
+            Fixed(MAX_HEIGHT),
+            Fixed(MAX_KERNEL_PROCEDURES),
+        ],
     );
 
     // DEEP grinding against trace height.
@@ -371,6 +384,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
             Inner(0),
             Fixed(FOLDING_POW),
             Outer(LOG_HEIGHT_MIN),
+            Fixed(MAX_KERNEL_PROCEDURES),
         ],
     );
 
@@ -384,6 +398,21 @@ fn masm_compute_conjectured_security_level_matches_native() {
             Fixed(DEEP_POW),
             Inner(0),
             Outer(LOG_HEIGHT_MIN),
+            Fixed(MAX_KERNEL_PROCEDURES),
+        ],
+    );
+
+    // Kernel procedure count against trace height: the lookup round's boundary correction.
+    sweep(
+        LOG_HEIGHT_SPAN,
+        NUM_KERNEL_PROCEDURES_BOUND,
+        [
+            Fixed(QUERIES),
+            Fixed(QUERY_POW),
+            Fixed(DEEP_POW),
+            Fixed(FOLDING_POW),
+            Outer(LOG_HEIGHT_MIN),
+            Inner(0),
         ],
     );
 }
@@ -423,15 +452,15 @@ impl Axis {
 /// Runs the estimator over an `outer_bound × inner_bound` grid in one VM execution and checks
 /// every cell against the native implementation.
 ///
-/// `axes` supplies the procedure's five inputs in call order. They are pushed deepest-first, so
+/// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
-fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
+fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
     use miden_core::Felt;
     use miden_processor::ContextId;
 
-    let push_args = (0..5)
+    let push_args = (0..6)
         .rev()
-        .map(|position| axes[position].push(4 - position))
+        .map(|position| axes[position].push(5 - position))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -449,7 +478,8 @@ fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
                 while.true
                     # => [inner, outer]
                     {push_args}
-                    # => [num_queries, query_pow, deep_pow, folding_pow, log_height, inner, outer]
+                    # => [num_queries, query_pow, deep_pow, folding_pow, log_height,
+                    #     num_kernel_procedures, inner, outer]
                     exec.vm::compute_conjectured_security_level
                     # => [level, inner, outer]
                     dup.2 push.{inner_bound} mul dup.2 add
@@ -486,6 +516,7 @@ fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
                 axes[2].value(outer, inner),
                 axes[3].value(outer, inner),
                 axes[4].value(outer, inner),
+                axes[5].value(outer, inner),
             ));
             assert_eq!(
                 masm,
@@ -511,7 +542,7 @@ fn security_level_rejects_an_out_of_range_trace_height() {
         ";
 
     for log_height in [0_u64, 5, 30] {
-        let test = build_test!(source, &[27_u64, 17, 12, 4, log_height]);
+        let test = build_test!(source, &[27_u64, 17, 12, 4, log_height, 0]);
         assert!(
             test.execute_for_output().is_err(),
             "log trace height {log_height} is outside the verifier's range and must be rejected"
@@ -544,16 +575,16 @@ fn security_level_threshold_rejects_below_target() {
 
     // The deployed preset at a height below the lookup/query crossover grades to exactly the
     // target: the threshold assert must pass.
-    let at = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 20]);
+    let at = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 20, 0]);
     at.execute_for_output().expect("an at-target level must be accepted");
 
     // Fewer queries and less grinding grades below the target: the threshold assert must fail.
-    let below = build_test!(source.as_str(), &[22_u64, 16, 12, 4, 20]);
+    let below = build_test!(source.as_str(), &[22_u64, 16, 12, 4, 20, 0]);
     assert!(below.execute_for_output().is_err(), "a below-target level must be rejected");
 
     // The same preset at the maximum supported height falls below the target on the lookup
     // round alone — the reason grading cannot be a property of the parameters by themselves.
-    let tall = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 29]);
+    let tall = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 29, 0]);
     assert!(tall.execute_for_output().is_err(), "a below-target level must be rejected");
 }
 
