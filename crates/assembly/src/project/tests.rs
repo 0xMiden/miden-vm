@@ -501,17 +501,63 @@ end
         .debug_info()
         .expect("package debug sections should decode")
         .expect("root package should contain debug info");
-    let has_context = |context_name: &str| {
-        debug_info.nodes().iter().any(|node| {
-            node.asm_ops.iter().any(|row| {
-                debug_info.get_string(row.context_name_idx).as_deref() == Some(context_name)
+    let source_for_context = |context_name: &str| {
+        debug_info
+            .nodes()
+            .iter()
+            .enumerate()
+            .find(|(_, node)| {
+                node.asm_ops.len() == 1
+                    && node.asm_ops.iter().any(|row| {
+                        debug_info.get_string(row.context_name_idx).as_deref() == Some(context_name)
+                    })
             })
-        })
+            .map(|(source_idx, _)| DebugSourceNodeId::from(source_idx as u32))
+            .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
     };
-    assert!(
-        has_context("depa_ctx") && has_context("depb_ctx"),
-        "validated preassembled dependency debug rows should be retained",
+    let depa_source = source_for_context("depa_ctx");
+    let depb_source = source_for_context("depb_ctx");
+    assert_ne!(depa_source, depb_source, "static package source occurrences must stay distinct",);
+
+    let depa_exec = debug_info.source_node(depa_source).unwrap().exec_node;
+    let depb_exec = debug_info.source_node(depb_source).unwrap().exec_node;
+    assert_eq!(
+        depa_exec, depb_exec,
+        "identical static dependency bodies should dedup to one execution node",
     );
+    assert!(debug_info.nodes().iter().any(|node| {
+        node.exec_node == depa_exec
+            && node
+                .asm_ops
+                .iter()
+                .map(|row| debug_info.get_string(row.context_name_idx).unwrap())
+                .eq([Arc::from("depa_ctx"), Arc::from("depb_ctx")])
+    }));
+
+    let contexts_for_deduped_exec = [depa_source, depb_source]
+        .into_iter()
+        .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
+        .map(|source_node| {
+            let row = debug_info.first_asm_op_for_source_node(source_node).unwrap();
+            debug_info.get_string(row.context_name_idx).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depa_ctx"));
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depb_ctx"));
+
+    let vars_at_source_start = |source_node_id| {
+        let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
+        debug_info
+            .debug_vars_for_operation(source_node_id, op_start)
+            .map(|row| debug_info.get_string(row.name_idx).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let depa_vars = vars_at_source_start(depa_source);
+    let depb_vars = vars_at_source_start(depb_source);
+    assert_eq!(depa_vars.len(), 1);
+    assert_eq!(depa_vars[0].as_ref(), "depa_var");
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 
     let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
         .expect("root package should deserialize as trusted");
@@ -519,18 +565,19 @@ end
         .debug_info()
         .expect("round-tripped debug sections should decode")
         .expect("round-tripped package should contain debug info");
-    let has_round_tripped_context = |context_name: &str| {
-        round_tripped_debug_info.nodes().iter().any(|node| {
-            node.asm_ops.iter().any(|row| {
-                round_tripped_debug_info.get_string(row.context_name_idx).as_deref()
-                    == Some(context_name)
-            })
-        })
-    };
-    assert!(
-        has_round_tripped_context("depa_ctx") && has_round_tripped_context("depb_ctx"),
-        "round-tripped root debug should retain dependency debug rows",
+    let depa_asm_op = round_tripped_debug_info.first_asm_op_for_source_node(depa_source).unwrap();
+    assert_eq!(
+        round_tripped_debug_info.get_string(depa_asm_op.context_name_idx).as_deref(),
+        Some("depa_ctx"),
     );
+    let depb_vars = {
+        let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
+        round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
+    }
+    .map(|row| round_tripped_debug_info.get_string(row.name_idx).unwrap())
+    .collect::<Vec<_>>();
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 }
 
 #[test]

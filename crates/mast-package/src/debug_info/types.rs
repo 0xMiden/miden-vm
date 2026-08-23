@@ -423,7 +423,11 @@ pub struct SourceNode<Exec: Idx, Src: Idx> {
     pub asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variable metadata for operations attached to this node
     pub debug_vars: Vec<DebugSourceVar>,
-    /// Inline-call metadata for operations attached to this node
+    /// Inline-call metadata for operations attached to this node.
+    ///
+    /// A zero-width external occurrence may carry rows at its start index. Those rows describe the
+    /// inline chain inherited by the resolved target rather than an operation on the external
+    /// node.
     pub inline_calls: Vec<DebugSourceInlineCall>,
 }
 

@@ -6,7 +6,7 @@ use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
+    continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     execution::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
         finalize_clock_cycle_with_continuation, get_next_ctx_id,
@@ -94,6 +94,11 @@ where
     } else {
         state.tracer.record_memory_read_word(callee_hash, mem_addr, read_ctx, clk);
     };
+
+    // A DYN node has no execution child to carry its source occurrence into the selected target.
+    // Preserve its inline rows as runtime context until the matching FinishDyn continuation.
+    let inline_call_context = state.current_inline_call_context();
+    state.inline_call_contexts.push(inline_call_context);
 
     // Update continuation stack
     // -----------------------------
@@ -261,6 +266,7 @@ pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
     processor: &mut P,
     current_forest: &mut F,
     current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+    inline_call_contexts: &[Option<SourceInlineCallContext>],
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
     stopper: &S,
@@ -276,8 +282,11 @@ where
     let old_package_debug_info = current_package_debug_info.clone();
 
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack
-        .push_enter_forest_with_package_debug_info(current_forest.clone(), old_package_debug_info);
+    continuation_stack.push_enter_forest_with_package_debug_info(
+        current_forest.clone(),
+        old_package_debug_info,
+        inline_call_contexts.len(),
+    );
 
     // Push the root node of the external MAST forest onto the continuation stack.
     continuation_stack
@@ -311,6 +320,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    state.inline_call_contexts.pop();
     state.tracer.start_clock_cycle(
         state.processor,
         Continuation::FinishDyn(node_id),

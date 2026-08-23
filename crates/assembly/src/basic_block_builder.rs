@@ -6,7 +6,7 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ast::{DebugVarInfo, Instruction},
+    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
     debuginfo::{Location, Span},
     diagnostics::Report,
 };
@@ -15,12 +15,14 @@ use miden_core::{
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
-use miden_mast_package::debug_info::{DebugSourceAsmOp, DebugSourceVar};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
+};
 
 use crate::{
     ProcedureContext,
     assembler::BodyWrapper,
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeUse},
 };
 
 // PENDING ASM OP
@@ -41,6 +43,12 @@ struct PendingAsmOp {
     context_name: String,
     /// The string representation of the instruction (e.g., "add", "push.1").
     op: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ActiveInlineCall {
+    callee_idx: DebugFunctionIdx,
+    loc_idx: DebugLocIdx,
 }
 
 // BASIC BLOCK BUILDER
@@ -64,6 +72,10 @@ pub struct BasicBlockBuilder<'a> {
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variables attached to operations in this block.
     debug_vars: Vec<DebugSourceVar>,
+    /// Inline call chains attached to operations in this block.
+    inline_calls: Vec<DebugSourceInlineCall>,
+    /// The source-level inline call chain active for subsequently generated operations.
+    active_inline_calls: Vec<ActiveInlineCall>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -85,6 +97,8 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Vec::new(),
+                inline_calls: Vec::new(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
             None => Self {
@@ -93,9 +107,21 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Default::default(),
+                inline_calls: Default::default(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
         }
+    }
+
+    pub(super) fn with_active_inline_calls(
+        wrapper: Option<BodyWrapper>,
+        mast_forest_builder: &'a mut MastForestBuilder,
+        active_inline_calls: Vec<ActiveInlineCall>,
+    ) -> Self {
+        let mut builder = Self::new(wrapper, mast_forest_builder);
+        builder.active_inline_calls = active_inline_calls;
+        builder
     }
 }
 
@@ -110,12 +136,30 @@ impl BasicBlockBuilder<'_> {
     pub fn mast_forest_builder_mut(&mut self) -> &mut MastForestBuilder {
         self.mast_forest_builder
     }
+
+    pub(super) fn active_inline_calls(&self) -> &[ActiveInlineCall] {
+        &self.active_inline_calls
+    }
+
+    pub(super) fn active_inline_call_rows(&self, op_idx: u32) -> Vec<DebugSourceInlineCall> {
+        self.active_inline_calls
+            .iter()
+            .map(|inline_call| DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            })
+            .collect()
+    }
 }
 
 /// Operations
 impl BasicBlockBuilder<'_> {
     /// Adds the specified operation to the list of basic block operations.
     pub fn push_op(&mut self, op: Operation) {
+        if !self.active_inline_calls.is_empty() {
+            self.record_active_inline_calls(self.ops.len() as u32);
+        }
         self.ops.push(op);
     }
 
@@ -125,13 +169,24 @@ impl BasicBlockBuilder<'_> {
         I: IntoIterator<Item = O>,
         O: Borrow<Operation>,
     {
-        self.ops.extend(ops.into_iter().map(|o| *o.borrow()));
+        if self.active_inline_calls.is_empty() {
+            self.ops.extend(ops.into_iter().map(|op| *op.borrow()));
+        } else {
+            for op in ops {
+                self.push_op(*op.borrow());
+            }
+        }
     }
 
     /// Adds the specified operation n times to the list of basic block operations.
     pub fn push_op_many(&mut self, op: Operation, n: usize) {
-        let new_len = self.ops.len() + n;
-        self.ops.resize(new_len, op);
+        if self.active_inline_calls.is_empty() {
+            self.ops.resize(self.ops.len() + n, op);
+        } else {
+            for _ in 0..n {
+                self.push_op(op);
+            }
+        }
     }
 
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
@@ -232,6 +287,41 @@ impl BasicBlockBuilder<'_> {
         self.debug_vars.push(debug_var);
         Ok(())
     }
+
+    /// Appends one frame to the inline call chain active for subsequently generated operations.
+    pub fn push_debug_inline_call(
+        &mut self,
+        inline_call: &DebugInlineCallInfo,
+        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
+    ) {
+        let Some(call_site_span) =
+            source_manager.file_line_col_to_span(inline_call.call_site().clone())
+        else {
+            return;
+        };
+        let Ok(call_site) = source_manager.location(call_site_span) else {
+            return;
+        };
+
+        let callee_idx = self.mast_forest_builder.register_inline_function(inline_call);
+        let loc_idx = self.mast_forest_builder.debug_info_mut().add_location(call_site);
+        self.active_inline_calls.push(ActiveInlineCall { callee_idx, loc_idx });
+    }
+
+    /// Clears the inline call chain active for subsequently generated operations.
+    pub fn clear_debug_inline_calls(&mut self) {
+        self.active_inline_calls.clear();
+    }
+
+    fn record_active_inline_calls(&mut self, op_idx: u32) {
+        self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
+            DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            }
+        }));
+    }
 }
 
 /// Basic Block Constructors
@@ -242,21 +332,22 @@ impl BasicBlockBuilder<'_> {
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
-    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeUse>, Report> {
         if !self.ops.is_empty() {
             let ops = core::mem::take(&mut self.ops);
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars = core::mem::take(&mut self.debug_vars);
+            let inline_calls = core::mem::take(&mut self.inline_calls);
 
-            let basic_block_node_ref = self.mast_forest_builder.ensure_block_ref(
+            let basic_block_node_use = self.mast_forest_builder.ensure_block_use(
                 ops,
                 asm_ops,
                 debug_vars,
-                vec![],
+                inline_calls,
                 vec![],
             )?;
 
-            Ok(Some(basic_block_node_ref))
+            Ok(Some(basic_block_node_use))
         } else {
             Ok(None)
         }
@@ -269,7 +360,7 @@ impl BasicBlockBuilder<'_> {
     /// - Operations contained in the epilogue of the builder are appended to the list of ops which
     ///   go into the new BASIC BLOCK node.
     /// - The builder is consumed in the process.
-    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeUse>, Report> {
         self.ops.append(&mut self.epilogue);
         self.make_basic_block()
     }
