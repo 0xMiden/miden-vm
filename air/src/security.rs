@@ -93,7 +93,7 @@ pub fn derive_air_shape() -> AirShape {
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
 /// from the AIRs' own width accessors — no symbolic constraint pass — reusing
-/// [`AIR_SHAPE::max_constraint_degree`] for the quotient group's chunk count. A native verifier
+/// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
 /// grading a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17)
 /// reads this instead of the alignment-8 [`AIR_SHAPE`] pinned for the Poseidon2-only recursive
 /// verifier.
@@ -404,8 +404,8 @@ mod tests {
         for (log_height, expected_level, expected_binding) in [
             (20, 96, p3_security::budget::report::QUERY_LABEL),
             (22, 96, p3_security::budget::report::QUERY_LABEL),
-            (24, 95, p3_security::budget::report::LOOKUP_LABEL),
-            (29, 90, p3_security::budget::report::LOOKUP_LABEL),
+            (24, 95, LOOKUP_LABEL),
+            (29, 90, LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height, 128, 0);
             assert_eq!(
@@ -527,8 +527,7 @@ mod tests {
         let params = protocol_params(&config::pcs_params());
         let crossover = (6..=30)
             .find(|&log_height| {
-                security_report(&params, log_height, 128, 0).binding_term().label
-                    == p3_security::budget::report::LOOKUP_LABEL
+                security_report(&params, log_height, 128, 0).binding_term().label == LOOKUP_LABEL
             })
             .expect("the lookup round must bind at some supported height");
 
