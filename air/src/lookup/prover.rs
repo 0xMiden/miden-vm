@@ -168,12 +168,42 @@ where
             .collect();
 
         let total_fractions: usize = chunks.iter().map(|c| c.fractions.len()).sum();
-        let mut fractions_vec: Vec<(F, EF)> = Vec::with_capacity(total_fractions);
-        let mut counts_vec: Vec<usize> = Vec::with_capacity(num_rows * num_cols);
-        for chunk in chunks {
-            fractions_vec.extend(chunk.fractions);
-            counts_vec.extend(chunk.counts);
-        }
+        let (fractions_vec, counts_vec) = if current_num_threads() == 1 {
+            let mut fractions_vec = Vec::with_capacity(total_fractions);
+            let mut counts_vec = Vec::with_capacity(num_rows * num_cols);
+            for chunk in chunks {
+                fractions_vec.extend(chunk.fractions);
+                counts_vec.extend(chunk.counts);
+            }
+            (fractions_vec, counts_vec)
+        } else {
+            let (fraction_chunks, count_chunks): (Vec<_>, Vec<_>) =
+                chunks.into_iter().map(|chunk| (chunk.fractions, chunk.counts)).unzip();
+
+            // Initialize the contiguous destinations in parallel, then copy each ordered chunk
+            // into its disjoint destination slice. This keeps the public flat layout while
+            // avoiding a single-threaded first-touch and copy of the complete lookup buffer.
+            let mut fractions_vec: Vec<(F, EF)> =
+                (0..total_fractions).into_par_iter().map(|_| (F::ZERO, EF::ZERO)).collect();
+            let mut counts_vec: Vec<usize> =
+                (0..num_rows * num_cols).into_par_iter().map(|_| 0).collect();
+
+            let fraction_outputs =
+                split_by_lengths_mut(&mut fractions_vec, fraction_chunks.iter().map(Vec::len));
+            let count_outputs =
+                split_by_lengths_mut(&mut counts_vec, count_chunks.iter().map(Vec::len));
+
+            fraction_outputs
+                .into_par_iter()
+                .zip(fraction_chunks.into_par_iter())
+                .for_each(|(output, chunk)| output.copy_from_slice(&chunk));
+            count_outputs
+                .into_par_iter()
+                .zip(count_chunks.into_par_iter())
+                .for_each(|(output, chunk)| output.copy_from_slice(&chunk));
+
+            (fractions_vec, counts_vec)
+        };
 
         LookupFractions::from_parts(shape, num_rows, fractions_vec, counts_vec)
     };
@@ -184,6 +214,23 @@ where
         "counts buffer should have exactly num_rows * num_cols entries after collection",
     );
     fractions
+}
+
+#[cfg(feature = "concurrent")]
+fn split_by_lengths_mut<T>(
+    output: &mut [T],
+    lengths: impl IntoIterator<Item = usize>,
+) -> Vec<&mut [T]> {
+    let lengths = lengths.into_iter();
+    let mut remaining = output;
+    let mut parts = Vec::with_capacity(lengths.size_hint().0);
+    for len in lengths {
+        let (part, tail) = core::mem::take(&mut remaining).split_at_mut(len);
+        parts.push(part);
+        remaining = tail;
+    }
+    assert!(remaining.is_empty(), "chunk lengths must cover the complete output buffer");
+    parts
 }
 
 impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>
@@ -454,7 +501,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-    use miden_crypto::stark::air::RowWindow;
+    use miden_crypto::stark::air::{RowWindow, WindowAccess};
 
     use super::*;
     use crate::{
@@ -640,6 +687,89 @@ mod tests {
         // Column 1 stores the per-row fraction on every row.
         for &entry in &aux[1] {
             assert_eq!(entry, delta1);
+        }
+    }
+
+    struct RowTaggedAir;
+
+    const ROW_TAGGED_SHAPE: [usize; 1] = [1];
+
+    impl<LB> LookupAir<LB> for RowTaggedAir
+    where
+        LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, Var = Felt, ExprEF = QuadFelt>,
+    {
+        fn num_columns(&self) -> usize {
+            1
+        }
+
+        fn column_shape(&self) -> &[usize] {
+            &ROW_TAGGED_SHAPE
+        }
+
+        fn max_message_width(&self) -> usize {
+            1
+        }
+
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, builder: &mut LB) {
+            let row_tag = builder.main().current_slice()[0];
+            let active = builder.main().current_slice()[1];
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "row_tagged",
+                        |group| {
+                            group.add(
+                                "row_tag",
+                                active,
+                                || SmokeMsg { value: row_tag },
+                                Deg { v: 0, u: 0 },
+                            );
+                        },
+                        Deg { v: 0, u: 0 },
+                    );
+                },
+                Deg { v: 0, u: 0 },
+            );
+        }
+    }
+
+    #[test]
+    fn multi_chunk_collection_preserves_row_order() {
+        const NUM_ROWS: usize = 2 * crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK + 1;
+
+        let mut trace_values = Vec::with_capacity(2 * NUM_ROWS);
+        let mut expected_counts = Vec::with_capacity(NUM_ROWS);
+        let mut expected_tags = Vec::with_capacity(NUM_ROWS);
+        for row in 0..NUM_ROWS {
+            let row_tag = Felt::from_usize(row + 1);
+            let active = row % 3 != 0;
+            trace_values.extend([row_tag, if active { Felt::ONE } else { Felt::ZERO }]);
+            expected_counts.push(usize::from(active));
+            if active {
+                expected_tags.push(row_tag);
+            }
+        }
+        let trace = RowMajorMatrix::new(trace_values, 2);
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
+            QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]),
+            1,
+            1,
+        );
+
+        let fractions = build_lookup_fractions(&RowTaggedAir, &trace, &[], &challenges);
+
+        assert_eq!(fractions.counts(), expected_counts);
+        assert_eq!(fractions.fractions().len(), expected_tags.len());
+        for (&row_tag, &(multiplicity, denominator)) in
+            expected_tags.iter().zip(fractions.fractions())
+        {
+            assert_eq!(multiplicity, Felt::ONE);
+            assert_eq!(denominator, SmokeMsg { value: row_tag }.encode(&challenges));
         }
     }
 }
