@@ -640,13 +640,8 @@ impl SourceContent {
 
     /// Get the [ByteIndex] corresponding to the given line and column indices.
     ///
-    /// `column_index` counts Unicode scalar values (chars), matching [`SourceContent::location`]
-    /// -- not bytes, and not UTF-16 code units as used by the Language Server Protocol. Callers
-    /// bridging from LSP must convert to a scalar-based column before calling this function.
-    ///
-    /// A column landing on or inside the line's terminator (`"\n"` or `"\r\n"`) is out of
-    /// bounds: that position is only reachable via the start of the next line (`line_index + 1`,
-    /// column `0`).
+    /// Columns count Unicode scalars. The content-end position is valid; positions inside a
+    /// trailing terminator are not. LSP callers must convert UTF-16 columns first.
     ///
     /// Returns `None` if the line or column indices are out of bounds.
     pub fn line_column_to_offset(
@@ -661,17 +656,12 @@ impl SourceContent {
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
 
-        // Exclude any trailing line terminator from the content this searches: see the
-        // rejection rationale above.
         let content = line_src
             .strip_suffix("\r\n")
             .or_else(|| line_src.strip_suffix('\n'))
             .unwrap_or(line_src);
 
-        // Chain `content.len()` onto the char boundaries (as the one-past-the-end position) so
-        // a single `nth` call covers both "column falls within the content" and "column is
-        // exactly at the end of the content", instead of a second full scan via
-        // `content.chars().count()` to special-case the latter.
+        // Include the end-of-content position as the final boundary.
         let byte_len = content
             .char_indices()
             .map(|(offset, _)| offset)
