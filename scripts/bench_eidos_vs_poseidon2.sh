@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EIDOS_REV="${EIDOS_REV:-7b2b1113aa619db9dba10cdfcf679404c4b823a3}"
+EIDOS_REV="${EIDOS_REV:-d29170b61b50cd5000871b96901919e711f8a2dc}"
 FIXTURE_ROOT="$ROOT/bench-baselines/fixtures/bench-tx"
 MODE=""
 # Keep the historical #3306/#3307 comparison default; override it for the host with --threads.
