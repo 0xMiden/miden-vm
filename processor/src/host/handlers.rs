@@ -620,7 +620,10 @@ mod tests {
     #[test]
     fn replace_handler_rejects_invalid_names_without_panicking() {
         let mut host = DefaultHost::default();
-        assert!(host.replace_handler(EventName::new("sys::nope"), Arc::new(NoopEventHandler)).is_err());
+        assert!(
+            host.replace_handler(EventName::new("sys::nope"), Arc::new(NoopEventHandler))
+                .is_err()
+        );
         assert!(host.replace_handler(EventName::new(""), Arc::new(NoopEventHandler)).is_err());
         assert!(
             host.replace_trace_handler(EventName::new("sys::nope"), Arc::new(NoopTraceHandler))

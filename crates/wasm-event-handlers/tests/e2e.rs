@@ -306,6 +306,68 @@ fn rust_guest_panic_reaches_the_host() {
     assert!(chain.contains("guest panic"), "unexpected error chain: {chain}");
 }
 
+/// The guest SDK and the host runner must name one import set. The test keeps them in sync from
+/// the guest side: every import of the compiled fixture must be an ABI host function in the
+/// [`IMPORT_MODULE`] namespace.
+///
+/// The relation is a subset, not an equality: the linker removes the imports a build does not
+/// call, so the fixture never declares the full set.
+#[test]
+fn rust_guest_imports_stay_inside_the_abi() {
+    use std::collections::BTreeSet;
+
+    use miden_event_handler_abi::{IMPORT_MODULE, host_fn};
+
+    let abi: BTreeSet<&str> = BTreeSet::from([
+        host_fn::STACK_DEPTH,
+        host_fn::STACK_GET,
+        host_fn::STACK_READ,
+        host_fn::CLK,
+        host_fn::CTX,
+        host_fn::MEM_GET,
+        host_fn::MEM_READ,
+        host_fn::MEM_READ_CTX,
+        host_fn::MERKLE_GET_NODE,
+        host_fn::MERKLE_HAS_PATH,
+        host_fn::POSEIDON2_MERGE,
+        host_fn::POSEIDON2_HASH,
+        host_fn::POSEIDON2_PERMUTE,
+        host_fn::KECCAK256,
+        host_fn::SHA256,
+        host_fn::SHA512,
+        host_fn::BLAKE3,
+        host_fn::ADV_STACK_LEN,
+        host_fn::ADV_STACK_READ,
+        host_fn::ADV_MAP_VALUE_LEN,
+        host_fn::ADV_MAP_VALUE_READ,
+        host_fn::ADV_STACK_EXTEND,
+        host_fn::ADV_MAP_INSERT,
+        host_fn::MERKLE_STORE_EXTEND,
+        host_fn::FAIL,
+    ]);
+
+    let wasm = build_rust_guest_fixture();
+    let engine = wasmi::Engine::default();
+    let module = wasmi::Module::new(&engine, &wasm[..]).expect("the fixture module parses");
+
+    let mut imported = 0usize;
+    for import in module.imports() {
+        assert_eq!(
+            import.module(),
+            IMPORT_MODULE,
+            "import '{}' comes from outside the ABI namespace",
+            import.name(),
+        );
+        assert!(
+            abi.contains(import.name()),
+            "import '{}' is not an ABI host function",
+            import.name(),
+        );
+        imported += 1;
+    }
+    assert!(imported > 0, "the fixture must import host functions");
+}
+
 #[test]
 fn program_fails_without_the_packaged_handlers() {
     let package = assemble_package_with_handlers();

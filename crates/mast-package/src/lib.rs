@@ -11,6 +11,7 @@ extern crate std;
 pub mod debug_info;
 mod dependency;
 mod package;
+mod serde_helpers;
 
 pub use miden_assembly_syntax::{
     PathBuf, Version, VersionError,
@@ -27,6 +28,6 @@ pub use self::{
         InvalidSectionIdError, InvalidTargetTypeError, MAX_HANDLERS, MAX_MODULE_BYTES,
         MAX_NAME_BYTES, ManifestValidationError, Package, PackageDebugInfoError, PackageExport,
         PackageId, PackageManifest, PackageModule, PackageStripError, PackageSubmodule,
-        ProcedureExport, Section, SectionId, TargetType, TypeExport,
+        ProcedureExport, Section, SectionId, TargetType, TypeExport, validate_manifest_entries,
     },
 };
