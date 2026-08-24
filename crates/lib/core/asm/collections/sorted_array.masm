@@ -52,7 +52,6 @@ pub proc find_word
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
         # dereference maybe_value_ptr (9 cycles)
-        # masm-lint: allow unconstrained-advice -- bounds and the loaded value are checked.
         dup u32assert.err="maybe_value_ptr is not u32" movdn.5 padw movup.4 mem_loadw_le
         #=> [MAYBE_VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
@@ -90,7 +89,6 @@ pub proc find_word
                 #=> [VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # dereference maybe_value_ptr (8 cycles)
-                # masm-lint: allow unconstrained-advice -- start_ptr and the loaded value are checked.
                 dup.4 u32assert.err="start_ptr is not u32" padw movup.4 mem_loadw_le
                 #=> [FIRST_WORD, VALUE, maybe_value_ptr = start_ptr, start_ptr, end_ptr]
 
@@ -112,7 +110,6 @@ pub proc find_word
                 #=> [maybe_value_ptr = end_ptr, VALUE, start_ptr, end_ptr]
 
                 # fetch the last word in the array (11 cycles)
-                # masm-lint: allow unconstrained-advice -- end_ptr and the loaded value are checked.
                 dup movdn.5 sub.4 u32assert.err="end_ptr-4 is not u32" padw movup.4 mem_loadw_le
                 #=> [LAST_WORD, VALUE, maybe_value_ptr = end_ptr, start_ptr, end_ptr]
 
@@ -145,7 +142,6 @@ pub proc find_word
                 #=> [VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # dereference maybe_value_ptr (9 cycles)
-                # masm-lint: allow unconstrained-advice -- bounds and the loaded value are checked.
                 padw dup.12 u32assert.err="maybe_value_ptr is not u32" mem_loadw_le
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
@@ -154,7 +150,6 @@ pub proc find_word
                 assert.err="lowerbound_array invariant: *maybe_value_ptr must be greater than VALUE"
 
                 # dereference `maybe_value_ptr-4` (12 cycles)
-                # masm-lint: allow unconstrained-advice -- bounds and the loaded value are checked.
                 padw dup.8 sub.4 u32assert.err="maybe_value_ptr-4 is not u32" mem_loadw_le
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
