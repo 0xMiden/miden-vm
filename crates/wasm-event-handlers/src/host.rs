@@ -124,6 +124,7 @@ unsafe impl Sync for StatePtr {}
 /// The per-call store data: the processor state, the buffered mutations, the mutation budget,
 /// the recorded `fail` message, and the resource limits.
 pub(crate) struct HostCtx {
+    /// The processor state for this call; see [`StatePtr`] for the unsafe contract.
     state: StatePtr,
     /// The mutations the handler buffered so far. Returned to the processor only when the
     /// handler returns without a trap.
@@ -226,6 +227,8 @@ fn byte_range(
 fn read_felts(data: &[u8], ptr: u32, count: u32) -> Result<Vec<Felt>, wasmi::Error> {
     let range = byte_range(data.len(), ptr, FELT_BYTES, count)?;
     let mut out = Vec::with_capacity(count as usize);
+    // The discarded `as_chunks` remainder is empty: `byte_range` sized the range as an exact
+    // multiple of the chunk size.
     for chunk in data[range].as_chunks::<FELT_BYTES>().0 {
         let raw = u64::from_le_bytes(*chunk);
         if raw >= FIELD_MODULUS {
@@ -253,6 +256,8 @@ fn read_word(data: &[u8], ptr: u32) -> Result<Word, wasmi::Error> {
 /// Writes field elements into guest memory in canonical little-endian form.
 fn write_felts(data: &mut [u8], ptr: u32, felts: &[Felt]) -> Result<(), wasmi::Error> {
     let range = byte_range(data.len(), ptr, FELT_BYTES, felts.len() as u32)?;
+    // The discarded `as_chunks_mut` remainder is empty: `byte_range` sized the range as an
+    // exact multiple of the chunk size.
     for (chunk, felt) in data[range].as_chunks_mut::<FELT_BYTES>().0.iter_mut().zip(felts) {
         *chunk = felt.as_canonical_u64().to_le_bytes();
     }
@@ -399,6 +404,8 @@ fn mem_read_range(
     let ctx = ctx.unwrap_or_else(|| state.ctx());
     let mut felts = Vec::with_capacity(count as usize);
     for idx in 0..count {
+        // `addr + idx` cannot wrap: the `addr + count` guard above keeps the whole range
+        // inside the u32 address space.
         match state.get_mem_value(ctx, addr + idx) {
             Some(felt) => felts.push(felt),
             // The whole range must be written; use `mem_get` for per-cell checks.
@@ -598,6 +605,8 @@ fn poseidon2_merge(
 ) -> Result<(), wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_POSEIDON2_PERM + 12 * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
+    // Validate the output pointer before the hash; see `mem_get`.
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let felts = read_felts(mem.data(&caller), pair, 8)?;
     let word = |at: usize| Word::new([felts[at], felts[at + 1], felts[at + 2], felts[at + 3]]);
     let pair = [word(0), word(4)];
@@ -616,13 +625,17 @@ fn poseidon2_hash(
     domain: u64,
     out: u32,
 ) -> Result<(), wasmi::Error> {
-    // The sponge absorbs eight elements per permutation, and always runs a final one.
+    // The sponge absorbs eight elements per permutation. The `+ 1` makes the formula a
+    // deliberate upper bound: for a nonzero multiple of eight, and for empty input, the
+    // sponge runs one permutation fewer than charged.
     let permutations = u64::from(count) / 8 + 1;
     let fuel = HOST_CALL_BASE_FUEL
         + FUEL_PER_POSEIDON2_PERM * permutations
         + u64::from(count) * FUEL_PER_FELT;
     charge_fuel(&mut caller, fuel)?;
     let mem = memory(&mut caller)?;
+    // Validate the output pointer before the hash; see `mem_get`.
+    byte_range(mem.data(&caller).len(), out, FELT_BYTES, 4)?;
     let felts = read_felts(mem.data(&caller), elems, count)?;
     // A hash in domain zero is the plain hash: the domain goes into a capacity element that is
     // already zero, and the empty-input marker fires only for a nonzero domain.
@@ -655,6 +668,8 @@ fn hash_bytes<const N: usize>(
         HOST_CALL_BASE_FUEL + HASH_BASE_FUEL + u64::from(len) * fuel_per_byte,
     )?;
     let mem = memory(&mut caller)?;
+    // Validate the output pointer before the hash; see `mem_get`.
+    byte_range(mem.data(&caller).len(), out, 1, N as u32)?;
     let range = byte_range(mem.data(&caller).len(), data, 1, len)?;
     let digest = hash(&mem.data(&caller)[range]);
     write_bytes(mem.data_mut(&mut caller), out, &digest)
@@ -758,6 +773,8 @@ fn merkle_store_extend(
     let felt_count = u32::try_from(felt_count).map_err(|_| trap("merkle node count overflows"))?;
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), nodes, felt_count)?;
+    // The discarded `as_chunks` remainder is empty: `read_felts` returned exactly
+    // `len * MERKLE_NODE_FELTS` elements.
     let nodes: Vec<InnerNodeInfo> = felts
         .as_chunks::<MERKLE_NODE_FELTS>()
         .0
