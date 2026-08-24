@@ -68,7 +68,7 @@
 
 #### Fixes
 
-- Constrained advice-derived sorted-array pointers before u32 arithmetic and memory access, and corrected the `sys::drop_stack_top` MASM signature.
+- Added u32 checks before sorted array pointers from advice are used in arithmetic or memory access, and corrected the `sys::drop_stack_top` MASM signature ([#3711](https://github.com/0xMiden/miden-vm/pull/3711)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
