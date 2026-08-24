@@ -226,8 +226,8 @@ fn byte_range(
 fn read_felts(data: &[u8], ptr: u32, count: u32) -> Result<Vec<Felt>, wasmi::Error> {
     let range = byte_range(data.len(), ptr, FELT_BYTES, count)?;
     let mut out = Vec::with_capacity(count as usize);
-    for chunk in data[range].chunks_exact(FELT_BYTES) {
-        let raw = u64::from_le_bytes(chunk.try_into().expect("chunk is 8 bytes"));
+    for chunk in data[range].as_chunks::<FELT_BYTES>().0 {
+        let raw = u64::from_le_bytes(*chunk);
         if raw >= FIELD_MODULUS {
             return Err(trap(format!("non-canonical field element {raw}")));
         }
@@ -253,8 +253,8 @@ fn read_word(data: &[u8], ptr: u32) -> Result<Word, wasmi::Error> {
 /// Writes field elements into guest memory in canonical little-endian form.
 fn write_felts(data: &mut [u8], ptr: u32, felts: &[Felt]) -> Result<(), wasmi::Error> {
     let range = byte_range(data.len(), ptr, FELT_BYTES, felts.len() as u32)?;
-    for (chunk, felt) in data[range].chunks_exact_mut(FELT_BYTES).zip(felts) {
-        chunk.copy_from_slice(&felt.as_canonical_u64().to_le_bytes());
+    for (chunk, felt) in data[range].as_chunks_mut::<FELT_BYTES>().0.iter_mut().zip(felts) {
+        *chunk = felt.as_canonical_u64().to_le_bytes();
     }
     Ok(())
 }
@@ -759,7 +759,9 @@ fn merkle_store_extend(
     let mem = memory(&mut caller)?;
     let felts = read_felts(mem.data(&caller), nodes, felt_count)?;
     let nodes: Vec<InnerNodeInfo> = felts
-        .chunks_exact(MERKLE_NODE_FELTS)
+        .as_chunks::<MERKLE_NODE_FELTS>()
+        .0
+        .iter()
         .map(|chunk| {
             let word =
                 |at: usize| Word::new([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]]);

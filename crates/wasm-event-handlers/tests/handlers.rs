@@ -173,11 +173,10 @@ fn digest_to_advice_stack(digest: u32, felts: u32, bytes: u32) -> String {
 /// Splits digest bytes into the little-endian `u32` limbs [`digest_to_advice_stack`] produces.
 fn digest_limbs(bytes: &[u8]) -> Vec<Felt> {
     bytes
-        .chunks_exact(4)
-        .map(|chunk| {
-            let limb = u32::from_le_bytes(chunk.try_into().expect("chunk is 4 bytes"));
-            Felt::new_unchecked(u64::from(limb))
-        })
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| Felt::new_unchecked(u64::from(u32::from_le_bytes(*chunk))))
         .collect()
 }
 
