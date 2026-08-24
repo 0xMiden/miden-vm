@@ -29,7 +29,9 @@ pub enum Component {
     /// System + decoder + stack.
     Core,
     Hasher,
-    Bitwise,
+    /// Total chiplets trace. The bitwise snippet is the adjustable filler for this hard bracket.
+    Chiplets,
+    /// Advisory memory composition.
     Memory,
     /// Range checker. The solver sizes the `u32arith` snippet against it so the synthetic's range
     /// workload is representative.
@@ -65,7 +67,7 @@ pub const SNIPPETS: &[Snippet] = &[
         setup: "push.1 neg",
         body: "u32split u32xor",
         cleanup: "drop",
-        dominant: Component::Bitwise,
+        dominant: Component::Chiplets,
     },
     Snippet {
         name: "u32arith",
@@ -176,7 +178,7 @@ mod tests {
         let targets = [
             Component::Core,
             Component::Hasher,
-            Component::Bitwise,
+            Component::Chiplets,
             Component::Memory,
             Component::Range,
         ];

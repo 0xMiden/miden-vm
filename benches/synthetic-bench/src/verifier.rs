@@ -3,10 +3,8 @@
 //! Hard checks:
 //! - `padded_core_side(actual) == padded_core_side(target)`: `next_pow2(max(core_rows,
 //!   range_rows))`
-//! - `padded_chiplets(actual) == padded_chiplets(target)` when the snapshot contains a per-AIR
-//!   Poseidon2 target.
-//! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)` when the
-//!   snapshot contains a per-AIR Poseidon2 target.
+//! - `padded_chiplets(actual) == padded_chiplets(target)`.
+//! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)`.
 //! - `padded_total(actual) == padded_total(target)`
 //!
 //! Soft reporting:
@@ -53,17 +51,6 @@ pub struct ComponentDelta {
 
 impl VerificationReport {
     pub fn new(target: TraceShape, actual: TraceShape) -> Self {
-        let has_poseidon2_target = target.totals.has_poseidon2_permutation_target();
-        let chiplets_status = if has_poseidon2_target {
-            DeltaStatus::Enforced
-        } else {
-            DeltaStatus::Informational
-        };
-        let poseidon2_status = if has_poseidon2_target {
-            DeltaStatus::Enforced
-        } else {
-            DeltaStatus::Informational
-        };
         let total_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
                 "core_rows",
@@ -75,13 +62,13 @@ impl VerificationReport {
                 "chiplets_rows",
                 target.totals.chiplets_rows,
                 actual.totals.chiplets_rows,
-                chiplets_status,
+                DeltaStatus::Enforced,
             ),
             (
                 "poseidon2_rows",
                 target.totals.poseidon2_permutation_rows,
                 actual.totals.poseidon2_permutation_rows,
-                poseidon2_status,
+                DeltaStatus::Enforced,
             ),
             (
                 // range_rows is derived, not independently driven.
@@ -119,18 +106,12 @@ impl VerificationReport {
         }
     }
 
-    /// True when all available padded proxies match their targets exactly.
+    /// True when all padded proxies match their targets exactly.
     pub fn brackets_match(&self) -> bool {
-        let has_poseidon2_target = self.target.totals.has_poseidon2_permutation_target();
-        let chiplets_matches = !has_poseidon2_target
-            || self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets();
-        let poseidon2_matches = !has_poseidon2_target
-            || self.target.totals.padded_poseidon2_permutation()
-                == self.actual.totals.padded_poseidon2_permutation();
-
         self.target.totals.padded_core_side() == self.actual.totals.padded_core_side()
-            && chiplets_matches
-            && poseidon2_matches
+            && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
+            && self.target.totals.padded_poseidon2_permutation()
+                == self.actual.totals.padded_poseidon2_permutation()
             && self.target.totals.padded_total() == self.actual.totals.padded_total()
     }
 
@@ -166,20 +147,18 @@ impl Display for VerificationReport {
             self.target.totals.padded_core_side(),
             self.actual.totals.padded_core_side(),
         )?;
-        if self.target.totals.has_poseidon2_permutation_target() {
-            write_bracket_row(
-                f,
-                "padded_chiplets",
-                self.target.totals.padded_chiplets(),
-                self.actual.totals.padded_chiplets(),
-            )?;
-            write_bracket_row(
-                f,
-                "padded_poseidon2",
-                self.target.totals.padded_poseidon2_permutation(),
-                self.actual.totals.padded_poseidon2_permutation(),
-            )?;
-        }
+        write_bracket_row(
+            f,
+            "padded_chiplets",
+            self.target.totals.padded_chiplets(),
+            self.actual.totals.padded_chiplets(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_poseidon2",
+            self.target.totals.padded_poseidon2_permutation(),
+            self.actual.totals.padded_poseidon2_permutation(),
+        )?;
         write_bracket_row(
             f,
             "padded_total",
@@ -322,75 +301,6 @@ mod tests {
             actual.totals.padded_poseidon2_permutation()
         );
         assert!(!r.brackets_match());
-    }
-
-    #[test]
-    fn missing_poseidon2_target_uses_chiplet_hasher_rows() {
-        let breakdown = TraceBreakdown {
-            hasher_rows: 8000,
-            bitwise_rows: 0,
-            memory_rows: 1000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let target = TraceShape::new(
-            TraceTotals {
-                core_rows: 40000,
-                chiplets_rows: breakdown.chiplets_sum(),
-                poseidon2_permutation_rows: 0,
-                range_rows: 0,
-            },
-            breakdown,
-        );
-        let actual = shape(40000, 8000, 1000);
-        let r = VerificationReport::new(target, actual);
-
-        assert!(r.brackets_match());
-    }
-
-    #[test]
-    fn chiplets_bracket_miss_is_info_without_poseidon2_target() {
-        let target_breakdown = TraceBreakdown {
-            hasher_rows: 16_000,
-            bitwise_rows: 0,
-            memory_rows: 16_000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let actual_breakdown = TraceBreakdown {
-            hasher_rows: 32_000,
-            bitwise_rows: 0,
-            memory_rows: 32_000,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let target = TraceShape::new(
-            TraceTotals {
-                core_rows: 100_000,
-                chiplets_rows: target_breakdown.chiplets_sum(),
-                poseidon2_permutation_rows: 0,
-                range_rows: 0,
-            },
-            target_breakdown,
-        );
-        let actual = TraceShape::new(
-            TraceTotals {
-                core_rows: 100_000,
-                chiplets_rows: actual_breakdown.chiplets_sum(),
-                poseidon2_permutation_rows: 0,
-                range_rows: 0,
-            },
-            actual_breakdown,
-        );
-        let r = VerificationReport::new(target, actual);
-
-        assert_eq!(target.totals.padded_core_side(), actual.totals.padded_core_side());
-        assert_eq!(target.totals.padded_total(), actual.totals.padded_total());
-        assert_ne!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
-        assert!(r.brackets_match());
-
-        let chiplets_delta = r.total_deltas.iter().find(|d| d.name == "chiplets_rows").unwrap();
-        assert_eq!(chiplets_delta.status, DeltaStatus::Informational);
     }
 
     #[test]
