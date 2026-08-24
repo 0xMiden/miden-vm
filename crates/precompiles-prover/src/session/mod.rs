@@ -392,7 +392,7 @@ impl Session {
             );
         }
 
-        let value = self.eval.record_ec_msm(
+        let (value, is_new) = self.eval.record_ec_msm(
             expr.addr(),
             group.addr(),
             val,
@@ -400,7 +400,9 @@ impl Session {
             terms,
             &mut self.p2,
         );
-        self.msm.consume_claim(expr, 1);
+        if is_new {
+            self.msm.consume_claim(expr, 1);
+        }
         value
     }
 

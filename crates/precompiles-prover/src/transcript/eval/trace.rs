@@ -280,12 +280,12 @@ enum UintKey {
 /// `group_ptr` + coord hashes (the group rides the cap not the children, so
 /// identical coords on distinct groups stay distinct; ∞ uses the zero coord
 /// hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim by its
-/// `expr_ptr` (one node per expression; its hash chains the whole term run).
+/// `(expr_ptr, claim hash)` (one node per structural claim; its hash chains the whole term run).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EcKey {
     Create(u32, P2Digest, P2Digest),
     Op(EcOpId, P2Digest, P2Digest),
-    Msm(u32),
+    Msm(u32, P2Digest),
 }
 
 /// `*Requires`-pattern accumulator for the eval chip, built from explicit
@@ -752,8 +752,8 @@ impl TranscriptEvalRequires {
     /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
-    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `expr`. Returns
-    /// the value's shared-use [`EcNode`].
+    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)`. Returns the value's
+    /// shared-use [`EcNode`] and whether a new eval row was recorded.
     pub fn record_ec_msm(
         &mut self,
         expr: u32,
@@ -762,10 +762,7 @@ impl TranscriptEvalRequires {
         bound: u32,
         terms: &[(EcNode, UintNode)],
         p2: &mut Poseidon2Requires,
-    ) -> EcNode {
-        if let Some(&node) = self.ec_dedup.get(&EcKey::Msm(expr)) {
-            return node;
-        }
+    ) -> (EcNode, bool) {
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
         let blocks: Vec<_> = terms
             .iter()
@@ -780,9 +777,15 @@ impl TranscriptEvalRequires {
             .collect();
 
         let initial_cap = P2Cap::ec_msm_iv();
+        let h_claim = Poseidon2Requires::digest_of(initial_cap, &blocks);
+        let key = EcKey::Msm(expr, h_claim);
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return (node, false);
+        }
+
         let absorption = p2.require_absorption(initial_cap, blocks.iter().copied());
         let _ = p2.require_digest(absorption.digest);
-        let h_claim = absorption.digest;
+        debug_assert_eq!(absorption.digest, h_claim);
 
         let mut absorbs = Vec::with_capacity(terms.len());
         let mut cap = initial_cap.as_array();
@@ -824,8 +827,8 @@ impl TranscriptEvalRequires {
         });
         self.node_consumers.insert(id, 0);
         let node = EcNode { id, hash: h_claim, point: val };
-        self.ec_dedup.insert(EcKey::Msm(expr), node);
-        node
+        self.ec_dedup.insert(key, node);
+        (node, true)
     }
 
     fn consume_ec(&mut self, node: &EcNode) {
