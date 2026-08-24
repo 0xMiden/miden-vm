@@ -87,11 +87,6 @@ pub fn prover_peak_bytes(heights: &[usize; MIDEN_AIR_COUNT], params: &PcsParams)
         .map(|scaled| scaled.div_ceil(SAFETY_DENOMINATOR))
 }
 
-/// The largest uniform per-AIR height whose [`prover_peak_bytes`] fits in `budget_bytes`.
-pub fn max_uniform_height_for_budget(budget_bytes: u64, params: &PcsParams) -> usize {
-    max_height_for_budget(budget_bytes, params, |n| [n; MIDEN_AIR_COUNT])
-}
-
 /// The largest single-AIR height that can fit in `budget_bytes`, derived from the cheapest AIR
 /// (every other height held at zero). Permissive: never rejects a shape [`prover_peak_bytes`]
 /// would accept.
@@ -175,12 +170,23 @@ mod tests {
     }
 
     #[test]
-    fn max_uniform_height_round_trips_through_prover_peak_bytes() {
+    fn max_any_height_round_trips_through_the_cheapest_air() {
         let params = pcs_params();
+        // The cheapest AIR is whichever produces the smallest `prover_peak_bytes` at height 1;
+        // placing all budget on it is exactly what `max_any_height_for_budget` searches for.
+        let cheapest = (0..MIDEN_AIR_COUNT)
+            .min_by_key(|&i| {
+                let mut heights = [0usize; MIDEN_AIR_COUNT];
+                heights[i] = 1;
+                prover_peak_bytes(&heights, &params).expect("fits in u64")
+            })
+            .expect("MIDEN_AIR_COUNT is non-zero");
         for n in [0usize, 1, 7, 100, 1 << 10, 1 << 20] {
-            let budget = prover_peak_bytes(&[n; MIDEN_AIR_COUNT], &params).expect("fits in u64");
+            let mut heights = [0usize; MIDEN_AIR_COUNT];
+            heights[cheapest] = n;
+            let budget = prover_peak_bytes(&heights, &params).expect("fits in u64");
             assert_eq!(
-                max_uniform_height_for_budget(budget, &params),
+                max_any_height_for_budget(budget, &params),
                 n,
                 "round trip failed for n = {n}"
             );
@@ -188,15 +194,14 @@ mod tests {
     }
 
     #[test]
-    fn max_any_height_is_at_least_as_permissive_as_max_uniform_height() {
+    fn max_any_height_for_budget_never_rejects_a_uniform_shape_that_fits() {
         let params = pcs_params();
-        for budget in [0u64, 1 << 20, 1 << 30, 1 << 34] {
-            let uniform = max_uniform_height_for_budget(budget, &params);
+        for n in [0usize, 1, 7, 100, 1 << 10, 1 << 20] {
+            let budget = prover_peak_bytes(&[n; MIDEN_AIR_COUNT], &params).expect("fits in u64");
             let any = max_any_height_for_budget(budget, &params);
             assert!(
-                any >= uniform,
-                "max_any_height_for_budget({budget}) = {any} is more restrictive than \
-                 max_uniform_height_for_budget = {uniform}"
+                any >= n,
+                "max_any_height_for_budget({budget}) = {any} rejects uniform height {n}"
             );
         }
     }

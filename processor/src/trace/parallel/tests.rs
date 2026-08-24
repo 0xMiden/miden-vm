@@ -1112,6 +1112,24 @@ fn chiplet_preflight_caps_combined_trace_len() {
     );
 }
 
+/// Verifies that `validate_heights_within_max_trace_len` rejects any padded per-AIR height above
+/// `MAX_TRACE_LEN`, independent of the memory budget: a large budget can keep the controller
+/// height (2 rows per unique Poseidon2 permutation) under `MAX_TRACE_LEN` while the Poseidon2
+/// permutation AIR (16 rows per unique permutation) exceeds it.
+#[test]
+fn validate_heights_within_max_trace_len_rejects_any_height_over_the_cap() {
+    let heights = [MIN_TRACE_LEN, MIN_TRACE_LEN, MAX_TRACE_LEN + 1];
+    assert!(
+        matches!(
+            validate_heights_within_max_trace_len(&heights),
+            Err(ExecutionError::TraceLenExceeded(limit)) if limit == MAX_TRACE_LEN
+        ),
+        "expected TraceLenExceeded({MAX_TRACE_LEN}), got: {:?}",
+        validate_heights_within_max_trace_len(&heights)
+    );
+    assert!(validate_heights_within_max_trace_len(&[MIN_TRACE_LEN; MIDEN_AIR_COUNT]).is_ok());
+}
+
 /// Tests `build_trace_with_budget` behavior at the exact byte-budget boundary computed from the
 /// actual padded per-AIR heights of a small program.
 #[rstest]
@@ -1146,13 +1164,7 @@ fn test_build_trace_with_budget_corner_cases(
     let measured = build_trace(build_witness()).expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
-    let heights: [usize; MIDEN_AIR_COUNT] = [
-        pad_to_trace_length(summary.core_trace_len().max(summary.range_trace_len())),
-        pad_to_trace_length(summary.chiplets_trace_len().trace_len()),
-        pad_to_trace_length(summary.poseidon2_permutation_trace_len()),
-    ];
-    let exact_peak =
-        memory::prover_peak_bytes(&heights, &pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
     let budget = exact_peak.checked_add_signed(budget_offset_from_exact_peak).unwrap();
 
     let result = build_trace_with_budget(build_witness(), budget);
@@ -1177,6 +1189,48 @@ fn test_build_trace_with_budget_corner_cases(
              got: {result:?}"
         );
     }
+}
+
+/// Regression test for a tier-1 over-rejection: the raw core-trace buffer allocated by
+/// `generate_core_trace_row_major` (`core_trace_contexts.len() * fragment_size` rows at its
+/// unblown-up 1x size) used to be checked against a cap derived from the *full* proving-pipeline
+/// model (`memory::max_any_height_for_budget`, which additionally prices in blowup, quotient, and
+/// Merkle-tree overhead this buffer hasn't incurred yet). At the default (unshrunk) core trace
+/// fragment size, that rejected small programs under budgets that comfortably cover their real,
+/// much smaller padded heights.
+#[test]
+fn test_build_trace_with_budget_accepts_small_program_at_default_fragment_size() {
+    fn build_witness() -> VmWitness {
+        let program = basic_block_program_small();
+        let processor = FastProcessor::new_with_options(
+            StackInputs::new(DEFAULT_STACK).unwrap(),
+            AdviceInputs::default(),
+            ExecutionOptions::default(),
+        )
+        .expect("processor advice inputs should fit advice map limits");
+        let mut host = DefaultHost::default();
+        processor.execute_for_proving_sync(&program, &mut host).unwrap().into_parts().0
+    }
+
+    // Measure the exact modelled peak for the program's real (small) padded heights under the
+    // default (generous) budget.
+    let measured = build_trace(build_witness()).expect("default budget must succeed");
+    let summary = measured.trace_len_summary();
+    let pcs_params = config::pcs_params();
+    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
+
+    // A budget well above the exact peak, but that the buggy tier-1 cap (`max_any_height_for_
+    // budget`, which divides the budget by the full proving pipeline's per-row cost) still shrinks
+    // below the default fragment size, so this only passes once tier 1 prices the raw core buffer
+    // at its own (unblown-up) per-row cost instead.
+    let budget = exact_peak * 3;
+
+    let result = build_trace_with_budget(build_witness(), budget);
+    assert!(
+        result.is_ok(),
+        "expected build_trace_with_budget to succeed at budget={budget} (exact peak={exact_peak}) \
+         with the default core trace fragment size, got: {result:?}"
+    );
 }
 
 /// Verifies that `build_trace_with_budget` returns `TraceLenExceeded` (instead of panicking due
@@ -1254,11 +1308,7 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
     let measured = build_trace(measuring_witness).expect("default budget must succeed");
     let summary = measured.trace_len_summary();
     let pcs_params = config::pcs_params();
-    let heights: [usize; MIDEN_AIR_COUNT] = [
-        pad_to_trace_length(summary.core_trace_len().max(summary.range_trace_len())),
-        pad_to_trace_length(summary.chiplets_trace_len().trace_len()),
-        pad_to_trace_length(summary.poseidon2_permutation_trace_len()),
-    ];
+    let heights = *summary.padded_heights().expect("build_trace records padded heights");
     assert!(
         heights[MidenAir::Poseidon2Permutation.instance_index()]
             > heights[MidenAir::Core.instance_index()]
@@ -1266,8 +1316,7 @@ fn test_build_trace_returns_err_when_poseidon2_trace_exceeds_budget() {
                 > heights[MidenAir::Chiplets.instance_index()],
         "test setup must make the Poseidon2 AIR the dominant height: {heights:?}"
     );
-    let exact_peak =
-        memory::prover_peak_bytes(&heights, &pcs_params).expect("modelled peak fits in u64");
+    let exact_peak = summary.prover_memory_bytes(&pcs_params).expect("modelled peak fits in u64");
 
     let mut vm_witness = build_witness(&program, stack_inputs);
     inject_extra_permutations(&mut vm_witness);

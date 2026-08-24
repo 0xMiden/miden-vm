@@ -54,9 +54,10 @@ pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH + RANGE_CHECK_TRACE_WIDTH
 /// `build_trace()` uses this as a hard cap on trace rows, independent of the memory budget.
 ///
 /// The code checks `core_trace_contexts.len() * fragment_size` before allocation. It checks the
-/// same cap again while replaying chiplet activity. Row indices are `u32`-backed, so this bound
-/// must hold regardless of budget; the actual memory bound is the tiered check in
-/// `build_trace_inner` (see [`memory::max_any_height_for_budget`] and
+/// same cap again while replaying chiplet activity, and once more against each padded per-AIR
+/// height once they're known (see [`validate_heights_within_max_trace_len`]). Row indices are
+/// `u32`-backed, so this bound must hold regardless of budget; the actual memory bound is the
+/// tiered check in `build_trace_inner` (see [`memory::max_any_height_for_budget`] and
 /// [`memory::prover_peak_bytes`]).
 pub(crate) const MAX_TRACE_LEN: usize = 1 << 29;
 
@@ -153,19 +154,24 @@ fn build_trace_inner(
     let max_trace_len =
         MAX_TRACE_LEN.min(memory::max_any_height_for_budget(max_prover_memory_bytes, &pcs_params));
 
-    // Before any trace generation, check that the number of core trace rows doesn't exceed the
-    // maximum trace length. This is a necessary check to avoid OOM panics during trace generation,
-    // which can occur if the execution produces an extremely large number of steps.
+    // Before any trace generation, check that the core trace buffer `generate_core_trace_row_major`
+    // is about to allocate (`core_trace_contexts.len() * fragment_size` rows, before any padding or
+    // proving-time blowup) doesn't itself exceed the byte budget. This is deliberately a separate,
+    // more permissive cap than `max_trace_len`: that one prices in the full proving pipeline
+    // (blowup, quotient, Merkle trees) that this raw buffer hasn't incurred yet, so reusing it here
+    // would reject buffer allocations the exact budget check below would happily accept once the
+    // real (usually much smaller) padded core height is known.
     //
     // Note that we add 1 to the total core trace rows to account for the additional HALT opcode row
     // that is pushed at the end of the last fragment.
+    let max_core_alloc_len = MAX_TRACE_LEN.min(max_core_alloc_rows(max_prover_memory_bytes));
     let total_core_trace_rows = core_trace_contexts
         .len()
         .checked_mul(fragment_size)
         .and_then(|n| n.checked_add(1))
-        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
-    if total_core_trace_rows > max_trace_len {
-        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+        .ok_or(ExecutionError::TraceLenExceeded(max_core_alloc_len))?;
+    if total_core_trace_rows > max_core_alloc_len {
+        return Err(ExecutionError::TraceLenExceeded(max_core_alloc_len));
     }
 
     if core_trace_contexts.is_empty() {
@@ -219,6 +225,7 @@ fn build_trace_inner(
     );
     let heights: [usize; MIDEN_AIR_COUNT] =
         [core_height, chiplets_height, poseidon2_permutation_height];
+    validate_heights_within_max_trace_len(&heights)?;
     let estimated_bytes = memory::prover_peak_bytes(&heights, &pcs_params).ok_or(
         ExecutionError::ProverMemoryExceeded {
             estimated_bytes: u64::MAX,
@@ -288,6 +295,29 @@ fn build_trace_inner(
 /// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
 fn pad_to_trace_length(logical_len: usize) -> usize {
     logical_len.next_power_of_two().max(MIN_TRACE_LEN)
+}
+
+/// The largest number of core-trace rows that may be allocated for
+/// `generate_core_trace_row_major`'s raw buffer while staying within `max_prover_memory_bytes`.
+///
+/// The buffer is `rows * CORE_STORAGE_WIDTH` [`Felt`]s at its 1x size, with no blowup, quotient, or
+/// Merkle-tree overhead yet, so this is priced directly off the buffer's own byte size rather than
+/// through [`memory::max_any_height_for_budget`]'s full-pipeline model.
+fn max_core_alloc_rows(max_prover_memory_bytes: u64) -> usize {
+    let bytes_per_row = (CORE_STORAGE_WIDTH * size_of::<Felt>()) as u64;
+    usize::try_from(max_prover_memory_bytes / bytes_per_row).unwrap_or(usize::MAX)
+}
+
+/// Rejects any padded per-AIR height above the hard [`MAX_TRACE_LEN`] row cap, independent of the
+/// memory budget: row indices are `u32`-backed, so a height must stay well under `2^32` regardless
+/// of how permissive the budget is.
+fn validate_heights_within_max_trace_len(
+    heights: &[usize; MIDEN_AIR_COUNT],
+) -> Result<(), ExecutionError> {
+    if heights.iter().any(|&height| height > MAX_TRACE_LEN) {
+        return Err(ExecutionError::TraceLenExceeded(MAX_TRACE_LEN));
+    }
+    Ok(())
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.

@@ -35,7 +35,11 @@ pub struct ProveCmd {
     max_cycles: u32,
 
     /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
-    #[arg(long = "max-prover-memory", default_value = "64Gi", value_parser = parse_byte_size)]
+    #[arg(
+        long = "max-prover-memory",
+        default_value_t = ExecutionOptions::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+        value_parser = parse_byte_size
+    )]
     max_prover_memory: u64,
 
     /// Number of outputs
