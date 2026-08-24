@@ -8369,7 +8369,7 @@ fn field_operation_cycle_costs_match_docs() {
         ("neg", 1),
         ("inv", 1),
         ("pow2", 16),
-        ("exp", 73),
+        ("exp", 72),
         ("exp.u8", 17),
         ("exp.u16", 25),
         ("exp.u32", 41),
@@ -8453,4 +8453,50 @@ fn field_operation_cycle_costs_match_docs() {
         "field_operations.md is out of date:\n{}",
         mismatches.join("\n")
     );
+}
+
+#[test]
+fn bare_exp_lowers_to_63_expacc_rows() -> Result<(), Report> {
+    let context = TestContext::default();
+    let program = Assembler::new(context.source_manager())
+        .assemble_program("p", "begin push.5 push.3 exp drop end")?
+        .unwrap_program();
+    let ops: Vec<Operation> = program.mast_forest()[program.entrypoint()]
+        .unwrap_basic_block()
+        .operations()
+        .copied()
+        .collect();
+
+    let start = ops.iter().position(|op| matches!(op, Operation::Expacc)).unwrap();
+    assert_eq!(ops.iter().filter(|op| matches!(op, Operation::Expacc)).count(), 63);
+
+    let end = start + 63;
+    assert_matches!(ops.get(end), Some(Operation::Drop));
+    assert_matches!(ops.get(end + 1), Some(Operation::Drop));
+    assert_matches!(ops.get(end + 2), Some(Operation::Swap));
+    assert_matches!(ops.get(end + 3), Some(Operation::Eqz));
+    assert_matches!(ops.get(end + 4), Some(Operation::Assert(_)));
+
+    Ok(())
+}
+
+#[test]
+fn exp_imm_uses_exact_exponent_bit_length() -> Result<(), Report> {
+    let context = TestContext::default();
+
+    for pow in [(1_u64 << 63) - 1, 1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let source = format!("begin push.3 exp.{pow} drop end");
+        let program = Assembler::new(context.source_manager())
+            .assemble_program("p", source.as_str())?
+            .unwrap_program();
+        let num_expacc = program.mast_forest()[program.entrypoint()]
+            .unwrap_basic_block()
+            .operations()
+            .filter(|op| matches!(op, Operation::Expacc))
+            .count();
+
+        assert_eq!(num_expacc, pow.ilog2() as usize + 1, "unexpected row count for pow = {pow}");
+    }
+
+    Ok(())
 }

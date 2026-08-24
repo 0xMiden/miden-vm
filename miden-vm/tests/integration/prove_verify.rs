@@ -7,7 +7,9 @@ use miden_core::{
     Felt, program::ExecutionClaim, proof::ExecutionProof, utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::CoreLibrary;
-use miden_utils_testing::{recursive_verifier::generate_request_inputs, stack_inputs_from_ints};
+use miden_utils_testing::{
+    PrimeField64, recursive_verifier::generate_request_inputs, stack_inputs_from_ints,
+};
 use miden_vm::{
     DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
     StackOutputs, Verifier, advice::AdviceInputs,
@@ -132,6 +134,20 @@ fn test_u32div_prove_verify() {
         end
     ";
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+}
+
+#[test]
+fn test_exp_lowerings_prove_verify() {
+    let exponent = Felt::ORDER_U64 - 1;
+    let source = format!(
+        "
+        begin
+            push.3 push.5 exp eq.243 assert
+            push.3 exp.{exponent} eq.1 assert
+        end
+    "
+    );
+    assert_prove_verify(&source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
 #[test]

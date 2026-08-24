@@ -65,6 +65,7 @@
 #### Fixes
 
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
+- [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though

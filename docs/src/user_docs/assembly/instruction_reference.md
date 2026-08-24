@@ -44,8 +44,9 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `neg`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = -a \bmod p$                                                               |
 | `inv`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = a^{-1} \bmod p$. Fails if $a = 0$.                                        |
 | `pow2`                   | `[a, ...]`    | `[b, ...]`   | 16                    | $b = 2^a$. Fails if $a > 63$.                                                  |
-| `exp.uxx` <br /> `exp.b` | `[b, a, ...]` | `[c, ...]`   | 9+xx <br /> 9+log2(b) | $c = a^b$. Fails if $xx$ is outside $[0, 63)$. `exp` is `exp.u64` (73 cycles). |
-| `ilog2`                  | `[a, ...]`    | `[b, ...]`   | 66                    | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                             |
+| `exp` <br /> `exp.uxx`   | `[b, a, ...]` | `[c, ...]`   | 72 <br /> 9+xx        | $c = a^b$. `exp` is `exp.u63` and fails if $b \ge 2^{63}$. `exp.uxx` requires $xx \in [0, 63]$ and fails if $b \ge 2^{xx}$. |
+| `exp.b`                  | `[a, ...]`    | `[c, ...]`   | See notes             | $c = a^b$, with $b \in [0, p)$. Costs 3, 1, 2, 4, 6, 8, 10, or 12 cycles for $b = 0, 1, \ldots, 7$ respectively, and $11 + \lfloor \log_2(b) \rfloor$ cycles for $b > 7$. |
+| `ilog2`                  | `[a, ...]`    | `[b, ...]`   | 70                    | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                             |
 | `not`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = 1 - a$. Fails if $a > 1$.                                                 |
 | `and`                    | `[b, a, ...]` | `[c, ...]`   | 1                     | $c = a \cdot b$. Fails if $\max(a, b) > 1$.                                    |
 | `or`                     | `[b, a, ...]` | `[c, ...]`   | 1                     | $c = a + b - a \cdot b$. Fails if $\max(a, b) > 1$.                            |

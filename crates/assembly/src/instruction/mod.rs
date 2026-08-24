@@ -124,11 +124,11 @@ impl Assembler {
             Instruction::Incr => block_builder.push_op(Incr),
 
             Instruction::Pow2 => field_ops::pow2(block_builder),
-            Instruction::Exp => field_ops::exp(block_builder, proc_ctx, 64_u8, span)?,
-
-            Instruction::ExpImm(pow) => {
-                field_ops::exp_imm(block_builder, proc_ctx, pow.expect_value(), pow.span())?
+            Instruction::Exp => {
+                field_ops::exp(block_builder, proc_ctx, crate::MAX_DYNAMIC_EXP_BITS, span)?
             },
+
+            Instruction::ExpImm(pow) => field_ops::exp_imm(block_builder, pow.expect_value()),
             Instruction::ExpBitLength(num_pow_bits) => {
                 field_ops::exp(block_builder, proc_ctx, *num_pow_bits, span)?
             },
