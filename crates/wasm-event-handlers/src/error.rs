@@ -2,8 +2,6 @@
 
 use alloc::string::String;
 
-use miden_processor::event::EventName;
-
 /// An error raised while loading and validating a Wasm handler module.
 #[derive(Debug, thiserror::Error)]
 pub enum WasmHandlerLoadError {
@@ -90,26 +88,11 @@ pub enum WasmHandlerLoadError {
         reason: String,
     },
 
-    /// The manifest contains the same event more than once.
-    #[error("event '{event}' appears more than once in the handler manifest")]
-    DuplicateEvent {
-        /// The duplicated event name.
-        event: EventName,
-    },
-
-    /// The manifest uses a name in the reserved `sys::` namespace.
-    #[error(
-        "event '{event}' uses the reserved '{namespace}' namespace",
-        namespace = EventName::RESERVED_NAMESPACE
-    )]
-    ReservedEvent {
-        /// The offending event name.
-        event: EventName,
-    },
-
-    /// A manifest entry has an empty event name or an empty export name.
-    #[error("manifest entries must have non-empty event and export names")]
-    EmptyManifestName,
+    /// The manifest breaks a section rule: an empty or over-long name, a duplicate event, or a
+    /// reserved `sys::` event name. The rules live in
+    /// [`validate_manifest_entries`](miden_mast_package::validate_manifest_entries).
+    #[error("invalid handler manifest: {0}")]
+    InvalidManifest(#[source] miden_mast_package::EventHandlerSectionError),
 
     /// The package's `event_handlers` section is malformed.
     #[error("invalid 'event_handlers' package section: {0}")]

@@ -8,6 +8,7 @@ use alloc::{
 };
 
 use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE};
+use miden_mast_package::validate_manifest_entries;
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -101,8 +102,9 @@ impl WasmHandlerModule {
     ///   more than once, or an import has a signature the host function set does not provide;
     /// - the module has a start section;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
-    /// - a manifest entry has an empty event name or an empty export name;
-    /// - the manifest contains a duplicate event or a reserved `sys::` event name.
+    /// - the manifest breaks a section rule (an empty or over-long name, a duplicate event, or a
+    ///   reserved `sys::` event name); the manifest is canonicalized by event name before the
+    ///   check.
     pub fn new(
         wasm: &[u8],
         abi_version: u32,
@@ -127,19 +129,13 @@ impl WasmHandlerModule {
             });
         }
 
-        // Validate the manifest before touching the Wasm binary.
-        let mut seen = BTreeSet::new();
-        for (event, export) in &manifest {
-            if event.as_str().is_empty() || export.is_empty() {
-                return Err(WasmHandlerLoadError::EmptyManifestName);
-            }
-            if event.is_reserved() {
-                return Err(WasmHandlerLoadError::ReservedEvent { event: event.clone() });
-            }
-            if !seen.insert(event.to_event_id()) {
-                return Err(WasmHandlerLoadError::DuplicateEvent { event: event.clone() });
-            }
-        }
+        // Canonicalize the order (which manifest_from_module already guarantees, but this
+        // constructor is public), then validate the manifest against the one rule set of the
+        // package section, before touching the Wasm binary.
+        let mut manifest = manifest;
+        manifest.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        validate_manifest_entries(manifest.iter().map(|(event, export)| (event, export.as_str())))
+            .map_err(WasmHandlerLoadError::InvalidManifest)?;
 
         let mut config = Config::default();
         config.consume_fuel(true);

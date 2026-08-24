@@ -1044,7 +1044,7 @@ fn duplicate_manifest_events_are_rejected() {
     let manifest = vec![(EVENT, "a".to_string()), (EVENT, "b".to_string())];
     let err = try_load("(module)", manifest).unwrap_err();
     assert!(
-        matches!(err, WasmHandlerLoadError::DuplicateEvent { .. }),
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
         "unexpected error: {err}"
     );
 }
@@ -1054,7 +1054,7 @@ fn reserved_event_names_are_rejected() {
     let manifest = vec![(EventName::new("sys::custom"), "handler".to_string())];
     let err = try_load("(module)", manifest).unwrap_err();
     assert!(
-        matches!(err, WasmHandlerLoadError::ReservedEvent { .. }),
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
         "unexpected error: {err}"
     );
 }
@@ -1065,7 +1065,7 @@ fn unknown_reserved_event_names_are_rejected() {
     let manifest = vec![(EventName::new("sys::not_a_real_event"), "handler".to_string())];
     let err = try_load("(module)", manifest).unwrap_err();
     assert!(
-        matches!(err, WasmHandlerLoadError::ReservedEvent { .. }),
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
         "unexpected error: {err}"
     );
 }
@@ -1075,14 +1075,14 @@ fn empty_manifest_names_are_rejected() {
     let empty_event = vec![(EventName::new(""), "handler".to_string())];
     let err = try_load("(module)", empty_event).unwrap_err();
     assert!(
-        matches!(err, WasmHandlerLoadError::EmptyManifestName),
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
         "unexpected error: {err}"
     );
 
     let empty_export = vec![(EVENT, String::new())];
     let err = try_load("(module)", empty_export).unwrap_err();
     assert!(
-        matches!(err, WasmHandlerLoadError::EmptyManifestName),
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
         "unexpected error: {err}"
     );
 }
