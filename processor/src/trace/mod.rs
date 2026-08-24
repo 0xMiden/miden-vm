@@ -104,8 +104,16 @@ impl ExecutionWitness {
     }
 }
 
+/// Current wire format version for [`ExecutionWitness`] serialization.
+///
+/// The version is written as the first byte of every serialized witness. Deserialization only
+/// accepts this exact value, so a future format change only needs to add a new accepted version
+/// and keep the old readers where compatibility matters.
+const EXECUTION_WITNESS_WIRE_VERSION: u8 = 1;
+
 impl Serializable for ExecutionWitness {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        EXECUTION_WITNESS_WIRE_VERSION.write_into(target);
         self.vm.write_into(target);
         match &self.precompile {
             Some(precompile) => {
@@ -119,6 +127,13 @@ impl Serializable for ExecutionWitness {
 
 impl Deserializable for ExecutionWitness {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = u8::read_from(source)?;
+        if version != EXECUTION_WITNESS_WIRE_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported execution witness wire version {version} (expected \
+                 {EXECUTION_WITNESS_WIRE_VERSION})"
+            )));
+        }
         let vm = VmWitness::read_from(source)?;
         let precompile = match source.read_u8()? {
             0 => {
@@ -484,6 +499,22 @@ mod wire_tests {
             .execute_for_proving_sync(&program, &mut host)
             .expect("execution should produce a witness");
         witness.to_bytes()
+    }
+
+    #[test]
+    fn witness_wire_rejects_unsupported_version() {
+        let mut bytes = deferred_witness_bytes();
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
+
+        // The first byte of the wire is the format version; any other value must be rejected
+        // before any payload is parsed.
+        bytes[0] = bytes[0].wrapping_add(1);
+        let err = ExecutionWitness::read_from_bytes(&bytes)
+            .expect_err("witness with an unknown wire version should be rejected");
+        assert!(
+            format!("{err:?}").contains("unsupported execution witness wire version"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

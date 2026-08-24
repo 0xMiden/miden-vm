@@ -314,6 +314,9 @@ impl WireBus {
 // SERIALIZATION
 // ================================================================================================
 
+// QuadFelt, RowIndex, and the other types handled by these helpers are foreign to this crate, so
+// the orphan rule prevents implementing Serializable/Deserializable on them directly; free
+// functions fill the same role for the replay structs' impls below.
 fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
     u32::from(row).write_into(target);
 }
