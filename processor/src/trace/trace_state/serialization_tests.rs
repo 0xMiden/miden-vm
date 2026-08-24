@@ -6,17 +6,21 @@ use super::*;
 use crate::mast::MastForestId;
 
 #[test]
-fn memory_replay_queues_reject_oversized_lengths_before_allocation() {
+fn memory_reads_replay_rejects_oversized_queue_lengths_before_allocation() {
     let mut bytes = Vec::new();
     usize::MAX.write_into(&mut bytes);
 
     let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
-    let err = read_memory_element_queue(&mut reader).unwrap_err();
-    assert!(err.to_string().contains("exceeds reader allocation bound"));
+    let err = MemoryReadsReplay::read_from(&mut reader).unwrap_err();
+    assert!(err.to_string().contains("reader can provide at most"));
+
+    let mut bytes = Vec::new();
+    0usize.write_into(&mut bytes);
+    usize::MAX.write_into(&mut bytes);
 
     let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
-    let err = read_memory_word_queue(&mut reader).unwrap_err();
-    assert!(err.to_string().contains("exceeds reader allocation bound"));
+    let err = MemoryReadsReplay::read_from(&mut reader).unwrap_err();
+    assert!(err.to_string().contains("reader can provide at most"));
 }
 
 #[test]

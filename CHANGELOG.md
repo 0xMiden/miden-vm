@@ -22,7 +22,7 @@
 - Miden Assembly signatures can now declare a variadic type parameter with `...`, in either argument or result position, e.g. `pub proc log(prefix: felt, ...)` or `pub proc f() -> (count: u32, ...)`. It must come last in its list and may appear at most once, matching the rules documented on `midenc_hir_type::Type::Variadic`, and it is only accepted in a signature, not as an ordinary type.
 - Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type.
 - Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
-- Added round-trip and proptest coverage for trusted trace proving input serialization ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
+- Added round-trip and proptest coverage for the trusted execution witness serialization, including external-library programs and wire-backed deferred proofs ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
 
 #### Changes
 
