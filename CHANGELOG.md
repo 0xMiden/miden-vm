@@ -14,6 +14,7 @@
 
 #### Changes
 
+- Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
@@ -68,6 +69,7 @@
 
 #### Fixes
 
+- Added u32 checks before sorted array pointers from advice are used in arithmetic or memory access, and corrected the `sys::drop_stack_top` MASM signature ([#3711](https://github.com/0xMiden/miden-vm/pull/3711)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
