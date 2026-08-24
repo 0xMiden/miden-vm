@@ -11,35 +11,6 @@ use super::*;
 // SERIALIZATION
 // ================================================================================================
 
-/// Serializable view over a [`VecDeque`].
-///
-/// This uses the same wire shape as `Vec<T>`: a length prefix followed by items in iteration order.
-///
-/// `Serializable` cannot be implemented on `VecDeque` directly: the trait and the type are both
-/// foreign to this crate (the orphan rule), so serialization goes through this newtype view and
-/// the paired [`read_vec_deque`].
-struct SerializableVecDeque<'a, T>(&'a VecDeque<T>);
-
-impl<T: Serializable> Serializable for SerializableVecDeque<'_, T> {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.0.len());
-        for item in self.0 {
-            item.write_into(target);
-        }
-    }
-}
-
-fn read_vec_deque<T: Deserializable, R: ByteReader>(
-    source: &mut R,
-) -> Result<VecDeque<T>, DeserializationError> {
-    let len = read_bounded_len(source, "VecDeque", T::min_serialized_size())?;
-    let mut values = VecDeque::with_capacity(len);
-    for _ in 0..len {
-        values.push_back(T::read_from(source)?);
-    }
-    Ok(values)
-}
-
 fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
     u32::from(row).write_into(target);
 }
@@ -263,37 +234,37 @@ impl Deserializable for ExecutionContextSystemInfo {
 
 impl Serializable for ExecutionContextReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.execution_contexts).write_into(target);
+        self.execution_contexts.write_into(target);
     }
 }
 
 impl Deserializable for ExecutionContextReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            execution_contexts: read_vec_deque(source)?,
+            execution_contexts: VecDeque::read_from(source)?,
         })
     }
 }
 
 impl Serializable for BlockStackReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.node_start_parent_addr).write_into(target);
-        SerializableVecDeque(&self.node_end).write_into(target);
+        self.node_start_parent_addr.write_into(target);
+        self.node_end.write_into(target);
     }
 }
 
 impl Deserializable for BlockStackReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            node_start_parent_addr: read_vec_deque(source)?,
-            node_end: read_vec_deque(source)?,
+            node_start_parent_addr: VecDeque::read_from(source)?,
+            node_end: VecDeque::read_from(source)?,
         })
     }
 }
 
 impl Serializable for MastForestResolutionReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.mast_forest_resolutions).write_into(target);
+        self.mast_forest_resolutions.write_into(target);
     }
 }
 
@@ -357,18 +328,18 @@ impl Deserializable for MemoryWritesReplay {
 
 impl Serializable for AdviceReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.stack_pops).write_into(target);
-        SerializableVecDeque(&self.stack_word_pops).write_into(target);
-        SerializableVecDeque(&self.stack_dword_pops).write_into(target);
+        self.stack_pops.write_into(target);
+        self.stack_word_pops.write_into(target);
+        self.stack_dword_pops.write_into(target);
     }
 }
 
 impl Deserializable for AdviceReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            stack_pops: read_vec_deque(source)?,
-            stack_word_pops: read_vec_deque(source)?,
-            stack_dword_pops: read_vec_deque(source)?,
+            stack_pops: VecDeque::read_from(source)?,
+            stack_word_pops: VecDeque::read_from(source)?,
+            stack_dword_pops: VecDeque::read_from(source)?,
         })
     }
 }
@@ -397,28 +368,28 @@ impl Deserializable for BitwiseOp {
 
 impl Serializable for BitwiseReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.u32op_with_operands).write_into(target);
+        self.u32op_with_operands.write_into(target);
     }
 }
 
 impl Deserializable for BitwiseReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            u32op_with_operands: read_vec_deque(source)?,
+            u32op_with_operands: VecDeque::read_from(source)?,
         })
     }
 }
 
 impl Serializable for KernelReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.kernel_proc_accesses).write_into(target);
+        self.kernel_proc_accesses.write_into(target);
     }
 }
 
 impl Deserializable for KernelReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            kernel_proc_accesses: read_vec_deque(source)?,
+            kernel_proc_accesses: VecDeque::read_from(source)?,
         })
     }
 }
@@ -501,42 +472,46 @@ impl Deserializable for RangeCheckReplayValues {
 
 impl Serializable for RangeCheckerReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.range_checks).write_into(target);
+        self.range_checks.write_into(target);
     }
 }
 
 impl Deserializable for RangeCheckerReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self { range_checks: read_vec_deque(source)? })
+        Ok(Self {
+            range_checks: VecDeque::read_from(source)?,
+        })
     }
 }
 
 impl Serializable for BlockAddressReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.block_addresses).write_into(target);
+        self.block_addresses.write_into(target);
     }
 }
 
 impl Deserializable for BlockAddressReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self { block_addresses: read_vec_deque(source)? })
+        Ok(Self {
+            block_addresses: VecDeque::read_from(source)?,
+        })
     }
 }
 
 impl Serializable for HasherResponseReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.permutation_operations).write_into(target);
-        SerializableVecDeque(&self.build_merkle_root_operations).write_into(target);
-        SerializableVecDeque(&self.mrupdate_operations).write_into(target);
+        self.permutation_operations.write_into(target);
+        self.build_merkle_root_operations.write_into(target);
+        self.mrupdate_operations.write_into(target);
     }
 }
 
 impl Deserializable for HasherResponseReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            permutation_operations: read_vec_deque(source)?,
-            build_merkle_root_operations: read_vec_deque(source)?,
-            mrupdate_operations: read_vec_deque(source)?,
+            permutation_operations: VecDeque::read_from(source)?,
+            build_merkle_root_operations: VecDeque::read_from(source)?,
+            mrupdate_operations: VecDeque::read_from(source)?,
         })
     }
 }
@@ -621,7 +596,7 @@ impl Deserializable for HasherOp {
 impl Serializable for HasherRequestReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match &self.sink {
-            HasherOpSink::Buffered(ops) => SerializableVecDeque(ops).write_into(target),
+            HasherOpSink::Buffered(ops) => ops.write_into(target),
             #[cfg(feature = "std")]
             HasherOpSink::Streamed(_) => {
                 panic!("cannot serialize streamed hasher request replay")
@@ -633,23 +608,23 @@ impl Serializable for HasherRequestReplay {
 impl Deserializable for HasherRequestReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            sink: HasherOpSink::Buffered(read_vec_deque(source)?),
+            sink: HasherOpSink::Buffered(VecDeque::read_from(source)?),
         })
     }
 }
 
 impl Serializable for StackOverflowReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        SerializableVecDeque(&self.overflow_values).write_into(target);
-        SerializableVecDeque(&self.restore_context_info).write_into(target);
+        self.overflow_values.write_into(target);
+        self.restore_context_info.write_into(target);
     }
 }
 
 impl Deserializable for StackOverflowReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            overflow_values: read_vec_deque(source)?,
-            restore_context_info: read_vec_deque(source)?,
+            overflow_values: VecDeque::read_from(source)?,
+            restore_context_info: VecDeque::read_from(source)?,
         })
     }
 }

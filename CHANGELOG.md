@@ -7,7 +7,7 @@
 - [BREAKING] Replaced source-specific and opaque debug variable locations with explicit unavailable
   locations, tagged Miden frame bases, and bounded structured Miden-runtime expressions. This bumps
   the package debug-info wire format to version 3.
-- [BREAKING] Added `miden::core::crypto::dsa::ecdsa_k256_keccak::{recover, recover_bytes}` for word-aligned native EVM recovery witnesses `R_LE_U32[8] || S_LE_U32[8] || V` (`V` = 27 or 28). They accept high-s and return `QX_LE_U32[8] || QY_LE_U32[8]`; callers convert external big-endian EVM wire signatures and authenticate the returned key. Also added `PublicKey::recover_from_prehash` in `miden-crypto`. The accompanying refactor changes the MAST root of the existing `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` export; consumers that pin this root must update it ([#3682](https://github.com/0xMiden/miden-vm/pull/3682)).
+- [BREAKING] Added `miden::core::crypto::dsa::ecdsa_k256_keccak::{recover, recover_bytes}` for word-aligned native EVM recovery witnesses `R_LE_U32[8] || S_LE_U32[8] || V` (`V` = 27 or 28). They accept high-s and return `QX_LE_U32[8] || QY_LE_U32[8]`. Callers convert external big-endian EVM wire signatures and authenticate the returned key. Also added `PublicKey::recover_from_prehash` in `miden-crypto`. The accompanying refactor changes the MAST root of the existing `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` export. Consumers that pin this root must update it ([#3682](https://github.com/0xMiden/miden-vm/pull/3682)).
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
 - Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 - [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
@@ -22,6 +22,9 @@
 
 #### Changes
 
+- [BREAKING] Removed `TraceProvingInputs`, `prove_from_trace_sync`, and
+  `prove_partial_from_trace_sync`. Deserialize `ExecutionWitness` directly and pass it to the
+  regular `Prover` interface ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
@@ -661,8 +664,8 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - Optimized batch inversion to use per-chunk scratch space ([#933](https://github.com/0xMiden/crypto/pull/933)).
 - [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results ([#924](https://github.com/0xMiden/crypto/pull/924)).
 - Optimized field operations for `Goldilocks` ([#926](https://github.com/0xMiden/crypto/pull/926)).
-- [BREAKING] Moved per-instance log trace heights from `AirInstance` into `StarkProof`; `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally ([#956](https://github.com/0xMiden/crypto/pull/956)). Consumers on the temporary `(log_trace_height, proof)` serialization path must drop the wrapper and stop pre-observing the height, or it will be bound twice. `StarkProof` no longer exposes per-instance heights directly — parse the proof with `StarkTranscript::from_proof` to read them; `num_traces()` is available for the count.
-- [BREAKING] `prove_multi` / `verify_multi` no longer require instances in ascending trace-height order; the prover sorts internally and the proof carries an `air_order` permutation ([#941](https://github.com/0xMiden/crypto/issues/941)). `InstanceShapes::from_trace_heights` now sorts internally and embeds the AIR ordering. `InstanceShapes::observe` renamed to `observe_heights`. The `NotAscending` error variant is removed; `InvalidAirOrder` and `AirOrderLengthMismatch` are added. `AirWitness` now derives `Clone + Copy`. Callers must bind AIR configurations and `air_order` into the Fiat-Shamir challenger — see the prover module-level docs.
+- [BREAKING] Moved per-instance log trace heights from `AirInstance` into `StarkProof`. `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally ([#956](https://github.com/0xMiden/crypto/pull/956)). Consumers on the temporary `(log_trace_height, proof)` serialization path must drop the wrapper and stop pre-observing the height, or it will be bound twice. `StarkProof` no longer exposes per-instance heights directly. Parse the proof with `StarkTranscript::from_proof` to read them. `num_traces()` is available for the count.
+- [BREAKING] `prove_multi` / `verify_multi` no longer require instances in ascending trace-height order. The prover sorts internally and the proof carries an `air_order` permutation ([#941](https://github.com/0xMiden/crypto/issues/941)). `InstanceShapes::from_trace_heights` now sorts internally and embeds the AIR ordering. `InstanceShapes::observe` renamed to `observe_heights`. The `NotAscending` error variant is removed. `InvalidAirOrder` and `AirOrderLengthMismatch` are added. `AirWitness` now derives `Clone + Copy`. Callers must bind AIR configurations and `air_order` into the Fiat-Shamir challenger. See the prover module-level docs.
 - [BREAKING] Split the `SecretKey` type for both ECDSA-k256 and EdDSA-25519 into `SigningKey` and `KeyExchangeKey` to help enforce better practices around key reuse. `SecretKey` is no longer available in the public API; all usages should be moved to one of the new key types ([#965](https://github.com/0xMiden/crypto/pull/965)).
 - Reduce repeated history scans in historical `LargeSmtForest::open()` queries ([#971](https://github.com/0xMiden/crypto/pull/971)).
 
@@ -1929,9 +1932,9 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Stdlib
 
-- Added new module: `std::collections::smt` (only `smt::get` available).
-- Added new module: `std::collections::mmr`.
-- Added new module: `std::collections::smt64`.
+- Added the `std::collections::smt` module, with only `smt::get` available.
+- Added the `std::collections::mmr` module.
+- Added the `std::collections::smt64` module.
 - Added several convenience procedures to `std::mem` module.
 - [BREAKING] Added procedures to compute 1-to-1 hashes in `std::crypto::hashes` module and renamed existing procedures to remove ambiguity.
 - Greatly optimized recursive STARK verifier (reduced number of cycles by 6x - 8x).

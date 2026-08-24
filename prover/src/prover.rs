@@ -246,7 +246,7 @@ pub enum ProverError {
 }
 
 impl ProverError {
-    pub(crate) fn into_execution_error(self) -> ExecutionError {
+    fn into_execution_error(self) -> ExecutionError {
         match self {
             Self::TraceGeneration(error) | Self::VmProofGeneration(error) => error,
             Self::PrecompileProofGeneration(error) => {
