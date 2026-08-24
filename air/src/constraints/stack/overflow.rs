@@ -182,15 +182,15 @@ fn enforce_overflow_index_constraints<AB>(
     // their sum is boolean on valid traces. A right shift creates a new overflow record, while a
     // left shift with non-empty overflow restores the previous address through the overflow table
     // lookup. All other transitions preserve b1.
-    let context_end = op_flags.end()
-        * (local.decoder.hasher_state[6].into() + local.decoder.hasher_state[7].into());
-    let pointer_changes = context_start
+    let end_flags = local.decoder.end_block_flags();
+    let context_end = op_flags.end() * (end_flags.is_call.into() + end_flags.is_syscall.into());
+    let updates_overflow_addr = context_start
         + context_end
         + op_flags.right_shift()
         + op_flags.left_shift() * op_flags.overflow();
     builder
         .when_transition()
-        .when(AB::Expr::ONE - pointer_changes)
+        .when(AB::Expr::ONE - updates_overflow_addr)
         .assert_eq(overflow_addr_next, overflow_addr);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
@@ -266,38 +266,22 @@ mod tests {
     }
 
     #[test]
-    fn noop_preserves_overflow_address() {
-        let mut local = generate_test_row(opcodes::NOOP.into());
-        local.stack.b0 = Felt::new_unchecked(17);
-        local.stack.b1 = Felt::new_unchecked(11);
-        local.stack.h0 = ONE;
-
-        let mut next = generate_test_row(0);
-        next.stack.b0 = Felt::new_unchecked(17);
-        next.stack.b1 = local.stack.b1;
-
-        let evaluations = eval_stack_overflow(&local, &next);
-        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
-
-        next.stack.b1 += ONE;
-        let evaluations = eval_stack_overflow(&local, &next);
-        assert!(
-            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-            "NOOP must preserve the overflow address"
-        );
-    }
-
-    #[test]
-    fn call_family_resets_overflow_address() {
-        for opcode in [opcodes::CALL, opcodes::DYNCALL, opcodes::SYSCALL] {
+    fn overflow_address_transitions() {
+        for (opcode, next_depth, next_overflow_addr, transition) in [
+            (opcodes::NOOP, 17, 11, "preserve"),
+            (opcodes::CALL, 16, 0, "reset"),
+            (opcodes::DYNCALL, 16, 0, "reset"),
+            (opcodes::SYSCALL, 16, 0, "reset"),
+            (opcodes::END, 17, 11, "preserve"),
+        ] {
             let mut local = generate_test_row(opcode.into());
             local.stack.b0 = Felt::new_unchecked(17);
             local.stack.b1 = Felt::new_unchecked(11);
             local.stack.h0 = ONE;
 
             let mut next = generate_test_row(0);
-            next.stack.b0 = Felt::new_unchecked(16);
-            next.stack.b1 = ZERO;
+            next.stack.b0 = Felt::new_unchecked(next_depth);
+            next.stack.b1 = Felt::new_unchecked(next_overflow_addr);
 
             let evaluations = eval_stack_overflow(&local, &next);
             assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
@@ -306,7 +290,7 @@ mod tests {
             let evaluations = eval_stack_overflow(&local, &next);
             assert!(
                 evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-                "opcode {opcode} must reset the overflow address"
+                "opcode {opcode} must {transition} the overflow address"
             );
         }
     }
@@ -326,28 +310,5 @@ mod tests {
 
         let evaluations = eval_stack_overflow(&local, &next);
         assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
-    }
-
-    #[test]
-    fn simple_end_preserves_overflow_address() {
-        let mut local = generate_test_row(opcodes::END.into());
-        local.stack.b0 = Felt::new_unchecked(17);
-        local.stack.b1 = Felt::new_unchecked(11);
-        local.stack.h0 = ONE;
-
-        let mut next = generate_test_row(0);
-        next.stack.b0 = local.stack.b0;
-        next.stack.b1 = local.stack.b1;
-        next.stack.h0 = ONE;
-
-        let evaluations = eval_stack_overflow(&local, &next);
-        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
-
-        next.stack.b1 += ONE;
-        let evaluations = eval_stack_overflow(&local, &next);
-        assert!(
-            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
-            "END of a simple block must preserve the overflow address"
-        );
     }
 }

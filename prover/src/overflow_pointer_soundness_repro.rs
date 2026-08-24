@@ -1,6 +1,5 @@
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
-use std::println;
 
 use miden_air::{CoreCols, PublicInputs, trace::RowIndex};
 use miden_core::{
@@ -12,8 +11,9 @@ use miden_core::{
     proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
     utils::{Matrix, RowMajorMatrix},
 };
+use miden_crypto::stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
-use miden_verifier::Verifier;
+use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 
 use crate::{config, prove_stark};
 
@@ -147,7 +147,6 @@ fn verifier_rejects_forged_overflow_pop_order() {
         &aux_inputs,
     )
     .expect("the low-level prover should encode the forged trace for the verifier regression");
-    let proof_size = proof_bytes.len();
     let proof = ExecutionProof::Complete {
         vm: VmProof {
             proof: StarkProof::new(proof_bytes, HashFunction::Poseidon2),
@@ -162,13 +161,15 @@ fn verifier_rejects_forged_overflow_pop_order() {
     );
 
     let verification_result = Verifier::new().verify(&claim, &proof);
-    println!("overflow additions: R1=(1, 1, 0), R2=(2, 2, 1)");
-    println!("overflow removals: R1 then R2 (non-LIFO)");
-    println!("honest stack[14..16]=[2, 1], forged stack[14..16]=[1, 2]");
-    println!("generated Poseidon2 STARK proof: {proof_size} bytes");
-    println!("miden_verifier::Verifier::verify result: {verification_result:?}");
     assert!(
-        verification_result.is_err(),
-        "the verifier must reject the forged public output",
+        matches!(
+            verification_result,
+            Err(VerificationError::StarkVerificationError(_, source))
+                if matches!(
+                    *source,
+                    StarkVerificationError::Verifier(VerifierError::ConstraintMismatch)
+                )
+        ),
+        "the forged public output must fail an AIR constraint",
     );
 }
