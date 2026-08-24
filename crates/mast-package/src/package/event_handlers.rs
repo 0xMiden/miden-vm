@@ -5,14 +5,15 @@
 //! which validates the module and registers one handler per manifest entry.
 //!
 //! The section is semantic package content: handler code decides the advice a program receives,
-//! so the section is part of [`Package::dependency_commitment`](crate::Package::dependency_commitment). The
-//! manifest order inside the section is canonical — reordering entries changes the package
-//! identity. Tooling that derives the manifest from a guest module sorts the entries by event
-//! name, so link order does not change the identity.
+//! so the section is part of
+//! [`Package::dependency_commitment`](crate::Package::dependency_commitment). The manifest
+//! order inside the section is canonical — the entries must be strictly increasing by event
+//! name, so the manifest of a given handler set has one encoding only.
 //!
 //! [`EventHandlerSection::validate`] holds the rules that all paths share. Attaching, decoding,
 //! and deriving a section apply the same check, so every host sees the same set of accepted
-//! sections.
+//! sections. [`validate_manifest_entries`] holds the per-entry rules, which the Wasm handler
+//! loader applies to the manifest it registers.
 //!
 //! Decoding applies explicit size caps ([`MAX_MODULE_BYTES`], [`MAX_HANDLERS`],
 //! [`MAX_NAME_BYTES`]), rejects oversized payloads before allocation, and rejects empty event
@@ -27,10 +28,12 @@ use alloc::{
 use miden_core::{
     events::EventName,
     serde::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, validate_bounded_len,
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
     },
 };
+
+use crate::serde_helpers::{PayloadError, read_capped_str, read_payload_with_budget};
 
 // CONSTANTS
 // ================================================================================================
@@ -62,9 +65,9 @@ pub struct EventHandlerSection {
     pub module: Vec<u8>,
     /// The manifest: one entry per handler the module provides.
     ///
-    /// The order is canonical: it is part of the package identity. Derivation from a guest
-    /// module canonicalizes the order by event name, because the record order in the module is
-    /// link order and changes with the toolchain.
+    /// The order is canonical and part of the package identity: the entries must be strictly
+    /// increasing by event name. Derivation from a guest module sorts the entries, because the
+    /// record order in the module is link order and changes with the toolchain.
     pub handlers: Vec<EventHandlerManifestEntry>,
 }
 
@@ -90,10 +93,8 @@ impl EventHandlerManifestEntry {
 impl EventHandlerSection {
     /// Checks the section against the rules that every path shares.
     ///
-    /// The rules are: the ABI version is at least 1; the module, the handler count, and each
-    /// name stay inside their caps; each name is not empty; no two entries name the same event;
-    /// and no entry names an event in
-    /// [`EventName::RESERVED_NAMESPACE`](miden_core::events::EventName::RESERVED_NAMESPACE).
+    /// The rules are: the ABI version is at least 1; the module and the handler count stay
+    /// inside their caps; and the manifest passes [`validate_manifest_entries`].
     ///
     /// Attaching, decoding, and deriving a section apply this check. The format decode does not:
     /// it applies only the caps it needs before it allocates.
@@ -102,38 +103,63 @@ impl EventHandlerSection {
     /// Returns an error when the section breaks one of the rules above.
     pub fn validate(&self) -> Result<(), EventHandlerSectionError> {
         if self.abi_version < MIN_ABI_VERSION {
-            return Err(EventHandlerSectionError::UnsupportedAbiVersion {
-                version: self.abi_version,
-            });
+            return Err(EventHandlerSectionError::InvalidAbiVersion { version: self.abi_version });
         }
         check_size_cap("module", self.module.len(), MAX_MODULE_BYTES)?;
         check_size_cap("handler count", self.handlers.len(), MAX_HANDLERS)?;
 
-        let mut seen = BTreeSet::new();
-        for entry in &self.handlers {
-            for (field, name) in
-                [("event name", entry.event.as_str()), ("export name", entry.export.as_str())]
-            {
-                if name.is_empty() {
-                    return Err(EventHandlerSectionError::EmptyName { field });
-                }
-                check_size_cap(field, name.len(), MAX_NAME_BYTES)?;
-            }
-            if entry.event.is_reserved() {
-                return Err(EventHandlerSectionError::ReservedEventName {
-                    event: entry.event.clone(),
-                });
-            }
-            // A host registers handlers by event ID, so two entries with the same ID cannot both
-            // register.
-            if !seen.insert(entry.event.to_event_id()) {
-                return Err(EventHandlerSectionError::DuplicateEvent {
-                    event: entry.event.clone(),
-                });
-            }
-        }
-        Ok(())
+        validate_manifest_entries(
+            self.handlers.iter().map(|entry| (&entry.event, entry.export.as_str())),
+        )
     }
+}
+
+/// Checks the per-entry rules of a handler manifest.
+///
+/// The rules are: each name is not empty and stays inside [`MAX_NAME_BYTES`]; no entry names an
+/// event in
+/// [`EventName::RESERVED_NAMESPACE`](miden_core::events::EventName::RESERVED_NAMESPACE); no two
+/// entries map to the same event ID; and the entries are in the canonical order, strictly
+/// increasing by event name.
+///
+/// [`EventHandlerSection::validate`] and the Wasm handler loader both apply this check, so a
+/// manifest that a package carries and a manifest that a host registers follow one rule set. The
+/// argument is an iterator, so a caller that owns its names passes borrowed ones.
+///
+/// # Errors
+/// Returns an error when an entry breaks one of the rules above.
+pub fn validate_manifest_entries<'a>(
+    entries: impl Iterator<Item = (&'a EventName, &'a str)>,
+) -> Result<(), EventHandlerSectionError> {
+    let mut seen = BTreeSet::new();
+    let mut previous: Option<&EventName> = None;
+    for (event, export) in entries {
+        for (field, name) in [("event name", event.as_str()), ("export name", export)] {
+            if name.is_empty() {
+                return Err(EventHandlerSectionError::EmptyName { field });
+            }
+            check_size_cap(field, name.len(), MAX_NAME_BYTES)?;
+        }
+        if event.is_reserved() {
+            return Err(EventHandlerSectionError::ReservedEventName { event: event.clone() });
+        }
+        // A host registers handlers by event ID, so two entries with the same ID cannot both
+        // register. Two equal names always collide here, so the order check below meets only
+        // entries with different names.
+        if !seen.insert(event.to_event_id()) {
+            return Err(EventHandlerSectionError::DuplicateEvent { event: event.clone() });
+        }
+        if let Some(previous) = previous
+            && previous.as_str() >= event.as_str()
+        {
+            return Err(EventHandlerSectionError::UnsortedManifest {
+                previous: previous.clone(),
+                current: event.clone(),
+            });
+        }
+        previous = Some(event);
+    }
+    Ok(())
 }
 
 /// Checks a length against its cap.
@@ -181,9 +207,12 @@ pub enum EventHandlerSectionError {
         max: usize,
     },
 
-    /// The section declares an ABI version that no host/guest contract uses.
-    #[error("'event_handlers' section declares unsupported abi version {version}")]
-    UnsupportedAbiVersion {
+    /// The section declares ABI version zero, which names no host/guest contract.
+    ///
+    /// Whether a host supports a declared version is not a rule of this crate: the Wasm handler
+    /// loader holds the range of versions it accepts.
+    #[error("'event_handlers' section declares ABI version {version}, but versions start at 1")]
+    InvalidAbiVersion {
         /// The declared version.
         version: u32,
     },
@@ -202,6 +231,17 @@ pub enum EventHandlerSectionError {
         event: EventName,
     },
 
+    /// The manifest entries are not in the canonical order.
+    #[error(
+        "'event_handlers' section manifest is not in the canonical order: event '{current}' follows '{previous}'"
+    )]
+    UnsortedManifest {
+        /// The event of the entry that comes first.
+        previous: EventName,
+        /// The event of the entry that follows it.
+        current: EventName,
+    },
+
     /// A manifest entry names an event in the reserved namespace, which only the VM can handle.
     #[error(
         "'event_handlers' section handles event '{event}' in the reserved '{namespace}' namespace",
@@ -216,18 +256,19 @@ pub enum EventHandlerSectionError {
 // SERIALIZATION
 // ================================================================================================
 
-/// Checks a declared length against its cap and returns a deserialization error over the cap.
+/// Reports the cap rule of [`check_size_cap`] as a deserialization error.
 fn check_cap(field: &'static str, actual: usize, max: usize) -> Result<(), DeserializationError> {
-    if actual > max {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "'event_handlers' section {field} length {actual} goes over the cap of {max}"
-        )));
-    }
-    Ok(())
+    check_size_cap(field, actual, max).map_err(over_cap_error)
 }
 
-/// Reads a length prefix, checks it against `max`, and checks that the source still holds the
-/// bytes the length claims.
+/// Reports an over-cap error as a deserialization error, so the decode and the validation of a
+/// section report one message for one rule.
+fn over_cap_error(err: EventHandlerSectionError) -> DeserializationError {
+    DeserializationError::InvalidValue(err.to_string())
+}
+
+/// Reads a length prefix, checks that the source still holds the bytes the length claims, and
+/// checks the length against `max`.
 ///
 /// `min_element_size` is the smallest serialized size of one of the elements the length counts.
 fn read_capped_len<R: ByteReader>(
@@ -236,9 +277,8 @@ fn read_capped_len<R: ByteReader>(
     max: usize,
     min_element_size: usize,
 ) -> Result<usize, DeserializationError> {
-    let len = source.read_usize()?;
+    let len = read_bounded_len(source, field, min_element_size)?;
     check_cap(field, len, max)?;
-    validate_bounded_len(source, field, len, min_element_size)?;
     Ok(len)
 }
 
@@ -251,16 +291,14 @@ fn read_str<R: ByteReader>(
     source: &mut R,
     field: &'static str,
 ) -> Result<String, DeserializationError> {
-    let len = read_capped_len(source, field, MAX_NAME_BYTES, 1)?;
-    if len == 0 {
+    let value = read_capped_str(source, field, MAX_NAME_BYTES, |actual| {
+        over_cap_error(EventHandlerSectionError::OverSizeCap { field, actual, max: MAX_NAME_BYTES })
+    })?;
+    if value.is_empty() {
         return Err(DeserializationError::InvalidValue(alloc::format!(
             "'event_handlers' section {field} is empty"
         )));
     }
-    let bytes = source.read_slice(len)?;
-    let value = core::str::from_utf8(bytes).map_err(|err| {
-        DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in {field}: {err}"))
-    })?;
     Ok(value.to_string())
 }
 
@@ -310,11 +348,10 @@ impl EventHandlerSection {
     /// Returns an error when the payload fails to decode (including size-cap violations), when
     /// bytes follow the encoded section, or when the section breaks a rule of [`Self::validate`].
     pub fn from_payload(bytes: &[u8]) -> Result<Self, EventHandlerSectionError> {
-        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
-        let section = Self::read_from(&mut reader)?;
-        if reader.has_more_bytes() {
-            return Err(EventHandlerSectionError::TrailingBytes);
-        }
+        let section = read_payload_with_budget::<Self>(bytes).map_err(|err| match err {
+            PayloadError::Decode(source) => EventHandlerSectionError::Decode(source),
+            PayloadError::TrailingBytes => EventHandlerSectionError::TrailingBytes,
+        })?;
         section.validate()?;
         Ok(section)
     }
@@ -354,10 +391,11 @@ mod tests {
     fn oversized_module_is_rejected_before_allocation() {
         let mut bytes = Vec::new();
         bytes.write_u32(1);
-        // A module length far over the cap; no module bytes follow.
+        // A module length far over the cap; no module bytes follow. The length is refused
+        // against the input the reader holds, before any allocation.
         bytes.write_usize(MAX_MODULE_BYTES + 1);
         let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
-        assert!(err.to_string().contains("cap"), "unexpected error: {err}");
+        assert!(err.to_string().contains("module"), "unexpected error: {err}");
     }
 
     #[test]
@@ -366,6 +404,8 @@ mod tests {
         bytes.write_u32(1);
         bytes.write_usize(0);
         bytes.write_usize(MAX_HANDLERS + 1);
+        // The declared entries fit the input, so the cap is what refuses the count.
+        bytes.resize(bytes.len() + (MAX_HANDLERS + 1) * MIN_ENTRY_BYTES, 0);
         let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         assert!(err.to_string().contains("cap"), "unexpected error: {err}");
     }
@@ -377,8 +417,23 @@ mod tests {
         bytes.write_usize(0);
         bytes.write_usize(1);
         bytes.write_usize(MAX_NAME_BYTES + 1);
+        // The declared name fits the input, so the cap is what refuses the name.
+        bytes.resize(bytes.len() + MAX_NAME_BYTES + 1, b'a');
         let err = EventHandlerSection::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         assert!(err.to_string().contains("cap"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn unsorted_manifest_is_rejected() {
+        let mut section = sample();
+        section.handlers.reverse();
+        assert!(matches!(
+            section.validate(),
+            Err(EventHandlerSectionError::UnsortedManifest { .. })
+        ));
+
+        // The canonical order is the order of the sample.
+        assert!(sample().validate().is_ok());
     }
 
     #[test]

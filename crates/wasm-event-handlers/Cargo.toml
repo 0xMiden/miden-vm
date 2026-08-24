@@ -45,6 +45,8 @@ wasmi = { workspace = true, features = ["simd"] }
 [dev-dependencies]
 miden-assembly.workspace = true
 wat.workspace = true
+# The import-set test parses the guest fixture with the same parser the loader uses.
+wasmi.workspace = true
 
 # criterion does not build for wasm targets, and the wasip1 smoke test compiles the
 # dev-dependency set.

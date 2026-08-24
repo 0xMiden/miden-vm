@@ -33,14 +33,14 @@ use miden_core::{
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::KernelDescriptor,
-    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
+    serde::{ByteWriter, Deserializable, Serializable},
 };
 
 pub use self::{
     error::{PackageDebugInfoError, PackageStripError},
     event_handlers::{
         EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
-        MAX_MODULE_BYTES, MAX_NAME_BYTES,
+        MAX_MODULE_BYTES, MAX_NAME_BYTES, validate_manifest_entries,
     },
     id::PackageId,
     manifest::{
@@ -56,6 +56,7 @@ use crate::{
         DebugFunctionIdx, DebugFunctionInfo, DebugSourceNode, DebugSourceNodeId, DebugStringIdx,
         DebugTypeIdx, DebugTypeInfo, PackageDebugInfo,
     },
+    serde_helpers::{PayloadError, read_payload_with_budget},
 };
 
 // PACKAGE
@@ -666,17 +667,31 @@ impl Package {
         Ok(modules_by_path.into_values().collect())
     }
 
+    /// Returns the section with `id`, or `None` when the package has no section with that ID.
+    ///
+    /// # Errors
+    /// Returns an error when the package has more than one section with `id`. Every accessor of
+    /// a well-known section applies this rule: a second section with the same ID makes the
+    /// content of the package ambiguous.
+    fn single_section(&self, id: &SectionId) -> Result<Option<&Section>, DuplicateSectionError> {
+        let mut sections = self.sections.iter().filter(|section| &section.id == id);
+        let section = sections.next();
+        if sections.next().is_some() {
+            return Err(DuplicateSectionError);
+        }
+        Ok(section)
+    }
+
     fn read_debug_section<T>(&self, id: SectionId) -> Result<Option<T>, PackageDebugInfoError>
     where
         T: Deserializable,
     {
-        let mut sections = self.sections.iter().filter(|section| section.id == id);
-        let Some(section) = sections.next() else {
+        let section = self
+            .single_section(&id)
+            .map_err(|_| PackageDebugInfoError::DuplicateSection { id: id.clone() })?;
+        let Some(section) = section else {
             return Ok(None);
         };
-        if sections.next().is_some() {
-            return Err(PackageDebugInfoError::DuplicateSection { id });
-        }
 
         read_section_payload(&id, section.data.as_ref()).map(Some)
     }
@@ -1140,17 +1155,20 @@ impl Package {
     }
 }
 
+/// The package has more than one section with a given ID.
+struct DuplicateSectionError;
+
+/// Decodes the payload of a well-known package section under a byte budget.
 fn read_section_payload<T>(id: &SectionId, bytes: &[u8]) -> Result<T, PackageDebugInfoError>
 where
     T: Deserializable,
 {
-    let mut reader = SliceReader::new(bytes);
-    let section = T::read_from(&mut reader)
-        .map_err(|source| PackageDebugInfoError::DecodeSection { id: id.clone(), source })?;
-    if reader.has_more_bytes() {
-        return Err(PackageDebugInfoError::TrailingBytes { id: id.clone() });
-    }
-    Ok(section)
+    read_payload_with_budget(bytes).map_err(|err| match err {
+        PayloadError::Decode(source) => {
+            PackageDebugInfoError::DecodeSection { id: id.clone(), source }
+        },
+        PayloadError::TrailingBytes => PackageDebugInfoError::TrailingBytes { id: id.clone() },
+    })
 }
 
 /// Conversions
@@ -1236,14 +1254,12 @@ impl Package {
     /// the encoded section, or when the decoded section fails
     /// [`EventHandlerSection::validate`].
     pub fn event_handlers(&self) -> Result<Option<EventHandlerSection>, EventHandlerSectionError> {
-        let mut sections =
-            self.sections.iter().filter(|section| section.id == SectionId::EVENT_HANDLERS);
-        let Some(section) = sections.next() else {
+        let section = self
+            .single_section(&SectionId::EVENT_HANDLERS)
+            .map_err(|_| EventHandlerSectionError::DuplicateSection)?;
+        let Some(section) = section else {
             return Ok(None);
         };
-        if sections.next().is_some() {
-            return Err(EventHandlerSectionError::DuplicateSection);
-        }
         EventHandlerSection::from_payload(section.data.as_ref()).map(Some)
     }
 
@@ -1292,7 +1308,14 @@ impl Package {
     /// * There are duplicate KERNEL sections
     /// * Deserialization of a package from the KERNEL section fails
     fn embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let Some(section) = self.embedded_kernel_section()? else {
+        let section = self.single_section(&SectionId::KERNEL).map_err(|_| {
+            Report::msg(format!(
+                "package '{}' contains multiple '{}' sections",
+                self.name,
+                SectionId::KERNEL
+            ))
+        })?;
+        let Some(section) = section else {
             return Ok(None);
         };
 
@@ -1305,21 +1328,6 @@ impl Package {
                     self.name
                 ))
             })
-    }
-
-    fn embedded_kernel_section(&self) -> Result<Option<&Section>, Report> {
-        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
-        let Some(section) = sections.next() else {
-            return Ok(None);
-        };
-        if sections.next().is_some() {
-            return Err(Report::msg(format!(
-                "package '{}' contains multiple '{}' sections",
-                self.name,
-                SectionId::KERNEL
-            )));
-        }
-        Ok(Some(section))
     }
 
     fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
@@ -1885,7 +1893,7 @@ mod tests {
         section.abi_version = 0;
         assert!(matches!(
             build_kernel_package("kernel").with_event_handlers(&section),
-            Err(EventHandlerSectionError::UnsupportedAbiVersion { version: 0 })
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
         ));
     }
 
@@ -1901,7 +1909,7 @@ mod tests {
 
         assert!(matches!(
             package.event_handlers(),
-            Err(EventHandlerSectionError::UnsupportedAbiVersion { version: 0 })
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
         ));
     }
 
