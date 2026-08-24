@@ -19,9 +19,13 @@ use miden::core::stark::verifier
 # — and, for the folding round, the fixed blowup — into a single base, leaving only the
 # instance-dependent height and grinding terms for run time.
 #
-# Every value is derived by `miden_air::security`, whose constants carry the same names; the
-# exhaustive cross-test in `crates/lib/core/tests/sys` compares the two implementations over the
-# verifier's whole input domain, so a stale literal here fails as an output mismatch.
+# Every value is derived by `miden_air::security`, whose constants carry the same names.
+# `constraints_regen::security_masm_matches_air` parses these literals from source and checks each
+# against its derived Rust constant directly, so a stale literal fails there regardless of which
+# round determines the reported level. The output cross-test in `crates/lib/core/tests/sys`
+# additionally checks the two implementations' computed security level against each other over
+# four two-dimensional slices of the input domain, which exercises only the lookup and query
+# rounds — the ones that determine the level under the deployed shape.
 #
 # log2|E| = 8388606 (quadratic extension of Goldilocks, rounded down).
 const BITS_PER_QUERY_FP = 193381        # blowup 8, random-words rate of 2025/2010 section 1.5
@@ -104,7 +108,7 @@ proc lookup_boundary_correction
     # => [correction]
 end
 
-#! Computes the conjectured security level (in bits) attained by the given proof parameters.
+#! Computes the conjectured security level, in bits, for the given proof parameters.
 #!
 #! Takes the minimum over the protocol's rounds — lookup challenge, constraint composition,
 #! out-of-domain evaluation, DEEP composition, FRI folding, FRI queries — and the commitment
@@ -149,31 +153,42 @@ pub proc compute_conjectured_security_level(
 
     # Hoist the height in fixed point; the height-bearing rounds all subtract it.
     dup.4 mul.65536
-    # => [H, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures, ...]
+    # => [log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures,
+    #     ...]
 
     # FRI queries: each query contributes the random-words rate, plus the query grinding.
     dup.1 mul.BITS_PER_QUERY_FP dup.3 mul.65536 add
-    # => [query, H, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures, ...]
+    # => [query_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
 
     # Lookup challenges: sampled once after the main-trace commitment, with no grinding, corrected
     # for the emit_core_boundary/emit_chiplets_boundary boundary fractions.
     dup.6 dup.8 swap exec.lookup_boundary_correction
-    # => [correction, query, H, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures, ...]
+    # => [correction, query_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow,
+    #     log_height, num_kernel_procedures, ...]
     push.LOOKUP_BASE_FP dup.3 sub swap sub u32min
-    # => [min, H, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures, ...]
+    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
 
     # Out-of-domain point: rejection-sampled, with no grinding.
     push.OOD_BASE_FP dup.2 sub u32min
+    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
 
     # FRI folding: worst at the first round, where the domain is largest.
     push.FOLDING_BASE_FP dup.2 sub dup.6 mul.65536 add u32min
+    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
 
     # DEEP composition, then the height-independent constraint composition and the collision cap.
     push.DEEP_BASE_FP dup.5 mul.65536 add u32min
+    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
     push.COMPOSITION_TERM_FP u32min
     push.SECURITY_CAP_FP u32min
     u32shr.16
-    # => [level, H, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures, ...]
+    # => [level, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
+    #     num_kernel_procedures, ...]
 
     movdn.7 dropw drop drop drop
     # => [level, ...]
@@ -219,8 +234,8 @@ end
 
 proc assert_shape_log
     dup u32assert.err="AIR log height must be u32"
-    dup u32gt.5 assert.err="AIR log height below minimum"
-    dup u32lt.30 assert.err="AIR log height above maximum"
+    dup u32gte.LOG_HEIGHT_MIN assert.err="AIR log height below minimum"
+    dup u32lt.LOG_HEIGHT_BOUND assert.err="AIR log height above maximum"
     drop
 end
 
@@ -389,10 +404,10 @@ end
 #! from the advice stack and stored in memory for the generic verifier, which enforces their
 #! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
 #! parameters it was not produced with. This procedure holds no security-estimate formula and
-#! no acceptance policy: it returns the transcript-bound parameters for the caller to grade (e.g.
-#! with `compute_conjectured_security_level`) under its own policy. An estimate or policy
-#! change therefore never moves this procedure's root - request keys and registered proof packages
-#! stay valid across such changes.
+#! no acceptance policy: it returns the transcript-bound parameters for the caller to compute a
+#! security level from (e.g. with `compute_conjectured_security_level`) under its own policy. An
+#! estimate or policy change therefore never moves this procedure's root - request keys and
+#! registered proof packages stay valid across such changes.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.

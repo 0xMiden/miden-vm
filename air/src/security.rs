@@ -1,9 +1,9 @@
-//! Conjectured security grading for the Miden VM STARK configuration.
+//! Conjectured security level computation for the Miden VM STARK configuration.
 //!
-//! The AIR shape entering the round budget is pinned as a constant so the MASM recursive verifier
-//! can grade proofs against the same numbers without running a symbolic pass in-VM. The constants
-//! are not hand-maintained: [`derive_air_shape`] computes them from the AIRs themselves, and
-//! `air_shape_matches_symbolic` fails the build's test run if an AIR change moves them.
+//! The AIR shape entering the round budget is stored as the constant [`AIR_SHAPE`] so the MASM
+//! recursive verifier can compute the same security level without running a symbolic pass in-VM.
+//! The constant is not hand-maintained: [`derive_air_shape`] computes it from the AIRs themselves,
+//! and `air_shape_matches_symbolic` fails the build's test run if an AIR change moves it.
 
 use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
 use miden_crypto::stark::pcs::PcsParams;
@@ -43,8 +43,8 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 
 /// Shape of the Miden VM multi-AIR statement, as it enters the round budget.
 ///
-/// Pinned rather than derived at runtime so the native and in-VM verifiers grade identically.
-/// Guarded against drift by `air_shape_matches_symbolic`.
+/// Stored as a constant rather than derived at runtime, so the native and in-VM verifiers compute
+/// the same security level. Guarded against drift by `air_shape_matches_symbolic`.
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 425,
     max_constraint_degree: 9,
@@ -58,7 +58,7 @@ pub const AIR_SHAPE: AirShape = AirShape {
 /// Computes the AIR shape by symbolically evaluating every AIR in the statement.
 ///
 /// This is the source of truth for [`AIR_SHAPE`]; it allocates and runs the full symbolic pass, so
-/// the verifiers read the pinned constant instead of calling it.
+/// the verifiers use the constant instead of calling this function.
 pub fn derive_air_shape() -> AirShape {
     let mut num_constraints = 0;
     let mut max_constraint_degree = 0;
@@ -89,14 +89,14 @@ pub fn derive_air_shape() -> AirShape {
 }
 
 /// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s pinned values.
+/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
 ///
 /// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
 /// from the AIRs' own width accessors — no symbolic constraint pass — reusing
 /// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
-/// grading a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17)
-/// reads this instead of the alignment-8 [`AIR_SHAPE`] pinned for the Poseidon2-only recursive
-/// verifier.
+/// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
+/// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
+/// for the Poseidon2-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in AIRS {
@@ -135,10 +135,13 @@ fn aligned(width: usize, alignment: usize) -> usize {
 // MIRRORED CONSTANTS
 // ================================================================================================
 //
-// The MASM recursive verifier grades proofs with the same round budget and cannot run this code,
-// so it carries these values as literals. Each is derived here rather than chosen. The cross-test
-// in `crates/lib/core/tests/sys` compares only outputs, which expose whichever round is the
-// minimum, so `masm_literals_match_the_derived_constants` below pins each literal on its own.
+// The MASM recursive verifier computes the same round budget and cannot run this code, so it
+// carries these values as literals. Each is derived here rather than chosen. The output cross-test
+// in `crates/lib/core/tests/sys` compares only the two implementations' final computed security
+// level, which exposes whichever round attains the minimum — so it alone would not catch drift in
+// a constant that never determines that minimum. `derived_security_constants_match_snapshot`
+// below checks every one of these constants against a fixed numeric snapshot instead,
+// independently of which round determines the minimum.
 
 /// Conjectured security contributed per FRI query, in fixed point.
 pub const BITS_PER_QUERY: u64 =
@@ -250,18 +253,19 @@ fn apply_lookup_boundary_correction(
     SecurityReport::new(terms)
 }
 
-/// Grades a deployed Miden VM proof, returning its conjectured security level in whole bits.
+/// Computes a deployed Miden VM proof's conjectured security level, in whole bits.
 ///
 /// Every input is bound by the Fiat-Shamir transcript — the PCS parameters through
 /// `observe_protocol_params`, the AIR log heights through the multi-AIR statement, the kernel
-/// procedure count through the kernel witness authenticated against the claim — so a proof
-/// cannot be graded under parameters or a shape it was not produced with. The blowup, folding
-/// arity, AIR shape, challenge field, and commitment hash are fixed by the deployed configuration
-/// and enter as the constants above.
+/// procedure count through the kernel witness authenticated against the claim — so the computed
+/// level always reflects the parameters and shape the proof was actually produced with. The
+/// blowup, folding arity, AIR shape, challenge field, and commitment hash are fixed by the
+/// deployed configuration and enter as the constants above.
 ///
 /// Mirrored bit-for-bit by `sys::vm::compute_conjectured_security_level`, which admits only the
 /// recursive verifier's domain — at most 150 queries, grinding below 32 bits, log trace height in
-/// `6..30`. This function grades outside it too, so a configuration past it traps in the VM.
+/// `6..30`. This function also accepts configurations outside that domain; a proof past it would
+/// trap in the VM.
 pub fn conjectured_security_level(
     num_queries: u32,
     query_pow_bits: u32,
@@ -287,16 +291,16 @@ pub fn conjectured_security_level(
     apply_lookup_boundary_correction(report, num_kernel_procedures, log_max_height).security_level()
 }
 
-/// Grades a deployed Miden VM proof committed under a commitment scheme with the given column
-/// alignment, returning its conjectured security level in whole bits.
+/// Computes a deployed Miden VM proof's conjectured security level, in whole bits, for a proof
+/// committed under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
 /// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Poseidon2
-/// proofs, whose alignment [`COMMITMENT_ALIGNMENT`] `conjectured_security_level` already grades
-/// exactly (and this function reduces to identically, since `num_deep_terms(COMMITMENT_ALIGNMENT)`
-/// is pinned equal to `AIR_SHAPE.num_deep_terms` by `num_deep_terms_matches_the_pinned_alignment`).
-/// The native verifier calls this for every hash function, including the non-algebraic ones the
-/// recursive verifier never sees.
+/// proofs, which `conjectured_security_level` already computes exactly at alignment
+/// [`COMMITMENT_ALIGNMENT`] (and this function is identical at that alignment, since
+/// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
+/// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
+/// every hash function, including the non-algebraic ones the recursive verifier never sees.
 pub fn conjectured_security_level_for_alignment(
     num_queries: u32,
     query_pow_bits: u32,
@@ -329,8 +333,8 @@ pub fn conjectured_security_level_for_alignment(
 
 /// Maps PCS parameters onto the protocol parameters the round budget reads.
 ///
-/// The transcript observes every field of [`PcsParams`], so grading a proof under these parameters
-/// grades it under the parameters it was produced with.
+/// The transcript observes every field of [`PcsParams`], so computing a proof's security level
+/// under these parameters uses the parameters it was actually produced with.
 pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
     ProtocolParams {
         log_blowup: u32::from(params.log_blowup()),
@@ -345,7 +349,8 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
     }
 }
 
-/// Grades a proof of the Miden VM statement, returning the per-round conjectured breakdown.
+/// Computes the conjectured security level of a Miden VM statement proof, for each protocol
+/// round.
 ///
 /// `log_max_height` is the largest AIR trace height in the proof; the Fiat-Shamir transcript binds
 /// every AIR's log height, so a prover cannot understate it to inflate the reported level.
@@ -370,17 +375,18 @@ pub fn security_report(
 mod tests {
     use super::*;
 
-    /// The pinned AIR shape must track the AIRs. An AIR change that adds constraints, columns, or
-    /// lookup fractions moves the conjectured level, and both verifiers read the constant rather
-    /// than recomputing it — so drift here silently overstates security.
+    /// [`AIR_SHAPE`] must track the AIRs. An AIR change that adds constraints, columns, or lookup
+    /// fractions moves the conjectured level, and both verifiers use the constant rather than
+    /// recomputing it — so drift here silently overstates security.
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
     }
 
-    /// `num_deep_terms` at [`COMMITMENT_ALIGNMENT`] (algebraic sponges) must reproduce the pinned
-    /// [`AIR_SHAPE`] exactly, so `conjectured_security_level_for_alignment` grades a Poseidon2
-    /// proof identically to `conjectured_security_level`.
+    /// `num_deep_terms` at [`COMMITMENT_ALIGNMENT`] (algebraic sponges) must reproduce
+    /// [`AIR_SHAPE`]'s stored `num_deep_terms` exactly, so
+    /// `conjectured_security_level_for_alignment` computes the same level for a Poseidon2 proof
+    /// as `conjectured_security_level`.
     ///
     /// The other two are the deployed non-algebraic configurations' actual alignments: Blake3's
     /// `ChainingHasher` (1, no padding) and Keccak's `SerializingStatefulSponge` over its 17-word
@@ -393,10 +399,11 @@ mod tests {
         assert_eq!(num_deep_terms(17), 172, "Keccak (alignment 17) DEEP term count moved");
     }
 
-    /// The deployed preset's grade, per trace height, with the round that binds at each. The
-    /// preset was calibrated against the query phase alone; this pins what it actually attains
-    /// once the trace-height-dependent rounds are counted, so any parameter or AIR change that
-    /// moves the real figure is visible rather than absorbed into an unchanged constant.
+    /// The deployed preset's computed security level, per trace height, with the round that
+    /// determines it at each. The preset was calibrated against the query phase alone; this test
+    /// checks what it actually computes once the trace-height-dependent rounds are counted, so any
+    /// parameter or AIR change that moves the real figure is visible rather than absorbed into an
+    /// unchanged constant.
     #[test]
     fn deployed_preset_grades_by_trace_height() {
         let params = protocol_params(&config::pcs_params());
@@ -421,13 +428,18 @@ mod tests {
         }
     }
 
-    /// Every literal in `sys::vm::mod.masm`, pinned against the constant it mirrors.
+    /// Every derived Rust security constant, checked against a fixed numeric snapshot.
+    ///
+    /// `sys::vm::mod.masm` carries the same values as literals; `security_masm_matches_air`
+    /// checks those literals directly against these constants. This test does not read the MASM
+    /// source — it only checks that the Rust-side values below have not silently drifted from the
+    /// snapshot.
     ///
     /// Under the deployed shape the lookup round sits below every other algebraic term and the
-    /// cap across the whole swept domain, so the output cross-test observes two of these seven
-    /// literals; the rest would drift unnoticed.
+    /// cap across the whole swept domain, so the output cross-test in `crates/lib/core/tests/sys`
+    /// observes only two of these seven constants; the rest would drift unnoticed there.
     #[test]
-    fn masm_literals_match_the_derived_constants() {
+    fn derived_security_constants_match_snapshot() {
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_323_072;
         const LOOKUP_BASE_FP: u64 = 7_800_270;
@@ -445,14 +457,15 @@ mod tests {
         assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
     }
 
-    /// Every round's attained bits, against values computed outside this crate from the closed
-    /// forms each round documents.
+    /// Every round's computed bit count, against values computed outside this crate from the
+    /// closed forms each round documents.
     ///
     /// The tests around it assert properties of the derivation they exercise — a term composed
-    /// with the wrong coefficient, size, or grinding site satisfies monotonicity and still grades
-    /// the deployed preset at 96. These rows are the independent check. They cover parameters the
-    /// deployed preset never reaches, so the DEEP and folding terms leave the cap and the query
-    /// term reaches it, rather than only the two rounds that bind in practice.
+    /// with the wrong coefficient, size, or grinding site satisfies monotonicity and still
+    /// computes the deployed preset at level 96. These rows are the independent check. They cover
+    /// parameters the deployed preset never reaches, so the DEEP and folding terms leave the cap
+    /// and the query term reaches it, rather than only the two rounds that determine the level in
+    /// practice.
     #[test]
     fn security_report_matches_reference_vectors() {
         // (queries, query PoW, DEEP PoW, folding PoW, log height)
@@ -520,8 +533,9 @@ mod tests {
     }
 
     /// The lookup round overtakes the query phase as the bottleneck somewhere in the low twenties,
-    /// which is what makes the grade height-dependent at all. Pinning the crossover keeps that
-    /// boundary honest: below it the preset attains its design target, above it it does not.
+    /// which is what makes the computed security level height-dependent at all. This test checks
+    /// the crossover height against a fixed value: below it the preset reaches its design target,
+    /// above it it does not.
     #[test]
     fn lookup_round_overtakes_the_query_phase_in_the_low_twenties() {
         let params = protocol_params(&config::pcs_params());

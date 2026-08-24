@@ -164,9 +164,9 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
             adv.push_mapval dropw
             exec.vm::verify_vm_proof
 
-            # Accept the MVM proof while retaining its authenticated deferred root. The grade
-            # also depends on the proof's largest AIR trace height and kernel procedure count,
-            # which the verifier left in its own memory.
+            # Accept the MVM proof while retaining its authenticated deferred root. The computed
+            # security level also depends on the proof's largest AIR trace height and kernel
+            # procedure count, which the verifier left in its own memory.
             swapw
             exec.constants::get_trace_length_log movdn.4
             exec.layout::num_kernel_procedures_ptr mem_load movdn.5

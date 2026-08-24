@@ -325,17 +325,22 @@ fn proof_request_round_trip_retrieves_registered_package() {
 }
 
 /// The MASM `sys::vm::compute_conjectured_security_level` procedure must agree with the native
-/// `miden_air::security::conjectured_security_level` across the verifier's whole input domain.
-/// The two implementations share no code — one is fixed-point Rust, the other hand-written
-/// integer MASM over precomputed round bases — so only an exhaustive comparison establishes that
-/// a proof grades identically whether it is verified natively or recursively.
+/// `miden_air::security::conjectured_security_level` on the swept inputs below. The two
+/// implementations share no code — one is fixed-point Rust, the other hand-written integer MASM
+/// over precomputed round bases — so this comparison is what establishes that a proof's computed
+/// security level agrees whether it is verified natively or recursively.
 ///
-/// The domain has six axes, covered by four two-dimensional sweeps: the query parameters against
-/// each other at the maximum trace height, where the height-bearing rounds are largest and any
-/// underflow would surface; each grinding site against every supported height; and the kernel
-/// procedure count (the lookup round's boundary correction) against every supported height, its
-/// own trace-height-scaled term. One VM run evaluates each grid, storing the MASM level for
-/// `(outer, inner)` at address `outer * inner_bound + inner`; the host then checks every cell.
+/// The domain has six axes; this covers four two-dimensional slices of it, not the whole domain:
+/// the query parameters against each other at the maximum trace height, where the height-bearing
+/// rounds are largest and any underflow would surface; each grinding site against every supported
+/// height; and the kernel procedure count (the lookup round's boundary correction) against every
+/// supported height, its own trace-height-scaled term. Every round's calculation executes on every
+/// swept input, but comparing only the returned minimum establishes exact arithmetic solely for
+/// whichever round determines it under that slice's other axes — held fixed at the deployed
+/// preset, so the lookup and query rounds are the ones actually checked here; a wrong composition,
+/// out-of-domain, or folding literal would move no swept output. One VM run evaluates each grid,
+/// storing the MASM level for `(outer, inner)` at address `outer * inner_bound + inner`; the host
+/// then checks every cell.
 #[test]
 fn masm_compute_conjectured_security_level_matches_native() {
     use Axis::{Fixed, Inner, Outer};
@@ -529,8 +534,9 @@ fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
 }
 
 /// The estimator must trap on a log trace height outside `assert_shape_log`'s range rather than
-/// grade against it: a consumer that `call`s `verify_vm_proof` instead of `exec`ing it reads its
-/// own context's zeroed height slot, which would report six bits the proof has not earned.
+/// compute a level from it: a consumer that `call`s `verify_vm_proof` instead of `exec`ing it
+/// reads its own context's zeroed height slot, which would report six bits the proof has not
+/// earned.
 #[test]
 fn security_level_rejects_an_out_of_range_trace_height() {
     let source = "
@@ -573,17 +579,18 @@ fn security_level_threshold_rejects_below_target() {
         "
     );
 
-    // The deployed preset at a height below the lookup/query crossover grades to exactly the
+    // The deployed preset at a height below the lookup/query crossover computes to exactly the
     // target: the threshold assert must pass.
     let at = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 20, 0]);
     at.execute_for_output().expect("an at-target level must be accepted");
 
-    // Fewer queries and less grinding grades below the target: the threshold assert must fail.
+    // Fewer queries and less grinding computes a level below the target: the threshold assert
+    // must fail.
     let below = build_test!(source.as_str(), &[22_u64, 16, 12, 4, 20, 0]);
     assert!(below.execute_for_output().is_err(), "a below-target level must be rejected");
 
-    // The same preset at the maximum supported height falls below the target on the lookup
-    // round alone — the reason grading cannot be a property of the parameters by themselves.
+    // The same preset at the maximum supported height falls below the target on the lookup round
+    // alone — the reason the computed level cannot be a property of the parameters by themselves.
     let tall = build_test!(source.as_str(), &[27_u64, 17, 12, 4, 29, 0]);
     assert!(tall.execute_for_output().is_err(), "a below-target level must be rejected");
 }
