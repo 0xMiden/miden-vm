@@ -114,6 +114,8 @@ fn core_library_exports_crypto_wrappers() {
         "::miden::core::crypto::hashes::keccak256::merge",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_bytes",
+        "::miden::core::crypto::dsa::ecdsa_k256_keccak::recover",
+        "::miden::core::crypto::dsa::ecdsa_k256_keccak::recover_bytes",
     ] {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
@@ -161,8 +163,11 @@ fn precompile_semantic_api_is_available_from_precompiles_crate() {
 fn core_library_load_registers_precompile_handlers() {
     use miden_core_lib::{
         CoreLibrary,
-        handlers::precompiles::{
-            keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
+        handlers::{
+            ecdsa_k256_keccak::ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+            precompiles::{
+                keccak256::KECCAK256_DIGEST_EVENT_NAME, uint_field_inv::UINT_FIELD_INV_EVENT_NAME,
+            },
         },
     };
     use miden_processor::{BaseHost, DefaultHost};
@@ -171,7 +176,11 @@ fn core_library_load_registers_precompile_handlers() {
     let mut host = DefaultHost::default();
     host.load_library(&core_lib).expect("failed to load core library");
 
-    for event in [KECCAK256_DIGEST_EVENT_NAME, UINT_FIELD_INV_EVENT_NAME] {
+    for event in [
+        KECCAK256_DIGEST_EVENT_NAME,
+        UINT_FIELD_INV_EVENT_NAME,
+        ECDSA_K256_KECCAK_RECOVER_EVENT_NAME,
+    ] {
         assert_eq!(host.resolve_event(event.to_event_id()), Some(&event));
     }
 }

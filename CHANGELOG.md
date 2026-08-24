@@ -7,6 +7,7 @@
 - [BREAKING] Replaced source-specific and opaque debug variable locations with explicit unavailable
   locations, tagged Miden frame bases, and bounded structured Miden-runtime expressions. This bumps
   the package debug-info wire format to version 3.
+- [BREAKING] Added `miden::core::crypto::dsa::ecdsa_k256_keccak::{recover, recover_bytes}` for word-aligned native EVM recovery witnesses `R_LE_U32[8] || S_LE_U32[8] || V` (`V` = 27 or 28). They accept high-s and return `QX_LE_U32[8] || QY_LE_U32[8]`; callers convert external big-endian EVM wire signatures and authenticate the returned key. Also added `PublicKey::recover_from_prehash` in `miden-crypto`. The accompanying refactor changes the MAST root of the existing `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` export; consumers that pin this root must update it ([#3682](https://github.com/0xMiden/miden-vm/pull/3682)).
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
 - Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 - [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
