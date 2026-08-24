@@ -140,15 +140,26 @@ end
 #! Outputs:
 #!   Operand stack: [QX[8] | QY[8], ...]
 #!
-#! `SIG_PTR` must be word-aligned and address the native EVM recovery witness
-#! `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is exactly 27 or 28. The Word is encoded and hashed
-#! exactly as it is by `verify`. It must point to caller-owned memory that remains unchanged until
-#! the procedure returns.
+#! Where:
+#! - `MSG_WORD`: four felts split into eight little-endian u32 limbs and hashed exactly as by
+#!   `verify`.
+#! - `SIG_PTR`: word-aligned address of caller-owned memory containing the native EVM recovery
+#!   witness `R_LE_U32[8] || S_LE_U32[8] || V`. The memory must remain unchanged until the procedure
+#!   returns.
+#! - `R_LE_U32[8]`, `S_LE_U32[8]`: signature scalars as little-endian u32 limbs.
+#! - `V`: EVM recovery byte 27 or 28.
+#! - `QX[8]`, `QY[8]`: recovered affine public-key coordinates as little-endian u32 limbs.
 #!
-#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. The
-#! procedure traps on malformed memory, invalid scalars or recovery byte, an invalid recovery point,
-#! or advice inconsistent with the exact message and signature. A wrong message can recover a
-#! different valid key; callers must authenticate the returned key against trusted state.
+#! Panics if:
+#! - `SIG_PTR` is not word-aligned.
+#! - a signature limb is not a u32, or `r` or `s` is zero or not a canonical secp256k1 scalar.
+#! - `V` is not 27 or 28.
+#! - candidate public-key advice or the derived recovery point is invalid or inconsistent with the
+#!   exact message, signature, and recovery byte.
+#!
+#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. A wrong
+#! message can recover a different valid key; callers must authenticate the returned key against
+#! trusted state.
 #! Raw signature bytes are not a replay key because equivalent low-s and high-s encodings exist.
 #!
 #! Invocation: exec
@@ -175,15 +186,29 @@ end
 #! Outputs:
 #!   Operand stack: [QX[8] | QY[8], ...]
 #!
-#! The message uses the same packed-byte representation, alignment, length bound, and final-chunk
-#! padding rules as `verify_bytes`. `SIG_PTR` must be word-aligned and address the native EVM
-#! recovery witness `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is exactly 27 or 28. It must point
-#! to caller-owned memory that remains unchanged until the procedure returns.
+#! Where:
+#! - `MSG_PTR`: word-aligned address containing the message as packed little-endian u32 limbs.
+#! - `MSG_LEN_BYTES`: number of message bytes to hash. Unused bytes in the final u32 and remaining
+#!   felts in the final 32-byte chunk must be zero.
+#! - `SIG_PTR`: word-aligned address of caller-owned memory containing the native EVM recovery
+#!   witness `R_LE_U32[8] || S_LE_U32[8] || V`. The memory must remain unchanged until the procedure
+#!   returns.
+#! - `R_LE_U32[8]`, `S_LE_U32[8]`: signature scalars as little-endian u32 limbs.
+#! - `V`: EVM recovery byte 27 or 28.
+#! - `QX[8]`, `QY[8]`: recovered affine public-key coordinates as little-endian u32 limbs.
 #!
-#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. The
-#! procedure traps on malformed memory, invalid scalars or recovery byte, an invalid recovery point,
-#! or advice inconsistent with the exact message and signature. A wrong message can recover a
-#! different valid key; callers must authenticate the returned key against trusted state.
+#! Panics if:
+#! - `MSG_PTR` or `SIG_PTR` is not word-aligned.
+#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - a message-memory felt is not a u32, or final-chunk padding is nonzero.
+#! - a signature limb is not a u32, or `r` or `s` is zero or not a canonical secp256k1 scalar.
+#! - `V` is not 27 or 28.
+#! - candidate public-key advice or the derived recovery point is invalid or inconsistent with the
+#!   exact message, signature, and recovery byte.
+#!
+#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. A wrong
+#! message can recover a different valid key; callers must authenticate the returned key against
+#! trusted state.
 #!
 #! Invocation: exec
 @locals(8)
