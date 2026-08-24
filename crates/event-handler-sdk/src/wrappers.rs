@@ -210,11 +210,23 @@ pub fn adv_map_value_len(key: &Word) -> Option<u32> {
     }
 }
 
-/// Reads the advice-map value for `key` into `out` and returns the element count, or `None`
-/// when the map has no entry. One host call.
+/// The outcome of [`adv_map_value_read`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvMapRead {
+    /// The value was written to the buffer; it has this many elements.
+    Value(usize),
+    /// The advice map has no entry for the key.
+    NotFound,
+    /// The buffer is too small; the value has this many elements. One retry with a buffer of
+    /// this capacity succeeds.
+    NeedsCapacity(usize),
+}
+
+/// Reads the advice-map value for `key` into `out`. One host call.
 ///
-/// Ends the handler when `out` is smaller than the value; size it with [`adv_map_value_len`].
-pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
+/// Size the buffer with [`adv_map_value_len`] first, or retry once with the capacity that
+/// [`AdvMapRead::NeedsCapacity`] reports.
+pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> AdvMapRead {
     let key = canonical_word(key);
     let cap = out.len() as u32;
     let mut len = 0u32;
@@ -222,9 +234,9 @@ pub fn adv_map_value_read(key: &Word, out: &mut [Felt]) -> Option<usize> {
     // more than `cap` elements, and the element count goes to the local `len`.
     let raw = unsafe { guest::adv_map_value_read(&key, out.as_mut_ptr(), cap, &mut len) };
     match status(raw) {
-        Status::Ok => Some(len as usize),
-        Status::NotFound => None,
-        Status::CapacityTooSmall => fail("adv_map_value_read: output buffer is too small"),
+        Status::Ok => AdvMapRead::Value(len as usize),
+        Status::NotFound => AdvMapRead::NotFound,
+        Status::CapacityTooSmall => AdvMapRead::NeedsCapacity(len as usize),
         _ => fail("adv_map_value_read failed"),
     }
 }

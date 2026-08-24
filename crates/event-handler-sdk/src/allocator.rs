@@ -44,6 +44,9 @@ unsafe impl GlobalAlloc for Bump {
 
         // Reserve fresh pages. `memory.grow` returns the previous page count, and the memory
         // above it is untouched, so the new region cannot overlap an earlier allocation.
+        // The `align` term over-reserves on purpose: the region start is only page-aligned,
+        // and `fit` can move the allocation start forward by up to `align - 1` bytes, so the
+        // grown pages must hold `size` bytes after that fixup.
         let Some(bytes) = layout.size().checked_add(layout.align()) else {
             return ptr::null_mut();
         };
