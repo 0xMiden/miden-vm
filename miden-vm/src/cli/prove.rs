@@ -37,7 +37,7 @@ pub struct ProveCmd {
     /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
     #[arg(
         long = "max-prover-memory",
-        default_value_t = ExecutionOptions::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+        default_value_t = Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
         value_parser = parse_byte_size
     )]
     max_prover_memory: u64,
@@ -75,7 +75,6 @@ impl ProveCmd {
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         )
-        .map(|options| options.with_max_prover_memory_bytes(self.max_prover_memory))
         .map_err(|err| Report::msg(format!("{err}")))
     }
 
@@ -172,6 +171,7 @@ impl ProveCmd {
         let stack_outputs = *witness.claim().stack_outputs();
         let proof = Prover::new()
             .with_hash_fn(hash_fn)
+            .with_max_prover_memory_bytes(self.max_prover_memory)
             .prove_full(witness)
             .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 

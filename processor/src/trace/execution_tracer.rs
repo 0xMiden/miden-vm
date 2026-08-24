@@ -78,10 +78,6 @@ pub(crate) struct TraceReplay {
     /// The maximum number of field elements allowed on the operand stack in an active execution
     /// context.
     pub(crate) max_stack_depth: usize,
-
-    /// The maximum memory, in bytes, the prover is permitted to allocate for a proof over this
-    /// execution's trace.
-    pub(crate) max_prover_memory_bytes: u64,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -154,10 +150,6 @@ pub struct ExecutionTracer {
     /// context.
     max_stack_depth: usize,
 
-    /// The maximum memory, in bytes, the prover is permitted to allocate for a proof over this
-    /// execution's trace.
-    max_prover_memory_bytes: u64,
-
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
@@ -177,17 +169,16 @@ impl ExecutionTracer {
     pub(crate) fn new_with_streamed_hasher(
         fragment_size: usize,
         max_stack_depth: usize,
-        max_prover_memory_bytes: u64,
         hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
     ) -> Self {
-        let mut tracer = Self::new(fragment_size, max_stack_depth, max_prover_memory_bytes);
+        let mut tracer = Self::new(fragment_size, max_stack_depth);
         tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
         tracer
     }
 
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize, max_stack_depth: usize, max_prover_memory_bytes: u64) -> Self {
+    pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -210,7 +201,6 @@ impl ExecutionTracer {
             mast_forest_ids: BTreeMap::new(),
             fragment_size,
             max_stack_depth,
-            max_prover_memory_bytes,
             pending_restore_context: false,
             is_eval_circuit_op: false,
         }
@@ -320,7 +310,6 @@ impl ExecutionTracer {
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
             max_stack_depth: self.max_stack_depth,
-            max_prover_memory_bytes: self.max_prover_memory_bytes,
         }
     }
 

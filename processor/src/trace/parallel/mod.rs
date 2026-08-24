@@ -61,6 +61,12 @@ pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH + RANGE_CHECK_TRACE_WIDTH
 /// [`memory::prover_peak_bytes`]).
 pub(crate) const MAX_TRACE_LEN: usize = 1 << 29;
 
+/// Default maximum memory, in bytes, [`build_trace`] assumes when no budget is given explicitly.
+/// Set to 64 GiB, comfortably above every workload in-repo and far below what the previous
+/// row-count cap admitted; callers that own actual proving policy (e.g. `miden-prover`'s
+/// `Prover`) are expected to set their own via [`build_trace_with_budget`].
+pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = 64 << 30;
+
 pub(crate) mod core_trace_fragment;
 
 mod processor;
@@ -95,32 +101,33 @@ mod tests;
 /// ```
 #[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(witness: VmWitness) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, None)
+    build_trace_inner(witness, None, DEFAULT_MAX_PROVER_MEMORY_BYTES)
 }
 
-/// Same as [`build_trace`], but overrides the budget carried by the witness.
+/// Same as [`build_trace`], but with an explicit memory budget instead of the default.
 pub fn build_trace_with_budget(
     witness: VmWitness,
     max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, None, Some(max_prover_memory_bytes))
+    build_trace_inner(witness, None, max_prover_memory_bytes)
 }
 
-/// Same as [`build_trace`], but with a hasher chiplet that was already built — used by the
-/// streaming path, where the hasher builder runs concurrently with program execution
+/// Same as [`build_trace_with_budget`], but with a hasher chiplet that was already built — used
+/// by the streaming path, where the hasher builder runs concurrently with program execution
 /// (`FastProcessor::execute_and_build_trace_sync`, std-only).
 #[cfg(feature = "std")]
 pub(crate) fn build_trace_with_prebuilt_hasher(
     witness: VmWitness,
     prebuilt_hasher: Hasher,
+    max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
-    build_trace_inner(witness, Some(prebuilt_hasher), None)
+    build_trace_inner(witness, Some(prebuilt_hasher), max_prover_memory_bytes)
 }
 
 fn build_trace_inner(
     witness: VmWitness,
     prebuilt_hasher: Option<Hasher>,
-    max_prover_memory_bytes_override: Option<u64>,
+    max_prover_memory_bytes: u64,
 ) -> Result<VmTrace, ExecutionError> {
     let VmWitness {
         program_info,
@@ -141,11 +148,8 @@ fn build_trace_inner(
         ace_replay,
         fragment_size,
         max_stack_depth,
-        max_prover_memory_bytes: witness_max_prover_memory_bytes,
     } = trace;
 
-    let max_prover_memory_bytes =
-        max_prover_memory_bytes_override.unwrap_or(witness_max_prover_memory_bytes);
     let pcs_params = config::pcs_params();
 
     // Tier 1: a permissive per-AIR row cap derived from the cheapest AIR's marginal cost, so it
