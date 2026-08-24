@@ -102,6 +102,7 @@ pub struct IterCost {
     pub core: f64,
     pub hasher: f64,
     pub bitwise: f64,
+    pub chiplets: f64,
     pub memory: f64,
     pub range: f64,
 }
@@ -111,7 +112,7 @@ impl IterCost {
         match component {
             Component::Core => self.core,
             Component::Hasher => self.hasher,
-            Component::Bitwise => self.bitwise,
+            Component::Chiplets => self.chiplets,
             Component::Memory => self.memory,
             Component::Range => self.range,
         }
@@ -140,6 +141,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
         core: shape.totals.core_rows as f64 / k,
         hasher: shape.hasher_work_rows() as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
+        chiplets: shape.totals.chiplets_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
         range: shape.totals.range_rows as f64 / k,
     }
@@ -220,11 +222,12 @@ mod tests {
     }
 
     #[test]
-    fn memory_snippet_two_rows_per_iter() {
+    fn memory_snippet_drives_chiplets() {
         let c = cal();
         let memory = c["memory"];
-        assert!(memory.memory >= 1.5, "memory per-iter ({}) too low", memory.memory);
-        assert!(memory.memory <= 2.5, "memory per-iter ({}) too high", memory.memory);
+        assert!(memory.chiplets >= 1.5, "chiplets per memory iter ({}) too low", memory.chiplets,);
+        assert!(memory.memory >= 1.5, "memory per iter ({}) too low", memory.memory);
+        assert!(memory.memory <= 2.5, "memory per iter ({}) too high", memory.memory);
     }
 
     #[test]

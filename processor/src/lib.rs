@@ -51,7 +51,7 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use continuation_stack::Continuation;
+pub use continuation_stack::{Continuation, SourceInlineCallContext};
 pub use errors::{
     AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
     advice_error_with_package_source_context, event_error_with_package_source_context,

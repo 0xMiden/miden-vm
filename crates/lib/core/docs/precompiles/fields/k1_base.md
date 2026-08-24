@@ -1,0 +1,39 @@
+
+## miden::core::precompiles::fields::k1_base
+| Procedure | Description |
+| ----------- | ------------- |
+| load | Loads one canonical field value from the operand stack and returns its deferred digest.<br />Input:  [VALUE_U32[8], ...]<br />Output: [VALUE_DIGEST, ...]<br /> |
+| load_mem_stream | Loads one canonical field value from memory, returning its deferred digest and the advanced pointer.<br />Input:  [ptr, ...]<br />Output: [VALUE_DIGEST, ptr+8, ...]<br /><br />`ptr` must address eight consecutive u32-range felts and be double-word aligned for the<br />`mem_stream` used by the deferred data registration helper.<br /> |
+| load_mem | Loads one canonical field value from memory and returns its deferred digest.<br />Input:  [ptr, ...]<br />Output: [VALUE_DIGEST, ...]<br /><br />`ptr` must address eight consecutive u32-range felts and be double-word aligned for<br />`load_mem_stream`.<br /> |
+| push_zero_digest | Pushes the registered digest of constant 0.<br /> |
+| push_zero_value | Pushes the raw little-endian u32 limbs of constant 0.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_one_digest | Pushes the registered digest of constant 1.<br /> |
+| push_one_value | Pushes the raw little-endian u32 limbs of constant 1.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_two_digest | Pushes the registered digest of constant 2.<br /> |
+| push_two_value | Pushes the raw little-endian u32 limbs of constant 2.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_minus_one_digest | Pushes the registered digest of field constant -1.<br /> |
+| push_minus_one_value | Pushes the raw little-endian u32 limbs of field constant -1.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_half_digest | Pushes the registered digest of field constant 1/2.<br /> |
+| push_half_value | Pushes the raw little-endian u32 limbs of field constant 1/2.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_pow_2_128_digest | Pushes the registered digest of field constant 2^128.<br /> |
+| push_pow_2_128_value | Pushes the raw little-endian u32 limbs of field constant 2^128.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_pow_2_256_digest | Pushes the registered digest of field constant 2^256.<br /> |
+| push_pow_2_256_value | Pushes the raw little-endian u32 limbs of field constant 2^256.<br />Output: [VALUE_U32[8], ...]<br /> |
+| push_pow_2_384_digest | Pushes the registered digest of field constant 2^384.<br /> |
+| push_pow_2_384_value | Pushes the raw little-endian u32 limbs of field constant 2^384.<br />Output: [VALUE_U32[8], ...]<br /> |
+| add | Registers `lhs + rhs` and returns the result expression digest.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [SUM_DIGEST, ...]<br /> |
+| sub | Registers `lhs - rhs` and returns the result expression digest.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [DIFF_DIGEST, ...]<br /> |
+| mul | Registers `lhs * rhs` and returns the result expression digest.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [PRODUCT_DIGEST, ...]<br /> |
+| is_eq | Evaluates two field expression digests and returns whether their canonical values match.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [is_equal, ...]<br /><br />This does not trap when the two values differ. Each digest is evaluated independently, and each<br />advised canonical value is bound by logging an equality assertion against the expression that<br />produced it. The returned bit is derived in MASM by comparing the two canonical field values.<br /> |
+| is_zero | Evaluates a field expression digest and returns whether its canonical value is zero.<br />Input:  [EXPR_DIGEST, ...]<br />Output: [is_zero, ...]<br /><br />This evaluates and binds only the input expression's resulting VALUE digest, then compares that<br />digest against the registered zero digest. Inequality itself does not trap.<br /> |
+| is_one | Evaluates a field expression digest and returns whether its canonical value is one.<br />Input:  [EXPR_DIGEST, ...]<br />Output: [is_one, ...]<br /><br />This evaluates and binds only the input expression's resulting VALUE digest, then compares that<br />digest against the registered one digest. Inequality itself does not trap.<br /> |
+| assert_eq | Asserts two field expressions are equal by logging an EQ predicate into the deferred root.<br />Input:  [LHS_DIGEST, RHS_DIGEST, ...]<br />Output: [...]<br /><br />Unlike `is_eq`, this does not materialize canonical values. It registers the predicate<br />`eq(LHS_DIGEST, RHS_DIGEST)` directly; the installed Uint precompile checks equality when the<br />logged node is evaluated as part of the deferred root.<br /> |
+| load_128 | Loads a 128-bit little-endian chunk from the operand stack as a canonical field value.<br />Input:  [CHUNK_U32[4], ...]<br />Output: [FIELD_DIGEST, ...]<br /><br />Every 128-bit chunk is canonical in the generated prime fields because 2^128 is smaller than<br />the field modulus.<br /> |
+| load_128_mem | Loads a 128-bit little-endian chunk from memory as a canonical field value.<br />Input:  [ptr, ...]<br />Output: [FIELD_DIGEST, ...]<br />Memory layout: ptr[0..4] = chunk limbs; high field limbs are zero.<br /> |
+| load_reduced_256 | Reduces a 256-bit little-endian u32 value from the operand stack into this field.<br />Input:  [VALUE_U32[8], ...]<br />Output: [FIELD_DIGEST, ...]<br /><br />Registers the expression `lo128 + hi128 * 2^128`, where each half is loaded as a canonical<br />field value.<br /> |
+| load_reduced_512_mem | Reduces a 512-bit little-endian u32 value from memory into this field.<br />Input:  [ptr, ...]<br />Output: [FIELD_DIGEST, ...]<br />Memory layout: ptr[0..16] = little-endian u32 limbs of the 512-bit value.<br /> |
+| inv | Computes the multiplicative inverse of a nonzero field element digest.<br />Input:  [X_DIGEST, ...]<br />Output: [INV_DIGEST, ...]<br /><br />The inverse limbs are untrusted host advice. This wrapper registers the advised limbs as a<br />canonical VALUE node, then proves correctness by logging `eq(mul(X_DIGEST, INV_DIGEST), one)`<br />into the deferred root using only existing MUL and EQ nodes.<br /> |
+| div | Divides one field element digest by another nonzero field element digest.<br />Input:  [NUMERATOR_DIGEST, DENOMINATOR_DIGEST, ...]<br />Output: [QUOTIENT_DIGEST, ...]<br /> |
+| is_eq_digest | Evaluates a field expression digest and returns whether its canonical VALUE digest matches a target.<br />Input:  [TARGET_DIGEST, EXPR_DIGEST, ...]<br />Output: [is_equal, ...]<br /><br />Advice is untrusted: `adv.evaluate_deferred_payload` leaves `EXPR_DIGEST` on stack and<br />pushes only the canonical value payload to advice. MASM derives a VALUE node digest from<br />the advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind it, then compares<br />`VALUE_DIGEST` with `TARGET_DIGEST` to produce a safe boolean.<br /> |
+| open_value | Opens an already proof-bound canonical field VALUE digest and returns its eight<br />little-endian u32 limbs.<br />Input:  [VALUE_DIGEST, ...]<br />Output: [VALUE_U32[8], ...]<br /><br />Advice is untrusted, so this re-hashes the advised payload with this module's VALUE_TAG and<br />asserts raw digest equality in the VM. This does not evaluate arbitrary expression digests or<br />independently prove registration or canonicity; callers must establish that VALUE_DIGEST is an<br />already proof-bound canonical VALUE node for this domain.<br /> |
+| eval | Evaluates a field expression digest and returns its eight little-endian u32 limbs on the stack.<br />Input:  [EXPR_DIGEST, ...]<br />Output: [VALUE_U32[8], ...]<br /><br />Advice is untrusted. `adv.evaluate_deferred_payload` leaves `EXPR_DIGEST` on stack and<br />pushes only the canonical value payload to advice. MASM derives a VALUE node digest from the<br />advised payload, logs `eq(EXPR_DIGEST, VALUE_DIGEST)` to bind the result, then returns the<br />now-safe canonical value.<br /> |

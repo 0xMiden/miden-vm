@@ -85,7 +85,7 @@ fn run_hash_mem(
             push.{OUT_PTR}
             push.{len_bytes}
             push.{IN_PTR}
-            exec.::miden::precompiles::hashes::{module}::{proc}
+            exec.::miden::core::precompiles::hashes::{module}::{proc}
         end
         "#,
         len_bytes = input.len() + trailing_zero_felts * BYTES_PER_FELT,
@@ -150,7 +150,7 @@ fn cycle_hash_mem_source(module: &str, proc: &str, input: &[u8]) -> String {
             push.{len_bytes}
             push.{IN_PTR}
             clk push.512 mem_store
-            exec.::miden::precompiles::hashes::{module}::{proc}
+            exec.::miden::core::precompiles::hashes::{module}::{proc}
             clk push.512 mem_load sub
             exec.truncate_stack_to_output
         end

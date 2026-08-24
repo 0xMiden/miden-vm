@@ -1,10 +1,58 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{mast::MastNodeId, program::Program};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceInlineCall, DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
+
+/// Package-owned source context whose inline-call rows remain active across a dynamic target.
+#[derive(Debug, Clone)]
+pub struct SourceInlineCallContext {
+    package_debug_info: Arc<PackageDebugInfo>,
+    source_node_id: DebugSourceNodeId,
+    op_idx: u32,
+}
+
+impl SourceInlineCallContext {
+    pub(crate) fn new(
+        package_debug_info: Arc<PackageDebugInfo>,
+        source_node_id: DebugSourceNodeId,
+        op_idx: u32,
+    ) -> Self {
+        Self {
+            package_debug_info,
+            source_node_id,
+            op_idx,
+        }
+    }
+
+    pub(crate) fn for_source_boundary(
+        package_debug_info: Arc<PackageDebugInfo>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) -> Option<Self> {
+        let source_node_id = source_node_id?;
+        let op_idx = package_debug_info.source_node(source_node_id)?.op_start;
+        package_debug_info.inline_calls_for_operation(source_node_id, op_idx).next()?;
+        Some(Self::new(package_debug_info, source_node_id, op_idx))
+    }
+
+    /// Returns the package debug information which owns this source occurrence.
+    pub fn debug_info(&self) -> &Arc<PackageDebugInfo> {
+        &self.package_debug_info
+    }
+
+    /// Returns the source occurrence whose boundary inline rows form this context.
+    pub fn source_node_id(&self) -> DebugSourceNodeId {
+        self.source_node_id
+    }
+
+    /// Returns the inline calls inherited at this source boundary.
+    pub fn inline_calls(&self) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.package_debug_info
+            .inline_calls_for_operation(self.source_node_id, self.op_idx)
+    }
+}
 
 // CONTINUATION
 // ================================================================================================
@@ -58,6 +106,8 @@ pub enum Continuation<F> {
     EnterForest {
         forest: F,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
+        /// Inline-context stack depth to restore when returning to this forest.
+        inline_context_depth: usize,
     },
 }
 
@@ -184,15 +234,20 @@ impl<F> ContinuationStack<F> {
     /// # Arguments
     /// * `forest` - The MAST forest to enter
     pub fn push_enter_forest(&mut self, forest: F) {
-        self.push_enter_forest_with_package_debug_info(forest, None);
+        self.push_enter_forest_with_package_debug_info(forest, None, 0);
     }
 
     pub(crate) fn push_enter_forest_with_package_debug_info(
         &mut self,
         forest: F,
         package_debug_info: Option<Arc<PackageDebugInfo>>,
+        inline_context_depth: usize,
     ) {
-        self.stack.push(Continuation::EnterForest { forest, package_debug_info });
+        self.stack.push(Continuation::EnterForest {
+            forest,
+            package_debug_info,
+            inline_context_depth,
+        });
         self.push_source_node_id(None);
     }
 
@@ -365,6 +420,10 @@ mod tests {
     use alloc::sync::Arc;
 
     use miden_core::mast::MastForest;
+    use miden_mast_package::debug_info::{
+        DebugFunctionIdx, DebugLocIdx, DebugSourceInlineCall, DebugSourceNode,
+        PackageDebugInfoBuilder,
+    };
 
     use super::*;
 
@@ -394,6 +453,7 @@ mod tests {
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
@@ -412,10 +472,12 @@ mod tests {
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
         stack.push_continuation(Continuation::EnterForest {
             forest: Arc::new(MastForest::new()),
             package_debug_info: None,
+            inline_context_depth: 0,
         });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
@@ -424,5 +486,32 @@ mod tests {
         assert!(matches!(result[0], Continuation::EnterForest { .. }));
         assert!(matches!(result[1], Continuation::EnterForest { .. }));
         assert!(matches!(result[2], Continuation::StartNode(_)));
+    }
+
+    #[test]
+    fn inline_call_context_uses_the_source_boundary_index() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_node_id = builder
+            .add_node(DebugSourceNode {
+                exec_node: MastNodeId::new_unchecked(0),
+                children: Vec::new(),
+                op_start: 7,
+                op_end: 7,
+                asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
+                inline_calls: vec![DebugSourceInlineCall {
+                    op_idx: 7,
+                    callee_idx: DebugFunctionIdx::from(0),
+                    loc_idx: DebugLocIdx::from(0),
+                }],
+            })
+            .unwrap();
+        let debug_info = Arc::from(builder.build());
+
+        let context =
+            SourceInlineCallContext::for_source_boundary(debug_info, Some(source_node_id))
+                .expect("boundary row should create inherited inline context");
+
+        assert_eq!(context.inline_calls().map(|row| row.op_idx).collect::<Vec<_>>(), [7]);
     }
 }

@@ -253,6 +253,35 @@ version_cmp() {
     '
 }
 
+semver_release_type() {
+    local baseline_version="$1"
+    local current_version="$2"
+
+    awk -v baseline="$baseline_version" -v current="$current_version" '
+        function core(version, parts) {
+            sub(/\+.*/, "", version)
+            split(version, prerelease_parts, "-")
+            split(prerelease_parts[1], parts, ".")
+        }
+
+        BEGIN {
+            core(baseline, baseline_parts)
+            core(current, current_parts)
+
+            if (baseline_parts[1] != current_parts[1] ||
+                (baseline_parts[1] == 0 && baseline_parts[2] != current_parts[2]) ||
+                (baseline_parts[1] == 0 && baseline_parts[2] == 0 &&
+                    baseline_parts[3] != current_parts[3])) {
+                print "major"
+            } else if (baseline_parts[2] != current_parts[2]) {
+                print "minor"
+            } else {
+                print "patch"
+            }
+        }
+    '
+}
+
 is_publishable_package() {
     local package="$1"
 
@@ -294,6 +323,17 @@ package_rustdoc_name() {
         head -n 1
 }
 
+package_version() {
+    local package="$1"
+
+    printf '%s' "$metadata_json" |
+        jq -r --arg package "$package" '
+          .packages[]
+          | select(.name == $package)
+          | .version
+        '
+}
+
 publishable_packages() {
     printf '%s' "$metadata_json" |
         jq -r '
@@ -328,7 +368,7 @@ run_semver_check() {
     local workspace_root="$3"
     local baseline_commit="${4:-}"
     local semver_cmd semver_cargo_home semver_target_dir semver_workdir
-    local baseline_root current_json baseline_json
+    local baseline_root current_json baseline_json current_version release_type
 
     check_command "cargo-semver-checks"
     semver_cmd="$(command -v cargo-semver-checks)"
@@ -343,6 +383,8 @@ run_semver_check() {
     fi
 
     if [[ -n "$baseline_commit" ]]; then
+        current_version="$(package_version "$package")"
+        release_type="$(semver_release_type "$baseline_version" "$current_version")"
         baseline_root="$RELEASE_PLAN_TMPDIR/baseline-source/$package-$baseline_commit"
         mkdir -p "$baseline_root"
         git archive "$baseline_commit" | tar -x -C "$baseline_root"
@@ -356,6 +398,7 @@ run_semver_check() {
                 "$semver_cmd" semver-checks \
                 --current-rustdoc "$current_json" \
                 --baseline-rustdoc "$baseline_json" \
+                --release-type "$release_type" \
                 --color never
         )
         return

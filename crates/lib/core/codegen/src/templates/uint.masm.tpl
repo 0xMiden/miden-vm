@@ -2,7 +2,7 @@
 # Source template: {{TEMPLATE_PATH}}
 # Regenerate with: {{REGENERATE_COMMAND}}
 
-use miden::precompiles
+use miden::core::precompiles
 
 # {{TITLE}} {{DOMAIN_KIND}} PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================

@@ -2,8 +2,8 @@
 # Source template: {{TEMPLATE_PATH}}
 # Regenerate with: {{REGENERATE_COMMAND}}
 
-use miden::precompiles
-use miden::precompiles::fields::{{BASE_FIELD_MODULE}}
+use miden::core::precompiles
+use miden::core::precompiles::fields::{{BASE_FIELD_MODULE}}
 
 # {{TITLE}} CURVE PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================

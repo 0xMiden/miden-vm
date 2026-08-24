@@ -9,10 +9,7 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
-`CoreLibrary` provides separate `miden-core` and `miden-precompiles` MASM packages. Keeping their
-`miden::core` and `miden::precompiles` namespaces in separate packages leaves the parent `miden`
-namespace available to other packages. Use `CoreLibrary::packages()` when both packages should be
-linked, and call the stable facades under `miden::core::*`.
+`CoreLibrary` provides the `miden-core` Miden package (a `.masp` file) in addition to its associated event handlers. This package occupies the `miden::core` namespace. 
 
 Generated core-library MASM can be inspected locally:
 

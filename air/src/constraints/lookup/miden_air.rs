@@ -65,6 +65,7 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 
 /// Emit boundary corrections for Chiplets lookup columns.
 pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let kernel_digests: Vec<[B::F; 4]> = boundary
         .var_len_public_inputs()
         .first()

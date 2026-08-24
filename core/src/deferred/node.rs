@@ -363,6 +363,7 @@ impl Node {
         let mut felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(Self::DATA_CHUNK_FELT_LEN).max(1);
         felts.resize(n_chunks * Self::DATA_CHUNK_FELT_LEN, ZERO);
+        #[allow(clippy::chunks_exact_to_as_chunks)]
         let chunks = felts
             .as_chunks::<{ Self::DATA_CHUNK_FELT_LEN }>()
             .0
