@@ -80,7 +80,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 ///
 /// # Errors
 /// Returns an error if the name is empty or is in the reserved namespace.
-fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
+pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionError> {
     if event.as_str().is_empty() {
         return Err(crate::errors::HostError::EmptyEventName.into());
     }
@@ -599,12 +599,12 @@ mod tests {
 
         // `replace_handler` reports whether a prior handler existed; before any registration it
         // returns false but registers the handler.
-        let existed = host.replace_handler(NAME, Arc::new(NoopEventHandler));
+        let existed = host.replace_handler(NAME, Arc::new(NoopEventHandler)).unwrap();
         assert!(!existed, "replace before register should report no prior handler");
         assert_eq!(host.resolve_event(id), Some(&NAME));
 
         // A second replace now observes the prior handler.
-        assert!(host.replace_handler(NAME, Arc::new(NoopEventHandler)));
+        assert!(host.replace_handler(NAME, Arc::new(NoopEventHandler)).unwrap());
 
         // Re-registering the same event directly is rejected.
         assert!(matches!(
@@ -618,16 +618,27 @@ mod tests {
     }
 
     #[test]
+    fn replace_handler_rejects_invalid_names_without_panicking() {
+        let mut host = DefaultHost::default();
+        assert!(host.replace_handler(EventName::new("sys::nope"), Arc::new(NoopEventHandler)).is_err());
+        assert!(host.replace_handler(EventName::new(""), Arc::new(NoopEventHandler)).is_err());
+        assert!(
+            host.replace_trace_handler(EventName::new("sys::nope"), Arc::new(NoopTraceHandler))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn default_host_trace_handler_lifecycle() {
         const NAME: EventName = EventName::new("test::host::trace_lifecycle");
         let id = NAME.to_event_id();
         let mut host = DefaultHost::default();
 
-        let existed = host.replace_trace_handler(NAME, Arc::new(NoopTraceHandler));
+        let existed = host.replace_trace_handler(NAME, Arc::new(NoopTraceHandler)).unwrap();
         assert!(!existed, "replace before register should report no prior handler");
         assert_eq!(host.resolve_trace(id), Some(&NAME));
 
-        assert!(host.replace_trace_handler(NAME, Arc::new(NoopTraceHandler)));
+        assert!(host.replace_trace_handler(NAME, Arc::new(NoopTraceHandler)).unwrap());
 
         assert!(matches!(
             host.register_trace_handler(NAME, Arc::new(NoopTraceHandler)),

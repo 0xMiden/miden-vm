@@ -116,11 +116,20 @@ where
 
     /// Replaces a handler with the given event, returning a flag indicating whether a handler
     /// was previously registered with this event ID.
-    pub fn replace_handler(&mut self, event: EventName, handler: Arc<dyn EventHandler>) -> bool {
-        let event_id = event.to_event_id();
-        let existed = self.event_handlers.unregister(event_id);
-        self.register_handler(event, handler).unwrap();
-        existed
+    ///
+    /// # Errors
+    /// Returns an error when the event name is empty or reserved; the host is not changed
+    /// then.
+    pub fn replace_handler(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn EventHandler>,
+    ) -> Result<bool, ExecutionError> {
+        // Validate before the unregistration, so an invalid name leaves the host unchanged.
+        super::handlers::validate_event_name(&event)?;
+        let existed = self.event_handlers.unregister(event.to_event_id());
+        self.register_handler(event, handler)?;
+        Ok(existed)
     }
 
     /// Registers a single [`TraceHandler`] into this host.
@@ -144,15 +153,20 @@ where
 
     /// Replaces a trace handler with the given event, returning a flag indicating whether a
     /// handler was previously registered with this event ID.
+    ///
+    /// # Errors
+    /// Returns an error when the event name is empty or reserved; the host is not changed
+    /// then.
     pub fn replace_trace_handler(
         &mut self,
         event: EventName,
         handler: Arc<dyn TraceHandler>,
-    ) -> bool {
-        let event_id = event.to_event_id();
-        let existed = self.trace_handlers.unregister(event_id);
-        self.register_trace_handler(event, handler).unwrap();
-        existed
+    ) -> Result<bool, ExecutionError> {
+        // Validate before the unregistration, so an invalid name leaves the host unchanged.
+        super::handlers::validate_event_name(&event)?;
+        let existed = self.trace_handlers.unregister(event.to_event_id());
+        self.register_trace_handler(event, handler)?;
+        Ok(existed)
     }
 }
 
