@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_crypto::{
     field::TwoAdicField,
-    stark::dft::{NaiveDft, TwoAdicSubgroupDft},
+    stark::dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft},
 };
 
 use crate::layout::InputKey;
@@ -136,7 +136,11 @@ impl<EF> PeriodicColumnData<EF> {
             let column = if terms.is_empty() || sparse_ops < dense_ops {
                 PeriodicColumn::Sparse { period, terms }
             } else {
-                let coeffs = NaiveDft.idft(col).into_iter().map(EF::from).collect();
+                let coeffs = Radix2DFTSmallBatch::<F>::default()
+                    .idft(col)
+                    .into_iter()
+                    .map(EF::from)
+                    .collect();
                 PeriodicColumn::Dense(coeffs)
             };
             columns.push(column);
