@@ -1188,9 +1188,14 @@ pub struct FunctionInfo<N: Idx> {
     pub source_node: OptionalIndex<N>,
     /// Type signature of this function (index into type table, optional)
     pub type_idx: OptionalIndex<DebugTypeIdx>,
-    /// Linkage name / mangled name (index into string table, optional)
+    /// Assembler/linker-visible name (index into string table, optional).
+    ///
+    /// Set when the name known to the linker differs from the name as written in the source code
+    /// (which is tracked by name_idx).
     pub linkage_name_idx: OptionalIndex<DebugStringIdx>,
-    /// Name of the function (index into string table)
+    /// Name of the function (index into string table).
+    ///
+    /// When `linkage_name_idx` is unset, this is also the assembler/linker-visible name.
     pub name_idx: DebugStringIdx,
     /// File containing this function (index into file table)
     pub file_idx: DebugFileIdx,

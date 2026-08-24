@@ -335,17 +335,27 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 // ================================================================================================
 
 impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
-    /// Look up the index of a function info record by it's [`miden_assembly_syntax::Path`].
+    /// Look up the index of a function info record by its [`miden_assembly_syntax::Path`].
+    ///
+    /// The path is matched against both the linkage name and the source name of each function.
+    /// Linkage name matches take precedence over source name matches.
     pub fn get_function_index_by_path(
         &self,
         path: &miden_assembly_syntax::Path,
     ) -> Option<DebugFunctionIdx> {
         let path = path.as_str();
-        self.debug_info
-            .functions
-            .iter()
-            .position(|f| self.debug_info[f.name_idx].as_ref() == path)
-            .map(|pos| DebugFunctionIdx::from(pos as u32))
+        let mut name_match = None;
+        for (pos, f) in self.debug_info.functions.iter().enumerate() {
+            if let Some(linkage_name_idx) = f.linkage_name_idx.into_option()
+                && self.debug_info[linkage_name_idx].as_ref() == path
+            {
+                return Some(DebugFunctionIdx::from(pos as u32));
+            }
+            if name_match.is_none() && self.debug_info[f.name_idx].as_ref() == path {
+                name_match = Some(pos);
+            }
+        }
+        name_match.map(|pos| DebugFunctionIdx::from(pos as u32))
     }
 
     /// Adds a function to the function table.
@@ -649,9 +659,12 @@ fn declared_type_name(
 mod tests {
     use alloc::sync::Arc;
 
-    use miden_assembly_syntax::ast::types::{
-        CallConv, EnumType, FunctionType, StructType, Type, Variant,
+    use miden_assembly_syntax::{
+        Path,
+        ast::types::{CallConv, EnumType, FunctionType, StructType, Type, Variant},
     };
+    use miden_core::Word;
+    use miden_debug_types::{ColumnNumber, LineNumber, Uri};
     use miden_utils_indexing::Idx;
 
     use super::*;
@@ -807,5 +820,84 @@ mod tests {
         assert_eq!(idx3.to_usize(), 0); // Should return same index
         assert_eq!(builder.string_indices.len(), 2);
         assert_eq!(builder.debug_info.strings.len(), 2);
+    }
+
+    fn add_test_function(
+        builder: &mut PackageDebugInfoBuilder,
+        name: &str,
+        linkage_name: Option<&str>,
+    ) -> DebugFunctionIdx {
+        let file_idx = builder.add_file(Uri::new("test.masm"), None);
+        let line = LineNumber::new(1).unwrap();
+        let column = ColumnNumber::new(1).unwrap();
+        let name_idx = builder.add_string(name);
+        let func = FunctionInfo::new(None, name_idx, file_idx, line, column, Word::default());
+        let func = match linkage_name {
+            Some(linkage_name) => {
+                let linkage_name_idx = builder.add_string(linkage_name);
+                func.with_linkage_name(linkage_name_idx)
+            },
+            None => func,
+        };
+        builder.add_function(func)
+    }
+
+    #[test]
+    fn function_path_lookup_no_match() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        add_test_function(&mut builder, "::module::plain", None);
+        add_test_function(&mut builder, "duplicate", Some("::module::linked"));
+
+        assert_eq!(builder.get_function_index_by_path(Path::new("::module::missing")), None);
+    }
+
+    #[test]
+    fn function_path_lookup_matches_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let plain_function_idx = add_test_function(&mut builder, "::module::plain", None);
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::plain")),
+            Some(plain_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_matches_linkage_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let linked_function_idx =
+            add_test_function(&mut builder, "duplicate", Some("::module::linked"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::linked")),
+            Some(linked_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_matches_source_name_of_linked_function() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let linked_function_idx =
+            add_test_function(&mut builder, "::module::source", Some("::module::linked"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::source")),
+            Some(linked_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_prefers_linkage_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        // The name-matching function comes first in the table, but the linkage name match must
+        // still take precedence.
+        add_test_function(&mut builder, "::module::shared", None);
+        let linked_function_idx =
+            add_test_function(&mut builder, "duplicate", Some("::module::shared"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::shared")),
+            Some(linked_function_idx),
+        );
     }
 }
