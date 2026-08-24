@@ -13,7 +13,7 @@ use miden_processor::{
     advice::AdviceMutation,
     event::{EventError, EventHandler, EventName},
 };
-use wasmi::{Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
+use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
 
 use crate::{
     error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
@@ -72,10 +72,15 @@ impl Default for WasmHandlerLimits {
 /// The module is parsed, validated, and compiled once. Each event call then runs in a fresh
 /// store and instance, so handlers keep no state between calls.
 pub struct WasmHandlerModule {
+    /// The wasmi engine, configured with the fixed feature policy and fuel metering.
     engine: Engine,
+    /// The compiled module, shared by every call.
     module: Module,
+    /// The linker that holds the host function set.
     linker: Linker<HostCtx>,
+    /// The per-call resource limits.
     limits: WasmHandlerLimits,
+    /// The validated `(event, export)` pairs.
     manifest: Vec<(EventName, String)>,
     /// The fuel charge for one instantiation, deducted from the budget of every call.
     instantiation_fuel: u64,
@@ -138,6 +143,11 @@ impl WasmHandlerModule {
 
         let mut config = Config::default();
         config.consume_fuel(true);
+        // Translate the whole module at load time. wasmi's default lazy translation would run
+        // per-function translation inside the first event call that reaches each function —
+        // host-side work that no fuel meters. With eager mode, all compilation cost lands in
+        // the load path, next to parsing and validation.
+        config.compilation_mode(CompilationMode::Eager);
         // The accepted Wasm feature set is validation policy: it decides which modules load,
         // on every host, so it is stated explicitly instead of inherited from wasmi's
         // defaults (which change with wasmi versions and with Cargo feature unification).
@@ -395,6 +405,10 @@ pub(crate) fn walk_wasm_sections<'a>(
 
 /// Decodes a LEB128-encoded `u64` from `data` at `pos`; returns the value and the next
 /// position.
+///
+/// At the last shift (63), the bits of an over-long encoding drop silently instead of
+/// returning `None`. This is harmless here: the reader runs after `Module::new` validated the
+/// binary, and its result only feeds the instantiation-cost upper bound.
 fn read_leb_u64(data: &[u8], mut pos: usize) -> Option<(u64, usize)> {
     let mut value: u64 = 0;
     let mut shift = 0u32;
