@@ -932,6 +932,33 @@ fn reachable_components<Exec: Idx, Src: Idx>(
     Some(components)
 }
 
+/// Whether a recovered aggregate lays out exactly as its debug row records.
+fn layout_matches_row(ty: &Type, row: &DebugTypeInfo) -> bool {
+    match (ty, row) {
+        (Type::Struct(recovered), DebugTypeInfo::Struct { size, fields, .. }) => {
+            let recovered = recovered.get();
+            u32::try_from(recovered.size()).is_ok_and(|recovered_size| recovered_size == *size)
+                && recovered.fields().len() == fields.len()
+                && recovered
+                    .fields()
+                    .iter()
+                    .zip(fields)
+                    .all(|(recovered, row)| recovered.offset == row.offset)
+        },
+        (Type::Enum(recovered), DebugTypeInfo::Enum { size, variants, .. }) => {
+            let recovered = recovered.get();
+            u32::try_from(recovered.size_in_bytes())
+                .is_ok_and(|recovered_size| recovered_size == *size)
+                && recovered.variants().len() == variants.len()
+                && recovered.variant_offsets().zip(variants).all(|((offset, variant), row)| {
+                    variant.value.is_none() == row.payload_offset.is_none()
+                        && row.payload_offset.is_none_or(|expected| offset == expected)
+                })
+        },
+        _ => false,
+    }
+}
+
 fn is_aggregate_row(ty: &DebugTypeInfo) -> bool {
     matches!(ty, DebugTypeInfo::Struct { .. } | DebugTypeInfo::Enum { .. })
 }
@@ -1026,6 +1053,13 @@ fn recover_recursive_component<Exec: Idx, Src: Idx>(
     let built = builder.build().ok()?;
     for index in &definitions {
         let ty = built.get(&names[index])?.clone();
+        // The rebuilt type must describe the same memory the row does. `DebugTypeInfo` records no
+        // representation, so a row written from a packed or over-aligned aggregate rebuilds with
+        // the default layout, and its fields land at different offsets. Recovering it anyway
+        // would hand back a type that disagrees with the record it came from.
+        if !layout_matches_row(&ty, debug_info.get_type(*index)?) {
+            return None;
+        }
         cached_types.insert(*index, (ty, None));
     }
 
@@ -2033,6 +2067,40 @@ mod tests {
 
         // Either a recovered type or a clean refusal is fine; aborting is not.
         let _ = recover_type_at(root, debug_info.as_ref(), &mut cache);
+    }
+
+    #[test]
+    fn recovery_rejects_a_recursive_row_whose_layout_does_not_match() {
+        // A packed row: size 9 with fields at 0/1/5. Recovery rebuilds the type with the default
+        // representation, which lays those fields out at 0/4/8 with size 12, so the recovered
+        // type does not describe the same memory the row does.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Packed");
+        let u8_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let u32_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let root = builder.add_type(DebugTypeInfo::Unknown);
+        let pointer = builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: root });
+        let a = builder.add_string("a");
+        let b = builder.add_string("b");
+        let next = builder.add_string("next");
+        let fields = vec![
+            DebugFieldInfo { name_idx: a, type_idx: u8_idx, offset: 0 },
+            DebugFieldInfo {
+                name_idx: b,
+                type_idx: u32_idx,
+                offset: 1,
+            },
+            DebugFieldInfo {
+                name_idx: next,
+                type_idx: pointer,
+                offset: 5,
+            },
+        ];
+        builder.replace_type_for_test(root, DebugTypeInfo::Struct { name_idx, size: 9, fields });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(root, debug_info.as_ref(), &mut cache).is_none());
     }
 
     #[test]
