@@ -402,12 +402,50 @@ impl TypeExpr {
 
 impl From<Type> for TypeExpr {
     fn from(ty: Type) -> Self {
-        match ty {
-            Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
-            Type::Struct(t) => {
-                let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
-                let t = t.get();
-                let fields = t.fields().iter().enumerate().map(|(i, ft)| {
+        let mut expanding = Vec::new();
+        type_expr_from(ty, &mut expanding)
+    }
+}
+
+/// Convert a [Type] to a [TypeExpr], rendering a recursive aggregate's backedge as a reference by
+/// name rather than expanding it again.
+///
+/// `expanding` holds the recursive definitions whose bodies are currently being written out.
+/// Without it a recursive struct expands forever: the body is unfolded, its pointer field is
+/// converted, and converting the pointee unfolds the same body again.
+fn type_expr_from(ty: Type, expanding: &mut Vec<types::RecTypeRef>) -> TypeExpr {
+    match ty {
+        Type::Array(t) => TypeExpr::Array(ArrayType::new(
+            type_expr_from(t.element_type().clone(), expanding),
+            t.len(),
+        )),
+        Type::Struct(t) => {
+            let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
+
+            // A backedge to a definition already being written out becomes a reference to it,
+            // which is how it would have been written in source in the first place.
+            if let Some(rec) = t.as_recursive() {
+                if expanding.contains(rec) {
+                    let name = name.unwrap_or_else(|| {
+                        panic!(
+                            "unrepresentable type value: a recursive struct without a name cannot \
+                             be referred to as a type expression"
+                        )
+                    });
+                    return TypeExpr::Ref(Span::unknown(
+                        Path::from_ident(&name).into_owned().into(),
+                    ));
+                }
+                expanding.push(rec.clone());
+            }
+
+            let is_recursive = t.is_recursive();
+            let body = t.get();
+            let fields = body
+                .fields()
+                .iter()
+                .enumerate()
+                .map(|(i, ft)| {
                     let name = ft
                         .name
                         .as_deref()
@@ -417,25 +455,36 @@ impl From<Type> for TypeExpr {
                     StructField {
                         span: SourceSpan::UNKNOWN,
                         name,
-                        ty: ft.ty.clone().into(),
+                        ty: type_expr_from(ft.ty.clone(), expanding),
                     }
-                });
-                Self::Struct(
-                    StructType::new(name, fields)
-                        .with_repr(Span::unknown(t.repr()))
-                        .with_span(SourceSpan::UNKNOWN),
-                )
-            },
-            Type::Ptr(t) => Self::Ptr((*t).clone().into()),
-            Type::Function(_) => {
-                Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
-            },
-            Type::List(t) => Self::Ptr(
-                PointerType::new((*t).clone().into()).with_address_space(AddressSpace::Byte),
-            ),
-            Type::Unknown | Type::Never | Type::F64 => panic!("unrepresentable type value: {ty}"),
-            ty => Self::Primitive(Span::unknown(ty)),
-        }
+                })
+                .collect::<Vec<_>>();
+            let converted = TypeExpr::Struct(
+                StructType::new(name, fields)
+                    .with_repr(Span::unknown(body.repr()))
+                    .with_span(SourceSpan::UNKNOWN),
+            );
+
+            if is_recursive {
+                expanding.pop();
+            }
+            converted
+        },
+        Type::Ptr(t) => TypeExpr::Ptr(
+            PointerType::new(type_expr_from(t.pointee().clone(), expanding))
+                .with_address_space(t.addrspace()),
+        ),
+        Type::Function(_) => {
+            TypeExpr::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
+        },
+        Type::List(t) => TypeExpr::Ptr(
+            PointerType::new(type_expr_from((*t).clone(), expanding))
+                .with_address_space(AddressSpace::Byte),
+        ),
+        Type::Unknown | Type::Never | Type::F64 => {
+            panic!("unrepresentable type value: {ty}")
+        },
+        ty => TypeExpr::Primitive(Span::unknown(ty)),
     }
 }
 
@@ -1404,6 +1453,35 @@ mod tests {
         assert_eq!(*actual.repr, TypeRepr::align(16));
         assert_eq!(actual.fields[0].name.as_str(), "prefix");
         assert_eq!(actual.fields[1].name.as_str(), "suffix");
+    }
+
+    #[test]
+    fn type_expr_conversion_of_a_recursive_struct_terminates() {
+        use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [("next", TypeTemplate::ptr(TypeTemplate::rec("Node")))],
+            ),
+        );
+        let node = builder.build().unwrap().remove("Node").unwrap();
+
+        // The backedge must come back as a reference by name, not as another copy of the body,
+        // or the conversion never terminates.
+        let TypeExpr::Struct(converted) = TypeExpr::from(node) else {
+            panic!("expected a struct type expression");
+        };
+        let TypeExpr::Ptr(pointer) = &converted.fields[0].ty else {
+            panic!("expected a pointer");
+        };
+        let TypeExpr::Ref(target) = pointer.pointee.as_ref() else {
+            panic!("expected the pointee to be a reference, got {:?}", pointer.pointee);
+        };
+        assert_eq!(target.inner().to_string(), "Node");
     }
 
     #[test]
