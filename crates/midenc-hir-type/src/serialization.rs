@@ -419,7 +419,14 @@ fn check_array_size(element: &TypeTemplate, len: usize) -> Result<(), Deserializ
 /// The size of a template's element, when it does not depend on a definition still being built.
 fn known_min_size(template: &TypeTemplate) -> Option<u64> {
     match template {
-        TypeTemplate::Type(ty) => u64::try_from(ty.aligned_size_in_bytes()).ok(),
+        // The stride of an array is the element padded to its own alignment, not the allocation
+        // headroom `aligned_size_in_bytes` reports, which would overstate it and reject valid
+        // types.
+        TypeTemplate::Type(ty) => {
+            let size = u64::try_from(ty.size_in_bytes()).ok()?;
+            let align = u64::try_from(ty.min_alignment()).ok()?;
+            size.checked_next_multiple_of(align)
+        },
         // Reference types have a fixed size whatever they refer to.
         TypeTemplate::Ptr(..) | TypeTemplate::Function(_) => Some(4),
         TypeTemplate::List(_) => Some(8),
@@ -433,13 +440,17 @@ fn known_min_size(template: &TypeTemplate) -> Option<u64> {
             .fields
             .iter()
             .try_fold(0u64, |total, field| total.checked_add(known_min_size(&field.ty)?)),
-        TypeTemplate::Enum(ty) => ty.variants.iter().try_fold(0u64, |total, variant| match variant
-            .value
-            .as_ref()
-        {
-            Some(value) => Some(total.max(known_min_size(value)?)),
-            None => Some(total),
-        }),
+        // An enum is at least as big as its discriminant, which is what a C-like enum consists
+        // of; omitting it reported such an enum as zero-sized and let an array of them through.
+        TypeTemplate::Enum(ty) => {
+            let discriminant = u64::try_from(ty.discriminant.size_in_bytes()).ok()?;
+            ty.variants.iter().try_fold(discriminant, |total, variant| {
+                match variant.value.as_ref() {
+                    Some(value) => Some(total.max(known_min_size(value)?)),
+                    None => Some(total),
+                }
+            })
+        },
         // A back-reference names a definition whose size is not known until the group is built.
         TypeTemplate::Rec(_) => None,
     }
@@ -1478,6 +1489,61 @@ mod tests {
         let handler = build_one(builder, "Handler");
 
         assert_eq!(round_trip(&handler), handler);
+    }
+
+    #[test]
+    fn a_large_but_valid_recursive_array_is_accepted() {
+        // Three billion bytes fits in a u32 size. Treating the element's stride as its allocation
+        // headroom would overstate it and reject this.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "T",
+            StructTemplate::named(
+                "T",
+                TypeRepr::Default,
+                [
+                    ("bytes", TypeTemplate::array(TypeTemplate::from(Type::U8), 3_000_000_000)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("T"))),
+                ],
+            ),
+        );
+        let ty = build_one(builder, "T");
+
+        assert_eq!(round_trip(&ty), ty);
+    }
+
+    #[test]
+    fn a_recursive_array_of_c_like_enums_is_rejected() {
+        // A C-like enum is its discriminant, so an array of them is not zero-sized, and one this
+        // long cannot be laid out.
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(1);
+        bytes.write_u8(0);
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(2);
+        bytes.write_bool(false);
+        bytes.write_u8(18); // array
+        bytes.write_usize(usize::MAX);
+        bytes.write_u8(21); // of a C-like enum
+        bytes.write_usize(1);
+        bytes.write_bytes(b"E");
+        bytes.write_u8(4); // u8 discriminant
+        bytes.write_usize(1);
+        bytes.write_usize(1);
+        bytes.write_bytes(b"V");
+        bytes.write_bool(false); // no payload
+        bytes.write_bool(true);
+        bytes.write_u8(0); // discriminant value
+        bytes.write_bool(false);
+        bytes.write_u8(16); // and a pointer field, guarding the recursion
+        bytes.write_u8(0);
+        bytes.write_u8(24);
+        bytes.write_u16(0);
+        bytes.write_u16(0);
+
+        assert!(Type::read_from(&mut SliceReader::new(&bytes)).is_err());
     }
 
     #[test]
