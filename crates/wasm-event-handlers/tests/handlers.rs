@@ -881,6 +881,39 @@ fn instantiation_cost_is_charged_on_every_call() {
 }
 
 #[test]
+fn element_segments_count_toward_the_instantiation_cost() {
+    // wasmi materializes every element segment — passive included — on each instantiation,
+    // one boxed value plus a const-expr evaluation per item. 8000 passive items encode as
+    // ~8 KB but cost ~131k fuel at the element rate, far over a 100k budget that the same
+    // module without the segment fits (one page costs 8192).
+    let segment = format!("(elem func {})", "0 ".repeat(8000));
+    let with_segment = fixture_with(&segment, "(nop)");
+    let without_segment = fixture("(nop)");
+    let limits = WasmHandlerLimits { fuel: 100_000, ..Default::default() };
+    load_with_limits(&without_segment, limits.clone());
+    let wasm = wat::parse_str(&with_segment).expect("fixture WAT must parse");
+    let manifest = vec![(EVENT, "handler".to_string())];
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, manifest, limits).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::InstantiationOverBudget { .. }),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn oversized_export_count_is_rejected_at_load() {
+    // wasmi rebuilds the export map on every per-call instantiation, unmetered, so the
+    // export count is capped at load (1024).
+    let exports: String = (0..1025).map(|idx| format!("(export \"e{idx}\" (func $f))")).collect();
+    let wat_src = format!("(module (func $f) (func (export \"handler\")) {exports})");
+    let err = try_load(&wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::TooManyExports { count: 1026, .. }),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn zero_length_mutations_buffer_no_records() {
     let wat_src = fixture(
         "(call $adv_stack_extend (i32.const 0) (i32.const 0))

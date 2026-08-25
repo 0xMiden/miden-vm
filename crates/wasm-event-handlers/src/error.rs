@@ -53,6 +53,16 @@ pub enum WasmHandlerLoadError {
         name: String,
     },
 
+    /// The module has more exports than the cap. wasmi rebuilds the export map on every
+    /// per-call instantiation, and no fuel meters that work, so the count is bounded at load.
+    #[error("handler module has {count} exports, over the {max}-export limit")]
+    TooManyExports {
+        /// The number of exports the module declares.
+        count: usize,
+        /// The export cap.
+        max: usize,
+    },
+
     /// The module has a start section. No guest code may run before fuel and limits are
     /// installed, so start functions are rejected.
     #[error("handler module has a start section; start functions are not allowed")]

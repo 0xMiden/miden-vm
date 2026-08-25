@@ -65,6 +65,13 @@ impl Default for WasmHandlerLimits {
     }
 }
 
+/// The maximum number of exports a handler module may have.
+///
+/// The manifest can name at most `MAX_HANDLERS` (256) exports, plus the `memory` export and
+/// toolchain extras; per-call instantiation pays one unmetered allocation per export, so the
+/// count is bounded at load.
+const MAX_MODULE_EXPORTS: usize = 1024;
+
 // WASM HANDLER MODULE
 // ================================================================================================
 
@@ -100,6 +107,7 @@ impl WasmHandlerModule {
     ///   ([`EnforcedLimits::strict`]);
     /// - the module imports from a namespace other than `miden:event/v1`, imports the same function
     ///   more than once, or an import has a signature the host function set does not provide;
+    /// - the module has more than [`MAX_MODULE_EXPORTS`] exports;
     /// - the module has a start section;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
     /// - the manifest breaks a section rule (an empty or over-long name, a duplicate event, or a
@@ -193,6 +201,19 @@ impl WasmHandlerModule {
                     name: import.name().to_string(),
                 });
             }
+        }
+
+        // wasmi rebuilds the export map (one allocation per export) inside every per-call
+        // instantiation, no fuel meters it, and the engine's structural limits do not bound
+        // the export count. The cap closes that amplification the same way the
+        // duplicate-import rejection does; the manifest can name at most 256 exports, so the
+        // cap is generous.
+        let export_count = module.exports().count();
+        if export_count > MAX_MODULE_EXPORTS {
+            return Err(WasmHandlerLoadError::TooManyExports {
+                count: export_count,
+                max: MAX_MODULE_EXPORTS,
+            });
         }
 
         // One section walk answers both questions below.
@@ -435,10 +456,12 @@ struct ModuleStatics {
 /// has a start section.
 ///
 /// wasmi meters no instantiation work: it allocates and zeroes the declared initial memory,
-/// allocates the initial tables, and copies the data and element segments before any guest
-/// code runs. The sizes are static, so the charge is computed once at load time. The rate is
-/// one fuel unit per 8 bytes, the same as [`FUEL_PER_FELT`] for host-moved data; the byte
-/// count is an upper bound that counts passive segments as if they were copied.
+/// allocates the initial tables, copies the data segments, and materializes every element
+/// segment (passive included) before any guest code runs. The sizes are static, so the charge
+/// is computed once at load time. Memory, tables, and data segments charge one fuel unit per
+/// 8 bytes, the same as [`FUEL_PER_FELT`] for host-moved data — an upper bound that counts
+/// passive data segments as if they were copied. The element section charges per encoded byte
+/// at its own, much higher rate; see `ELEMENT_FUEL_PER_BYTE` below.
 ///
 /// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
 /// invalid module.
@@ -454,8 +477,18 @@ fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
     const PAGE_BYTES: u64 = 65536;
     /// The size of one table element (a reference) on a 64-bit host.
     const TABLE_ELEMENT_BYTES: u64 = 8;
+    /// Fuel charged per encoded byte of the element section.
+    ///
+    /// wasmi materializes every element segment — passive included — as a boxed value array
+    /// with one const-expr evaluation per item, on every instantiation. An item encodes as
+    /// ~2 bytes but realizes as an 8-byte value plus an evaluation (tens of nanoseconds), so
+    /// the byte-copy rate of the data section would undercharge by two orders of magnitude.
+    /// 16 fuel per encoded byte is an upper bound at the calibrated ~0.8 ns per fuel unit,
+    /// and it needs no parsing of the segment encodings.
+    const ELEMENT_FUEL_PER_BYTE: u64 = 16;
 
     let mut bytes: u64 = 0;
+    let mut element_fuel: u64 = 0;
     let mut malformed = false;
     let mut has_start_section = false;
     walk_wasm_sections(wasm, |id, payload| match id {
@@ -467,8 +500,12 @@ fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
             Some(elems) => bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES)),
             None => malformed = true,
         },
-        DATA_SECTION_ID | ELEMENT_SECTION_ID => {
+        DATA_SECTION_ID => {
             bytes = bytes.saturating_add(payload.len() as u64);
+        },
+        ELEMENT_SECTION_ID => {
+            element_fuel = element_fuel
+                .saturating_add((payload.len() as u64).saturating_mul(ELEMENT_FUEL_PER_BYTE));
         },
         START_SECTION_ID => has_start_section = true,
         _ => {},
@@ -477,7 +514,10 @@ fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
         return None;
     }
     Some(ModuleStatics {
-        instantiation_fuel: bytes.div_ceil(8).saturating_mul(FUEL_PER_FELT),
+        instantiation_fuel: bytes
+            .div_ceil(8)
+            .saturating_mul(FUEL_PER_FELT)
+            .saturating_add(element_fuel),
         has_start_section,
     })
 }
