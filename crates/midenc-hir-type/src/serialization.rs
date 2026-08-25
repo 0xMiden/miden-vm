@@ -426,8 +426,22 @@ fn known_min_size(template: &TypeTemplate) -> Option<u64> {
         TypeTemplate::Array(element, len) => {
             known_min_size(element)?.checked_mul(u64::try_from(*len).ok()?)
         },
-        // Anything else may contain a back-reference, whose size is not yet known.
-        TypeTemplate::Rec(_) | TypeTemplate::Struct(_) | TypeTemplate::Enum(_) => None,
+        // An aggregate that mentions no definition still under construction has a knowable size.
+        // Summing its fields is a lower bound rather than its exact layout, which is all that is
+        // needed to reject an array whose size cannot fit.
+        TypeTemplate::Struct(ty) => ty
+            .fields
+            .iter()
+            .try_fold(0u64, |total, field| total.checked_add(known_min_size(&field.ty)?)),
+        TypeTemplate::Enum(ty) => ty.variants.iter().try_fold(0u64, |total, variant| match variant
+            .value
+            .as_ref()
+        {
+            Some(value) => Some(total.max(known_min_size(value)?)),
+            None => Some(total),
+        }),
+        // A back-reference names a definition whose size is not known until the group is built.
+        TypeTemplate::Rec(_) => None,
     }
 }
 
@@ -651,6 +665,29 @@ fn read_discriminant_value<R: ByteReader>(
     })
 }
 
+/// Read one entry of a function's parameter or result list inside a group body.
+///
+/// The same trailing-position rule as [`read_signature_type`] applies here; a signature does not
+/// stop being a signature because it sits inside a recursive group.
+fn read_signature_template<R: ByteReader>(
+    source: &mut R,
+    names: &[Arc<str>],
+    depth: usize,
+    is_last: bool,
+) -> Result<TypeTemplate, DeserializationError> {
+    if source.peek_u8()? == TAG_VARIADIC {
+        source.read_u8()?;
+        if !is_last {
+            return Err(DeserializationError::InvalidValue(String::from(
+                "invalid function type: a variadic type parameter must come last, and may appear \
+                 at most once per list",
+            )));
+        }
+        return Ok(TypeTemplate::Type(Type::Variadic));
+    }
+    read_template(source, names, depth)
+}
+
 /// Read a type inside a group body, where a back-reference is permitted.
 fn read_template<R: ByteReader>(
     source: &mut R,
@@ -716,8 +753,13 @@ fn read_template<R: ByteReader>(
                 )));
             }
             let mut params = Vec::with_capacity(arity);
-            for _ in 0..arity {
-                params.push(read_template(source, names, next_depth)?);
+            for index in 0..arity {
+                params.push(read_signature_template(
+                    source,
+                    names,
+                    next_depth,
+                    index + 1 == arity,
+                )?);
             }
             let num_results = source.read_usize()?;
             let max_results = source.max_alloc(1);
@@ -727,8 +769,13 @@ fn read_template<R: ByteReader>(
                 )));
             }
             let mut results = Vec::with_capacity(num_results);
-            for _ in 0..num_results {
-                results.push(read_template(source, names, next_depth)?);
+            for index in 0..num_results {
+                results.push(read_signature_template(
+                    source,
+                    names,
+                    next_depth,
+                    index + 1 == num_results,
+                )?);
             }
             TypeTemplate::Function(Box::new(FunctionTemplate { abi, params, results }))
         },
@@ -1373,6 +1420,64 @@ mod tests {
         };
         assert_eq!(signature.params(), &[Type::U32, Type::Variadic]);
         assert_eq!(signature.results(), &[Type::Variadic]);
+    }
+
+    #[test]
+    fn recursive_array_with_oversized_closed_element_is_rejected() {
+        // The element is a closed anonymous struct, whose size is knowable, so the array's size
+        // must be checked before the group's layout is computed.
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(1);
+        bytes.write_u8(0);
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(2);
+        bytes.write_bool(false);
+        bytes.write_u8(18); // array
+        bytes.write_usize(usize::MAX);
+        bytes.write_u8(17); // of an anonymous struct
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(1);
+        bytes.write_bool(false);
+        bytes.write_u8(8); // holding a u32
+        bytes.write_bool(false);
+        bytes.write_u8(16); // and a pointer field, which guards the recursion
+        bytes.write_u8(0);
+        bytes.write_u8(24);
+        bytes.write_u16(0);
+        bytes.write_u16(0);
+
+        assert!(Type::read_from(&mut SliceReader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn a_recursive_group_holding_a_variadic_signature_round_trips() {
+        // A variadic is legal as a function's trailing parameter, including inside a recursive
+        // group, so encoding one there must be readable again.
+        //
+        // The signature has to mention the group, or the whole function is stored as a closed
+        // subterm and read back by the ordinary decoder rather than the group decoder.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Handler",
+            StructTemplate::named(
+                "Handler",
+                TypeRepr::Default,
+                [(
+                    "call",
+                    TypeTemplate::function(
+                        CallConv::Fast,
+                        [TypeTemplate::rec("Handler"), TypeTemplate::from(Type::Variadic)],
+                        [],
+                    ),
+                )],
+            ),
+        );
+        let handler = build_one(builder, "Handler");
+
+        assert_eq!(round_trip(&handler), handler);
     }
 
     #[test]
