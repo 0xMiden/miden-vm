@@ -508,7 +508,7 @@ mod prover_api_lifecycle {
     }
 }
 
-mod trace_proving_inputs {
+mod execution_witness_serialization {
     use std::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
@@ -525,7 +525,7 @@ mod trace_proving_inputs {
         trace::build_trace,
     };
     use miden_prover::{
-        HashFunction, TraceProvingInputs, prove_from_trace_sync, prove_partial_from_trace_sync,
+        HashFunction, Prover,
         serde::{Deserializable, Serializable},
     };
     use miden_verifier::Verifier;
@@ -568,17 +568,17 @@ mod trace_proving_inputs {
     }
 
     #[test]
-    fn test_trace_proving_inputs_round_trip_proves_external_library_program() {
+    fn test_execution_witness_round_trip_proves_external_library_program() {
         std::thread::Builder::new()
-            .name("trace-proving-inputs-round-trip".into())
+            .name("execution-witness-round-trip".into())
             .stack_size(8 * 1024 * 1024)
-            .spawn(trace_proving_inputs_round_trip_proves_external_library_program)
+            .spawn(execution_witness_round_trip_proves_external_library_program)
             .expect("failed to spawn round-trip test thread")
             .join()
             .expect("round-trip test thread panicked");
     }
 
-    fn trace_proving_inputs_round_trip_proves_external_library_program() {
+    fn execution_witness_round_trip_proves_external_library_program() {
         let program = external_program();
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
@@ -591,6 +591,7 @@ mod trace_proving_inputs {
                 .execute_for_proving_sync(&program, &mut host)
                 .expect("execution should produce a witness");
 
+        let claim = witness.claim();
         let witness_bytes = witness.to_bytes();
         let (restored_vm, _) = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("witness round trip")
@@ -611,55 +612,32 @@ mod trace_proving_inputs {
             original_trace.public_inputs().to_air_inputs()
         );
 
-        let proving_inputs = TraceProvingInputs::new(
-            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip"),
-            HashFunction::Blake3_256,
-        );
-        let proving_inputs_bytes = proving_inputs.to_bytes();
-        let proving_inputs_budget =
-            proving_inputs_bytes.len().checked_mul(4).expect("test input budget overflow");
-        let mut proving_inputs_with_trailing_byte = proving_inputs_bytes.clone();
-        proving_inputs_with_trailing_byte.push(0);
-        let err = TraceProvingInputs::read_from_bytes_with_budget(
-            &proving_inputs_with_trailing_byte,
-            proving_inputs_with_trailing_byte
-                .len()
-                .checked_mul(4)
-                .expect("test input budget overflow"),
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("TraceProvingInputs payload has trailing bytes"),
-            "unexpected error: {err}"
-        );
-        let restored_proving_inputs = TraceProvingInputs::read_from_bytes_with_budget(
-            &proving_inputs_bytes,
-            proving_inputs_budget,
-        )
-        .expect("trace proving inputs round trip");
-
-        let claim = ExecutionWitness::read_from_bytes(&witness_bytes)
-            .expect("witness round trip")
-            .claim();
-        let (_, proof) =
-            prove_from_trace_sync(restored_proving_inputs).expect("prove_from_trace_sync failed");
+        let witness_budget =
+            witness_bytes.len().checked_mul(4).expect("test input budget overflow");
+        let restored_witness =
+            ExecutionWitness::read_from_bytes_with_budget(&witness_bytes, witness_budget)
+                .expect("execution witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(restored_witness)
+            .expect("restored execution witness should prove");
 
         let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
         assert!(outcome.is_complete());
     }
 
     #[test]
-    fn test_prove_partial_from_trace_sync_preserves_deferred_wire() {
+    fn test_execution_witness_round_trip_preserves_deferred_wire() {
         std::thread::Builder::new()
             .name("partial-deferred-wire".into())
             .stack_size(8 * 1024 * 1024)
-            .spawn(prove_partial_from_trace_sync_preserves_deferred_wire)
+            .spawn(execution_witness_round_trip_preserves_deferred_wire)
             .expect("failed to spawn partial-wire test thread")
             .join()
             .expect("partial-wire test thread panicked");
     }
 
-    fn prove_partial_from_trace_sync_preserves_deferred_wire() {
+    fn execution_witness_round_trip_preserves_deferred_wire() {
         let source = "begin log_deferred end";
         let program = Assembler::default()
             .assemble_program("program", source)
@@ -681,23 +659,18 @@ mod trace_proving_inputs {
             .to_wire()
             .expect("deferred state should serialize to canonical wire");
 
-        let (stack_outputs, proof) = {
-            let proving =
-                ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
-            prove_partial_from_trace_sync(TraceProvingInputs::new(
-                proving,
-                HashFunction::Blake3_256,
-            ))
-            .expect("wire-backed partial proof should be produced from trace inputs")
-        };
+        let proving =
+            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(proving)
+            .expect("wire-backed partial proof should be produced from the restored witness");
 
         assert!(!proof.is_complete());
         let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
             panic!("partial proving should keep the deferred proof wire-backed");
         };
         assert_eq!(wire, &expected_wire);
-        let _ = stack_outputs;
-
         let claim = ExecutionWitness::read_from_bytes(&witness_bytes)
             .expect("witness round trip")
             .claim();
