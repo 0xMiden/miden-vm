@@ -1,5 +1,4 @@
 # Changelog
-
 ## v0.30.0 (Unreleased)
 
 #### Features
@@ -21,7 +20,7 @@
 - Added trusted binary serialization of execution witnesses (VM witness plus optional singleton precompile witness) for remote proving, with a wire format version tag and bounded, trusted deserialization ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 - `midenc_hir_type` now supports self-recursive and mutually recursive struct and enum types, e.g. `struct Node { next: *Node }`. Recursion must cross a pointer, list, or function, so that every layout stays finite; more precisely, every cycle in the type reference graph must cross one of those. A recursive `Type` carries its whole definition group by `Arc`, so it remains self-contained: no interning table, definition registry, or context object is needed to interpret one, and descending through a backedge yields a type equal to the definition it points at.
 - Miden Assembly signatures can now declare a variadic type parameter with `...`, in either argument or result position, e.g. `pub proc log(prefix: felt, ...)` or `pub proc f() -> (count: u32, ...)`. It must come last in its list and may appear at most once, matching the rules documented on `midenc_hir_type::Type::Variadic`, and it is only accepted in a signature, not as an ordinary type.
-- Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type. 
+- Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type.
 
 #### Changes
 
@@ -54,22 +53,6 @@
 - [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 - Made `Mmr::clone()` cheap by storing MMR nodes in chunked, `Arc`-shared storage. Clones share all chunk storage with the original; appending after a clone copies at most one 32 KiB chunk. Public API and serialization formats are unchanged. ([#3562](https://github.com/0xMiden/miden-vm/pull/3562)).
 - The `miden-precompiles` package has been merged into `miden-core`, users should remove any references to `miden-precompiles` and use `miden-core` instead.
-- [BREAKING] `midenc_hir_type::CallConv` has gained a new variant `Extern`, for language frontends to use for representing their own internal calling conventions.
-- [BREAKING] `midenc_hir_type::Type` has gained a new variant: `Variadic`, for use in representing function signatures that have variadic parameter or result lists.
-- The `List` variant of `midenc_hir_type::Type` has had its representation defined as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and so it is now supported in APIs that previously would panic due to the representation being unspecified. `List` is now emitted into debug info as an array with no fixed element count, which is what debug type recovery expects, so lists round-trip through package debug info; previously they were emitted as a synthetic `{ ptr, len }` struct and recovered as an ordinary struct. Structs with a `List`-typed field are now recoverable at all, where recovery previously failed outright because a list was treated as having no computable size.
-- [BREAKING] `midenc_hir_type::StructType` now rejects structs with more than 255 fields. 256 fields were previously constructible, but the field count is encoded as a `u8`, so such a struct silently serialized as having zero fields.
-- [BREAKING] `midenc_hir_type::Type::Struct` and `Type::Enum` now carry `StructRef` and `EnumRef` rather than `Arc<StructType>` and `Arc<EnumType>`. Pattern matching on `Type::Struct(..)`/`Type::Enum(..)` is unchanged and correctly selects recursive types too, but reading an aggregate's contents now goes through `StructRef::get`/`EnumRef::get`, which return `Cow` and unfold the recursive case.
-- [BREAKING] `miden_assembly_syntax::ast::TypeResolver::get_type` and `get_local_type` now return a `TypeTemplate` rather than a `Type`, and the trait gains a `finalize` method. A declaration cannot be resolved to a concrete type until the whole recursive group it belongs to is known, so resolution produces templates and materializes them at the outermost boundary. `TypeExpr::resolve_type` is replaced by `TypeExpr::resolve_template`; use `TypeResolver::resolve` to obtain a `Type`.
-- Fixed a stack overflow when assembling a module containing a cyclic type declaration. `type A = B` with `type B = A`, or a type defined in terms of itself, previously aborted the process, because resolving a type reference re-entered declaration resolution with a fresh nesting budget. A cycle between type aliases alone is now reported as a `recursive type definition` diagnostic, while a cycle that passes through an aggregate whose field goes via a pointer is finite and resolves. Resolved type declarations are also cached now, where the cache was previously populated but never consulted.
-- [BREAKING] The MAST package format version is now 7. Package type serialization gained a tag for recursive aggregates, which encodes a definition group and the index of the selected definition; existing type tags keep their meanings. The reader accepts exactly one version, so version 6 packages are rejected.
-
-#### Features
-
-- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
-- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
-
-#### Changes
-
 - [BREAKING] Removed the free `execute()` and `execute_sync()` functions from `miden-vm`/`miden-processor`. Use `FastProcessor::new_with_options(...)` followed by `execute()`/`execute_sync()` instead ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 - [BREAKING] `verify` and `Verifier::verify` now borrow the proof and the claim instead of
   consuming them.
@@ -88,6 +71,14 @@
   ([#3437](https://github.com/0xMiden/miden-vm/pull/3437)).
 - [BREAKING] Changed `HORNERBASE` and `HORNEREXT` to read the evaluation point from an aligned, zero-padded word: `[alpha0, alpha1, 0, 0]`. This reduces the memory-chiplet trace for `HORNERBASE` from two rows to one and gives both operations the same memory layout ([#3570](https://github.com/0xMiden/miden-vm/pull/3570)).
 - [BREAKING] Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
+- [BREAKING] `midenc_hir_type::CallConv` has gained a new variant `Extern`, for language frontends to use for representing their own internal calling conventions.
+- [BREAKING] `midenc_hir_type::Type` has gained a new variant: `Variadic`, for use in representing function signatures that have variadic parameter or result lists.
+- The `List` variant of `midenc_hir_type::Type` has had its representation defined as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and so it is now supported in APIs that previously would panic due to the representation being unspecified. `List` is now emitted into debug info as an array with no fixed element count, which is what debug type recovery expects, so lists round-trip through package debug info; previously they were emitted as a synthetic `{ ptr, len }` struct and recovered as an ordinary struct. Structs with a `List`-typed field are now recoverable at all, where recovery previously failed outright because a list was treated as having no computable size.
+- [BREAKING] `midenc_hir_type::StructType` now rejects structs with more than 255 fields. 256 fields were previously constructible, but the field count is encoded as a `u8`, so such a struct silently serialized as having zero fields.
+- [BREAKING] `midenc_hir_type::Type::Struct` and `Type::Enum` now carry `StructRef` and `EnumRef` rather than `Arc<StructType>` and `Arc<EnumType>`. Pattern matching on `Type::Struct(..)`/`Type::Enum(..)` is unchanged and correctly selects recursive types too, but reading an aggregate's contents now goes through `StructRef::get`/`EnumRef::get`, which return `Cow` and unfold the recursive case.
+- [BREAKING] `miden_assembly_syntax::ast::TypeResolver::get_type` and `get_local_type` now return a `TypeTemplate` rather than a `Type`, and the trait gains a `finalize` method. A declaration cannot be resolved to a concrete type until the whole recursive group it belongs to is known, so resolution produces templates and materializes them at the outermost boundary. `TypeExpr::resolve_type` is replaced by `TypeExpr::resolve_template`; use `TypeResolver::resolve` to obtain a `Type`.
+- Fixed a stack overflow when assembling a module containing a cyclic type declaration. `type A = B` with `type B = A`, or a type defined in terms of itself, previously aborted the process, because resolving a type reference re-entered declaration resolution with a fresh nesting budget. A cycle between type aliases alone is now reported as a `recursive type definition` diagnostic, while a cycle that passes through an aggregate whose field goes via a pointer is finite and resolves. Resolved type declarations are also cached now, where the cache was previously populated but never consulted.
+- [BREAKING] The MAST package format version is now 7. Package type serialization gained a tag for recursive aggregates, which encodes a definition group and the index of the selected definition; existing type tags keep their meanings. The reader accepts exactly one version, so version 6 packages are rejected.
 
 #### Fixes
 
