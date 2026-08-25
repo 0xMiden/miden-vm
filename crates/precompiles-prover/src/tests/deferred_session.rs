@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec, vec::Vec};
 use miden_core::deferred::{DeferredState, Node};
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
-use crate::deferred::session_from_deferred_state;
+use crate::deferred::{DeferredSession, session_from_deferred_state};
 
 fn state() -> DeferredState {
     DeferredState::new(Arc::new(miden_precompiles::registry()))
@@ -78,6 +78,43 @@ fn curve_msm_node(pairs: Vec<(Node, Node)>) -> Node {
     let pairs = pairs.into_iter().map(|(point, scalar)| (point.digest(), scalar.digest()));
     let pairs = pairs.collect::<Vec<_>>();
     Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned")
+}
+
+#[test]
+fn deferred_session_lowers_nested_one_term_msm() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(one.clone()).expect("scalar must register");
+
+    let inner = curve_msm_node(vec![(generator.clone(), one.clone())]);
+    state.register(inner.clone()).expect("inner MSM must register");
+    let outer = curve_msm_node(vec![(inner, one)]);
+    state.register(outer.clone()).expect("outer MSM must register");
+    register_curve_equality(&mut state, outer, generator);
+
+    let DeferredSession { session, root } =
+        session_from_deferred_state(&state).expect("nested MSM claims should lower");
+    session.finish(root).check();
+}
+
+#[test]
+fn deferred_session_reuses_identical_msm_claim_in_trace() {
+    let mut state = state();
+    let curve = CurveId::Secp256k1;
+    let generator = CurvePrecompile::generator_node(curve);
+    let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
+    state.register(generator.clone()).expect("generator must register");
+    state.register(one.clone()).expect("scalar must register");
+
+    let msm = curve_msm_node(vec![(generator, one)]);
+    register_curve_equality(&mut state, msm.clone(), msm);
+
+    let DeferredSession { session, root } =
+        session_from_deferred_state(&state).expect("repeated MSM claim should lower");
+    session.finish(root).check();
 }
 
 fn register_affine_curve_value(
