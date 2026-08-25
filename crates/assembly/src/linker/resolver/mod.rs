@@ -1,6 +1,12 @@
 mod symbol_resolver;
 
-use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax::{
     Report,
@@ -30,11 +36,20 @@ pub struct Resolver<'a, 'b: 'a> {
 }
 
 /// An aggregate declaration awaiting group construction.
-pub struct PendingTypeDef {
-    pub gid: GlobalItemIndex,
-    pub key: Arc<str>,
-    pub kind: types::AggregateKind,
-    pub template: types::TypeTemplate,
+struct PendingTypeDef {
+    gid: GlobalItemIndex,
+    key: Arc<str>,
+    kind: types::AggregateKind,
+    template: types::TypeTemplate,
+}
+
+/// A type declaration currently being resolved.
+struct EvaluatingType {
+    gid: GlobalItemIndex,
+    /// Where resolution of this declaration began, for cycle diagnostics.
+    span: SourceSpan,
+    /// Whether this declaration defines an aggregate, and so can carry a back-reference.
+    is_aggregate: bool,
 }
 
 /// A [ResolverCache] is used to cache resolutions of type and constant expressions to concrete
@@ -51,12 +66,19 @@ pub struct ResolverCache {
     /// These are handed to the recursive type builder together, so that a group spanning several
     /// declarations is built as a unit. Non-recursive declarations in the set simply come back
     /// out as ordinary types.
-    pub pending_types: Vec<PendingTypeDef>,
+    pending_types: Vec<PendingTypeDef>,
     /// Type declarations currently being resolved, and where resolution of each began.
     ///
     /// Type references are expanded structurally, so this allows us to catch declaration cycles
     /// such as `type A = B` / `type B = A` which would otherwise infinitely recurse.
-    pub evaluating_types: BTreeMap<GlobalItemIndex, SourceSpan>,
+    /// Ordered, so that on re-entering a declaration it can be seen what was entered after it.
+    evaluating_types: Vec<EvaluatingType>,
+    /// Aliases already re-expanded during the current resolution.
+    ///
+    /// An alias cannot hold a back-reference, so a cycle through one is broken by expanding the
+    /// alias a second time and letting it terminate at an enclosing aggregate. Allowing that at
+    /// most once per alias bounds the work and guarantees termination.
+    reexpanded_types: BTreeSet<GlobalItemIndex>,
 }
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
@@ -197,19 +219,30 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
 
         let key = self.type_key(gid);
 
-        // Already being resolved: this reference closes a cycle. Only an aggregate can carry
-        // one, because only an aggregate can put a pointer between itself and the reference; a
-        // cycle through aliases alone has no finite representation.
-        if let Some(start) = self.cache.evaluating_types.get(&gid).copied() {
-            return if self.aggregate_kind(gid).is_some() {
-                Ok(Some(types::TypeTemplate::Rec(key)))
-            } else {
-                Err(LinkerError::RecursiveType {
-                    span: start,
-                    cycle_span: context,
-                    source_file: self.get_source_file_for(start),
-                })
-            };
+        // Already being resolved: this reference closes a cycle.
+        if let Some(position) = self.cache.evaluating_types.iter().position(|e| e.gid == gid) {
+            let start = self.cache.evaluating_types[position].span;
+
+            // An aggregate carries the cycle directly, as a back-reference.
+            if self.aggregate_kind(gid).is_some() {
+                return Ok(Some(types::TypeTemplate::Rec(key)));
+            }
+
+            // An alias cannot carry a back-reference, but the cycle may still be finite if an
+            // aggregate was entered after this alias: expanding the alias once more terminates
+            // at that aggregate's back-reference. With no aggregate in between, the cycle is
+            // between aliases alone and has no finite representation.
+            let broken_by_aggregate =
+                self.cache.evaluating_types[position + 1..].iter().any(|e| e.is_aggregate);
+            if broken_by_aggregate && self.cache.reexpanded_types.insert(gid) {
+                return self.expand_alias_body(context, gid);
+            }
+
+            return Err(LinkerError::RecursiveType {
+                span: start,
+                cycle_span: context,
+                source_file: self.get_source_file_for(start),
+            });
         }
 
         // An aggregate declaration becomes a definition of the group under construction, and is
@@ -223,9 +256,11 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
             return Ok(Some(types::TypeTemplate::Rec(key)));
         }
 
-        self.cache.evaluating_types.insert(gid, context);
+        self.cache
+            .evaluating_types
+            .push(EvaluatingType { gid, span: context, is_aggregate: true });
         let resolved = self.resolve_aggregate_template(context, gid);
-        self.cache.evaluating_types.remove(&gid);
+        self.cache.evaluating_types.pop();
 
         let template = resolved?;
         self.cache
@@ -335,6 +370,27 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
         }
     }
 
+    /// Expand an alias declaration's body in place.
+    ///
+    /// Kept separate from [`Self::resolve_alias_template`] so that re-entering an alias which is
+    /// already in progress can expand it again without pushing it onto the stack twice.
+    fn expand_alias_body(
+        &mut self,
+        context: SourceSpan,
+        gid: GlobalItemIndex,
+    ) -> Result<Option<types::TypeTemplate>, LinkerError> {
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
+                let body = ty.ty.clone();
+                body.resolve_template(self)
+            },
+            _ => Err(LinkerError::InvalidTypeRef {
+                span: context,
+                source_file: self.get_source_file_for(context),
+            }),
+        }
+    }
+
     /// Resolve a non-aggregate declaration, expanding it in place.
     fn resolve_alias_template(
         &mut self,
@@ -345,11 +401,14 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
             SymbolItem::Compiled(ItemInfo::Type(info)) => {
                 Ok(Some(types::TypeTemplate::Type(info.ty.clone())))
             },
-            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
-                let body = ty.ty.clone();
-                self.cache.evaluating_types.insert(gid, context);
-                let resolved = body.resolve_template(self);
-                self.cache.evaluating_types.remove(&gid);
+            SymbolItem::Type(ast::TypeDecl::Alias(_)) => {
+                self.cache.evaluating_types.push(EvaluatingType {
+                    gid,
+                    span: context,
+                    is_aggregate: false,
+                });
+                let resolved = self.expand_alias_body(context, gid);
+                self.cache.evaluating_types.pop();
                 resolved
             },
             SymbolItem::Type(ast::TypeDecl::Enum(_))

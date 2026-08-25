@@ -5638,6 +5638,48 @@ fn directly_self_referential_type_alias_is_diagnosed() -> TestResult {
 }
 
 #[test]
+fn a_finite_cycle_through_an_alias_resolves() -> TestResult {
+    // `A` is an alias, not an aggregate, so it cannot itself carry the recursion. The cycle is
+    // still finite, because it passes through `B`, whose field goes via a pointer. Declaration
+    // order must not matter.
+    for decls in [
+        "pub type B = struct { a: A }
+        pub type A = ptr<B, addrspace(byte)>",
+        "pub type A = ptr<B, addrspace(byte)>
+        pub type B = struct { a: A }",
+    ] {
+        let src = alloc::format!(
+            "
+        namespace lib::ord
+        {decls}
+        pub proc entry(x: A)
+                         nop
+        end
+"
+        );
+        let context = TestContext::new();
+        let module = context.parse_module(source_file!(&context, src))?;
+        let package = context
+            .assemble_library("lib", None, module, [])
+            .expect("a finite cycle through an alias should resolve");
+
+        use miden_mast_package::PackageExport;
+        let b = package
+            .manifest
+            .exports()
+            .find_map(|export| match export {
+                PackageExport::Type(ty) if ty.path.to_string().ends_with("B") => {
+                    Some(ty.ty.clone())
+                },
+                _ => None,
+            })
+            .expect("B should be exported");
+        assert_eq!(b.size_in_bytes(), 4);
+    }
+    Ok(())
+}
+
+#[test]
 fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
     let context = TestContext::new();
     let module = context.parse_module(source_file!(
