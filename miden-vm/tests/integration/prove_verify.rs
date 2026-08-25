@@ -596,6 +596,18 @@ mod execution_witness_serialization {
             .expect("execution should produce a witness")
     }
 
+    fn write_execution_witness_fuzz_seed(
+        corpus_dir: &std::path::Path,
+        name: &str,
+        witness: ExecutionWitness,
+    ) {
+        let bytes = witness.to_bytes();
+        let budget = bytes.len().saturating_mul(4);
+        ExecutionWitness::read_from_bytes_with_budget(&bytes, budget)
+            .expect("witness seed should decode within the fuzzing budget");
+        std::fs::write(corpus_dir.join(name), bytes).expect("witness seed should be writable");
+    }
+
     #[test]
     #[ignore = "generates corpus files rather than asserting behavior"]
     fn generate_execution_witness_fuzz_seeds() {
@@ -605,12 +617,10 @@ mod execution_witness_serialization {
 
         let ordinary =
             execute_witness(&stack_neutral_program_source(&[0, 1, 2, 3]), StackInputs::default());
-        std::fs::write(corpus_dir.join("ordinary.bin"), ordinary.to_bytes())
-            .expect("ordinary witness seed should be writable");
+        write_execution_witness_fuzz_seed(corpus_dir, "ordinary.bin", ordinary);
 
         let deferred = execute_witness("begin log_deferred end", StackInputs::default());
-        std::fs::write(corpus_dir.join("deferred.bin"), deferred.to_bytes())
-            .expect("deferred witness seed should be writable");
+        write_execution_witness_fuzz_seed(corpus_dir, "deferred.bin", deferred);
     }
 
     #[cfg(feature = "arbitrary")]

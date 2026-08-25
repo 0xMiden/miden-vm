@@ -8,5 +8,6 @@ use libfuzzer_sys::fuzz_target;
 use miden_processor::{ExecutionWitness, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
-    let _ = ExecutionWitness::read_from_bytes_with_budget(data, data.len());
+    let budget = data.len().saturating_mul(4);
+    let _ = ExecutionWitness::read_from_bytes_with_budget(data, budget);
 });
