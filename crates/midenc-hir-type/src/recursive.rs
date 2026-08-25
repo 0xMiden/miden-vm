@@ -891,19 +891,9 @@ fn strongly_connected_components(
 
 fn build_group(
     defs: &[TemplateDef],
-    mut component: Vec<usize>,
+    component: Vec<usize>,
     completed: &mut BTreeMap<Arc<str>, Type>,
 ) -> Result<(), RecursiveTypeError> {
-    // Canonical order must be a function of the group's *structure*, not of the keys it happened
-    // to be built under. Keys are collision-free identifiers a frontend supplies to bind
-    // back-references -- typically module-qualified paths -- and ordering by them would make the
-    // same type declared in two modules order differently, and so compare unequal.
-    //
-    // Definitions are therefore ordered by what they are: declared name, kind, and a hash of the
-    // body taken with every back-reference treated alike, so that the ordering does not depend on
-    // the numbering it is being used to produce.
-    component.sort_by(|a, b| structural_order_key(&defs[*a]).cmp(&structural_order_key(&defs[*b])));
-
     let is_recursive = component.len() > 1
         || defs[component[0]].body.references().contains(&defs[component[0]].name);
 
@@ -915,6 +905,8 @@ fn build_group(
         return Ok(());
     }
 
+    // The cap applies to the declarations coming in, since that is the work being bounded;
+    // merging below can only reduce the count.
     if component.len() > MAX_RECURSIVE_GROUP_SIZE {
         return Err(RecursiveTypeError::GroupTooLarge(
             defs[component[0]].name.clone(),
@@ -922,11 +914,36 @@ fn build_group(
         ));
     }
 
+    // Canonical order must be a function of the group's *structure*, not of the keys it happened
+    // to be built under. Keys are collision-free identifiers a frontend supplies to bind
+    // back-references -- typically module-qualified paths -- and ordering by them would make the
+    // same type declared in two modules order differently, and so compare unequal.
+    //
+    // Structure alone cannot order definitions that are indistinguishable from one another, so
+    // rather than break such ties arbitrarily, indistinguishable definitions are merged: they
+    // denote the same type, exactly as two identically named and shaped non-recursive structs
+    // already do. What comes back is one definition per equivalence class, canonically ordered.
+    let class_of = merge_isomorphic_definitions(defs, &component);
+    let class_count = class_of.iter().copied().max().map_or(0, |max| max as usize + 1);
+
+    // Every member of a class resolves to that class's definition, so a reference to any of them
+    // is a reference to the one that remains.
     let slot_of = component
         .iter()
         .enumerate()
-        .map(|(slot, member)| (defs[*member].name.clone(), slot as u16))
+        .map(|(position, member)| (defs[*member].name.clone(), class_of[position]))
         .collect::<BTreeMap<_, _>>();
+
+    // One representative per class; they are indistinguishable, so which one is immaterial.
+    let mut representatives = alloc::vec![None::<usize>; class_count];
+    for (position, member) in component.iter().enumerate() {
+        representatives[class_of[position] as usize].get_or_insert(*member);
+    }
+    let original_component = component;
+    let component: Vec<usize> = representatives
+        .into_iter()
+        .map(|member| member.expect("every class has a member"))
+        .collect();
 
     // Guardedness: build the unguarded reference graph over the group and require it to be
     // acyclic. Equivalently, every cycle in the full reference graph must cross a barrier. This
@@ -972,11 +989,78 @@ fn build_group(
     }
 
     let group = Arc::new(RecGroup::new(rec_defs.into_boxed_slice()));
-    for (slot, member) in component.iter().enumerate() {
-        completed.insert(defs[*member].name.clone(), rec_type(group.clone(), slot as u16));
+    for (position, member) in original_component.iter().enumerate() {
+        completed.insert(defs[*member].name.clone(), rec_type(group.clone(), class_of[position]));
     }
 
     Ok(())
+}
+
+/// Partition a component's definitions into classes that denote the same type, and return each
+/// definition's class.
+///
+/// Definitions start apart if their declared name, kind, or reference-blind shape differ, and are
+/// then repeatedly split whenever they refer to definitions that have themselves been split. What
+/// remains in one class at the fixpoint cannot be told apart by any finite unfolding, so those
+/// definitions are the same type.
+///
+/// Class numbering is canonical: at each round the distinct signatures are sorted, and a signature
+/// is built from the previous round's numbering, which is canonical by induction. The base case is
+/// the structural key, which does not depend on any numbering.
+fn merge_isomorphic_definitions(defs: &[TemplateDef], component: &[usize]) -> Vec<u16> {
+    let position_of = component
+        .iter()
+        .enumerate()
+        .map(|(position, member)| (defs[*member].name.clone(), position))
+        .collect::<BTreeMap<_, _>>();
+
+    // References in occurrence order, so that two definitions referring to different classes in
+    // different positions are told apart.
+    let references = component
+        .iter()
+        .map(|member| {
+            defs[*member]
+                .body
+                .ordered_references()
+                .into_iter()
+                .filter_map(|name| position_of.get(&name).copied())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    let keys = component
+        .iter()
+        .map(|member| structural_order_key(&defs[*member]))
+        .collect::<Vec<_>>();
+    let mut classes = rank(&keys);
+
+    loop {
+        let signatures = (0..component.len())
+            .map(|position| {
+                (
+                    classes[position],
+                    references[position].iter().map(|to| classes[*to]).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let refined = rank(&signatures);
+        if refined == classes {
+            return classes;
+        }
+        classes = refined;
+    }
+}
+
+/// Number `values` by their sorted order, so equal values share a number and the numbering depends
+/// only on the values themselves.
+fn rank<T: Ord + Clone>(values: &[T]) -> Vec<u16> {
+    let mut distinct = values.to_vec();
+    distinct.sort();
+    distinct.dedup();
+    values
+        .iter()
+        .map(|value| distinct.binary_search(value).expect("value is present") as u16)
+        .collect()
 }
 
 /// A closed stand-in for a reference to a group member, used when building a probe.
@@ -1093,6 +1177,29 @@ impl AggregateTemplate {
         hasher.finish()
     }
 
+    /// Every reference this definition makes, in the order it makes them.
+    ///
+    /// Occurrence order matters to refinement: two definitions referring to the same classes in
+    /// different positions are different types.
+    fn ordered_references(&self) -> Vec<Arc<str>> {
+        let mut references = Vec::new();
+        match self {
+            Self::Struct(ty) => {
+                for field in &ty.fields {
+                    collect_ordered_references(&field.ty, &mut references);
+                }
+            },
+            Self::Enum(ty) => {
+                for variant in &ty.variants {
+                    if let Some(value) = variant.value.as_ref() {
+                        collect_ordered_references(value, &mut references);
+                    }
+                }
+            },
+        }
+        references
+    }
+
     fn references(&self) -> BTreeSet<Arc<str>> {
         let mut references = BTreeSet::new();
         match self {
@@ -1130,6 +1237,33 @@ impl AggregateTemplate {
             },
         }
         references
+    }
+}
+
+fn collect_ordered_references(template: &TypeTemplate, references: &mut Vec<Arc<str>>) {
+    match template {
+        TypeTemplate::Type(_) => {},
+        TypeTemplate::Rec(name) => references.push(name.clone()),
+        TypeTemplate::Ptr(_, inner) | TypeTemplate::Array(inner, _) | TypeTemplate::List(inner) => {
+            collect_ordered_references(inner, references)
+        },
+        TypeTemplate::Function(ty) => {
+            for t in ty.params.iter().chain(ty.results.iter()) {
+                collect_ordered_references(t, references);
+            }
+        },
+        TypeTemplate::Struct(ty) => {
+            for field in &ty.fields {
+                collect_ordered_references(&field.ty, references);
+            }
+        },
+        TypeTemplate::Enum(ty) => {
+            for variant in &ty.variants {
+                if let Some(value) = variant.value.as_ref() {
+                    collect_ordered_references(value, references);
+                }
+            }
+        },
     }
 }
 
@@ -1605,6 +1739,115 @@ mod tests {
 
         // "z::Apple" > "a::Zebra" by key, but "Apple" < "Zebra" by declared name.
         assert_eq!(build("z::Apple", "a::Zebra"), build("apple", "zebra"));
+    }
+
+    #[test]
+    fn anonymous_definitions_order_independently_of_declaration_order() {
+        // Three anonymous definitions with the same reference-blind shape tie on every component
+        // of the ordering key, so a stable sort would leave them in declaration order and make
+        // the same group compare unequal depending on how it was written.
+        fn build(order: [usize; 3]) -> Type {
+            let names = ["a", "b", "c"];
+            let mut builder = RecursiveTypeBuilder::new();
+            for slot in order {
+                let next = names[(slot + 1) % 3];
+                builder.define_struct(
+                    names[slot],
+                    // Anonymous, so the declared name cannot break the tie.
+                    StructTemplate::new(
+                        TypeRepr::Default,
+                        [("next", TypeTemplate::ptr(TypeTemplate::rec(next)))],
+                    ),
+                );
+            }
+            builder.build().expect("should build").remove("a").expect("a")
+        }
+
+        assert_eq!(build([0, 1, 2]), build([2, 1, 0]));
+        assert_eq!(build([0, 1, 2]), build([1, 2, 0]));
+    }
+
+    #[test]
+    fn definitions_that_denote_the_same_type_are_merged() {
+        // Three definitions in a cycle, none distinguishable from the others. They unfold to the
+        // same type, so one definition remains and all three references are that type.
+        let names = ["a", "b", "c"];
+        let mut builder = RecursiveTypeBuilder::new();
+        for slot in 0..3 {
+            builder.define_struct(
+                names[slot],
+                StructTemplate::new(
+                    TypeRepr::Default,
+                    [("next", TypeTemplate::ptr(TypeTemplate::rec(names[(slot + 1) % 3])))],
+                ),
+            );
+        }
+        let built = builder.build().expect("should build");
+
+        assert_eq!(built.get("a"), built.get("b"));
+        assert_eq!(built.get("a"), built.get("c"));
+
+        let Some(Type::Struct(a)) = built.get("a") else {
+            panic!("expected a struct")
+        };
+        assert_eq!(a.as_recursive().expect("recursive").group_len(), 1);
+    }
+
+    #[test]
+    fn definitions_sharing_a_name_across_modules_are_one_type() {
+        // Two declarations of `A` in different modules, mutually referencing each other. Their
+        // keys differ but nothing about the types does, and a non-recursive pair with the same
+        // name and fields would already compare equal.
+        fn build(order: [usize; 2]) -> BTreeMap<Arc<str>, Type> {
+            let keys = ["lib::m1::A", "lib::m2::A"];
+            let mut builder = RecursiveTypeBuilder::new();
+            for slot in order {
+                builder.define_struct(
+                    keys[slot],
+                    StructTemplate::named(
+                        "A",
+                        TypeRepr::Default,
+                        [("b", TypeTemplate::ptr(TypeTemplate::rec(keys[(slot + 1) % 2])))],
+                    ),
+                );
+            }
+            builder.build().expect("should build")
+        }
+
+        let forward = build([0, 1]);
+        let reversed = build([1, 0]);
+        assert_eq!(forward.get("lib::m1::A"), forward.get("lib::m2::A"));
+        assert_eq!(forward.get("lib::m1::A"), reversed.get("lib::m1::A"));
+    }
+
+    #[test]
+    fn definitions_that_differ_are_kept_apart() {
+        // Refinement must not over-merge. `p` and `q` are identical in name, kind, and shape, so
+        // nothing separates them until what they refer to is taken into account: `p` reaches `m`
+        // and `q` reaches `n`, which differ by name. One round of refinement tells them apart.
+        let mut builder = RecursiveTypeBuilder::new();
+        let mut define = |key: &str, name: &str, to: &str| {
+            builder.define_struct(
+                key,
+                StructTemplate::named(
+                    name,
+                    TypeRepr::Default,
+                    [("f", TypeTemplate::ptr(TypeTemplate::rec(to)))],
+                ),
+            );
+        };
+        // One cycle, so all four are a single group: p -> m -> q -> n -> p.
+        define("p", "N", "m");
+        define("m", "M", "q");
+        define("q", "N", "n");
+        define("n", "O", "p");
+        let built = builder.build().expect("should build");
+
+        assert_ne!(built.get("p"), built.get("q"));
+        let Some(Type::Struct(p)) = built.get("p") else {
+            panic!("expected a struct")
+        };
+        assert_eq!(p.as_recursive().expect("recursive").group_len(), 4);
     }
 
     #[test]
