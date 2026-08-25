@@ -263,12 +263,12 @@ pub enum EventHandlerSectionError {
 
 /// Reports the cap rule of [`check_size_cap`] as a deserialization error.
 fn check_cap(field: &'static str, actual: usize, max: usize) -> Result<(), DeserializationError> {
-    check_size_cap(field, actual, max).map_err(over_cap_error)
+    check_size_cap(field, actual, max).map_err(section_error)
 }
 
-/// Reports an over-cap error as a deserialization error, so the decode and the validation of a
-/// section report one message for one rule.
-fn over_cap_error(err: EventHandlerSectionError) -> DeserializationError {
+/// Reports a section-rule error as a deserialization error, so the decode and the validation of
+/// a section report one message for one rule.
+fn section_error(err: EventHandlerSectionError) -> DeserializationError {
     DeserializationError::InvalidValue(err.to_string())
 }
 
@@ -297,12 +297,12 @@ fn read_str<R: ByteReader>(
     field: &'static str,
 ) -> Result<String, DeserializationError> {
     let value = read_capped_str(source, field, MAX_NAME_BYTES, |actual| {
-        over_cap_error(EventHandlerSectionError::OverSizeCap { field, actual, max: MAX_NAME_BYTES })
+        section_error(EventHandlerSectionError::OverSizeCap { field, actual, max: MAX_NAME_BYTES })
     })?;
     if value.is_empty() {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "'event_handlers' section {field} is empty"
-        )));
+        // The rule and its message live in one place, so the decode and the validation of a
+        // section cannot drift apart.
+        return Err(section_error(EventHandlerSectionError::EmptyName { field }));
     }
     Ok(value.to_string())
 }
@@ -310,8 +310,7 @@ fn read_str<R: ByteReader>(
 impl Serializable for EventHandlerSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.abi_version);
-        target.write_usize(self.module.len());
-        target.write_bytes(&self.module);
+        self.module.write_into(target);
         target.write_usize(self.handlers.len());
         for entry in &self.handlers {
             entry.event.write_into(target);

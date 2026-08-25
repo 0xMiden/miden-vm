@@ -158,6 +158,26 @@ impl EventHandlerRegistry {
         Ok(())
     }
 
+    /// Replaces the handler registered for the event ID of `event`, returning a flag whether a
+    /// handler with that identifier was previously registered.
+    ///
+    /// The registry changes in one step, so a rejected name leaves it unchanged.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The event name is empty
+    /// - The event name is in the reserved [`EventName::RESERVED_NAMESPACE`]
+    pub fn replace(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn EventHandler>,
+    ) -> Result<bool, ExecutionError> {
+        validate_event_name(&event)?;
+
+        let id = event.to_event_id();
+        Ok(self.handlers.insert(id, (event, handler)).is_some())
+    }
+
     /// Unregisters a handler with the given identifier, returning a flag whether a handler with
     /// that identifier was previously registered.
     pub fn unregister(&mut self, id: EventId) -> bool {
@@ -273,6 +293,26 @@ impl TraceHandlerRegistry {
             },
         };
         Ok(())
+    }
+
+    /// Replaces the trace handler registered for the event ID of `event`, returning whether a
+    /// handler with that identifier was previously registered.
+    ///
+    /// The registry changes in one step, so a rejected name leaves it unchanged.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The event name is empty
+    /// - The event name is in the reserved [`EventName::RESERVED_NAMESPACE`]
+    pub fn replace(
+        &mut self,
+        event: EventName,
+        handler: Arc<dyn TraceHandler>,
+    ) -> Result<bool, ExecutionError> {
+        validate_event_name(&event)?;
+
+        let id = event.to_event_id();
+        Ok(self.handlers.insert(id, (event, handler)).is_some())
     }
 
     /// Unregisters a handler with the given identifier, returning whether a handler with that

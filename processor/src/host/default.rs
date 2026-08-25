@@ -125,13 +125,7 @@ where
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<bool, ExecutionError> {
-        // Validate before the unregistration, so an invalid name leaves the host unchanged.
-        super::handlers::validate_event_name(&event)?;
-        let existed = self.event_handlers.unregister(event.to_event_id());
-        // The registration cannot fail: the name passed the check above and the slot was just
-        // vacated. A new failure mode in `register` must therefore be handled here.
-        self.register_handler(event, handler)?;
-        Ok(existed)
+        self.event_handlers.replace(event, handler)
     }
 
     /// Registers a single [`TraceHandler`] into this host.
@@ -164,13 +158,7 @@ where
         event: EventName,
         handler: Arc<dyn TraceHandler>,
     ) -> Result<bool, ExecutionError> {
-        // Validate before the unregistration, so an invalid name leaves the host unchanged.
-        super::handlers::validate_event_name(&event)?;
-        let existed = self.trace_handlers.unregister(event.to_event_id());
-        // The registration cannot fail: the name passed the check above and the slot was just
-        // vacated. A new failure mode in `register` must therefore be handled here.
-        self.register_trace_handler(event, handler)?;
-        Ok(existed)
+        self.trace_handlers.replace(event, handler)
     }
 }
 

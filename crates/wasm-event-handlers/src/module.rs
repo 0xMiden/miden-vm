@@ -599,7 +599,9 @@ impl core::fmt::Debug for WasmHandlerModule {
 ///
 /// Each call instantiates the module afresh, so the handler keeps no state between events.
 pub struct WasmEventHandler {
+    /// The validated module that holds the export.
     module: Arc<WasmHandlerModule>,
+    /// The name of the Wasm export this handler runs.
     export: String,
 }
 

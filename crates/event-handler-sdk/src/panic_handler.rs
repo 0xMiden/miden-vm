@@ -6,7 +6,9 @@ use miden_event_handler_abi::guest;
 
 /// A fixed-size message buffer; text past the capacity is dropped.
 struct MsgBuf {
+    /// The message bytes; the capacity is the maximum message length.
     data: [u8; 512],
+    /// The number of bytes written, never more than the capacity of `data`.
     len: usize,
 }
 
@@ -20,6 +22,9 @@ impl Write for MsgBuf {
     }
 }
 
+/// Reports a guest panic to the host as the handler's error message, and ends the handler.
+///
+/// The message is truncated to the capacity of [`MsgBuf`].
 #[panic_handler]
 fn on_panic(info: &core::panic::PanicInfo<'_>) -> ! {
     let mut buf = MsgBuf { data: [0; 512], len: 0 };

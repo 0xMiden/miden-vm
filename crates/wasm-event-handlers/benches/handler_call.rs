@@ -25,10 +25,13 @@ use miden_wasm_event_handlers::{WasmHandlerLimits, WasmHandlerModule};
 const EVENT: EventName = EventName::new("bench::wasm::handler");
 
 /// The empty handler: measures the fixed per-call cost.
-const EMPTY_WAT: &str = r#"(module (func (export "handler")))"#;
+const EMPTY_WAT: &str = r#"(module
+  (memory (export "memory") 1)
+  (func (export "handler")))"#;
 
 /// A counting loop with 100k iterations of ~4 instructions each.
 const ARITH_WAT: &str = r#"(module
+  (memory (export "memory") 1)
   (func (export "handler")
     (local $i i64)
     (local.set $i (i64.const 100000))
