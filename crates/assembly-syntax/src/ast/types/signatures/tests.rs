@@ -100,6 +100,21 @@ fn a_recursive_struct_argument_is_refused_rather_than_walked_forever() {
     ));
 }
 
+#[test]
+fn an_anonymous_recursive_signature_formats_without_aborting() {
+    use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+
+    let mut builder = RecursiveTypeBuilder::new();
+    builder.define_struct(
+        "node",
+        StructTemplate::new(TypeRepr::Default, [TypeTemplate::ptr(TypeTemplate::rec("node"))]),
+    );
+    let node = builder.build().expect("node should build").remove("node").expect("node");
+    let info = proc("f", [node], []);
+
+    assert!(!info.to_string().is_empty());
+}
+
 fn proc(
     name: &str,
     params: impl IntoIterator<Item = Type>,
