@@ -22,6 +22,7 @@ use miden_utils_sync::LazyLock;
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     debug::default_debug_handlers,
+    ecdsa_k256_keccak::{ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, handle_ecdsa_k256_keccak_recover},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     precompiles::{
         keccak256::{KECCAK256_DIGEST_EVENT_NAME, handle_keccak256_digest},
@@ -174,6 +175,7 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
+            (ECDSA_K256_KECCAK_RECOVER_EVENT_NAME, Arc::new(handle_ecdsa_k256_keccak_recover)),
             (KECCAK256_DIGEST_EVENT_NAME, Arc::new(handle_keccak256_digest)),
             (UINT_FIELD_INV_EVENT_NAME, Arc::new(handle_uint_field_inv)),
         ];

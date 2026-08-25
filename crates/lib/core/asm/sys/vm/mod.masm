@@ -31,7 +31,7 @@ use miden::core::stark::verifier
 const BITS_PER_QUERY_FP = 193381        # blowup 8, random-words rate of 2025/2010 section 1.5
 const SECURITY_CAP_FP = 8323072         # min(log2|E|, hash collision resistance) = 127 bits
 const LOOKUP_BASE_FP = 7800270          # 8388606 - 588336 ((message width + 2) * fractions per row)
-const COMPOSITION_TERM_FP = 7816390     # 8388606 - 572216 (batched constraint slots)
+const COMPOSITION_TERM_FP = 7815946     # 8388606 - 572660 (batched constraint slots)
 const OOD_BASE_FP = 8170900             # 8388606 - 217706 (max constraint degree + 1)
 const DEEP_BASE_FP = 7922741            # 8388606 - 465865 (batched DEEP terms)
 const FOLDING_BASE_FP = 8022589         # 8388606 - 169409 (2 * (arity - 1)) - 196608 (blowup)
@@ -66,16 +66,16 @@ const MAX_NUM_KERNEL_PROCEDURES = 255
 const NUM_MIDEN_AIRS = 3
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 8001155700388371521
-const RELATION_DIGEST_1 = 10401107199630226870
-const RELATION_DIGEST_2 = 16097540092429316788
-const RELATION_DIGEST_3 = 5987438047465362013
+const RELATION_DIGEST_0 = 8509919582315365814
+const RELATION_DIGEST_1 = 12865978328275266043
+const RELATION_DIGEST_2 = 12073117316737140237
+const RELATION_DIGEST_3 = 5647109555087128169
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 4203939832410250299
-const ACE_REGISTRY_ROOT_1 = 12914527915593930096
-const ACE_REGISTRY_ROOT_2 = 3268125648964005028
-const ACE_REGISTRY_ROOT_3 = 5037431390707430717
+const ACE_REGISTRY_ROOT_0 = 8563712008625779037
+const ACE_REGISTRY_ROOT_1 = 2346635758357605862
+const ACE_REGISTRY_ROOT_2 = 17725435322360039753
+const ACE_REGISTRY_ROOT_3 = 12106900609136090006
 
 #! Bounds `log2(1 + boundary / (fractions_per_row * 2^log_max_height))` in fixed point via
 #! `log2(1 + x) <= x * log2(e)`, where `boundary` is the one-time lookup fractions
