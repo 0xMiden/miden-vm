@@ -512,6 +512,8 @@ mod execution_witness_serialization {
     use std::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
+    #[cfg(feature = "arbitrary")]
+    use miden_core::Felt;
     use miden_core::{
         Word,
         mast::{
@@ -528,6 +530,8 @@ mod execution_witness_serialization {
         HashFunction, Prover,
         serde::{Deserializable, Serializable},
     };
+    #[cfg(feature = "arbitrary")]
+    use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
     use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
 
@@ -565,6 +569,96 @@ mod execution_witness_serialization {
             .unwrap();
         program.make_root(root);
         Program::new(Arc::new(program), root)
+    }
+
+    fn stack_neutral_program_source(operations: &[u8]) -> String {
+        let mut source = String::from("begin push.1 drop");
+        for operation in operations {
+            source.push_str(match operation {
+                0 => " push.1 drop",
+                1 => " push.1 push.2 add drop",
+                2 => " push.1 dup drop drop",
+                _ => " push.1 push.2 swap drop drop",
+            });
+        }
+        source.push_str(" end");
+        source
+    }
+
+    fn execute_witness(source: &str, stack_inputs: StackInputs) -> ExecutionWitness {
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = default_source_manager_host();
+        FastProcessor::new(stack_inputs)
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness")
+    }
+
+    #[test]
+    #[ignore = "generates corpus files rather than asserting behavior"]
+    fn generate_execution_witness_fuzz_seeds() {
+        let corpus_dir =
+            std::path::Path::new("../tools/miden-core-fuzz/corpus/execution_witness_deserialize");
+        std::fs::create_dir_all(corpus_dir).expect("fuzz corpus directory should be writable");
+
+        let ordinary =
+            execute_witness(&stack_neutral_program_source(&[0, 1, 2, 3]), StackInputs::default());
+        std::fs::write(corpus_dir.join("ordinary.bin"), ordinary.to_bytes())
+            .expect("ordinary witness seed should be writable");
+
+        let deferred = execute_witness("begin log_deferred end", StackInputs::default());
+        std::fs::write(corpus_dir.join("deferred.bin"), deferred.to_bytes())
+            .expect("deferred witness seed should be writable");
+    }
+
+    #[cfg(feature = "arbitrary")]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn proptest_execution_witness_round_trip_preserves_trace(
+            inputs in prop::collection::vec(any::<u32>(), 0..=16),
+            operations in prop::collection::vec(0_u8..4, 0..=16),
+        ) {
+            let source = stack_neutral_program_source(&operations);
+            let stack = inputs.iter().copied().map(Felt::from_u32).collect::<Vec<_>>();
+            let stack_inputs = StackInputs::new(&stack).expect("generated stack should be valid");
+            let witness = execute_witness(&source, stack_inputs);
+
+            let expected_claim = witness.claim();
+            let witness_bytes = witness.to_bytes();
+            let witness_budget = witness_bytes
+                .len()
+                .checked_mul(4)
+                .expect("generated witness budget should fit usize");
+            let restored = ExecutionWitness::read_from_bytes_with_budget(
+                &witness_bytes,
+                witness_budget,
+            )
+            .expect("generated witness should round trip");
+
+            prop_assert_eq!(restored.claim(), expected_claim);
+            prop_assert_eq!(restored.to_bytes(), witness_bytes);
+
+            let (original_vm, _) = witness.into_parts();
+            let (restored_vm, _) = restored.into_parts();
+            let original_trace =
+                build_trace(original_vm).expect("original generated witness should build a trace");
+            let restored_trace =
+                build_trace(restored_vm).expect("restored generated witness should build a trace");
+            prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+            prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
+            prop_assert_eq!(
+                restored_trace.trace_len_summary(),
+                original_trace.trace_len_summary()
+            );
+            prop_assert_eq!(
+                restored_trace.public_inputs().to_air_inputs(),
+                original_trace.public_inputs().to_air_inputs()
+            );
+        }
     }
 
     #[test]

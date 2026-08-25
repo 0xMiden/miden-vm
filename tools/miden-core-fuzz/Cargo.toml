@@ -132,6 +132,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "execution_witness_deserialize"
+path = "fuzz_targets/execution_witness_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "deferred_state_wire_deserialize"
 path = "fuzz_targets/deferred_state_wire_deserialize.rs"
 test = false

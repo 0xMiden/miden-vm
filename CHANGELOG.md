@@ -23,6 +23,7 @@
 - Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type.
 - Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 - Added round-trip and proptest coverage for the trusted execution witness serialization, including external-library programs and wire-backed deferred proofs ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
+- Added property and fuzz coverage for `ExecutionWitness` serialization, plus round-trip tests for external-library programs and wire-backed deferred proofs ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
 
 #### Changes
 
