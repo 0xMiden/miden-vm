@@ -11,7 +11,7 @@ use miden::core::sys::vm::layout
 const NUM_INPUTS_CIRCUIT = 628
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 5392
+const NUM_EVAL_GATES_CIRCUIT = 5400
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 4
@@ -28,7 +28,7 @@ const NUM_AIRS = 3
 
 # Number of 8-felt blocks in each authenticated ACE circuit segment.
 const ACE_PREFIX_BLOCKS = 105
-const ACE_COMMON_BLOCKS = 643
+const ACE_COMMON_BLOCKS = 644
 
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
 # relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;
@@ -41,10 +41,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 # Poseidon2 digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 15433024867901467812
-const ACE_COMMON_COMMITMENT_1 = 8913262848297184576
-const ACE_COMMON_COMMITMENT_2 = 10266320086976787717
-const ACE_COMMON_COMMITMENT_3 = 3183468947319856490
+const ACE_COMMON_COMMITMENT_0 = 12219740681290956869
+const ACE_COMMON_COMMITMENT_1 = 4622123471444412033
+const ACE_COMMON_COMMITMENT_2 = 8504359799583469631
+const ACE_COMMON_COMMITMENT_3 = 87246567374956747
 
 # ERRORS
 # =================================================================================================

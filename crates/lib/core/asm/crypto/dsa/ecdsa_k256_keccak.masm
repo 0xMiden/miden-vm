@@ -5,6 +5,8 @@ use miden::core::precompiles::fields::k1_base
 use miden::core::precompiles::fields::k1_scalar
 use miden::core::word
 
+const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::recover")
+
 # ENCODING CONVENTIONS
 # ================================================================================================
 #
@@ -44,8 +46,8 @@ use miden::core::word
 #!
 #! Low-s is intentionally not enforced: this procedure proves that some untrusted advice satisfies
 #! the ECDSA equation, and `(r, s)` and `(r, n - s)` are equivalent witnesses. An adaptation that
-#! verifies a committed or canonical Ethereum signature must bind the exact signature encoding inside
-#! the VM and enforce low-s on that bound value.
+#! verifies a committed signature must bind the exact signature encoding inside the VM. Low-s is a
+#! separate canonicality policy and only needs to be enforced when the caller requires it.
 #!
 #! Advice is untrusted. This procedure binds QX/QY to `PK_COMM`, and validates the public key,
 #! reduced Keccak prehash, and signature scalars through precompile-backed deferred evaluation.
@@ -53,28 +55,10 @@ use miden::core::word
 #! Invocation: exec
 @locals(24)
 pub proc verify
-    # load QX || QY from advice into the verifier public-key buffer while absorbing the same
-    # two chunks into the Poseidon2 `hash_elements` state. Since there are exactly 16 elements,
-    # the `hash_elements` capacity word is zero and no partial-block padding is required.
-    # `adv_pipe` exposes each just-written chunk in the rate slots in the same order that
-    # `mem_stream` would read it back from memory.
-    locaddr.0 padw padw padw
-    # => [R0=0w, R1=0w, C=0w, write_ptr=loc[0], PK_COMM, MSG_WORD, ...]
-    adv_pipe
-    # => [QX_RATE[8], C=0w, write_ptr=loc[8], PK_COMM, MSG_WORD, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=loc[8], PK_COMM, MSG_WORD, ...]
-    adv_pipe
-    # => [QY_RATE[8], C, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
-    # assert Poseidon2::hash_elements(QX[8] || QY[8]) == PK_COMM.
-    exec.poseidon2::squeeze_digest
-    # => [PK_HASH, write_ptr=loc[16], PK_COMM, MSG_WORD, ...]
-    movup.4 movdn.8
-    # => [PK_HASH, PK_COMM, write_ptr=loc[16], MSG_WORD, ...]
-    assert_eqw.err="invalid public key commitment"
-    # => [write_ptr=loc[16], MSG_WORD, ...]
+    locaddr.0
+    # => [pubkey_ptr=loc[0], PK_COMM, MSG_WORD, ...]
+    exec.load_and_verify_public_key
+    # => [pubkey_ptr+16=loc[16], MSG_WORD, ...]
 
     movdn.4
     # => [MSG_WORD, digest_ptr=loc[16], ...]
@@ -89,15 +73,9 @@ pub proc verify
     exec.keccak256::hash_1_chunk_mem
     # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
 
-    dup sub.16 swap
-    # => [read_ptr=loc[16], pubkey_ptr=loc[0], ...]
-    repeat.8
-        dup mem_load
-        exec.reverse_u32_bytes
-        swap add.1
-    end
-    # => [read_ptr=loc[24], PREHASH_U32[8], pubkey_ptr, ...]
-    drop
+    locaddr.0 swap
+    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]
+    exec.load_keccak_digest_as_z
     # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 
     exec.verify_digest_impl
@@ -147,16 +125,175 @@ pub proc verify_bytes
     exec.keccak256::hash_bytes_mem
     # => [...]
 
-    locaddr.16
-    # => [digest_ptr=loc[16], ...]  (DIGEST_U32[8] written to loc[16..24])
+    locaddr.0 locaddr.16
+    # => [digest_ptr=loc[16], pubkey_ptr=loc[0], ...]  (DIGEST_U32[8] written to loc[16..24])
     exec.load_keccak_digest_as_z
     # => [PREHASH_U32[8], pubkey_ptr=loc[0], ...]
     exec.verify_digest_impl
     # => [...]
 end
 
+#! Recovers the secp256k1 public key from a native EVM recovery witness over a Word message.
+#!
+#! Inputs:
+#!   Operand stack: [MSG_WORD, SIG_PTR, ...]
+#! Outputs:
+#!   Operand stack: [QX[8] | QY[8], ...]
+#!
+#! Where:
+#! - `MSG_WORD`: four felts split into eight little-endian u32 limbs and hashed exactly as by
+#!   `verify`.
+#! - `SIG_PTR`: word-aligned address of caller-owned memory containing the native EVM recovery
+#!   witness `R_LE_U32[8] || S_LE_U32[8] || V`. The memory must remain unchanged until the procedure
+#!   returns.
+#! - `R_LE_U32[8]`, `S_LE_U32[8]`: signature scalars as little-endian u32 limbs.
+#! - `V`: EVM recovery byte 27 or 28.
+#! - `QX[8]`, `QY[8]`: recovered affine public-key coordinates as little-endian u32 limbs.
+#!
+#! Panics if:
+#! - `SIG_PTR` is not word-aligned.
+#! - a signature limb is not a u32, or `r` or `s` is zero or not a canonical secp256k1 scalar.
+#! - `V` is not 27 or 28.
+#! - candidate public-key advice or the derived recovery point is invalid or inconsistent with the
+#!   exact message, signature, and recovery byte.
+#!
+#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. A wrong
+#! message can recover a different valid key; callers must authenticate the returned key against
+#! trusted state.
+#! Raw signature bytes are not a replay key because equivalent low-s and high-s encodings exist.
+#!
+#! Invocation: exec
+@locals(8)
+pub proc recover
+    locaddr.0 movdn.4
+    # => [MSG_WORD, digest_ptr=loc[0], SIG_PTR, ...]
+    exec.store_word_u32s_le
+    # => [digest_ptr, SIG_PTR, ...]
+
+    dup dup push.32 swap
+    # => [in_ptr=loc[0], len_bytes=32, out_ptr=loc[0], digest_ptr=loc[0], SIG_PTR, ...]
+    exec.keccak256::hash_1_chunk_mem
+    # => [digest_ptr=loc[0], SIG_PTR, ...]
+
+    exec.recover_digest
+    # => [QX[8] | QY[8], ...]
+end
+
+#! Recovers the secp256k1 public key from a native EVM recovery witness over bytes in memory.
+#!
+#! Inputs:
+#!   Operand stack: [MSG_PTR, MSG_LEN_BYTES, SIG_PTR, ...]
+#! Outputs:
+#!   Operand stack: [QX[8] | QY[8], ...]
+#!
+#! Where:
+#! - `MSG_PTR`: word-aligned address containing the message as packed little-endian u32 limbs.
+#! - `MSG_LEN_BYTES`: number of message bytes to hash. Unused bytes in the final u32 and remaining
+#!   felts in the final 32-byte chunk must be zero.
+#! - `SIG_PTR`: word-aligned address of caller-owned memory containing the native EVM recovery
+#!   witness `R_LE_U32[8] || S_LE_U32[8] || V`. The memory must remain unchanged until the procedure
+#!   returns.
+#! - `R_LE_U32[8]`, `S_LE_U32[8]`: signature scalars as little-endian u32 limbs.
+#! - `V`: EVM recovery byte 27 or 28.
+#! - `QX[8]`, `QY[8]`: recovered affine public-key coordinates as little-endian u32 limbs.
+#!
+#! Panics if:
+#! - `MSG_PTR` or `SIG_PTR` is not word-aligned.
+#! - `MSG_LEN_BYTES` exceeds the configured `max_hash_len_bytes` execution limit.
+#! - a message-memory felt is not a u32, or final-chunk padding is nonzero.
+#! - a signature limb is not a u32, or `r` or `s` is zero or not a canonical secp256k1 scalar.
+#! - `V` is not 27 or 28.
+#! - candidate public-key advice or the derived recovery point is invalid or inconsistent with the
+#!   exact message, signature, and recovery byte.
+#!
+#! Exact `r`, `s`, and `v`, including high-s, are bound; low-s is a separate caller policy. A wrong
+#! message can recover a different valid key; callers must authenticate the returned key against
+#! trusted state.
+#!
+#! Invocation: exec
+@locals(8)
+pub proc recover_bytes
+    locaddr.0 movdn.2
+    # => [MSG_PTR, MSG_LEN_BYTES, digest_ptr=loc[0], SIG_PTR, ...]
+    exec.keccak256::hash_bytes_mem
+    # => [SIG_PTR, ...]  (DIGEST_U32[8] written to loc[0..8])
+
+    locaddr.0
+    # => [digest_ptr=loc[0], SIG_PTR, ...]
+    exec.recover_digest
+    # => [QX[8] | QY[8], ...]
+end
+
 # INTERNAL PROCEDURES — ECDSA
 # ================================================================================================
+
+#! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
+#!
+#! Input:  [Z_U32[8], pubkey_ptr, ...]
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [...]
+proc verify_digest_impl
+    exec.prepare_verify_inputs
+    # => [U1, Q, U2, SIG_R, ...]
+    exec.relation_point_2base
+    # => [VERIFY_POINT, SIG_R, ...]
+    exec.assert_x_eq_scalar_k1
+    # => [...]
+end
+
+#! Recovers and constrains a public key for a Keccak digest and native EVM recovery witness.
+#!
+#! Input:  [digest_ptr, SIG_PTR, ...]
+#! Output: [QX[8] | QY[8], ...]
+#!
+#! `digest_ptr` addresses eight packed little-endian u32 felts containing the Keccak digest.
+#! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 27 or 28.
+#! The recovery event supplies only the candidate `QX[8] || QY[8]`; all witness data is loaded
+#! independently from memory and the advice point is constrained before it is returned.
+@locals(16)
+proc recover_digest
+    emit.ECDSA_RECOVER_EVENT
+    # => [digest_ptr, SIG_PTR, ...]  Advice: [QX[8] | QY[8] | ...]
+
+    # Bind the digest and signature before writing candidate-point advice into procedure locals.
+    # SIG_PTR must be caller-owned; this ordering is also robust to an out-of-contract absolute
+    # pointer into this local frame.
+    exec.load_keccak_digest_as_z
+    # => [PREHASH_U32[8], SIG_PTR, ...]
+    exec.k1_scalar::load_reduced_256
+    # => [Z, SIG_PTR, ...]
+    exec.load_recovery_signature_k1
+    # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+
+    # Stream the candidate point into local memory. The sponge words are scratch; no digest is
+    # derived from the untrusted advice here.
+    locaddr.0 padw padw padw
+    adv_pipe
+    adv_pipe
+    # => [QY_RATE[8], C, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    dropw dropw dropw sub.16
+    # => [pubkey_ptr=loc[0], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    exec.secp256k1::load_mem
+    # => [Q, SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    movdnw.3
+    # => [SIG_S, SIG_R, Z, Q, SIG_R_BASE, recovery_parity, ...]
+
+    exec.compute_ecdsa_scalars
+    # => [U1, Q, U2, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    exec.relation_point_2base
+    # => [RECOVERY_POINT, SIG_R, SIG_R_BASE, recovery_parity, ...]
+    swapw dropw
+    # => [RECOVERY_POINT, SIG_R_BASE, recovery_parity, ...]
+    exec.assert_recovery_point
+    # => [...]
+
+    # Return the now-constrained point in the same native layout used for public-key commitments.
+    padw loc_loadw_le.12
+    padw loc_loadw_le.8
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
+    # => [QX[8] | QY[8], ...]
+end
 
 #! Loads QX || QY from advice, binds it to PK_COMM, and returns the end of the public-key buffer.
 #!
@@ -185,13 +322,14 @@ proc load_and_verify_public_key
     # => [pubkey_ptr+16, ...]
 end
 
-#! Converts a packed Keccak256 digest in the local scratch buffer to native scalar limbs.
+#! Converts a packed Keccak256 digest in memory to native scalar limbs.
 #!
 #! Input:  [digest_ptr, ...]
-#! Output: [PREHASH_U32[8], pubkey_ptr, ...]
+#! Output: [PREHASH_U32[8], ...]
 #!
 #! Preconditions:
-#! - digest_ptr = pubkey_ptr + 16 and points to DIGEST_U32[8] packed little-endian u32 limbs.
+#! - digest_ptr points to DIGEST_U32[8] packed little-endian u32 limbs. Each felt is u32-constrained
+#!   by the Keccak memory interface before `reverse_u32_bytes` consumes it.
 proc load_keccak_digest_as_z
     repeat.8
         dup mem_load
@@ -199,50 +337,8 @@ proc load_keccak_digest_as_z
         swap add.1
     end
     # => [read_ptr=digest_ptr+8, PREHASH_U32[8], ...]
-    sub.24 movdn.8
-    # => [PREHASH_U32[8], pubkey_ptr, ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
-end
-
-#! Computes `R = u1*G + u2*Q` as a plain 2-base joint wNAF MSM, folding the degenerate `Q == G`
-#! case into a single `(u1+u2)*G` multiply, the one collision a 2-base MSM has.
-#!
-#! Input:  [U1, Q, U2, ...]
-#! Output: [VERIFY_POINT, ...]
-proc verify_point_2base
-    dupw.1
-    # => [Q, U1, Q, U2, ...]
-    exec.secp256k1::push_generator
-    # => [G, Q, U1, Q, U2, ...]
-    exec.word::eq
-    # => [is_q_generator, U1, Q, U2, ...]
-    if.true
-        movupw.2 swapw
-        # => [U1, U2, Q, ...]
-        exec.k1_scalar::add
-        # => [U1_PLUS_U2, Q, ...]
-        swapw dropw
-        # => [U1_PLUS_U2, ...]
-        exec.secp256k1::mul_scalar_generator
-    else
-        exec.secp256k1::push_generator
-        # => [G, U1, Q, U2, ...]
-        exec.secp256k1::msm2
-    end
-    # => [VERIFY_POINT, ...]
-end
-
-#! Completes ECDSA verification after the Keccak digest has been converted to native scalar limbs.
-#!
-#! Input:  [Z_U32[8], pubkey_ptr, ...]
-#! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [...]
-proc verify_digest_impl
-    exec.prepare_verify_inputs
-    # => [U1, Q, U2, SIG_R, ...]
-    exec.verify_point_2base
-    # => [VERIFY_POINT, SIG_R, ...]
-    exec.assert_x_eq_scalar_k1
-    # => [...]
+    drop
+    # => [PREHASH_U32[8], ...] where PREHASH[0] = byte_reverse(KeccakDigest[7])
 end
 
 #! Computes ECDSA scalars U1 = z/s and U2 = r/s, keeping SIG_R for the final check.
@@ -254,7 +350,7 @@ end
 #! Preconditions/provenance:
 #! - Z_U32[8] is the Keccak256 message digest converted to little-endian scalar limbs;
 #! - pubkey_ptr points to QX[8] || QY[8], already bound to PK_COMM by a public verifier;
-#! - SIG_R/S advice is untrusted and validated by `load_signature_k1`.
+#! - SIG_R/S advice is untrusted, loaded canonically by `load_signature_k1`, and checked below.
 proc prepare_verify_inputs
     exec.k1_scalar::load_reduced_256
     # => [Z, pubkey_ptr, ...]
@@ -267,6 +363,86 @@ proc prepare_verify_inputs
     # => [Z, Q, ...]
 
     exec.load_signature_k1
+    # => [SIG_S, SIG_R, Z, Q, ...]
+
+    exec.compute_ecdsa_scalars
+    # => [U1, Q, U2, SIG_R, ...]
+end
+
+#! Loads a native EVM recovery witness before any procedure-local writes can alias its memory.
+#!
+#! Input:  [Z_SCALAR_EXPR_DIGEST, SIG_PTR, ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, Z_SCALAR_EXPR_DIGEST,
+#!          SIG_R_BASE_VALUE_DIGEST, recovery_parity, ...]
+#!
+#! `SIG_PTR` is word-aligned and addresses `R_LE_U32[8] || S_LE_U32[8] || V`, with V = 27 or 28.
+#! Loading r in both uint domains is sound because scalar canonicality proves `r < n < p`.
+proc load_recovery_signature_k1
+    movup.4
+    # => [SIG_PTR, Z, ...]
+
+    # Validate V first and move the normalized parity below Z.
+    dup add.16 mem_load sub.27
+    dup dup sub.1 mul assertz.err="invalid EVM recovery byte: expected 27 or 28"
+    # => [recovery_parity, SIG_PTR, Z, ...]
+    movdn.5
+    # => [SIG_PTR, Z, recovery_parity, ...]
+
+    # Register r in the base domain for the final exact-X comparison, and independently in the
+    # scalar domain for the ECDSA relation.
+    dup exec.k1_base::load_mem
+    # => [SIG_R_BASE, SIG_PTR, Z, recovery_parity, ...]
+    movup.4
+    dup exec.k1_scalar::load_mem
+    # => [SIG_R, SIG_PTR, SIG_R_BASE, Z, recovery_parity, ...]
+    movup.4 add.8 exec.k1_scalar::load_mem
+    # => [SIG_S, SIG_R, SIG_R_BASE, Z, recovery_parity, ...]
+
+    movupw.3 movdnw.2
+    # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+end
+
+#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests and returns SIG_S on top.
+#!
+#! Advice: [SIG_R[8] | SIG_S[8] | ...]
+#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
+proc load_signature_k1
+    exec.load_scalar_k1_from_advice
+    # => [SIG_R, ...]
+
+    exec.load_scalar_k1_from_advice
+    # => [SIG_S, SIG_R, ...]
+end
+
+#! Loads one canonical k1 scalar from advice.
+#!
+#! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
+#! Output: [VALUE_SCALAR_DIGEST, ...]
+proc load_scalar_k1_from_advice
+    adv_pushw
+    # => [VALUE_LO_U32[4], ...]
+    adv_pushw
+    # => [VALUE_HI_U32[4], VALUE_LO_U32[4], ...]
+    swapw
+    # => [VALUE_LO_U32[4], VALUE_HI_U32[4], ...]
+    exec.k1_scalar::load
+    # => [VALUE_SCALAR_DIGEST, ...]
+end
+
+#! Checks the ECDSA signature scalars and computes `U1 = z/s` and `U2 = r/s`.
+#!
+#! Input:  [SIG_S, SIG_R, Z, Q, ...]
+#! Output: [U1, Q, U2, SIG_R, ...]
+#!
+#! SIG_R/S are canonical k1-scalar VALUE digests from the scalar loaders; Z is a k1-scalar
+#! expression digest from `load_reduced_256`; Q originates from `secp256k1::load_mem`. Thus direct
+#! comparison of SIG_R with the pinned zero VALUE digest is sound.
+proc compute_ecdsa_scalars
+    # Inversion rejects s = 0; check r explicitly.
+    dupw.1
+    exec.k1_scalar::push_zero_digest
+    exec.word::eq
+    assertz.err="invalid ECDSA signature: r is zero"
     # => [SIG_S, SIG_R, Z, Q, ...]
 
     exec.k1_scalar::inv
@@ -291,44 +467,39 @@ proc prepare_verify_inputs
     # => [U1, Q, U2, SIG_R, ...]
 end
 
-#! Loads SIG_R and SIG_S from advice as k1 scalar VALUE digests, checks SIG_R != 0,
-#! and returns SIG_S on top because callers immediately invert SIG_S.
-#!
-#! Advice: [SIG_R[8] | SIG_S[8] | ...]
-#! Output: [SIG_S_SCALAR_VALUE_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
-proc load_signature_k1
-    exec.load_scalar_k1_from_advice
-    # => [SIG_R, ...]
-
-    exec.load_scalar_k1_from_advice
-    # => [SIG_S, SIG_R, ...]
-
-    # ECDSA requires SIG_R != 0 and SIG_S != 0.
-    # Check SIG_R here. We do not check SIG_S here because k1_scalar::inv(SIG_S) traps on SIG_S = 0
-    # and binds the inverse relation for nonzero SIG_S.
-    dupw.1
-    # => [SIG_R, SIG_S, SIG_R, ...]
-    exec.k1_scalar::push_zero_digest
-    # => [ZERO_DIGEST, SIG_R_COPY, SIG_S, SIG_R, ...]
-    exec.word::eq
-    # => [is_sig_r_zero, SIG_S, SIG_R, ...]
-    assertz.err="invalid ECDSA signature: r is zero"
-    # => [SIG_S, SIG_R, ...]
-end
-
-#! Loads one canonical k1 scalar from advice.
-#!
-#! Advice: [VALUE_LO_U32[4] | VALUE_HI_U32[4] | ...]
-#! Output: [VALUE_SCALAR_DIGEST, ...]
-proc load_scalar_k1_from_advice
-    adv_pushw
-    # => [VALUE_LO_U32[4], ...]
-    adv_pushw
-    # => [VALUE_HI_U32[4], VALUE_LO_U32[4], ...]
-    swapw
-    # => [VALUE_LO_U32[4], VALUE_HI_U32[4], ...]
-    exec.k1_scalar::load
-    # => [VALUE_SCALAR_DIGEST, ...]
+#! Computes `R = u1*G + u2*Q`, omitting the `u1*G` term when U1 is zero. Otherwise, uses a plain
+#! 2-base joint wNAF MSM, folding the degenerate `Q == G` case into a single `(u1+u2)*G` multiply,
+#! the one collision a 2-base MSM has.
+#! Input:  [U1, Q, U2, ...]
+#! Output: [RELATION_POINT, ...]
+proc relation_point_2base
+    dupw
+    exec.k1_scalar::is_zero
+    # => [is_u1_zero, U1, Q, U2, ...]
+    if.true
+        dropw
+        # => [Q, U2, ...]
+        exec.secp256k1::mul_scalar
+    else
+        dupw.1
+        # => [Q, U1, Q, U2, ...]
+        exec.secp256k1::push_generator
+        # => [G, Q, U1, Q, U2, ...]
+        exec.word::eq
+        # => [is_q_generator, U1, Q, U2, ...]
+        if.true
+            swapw dropw
+            # => [U1, U2, ...]
+            exec.k1_scalar::add
+            # => [U1_PLUS_U2, ...]
+            exec.secp256k1::mul_scalar_generator
+        else
+            exec.secp256k1::push_generator
+            # => [G, U1, Q, U2, ...]
+            exec.secp256k1::msm2
+        end
+    end
+    # => [RELATION_POINT, ...]
 end
 
 #! Evaluates VERIFY_POINT once, rejects the identity, reduces x(VERIFY_POINT) modulo n, and
@@ -364,11 +535,44 @@ proc assert_x_eq_scalar_k1
     exec.k1_scalar::load_reduced_256
     # => [X_SCALAR_DIGEST, SIG_R_SCALAR_VALUE_DIGEST, ...]
 
-    swapw
-    # => [SIG_R_SCALAR_VALUE_DIGEST, X_SCALAR_DIGEST, ...]
-    exec.k1_scalar::is_eq_digest
-    # => [x_matches_sig_r, ...]
-    assert.err="ECDSA verification failed: x(VERIFY_POINT) != SIG_R"
+    # Deferred registration evaluates this same-domain scalar equality eagerly, so a mismatch traps
+    # during main-VM execution as well as being committed to the deferred root.
+    exec.k1_scalar::assert_eq
+    # => [...]
+end
+
+#! Checks exact x-coordinate and y parity for parity-only EVM public-key recovery.
+#!
+#! Input:  [RECOVERY_POINT_DIGEST, SIG_R_BASE_VALUE_DIGEST, recovery_parity, ...]
+#! Output: [...]
+#!
+#! The x-coordinate is compared without reduction: recovery bytes 27 and 28 select only the
+#! `x(R) = r` branches, not the mathematical recovery-ID branches where `x(R) = r + n`.
+proc assert_recovery_point
+    # Keep the curve evaluation inline in each final-check mode: placing it behind a non-tail helper
+    # adds three cycles to the existing verifier hot path.
+    exec.secp256k1::eval
+    # => [RECOVERY_POINT_VALUE_DIGEST, X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST, SIG_R_BASE, recovery_parity, ...]
+
+    # Identity has TRUE_DIGEST children, so the exact base-field X comparison below rejects it.
+    dropw
+    # => [X_DIGEST, Y_DIGEST, SIG_R_BASE, recovery_parity, ...]
+
+    # Both operands are canonical base-field VALUE digests. Raw equality is exact and cannot admit
+    # x = r + n; identity has TRUE_DIGEST children and therefore also fails this comparison.
+    movupw.2
+    # => [R_BASE_VALUE_DIGEST, X_BASE_VALUE_DIGEST, Y_DIGEST, recovery_parity, ...]
+    assert_eqw.err="ECDSA recovery point x-coordinate does not equal r"
+    # => [Y_DIGEST, recovery_parity, ...]
+
+    exec.k1_base::open_value
+    # => [Y_U32[8], recovery_parity, ...]
+    push.1 u32and
+    # => [y_parity, Y_U32[1..8], recovery_parity, ...]
+    movup.8 assert_eq.err="ECDSA recovery point has the wrong y parity"
+    repeat.7
+        drop
+    end
     # => [...]
 end
 
@@ -399,6 +603,7 @@ end
 #!
 #! Input:  [x, ...]
 #! Output: [byte_reverse(x), ...]
+#! Precondition: x is a u32.
 proc reverse_u32_bytes
     dup u32shr.8 push.0x00FF00FF u32and
     # => [(x >> 8) & 0x00ff00ff, x, ...]
@@ -407,10 +612,6 @@ proc reverse_u32_bytes
     u32xor
     # => [x with adjacent bytes swapped, ...]
 
-    dup u32shr.16
-    # => [x >> 16, x, ...]
-    swap u32shl.16
-    # => [(x << 16) mod 2^32, x >> 16, ...]
-    u32xor
+    u32rotr.16
     # => [byte_reverse(x), ...]
 end

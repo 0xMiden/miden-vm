@@ -4,12 +4,21 @@
 #### Features
 
 - [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
+- [BREAKING] Replaced source-specific and opaque debug variable locations with explicit unavailable
+  locations, tagged Miden frame bases, and bounded structured Miden-runtime expressions. This bumps
+  the package debug-info wire format to version 3.
+- [BREAKING] Added `miden::core::crypto::dsa::ecdsa_k256_keccak::{recover, recover_bytes}` for word-aligned native EVM recovery witnesses `R_LE_U32[8] || S_LE_U32[8] || V` (`V` = 27 or 28). They accept high-s and return `QX_LE_U32[8] || QY_LE_U32[8]`; callers convert external big-endian EVM wire signatures and authenticate the returned key. Also added `PublicKey::recover_from_prehash` in `miden-crypto`. The accompanying refactor changes the MAST root of the existing `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` export; consumers that pin this root must update it ([#3682](https://github.com/0xMiden/miden-vm/pull/3682)).
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
 - Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 - [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
+- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
+- Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
 
 #### Changes
 
+- Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
@@ -65,7 +74,9 @@
 
 #### Fixes
 
+- Added u32 checks before sorted array pointers from advice are used in arithmetic or memory access, and corrected the `sys::drop_stack_top` MASM signature ([#3711](https://github.com/0xMiden/miden-vm/pull/3711)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
+- [BREAKING] Constrained the stack overflow pointer on every VM transition, preventing forged traces from consuming overflow rows out of order ([#3684](https://github.com/0xMiden/miden-vm/pull/3684)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though
@@ -76,10 +87,6 @@
 - Fixed `miden-vm prove` so unsupported program extensions are rejected before inferred input files are loaded ([#3587](https://github.com/0xMiden/miden-vm/issues/3587)).
 - Rejected MAST basic block payloads whose batch metadata does not cover every serialized operation, instead of silently dropping the trailing operations during deserialization ([#3594](https://github.com/0xMiden/miden-vm/issues/3594)).
 - Hashed the local registry `index.toml` with ASCII trim on load, matching the write-path staleness check, so a leading NBSP or vertical tab no longer makes every write fail with `WriteToStaleIndex` ([#3651](https://github.com/0xMiden/miden-vm/issues/3651)).
-#### Features
-
-- Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
-- Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
 
 ## v0.29.2 (2026-08-20)
 
@@ -90,11 +97,11 @@
 #### Fixes
 
 - Fixed `Felt`'s `Debug` impl on the `miden` target by formatting the canonical `u64` value instead of the `f32` backing type. The `Debug` output format changed from `Felt { inner: .. }` to `Felt(..)` ([#3693](https://github.com/0xMiden/miden-vm/pull/3693)).
-## v0.30.0 (Unreleased)
+## v0.29.2 (Unreleased)
 
 #### Changes
 
-- [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
+- Added explicit unavailable and tagged Miden frame-base debug variable locations, plus a structured Miden-runtime expression fallback for compound locations. This replaces private compiler/debugger expression encodings for new packages and bumps the package debug-info wire format to version 3.
 
 ## v0.29.1 (2026-08-11)
 
