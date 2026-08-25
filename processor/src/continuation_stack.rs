@@ -507,22 +507,22 @@ impl Serializable for Continuation<MastForestId> {
 impl Deserializable for Continuation<MastForestId> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         match u8::read_from(source)? {
-            TAG_START_NODE => Ok(Self::StartNode(read_mast_node_id(source)?)),
-            TAG_FINISH_JOIN => Ok(Self::FinishJoin(read_mast_node_id(source)?)),
-            TAG_FINISH_SPLIT => Ok(Self::FinishSplit(read_mast_node_id(source)?)),
-            TAG_FINISH_LOOP => Ok(Self::FinishLoop(read_mast_node_id(source)?)),
-            TAG_FINISH_CALL => Ok(Self::FinishCall(read_mast_node_id(source)?)),
-            TAG_FINISH_DYN => Ok(Self::FinishDyn(read_mast_node_id(source)?)),
+            TAG_START_NODE => Ok(Self::StartNode(MastNodeId::read_from(source)?)),
+            TAG_FINISH_JOIN => Ok(Self::FinishJoin(MastNodeId::read_from(source)?)),
+            TAG_FINISH_SPLIT => Ok(Self::FinishSplit(MastNodeId::read_from(source)?)),
+            TAG_FINISH_LOOP => Ok(Self::FinishLoop(MastNodeId::read_from(source)?)),
+            TAG_FINISH_CALL => Ok(Self::FinishCall(MastNodeId::read_from(source)?)),
+            TAG_FINISH_DYN => Ok(Self::FinishDyn(MastNodeId::read_from(source)?)),
             TAG_RESUME_BASIC_BLOCK => Ok(Self::ResumeBasicBlock {
-                node_id: read_mast_node_id(source)?,
+                node_id: MastNodeId::read_from(source)?,
                 batch_index: usize::read_from(source)?,
                 op_idx_in_batch: usize::read_from(source)?,
             }),
             TAG_RESPAN => Ok(Self::Respan {
-                node_id: read_mast_node_id(source)?,
+                node_id: MastNodeId::read_from(source)?,
                 batch_index: usize::read_from(source)?,
             }),
-            TAG_FINISH_BASIC_BLOCK => Ok(Self::FinishBasicBlock(read_mast_node_id(source)?)),
+            TAG_FINISH_BASIC_BLOCK => Ok(Self::FinishBasicBlock(MastNodeId::read_from(source)?)),
             TAG_ENTER_FOREST => Ok(Self::EnterForest {
                 forest: MastForestId::read_from(source)?,
                 package_debug_info: None,
@@ -533,10 +533,6 @@ impl Deserializable for Continuation<MastForestId> {
             },
         }
     }
-}
-
-fn read_mast_node_id<R: ByteReader>(source: &mut R) -> Result<MastNodeId, DeserializationError> {
-    Ok(MastNodeId::from(u32::read_from(source)?))
 }
 
 // `source_node_ids` is deliberately *not* serialized: those indices point into a package's

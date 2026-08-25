@@ -298,40 +298,13 @@ impl WireBus {
 // SERIALIZATION
 // ================================================================================================
 
-// QuadFelt, RowIndex, and the other types handled by these helpers are foreign to this crate, so
-// the orphan rule prevents implementing Serializable/Deserializable on them directly; free
-// functions fill the same role for the replay structs' impls below.
-fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
-    u32::from(row).write_into(target);
-}
-
-fn read_row_index<R: ByteReader>(source: &mut R) -> Result<RowIndex, DeserializationError> {
-    Ok(RowIndex::from(u32::read_from(source)?))
-}
-
-fn write_quad_felt<W: ByteWriter>(value: QuadFelt, target: &mut W) {
-    let coefficients: &[Felt] = value.as_basis_coefficients_slice();
-    coefficients[0].write_into(target);
-    coefficients[1].write_into(target);
-}
-
-fn read_quad_felt<R: ByteReader>(source: &mut R) -> Result<QuadFelt, DeserializationError> {
-    let c0 = Felt::read_from(source)?;
-    let c1 = Felt::read_from(source)?;
-    Ok(QuadFelt::new([c0, c1]))
-}
-
-fn quad_felt_min_serialized_size() -> usize {
-    Felt::min_serialized_size() * 2
-}
-
 impl Serializable for ReadNode {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.ptr.write_into(target);
         self.id_0.write_into(target);
-        write_quad_felt(self.v_0, target);
+        self.v_0.write_into(target);
         self.id_1.write_into(target);
-        write_quad_felt(self.v_1, target);
+        self.v_1.write_into(target);
     }
 }
 
@@ -340,14 +313,14 @@ impl Deserializable for ReadNode {
         Ok(Self {
             ptr: Felt::read_from(source)?,
             id_0: Felt::read_from(source)?,
-            v_0: read_quad_felt(source)?,
+            v_0: QuadFelt::read_from(source)?,
             id_1: Felt::read_from(source)?,
-            v_1: read_quad_felt(source)?,
+            v_1: QuadFelt::read_from(source)?,
         })
     }
 
     fn min_serialized_size() -> usize {
-        Felt::min_serialized_size() * 3 + quad_felt_min_serialized_size() * 2
+        Felt::min_serialized_size() * 3 + QuadFelt::min_serialized_size() * 2
     }
 }
 
@@ -356,11 +329,11 @@ impl Serializable for EvalNode {
         self.ptr.write_into(target);
         self.eval_op.write_into(target);
         self.id_0.write_into(target);
-        write_quad_felt(self.v_0, target);
+        self.v_0.write_into(target);
         self.id_1.write_into(target);
-        write_quad_felt(self.v_1, target);
+        self.v_1.write_into(target);
         self.id_2.write_into(target);
-        write_quad_felt(self.v_2, target);
+        self.v_2.write_into(target);
     }
 }
 
@@ -370,27 +343,23 @@ impl Deserializable for EvalNode {
             ptr: Felt::read_from(source)?,
             eval_op: Felt::read_from(source)?,
             id_0: Felt::read_from(source)?,
-            v_0: read_quad_felt(source)?,
+            v_0: QuadFelt::read_from(source)?,
             id_1: Felt::read_from(source)?,
-            v_1: read_quad_felt(source)?,
+            v_1: QuadFelt::read_from(source)?,
             id_2: Felt::read_from(source)?,
-            v_2: read_quad_felt(source)?,
+            v_2: QuadFelt::read_from(source)?,
         })
     }
 
     fn min_serialized_size() -> usize {
-        Felt::min_serialized_size() * 5 + quad_felt_min_serialized_size() * 3
+        Felt::min_serialized_size() * 5 + QuadFelt::min_serialized_size() * 3
     }
 }
 
 impl Serializable for WireBus {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.id_next.write_into(target);
-        self.wires.len().write_into(target);
-        for (value, multiplicity) in &self.wires {
-            write_quad_felt(*value, target);
-            multiplicity.write_into(target);
-        }
+        self.wires.write_into(target);
         self.num_wires.write_into(target);
     }
 }
@@ -398,19 +367,8 @@ impl Serializable for WireBus {
 impl Deserializable for WireBus {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let id_next = Felt::read_from(source)?;
-        let wire_count = usize::read_from(source)?;
-        let max_count =
-            source.max_alloc(Felt::min_serialized_size() * 2 + u32::min_serialized_size());
-        if wire_count > max_count {
-            return Err(DeserializationError::InvalidValue(format!(
-                "ACE wire count {wire_count} exceeds reader allocation bound {max_count}"
-            )));
-        }
-
-        let mut wires = Vec::with_capacity(wire_count);
-        for _ in 0..wire_count {
-            wires.push((read_quad_felt(source)?, u32::read_from(source)?));
-        }
+        let wires = Vec::<(QuadFelt, u32)>::read_from(source)?;
+        let wire_count = wires.len();
         let num_wires = u32::read_from(source)?;
         if num_wires == 0 {
             return Err(DeserializationError::InvalidValue(
@@ -438,7 +396,7 @@ impl Deserializable for WireBus {
 impl Serializable for CircuitEvaluation {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.ctx.write_into(target);
-        write_row_index(self.clk, target);
+        self.clk.write_into(target);
         self.wire_bus.write_into(target);
         self.read_nodes.write_into(target);
         self.eval_nodes.write_into(target);
@@ -449,7 +407,7 @@ impl Deserializable for CircuitEvaluation {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let evaluation = Self {
             ctx: ContextId::read_from(source)?,
-            clk: read_row_index(source)?,
+            clk: RowIndex::read_from(source)?,
             wire_bus: WireBus::read_from(source)?,
             read_nodes: Vec::<ReadNode>::read_from(source)?,
             eval_nodes: Vec::<EvalNode>::read_from(source)?,
@@ -460,7 +418,7 @@ impl Deserializable for CircuitEvaluation {
 
     fn min_serialized_size() -> usize {
         ContextId::min_serialized_size()
-            + u32::min_serialized_size()
+            + RowIndex::min_serialized_size()
             + WireBus::min_serialized_size()
             + Vec::<ReadNode>::min_serialized_size()
             + Vec::<EvalNode>::min_serialized_size()

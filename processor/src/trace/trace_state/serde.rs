@@ -11,93 +11,9 @@ use super::*;
 // SERIALIZATION
 // ================================================================================================
 
-fn write_row_index<W: ByteWriter>(row: RowIndex, target: &mut W) {
-    u32::from(row).write_into(target);
-}
-
-fn read_row_index<R: ByteReader>(source: &mut R) -> Result<RowIndex, DeserializationError> {
-    Ok(RowIndex::from(u32::read_from(source)?))
-}
-
-fn write_memory_element_queue<W: ByteWriter>(
-    queue: &VecDeque<(Felt, Felt, ContextId, RowIndex)>,
-    target: &mut W,
-) {
-    target.write_usize(queue.len());
-    for &(element, addr, ctx, clk) in queue {
-        element.write_into(target);
-        addr.write_into(target);
-        ctx.write_into(target);
-        write_row_index(clk, target);
-    }
-}
-
-fn read_memory_element_queue<R: ByteReader>(
-    source: &mut R,
-) -> Result<VecDeque<(Felt, Felt, ContextId, RowIndex)>, DeserializationError> {
-    let len = source.read_usize()?;
-    let element_size =
-        Felt::min_serialized_size() * 2 + u32::min_serialized_size() + u32::min_serialized_size();
-    let max_len = source.max_alloc(element_size);
-    if len > max_len {
-        return Err(DeserializationError::InvalidValue(format!(
-            "memory element replay length {len} exceeds reader allocation bound {max_len}"
-        )));
-    }
-
-    let mut values = VecDeque::with_capacity(len);
-    for _ in 0..len {
-        values.push_back((
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            ContextId::read_from(source)?,
-            read_row_index(source)?,
-        ));
-    }
-    Ok(values)
-}
-
-fn write_memory_word_queue<W: ByteWriter>(
-    queue: &VecDeque<(Word, Felt, ContextId, RowIndex)>,
-    target: &mut W,
-) {
-    target.write_usize(queue.len());
-    for &(word, addr, ctx, clk) in queue {
-        word.write_into(target);
-        addr.write_into(target);
-        ctx.write_into(target);
-        write_row_index(clk, target);
-    }
-}
-
-fn read_memory_word_queue<R: ByteReader>(
-    source: &mut R,
-) -> Result<VecDeque<(Word, Felt, ContextId, RowIndex)>, DeserializationError> {
-    let len = source.read_usize()?;
-    let element_size =
-        Word::min_serialized_size() + Felt::min_serialized_size() + u32::min_serialized_size() * 2;
-    let max_len = source.max_alloc(element_size);
-    if len > max_len {
-        return Err(DeserializationError::InvalidValue(format!(
-            "memory word replay length {len} exceeds reader allocation bound {max_len}"
-        )));
-    }
-
-    let mut values = VecDeque::with_capacity(len);
-    for _ in 0..len {
-        values.push_back((
-            Word::read_from(source)?,
-            Felt::read_from(source)?,
-            ContextId::read_from(source)?,
-            read_row_index(source)?,
-        ));
-    }
-    Ok(values)
-}
-
 impl Serializable for SystemState {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        write_row_index(self.clk, target);
+        self.clk.write_into(target);
         self.ctx.write_into(target);
         self.fn_hash.write_into(target);
         self.deferred_root.write_into(target);
@@ -107,7 +23,7 @@ impl Serializable for SystemState {
 impl Deserializable for SystemState {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            clk: read_row_index(source)?,
+            clk: RowIndex::read_from(source)?,
             ctx: ContextId::read_from(source)?,
             fn_hash: Word::read_from(source)?,
             deferred_root: Word::read_from(source)?,
@@ -284,44 +200,37 @@ fn read_mast_forest_resolution_queue<R: ByteReader>(
         "MastForestResolutionReplay",
         u32::min_serialized_size() + MastForestId::min_serialized_size(),
     )?;
-    let mut values = VecDeque::with_capacity(len);
-    for _ in 0..len {
-        values.push_back((
-            MastNodeId::from(u32::read_from(source)?),
-            MastForestId::read_from(source)?,
-        ));
-    }
-    Ok(values)
+    source.read_many_iter(len)?.collect()
 }
 
 impl Serializable for MemoryReadsReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        write_memory_element_queue(&self.elements_read, target);
-        write_memory_word_queue(&self.words_read, target);
+        self.elements_read.write_into(target);
+        self.words_read.write_into(target);
     }
 }
 
 impl Deserializable for MemoryReadsReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            elements_read: read_memory_element_queue(source)?,
-            words_read: read_memory_word_queue(source)?,
+            elements_read: VecDeque::read_from(source)?,
+            words_read: VecDeque::read_from(source)?,
         })
     }
 }
 
 impl Serializable for MemoryWritesReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        write_memory_element_queue(&self.elements_written, target);
-        write_memory_word_queue(&self.words_written, target);
+        self.elements_written.write_into(target);
+        self.words_written.write_into(target);
     }
 }
 
 impl Deserializable for MemoryWritesReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            elements_written: read_memory_element_queue(source)?,
-            words_written: read_memory_word_queue(source)?,
+            elements_written: VecDeque::read_from(source)?,
+            words_written: VecDeque::read_from(source)?,
         })
     }
 }
@@ -394,43 +303,16 @@ impl Deserializable for KernelReplay {
     }
 }
 
-fn write_ace_queue<W: ByteWriter>(queue: &VecDeque<(RowIndex, CircuitEvaluation)>, target: &mut W) {
-    target.write_usize(queue.len());
-    for &(row, ref evaluation) in queue {
-        write_row_index(row, target);
-        evaluation.write_into(target);
-    }
-}
-
-fn read_ace_queue<R: ByteReader>(
-    source: &mut R,
-) -> Result<VecDeque<(RowIndex, CircuitEvaluation)>, DeserializationError> {
-    let len = source.read_usize()?;
-    let max_len =
-        source.max_alloc(u32::min_serialized_size() + CircuitEvaluation::min_serialized_size());
-    if len > max_len {
-        return Err(DeserializationError::InvalidValue(format!(
-            "ACE replay length {len} exceeds reader allocation bound {max_len}"
-        )));
-    }
-
-    let mut values = VecDeque::with_capacity(len);
-    for _ in 0..len {
-        values.push_back((read_row_index(source)?, CircuitEvaluation::read_from(source)?));
-    }
-    Ok(values)
-}
-
 impl Serializable for AceReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        write_ace_queue(&self.circuit_evaluations, target);
+        self.circuit_evaluations.write_into(target);
     }
 }
 
 impl Deserializable for AceReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            circuit_evaluations: read_ace_queue(source)?,
+            circuit_evaluations: VecDeque::read_from(source)?,
         })
     }
 }
@@ -565,7 +447,7 @@ impl Deserializable for HasherOp {
             ))),
             2 => Ok(Self::HashBasicBlock((
                 MastForestId::read_from(source)?,
-                MastNodeId::from(u32::read_from(source)?),
+                MastNodeId::read_from(source)?,
                 Word::read_from(source)?,
             ))),
             3 => Ok(Self::BuildMerkleRoot((

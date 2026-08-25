@@ -892,8 +892,39 @@ impl Deserializable for Arc<str> {
     }
 }
 
-// GOLDILOCKS FIELD ELEMENT IMPLEMENTATIONS
+// PLONKY3 FIELD IMPLEMENTATIONS
 // ================================================================================================
+
+impl<F, const D: usize> Serializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let coefficients =
+            <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self);
+        target.write_many(coefficients);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self)
+            .iter()
+            .map(Serializable::get_size_hint)
+            .sum()
+    }
+}
+
+impl<F, const D: usize> Deserializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::new(<[F; D]>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        D.saturating_mul(F::min_serialized_size())
+    }
+}
 
 impl Serializable for p3_goldilocks::Goldilocks {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -923,6 +954,9 @@ impl Deserializable for p3_goldilocks::Goldilocks {
 mod tests {
     use alloc::{collections::VecDeque, sync::Arc};
 
+    use p3_field::extension::BinomialExtensionField;
+    use p3_goldilocks::Goldilocks;
+
     use super::*;
 
     #[test]
@@ -950,6 +984,19 @@ mod tests {
         assert_eq!(Vec::<u32>::read_from_bytes(&bytes).unwrap(), Vec::from([1, 2, 3]));
         assert_eq!(
             VecDeque::<u32>::read_from_bytes(&Vec::from([1u32, 2, 3]).to_bytes()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn binomial_extension_field_roundtrip() {
+        let coefficients = [Goldilocks::new(1), Goldilocks::new(2)];
+        let original = BinomialExtensionField::<Goldilocks, 2>::new(coefficients);
+        let bytes = original.to_bytes();
+
+        assert_eq!(bytes, coefficients.to_bytes());
+        assert_eq!(
+            BinomialExtensionField::<Goldilocks, 2>::read_from_bytes(&bytes).unwrap(),
             original
         );
     }
