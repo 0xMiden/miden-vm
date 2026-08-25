@@ -187,36 +187,72 @@ Thus, for example, if $n = 14$, the result of the hash is available at controlle
 
 ### Control flow tables
 
-In addition to the hash chiplet, control flow operations rely on $3$ virtual tables: *block stack* table, *block hash* table, and _op group_ table. These tables are virtual in that they don't require separate trace columns. Their state is described solely by running product columns: $p_1$, $p_2$, and $p_3$. The tables are described in the following sections.
+In addition to the hash chiplet, control-flow operations use three virtual relations: the
+*block stack*, *block hash*, and *op group* relations. These relations do not require dedicated
+main-trace columns; they are enforced as virtual lookup relations. The relations are described
+below.
 
 #### Block stack table
 
 When the VM starts executing a new program block, it adds its block ID together with the ID of its parent block (and some additional info) to the *block stack* table. When a program block is fully executed, it is removed from the table. In this way, the table represents a stack of blocks which are currently executing on the VM. By the time program execution completes, block stack table must be empty.
 
-The block stack table is also used to ensure that execution contexts are managed properly across the `CALL` and `SYSCALL` operations.
+The block stack table is also used to ensure that execution contexts are managed properly across
+`CALL`, `DYNCALL`, and `SYSCALL`. It is one logical relation with two authenticated entry kinds:
 
-The table can be thought of as consisting of $11$ columns as shown below:
+* A **continuation** `(block_id, parent_id, is_loop)` records ordinary control-flow nesting.
+* A **caller frame** `(block_id, parent_id, caller_ctx, caller_stack_depth,
+  caller_overflow_addr, caller_fn_hash[0..3])` additionally records the state which the matching
+  `END` is authorized to restore. Its loop-marker slot in the common encoded layout is always
+  zero; caller frames and LOOP continuations are disjoint entry kinds.
 
-![decoder_block_stack_table](../../img/design/decoder/decoder_block_stack_table.png)
+Both kinds use the same 11-slot encoded layout. Unused slots are fixed to zero; they are not
+additional witness-controlled fields.
 
-where:
-* The first column ($t_0$) contains the ID of the block.
-* The second column ($t_1$) contains the ID of the parent block. If the block has no parent (i.e., it is a root block of the program), parent ID is 0.
-* The third column ($t_2$) contains a binary value which is set to $1$ is the block is a *loop* block, and to $0$ otherwise.
-* The following 8 columns are only set to non-zero values for `CALL` and `SYSCALL` operations. They save all the necessary information to be able to restore the parent context properly upon the corresponding `END` operation
-    - the `prnt_b0` and `prnt_b1` columns refer to the stack helper columns B0 and B1 (current stack depth and last overflow address, respectively)
+**Continuation:**
 
-In the above diagram, the first 2 rows correspond to 2 different `CALL` operations. The first `CALL` operation is called from the root context, and hence its parent fn hash is the zero hash. Additionally, the second `CALL` operation has a parent fn hash of `[h0, h1, h2, h3]`, indicating that the first `CALL` was to a procedure with that hash.
+| Slot(s) | Value |
+| --- | --- |
+| $t_0$ | `block_id` |
+| $t_1$ | `parent_id` |
+| $t_2$ | `is_loop` |
+| $t_3,\ldots,t_9$ | $[0,0,0,0,0,0,0]$ |
+| $t_{10}$ (entry kind) | $0$ |
 
-Running product column $p_1$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_1$ defines which rows are present in the table.
+**Caller frame:**
 
-To reduce a row in the block stack table to a single value, we compute the following.
+| Slot(s) | Value |
+| --- | --- |
+| $t_0$ | `block_id` |
+| $t_1$ | `parent_id` |
+| $t_2$ | $0$ |
+| $t_3$ | `caller_ctx` |
+| $t_4$ | `caller_stack_depth` |
+| $t_5$ | `caller_overflow_addr` |
+| $t_6,\ldots,t_9$ | `caller_fn_hash[0..3]` |
+| $t_{10}$ (entry kind) | $1$ |
+
+Thus $t_{10}$ describes what the entry authorizes at its matching `END`: $0$ resumes ordinary
+control flow, while $1$ permits restoration of the authenticated caller state.
+
+The entry kind is an explicit field in the lookup message. A continuation is not encoded as a
+caller frame with zero-valued saved-state fields: those two messages remain distinct even when
+every saved caller value is zero. This makes the relation a tagged union while preserving its
+one-table stack semantics.
+
+For lookup encoding, both entry kinds use one block-stack bus prefix $\alpha_{block\_stack}$ and
+powers of the lookup challenge $\beta$. Payload slot 10 holds the entry-kind tag $k$, where $k=0$
+for a continuation and $k=1$ for a caller frame:
 
 $$
-row = \alpha_0 + \sum_{i=0}^{10} (\alpha_{i+1} \cdot t_i),
+d_{continuation} = \alpha_{block\_stack} + \sum_{i=0}^{2} \beta^i t_i,
 $$
 
-where $\alpha_0, ..., \alpha_{11}$ are the random values provided by the verifier.
+$$
+d_{caller\_frame} = \alpha_{block\_stack} + \sum_{i=0}^{9} \beta^i t_i + \beta^{10}.
+$$
+
+The shared prefix keeps both entry kinds in one relation; the final term prevents a zero-payload
+collision between them.
 
 #### Block hash table
 
@@ -285,7 +321,7 @@ In the above diagram, `blk` is the ID of the *join* block which is about to be e
 
 When the VM executes a `JOIN` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, 0...)` to the block stack table.
+1. Adds a continuation `(blk, prnt, 0)` to the block stack table.
 2. Adds tuples `(blk, left_child_hash, 1, 0)` and `(blk, right_child_hash, 0, 0)` to the block hash table.
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
 
@@ -299,7 +335,7 @@ In the above diagram, `blk` is the ID of the *split* block which is about to be 
 
 When the VM executes a `SPLIT` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, 0...)` to the block stack table.
+1. Adds a continuation `(blk, prnt, 0)` to the block stack table.
 2. Pops the stack and:\
    a. If the popped value is $1$, adds a tuple `(blk, true_branch_hash, 0, 0)` to the block hash table.\
    b. If the popped value is $0$, adds a tuple `(blk, false_branch_hash, 0, 0)` to the block hash table.\
@@ -316,7 +352,7 @@ In the above diagram, `blk` is the ID of the *loop* block which is about to be e
 
 The `LOOP` operation has do-while semantics: the body is entered unconditionally for the first iteration, with the condition checked only at the end of each iteration by `REPEAT`/`END`. When the VM executes a `LOOP` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 1, 0...)` to the block stack table (the `1` indicates that the
+1. Adds a continuation `(blk, prnt, 1)` to the block stack table (the `1` indicates that the
    loop's body is expected to be executed).
 2. Adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table.
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
@@ -333,7 +369,7 @@ In the above diagram, `blk` is the ID of the *basic* block which is about to be 
 
 When the VM executes a `SPAN` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, 0...)` to the block stack table.
+1. Adds a continuation `(blk, prnt, 0)` to the block stack table.
 2. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table.
 3. Initiates a sequential hash computation in the hash chiplet (as described [here](#sequential-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
 4. Sets the `in_span` register to $1$.
@@ -349,12 +385,12 @@ In the above diagram, `blk` is the ID of the *dyn* block which is about to be ex
 
 When the VM executes a `DYN` operation, it does the following:
 
-1. Adds a tuple `(blk, p_addr, 0, 0...)` to the block stack table.
+1. Adds a continuation `(blk, p_addr, 0)` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
 3. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
 4. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
 5. Performs a stack left shift
-    - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
+    - The new `s15` is pulled from the stack overflow table if present; otherwise it is set to `0`.
 
 Note that unlike `DYNCALL`, the `ctx` and `fn_hash` registers are unchanged.
 
@@ -366,13 +402,15 @@ In the above diagram, `blk` is the ID of the *dyn* block which is about to be ex
 
 When the VM executes a `DYNCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, p_addr, 0, ctx, b_0, b_1, fn_hash[0..3])` to the block stack table.
+1. Adds a caller frame `(blk, p_addr, ctx, h_4, h_5, fn_hash[0..3])` to the block stack table,
+   where $h_4$ and $h_5$ are constrained to the caller stack depth and overflow address after
+   DYNCALL consumes its address operand.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
 5. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
 6. Performs a stack left shift
-    - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
+    - The new `s15` is pulled from the stack overflow table if present; otherwise it is set to `0`.
 
 Similar to `CALL`, `DYNCALL` sets up a new `ctx`, and sets the `fn_hash` registers to the callee hash.
 
@@ -382,8 +420,9 @@ Before an `END` operation is executed by the VM, the prover populates $h_0, ...,
 * $h_4$ is set to $1$ if the block is a body of a *loop* block. We denote this value as `f0`.
 * $h_5$ is set to $1$ if the block is a *loop* block. We denote this value as `f1`. Under do-while
   semantics every *loop* block is entered, so $h_5 = 1$ for every loop's `END` row.
-* $h_6$ is set to $1$ if the block is a *call* block. We denote this value as `f2`.
-* $h_7$ is set to $1$ if the block is a *syscall* block. We denote this value as `f3`.
+* $h_6$ is set to $1$ if this `END` restores a caller frame created by `CALL`, `DYNCALL`, or
+  `SYSCALL`. We denote this value as `f2`.
+* $h_7$ is set to $0$ on every `END` row. In the diagram below this is `f3`.
 
 ![decoder_end_operation](../../img/design/decoder/decoder_end_operation.png)
 
@@ -391,10 +430,11 @@ In the above diagram, `blk` is the ID of the block which is about to finish exec
 
 When the VM executes an `END` operation, it does the following:
 
-1. Removes a tuple from the block stack table.
-    - if `f2` or `f3` is set, we remove a row `(blk, prnt, 0, ctx_next, b0_next, b1_next, fn_hash_next[0..4])`
+1. Removes an entry from the block stack table. The loop selector `f1` and caller-frame restoration
+   selector `f2` are constrained to be boolean and mutually exclusive on every `END` row.
+    - if `f2` is set, we remove a caller frame `(blk, prnt, ctx_next, b0_next, b1_next, fn_hash_next[0..3])`
         - in the above, the `x_next` variables denote the column `x` in the next row
-    - else, we remove a row `(blk, prnt, f1, 0, 0, 0, 0, 0)`
+    - else, we remove a continuation `(blk, prnt, f1)`
 2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is either `END` or `REPEAT`, and $1$ otherwise.
 3. Reads the hash result from the hash chiplet (as described [here](#program-block-hashing)) using `blk + 1` as the controller output row address.
 4. If $h_5 = 1$ (i.e., we are exiting a *loop* block), pops the value off the top of the stack and verifies that the value is $0$.
@@ -441,8 +481,8 @@ In the above diagram, `g0_op0` is the first operation of the new operation batch
 When the VM executes a `RESPAN` operation, it does the following:
 
 1. Increments block address by $2$.
-2. Removes the tuple `(blk, prnt, 0, 0...)` from the block stack table.
-3. Adds the tuple `(blk+2, prnt, 0, 0...)` to the block stack table.
+2. Removes the continuation `(blk, prnt, 0)` from the block stack table.
+3. Adds the continuation `(blk+2, prnt, 0)` to the block stack table.
 4. Absorbs values in registers $h_0, ..., h_7$ into the hasher state of the hash chiplet (as described [here](#sequential-hash)).
 5. Sets the `in_span` register to $1$.
 6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+2` as batch ID.
@@ -468,7 +508,7 @@ In the above diagram, `blk` is the ID of the *call* block which is about to be e
 
 When the VM executes a `CALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a caller frame `(blk, prnt, p_ctx, p_b0, p_b1, prnt_fn_hash[0..3])` to the block stack table.
 2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
@@ -491,7 +531,7 @@ In the above diagram, `blk` is the ID of the *syscall* block which is about to b
 
 When the VM executes a `SYSCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a caller frame `(blk, prnt, p_ctx, p_b0, p_b1, prnt_fn_hash[0..3])` to the block stack table.
 2. Sends a request to the kernel ROM chiplet indicating that `hash of callee` is being accessed.
     - this results in a fault if `hash of callee` does not correspond to the hash of a kernel procedure
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
@@ -599,7 +639,7 @@ Before the VM starts processing this *basic* block, the prover populates registe
 When the VM executes a `SPAN` operation, it does the following:
 
 1. Initiates hashing of elements $g_0, ..., g_7$ using hash chiplet. The hasher address is used as the block ID `blk`, and it is inserted into `addr` register in the next row.
-2. Adds a tuple `(blk, prnt, 0)` to the block stack table.
+2. Adds a continuation `(blk, prnt, 0)` to the block stack table.
 3. Sets the `is_span` register to $1$ in the next row.
 4. Sets the `op_index` register to $0$ in the next row.
 5. Decrements `group_count` register by $1$.
@@ -639,7 +679,7 @@ Notice that while the same groups ($g_1, ..., g_7$) are added to the table, thei
 
 Second, executing a `RESPAN` operation increments the hasher controller address by $2$. This is done because each absorbed batch is represented by one controller pair `(input, output)`, so the next batch starts at the next controller input row.
 
-Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 2, prnt, 0)`. To perform this operation, the prover sets the value of $h_1` in the next row to `prnt`.
+Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we remove continuation `(blk, prnt, 0)` and replace it with continuation `(blk + 2, prnt, 0)`. To perform this operation, the prover sets the value of $h_1$ in the next row to `prnt`.
 
 Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op group table, which now would look as follows:
 

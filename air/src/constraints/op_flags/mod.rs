@@ -23,6 +23,8 @@
 //! - `no_shift_at(i)`: stack position i unchanged
 //! - `left_shift_at(i)`: stack shifts left at position i
 //! - `right_shift_at(i)`: stack shifts right at position i
+//! - `left_shift()`: low-degree aggregate for one-element left shifts
+//! - `right_shift()`: low-degree aggregate for one-element right shifts
 
 use core::array;
 
@@ -474,9 +476,9 @@ where
             op4(opcodes::REPEAT),
             // +END*loop     — END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
-            // +DYN          — control flow: consumes s0..s3 (target hash)
+            // +DYN          — control flow: consumes s0 (address of the target hash in memory)
             op5(opcodes::DYN),
-            // +DYNCALL      — control flow: consumes s0..s3 (target hash)
+            // +DYNCALL      — control flow: consumes s0 (address of the target hash in memory)
             op5(opcodes::DYNCALL),
         ]);
 
@@ -580,10 +582,8 @@ where
         ]);
 
         // ── Scalar shift flags ──────────────────────────────────────
-        // These are NOT the same expressions as right_shift[15] / left_shift[15].
-        // They use low-degree bit prefixes that are algebraically equivalent on
-        // valid traces (exactly one opcode active), but produce lower-degree
-        // expressions for use in constraints that multiply these with other terms.
+        // These low-degree aggregates are used by the stack-depth and overflow-table constraints.
+        // They are distinct expressions from the per-position selectors above.
 
         // right_shift_scalar (degree 6):
         // Uses prefix_011 (degree 3) instead of summing all 16 push-like degree-7 flags.
@@ -597,9 +597,9 @@ where
             + op6(opcodes::U32SPLIT);
 
         // left_shift_scalar (degree 5):
-        // Uses prefix_010 (degree 3) instead of summing all left-shifting degree-7 flags.
-        // DYNCALL is intentionally excluded — it left-shifts the stack but uses
-        // decoder hasher state (h5) for overflow constraints, not the generic path.
+        // DYNCALL also left-shifts the visible stack, but is intentionally excluded: call entry
+        // resets the depth and b1 columns, while its post-shift caller state is carried in decoder
+        // h4/h5 and its overflow-table removal is constrained separately.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
         let left_shift_scalar = E::sum_array::<6>(&[
@@ -614,7 +614,7 @@ where
             op4(opcodes::REPEAT),
             // +END*loop            — END when ending a loop: pops the trailing condition
             end_loop_flag,
-            // +DYN                 — control flow: consumes target hash
+            // +DYN                 — control flow: consumes target-hash address
             op5(opcodes::DYN),
         ]);
 
@@ -683,30 +683,26 @@ where
         self.right_shift_flags[index].clone()
     }
 
-    /// Returns the scalar flag when the stack operation shifts the stack to the right.
+    /// Returns the scalar flag for operations which shift the stack right by one element.
     ///
-    /// This is NOT the same expression as `right_shift_at(15)`. It uses low-degree
-    /// bit prefixes (degree 6) that are algebraically equivalent on valid traces,
-    /// producing a lower-degree expression for use in constraints that multiply
-    /// this flag with other terms.
+    /// This is deliberately separate from the physical per-position `right_shift_at` selectors.
+    /// For example, U32SPLIT overwrites position 0 while still increasing depth and pushing the
+    /// previous bottom value into overflow.
     #[inline(always)]
     pub fn right_shift(&self) -> E {
-        self.right_shift.clone()
+        self.right_shift.dup()
     }
 
-    /// Returns the scalar flag when the stack operation shifts the stack to the left.
+    /// Returns the scalar flag for operations whose ordinary stack effect is a one-element left
+    /// shift.
     ///
-    /// This is NOT the same expression as `left_shift_at(15)`. It uses low-degree
-    /// bit prefixes (degree 5) that are algebraically equivalent on valid traces.
-    ///
-    /// Excludes `DYNCALL` — it left-shifts the stack but is handled via the
-    /// per-position `left_shift_at` flags. The aggregate `left_shift` flag only
-    /// gates generic helper/overflow constraints, which don't apply to `DYNCALL`
-    /// because those helper columns are reused for the context switch and the
-    /// overflow pointer is stored in decoder hasher state (h5).
+    /// This is deliberately not a physical per-position shift selector. Specialized operations
+    /// such as FRIE2F4 constrain their stack positions elsewhere but still remove one element.
+    /// DYNCALL is excluded because call entry resets the ordinary depth and overflow-pointer
+    /// columns; its post-shift caller state and overflow-table removal are constrained separately.
     #[inline(always)]
     pub fn left_shift(&self) -> E {
-        self.left_shift.clone()
+        self.left_shift.dup()
     }
 
     /// Returns the flag when the current operation is a control flow operation.

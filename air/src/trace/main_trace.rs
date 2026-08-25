@@ -306,14 +306,9 @@ impl MainTrace {
         self.core_row(i).decoder.end_block_flags().is_loop
     }
 
-    /// Returns the `is_call` flag at row i.
-    pub fn is_call_flag(&self, i: RowIndex) -> Felt {
-        self.core_row(i).decoder.end_block_flags().is_call
-    }
-
-    /// Returns the `is_syscall` flag at row i.
-    pub fn is_syscall_flag(&self, i: RowIndex) -> Felt {
-        self.core_row(i).decoder.end_block_flags().is_syscall
+    /// Returns whether the END at row i restores a caller frame.
+    pub fn restores_caller_frame_flag(&self, i: RowIndex) -> Felt {
+        self.core_row(i).decoder.end_block_flags().restores_caller_frame
     }
 
     /// Returns the operation batch flags at row i. This indicates the number of op groups in

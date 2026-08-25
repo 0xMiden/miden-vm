@@ -195,18 +195,18 @@ where
         let u32_rc_op = bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone();
         let u32div = u32_rc_op.clone() * b321[get_op_index(opcodes::U32DIV)].clone();
 
-        // right_shift_scalar (degree 6): prefix_011 + PUSH + U32SPLIT.
+        // right_shift (degree 6): prefix_011 + PUSH + U32SPLIT.
         // U32SPLIT is a degree-6 op: u32_rc_op * b321[get_op_index(U32SPLIT)].
         let u32split = u32_rc_op.clone() * b321[get_op_index(opcodes::U32SPLIT)].clone();
         let prefix_01 = bits[6][0].clone() * bits[5][1].clone();
         let prefix_011 = prefix_01.clone() * bits[4][1].clone();
-        let right_shift = prefix_011 + push.clone() + u32split;
+        let right_shift = prefix_011 + push.dup() + u32split;
 
-        // left_shift_scalar (degree 5):
+        // left_shift (degree 5):
         //   prefix_010 + u32_add3_madd_group + SPLIT + REPEAT + END*is_loop + DYN.
         //   prefix_010 includes FRIE2F4, which rewrites s0..s14 but still decrements stack depth.
-        // DYNCALL intentionally excluded (see OpFlags::left_shift doc). LOOP is also excluded:
-        // under do-while semantics the LOOP op reads no stack input.
+        // DYNCALL intentionally excluded (see OpFlags::left_shift). LOOP is also excluded: under
+        // do-while semantics the LOOP op reads no stack input.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = u32_rc_op.clone() * bits[3][1].clone() * bits[2][1].clone();
         let is_loop = decoder.end_block_flags().is_loop;
@@ -274,8 +274,8 @@ impl LookupOpFlags<Felt> {
     /// (or no) flag instead of building the polynomial products that
     /// [`from_main_cols`](LookupOpFlags::from_main_cols) builds. Semantics match
     /// `from_main_cols` on any valid trace. op_bits are 0/1 by the decoder's boolean
-    /// constraint, and the `is_loop` hasher slot that gates `left_shift`'s `end` term is
-    /// also 0/1 on valid traces.
+    /// constraint, and the `is_loop` hasher slot that gates `left_shift`'s END term is also 0/1 on
+    /// valid traces.
     ///
     /// When `debug_assertions` is on, the output is cross-checked field-by-field against
     /// `from_main_cols` so divergences surface immediately in tests.
@@ -333,13 +333,12 @@ impl LookupOpFlags<Felt> {
         // -- Composite flags via integer range tests ------------------------------------
         // u32_rc_op: 1 iff opcode is a degree-6 u32 op (opcodes 64..80).
         f.u32_rc_op = bool_to_felt((64..80).contains(&opcode));
-        // right_shift_scalar: prefix_011 (opcodes 48..64) + PUSH + U32SPLIT.
+        // right_shift: prefix_011 (opcodes 48..64) + PUSH + U32SPLIT.
         f.right_shift = bool_to_felt(
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
-        // left_shift_scalar: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
-        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see
-        // OpFlags::left_shift.
+        // left_shift: prefix_010 (opcodes 32..48, including FRIE2F4) + U32ADD3/U32MADD
+        // + SPLIT/REPEAT/DYN + END*is_loop. DYNCALL and LOOP are excluded; see OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)

@@ -7,31 +7,36 @@
 //!
 //! - `clk`: VM execution clock (clk[0] = 0, clk' = clk + 1)
 //! - `ctx`: Execution context ID (determines memory context isolation)
-//! - `fn_hash[0..4]`: Current function digest (identifies executing procedure)
+//! - `fn_hash[0..3]`: Current function digest (identifies executing procedure)
 //!
 //! ## Context Transitions
 //!
-//! | Operation           | ctx'              | Description               |
-//! |---------------------|-------------------|---------------------------|
-//! | CALL or DYNCALL     | clk + 1           | Create new context        |
-//! | SYSCALL             | 0                 | Return to kernel context  |
-//! | END                 | (from block stack)| Restore previous context  |
-//! | Other ops           | ctx               | Unchanged                 |
+//! | Operation             | ctx'              | Description               |
+//! |-----------------------|-------------------|---------------------------|
+//! | CALL or DYNCALL       | clk + 1           | Create new context        |
+//! | SYSCALL               | 0                 | Return to kernel context  |
+//! | Caller-frame END      | (from block stack)| Restore caller context    |
+//! | Continuation END      | ctx               | Unchanged                 |
+//! | Other ops             | ctx               | Unchanged                 |
 //!
 //! ## Function Hash Transitions
 //!
-//! | Operation                          | fn_hash'           | Description                 |
-//! |------------------------------------|--------------------|-----------------------------|
-//! | CALL or DYNCALL                    | decoder_h[0..4]    | Load new procedure hash     |
-//! | END                                | (from block stack) | Restore previous hash       |
-//! | Other ops (incl. DYN, SYSCALL)     | fn_hash            | Unchanged                   |
+//! | Operation                       | fn_hash'           | Description                 |
+//! |---------------------------------|--------------------|-----------------------------|
+//! | CALL or DYNCALL                 | decoder_h[0..3]    | Load new procedure hash     |
+//! | Caller-frame END                | (from block stack) | Restore previous hash       |
+//! | Continuation END                | fn_hash            | Unchanged                   |
+//! | Other ops (incl. DYN, SYSCALL)  | fn_hash            | Unchanged                   |
 //!
-//! Note: END operation's restoration is handled by the block stack table (bus-based),
-//! not by these constraints. These constraints only handle the non-END cases.
+//! Note: restoration is handled by the block-stack relation only for an END that consumes a
+//! caller-frame entry, whose removal carries `ctx` and `fn_hash`. A continuation entry carries
+//! neither, so these constraints must preserve both columns across a continuation END -- see
+//! `f_restore_caller_frame` below.
 
 pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
+use p3_field::Dup;
 
 use crate::{
     CoreCols, MidenAirBuilder,
@@ -65,7 +70,12 @@ pub fn enforce_main<AB>(
     let f_call = op_flags.call();
     let f_syscall = op_flags.syscall();
     let f_dyncall = op_flags.dyncall();
-    let f_end = op_flags.end();
+
+    // Only a caller-frame END may restore `ctx` and `fn_hash`; a continuation END preserves them.
+    // The decoder constrains this selector, and the block-stack relation authenticates the entry
+    // kind and restored payload.
+    let end_flags = local.decoder.end_block_flags();
+    let f_restore_caller_frame = op_flags.end() * end_flags.restores_caller_frame;
 
     // Execution context transition constraints (see module doc for transition table)
     {
@@ -73,9 +83,9 @@ pub fn enforce_main<AB>(
         let ctx_next = next.system.ctx;
         let clk = local.system.clk;
 
-        let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
+        let call_dyncall_flag = f_call.dup() + f_dyncall.dup();
         let change_ctx_flag =
-            f_call.clone() + f_syscall.clone() + f_dyncall.clone() + f_end.clone();
+            f_call.dup() + f_syscall.dup() + f_dyncall.dup() + f_restore_caller_frame.dup();
         let default_flag = change_ctx_flag.not();
 
         builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
@@ -86,7 +96,7 @@ pub fn enforce_main<AB>(
     // Function hash transition constraints (see module doc for transition table)
     {
         let f_load = f_call + f_dyncall;
-        let f_preserve = (f_load.clone() + f_end).not();
+        let f_preserve = (f_load.dup() + f_restore_caller_frame).not();
 
         {
             let builder = &mut builder.when(f_load);
@@ -109,6 +119,7 @@ mod tests {
     use miden_core::{
         Felt,
         field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
     };
     use miden_crypto::stark::{
         air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
@@ -117,6 +128,7 @@ mod tests {
 
     use super::enforce_main;
     use crate::{
+        CoreCols,
         constraints::{
             op_flags::{OpFlags, generate_test_row},
             system::columns::SystemCols,
@@ -253,6 +265,84 @@ mod tests {
         assert!(
             builder.evaluations.iter().any(|value| *value != QuadFelt::ZERO),
             "system constraints should reject a forged initial context and function hash"
+        );
+    }
+
+    // GATE-LEVEL TESTS FOR THE CALLER-FRAME RESTORATION SELECTOR
+    // --------------------------------------------------------------------------------------
+    //
+    // `ctx` and `fn_hash` are preserved on every transition except an END that closes a
+    // CALL/DYNCALL/SYSCALL block, where the block-stack relation restores them instead. These
+    // two tests pin both halves of that mask directly, without going through a full proof:
+    // a continuation END must preserve, a caller-frame END must permit restoration.
+    //
+    // The mask previously keyed on the bare END flag, which made it vacuous at *every* END and
+    // left both columns free at ordinary ones.
+
+    /// Evaluates the system constraints on a mid-trace transition.
+    ///
+    /// Uses the shared harness rather than the local one above, because that one reports
+    /// `is_first_row = 1` — which fires the boundary constraints demanding `ctx = 0` and a zero
+    /// `fn_hash`, drowning out whatever the END logic does. These tests are about an interior
+    /// transition, so they need `first_row = 0, transition = 1`.
+    fn eval_system(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        use crate::constraints::stack::test_utils::ConstraintEvalBuilder as SharedBuilder;
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        let mut builder = SharedBuilder::new().with_row_flags(false, false, true);
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
+    }
+
+    /// Builds an END row carrying the given caller-frame restoration flag, with a non-root context
+    /// and digest, plus the following row.
+    fn end_rows(restores_caller_frame: Felt) -> (CoreCols<Felt>, CoreCols<Felt>) {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.decoder.hasher_state[6] = restores_caller_frame;
+        local.system.ctx = Felt::new_unchecked(7);
+        local.system.fn_hash = [Felt::new_unchecked(11); 4];
+
+        let mut next = generate_test_row(0);
+        next.system.clk = local.system.clk + Felt::ONE;
+        next.system.ctx = local.system.ctx;
+        next.system.fn_hash = local.system.fn_hash;
+        (local, next)
+    }
+
+    #[test]
+    fn continuation_end_preserves_context_and_fn_hash() {
+        let (local, next) = end_rows(Felt::ZERO);
+        assert!(
+            eval_system(&local, &next).iter().all(|v| *v == QuadFelt::ZERO),
+            "an ordinary END that preserves ctx/fn_hash must be accepted"
+        );
+
+        // Changing either column across an ordinary END must be caught.
+        let mut changed_ctx = next.clone();
+        changed_ctx.system.ctx += Felt::ONE;
+        assert!(
+            eval_system(&local, &changed_ctx).iter().any(|v| *v != QuadFelt::ZERO),
+            "an ordinary END must not be able to change ctx"
+        );
+
+        let mut changed_hash = next;
+        changed_hash.system.fn_hash[0] += Felt::ONE;
+        assert!(
+            eval_system(&local, &changed_hash).iter().any(|v| *v != QuadFelt::ZERO),
+            "an ordinary END must not be able to change fn_hash"
+        );
+    }
+
+    #[test]
+    fn caller_frame_end_permits_restoration() {
+        let (local, next) = end_rows(Felt::ONE);
+
+        let mut restored = next;
+        restored.system.ctx = Felt::ZERO;
+        restored.system.fn_hash = [Felt::ZERO; 4];
+
+        assert!(
+            eval_system(&local, &restored).iter().all(|v| *v == QuadFelt::ZERO),
+            "a caller-frame END must permit ctx/fn_hash to be restored to the caller's values"
         );
     }
 }

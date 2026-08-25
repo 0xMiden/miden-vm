@@ -47,7 +47,7 @@
 //! | Context     | h0         | h1..h3    | h4             | h5      | h6      | h7         |
 //! |-------------|------------|-----------|----------------|---------|---------|------------|
 //! | SPAN/RESPAN | packed ops | op groups | op group       | op group| op group| op group   |
-//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | is_call | is_syscall |
+//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | restores_caller_frame | 0 |
 //! | User ops    | packed ops | op groups | user_op_helper | ...     | ...     | ...        |
 //!
 //! ## Operation Flag Degrees
@@ -69,6 +69,7 @@
 pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
+use p3_field::Dup;
 
 use crate::{
     CoreCols, Felt, MidenAirBuilder,
@@ -246,6 +247,16 @@ pub fn enforce_main<AB>(
         builder.assert_zeros(hasher_zeros)
     }
 
+    // DYNCALL records its caller's post-pop stack depth and overflow pointer in h4/h5. Bind the
+    // depth directly; the overflow relation binds h5 when non-empty, and the constraint below
+    // handles the empty case.
+    {
+        let overflow = op_flags.overflow();
+        let builder = &mut builder.when(op_flags.dyncall());
+        builder.assert_eq(hasher_state[4], local.stack.b0 - overflow.dup());
+        builder.when(overflow.not()).assert_zero(hasher_state[5]);
+    }
+
     // REPEAT: top-of-stack must be 1 (loop condition true) and we must be inside an
     // active loop body (is_loop_body = h4 = 1).
     {
@@ -259,6 +270,19 @@ pub fn enforce_main<AB>(
     // be 0 — the loop exits because the condition became false.
     let loop_condition = local.stack.get(0);
     builder.when(op_flags.end()).when(is_loop).assert_zero(loop_condition);
+
+    // END entry-kind selectors form the same tagged union as `BlockStackMsg`. They are boolean and
+    // mutually exclusive: an END consumes either a LOOP continuation or a caller frame, never
+    // both. h7 has no END semantics and is fixed to zero rather than carrying unauthenticated
+    // metadata.
+    {
+        let restores_caller_frame = end_flags.restores_caller_frame;
+        let builder = &mut builder.when(op_flags.end());
+        builder.assert_bool(is_loop);
+        builder.assert_bool(restores_caller_frame);
+        builder.assert_zero(hasher_state[7]);
+        builder.assert_zero(is_loop * restores_caller_frame);
+    }
 
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
     // (h4) into the next row so the loop body can be re-entered.
@@ -509,9 +533,11 @@ pub fn enforce_main<AB>(
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use miden_core::{
         Felt, ONE,
-        field::{PrimeCharacteristicRing, QuadFelt},
+        field::{Field, PrimeCharacteristicRing, QuadFelt},
         operations::opcodes,
     };
 
@@ -529,6 +555,13 @@ mod tests {
         let mut builder = ConstraintEvalBuilder::new();
         enforce_main(&mut builder, local, next, &op_flags);
         builder.evaluations.into_iter().all(|value| value == QuadFelt::ZERO)
+    }
+
+    fn eval_decoder(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        let mut builder = ConstraintEvalBuilder::new();
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
     }
 
     #[test]
@@ -563,5 +596,107 @@ mod tests {
             !decoder_constraints_hold(&local, &next),
             "entering a span without SPAN or RESPAN must violate the decoder AIR",
         );
+    }
+
+    /// END entry-kind selectors must encode exactly one valid semantic kind.
+    ///
+    /// Every other soundness test in this tree keeps these selectors valid, so the invalid cases
+    /// here are what make each domain constraint mutation-sensitive.
+    #[test]
+    fn block_stack_entry_kind_selectors_must_encode_a_valid_kind() {
+        let accepts = |is_loop: Felt, restores_caller_frame: Felt, h7: Felt| {
+            let mut local = generate_test_row(opcodes::END.into());
+            local.decoder.hasher_state[5] = is_loop;
+            local.decoder.hasher_state[6] = restores_caller_frame;
+            local.decoder.hasher_state[7] = h7;
+            let next = generate_test_row(0);
+            eval_decoder(&local, &next).iter().all(|v| *v == QuadFelt::ZERO)
+        };
+
+        // Every semantic END block-stack entry kind: non-loop continuation, LOOP continuation,
+        // and caller frame.
+        for (is_loop, restores_caller_frame, h7) in [
+            (Felt::ZERO, Felt::ZERO, Felt::ZERO),
+            (Felt::ONE, Felt::ZERO, Felt::ZERO),
+            (Felt::ZERO, Felt::ONE, Felt::ZERO),
+        ] {
+            assert!(
+                accepts(is_loop, restores_caller_frame, h7),
+                "a valid END entry kind must be permitted"
+            );
+        }
+
+        assert!(
+            !accepts(Felt::new_unchecked(3), Felt::ZERO, Felt::ZERO),
+            "a non-boolean LOOP selector must be rejected"
+        );
+        assert!(
+            !accepts(Felt::ONE, Felt::ONE, Felt::ZERO),
+            "an END cannot be both a LOOP continuation and a caller frame"
+        );
+        assert!(
+            !accepts(Felt::ZERO, Felt::ONE, Felt::ONE),
+            "the unused h7 lane must be zero on an END row"
+        );
+        assert!(
+            !accepts(Felt::ZERO, Felt::new_unchecked(3), Felt::ZERO),
+            "a non-boolean caller-frame restoration selector must be rejected"
+        );
+    }
+
+    /// Control against over-constraining: outside END rows these lanes are user-op helper
+    /// registers, and the booleanity constraint is gated on the END flag so it must not reach
+    /// them. Uses NOOP, which reads no helper registers.
+    #[test]
+    fn helper_lanes_are_unconstrained_off_end_rows() {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        local.decoder.hasher_state[5] = Felt::new_unchecked(3);
+        local.decoder.hasher_state[6] = Felt::new_unchecked(5);
+        local.decoder.hasher_state[7] = Felt::new_unchecked(7);
+        let next = generate_test_row(0);
+
+        // Re-evaluate with the lanes zeroed; the two runs must agree, i.e. no constraint in
+        // this module reacted to them.
+        let with_values = eval_decoder(&local, &next);
+        let mut cleared = local;
+        cleared.decoder.hasher_state[5] = Felt::ZERO;
+        cleared.decoder.hasher_state[6] = Felt::ZERO;
+        cleared.decoder.hasher_state[7] = Felt::ZERO;
+        let with_zeros = eval_decoder(&cleared, &next);
+
+        assert_eq!(
+            with_values, with_zeros,
+            "the END-gated booleanity constraint must not reach helper lanes on a NOOP row"
+        );
+    }
+
+    /// DYNCALL records the caller state after consuming its address operand. The decoder binds
+    /// the saved depth in both overflow regimes and binds the saved pointer directly only in the
+    /// empty regime; with overflow present, the stack-overflow relation owns that pointer.
+    #[test]
+    fn dyncall_saved_frame_cells_follow_the_post_pop_state() {
+        let accepts = |depth: Felt, overflow_helper: Felt, h4: Felt, h5: Felt| {
+            let mut local = generate_test_row(opcodes::DYNCALL.into());
+            local.stack.b0 = depth;
+            local.stack.h0 = overflow_helper;
+            local.decoder.hasher_state[4] = h4;
+            local.decoder.hasher_state[5] = h5;
+            let next = generate_test_row(0);
+            eval_decoder(&local, &next).iter().all(|v| *v == QuadFelt::ZERO)
+        };
+
+        // Empty overflow: consuming the address leaves the represented depth clamped at 16 and
+        // there is no previous overflow row, so both saved values are fixed directly.
+        assert!(accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(16), Felt::ZERO));
+        assert!(!accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(15), Felt::ZERO));
+        assert!(!accepts(Felt::from_u8(16), Felt::ZERO, Felt::from_u8(16), Felt::ONE));
+
+        // Non-empty overflow: at depth 18 the inverse helper makes `overflow() = 1`, so the
+        // post-pop saved depth is 17. h5 is deliberately outside this module's authority here;
+        // the DYNCALL removal in the stack-overflow relation binds it to the prior row address.
+        let inverse_two = Felt::from_u8(2).inverse();
+        let relation_owned_h5 = Felt::new_unchecked(123);
+        assert!(accepts(Felt::from_u8(18), inverse_two, Felt::from_u8(17), relation_owned_h5));
+        assert!(!accepts(Felt::from_u8(18), inverse_two, Felt::from_u8(18), relation_owned_h5));
     }
 }

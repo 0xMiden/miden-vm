@@ -1335,17 +1335,15 @@ fn test_syscall_decoding() {
     assert_eq!(foo_root_hash, get_hasher_state1(&dec_trace, 16));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 16));
 
-    // SYSCALL block ends in the 17th row; the last element of the hasher state
-    // is set to ONE because we are exiting a SYSCALL block
+    // SYSCALL block ends in the 17th row; h6 marks caller-frame restoration.
     assert_eq!(foo_call_hash, get_hasher_state1(&dec_trace, 17));
-    assert_eq!(Word::from([ZERO, ZERO, ZERO, ONE]), get_hasher_state2(&dec_trace, 17));
+    assert_eq!(Word::from([ZERO, ZERO, ONE, ZERO]), get_hasher_state2(&dec_trace, 17));
 
     // internal bar_join block ends in the 18th row
     assert_eq!(bar_root_hash, get_hasher_state1(&dec_trace, 18));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 18));
 
-    // CALL block ends in the 19th row; the second to last element of the hasher state
-    // is set to ONE because we are exiting a CALL block
+    // CALL block ends in the 19th row; h6 marks caller-frame restoration.
     assert_eq!(bar_call_hash, get_hasher_state1(&dec_trace, 19));
     assert_eq!(Word::from([ZERO, ZERO, ONE, ZERO]), get_hasher_state2(&dec_trace, 19));
 

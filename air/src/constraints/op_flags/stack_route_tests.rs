@@ -263,12 +263,12 @@ fn assert_stack_routes(opcode: u8, is_loop_end: bool) {
     assert_eq!(
         op_flags.left_shift(),
         if left_shift_flag { ONE } else { ZERO },
-        "left_shift aggregate mismatch for opcode {opcode}"
+        "aggregate left-shift flag mismatch for opcode {opcode}"
     );
     assert_eq!(
         op_flags.right_shift(),
         if right_shift_flag { ONE } else { ZERO },
-        "right_shift aggregate mismatch for opcode {opcode}"
+        "aggregate right-shift flag mismatch for opcode {opcode}"
     );
 
     for idx in 0..16 {

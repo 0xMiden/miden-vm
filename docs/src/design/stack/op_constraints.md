@@ -177,7 +177,9 @@ $$
 
 Putting these operations into a group with flag degree $6$ is important for two other reasons:
 * Constraints for the `U32SPLIT` operation have degree $3$. Thus, the degree of the op flag for this operation cannot exceed $6$.
-* Operations `U32ADD3` and `U32MADD` shift the stack to the left. Thus, having these two operations in this group and putting them under the common prefix `10011` allows us to create a common flag for these operations of degree $5$ (recall that the left-shift flag cannot exceed degree $5$).
+* Operations `U32ADD3` and `U32MADD` shift the stack left. Thus, having these two operations in this
+  group and putting them under the common prefix `10011` allows us to include them in the
+  degree-$5$ aggregate left-shift flag.
 
 ### High-degree operations
 This group contains operations which require constraints with degree up to $3$. All $7$ operation bits are used for these flags. The extra $e_0$ column is used for degree reduction of the three high-degree bits.
@@ -244,16 +246,26 @@ $$
 Using the operation flags defined above, we can compute several composite flags which are used by various constraints in the VM.
 
 ### Shift right flag
-The right-shift flag indicates that an operation shifts the stack to the right. This flag is computed as follows:
+
+The right-shift flag is the low-degree aggregate used by the stack-depth and overflow-table
+constraints for operations that shift the stack right by one element. It is computed as follows:
 
 $$
 f_{shr} = (1 - b_6) \cdot b_5 \cdot b_4 + f_{u32split} + f_{push} \text{ | degree} = 6
 $$
 
-In the above, $(1 - b_6) \cdot b_5 \cdot b_4$ evaluates to $1$ for all [right stack shift](#right-stack-shift-operations) operations described previously. This works because all these operations have a common prefix `011`. We also need to add in flags for other operations which shift the stack to the right but are not a part of the above group (e.g., `PUSH` operation).
+In the above, $(1 - b_6) \cdot b_5 \cdot b_4$ evaluates to $1$ for all
+[right stack shift](#right-stack-shift-operations) operations described previously. This works
+because all these operations have a common prefix `011`. We also add operations outside that group
+which have the same net depth effect and overflow behavior: `PUSH` and `U32SPLIT`. This aggregate
+is a lower-degree expression than the per-position right-shift selectors; `U32SPLIT`, for example,
+overwrites $s_0$ while still increasing stack depth by one.
 
 ### Shift left flag
-The left-shift flag indicates that a given operation shifts the stack to the left. To simplify the description of this flag, we will first compute the following intermediate variables:
+
+The left-shift flag is the low-degree aggregate used by the stack-depth and overflow-table
+constraints for ordinary one-element left shifts. To simplify its description, we first compute
+the following intermediate variable:
 
 A flag which is set to $1$ when $f_{u32add3} = 1$ or $f_{u32madd} = 1$:
 
@@ -264,15 +276,22 @@ $$
 Using the above variable, we compute the left-shift flag as follows:
 
 $$
-f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split} + f_{repeat} + f_{end} \cdot h_5 \text{ | degree} = 5
+f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split} + f_{repeat} + f_{end} \cdot h_5 + f_{dyn} \text{ | degree} = 5
 $$
 
 In the above:
 * $(1 - b_6) \cdot b_5 \cdot (1 - b_4)$ evaluates to $1$ for all [left stack shift](#left-stack-shift-operations) operations described previously. This works because all these operations have a common prefix `010`.
 * $f_{split}$ is the SPLIT op flag. 
 * $h_5$ is the helper register in the decoder which is set to $1$ when we are exiting a `LOOP` block, and to $0$ otherwise. Because the loop body is always entered, $h_5$ coincides with "the ending node is a *loop*".
+* $f_{dyn}$ covers `DYN`, which consumes the memory address of its target hash from the stack.
 
-Thus, similarly to the right-shift flag, we compute the value of the left-shift flag based on the prefix of the operation group which contains most left shift operations, and add in flag values for other operations which shift the stack to the left but are not a part of this group.
+This selector deliberately excludes `DYNCALL`. Although `DYNCALL` also has a net one-element pop,
+call entry resets the ordinary stack-depth and overflow-pointer columns, while the caller's
+post-shift depth and overflow address are recorded in decoder helper columns and the overflow-table
+removal is constrained separately. DYNCALL is added explicitly to the local selector which fills
+$s'_{15}$ from overflow, or sets it to zero when overflow is empty. As with $f_{shr}$, $f_{shl}$ is
+not a per-position selector; specialized operations such as `FRIE2F4` constrain their visible
+stack positions separately.
 
 ### Control flow flag
 The control flow flag $f_{ctrl}$ is set to $1$ when a control flow operation is being executed by the VM, and to $0$ otherwise. Naively, this flag can be computed as follows:
