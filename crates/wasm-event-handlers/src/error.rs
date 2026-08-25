@@ -44,6 +44,15 @@ pub enum WasmHandlerLoadError {
         name: String,
     },
 
+    /// The module imports a name the host function set does not define. Such an import could
+    /// never resolve; rejecting it at load bounds the import section and turns a late, opaque
+    /// instantiation failure into a precise error.
+    #[error("handler module imports unknown host function '{name}'")]
+    UnknownImport {
+        /// The import name.
+        name: String,
+    },
+
     /// The module imports the same host function more than once. A module never needs a
     /// duplicate import; rejecting them bounds the per-instantiation import-resolution work,
     /// which no fuel meters.

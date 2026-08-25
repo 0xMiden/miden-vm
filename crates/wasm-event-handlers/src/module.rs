@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE};
+use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, host_fn};
 use miden_mast_package::{MAX_MODULE_BYTES, validate_manifest_entries};
 use miden_processor::{
     ProcessorState,
@@ -196,9 +196,15 @@ impl WasmHandlerModule {
                 });
             }
             // wasmi resolves every import against the linker on each per-call instantiation,
-            // and no engine limit bounds the import count. A module never needs the same
-            // import twice, so duplicates exist only to inflate that unmetered work; with
-            // this check the import count is bounded by the host function set.
+            // and no engine limit bounds the import section. An unknown name could never
+            // resolve, and a module never needs the same import twice, so both are rejected
+            // here; the two checks together bound the import count of a loadable module by
+            // the host function set.
+            if !host_fn::ALL.contains(&import.name()) {
+                return Err(WasmHandlerLoadError::UnknownImport {
+                    name: import.name().to_string(),
+                });
+            }
             if !import_names.insert(import.name().to_string()) {
                 return Err(WasmHandlerLoadError::DuplicateImport {
                     name: import.name().to_string(),
@@ -547,8 +553,18 @@ fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
     let mut total: u64 = 0;
     for _ in 0..count {
         if skip_reftype {
-            payload.get(pos)?;
+            // A table's reference type is one byte in the short form (0x70 funcref,
+            // 0x6F externref). With the reference-types feature this loader enables, wasmi
+            // also validates the long-form encoding 0x63 0x70 / 0x63 0x6F — `(ref null
+            // func/extern)` — which carries one extra heaptype byte. wasmi rejects every
+            // other long form (0x64, GC heap types, type indices), so consuming one extra
+            // byte after 0x63 keeps this conservative walk in sync with validation.
+            let reftype = *payload.get(pos)?;
             pos += 1;
+            if reftype == 0x63 {
+                payload.get(pos)?;
+                pos += 1;
+            }
         }
         let flags = *payload.get(pos)?;
         pos += 1;

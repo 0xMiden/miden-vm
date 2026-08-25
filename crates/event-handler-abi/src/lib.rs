@@ -211,6 +211,38 @@ pub mod host_fn {
     pub const MERKLE_STORE_EXTEND: &str = "merkle_store_extend";
     /// See `guest::fail`.
     pub const FAIL: &str = "fail";
+
+    /// Every host function name of this ABI version.
+    ///
+    /// The loader checks each import of a handler module against this set, so the import
+    /// count of a loadable module is bounded by it.
+    pub const ALL: [&str; 25] = [
+        STACK_DEPTH,
+        STACK_GET,
+        STACK_READ,
+        CLK,
+        CTX,
+        MEM_GET,
+        MEM_READ,
+        MEM_READ_CTX,
+        MERKLE_GET_NODE,
+        MERKLE_HAS_PATH,
+        POSEIDON2_MERGE,
+        POSEIDON2_HASH,
+        POSEIDON2_PERMUTE,
+        KECCAK256,
+        SHA256,
+        SHA512,
+        BLAKE3,
+        ADV_STACK_LEN,
+        ADV_STACK_READ,
+        ADV_MAP_VALUE_LEN,
+        ADV_MAP_VALUE_READ,
+        ADV_STACK_EXTEND,
+        ADV_MAP_INSERT,
+        MERKLE_STORE_EXTEND,
+        FAIL,
+    ];
 }
 
 // GUEST IMPORT DECLARATIONS
