@@ -15,7 +15,7 @@ use miden_processor::{
 
 use crate::{
     WasmHandlerLimits, WasmHandlerLoadError, WasmHandlerModule,
-    module::{read_leb_u32, walk_wasm_sections},
+    module::{HEADER_LEN, module_statics, read_leb_u32, walk_wasm_sections},
 };
 
 /// Loads the package's `event_handlers` section, validates the Wasm module, and returns one
@@ -79,25 +79,31 @@ pub fn manifest_from_module(
 ) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
     check_module_size(wasm)?;
 
-    let mut payloads = Vec::new();
-    walk_wasm_sections(wasm, |id, payload| {
+    // Only the manifest sections are collected, so the other custom sections of the module cost
+    // no allocation here.
+    let mut manifests = Vec::new();
+    let mut malformed = false;
+    walk_wasm_sections(wasm, |id, payload, _| {
         // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
-        if id == 0 {
-            payloads.push(payload);
+        if id != 0 {
+            return;
+        }
+        match split_custom_section(payload) {
+            Some((name, records)) if name == MANIFEST_SECTION_NAME.as_bytes() => {
+                manifests.push(records);
+            },
+            Some(_) => {},
+            None => malformed = true,
         }
     })
     .ok_or_else(|| WasmHandlerLoadError::InvalidModule("malformed section layout".to_string()))?;
+    if malformed {
+        return Err(WasmHandlerLoadError::InvalidModule("malformed custom section".to_string()));
+    }
 
     let mut entries = Vec::new();
-    for payload in payloads {
-        let Some((name, records)) = split_custom_section(payload) else {
-            return Err(WasmHandlerLoadError::InvalidModule(
-                "malformed custom section".to_string(),
-            ));
-        };
-        if name == MANIFEST_SECTION_NAME.as_bytes() {
-            parse_manifest_records(records, &mut entries)?;
-        }
+    for records in manifests {
+        parse_manifest_records(records, &mut entries)?;
     }
     Ok(entries)
 }
@@ -136,26 +142,30 @@ pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHan
 /// The result keeps the 8-byte header and every other top-level section, with their bytes
 /// unchanged. Returns `None` when the section layout is malformed.
 fn strip_manifest_sections(wasm: &[u8]) -> Option<Vec<u8>> {
-    /// The length of the Wasm binary header (magic + version).
-    const HEADER_LEN: usize = 8;
-
     let mut out = Vec::with_capacity(wasm.len());
     out.extend_from_slice(wasm.get(..HEADER_LEN)?);
 
-    let mut pos = HEADER_LEN;
-    while pos < wasm.len() {
-        let id = wasm[pos];
-        let (size, payload_start) = read_leb_u32(wasm, pos + 1)?;
-        let payload_end = payload_start.checked_add(size as usize)?;
-        let payload = wasm.get(payload_start..payload_end)?;
+    let mut malformed = false;
+    walk_wasm_sections(wasm, |id, payload, section| {
         // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
-        let is_manifest =
-            id == 0 && split_custom_section(payload)?.0 == MANIFEST_SECTION_NAME.as_bytes();
+        let is_manifest = if id == 0 {
+            match split_custom_section(payload) {
+                Some((name, _)) => name == MANIFEST_SECTION_NAME.as_bytes(),
+                None => {
+                    malformed = true;
+                    false
+                },
+            }
+        } else {
+            false
+        };
         if !is_manifest {
             // The copy holds the section ID and the size prefix as they were encoded.
-            out.extend_from_slice(&wasm[pos..payload_end]);
+            out.extend_from_slice(&wasm[section]);
         }
-        pos = payload_end;
+    })?;
+    if malformed {
+        return None;
     }
     Some(out)
 }
@@ -180,12 +190,23 @@ fn check_module_size(wasm: &[u8]) -> Result<(), WasmHandlerLoadError> {
 #[doc(hidden)]
 pub fn fuzz_walk_sections(wasm: &[u8]) -> bool {
     let mut custom_sections_ok = true;
-    let walked = walk_wasm_sections(wasm, |id, payload| {
+    let walked = walk_wasm_sections(wasm, |id, payload, _| {
         if id == 0 {
             custom_sections_ok &= split_custom_section(payload).is_some();
         }
     });
     walked.is_some() && custom_sections_ok
+}
+
+/// Fuzzing support: returns `true` when the loader's static analysis of `wasm` accepts the
+/// section layout (the memory, table, element, data, and start sections).
+///
+/// Differential fuzzing checks this against wasmi's validator: the load path conservatively
+/// rejects a module whose static analysis fails, so any module wasmi validates must also pass
+/// it. Not part of the public API.
+#[doc(hidden)]
+pub fn fuzz_module_statics(wasm: &[u8]) -> bool {
+    module_statics(wasm).is_some()
 }
 
 /// Splits a custom-section payload into its name and its content.

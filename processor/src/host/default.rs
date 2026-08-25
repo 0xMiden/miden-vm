@@ -128,6 +128,8 @@ where
         // Validate before the unregistration, so an invalid name leaves the host unchanged.
         super::handlers::validate_event_name(&event)?;
         let existed = self.event_handlers.unregister(event.to_event_id());
+        // The registration cannot fail: the name passed the check above and the slot was just
+        // vacated. A new failure mode in `register` must therefore be handled here.
         self.register_handler(event, handler)?;
         Ok(existed)
     }
@@ -165,6 +167,8 @@ where
         // Validate before the unregistration, so an invalid name leaves the host unchanged.
         super::handlers::validate_event_name(&event)?;
         let existed = self.trace_handlers.unregister(event.to_event_id());
+        // The registration cannot fail: the name passed the check above and the slot was just
+        // vacated. A new failure mode in `register` must therefore be handled here.
         self.register_trace_handler(event, handler)?;
         Ok(existed)
     }

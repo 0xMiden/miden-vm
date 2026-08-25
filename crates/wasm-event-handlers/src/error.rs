@@ -98,8 +98,13 @@ pub enum WasmHandlerLoadError {
         reason: String,
     },
 
-    /// The manifest breaks a section rule: an empty or over-long name, a duplicate event, or a
-    /// reserved `sys::` event name. The rules live in
+    /// The module does not export its linear memory under the name `memory`. Every host function
+    /// that takes a guest pointer needs that export, so a module without it can answer no event.
+    #[error("handler module does not export its linear memory as 'memory'")]
+    MissingMemoryExport,
+
+    /// The manifest breaks a section rule: an over-long manifest, an empty or over-long name, a
+    /// duplicate event, or a reserved `sys::` event name. The rules live in
     /// [`validate_manifest_entries`](miden_mast_package::validate_manifest_entries).
     #[error("invalid handler manifest: {0}")]
     InvalidManifest(#[source] miden_mast_package::EventHandlerSectionError),
@@ -130,6 +135,10 @@ pub enum WasmHandlerRunError {
     Failed(String),
 
     /// The handler used up its fuel budget.
+    ///
+    /// The reported number is the effective per-call budget: the configured
+    /// [`WasmHandlerLimits::fuel`](crate::WasmHandlerLimits::fuel) less the fixed instantiation
+    /// charge the module pays on every call.
     #[error("handler ran out of fuel (limit: {0})")]
     OutOfFuel(u64),
 

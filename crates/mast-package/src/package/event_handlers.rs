@@ -12,8 +12,8 @@
 //!
 //! [`EventHandlerSection::validate`] holds the rules that all paths share. Attaching, decoding,
 //! and deriving a section apply the same check, so every host sees the same set of accepted
-//! sections. [`validate_manifest_entries`] holds the per-entry rules, which the Wasm handler
-//! loader applies to the manifest it registers.
+//! sections. [`validate_manifest_entries`] holds the manifest rules (the entry count and the
+//! per-entry rules), which the Wasm handler loader applies to the manifest it registers.
 //!
 //! Decoding applies explicit size caps ([`MAX_MODULE_BYTES`], [`MAX_HANDLERS`],
 //! [`MAX_NAME_BYTES`]), rejects oversized payloads before allocation, and rejects empty event
@@ -93,8 +93,8 @@ impl EventHandlerManifestEntry {
 impl EventHandlerSection {
     /// Checks the section against the rules that every path shares.
     ///
-    /// The rules are: the ABI version is at least 1; the module and the handler count stay
-    /// inside their caps; and the manifest passes [`validate_manifest_entries`].
+    /// The rules are: the ABI version is at least 1; the module stays inside its cap; and the
+    /// manifest passes [`validate_manifest_entries`], which also bounds the handler count.
     ///
     /// Attaching, decoding, and deriving a section apply this check. The format decode does not:
     /// it applies only the caps it needs before it allocates.
@@ -106,7 +106,6 @@ impl EventHandlerSection {
             return Err(EventHandlerSectionError::InvalidAbiVersion { version: self.abi_version });
         }
         check_size_cap("module", self.module.len(), MAX_MODULE_BYTES)?;
-        check_size_cap("handler count", self.handlers.len(), MAX_HANDLERS)?;
 
         validate_manifest_entries(
             self.handlers.iter().map(|entry| (&entry.event, entry.export.as_str())),
@@ -114,26 +113,32 @@ impl EventHandlerSection {
     }
 }
 
-/// Checks the per-entry rules of a handler manifest.
+/// Checks the rules of a handler manifest.
 ///
-/// The rules are: each name is not empty and stays inside [`MAX_NAME_BYTES`]; no entry names an
-/// event in
+/// The rules are: the manifest holds at most [`MAX_HANDLERS`] entries; each name is not empty and
+/// stays inside [`MAX_NAME_BYTES`]; no entry names an event in
 /// [`EventName::RESERVED_NAMESPACE`](miden_core::events::EventName::RESERVED_NAMESPACE); no two
 /// entries map to the same event ID; and the entries are in the canonical order, strictly
 /// increasing by event name.
 ///
 /// [`EventHandlerSection::validate`] and the Wasm handler loader both apply this check, so a
 /// manifest that a package carries and a manifest that a host registers follow one rule set. The
-/// argument is an iterator, so a caller that owns its names passes borrowed ones.
+/// argument is an iterator, so a caller that owns its names passes borrowed ones. The count rule
+/// applies while the iterator advances, so an over-long manifest stops the walk at the cap.
 ///
 /// # Errors
-/// Returns an error when an entry breaks one of the rules above.
+/// Returns an error when the manifest breaks one of the rules above.
 pub fn validate_manifest_entries<'a>(
     entries: impl Iterator<Item = (&'a EventName, &'a str)>,
 ) -> Result<(), EventHandlerSectionError> {
     let mut seen = BTreeSet::new();
     let mut previous: Option<&EventName> = None;
+    let mut count: usize = 0;
     for (event, export) in entries {
+        // The count is checked first, so no unbounded iterator makes this function allocate
+        // past the cap.
+        count += 1;
+        check_size_cap("handler count", count, MAX_HANDLERS)?;
         for (field, name) in [("event name", event.as_str()), ("export name", export)] {
             if name.is_empty() {
                 return Err(EventHandlerSectionError::EmptyName { field });

@@ -1,6 +1,6 @@
 //! Benchmarks for per-event overhead and host-call fuel calibration.
 //!
-//! Three measurements matter:
+//! Four measurements matter:
 //!
 //! - `call_empty_handler`: the fixed cost of one event call (fresh store, instantiation, one export
 //!   invocation) — the price of the stateless instantiate-per-call design.

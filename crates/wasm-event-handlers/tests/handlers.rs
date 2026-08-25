@@ -637,13 +637,6 @@ fn blake3_matches_native() {
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
 }
 
-// The `StatePtr` safety argument relies on `ProcessorState` being `Sync`; keep that fact
-// checked at compile time.
-const _: () = {
-    const fn assert_sync<T: Sync>() {}
-    assert_sync::<miden_processor::ProcessorState<'static>>();
-};
-
 #[test]
 // wasm32 hosts (the wasip1 smoke-test run) have no threads.
 #[cfg_attr(target_family = "wasm", ignore = "no threads on wasm32 hosts")]
@@ -1099,6 +1092,37 @@ fn unknown_reserved_event_names_are_rejected() {
     let err = try_load("(module)", manifest).unwrap_err();
     assert!(
         matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn oversized_manifest_is_rejected() {
+    // The loader and the package section share one rule set, so the manifest cap (256 entries)
+    // also bounds the manifest a host registers directly.
+    let manifest: Vec<(EventName, String)> = (0..257)
+        .map(|index| {
+            (
+                EventName::from_string(format!("test::wasm::h{index:03}")),
+                "handler".to_string(),
+            )
+        })
+        .collect();
+    let err = try_load("(module)", manifest).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::InvalidManifest(_)),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn missing_memory_export_is_rejected_at_load() {
+    // Every host function that takes a guest pointer needs the `memory` export, so a module
+    // without it is refused at load, not at the first host call.
+    let wat_src = r#"(module (func (export "handler")))"#;
+    let err = try_load(wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::MissingMemoryExport),
         "unexpected error: {err}"
     );
 }
