@@ -61,9 +61,8 @@ impl FunctionType {
             )));
         }
         let mut params = SmallVec::<[Type; 4]>::with_capacity(arity);
-        for _ in 0..arity {
-            let ty = Type::read_from_with_depth(source, depth)?;
-            params.push(ty);
+        for index in 0..arity {
+            params.push(read_signature_type(source, depth, index + 1 == arity)?);
         }
 
         let num_results = source.read_usize()?;
@@ -75,9 +74,8 @@ impl FunctionType {
             )));
         }
         let mut results = SmallVec::<[Type; 1]>::with_capacity(num_results);
-        for _ in 0..num_results {
-            let ty = Type::read_from_with_depth(source, depth)?;
-            results.push(ty);
+        for index in 0..num_results {
+            results.push(read_signature_type(source, depth, index + 1 == num_results)?);
         }
 
         Ok(Self { abi, params, results })
@@ -214,6 +212,29 @@ const TAG_RECURSIVE_GROUP: u8 = 23;
 /// Tag for a back-reference to a definition of the enclosing group. Only valid inside a group
 /// body; encountering it anywhere else would yield a type with an unbound back-reference.
 const TAG_RECURSIVE_REF: u8 = 24;
+/// Tag for a variadic type parameter. Valid only as the last entry of a function's parameter or
+/// result list, which is a rule only the decoder is in a position to enforce.
+const TAG_VARIADIC: u8 = 22;
+
+/// Read one entry of a function's parameter or result list, where a variadic is permitted if it
+/// is the last entry.
+fn read_signature_type<R: ByteReader>(
+    source: &mut R,
+    depth: usize,
+    is_last: bool,
+) -> Result<Type, DeserializationError> {
+    if source.peek_u8()? == TAG_VARIADIC {
+        source.read_u8()?;
+        if !is_last {
+            return Err(DeserializationError::InvalidValue(String::from(
+                "invalid function type: a variadic type parameter must come last, and may appear \
+                 at most once per list",
+            )));
+        }
+        return Ok(Type::Variadic);
+    }
+    Type::read_from_with_depth(source, depth)
+}
 
 fn write_str_with_len<W: ByteWriter>(name: &str, target: &mut W) {
     target.write_usize(name.len());
@@ -372,6 +393,41 @@ fn write_open_type<W: ByteWriter>(ty: &OpenType, target: &mut W) {
             target.write_u8(21);
             write_open_enum_body(body, target);
         },
+    }
+}
+
+/// Reject an array whose layout would overflow, mirroring the ordinary decoder.
+///
+/// The element is still a template, so its size is only known when it contains no
+/// back-reference. That is enough: an array is not a layout barrier, so an array whose element
+/// reaches a back-reference is rejected as unguarded recursion before any layout is computed.
+fn check_array_size(element: &TypeTemplate, len: usize) -> Result<(), DeserializationError> {
+    use alloc::string::ToString;
+
+    let Some(element_size) = known_min_size(element) else {
+        return Ok(());
+    };
+    let size = u64::try_from(len).ok().and_then(|len| element_size.checked_mul(len));
+    if size.is_none_or(|size| size > u64::from(u32::MAX)) {
+        return Err(DeserializationError::InvalidValue(
+            "invalid array: size exceeds u32::MAX bytes".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// The size of a template's element, when it does not depend on a definition still being built.
+fn known_min_size(template: &TypeTemplate) -> Option<u64> {
+    match template {
+        TypeTemplate::Type(ty) => u64::try_from(ty.aligned_size_in_bytes()).ok(),
+        // Reference types have a fixed size whatever they refer to.
+        TypeTemplate::Ptr(..) | TypeTemplate::Function(_) => Some(4),
+        TypeTemplate::List(_) => Some(8),
+        TypeTemplate::Array(element, len) => {
+            known_min_size(element)?.checked_mul(u64::try_from(*len).ok()?)
+        },
+        // Anything else may contain a back-reference, whose size is not yet known.
+        TypeTemplate::Rec(_) | TypeTemplate::Struct(_) | TypeTemplate::Enum(_) => None,
     }
 }
 
@@ -552,21 +608,27 @@ fn read_open_enum_body<R: ByteReader>(
 }
 
 fn read_type_repr<R: ByteReader>(source: &mut R) -> Result<TypeRepr, DeserializationError> {
-    use alloc::string::ToString;
     use core::num::NonZeroU16;
+
+    fn read_alignment<R: ByteReader>(
+        source: &mut R,
+        what: &str,
+    ) -> Result<NonZeroU16, DeserializationError> {
+        // Layout computation assumes a power-of-two alignment and asserts on anything else, so
+        // this has to be rejected here rather than deeper in.
+        let align = source.read_u16()?;
+        if !align.is_power_of_two() {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "invalid type repr: {what} must be a power of two"
+            )));
+        }
+        Ok(NonZeroU16::new(align).expect("power-of-two alignment is non-zero"))
+    }
 
     Ok(match source.read_u8()? {
         0 => TypeRepr::Default,
-        1 => TypeRepr::Align(NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-            DeserializationError::InvalidValue(
-                "invalid type repr: alignment must be a non-zero value".to_string(),
-            )
-        })?),
-        2 => TypeRepr::Packed(NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-            DeserializationError::InvalidValue(
-                "invalid type repr: packed alignment must be a non-zero value".to_string(),
-            )
-        })?),
+        1 => TypeRepr::Align(read_alignment(source, "alignment")?),
+        2 => TypeRepr::Packed(read_alignment(source, "packed alignment")?),
         3 => TypeRepr::Transparent,
         invalid => {
             return Err(DeserializationError::InvalidValue(format!(
@@ -635,7 +697,9 @@ fn read_template<R: ByteReader>(
         18 => {
             source.read_u8()?;
             let len = source.read_usize()?;
-            TypeTemplate::Array(Box::new(read_template(source, names, next_depth)?), len)
+            let element = read_template(source, names, next_depth)?;
+            check_array_size(&element, len)?;
+            TypeTemplate::Array(Box::new(element), len)
         },
         19 => {
             source.read_u8()?;
@@ -872,7 +936,12 @@ impl Type {
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
                 Type::from(enum_ty)
             },
-            22 => Type::Variadic,
+            TAG_VARIADIC => {
+                return Err(DeserializationError::InvalidValue(String::from(
+                    "invalid type: a variadic type parameter is only valid in a function's \
+                     parameter or result list",
+                )));
+            },
             TAG_RECURSIVE_GROUP => read_recursive_group(source, next_depth)?,
             TAG_RECURSIVE_REF => {
                 return Err(DeserializationError::InvalidValue(String::from(
@@ -1165,6 +1234,145 @@ mod tests {
         };
         assert_eq!(apple.name().as_deref(), Some("Apple"));
         assert!(apple.is_recursive());
+    }
+
+    /// Encode a one-definition recursive group whose single field has the given encoded type.
+    fn recursive_group_bytes(repr: &[u8], field_ty: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(1);
+        bytes.write_u8(0); // struct
+        bytes.write_bool(true);
+        bytes.write_usize(1);
+        bytes.write_bytes(b"T");
+        bytes.write_bytes(repr);
+        bytes.write_u8(1); // one field
+        bytes.write_bool(true);
+        bytes.write_usize(1);
+        bytes.write_bytes(b"f");
+        bytes.write_bytes(field_ty);
+        bytes.write_u16(0);
+        bytes
+    }
+
+    fn decode_error(bytes: &[u8]) -> String {
+        let err = Type::read_from(&mut SliceReader::new(bytes))
+            .expect_err("expected the decoder to reject this");
+        match err {
+            DeserializationError::InvalidValue(message) => message,
+            other => panic!("expected InvalidValue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_group_with_a_non_power_of_two_alignment_is_rejected() {
+        // The ordinary decoder rejects this; the recursive one used to accept it and then panic
+        // in `align_up` while computing the group's layout.
+        let mut repr = Vec::new();
+        repr.write_u8(1); // TypeRepr::Align
+        repr.write_u16(3);
+        let mut field = Vec::new();
+        field.write_u8(16); // Ptr
+        field.write_u8(0);
+        field.write_u8(24); // back-reference
+        field.write_u16(0);
+
+        let message = decode_error(&recursive_group_bytes(&repr, &field));
+        assert!(message.contains("power of two"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_group_with_a_non_power_of_two_packed_alignment_is_rejected() {
+        let mut repr = Vec::new();
+        repr.write_u8(2); // TypeRepr::Packed
+        repr.write_u16(6);
+        let mut field = Vec::new();
+        field.write_u8(16);
+        field.write_u8(0);
+        field.write_u8(24);
+        field.write_u16(0);
+
+        let message = decode_error(&recursive_group_bytes(&repr, &field));
+        assert!(message.contains("power of two"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_group_with_an_oversized_array_is_rejected() {
+        // `struct T { f: [*T; usize::MAX] }` overflows when its layout is computed. The ordinary
+        // decoder reports this rather than panicking, and so should this one.
+        let mut field = Vec::new();
+        field.write_u8(18); // Array
+        field.write_usize(usize::MAX);
+        field.write_u8(16); // of Ptr
+        field.write_u8(0);
+        field.write_u8(24); // back-reference
+        field.write_u16(0);
+
+        let message = decode_error(&recursive_group_bytes(&[0], &field));
+        assert!(message.contains("size exceeds"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_variadic_outside_a_function_signature_is_rejected() {
+        // `Type::Variadic` is documented as valid only in a function's parameter or result list,
+        // in trailing position. The decoder has to enforce that; nothing else can.
+        let mut bytes = Vec::new();
+        bytes.write_u8(17); // Struct
+        bytes.write_bool(false);
+        bytes.write_u8(0);
+        bytes.write_u8(1);
+        bytes.write_bool(false);
+        bytes.write_u8(22); // Variadic, as a field type
+
+        let message = decode_error(&bytes);
+        assert!(message.contains("variadic"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_variadic_before_another_parameter_is_rejected() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(20); // Function
+        bytes.write_u8(0); // CallConv::Fast
+        bytes.write_usize(2);
+        bytes.write_u8(22); // Variadic
+        bytes.write_u8(8); // U32
+        bytes.write_usize(0);
+
+        let message = decode_error(&bytes);
+        assert!(message.contains("variadic"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn two_variadics_in_one_list_are_rejected() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(20);
+        bytes.write_u8(0);
+        bytes.write_usize(2);
+        bytes.write_u8(22);
+        bytes.write_u8(22);
+        bytes.write_usize(0);
+
+        let message = decode_error(&bytes);
+        assert!(message.contains("variadic"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_trailing_variadic_in_a_signature_is_accepted() {
+        let mut bytes = Vec::new();
+        bytes.write_u8(20);
+        bytes.write_u8(0);
+        bytes.write_usize(2);
+        bytes.write_u8(8); // U32
+        bytes.write_u8(22); // Variadic, trailing
+        bytes.write_usize(1);
+        bytes.write_u8(22); // Variadic, sole result
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).expect("should decode");
+        let Type::Function(signature) = &ty else {
+            panic!("expected a function")
+        };
+        assert_eq!(signature.params(), &[Type::U32, Type::Variadic]);
+        assert_eq!(signature.results(), &[Type::Variadic]);
     }
 
     #[test]
