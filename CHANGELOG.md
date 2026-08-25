@@ -11,7 +11,6 @@
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
 - Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 - [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
-- Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
 - Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 - Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
@@ -63,6 +62,7 @@
   `ExecutionOptions::with_max_deferred_elements` APIs were removed
   ([#3437](https://github.com/0xMiden/miden-vm/pull/3437)).
 - [BREAKING] Changed `HORNERBASE` and `HORNEREXT` to read the evaluation point from an aligned, zero-padded word: `[alpha0, alpha1, 0, 0]`. This reduces the memory-chiplet trace for `HORNERBASE` from two rows to one and gives both operations the same memory layout ([#3570](https://github.com/0xMiden/miden-vm/pull/3570)).
+- Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
 
 #### Fixes
 
