@@ -204,6 +204,7 @@
 - [BREAKING] Constrained the stack overflow pointer on every VM transition, preventing forged traces from consuming overflow rows out of order ([#3684](https://github.com/0xMiden/miden-vm/pull/3684)).
 - [BREAKING] Authenticated block-stack caller frames and completed DYNCALL's stack constraints. This changes the block-stack and `END` APIs, AIR relation digest, and ACE registry root, invalidating older proofs.
 - [BREAKING] Enforced decoder span-entry, span-exit, and `REPEAT` predecessor adjacency. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
+- [BREAKING] Rejected unused degree-5 opcode 95 and completed the stack route for unused opcode 6. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though

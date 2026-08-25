@@ -50,9 +50,9 @@ $$
 
 As can be seen from above, the degree for both of these flags is $7$. Since degree of constraints in Miden VM can go up to $9$, this means that operation-specific constraints cannot exceed degree $2$. However, there are some operations which require constraints of higher degree (e.g., $3$ or even $5$). To support such constraints, we adopt the following scheme.
 
-We organize the operations into $4$ groups as shown below and also introduce two extra registers $e_0$ and $e_1$ for degree reduction:
+We organize the opcode slots into $4$ groups as shown below and also introduce two extra registers $e_0$ and $e_1$ for degree reduction:
 
-| $b_6$ | $b_5$ | $b_4$ | $b_3$ | $b_2$ | $b_1$ | $b_0$ | $e_0$ | $e_1$ | # of ops | degree |
+| $b_6$ | $b_5$ | $b_4$ | $b_3$ | $b_2$ | $b_1$ | $b_0$ | $e_0$ | $e_1$ | # of slots | degree |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :------: | :----: |
 |   0   |   x   |   x   |   x   |   x   |   x   |   x   |   0   |   0   |    64    |   7    |
 |   1   |   0   |   0   |   x   |   x   |   x   |   -   |   0   |   0   |    8     |   6    |
@@ -62,13 +62,13 @@ We organize the operations into $4$ groups as shown below and also introduce two
 In the above:
 * Operation flags for operations in the first group (with prefix `0`), are computed using all $7$ op bits, and thus their degree is $7$.
 * Operation flags for operations in the second group (with prefix `100`), are computed using only the first $6$ op bits, and thus their degree is $6$.
-* Operation flags for operations in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$.
+* Operation flags for opcode slots in the third group (with prefix `101`), are computed using all $7$ op bits. We use the extra register $e_0$ (which is set to $b_6 \cdot (1-b_5) \cdot b_4$) to reduce the degree by $2$. Thus, the degree of op flags in this group is $5$. This group has $16$ slots, but only $15$ admissible opcodes; slot $95$ is rejected below.
 * Operation flags for operations in the fourth group (with prefix `11`), are computed using only the first $5$ op bits. We use the extra register $e_1$ (which is set to $b_6 \cdot b_5$) to reduce the degree by $1$. Thus, the degree of op flags in this group is $4$.
 
 How operations are distributed between these $4$ groups is described in the sections below.
 
 ### No stack shift operations
-This group contains $32$ operations which do not shift the stack (this is almost all such operations). Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
+This group contains $32$ opcode slots whose AIR route does not shift the stack (this is almost all such operations). Since the op flag degree for these slots is $7$, constraints selected by them cannot exceed degree $2$.
 
 | Operation | Opcode value | Binary encoding |        Operation group        | Flag degree |
 |-----------|:------------:|:---------------:|:-----------------------------:|:-----------:|
@@ -78,7 +78,7 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | `INV`     |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `INCR`    |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `NOT`     |     $5$      |   `000_0101`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `<unused>`|     $6$      |   `000_0110`    |                               |     $7$     |
+| `<reserved>` |    $6$      |   `000_0110`    |      AIR no-shift alias       |     $7$     |
 | `MLOAD`   |     $7$      |   `000_0111`    |    [I/O ops](./io_ops.md)     |     $7$     |
 | `SWAP`    |     $8$      |   `000_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `CALLER`  |     $9$      |   `000_1001`    | [System ops](./system_ops.md) |     $7$     |
@@ -104,6 +104,9 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | `SWAPW3`  |     $29$     |   `001_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `SWAPDW`  |     $30$     |   `001_1110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `EMIT`    |     $31$     |   `001_1111`    | [System ops](./system_ops.md) |     $7$     |
+
+Opcode $6$ is reserved/non-serializable: no `Operation` maps to it, but the AIR accepts the slot
+as a full no-shift alias so every visible stack position remains constrained.
 
 ### Left stack shift operations
 This group contains $16$ operations which shift the stack to the left (i.e., remove an item from the stack). Most of left-shift operations are contained in this group. Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
@@ -210,6 +213,13 @@ Also, we need to make sure that `extra` register $e_0$, which is used to reduce 
 
 $$
 e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
+$$
+
+The final slot in this group (`101_1111`, opcode $95$) is unused and is rejected with the
+following constraint:
+
+$$
+e_0 \cdot b_3 \cdot b_2 \cdot b_1 \cdot b_0 = 0 \text{ | degree} = 5
 $$
 
 ### Very high-degree operations

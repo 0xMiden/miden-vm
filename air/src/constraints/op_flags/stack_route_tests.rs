@@ -11,15 +11,15 @@ use super::{
 };
 
 // Valid interpolation slots that do not currently map to an `Operation`.
-const UNUSED_DEGREE_7_UNARY_ROUTE_OPCODE: u8 = 6;
+const UNUSED_DEGREE_7_NO_SHIFT_ROUTE_OPCODE: u8 = 6;
 const UNUSED_DEGREE_7_LEFT_SHIFT_ROUTE_OPCODE: u8 = 47;
-const UNUSED_DEGREE_5_ROUTE_OPCODE: u8 = 95;
+const UNUSED_DEGREE_5_REJECTED_OPCODE: u8 = 95;
 
 fn valid_route_opcodes() -> Vec<usize> {
     let mut opcodes = Vec::new();
     opcodes.extend(DEGREE_7_OPCODE_STARTS..=DEGREE_7_OPCODE_ENDS);
     opcodes.extend((DEGREE_6_OPCODE_STARTS..=DEGREE_6_OPCODE_ENDS).step_by(2));
-    opcodes.extend(DEGREE_5_OPCODE_STARTS..=DEGREE_5_OPCODE_ENDS);
+    opcodes.extend(DEGREE_5_OPCODE_STARTS..DEGREE_5_OPCODE_ENDS);
     opcodes.extend((DEGREE_4_OPCODE_STARTS..=DEGREE_4_OPCODE_ENDS).step_by(4));
     opcodes
 }
@@ -47,7 +47,8 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
         | opcodes::HALT
         | opcodes::CALL
         | opcodes::SYSCALL
-        | opcodes::EVALCIRCUIT => set(&mut no_shift, 0..16),
+        | opcodes::EVALCIRCUIT
+        | UNUSED_DEGREE_7_NO_SHIFT_ROUTE_OPCODE => set(&mut no_shift, 0..16),
         opcodes::END if !is_loop_end => set(&mut no_shift, 0..16),
         opcodes::END => set(&mut left_shift, 1..16),
 
@@ -56,7 +57,6 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
         | opcodes::INV
         | opcodes::INCR
         | opcodes::NOT
-        | UNUSED_DEGREE_7_UNARY_ROUTE_OPCODE
         | opcodes::MLOAD => set(&mut no_shift, 1..16),
         opcodes::SWAP => set(&mut no_shift, 2..16),
 
@@ -181,7 +181,7 @@ fn routes_for_opcode(opcode: u8, is_loop_end: bool) -> ([bool; 16], [bool; 16], 
             set(&mut no_shift, 13..16);
         },
         opcodes::HORNERBASE | opcodes::HORNEREXT => set(&mut no_shift, 0..14),
-        opcodes::FRIE2F4 | opcodes::CRYPTOSTREAM | UNUSED_DEGREE_5_ROUTE_OPCODE => {},
+        opcodes::FRIE2F4 | opcodes::CRYPTOSTREAM | UNUSED_DEGREE_5_REJECTED_OPCODE => {},
 
         _ => panic!("missing route table entry for opcode {opcode}"),
     }

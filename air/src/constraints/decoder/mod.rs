@@ -105,9 +105,7 @@ pub fn enforce_main<AB>(
         batch_flags,
         extra,
     } = local.decoder;
-    // b2 and b3 are not used directly in decoder constraints — they are consumed only
-    // by the op_flags module for individual opcode discrimination.
-    let [b0, b1, _, _, b4, b5, b6] = op_bits;
+    let [b0, b1, b2, b3, b4, b5, b6] = op_bits;
     let [bc0, bc1, bc2] = batch_flags;
     let [e0, e1] = extra;
     let h0 = hasher_state[0];
@@ -202,16 +200,20 @@ pub fn enforce_main<AB>(
     // Certain opcode prefixes have unused bit positions that must be zero to prevent
     // invalid opcodes from being encoded. Both opcode groups use e0/e1 for degree reduction:
     //
-    //   Prefix  | b6 b5 b4 | Meaning    | Constraint
-    //   --------+----------+------------+------------
-    //   U32     | 1  0  0  | 8 U32 ops  | b0 = 0
-    //   VeryHi  | 1  1  *  | 8 hi ops   | b0 = b1 = 0
+    //   Prefix  | b6 b5 b4 | Meaning     | Constraint
+    //   --------+----------+-------------+--------------------
+    //   U32     | 1  0  0  | 8 U32 ops   | b0 = 0
+    //   High    | 1  0  1  | 15 high ops | not all b0..b3 = 1
+    //   VeryHi  | 1  1  *  | 8 hi ops    | b0 = b1 = 0
     //
     // The U32 prefix is computed as b6·(1-b5)·(1-b4) = b6 - e1 - e0 (degree 1).
     // The VeryHi prefix is b6·b5 = e1 (degree 1).
 
     // When U32 prefix is active, b0 must be zero.
     builder.when(b6 - e1 - e0).assert_zero(b0);
+
+    // Reject the unused degree-5 slot 95 (0b101_1111).
+    builder.when(e0).assert_zero(b3 * b2 * b1 * b0);
 
     // When VeryHi prefix is active, both b0 and b1 must be zero.
     {
@@ -637,6 +639,12 @@ mod tests {
         row
     }
 
+    fn set_opcode(row: &mut CoreCols<Felt>, opcode: usize) {
+        let opcode_row = generate_test_row(opcode);
+        row.decoder.op_bits = opcode_row.decoder.op_bits;
+        row.decoder.extra = opcode_row.decoder.extra;
+    }
+
     #[test]
     fn honest_decoder_adjacency_pairs_are_accepted() {
         let (in_span_local, in_span_next) = honest_in_span_pair();
@@ -698,6 +706,22 @@ mod tests {
         assert!(
             !decoder_accepts(&in_span, &split),
             "a basic-block row cannot exit via arbitrary control flow"
+        );
+    }
+
+    #[test]
+    fn unused_degree5_opcode_slot_is_rejected() {
+        let (mut local, next) = honest_in_span_pair();
+        set_opcode(&mut local, opcodes::LOGDEFERRED.into());
+        assert!(
+            decoder_accepts(&local, &next),
+            "the last assigned degree-5 opcode must remain accepted"
+        );
+
+        set_opcode(&mut local, 95);
+        assert!(
+            !decoder_accepts(&local, &next),
+            "unused degree-5 opcode slot 95 must be rejected"
         );
     }
 

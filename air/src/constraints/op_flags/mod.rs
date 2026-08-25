@@ -328,9 +328,11 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<15>(&[
+        let no_shift_depth0 = E::sum_array::<16>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
+            // +(opcode 6)    — unused opcode slot; preserve the full visible stack
+            deg7[6].clone(),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
             op6(opcodes::U32ASSERT2),
             // +MPVERIFY     — verifies Merkle path in place
@@ -361,8 +363,10 @@ where
             op5(opcodes::HORNEREXT),
         ]);
 
-        // +opcodes[0..8] –NOOP — unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
-        let no_shift_depth1 = deg7[0..8].iter().cloned().sum::<E>() - op7(opcodes::NOOP);
+        // +opcodes[0..8] –NOOP –opcode6 — unary ops that modify only s0 (EQZ, NEG, INV, INCR,
+        // NOT, MLOAD). Opcode 6 is included at depth 0 above.
+        let no_shift_depth1 =
+            deg7[0..8].iter().cloned().sum::<E>() - op7(opcodes::NOOP) - deg7[6].clone();
 
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
