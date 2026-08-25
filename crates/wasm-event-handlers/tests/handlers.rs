@@ -894,6 +894,39 @@ fn element_segments_count_toward_the_instantiation_cost() {
 }
 
 #[test]
+fn long_form_table_reftype_is_accepted_by_the_section_walk() {
+    // Hand-crafted module: header + table section `04 05 01 63 70 00 01` — one table whose
+    // reference type uses the long-form encoding 0x63 0x70, `(ref null func)`. wasmi
+    // validates it, so the loader's static section analysis must accept it too (the
+    // differential fuzz target asserts exactly this pairing).
+    let mut wasm = b"\x00\x61\x73\x6d\x01\x00\x00\x00".to_vec();
+    wasm.extend_from_slice(&[0x04, 0x05, 0x01, 0x63, 0x70, 0x00, 0x01]);
+    assert!(
+        wasmi::Module::new(&wasmi::Engine::default(), &wasm).is_ok(),
+        "the fixture must be wasmi-valid"
+    );
+    assert!(
+        miden_wasm_event_handlers::fuzz_module_statics(&wasm),
+        "the section walk must accept what wasmi validates"
+    );
+}
+
+#[test]
+fn unknown_imports_are_rejected_at_load() {
+    // Distinct unknown names in the right namespace must fail at load, not accumulate and
+    // fail later inside instantiation.
+    let wat_src = r#"(module
+        (import "miden:event/v1" "not_a_host_fn" (func))
+        (memory (export "memory") 1)
+        (func (export "handler")))"#;
+    let err = try_load(wat_src, vec![(EVENT, "handler".to_string())]).unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::UnknownImport { ref name } if name == "not_a_host_fn"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn oversized_export_count_is_rejected_at_load() {
     // wasmi rebuilds the export map on every per-call instantiation, unmetered, so the
     // export count is capped at load (1024).
