@@ -2561,7 +2561,6 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-precompiles",
- "miden-test-serde-macros",
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
@@ -2608,7 +2607,6 @@ dependencies = [
  "miden-precompiles-prover",
  "miden-processor",
  "miden-verifier",
- "proptest",
  "serde",
  "serde-wincode",
  "thiserror",
@@ -2655,18 +2653,6 @@ dependencies = [
  "p3-goldilocks",
  "p3-mersenne-31",
  "p3-symmetric",
-]
-
-[[package]]
-name = "miden-test-serde-macros"
-version = "0.30.0"
-dependencies = [
- "proc-macro2",
- "proptest",
- "proptest-derive",
- "quote",
- "serde",
- "syn 1.0.109",
 ]
 
 [[package]]

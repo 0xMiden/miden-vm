@@ -39,7 +39,7 @@ std = [
     "miden-utils-sync/std",
     "thiserror/std",
 ]
-arbitrary = ["dep:proptest", "miden-crypto/arbitrary"]
+arbitrary = ["dep:proptest"]
 testing = ["arbitrary"]
 fuzzing = []
 

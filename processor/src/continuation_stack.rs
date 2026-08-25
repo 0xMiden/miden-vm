@@ -70,14 +70,6 @@ impl SourceInlineCallContext {
 /// [`Continuation::EnterForest`] variant. For live execution this is `Arc<MastForest>`; for the
 /// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
 /// `mast_forest_store` of the trace generation context.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(
-        binary_serde(true),
-        serde_test(false),
-        types(MastForestId)
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
@@ -561,78 +553,6 @@ impl Deserializable for ContinuationStack<MastForestId> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let stack = Vec::<Continuation<MastForestId>>::read_from(source)?;
         Ok(Self { stack, source_node_ids: None })
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-mod arbitrary {
-    use proptest::{collection, prelude::*};
-
-    use super::*;
-    use crate::mast::MastForestId;
-
-    const MAX_CONTINUATIONS: usize = 16;
-
-    fn arb_source_node_id() -> impl Strategy<Value = DebugSourceNodeId> {
-        any::<u32>().prop_map(DebugSourceNodeId::from)
-    }
-
-    impl Arbitrary for Continuation<MastForestId> {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            prop_oneof![
-                any::<MastNodeId>().prop_map(Self::StartNode),
-                any::<MastNodeId>().prop_map(Self::FinishJoin),
-                any::<MastNodeId>().prop_map(Self::FinishSplit),
-                any::<MastNodeId>().prop_map(Self::FinishLoop),
-                any::<MastNodeId>().prop_map(Self::FinishCall),
-                any::<MastNodeId>().prop_map(Self::FinishDyn),
-                (any::<MastNodeId>(), 0usize..=8, 0usize..=8).prop_map(
-                    |(node_id, batch_index, op_idx_in_batch)| Self::ResumeBasicBlock {
-                        node_id,
-                        batch_index,
-                        op_idx_in_batch,
-                    },
-                ),
-                (any::<MastNodeId>(), 0usize..=8)
-                    .prop_map(|(node_id, batch_index)| Self::Respan { node_id, batch_index }),
-                any::<MastNodeId>().prop_map(Self::FinishBasicBlock),
-                (any::<MastForestId>(), any::<usize>()).prop_map(
-                    |(forest, inline_context_depth)| {
-                        Self::EnterForest {
-                            forest,
-                            package_debug_info: None,
-                            inline_context_depth,
-                        }
-                    }
-                ),
-            ]
-            .boxed()
-        }
-    }
-
-    impl Arbitrary for ContinuationStack<MastForestId> {
-        type Parameters = ();
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            collection::vec(any::<Continuation<MastForestId>>(), 0..=MAX_CONTINUATIONS)
-                .prop_flat_map(|stack| {
-                    let len = stack.len();
-                    (
-                        Just(stack),
-                        prop_oneof![
-                            Just(None),
-                            collection::vec(proptest::option::of(arb_source_node_id()), len..=len,)
-                                .prop_map(Some),
-                        ],
-                    )
-                })
-                .prop_map(|(stack, source_node_ids)| Self { stack, source_node_ids })
-                .boxed()
-        }
     }
 }
 

@@ -22,9 +22,6 @@
 
 #### Changes
 
-- [BREAKING] Removed `TraceProvingInputs`, `prove_from_trace_sync`, and
-  `prove_partial_from_trace_sync`. Deserialize `ExecutionWitness` directly and pass it to the
-  regular `Prover` interface ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.

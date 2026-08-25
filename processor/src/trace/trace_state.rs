@@ -26,6 +26,8 @@ use crate::{
     utils::Idx,
 };
 
+mod serde;
+
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
 
@@ -67,10 +69,6 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceState {
     pub system: SystemState,
@@ -85,10 +83,6 @@ pub struct CoreTraceState {
 ///
 /// This struct captures the complete state of the system at a specific clock cycle, allowing for
 /// reconstruction of the system trace during concurrent execution.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemState {
     /// Current clock cycle (row index in the trace)
@@ -125,10 +119,6 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
@@ -178,10 +168,6 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
@@ -308,10 +294,6 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
@@ -327,10 +309,6 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
@@ -358,10 +336,6 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
@@ -464,10 +438,6 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeEndData {
     /// the address of the node that is ending
@@ -482,10 +452,6 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
@@ -505,10 +471,6 @@ pub struct ExecutionContextSystemInfo {
 /// trace replay that owns this data. This avoids holding a strong `Arc<MastForest>` reference per
 /// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
@@ -548,10 +510,6 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
@@ -622,10 +580,6 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
@@ -718,10 +672,6 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdviceReplay {
     // Stack operations
@@ -813,10 +763,6 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitwiseOp {
     U32And,
@@ -824,10 +770,6 @@ pub enum BitwiseOp {
 }
 
 /// Replay data for bitwise operations.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BitwiseReplay {
     u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
@@ -867,10 +809,6 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
@@ -900,10 +838,6 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
@@ -958,10 +892,6 @@ impl AsRef<[u16]> for RangeCheckReplayValues {
 }
 
 /// Replay data for range checking operations.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeCheckerReplay {
     range_checks: VecDeque<RangeCheckReplayValues>,
@@ -1007,10 +937,6 @@ impl IntoIterator for RangeCheckerReplay {
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
@@ -1041,10 +967,6 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from permutation operations (HPerm).
@@ -1152,10 +1074,6 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
@@ -1213,10 +1131,6 @@ pub enum ResolvedHasherOp<'a> {
 /// ([`HasherRequestReplay::streamed`]) each request is resolved at record time and forwarded to
 /// a hasher-chiplet builder running concurrently with execution; see
 /// `FastProcessor::execute_and_build_trace_sync`.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, Default)]
 pub struct HasherRequestReplay {
     sink: HasherOpSink,
@@ -1357,6 +1271,11 @@ impl HasherRequestReplay {
         self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
 
+    /// Returns the forest IDs referenced by buffered basic-block hash requests.
+    ///
+    /// Trace replay deserialization uses these IDs to validate that every request points into the
+    /// replay's finalized MAST forest store. Streamed requests have already been delivered to the
+    /// concurrent trace builder, so they yield no IDs here.
     pub(crate) fn iter_hash_basic_block_forest_ids(
         &self,
     ) -> impl Iterator<Item = MastForestId> + '_ {
@@ -1437,10 +1356,6 @@ impl HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
@@ -1543,8 +1458,3 @@ mod tests {
         assert!(ops.next().is_none());
     }
 }
-
-#[cfg(feature = "arbitrary")]
-mod arbitrary;
-
-mod serde;

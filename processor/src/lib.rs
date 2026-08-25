@@ -302,10 +302,6 @@ pub trait Stopper {
 // ================================================================================================
 
 /// Represents the ID of an execution context
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
-)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ContextId(u32);
 
@@ -366,17 +362,6 @@ impl Deserializable for ContextId {
 
     fn min_serialized_size() -> usize {
         <u32 as Deserializable>::min_serialized_size()
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl proptest::prelude::Arbitrary for ContextId {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-        any::<u32>().prop_map(Self).boxed()
     }
 }
 
