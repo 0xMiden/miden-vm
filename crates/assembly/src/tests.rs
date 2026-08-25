@@ -5680,6 +5680,42 @@ fn a_finite_cycle_through_an_alias_resolves() -> TestResult {
 }
 
 #[test]
+fn an_alias_used_twice_in_one_aggregate_resolves() -> TestResult {
+    // Both fields go through the same alias, and the pointer guards the cycle in each. Re-opening
+    // the alias once per resolution is too coarse: the second field is not a new cycle.
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::twice
+
+        pub type A = ptr<B, addrspace(byte)>
+        pub type B = struct { first: A, second: A }
+
+        pub proc entry(x: A)
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context
+        .assemble_library("lib", None, module, [])
+        .expect("an alias used twice should resolve");
+
+    use miden_mast_package::PackageExport;
+    let b = package
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Type(ty) if ty.path.to_string().ends_with("B") => Some(ty.ty.clone()),
+            _ => None,
+        })
+        .expect("B should be exported");
+    assert_eq!(b.size_in_bytes(), 8);
+    Ok(())
+}
+
+#[test]
 fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
     let context = TestContext::new();
     let module = context.parse_module(source_file!(

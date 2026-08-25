@@ -73,12 +73,15 @@ pub struct ResolverCache {
     /// such as `type A = B` / `type B = A` which would otherwise infinitely recurse.
     /// Ordered, so that on re-entering a declaration it can be seen what was entered after it.
     evaluating_types: Vec<EvaluatingType>,
-    /// Aliases already re-expanded during the current resolution.
+    /// Aliases currently being re-expanded.
     ///
     /// An alias cannot hold a back-reference, so a cycle through one is broken by expanding the
-    /// alias a second time and letting it terminate at an enclosing aggregate. Allowing that at
-    /// most once per alias bounds the work and guarantees termination.
-    reexpanded_types: BTreeSet<GlobalItemIndex>,
+    /// alias again and letting it terminate at an enclosing aggregate. This is per path, not per
+    /// resolution: the same alias may legitimately be reached from several fields of one
+    /// aggregate, and each is a separate cycle broken by the same pointer. Refusing to re-expand
+    /// an alias already being re-expanded *on this path* is what bounds the work, since each
+    /// alias can then appear on the path at most once.
+    reexpanding_types: BTreeSet<GlobalItemIndex>,
 }
 
 impl<'a, 'b: 'a> Resolver<'a, 'b> {
@@ -234,8 +237,10 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
             // between aliases alone and has no finite representation.
             let broken_by_aggregate =
                 self.cache.evaluating_types[position + 1..].iter().any(|e| e.is_aggregate);
-            if broken_by_aggregate && self.cache.reexpanded_types.insert(gid) {
-                return self.expand_alias_body(context, gid);
+            if broken_by_aggregate && self.cache.reexpanding_types.insert(gid) {
+                let expanded = self.expand_alias_body(context, gid);
+                self.cache.reexpanding_types.remove(&gid);
+                return expanded;
             }
 
             return Err(LinkerError::RecursiveType {
