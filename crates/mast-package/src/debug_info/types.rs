@@ -793,6 +793,14 @@ pub struct DebugVariantInfo {
     pub discriminant: u128,
 }
 
+/// The deepest chain of type rows recovery will follow.
+///
+/// A decoded debug type graph is bounded only by its byte budget, so a small package can describe
+/// a chain of many thousands of rows. Recovery walks a row's children as it goes, so without a
+/// bound such a graph exhausts the stack. This matches the nesting the package type codec itself
+/// permits, so no type that arrived through it can exceed this.
+const MAX_DEBUG_TYPE_DEPTH: usize = 128;
+
 /// Recovers the type at `root`, including recursive types.
 ///
 /// Recovery must start from an index rather than a row: a debug type graph records recursion as a
@@ -1002,11 +1010,11 @@ fn recover_recursive_component<Exec: Idx, Src: Idx>(
     for index in &definitions {
         match debug_info.get_type(*index)? {
             DebugTypeInfo::Struct { .. } => {
-                let template = struct_template(*index, debug_info, &names, cached_types)?;
+                let template = struct_template(*index, debug_info, &names, cached_types, 0)?;
                 builder.define_struct(names[index].clone(), template);
             },
             DebugTypeInfo::Enum { .. } => {
-                let template = enum_template(*index, debug_info, &names, cached_types)?;
+                let template = enum_template(*index, debug_info, &names, cached_types, 0)?;
                 builder.define_enum(names[index].clone(), template);
             },
             _ => return None,
@@ -1048,6 +1056,7 @@ fn struct_template<Exec: Idx, Src: Idx>(
     debug_info: &DebugInfo<Exec, Src>,
     names: &FxHashMap<DebugTypeIdx, Arc<str>>,
     cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
 ) -> Option<miden_assembly_syntax::ast::types::StructTemplate> {
     use miden_assembly_syntax::ast::types::{FieldTemplate, StructTemplate, TypeRepr};
 
@@ -1059,7 +1068,7 @@ fn struct_template<Exec: Idx, Src: Idx>(
     for field in fields {
         field_templates.push(FieldTemplate {
             name: debug_info.get_string(field.name_idx),
-            ty: type_template(field.type_idx, debug_info, names, cached_types)?,
+            ty: type_template(field.type_idx, debug_info, names, cached_types, depth)?,
         });
     }
     // `DebugTypeInfo::Struct` does not record the representation, so recovery is limited to the
@@ -1076,6 +1085,7 @@ fn enum_template<Exec: Idx, Src: Idx>(
     debug_info: &DebugInfo<Exec, Src>,
     names: &FxHashMap<DebugTypeIdx, Arc<str>>,
     cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
 ) -> Option<miden_assembly_syntax::ast::types::EnumTemplate> {
     use miden_assembly_syntax::ast::types::{EnumTemplate, VariantTemplate};
 
@@ -1096,7 +1106,7 @@ fn enum_template<Exec: Idx, Src: Idx>(
         variant_templates.push(VariantTemplate {
             name: debug_info.get_string(variant.name_idx)?,
             value: match variant.type_idx {
-                Some(ty) => Some(type_template(ty, debug_info, names, cached_types)?),
+                Some(ty) => Some(type_template(ty, debug_info, names, cached_types, depth)?),
                 None => None,
             },
             discriminant_value: Some(variant.discriminant),
@@ -1114,8 +1124,16 @@ fn type_template<Exec: Idx, Src: Idx>(
     debug_info: &DebugInfo<Exec, Src>,
     names: &FxHashMap<DebugTypeIdx, Arc<str>>,
     cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
 ) -> Option<miden_assembly_syntax::ast::types::TypeTemplate> {
     use miden_assembly_syntax::ast::types::TypeTemplate;
+
+    // The rows between a definition and its back-reference are walked here, and a decoded graph
+    // can chain arbitrarily many of them together.
+    if depth >= MAX_DEBUG_TYPE_DEPTH {
+        return None;
+    }
+    let depth = depth + 1;
 
     // A reference back to a group member becomes a back-reference by name.
     if let Some(name) = names.get(&index) {
@@ -1129,31 +1147,36 @@ fn type_template<Exec: Idx, Src: Idx>(
 
     // Otherwise this row is part of the group's body: structure on the path to a back-reference.
     Some(match debug_info.get_type(index)? {
-        DebugTypeInfo::Pointer { pointee_type_idx } => {
-            TypeTemplate::ptr(type_template(*pointee_type_idx, debug_info, names, cached_types)?)
-        },
+        DebugTypeInfo::Pointer { pointee_type_idx } => TypeTemplate::ptr(type_template(
+            *pointee_type_idx,
+            debug_info,
+            names,
+            cached_types,
+            depth,
+        )?),
         DebugTypeInfo::Array { element_type_idx, count } => {
-            let element = type_template(*element_type_idx, debug_info, names, cached_types)?;
+            let element = type_template(*element_type_idx, debug_info, names, cached_types, depth)?;
             match count {
                 Some(count) => TypeTemplate::array(element, usize::try_from(*count).ok()?),
                 None => TypeTemplate::list(element),
             }
         },
         DebugTypeInfo::Struct { .. } => TypeTemplate::Struct(alloc::boxed::Box::new(
-            struct_template(index, debug_info, names, cached_types)?,
+            struct_template(index, debug_info, names, cached_types, depth)?,
         )),
         DebugTypeInfo::Enum { .. } => TypeTemplate::Enum(alloc::boxed::Box::new(enum_template(
             index,
             debug_info,
             names,
             cached_types,
+            depth,
         )?)),
         DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
             use miden_assembly_syntax::ast::types::CallConv;
 
             let mut params = Vec::with_capacity(param_type_indices.len());
             for param in param_type_indices {
-                params.push(type_template(*param, debug_info, names, cached_types)?);
+                params.push(type_template(*param, debug_info, names, cached_types, depth)?);
             }
             let mut results = Vec::new();
             if let Some(result) = return_type_idx {
@@ -1162,7 +1185,7 @@ fn type_template<Exec: Idx, Src: Idx>(
                     debug_info.get_type(*result)?,
                     DebugTypeInfo::Primitive(DebugPrimitiveType::Void)
                 ) {
-                    results.push(type_template(*result, debug_info, names, cached_types)?);
+                    results.push(type_template(*result, debug_info, names, cached_types, depth)?);
                 }
             }
             TypeTemplate::function(CallConv::Fast, params, results)
@@ -1403,6 +1426,10 @@ impl DebugTypeInfo {
     ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
         if let Some(recovered) = cached_types.get(&type_idx) {
             return Some(recovered.clone());
+        }
+        // `resolving` holds one entry per level currently in flight, so its size is the depth.
+        if resolving.len() >= MAX_DEBUG_TYPE_DEPTH {
+            return None;
         }
         if !resolving.insert(type_idx) {
             return None;
@@ -1964,6 +1991,48 @@ mod tests {
         let mut cache = FxHashMap::default();
 
         assert!(recover_type_at(big, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_handles_a_long_decoded_pointer_chain_without_aborting() {
+        // A metered decode accepts a graph like this, so recovery has to survive it: a struct
+        // whose field starts a long pointer chain that loops back to the struct.
+        const POINTER_COUNT: u32 = 100_000;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_name = builder.add_string("Node");
+        let field_name = builder.add_string("next");
+        let root = DebugTypeIdx::from(0);
+        let first_pointer = DebugTypeIdx::from(1);
+        assert_eq!(
+            builder.add_type(DebugTypeInfo::Struct {
+                name_idx: struct_name,
+                size: 4,
+                fields: vec![DebugFieldInfo {
+                    name_idx: field_name,
+                    type_idx: first_pointer,
+                    offset: 0,
+                }],
+            }),
+            root
+        );
+        for index in 1..=POINTER_COUNT {
+            let target = if index == POINTER_COUNT {
+                root
+            } else {
+                DebugTypeIdx::from(index + 1)
+            };
+            assert_eq!(
+                builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: target }),
+                DebugTypeIdx::from(index)
+            );
+        }
+
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        // Either a recovered type or a clean refusal is fine; aborting is not.
+        let _ = recover_type_at(root, debug_info.as_ref(), &mut cache);
     }
 
     #[test]
