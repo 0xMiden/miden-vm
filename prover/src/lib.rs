@@ -33,7 +33,11 @@ mod dyncall_saved_frame_soundness_repro;
 #[cfg(all(test, feature = "std"))]
 mod overflow_pointer_soundness_repro;
 #[cfg(all(test, feature = "std"))]
+mod repeat_predecessor_soundness_repro;
+#[cfg(all(test, feature = "std"))]
 mod repro_harness;
+#[cfg(all(test, feature = "std"))]
+mod span_entry_soundness_repro;
 
 // EXPORTS
 // ================================================================================================

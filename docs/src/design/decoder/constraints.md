@@ -68,6 +68,12 @@ Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_lo
 > f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
 > $$
 
+A `REPEAT` operation must be preceded by an `END` operation:
+
+> $$
+> f_{repeat}' \cdot (1 - f_{end}) = 0 \text{ | degree} = 8
+> $$
+
 When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
 
 > $$
@@ -515,13 +521,10 @@ The `in_span` column (denoted as $sp$) marks rows which execute non-control flow
 operations. This is enforced by the control-flow constraint
 $1 - sp - f_{ctrl} = 0$, so $sp = 1$ for non-control flow operations and $sp = 0$
 otherwise. Semantically, this means $sp$ is 1 throughout basic blocks and 0 on
-control-flow rows. We do not separately constrain $sp' = sp$; the control-flow
-constraint pins $sp$ on every row, and the SPAN/RESPAN constraints below ensure
-the next row enters a basic block.
+control-flow rows. The transition constraints below enforce the legal state
+transitions into and out of basic blocks.
 Here $f_{ctrl}$ includes `SPAN`, `JOIN`, `SPLIT`, `LOOP`, `END`, `REPEAT`, `RESPAN`, `HALT`,
 `DYN`, `DYNCALL`, `CALL`, and `SYSCALL`.
-The op-group table and group_count constraints enforce that non-control rows can only appear
-inside spans, so $sp$ cannot switch to $1$ without a preceding `SPAN`/`RESPAN`.
 
 We require that the VM starts outside a basic block. Since $sp = 1 - f_{ctrl}$ and $f_{ctrl}$
 is binary, $sp$ is also binary.
@@ -544,6 +547,20 @@ Since these flags are mutually exclusive, we can also merge them into one constr
 
 > $$
 > (f_{span} + f_{respan}) \cdot (1 - sp') = 0 \text{ | degree} = 6
+> $$
+
+Conversely, a row with $sp' = 1$ must follow either a row already inside a
+basic block or an explicit `SPAN`/`RESPAN` operation:
+
+> $$
+> sp' \cdot (1 - f_{span} - f_{respan} - sp) = 0 \text{ | degree} = 6
+> $$
+
+A row inside a basic block may only stay inside the block, or exit through
+`END`/`RESPAN`:
+
+> $$
+> sp \cdot (1 - sp' - f_{end}' - f_{respan}') = 0 \text{ | degree} = 5
 > $$
 
 ### Block address constraints

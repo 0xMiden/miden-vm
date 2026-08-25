@@ -73,19 +73,40 @@ impl ReproTrace {
         core: RowMajorMatrix<Felt>,
         outputs: StackOutputs,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let proof_bytes = self.prove(core, outputs).unwrap_or_else(|error| {
+        let proof_bytes = self
+            .prove(core, self.chiplets.clone(), self.poseidon2.clone(), outputs)
+            .unwrap_or_else(|error| {
+                panic!("the low-level prover should encode the forged trace: {error}")
+            });
+        self.verify(proof_bytes, outputs)
+    }
+
+    /// Like [`Self::prove_and_verify_with_outputs`], but allows tests to replace all three AIR
+    /// trace matrices. This is needed for forgeries that add matching chiplet/permutation rows
+    /// rather than mutating only the Core trace.
+    pub fn prove_and_verify_parts_with_outputs(
+        &self,
+        core: RowMajorMatrix<Felt>,
+        chiplets: RowMajorMatrix<Felt>,
+        poseidon2: RowMajorMatrix<Felt>,
+        outputs: StackOutputs,
+    ) -> Result<VerificationOutcome, VerificationError> {
+        let proof_bytes = self.prove(core, chiplets, poseidon2, outputs).unwrap_or_else(|error| {
             panic!("the low-level prover should encode the forged trace: {error}")
         });
         self.verify(proof_bytes, outputs)
     }
 
-    /// Runs the full proof pipeline while allowing the lookup construction itself to reject an
-    /// unbalanced adversarial trace. Other proving failures remain test failures.
-    pub fn prove_and_verify_allowing_lookup_rejection(
+    /// Like [`Self::prove_and_verify_parts_with_outputs`], but permits lookup construction to
+    /// reject an unbalanced adversarial trace. Other proving failures remain test failures.
+    pub fn prove_and_verify_parts_allowing_lookup_rejection(
         &self,
         core: RowMajorMatrix<Felt>,
+        chiplets: RowMajorMatrix<Felt>,
+        poseidon2: RowMajorMatrix<Felt>,
+        outputs: StackOutputs,
     ) -> Result<VerificationOutcome, String> {
-        let proof_bytes = match self.prove(core, self.outputs) {
+        let proof_bytes = match self.prove(core, chiplets, poseidon2, outputs) {
             Ok(bytes) => bytes,
             Err(error) => {
                 assert!(
@@ -96,11 +117,39 @@ impl ReproTrace {
             },
         };
 
+        self.verify(proof_bytes, outputs)
+            .map_err(|error| format!("verifier rejected: {error}"))
+    }
+
+    /// Runs the full proof pipeline while allowing the lookup construction itself to reject an
+    /// unbalanced adversarial trace. Other proving failures remain test failures.
+    pub fn prove_and_verify_allowing_lookup_rejection(
+        &self,
+        core: RowMajorMatrix<Felt>,
+    ) -> Result<VerificationOutcome, String> {
+        let proof_bytes =
+            match self.prove(core, self.chiplets.clone(), self.poseidon2.clone(), self.outputs) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    assert!(
+                        error.contains("external assertion 0 is non-zero"),
+                        "unexpected prover failure: {error}"
+                    );
+                    return Err(format!("prover rejected an unbalanced lookup: {error}"));
+                },
+            };
+
         self.verify(proof_bytes, self.outputs)
             .map_err(|error| format!("verifier rejected: {error}"))
     }
 
-    fn prove(&self, core: RowMajorMatrix<Felt>, outputs: StackOutputs) -> Result<Vec<u8>, String> {
+    fn prove(
+        &self,
+        core: RowMajorMatrix<Felt>,
+        chiplets: RowMajorMatrix<Felt>,
+        poseidon2: RowMajorMatrix<Felt>,
+        outputs: StackOutputs,
+    ) -> Result<Vec<u8>, String> {
         let public_inputs = PublicInputs::new(
             self.program_info.clone(),
             self.init_stack,
@@ -109,15 +158,8 @@ impl ReproTrace {
         );
         let (public_values, aux_inputs) = public_inputs.to_air_inputs();
         let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
-        prove_stark(
-            &config,
-            core,
-            self.chiplets.clone(),
-            self.poseidon2.clone(),
-            &public_values,
-            &aux_inputs,
-        )
-        .map_err(|error| format!("{error}"))
+        prove_stark(&config, core, chiplets, poseidon2, &public_values, &aux_inputs)
+            .map_err(|error| format!("{error}"))
     }
 
     fn verify(

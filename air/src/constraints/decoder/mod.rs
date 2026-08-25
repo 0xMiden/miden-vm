@@ -287,6 +287,11 @@ pub fn enforce_main<AB>(
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
     // (h4) into the next row so the loop body can be re-entered.
     {
+        builder
+            .when_transition()
+            .when(op_flags.repeat_next())
+            .assert_one(op_flags.end());
+
         let gate = op_flags.end() * op_flags.repeat_next();
         let builder = &mut builder.when(gate);
         for i in 0..5 {
@@ -595,6 +600,104 @@ mod tests {
         assert!(
             !decoder_constraints_hold(&local, &next),
             "entering a span without SPAN or RESPAN must violate the decoder AIR",
+        );
+    }
+
+    fn decoder_accepts(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> bool {
+        eval_decoder(local, next).iter().all(|v| *v == QuadFelt::ZERO)
+    }
+
+    fn honest_in_span_pair() -> (CoreCols<Felt>, CoreCols<Felt>) {
+        let mut local = generate_test_row(opcodes::NOOP.into());
+        let mut next = generate_test_row(opcodes::NOOP.into());
+        local.decoder.addr = Felt::new_unchecked(17);
+        next.decoder.addr = local.decoder.addr;
+        local.decoder.in_span = Felt::ONE;
+        next.decoder.in_span = Felt::ONE;
+        local.decoder.group_count = Felt::ONE;
+        next.decoder.group_count = Felt::ONE;
+        local.decoder.op_index = Felt::ZERO;
+        next.decoder.op_index = Felt::ONE;
+        (local, next)
+    }
+
+    fn span_row_with_single_group() -> CoreCols<Felt> {
+        let mut row = generate_test_row(opcodes::SPAN.into());
+        row.decoder.addr = Felt::new_unchecked(17);
+        row.decoder.group_count = Felt::new_unchecked(2);
+        row.decoder.batch_flags[1] = Felt::ONE;
+        row.decoder.batch_flags[2] = Felt::ONE;
+        row
+    }
+
+    fn valid_repeat_row() -> CoreCols<Felt> {
+        let mut row = generate_test_row(opcodes::REPEAT.into());
+        row.stack.top[0] = Felt::ONE;
+        row.decoder.hasher_state[4] = Felt::ONE;
+        row
+    }
+
+    #[test]
+    fn honest_decoder_adjacency_pairs_are_accepted() {
+        let (in_span_local, in_span_next) = honest_in_span_pair();
+        assert!(
+            decoder_accepts(&in_span_local, &in_span_next),
+            "an ordinary in-span transition must be accepted"
+        );
+
+        let span = span_row_with_single_group();
+        let mut first_op = generate_test_row(opcodes::NOOP.into());
+        first_op.decoder.addr = span.decoder.addr;
+        first_op.decoder.in_span = Felt::ONE;
+        first_op.decoder.group_count = Felt::ONE;
+        assert!(decoder_accepts(&span, &first_op), "SPAN must be allowed to enter a basic block");
+
+        for exit_opcode in [opcodes::END, opcodes::RESPAN] {
+            let mut in_span = generate_test_row(opcodes::NOOP.into());
+            let mut exit = generate_test_row(exit_opcode.into());
+            in_span.decoder.addr = Felt::new_unchecked(17);
+            exit.decoder.addr = in_span.decoder.addr;
+            in_span.decoder.in_span = Felt::ONE;
+            assert!(
+                decoder_accepts(&in_span, &exit),
+                "an in-span row must be allowed to exit via opcode {exit_opcode}"
+            );
+        }
+
+        let mut end = generate_test_row(opcodes::END.into());
+        let mut repeat = valid_repeat_row();
+        end.stack.top[0] = Felt::ONE;
+        end.decoder.hasher_state[4] = Felt::ONE;
+        repeat.decoder.hasher_state[4] = end.decoder.hasher_state[4];
+        assert!(decoder_accepts(&end, &repeat), "END -> REPEAT must remain legal");
+    }
+
+    #[test]
+    fn malformed_decoder_adjacency_pairs_are_rejected() {
+        let (mut in_span, _) = honest_in_span_pair();
+        let mut repeat = valid_repeat_row();
+        repeat.decoder.addr = in_span.decoder.addr;
+        assert!(
+            !decoder_accepts(&in_span, &repeat),
+            "an in-span row cannot exit directly to REPEAT"
+        );
+
+        let loop_row = generate_test_row(opcodes::LOOP.into());
+        assert!(!decoder_accepts(&loop_row, &repeat), "REPEAT's predecessor must be END");
+
+        let end = generate_test_row(opcodes::END.into());
+        let mut illegal_entry = generate_test_row(opcodes::NOOP.into());
+        illegal_entry.decoder.in_span = Felt::ONE;
+        assert!(
+            !decoder_accepts(&end, &illegal_entry),
+            "an in-span successor must be entered by SPAN/RESPAN or another in-span row"
+        );
+
+        in_span.decoder.in_span = Felt::ONE;
+        let split = generate_test_row(opcodes::SPLIT.into());
+        assert!(
+            !decoder_accepts(&in_span, &split),
+            "a basic-block row cannot exit via arbitrary control flow"
         );
     }
 

@@ -457,7 +457,9 @@ When the VM executes a `HALT` operation, it does the following:
 
 #### REPEAT operation
 
-Before a `REPEAT` operation is executed by the VM, the VM copies values in registers $h_0, ..., h_4$ to the next row as shown in the diagram below.
+Before a `REPEAT` operation is executed by the VM, it must immediately follow an
+`END` operation, which copies values in registers $h_0, ..., h_4$ to the next row
+as shown in the diagram below.
 
 ![decoder_repeat_operation](../../img/design/decoder/decoder_repeat_operation.png)
 
