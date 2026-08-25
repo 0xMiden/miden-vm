@@ -1365,6 +1365,11 @@ impl Package {
     }
 
     /// Get a [Dependency] that represents this package
+    ///
+    /// The dependency digest is [`Self::dependency_commitment`], which binds the package code,
+    /// identity, manifest, and the sections that affect package use — the `event_handlers`
+    /// section included: two packages that differ only in handler code have different
+    /// dependency digests.
     pub fn to_dependency(&self) -> Dependency {
         Dependency {
             name: self.name.clone(),
@@ -1794,6 +1799,23 @@ mod tests {
     }
 
     #[test]
+    fn dependency_digest_binds_the_event_handlers_section() {
+        // Handler code decides the advice a program receives, so it affects package use: two
+        // packages that differ only in handler code must not resolve as one dependency.
+        let package = build_kernel_package("kernel");
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let with_other_handlers = package.with_event_handlers(&other_section).unwrap();
+
+        assert_ne!(
+            with_handlers.to_dependency().digest,
+            with_other_handlers.to_dependency().digest
+        );
+    }
+
+    #[test]
     fn event_handler_section_with_trailing_bytes_is_rejected() {
         let mut package = build_kernel_package("kernel");
         let mut data = sample_event_handlers().to_bytes();
@@ -1828,10 +1850,12 @@ mod tests {
     #[test]
     fn oversized_event_handler_section_is_rejected_on_attach() {
         let mut section = sample_event_handlers();
+        // The names are zero-padded, so the manifest is in the canonical order and the count is
+        // the only rule it breaks.
         section.handlers = (0..=MAX_HANDLERS)
             .map(|idx| {
                 EventHandlerManifestEntry::new(
-                    miden_core::events::EventName::from_string(format!("test::wasm::h{idx}")),
+                    miden_core::events::EventName::from_string(format!("test::wasm::h{idx:03}")),
                     format!("h{idx}"),
                 )
             })

@@ -112,14 +112,20 @@ const FUEL_PER_BLAKE3_BYTE: u64 = 1;
 ///    exist only to satisfy wasmi's trait bounds (the store-limiter closure and the linker's
 ///    store-data type parameter), not to enable cross-thread access.
 /// 2. Even if a future wasmi internals change moved the store data, `ProcessorState` is `Sync`
-///    (checked by a static assertion in the tests), so a shared reference reachable through this
-///    pointer is safe to read from any thread.
+///    (checked by the static assertion below), so a shared reference reachable through this pointer
+///    is safe to read from any thread.
 pub(crate) struct StatePtr(*const ProcessorState<'static>);
 
 // SAFETY: see the type-level comment.
 unsafe impl Send for StatePtr {}
 // SAFETY: see the type-level comment.
 unsafe impl Sync for StatePtr {}
+
+// Fact 2 of the safety argument above, checked at compile time.
+const _: () = {
+    const fn assert_sync<T: Sync>() {}
+    assert_sync::<ProcessorState<'static>>();
+};
 
 /// The per-call store data: the processor state, the buffered mutations, the mutation budget,
 /// the recorded `fail` message, and the resource limits.
@@ -447,8 +453,12 @@ fn merkle_lookup_args(
     depth: u32,
     index: u64,
 ) -> Result<(Memory, Word, Felt, Felt), wasmi::Error> {
-    // The lookup walks one level per depth unit, and moves the root in and the node out.
-    charge_fuel(caller, HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8)?;
+    // The lookup walks one level per depth unit, and moves eight felts: the root in and the
+    // node out.
+    charge_fuel(
+        caller,
+        HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8 * FUEL_PER_FELT,
+    )?;
     let mem = memory(caller)?;
     let root = read_word(mem.data(&caller), root)?;
     let index = felt_arg(index)?;
@@ -741,6 +751,9 @@ fn adv_map_insert(
     len: u32,
 ) -> Result<(), wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + (u64::from(len) + 4) * FUEL_PER_FELT)?;
+    // Unlike the two sibling mutations, this call has no `len == 0` early return, on purpose: an
+    // empty value under a key is a meaningful map entry, and the four-felt key charge below
+    // always consumes mutation budget, so a loop of empty inserts cannot run free.
     charge_mutation(caller.data_mut(), (len as usize).saturating_add(4))?;
     let mem = memory(&mut caller)?;
     let key = read_word(mem.data(&caller), key)?;

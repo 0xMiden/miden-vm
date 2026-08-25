@@ -1,9 +1,10 @@
 //! Differential fuzz target: the handler loader's Wasm section walker vs wasmi's validator.
 //!
-//! The loader's start-section check and manifest extraction re-parse the binary with a small
-//! hand-rolled section walker and conservatively reject modules whose walk fails. A module that
-//! wasmi validates but the walker rejects would therefore be falsely refused. This target hunts
-//! for such disagreements.
+//! The loader's start-section check, instantiation-cost estimate, and manifest extraction
+//! re-parse the binary with a small hand-rolled section walker and conservatively reject modules
+//! whose walk fails. A module that wasmi validates but the walker rejects would therefore be
+//! falsely refused. This target hunts for such disagreements, in the plain walk and in the
+//! static analysis the loader builds on it.
 //!
 //! Run with: cargo +nightly fuzz run wasm_section_walk_differential --fuzz-dir tools/miden-core-fuzz
 
@@ -24,6 +25,10 @@ fuzz_target!(|data: &[u8]| {
         assert!(
             miden_wasm_event_handlers::fuzz_walk_sections(data),
             "wasmi validated a module the section walker rejects"
+        );
+        assert!(
+            miden_wasm_event_handlers::fuzz_module_statics(data),
+            "wasmi validated a module the loader's static analysis rejects"
         );
     }
 });

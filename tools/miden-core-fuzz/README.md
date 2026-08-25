@@ -138,8 +138,9 @@ These targets exercise package deserializers used by `.masp`.
 cargo +nightly fuzz run package_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`event_handler_section_deserialize`** — Tests `EventHandlerSection::read_from_bytes` (the
-untrusted `event_handlers` package section with its decode-time size caps).
+**`event_handler_section_deserialize`** — Tests `EventHandlerSection::from_payload` (the
+untrusted `event_handlers` package section with its decode-time size caps), the same function
+`Package::event_handlers` uses.
 
 ```bash
 cargo +nightly fuzz run event_handler_section_deserialize --fuzz-dir tools/miden-core-fuzz
@@ -153,8 +154,9 @@ cargo +nightly fuzz run wasm_handler_manifest --fuzz-dir tools/miden-core-fuzz
 ```
 
 **`wasm_section_walk_differential`** — Differential test: any module wasmi validates must also
-pass the handler loader's hand-rolled section walk, since the loader conservatively rejects
-modules whose walk fails.
+pass the handler loader's hand-rolled section walk and the static analysis built on it (the
+instantiation-cost estimate and the start-section check), since the loader conservatively rejects
+modules that either one refuses.
 
 ```bash
 cargo +nightly fuzz run wasm_section_walk_differential --fuzz-dir tools/miden-core-fuzz

@@ -67,7 +67,7 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when any cell is unwritten, `OutOfBounds` past the `u32` address space. |
 | `mem_read_ctx(ctx, addr, out, count) -> status` | The same batch read for an explicit execution context, for example the root context (ID `0`). |
 | `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
-| `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. |
+| `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. The result is a boolean, not a status code: do not put it through `Status::from_raw`, because `1` is also the raw value of `Status::OutOfBounds`. |
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
 | `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap, out_len) -> status` | Advice-map reads; `NotFound` when the key has no entry. `adv_map_value_read` writes the element count to `out_len` on success and on `CapacityTooSmall`, so one call (plus at most one retry with a grown buffer) suffices. |
 
@@ -95,11 +95,13 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 
 ## Limits and validation
 
-Handler modules are untrusted. At load time the host rejects: imports outside `miden:event/v1` (no WASI), modules with a start section, missing or wrongly-typed manifest exports, duplicate or reserved (`sys::`) event names, and an ABI version mismatch. Float instructions are rejected by default for cross-host determinism.
+Handler modules are untrusted. At load time the host rejects: imports outside `miden:event/v1` (no WASI), modules with a start section, modules with more than 1,024 exports, modules that do not export their linear memory under the name `memory`, missing or wrongly-typed manifest exports, duplicate or reserved (`sys::`) event names, and an ABI version mismatch. Float instructions are rejected by default for cross-host determinism.
 
 The loader also applies wasmi's strict structural limits (`EnforcedLimits::strict()`), which bound the work the compiler itself does on an untrusted binary. A module is rejected when it declares more than 10,000 functions, 1,000 globals, 100 tables, 1,000 element segments, 1 memory, 1,000 data segments, or more than 32 parameters or 32 results in one signature. One more rule bounds many tiny functions: once the function bodies of a module hold 1,000 bytes in total, the bodies must average at least 40 bytes each. Normal compiler output stays far inside these numbers; a module that goes over one of them is almost always machine-written to attack the compiler.
 
 Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), a table-element cap (default 4,096), a module-size cap (default 16 MiB), and a cap on the total buffered mutation size (default 65,536 field elements). Fuel meters more than instructions: every host call charges a flat transition fee plus fuel in proportion to the field elements it moves and the hashes it computes, so the budget bounds the total work a handler causes on the host, not only what it executes itself.
+
+Each call also pays a fixed instantiation charge, which the loader computes once from the static sizes of the module. Initial memory, initial tables, and data segments charge 1 fuel per 8 bytes. Element segments charge much more, 16 fuel per encoded byte, because wasmi realizes every element segment — passive segments included — as boxed values, with one constant-expression evaluation per item, on every instantiation.
 
 ## Determinism across hosts
 

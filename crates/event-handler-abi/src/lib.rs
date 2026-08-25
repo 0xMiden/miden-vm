@@ -293,6 +293,11 @@ pub mod guest {
         ///
         /// `index` and `depth` follow the rules of `merkle_get_node`: a non-canonical `index`
         /// traps, and so does a `depth` or `index` outside the valid range for a Merkle tree.
+        ///
+        /// # Warning
+        /// The `i32` result is a boolean (`1` or `0`), not a `Status`. Do not put it through
+        /// `Status::from_raw`: the value `1` is also the raw value of `Status::OutOfBounds`, so
+        /// a status conversion reads a found path as an error.
         pub fn merkle_has_path(root: *const Word, depth: u32, index: u64) -> i32;
 
         // HASHING
