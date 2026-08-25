@@ -12,10 +12,13 @@
 
 use alloc::{format, string::String, vec::Vec};
 
-use miden_crypto::hash::{
-    blake::Blake3_256,
-    keccak::Keccak256,
-    sha2::{Sha256, Sha512},
+use miden_crypto::{
+    field::QuotientMap,
+    hash::{
+        blake::Blake3_256,
+        keccak::Keccak256,
+        sha2::{Sha256, Sha512},
+    },
 };
 use miden_event_handler_abi::{FIELD_MODULUS, IMPORT_MODULE, Status, host_fn};
 use miden_processor::{
@@ -34,7 +37,7 @@ use crate::{
 // ================================================================================================
 
 /// The number of bytes of one serialized field element.
-const FELT_BYTES: usize = 8;
+const FELT_BYTES: usize = Felt::NUM_BYTES;
 
 /// The number of field elements in one serialized Merkle node (three words).
 const MERKLE_NODE_FELTS: usize = 12;
@@ -143,8 +146,8 @@ pub(crate) struct HostCtx {
     pub error_msg: Option<String>,
     /// The wasmi resource limits (linear memory size, instance/table counts).
     pub limits: StoreLimits,
-    /// The guest's exported linear memory, resolved once after instantiation. `None` when the
-    /// module exports no memory under the name `memory`.
+    /// The guest's exported linear memory, resolved once after instantiation. `None` before the
+    /// resolution and for the load-time dry run, which runs no guest code.
     pub memory: Option<Memory>,
 }
 
@@ -201,6 +204,8 @@ fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c ProcessorState<'c>, 
 /// Returns the guest's exported linear memory.
 ///
 /// The handle is resolved once per instantiation, so this is a field read, not an export lookup.
+/// The load path refuses a module without the `memory` export, so the handle is always set for a
+/// running handler; the error path is defense in depth for that invariant.
 fn memory(caller: &mut Caller<'_, HostCtx>) -> Result<Memory, wasmi::Error> {
     caller
         .data()
@@ -247,10 +252,8 @@ fn read_felts(data: &[u8], ptr: u32, count: u32) -> Result<Vec<Felt>, wasmi::Err
 
 /// Converts a `u64` the guest passed by value into a field element; a non-canonical value traps.
 fn felt_arg(raw: u64) -> Result<Felt, wasmi::Error> {
-    if raw >= FIELD_MODULUS {
-        return Err(trap(format!("non-canonical field element {raw}")));
-    }
-    Ok(Felt::new_unchecked(raw))
+    Felt::from_canonical_checked(raw)
+        .ok_or_else(|| trap(format!("non-canonical field element {raw}")))
 }
 
 /// Reads one word (four field elements) from guest memory.
@@ -453,8 +456,9 @@ fn merkle_lookup_args(
     depth: u32,
     index: u64,
 ) -> Result<(Memory, Word, Felt, Felt), wasmi::Error> {
-    // The lookup walks one level per depth unit, and moves eight felts: the root in and the
-    // node out.
+    // The lookup walks one level per depth unit. The eight-felt charge is a shared upper bound
+    // for both callers: `merkle_get_node` moves the root in and the node out, while
+    // `merkle_has_path` moves only the root in and returns an `i32`.
     charge_fuel(
         caller,
         HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8 * FUEL_PER_FELT,
@@ -860,11 +864,18 @@ macro_rules! register {
 
 /// Builds the linker that provides the full `miden:event/v1` host function set.
 ///
+/// The registered names must be exactly [`host_fn::ALL`], which the loader uses as its import
+/// allowlist: a name in the table but not in `ALL` makes the loader refuse every module that
+/// imports it, and a name in `ALL` but not in the table fails at instantiation. The WAT import
+/// fixture of `tests/handlers.rs` declares the whole set, so every entry of the table below is
+/// resolved and type-checked by the tests.
+///
 /// # Panics
 /// Panics on a duplicate definition, which would be a bug in this crate.
 pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
     let mut linker = Linker::new(engine);
 
+    // Keep in sync with `host_fn::ALL`; see the note above.
     register!(linker,
         // queries
         host_fn::STACK_DEPTH => stack_depth,

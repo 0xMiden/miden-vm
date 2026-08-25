@@ -1862,7 +1862,7 @@ mod tests {
             .collect();
         assert!(matches!(
             build_kernel_package("kernel").with_event_handlers(&section),
-            Err(EventHandlerSectionError::OverSizeCap { field: "handler count", .. })
+            Err(EventHandlerSectionError::TooManyHandlers { max: MAX_HANDLERS })
         ));
     }
 

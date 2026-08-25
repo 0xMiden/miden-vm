@@ -215,7 +215,8 @@ pub mod host_fn {
     /// Every host function name of this ABI version.
     ///
     /// The loader checks each import of a handler module against this set, so the import
-    /// count of a loadable module is bounded by it.
+    /// count of a loadable module is bounded by it. The host-side linker (`build_linker` in
+    /// `miden-wasm-event-handlers`) registers exactly these names; keep the two in sync.
     pub const ALL: [&str; 25] = [
         STACK_DEPTH,
         STACK_GET,
@@ -446,6 +447,22 @@ pub mod guest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_function_list_is_the_full_set() {
+        // `ALL` is the one list of host functions: the loader's import allowlist reads it, the
+        // linker registration in `miden-wasm-event-handlers` must match it name for name, and
+        // the WAT import fixture of that crate declares the same set. The count is pinned here,
+        // so a new host function cannot reach the linker without this list.
+        assert_eq!(host_fn::ALL.len(), 25);
+        for (index, name) in host_fn::ALL.iter().enumerate() {
+            assert!(!name.is_empty(), "a host function name is empty");
+            assert!(
+                !host_fn::ALL[index + 1..].contains(name),
+                "duplicate host function name '{name}'"
+            );
+        }
+    }
 
     #[test]
     fn field_modulus_matches_miden_field() {

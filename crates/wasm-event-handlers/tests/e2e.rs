@@ -318,33 +318,8 @@ fn rust_guest_imports_stay_inside_the_abi() {
 
     use miden_event_handler_abi::{IMPORT_MODULE, host_fn};
 
-    let abi: BTreeSet<&str> = BTreeSet::from([
-        host_fn::STACK_DEPTH,
-        host_fn::STACK_GET,
-        host_fn::STACK_READ,
-        host_fn::CLK,
-        host_fn::CTX,
-        host_fn::MEM_GET,
-        host_fn::MEM_READ,
-        host_fn::MEM_READ_CTX,
-        host_fn::MERKLE_GET_NODE,
-        host_fn::MERKLE_HAS_PATH,
-        host_fn::POSEIDON2_MERGE,
-        host_fn::POSEIDON2_HASH,
-        host_fn::POSEIDON2_PERMUTE,
-        host_fn::KECCAK256,
-        host_fn::SHA256,
-        host_fn::SHA512,
-        host_fn::BLAKE3,
-        host_fn::ADV_STACK_LEN,
-        host_fn::ADV_STACK_READ,
-        host_fn::ADV_MAP_VALUE_LEN,
-        host_fn::ADV_MAP_VALUE_READ,
-        host_fn::ADV_STACK_EXTEND,
-        host_fn::ADV_MAP_INSERT,
-        host_fn::MERKLE_STORE_EXTEND,
-        host_fn::FAIL,
-    ]);
+    // `host_fn::ALL` is the one list of host functions; copying it here would let the copy drift.
+    let abi: BTreeSet<&str> = host_fn::ALL.into_iter().collect();
 
     let wasm = build_rust_guest_fixture();
     let engine = wasmi::Engine::default();

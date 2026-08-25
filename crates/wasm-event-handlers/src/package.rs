@@ -5,8 +5,8 @@ use alloc::{format, string::ToString, sync::Arc, vec::Vec};
 
 use miden_event_handler_abi::{ABI_VERSION, MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
 use miden_mast_package::{
-    EventHandlerManifestEntry, EventHandlerSection, MAX_HANDLERS, MAX_MODULE_BYTES, MAX_NAME_BYTES,
-    Package,
+    EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
+    MAX_MODULE_BYTES, MAX_NAME_BYTES, Package,
 };
 use miden_processor::{
     HostLibrary,
@@ -71,9 +71,10 @@ pub fn host_library_from_package(
 /// stops at [`MAX_HANDLERS`] entries and at names over [`MAX_NAME_BYTES`].
 ///
 /// # Errors
-/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap, and
+/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap,
 /// [`WasmHandlerLoadError::InvalidModule`] when the section layout or a manifest record is
-/// malformed, or when the records go over the manifest caps.
+/// malformed, and [`WasmHandlerLoadError::InvalidManifest`] when the records break a manifest
+/// rule of the package format.
 pub fn manifest_from_module(
     wasm: &[u8],
 ) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
@@ -117,9 +118,14 @@ pub fn manifest_from_module(
 /// not make the module bytes independent of link order — the code and data sections also move
 /// when the linker changes their order.
 ///
+/// The derived section is also dry-loaded with [`WasmHandlerModule::new`], so producer tooling
+/// cannot ship a package that every consumer refuses at load. The dry load uses
+/// [`WasmHandlerLimits::default`]: limits are host policy, so a host with stricter limits (a
+/// smaller fuel budget or memory cap) can still refuse a section this function accepts.
+///
 /// # Errors
 /// Same failure conditions as [`manifest_from_module`], plus the section rules of
-/// [`EventHandlerSection::validate`].
+/// [`EventHandlerSection::validate`] and the load rules of [`WasmHandlerModule::new`].
 pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHandlerLoadError> {
     let mut handlers = manifest_from_module(&wasm)?;
     handlers.sort_by(|a, b| a.event.as_str().cmp(b.event.as_str()));
@@ -134,6 +140,21 @@ pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHan
         handlers,
     };
     section.validate()?;
+
+    // The section rules say nothing about the module itself, so a section that passes them can
+    // still fail every consumer's load (no `memory` export, an import outside the host function
+    // set, a bad export signature). Move that failure to the producer's build.
+    let manifest = section
+        .handlers
+        .iter()
+        .map(|entry| (entry.event.clone(), entry.export.clone()))
+        .collect();
+    WasmHandlerModule::new(
+        &section.module,
+        section.abi_version,
+        manifest,
+        WasmHandlerLimits::default(),
+    )?;
     Ok(section)
 }
 
@@ -228,6 +249,11 @@ fn parse_manifest_records(
     mut records: &[u8],
     entries: &mut Vec<EventHandlerManifestEntry>,
 ) -> Result<(), WasmHandlerLoadError> {
+    /// Reports a manifest rule of the package format as a load error.
+    fn manifest_error(err: EventHandlerSectionError) -> WasmHandlerLoadError {
+        WasmHandlerLoadError::InvalidManifest(err)
+    }
+
     fn read_name(records: &[u8]) -> Option<(&str, &[u8])> {
         let len_bytes: [u8; 4] = records.get(..4)?.try_into().ok()?;
         let len = u32::from_le_bytes(len_bytes) as usize;
@@ -247,25 +273,26 @@ fn parse_manifest_records(
         }
         let (event, rest) = read_name(rest).ok_or_else(malformed)?;
         let (export, rest) = read_name(rest).ok_or_else(malformed)?;
-        if event.is_empty() || export.is_empty() {
-            return Err(WasmHandlerLoadError::InvalidModule(
-                "manifest record has an empty event or export name".to_string(),
-            ));
-        }
-        // The names are still borrowed from the module here, so both caps apply before the
-        // entry allocates.
-        for name in [event, export] {
+        // The names are still borrowed from the module here, so the per-entry rules apply
+        // before the entry allocates. The rules and their messages come from the package
+        // format, so this early check cannot drift from `validate_manifest_entries`, which
+        // sees the same manifest later.
+        for (field, name) in [("event name", event), ("export name", export)] {
+            if name.is_empty() {
+                return Err(manifest_error(EventHandlerSectionError::EmptyName { field }));
+            }
             if name.len() > MAX_NAME_BYTES {
-                return Err(WasmHandlerLoadError::InvalidModule(format!(
-                    "manifest record name length {} goes over the cap of {MAX_NAME_BYTES}",
-                    name.len()
-                )));
+                return Err(manifest_error(EventHandlerSectionError::OverSizeCap {
+                    field,
+                    actual: name.len(),
+                    max: MAX_NAME_BYTES,
+                }));
             }
         }
         if entries.len() >= MAX_HANDLERS {
-            return Err(WasmHandlerLoadError::InvalidModule(format!(
-                "module declares more than {MAX_HANDLERS} handlers"
-            )));
+            return Err(manifest_error(EventHandlerSectionError::TooManyHandlers {
+                max: MAX_HANDLERS,
+            }));
         }
         entries.push(EventHandlerManifestEntry::new(
             EventName::from_string(event.to_string()),
@@ -299,8 +326,21 @@ mod tests {
         }
     }
 
-    /// The 8-byte Wasm module header: magic and version.
-    const MODULE_HEADER: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    /// Builds a loadable handler module: the exported linear memory plus one `() -> ()` export
+    /// per distinct name. Derivation dry-loads the section it builds, so the fixtures must pass
+    /// the load rules as well as the section rules.
+    fn base_module(exports: &[&str]) -> Vec<u8> {
+        let mut declared: Vec<&str> = Vec::new();
+        let mut funcs = String::new();
+        for export in exports {
+            if !declared.contains(export) {
+                declared.push(export);
+                funcs.push_str(&format!("(func (export \"{export}\"))"));
+            }
+        }
+        wat::parse_str(format!("(module (memory (export \"memory\") 1) {funcs})"))
+            .expect("the fixture WAT parses")
+    }
 
     /// Encodes one custom section: ID 0, the LEB128 payload size, the LEB128-prefixed name, the
     /// content.
@@ -328,10 +368,11 @@ mod tests {
         records
     }
 
-    /// Builds a Wasm binary whose only section is the `miden:event-manifest` custom section, with
+    /// Builds a loadable Wasm binary that carries a `miden:event-manifest` custom section with
     /// one record per `(event, export)` pair, in the given order.
     fn module_with_manifest(handlers: &[(&str, &str)]) -> Vec<u8> {
-        let mut wasm = MODULE_HEADER.to_vec();
+        let exports: Vec<&str> = handlers.iter().map(|(_, export)| *export).collect();
+        let mut wasm = base_module(&exports);
         wasm.extend_from_slice(&custom_section(MANIFEST_SECTION_NAME, &manifest_records(handlers)));
         wasm
     }
@@ -364,8 +405,9 @@ mod tests {
 
     #[test]
     fn derivation_strips_the_manifest_sections() {
-        let other = custom_section("name", b"keep me");
-        let mut wasm = MODULE_HEADER.to_vec();
+        let other = custom_section("extra", b"keep me");
+        let base = base_module(&["a", "b"]);
+        let mut wasm = base.clone();
         wasm.extend_from_slice(&custom_section(
             MANIFEST_SECTION_NAME,
             &manifest_records(&[("test::wasm::a", "a")]),
@@ -381,7 +423,7 @@ mod tests {
         assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
 
         // The shipped module keeps every other section and carries no manifest records.
-        let mut expected = MODULE_HEADER.to_vec();
+        let mut expected = base;
         expected.extend_from_slice(&other);
         assert_eq!(section.module, expected);
         assert!(
@@ -389,6 +431,24 @@ mod tests {
                 .expect("the stripped module still parses")
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn derived_section_must_load() {
+        // The manifest records break no section rule, but the module exports no linear memory,
+        // so every host would refuse it at load. Derivation refuses it at the producer instead.
+        let mut wasm = wat::parse_str("(module (func (export \"a\")))").expect("the WAT parses");
+        wasm.extend_from_slice(&custom_section(
+            MANIFEST_SECTION_NAME,
+            &manifest_records(&[("test::wasm::a", "a")]),
+        ));
+
+        // The records themselves parse; only the load rules refuse the module.
+        assert_eq!(manifest_from_module(&wasm).expect("the manifest parses").len(), 1);
+        assert!(matches!(
+            section_from_module(wasm),
+            Err(WasmHandlerLoadError::MissingMemoryExport)
+        ));
     }
 
     #[test]

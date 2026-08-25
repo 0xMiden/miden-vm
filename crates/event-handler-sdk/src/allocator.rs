@@ -55,13 +55,23 @@ unsafe impl GlobalAlloc for Bump {
         if previous == usize::MAX {
             return ptr::null_mut();
         }
-        match fit(previous * PAGE_SIZE, layout) {
+        // A successful grow means the host reserved `previous + pages` pages. The byte count of
+        // the whole 32-bit address space is `2^32`, which does not fit a 32-bit `usize`, so the
+        // region bounds are computed with checked arithmetic instead of relying on the host cap
+        // to keep the reserved region far below 4 GiB. An overflow gives up the grown pages and
+        // returns null; the allocation fails, but nothing wraps.
+        let Some(region_start) = previous.checked_mul(PAGE_SIZE) else {
+            return ptr::null_mut();
+        };
+        let Some(region_end) =
+            pages.checked_mul(PAGE_SIZE).and_then(|grown| region_start.checked_add(grown))
+        else {
+            return ptr::null_mut();
+        };
+        match fit(region_start, layout) {
             Some((start, stop)) => {
                 *next = stop;
-                // A successful grow means the host reserved `previous + pages` pages, and the
-                // host caps the handler memory far below the 4 GiB of the 32-bit address space,
-                // so the byte count of the reserved region fits in a 32-bit `usize`.
-                *end = (previous + pages) * PAGE_SIZE;
+                *end = region_end;
                 start as *mut u8
             },
             None => ptr::null_mut(),

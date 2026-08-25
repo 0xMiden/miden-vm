@@ -136,9 +136,12 @@ pub fn validate_manifest_entries<'a>(
     let mut count: usize = 0;
     for (event, export) in entries {
         // The count is checked first, so no unbounded iterator makes this function allocate
-        // past the cap.
+        // past the cap. The walk stops at the first entry past the cap, so the real entry
+        // count is unknown here and the error names only the cap.
         count += 1;
-        check_size_cap("handler count", count, MAX_HANDLERS)?;
+        if count > MAX_HANDLERS {
+            return Err(EventHandlerSectionError::TooManyHandlers { max: MAX_HANDLERS });
+        }
         for (field, name) in [("event name", event.as_str()), ("export name", export)] {
             if name.is_empty() {
                 return Err(EventHandlerSectionError::EmptyName { field });
@@ -220,6 +223,17 @@ pub enum EventHandlerSectionError {
     InvalidAbiVersion {
         /// The declared version.
         version: u32,
+    },
+
+    /// The manifest holds more entries than the cap.
+    ///
+    /// The rule is checked while the entries are walked, so the error names the cap and not the
+    /// real entry count. The section decode, which reads a declared count up front, reports an
+    /// over-long manifest as [`Self::OverSizeCap`] instead.
+    #[error("'event_handlers' section manifest has more than {max} entries")]
+    TooManyHandlers {
+        /// The cap for the entry count.
+        max: usize,
     },
 
     /// A name of a manifest entry is empty.

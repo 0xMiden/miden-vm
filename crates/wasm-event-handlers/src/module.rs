@@ -43,6 +43,12 @@ pub struct WasmHandlerLimits {
     /// [`MAX_MODULE_BYTES`] never reaches this check: no package can carry it.
     pub max_module_bytes: usize,
     /// The maximum total number of field elements across all mutations one call buffers.
+    ///
+    /// The processor bounds the same data again when the mutations are applied, with
+    /// `ExecutionOptions::max_advice_size_bytes` (default 16 MiB). This cap is per call and in
+    /// field elements, so at the two defaults (65,536 felts = 512 KiB) it binds about 32 times
+    /// tighter. Tune the two together: raising the advice-size budget alone changes nothing for
+    /// handler mutations.
     pub max_mutation_felts: usize,
     /// Permits float instructions in the handler module. Off by default: handler output must be
     /// deterministic across hosts, and handlers have no use for floats.
@@ -103,14 +109,16 @@ impl WasmHandlerModule {
     ///
     /// # Errors
     /// Returns an error when:
-    /// - `abi_version` is not the version this crate implements;
+    /// - `abi_version` is zero or newer than the version this crate implements;
     /// - the Wasm binary is larger than `limits.max_module_bytes`;
     /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
     ///   ([`EnforcedLimits::strict`]);
-    /// - the module imports from a namespace other than `miden:event/v1`, imports the same function
-    ///   more than once, or an import has a signature the host function set does not provide;
+    /// - the module imports from a namespace other than `miden:event/v1`, imports a name outside
+    ///   the host function set, imports the same function more than once, or an import has a
+    ///   signature the host function set does not provide;
     /// - the module has more than 1024 exports (`MAX_MODULE_EXPORTS`);
     /// - the module has a start section;
+    /// - the fixed instantiation charge does not fit `limits.fuel`, so no call could ever run;
     /// - a manifest export is missing or does not have the `() -> ()` signature;
     /// - the module does not export its linear memory as `memory`;
     /// - the manifest breaks a section rule (more entries than the manifest cap, an empty or
@@ -364,9 +372,9 @@ impl WasmHandlerModule {
 
 /// Stores the instance's exported linear memory in the store data.
 ///
-/// Host functions read the handle from there, so no host call repeats the export lookup. The
-/// handle stays unset for a module that exports no memory under the name `memory`; the first
-/// host call that takes a guest pointer then traps.
+/// Host functions read the handle from there, so no host call repeats the export lookup. Load
+/// refuses a module without the `memory` export ([`WasmHandlerLoadError::MissingMemoryExport`]),
+/// so the lookup here always succeeds; the `Option` is defense in depth for that invariant.
 fn cache_memory(store: &mut Store<HostCtx>, instance: Instance) {
     let memory = instance.get_memory(&*store, "memory");
     store.data_mut().memory = memory;
@@ -556,14 +564,15 @@ fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
             // A table's reference type is one byte in the short form (0x70 funcref,
             // 0x6F externref). With the reference-types feature this loader enables, wasmi
             // also validates the long-form encoding 0x63 0x70 / 0x63 0x6F — `(ref null
-            // func/extern)` — which carries one extra heaptype byte. wasmi rejects every
-            // other long form (0x64, GC heap types, type indices), so consuming one extra
-            // byte after 0x63 keeps this conservative walk in sync with validation.
+            // func/extern)` — whose heaptype is an s33 LEB. wasmi 1.1.0 rejects every other
+            // long form (0x64, GC heap types, type indices), and 0x70/0x6F are one-byte LEB
+            // terminals, so the skip below consumes the same bytes today; it stays in sync
+            // with validation if a wasmi upgrade admits multi-byte heaptypes.
             let reftype = *payload.get(pos)?;
             pos += 1;
             if reftype == 0x63 {
-                payload.get(pos)?;
-                pos += 1;
+                let (_, next) = read_leb_u64(payload, pos)?;
+                pos = next;
             }
         }
         let flags = *payload.get(pos)?;
