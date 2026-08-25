@@ -117,6 +117,7 @@ impl<EF> PeriodicColumnData<EF> {
         F: TwoAdicField,
         EF: From<F>,
     {
+        let dft = Radix2DFTSmallBatch::<F>::default();
         let mut columns = Vec::with_capacity(periodic_columns.len());
         for col in periodic_columns {
             assert!(!col.is_empty(), "periodic column must not be empty");
@@ -136,11 +137,7 @@ impl<EF> PeriodicColumnData<EF> {
             let column = if terms.is_empty() || sparse_ops < dense_ops {
                 PeriodicColumn::Sparse { period, terms }
             } else {
-                let coeffs = Radix2DFTSmallBatch::<F>::default()
-                    .idft(col)
-                    .into_iter()
-                    .map(EF::from)
-                    .collect();
+                let coeffs = dft.idft(col).into_iter().map(EF::from).collect();
                 PeriodicColumn::Dense(coeffs)
             };
             columns.push(column);
