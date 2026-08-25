@@ -15,7 +15,7 @@ use miden_crypto::stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
 
-use crate::{config, prove_stark};
+use crate::{Prover, config, prove_stark};
 
 fn core_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
     let width = matrix.width();
@@ -49,7 +49,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let stack_inputs = StackInputs::new(&stack_values).unwrap();
     let mut host = DefaultHost::default();
     let (trace, precompile_witness) = FastProcessor::new(stack_inputs)
-        .execute_and_build_trace_sync(&program, &mut host)
+        .execute_and_build_trace_sync(&program, &mut host, Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES)
         .unwrap();
     assert!(precompile_witness.is_none());
     assert_eq!(trace.precompile_root(), TRUE_DIGEST);
