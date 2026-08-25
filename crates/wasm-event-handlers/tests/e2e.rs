@@ -172,7 +172,8 @@ fn rust_guest_fixture_end_to_end() {
 
     let wasm = build_rust_guest_fixture();
     // The manifest comes from the module's own miden:event-manifest records.
-    let section = section_from_module(wasm).expect("the fixture embeds its manifest");
+    let section = section_from_module(wasm, WasmHandlerLimits::default())
+        .expect("the fixture embeds its manifest");
     let mut events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
     events.sort_unstable();
     assert_eq!(
@@ -220,7 +221,8 @@ fn rust_guest_merges_words() {
     use miden_wasm_event_handlers::section_from_module;
 
     let wasm = build_rust_guest_fixture();
-    let section = section_from_module(wasm).expect("the fixture embeds its manifest");
+    let section = section_from_module(wasm, WasmHandlerLimits::default())
+        .expect("the fixture embeds its manifest");
 
     // `push.1.2.3.4 push.5.6.7.8` leaves 8 closest to the top of the stack, and the event ID
     // takes position 0 during the event. The handler's words are therefore the elements at
@@ -267,7 +269,9 @@ fn rust_guest_merges_words() {
 #[test]
 fn rust_guest_panic_reaches_the_host() {
     let wasm = build_rust_guest_fixture();
-    let section = miden_wasm_event_handlers::section_from_module(wasm).expect("manifest embedded");
+    let section =
+        miden_wasm_event_handlers::section_from_module(wasm, WasmHandlerLimits::default())
+            .expect("manifest embedded");
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Assembler::new(source_manager)

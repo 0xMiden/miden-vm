@@ -118,15 +118,20 @@ pub fn manifest_from_module(
 /// not make the module bytes independent of link order — the code and data sections also move
 /// when the linker changes their order.
 ///
-/// The derived section is also dry-loaded with [`WasmHandlerModule::new`], so producer tooling
-/// cannot ship a package that every consumer refuses at load. The dry load uses
-/// [`WasmHandlerLimits::default`]: limits are host policy, so a host with stricter limits (a
-/// smaller fuel budget or memory cap) can still refuse a section this function accepts.
+/// The derived section is also dry-loaded with [`WasmHandlerModule::new`] under `limits`, so
+/// producer tooling cannot ship a package that every consumer refuses at load. Pass
+/// [`WasmHandlerLimits::default`] for the default host policy, or the limits of the target hosts
+/// when they are looser: a module that needs more fuel or memory than the default is a valid
+/// package for a host that grants it. Limits stay host policy in both directions, so a consumer
+/// with stricter limits can still refuse a section this function accepts.
 ///
 /// # Errors
 /// Same failure conditions as [`manifest_from_module`], plus the section rules of
 /// [`EventHandlerSection::validate`] and the load rules of [`WasmHandlerModule::new`].
-pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHandlerLoadError> {
+pub fn section_from_module(
+    wasm: Vec<u8>,
+    limits: WasmHandlerLimits,
+) -> Result<EventHandlerSection, WasmHandlerLoadError> {
     let mut handlers = manifest_from_module(&wasm)?;
     handlers.sort_by(|a, b| a.event.as_str().cmp(b.event.as_str()));
     let module = strip_manifest_sections(&wasm).ok_or_else(|| {
@@ -149,12 +154,7 @@ pub fn section_from_module(wasm: Vec<u8>) -> Result<EventHandlerSection, WasmHan
         .iter()
         .map(|entry| (entry.event.clone(), entry.export.clone()))
         .collect();
-    WasmHandlerModule::new(
-        &section.module,
-        section.abi_version,
-        manifest,
-        WasmHandlerLimits::default(),
-    )?;
+    WasmHandlerModule::new(&section.module, section.abi_version, manifest, limits)?;
     Ok(section)
 }
 
@@ -387,7 +387,8 @@ mod tests {
 
         // Derivation canonicalizes the order, so the link order cannot change the identity of
         // the package.
-        let section = section_from_module(wasm).expect("the section derives");
+        let section =
+            section_from_module(wasm, WasmHandlerLimits::default()).expect("the section derives");
         let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
         assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
     }
@@ -396,11 +397,17 @@ mod tests {
     fn derived_section_applies_the_section_rules() {
         // Two handlers for one event.
         let wasm = module_with_manifest(&[("test::wasm::a", "a"), ("test::wasm::a", "b")]);
-        assert!(matches!(section_from_module(wasm), Err(WasmHandlerLoadError::Section(_))));
+        assert!(matches!(
+            section_from_module(wasm, WasmHandlerLimits::default()),
+            Err(WasmHandlerLoadError::Section(_))
+        ));
 
         // An event in the reserved namespace.
         let wasm = module_with_manifest(&[("sys::a", "a")]);
-        assert!(matches!(section_from_module(wasm), Err(WasmHandlerLoadError::Section(_))));
+        assert!(matches!(
+            section_from_module(wasm, WasmHandlerLimits::default()),
+            Err(WasmHandlerLoadError::Section(_))
+        ));
     }
 
     #[test]
@@ -418,7 +425,8 @@ mod tests {
             &manifest_records(&[("test::wasm::b", "b")]),
         ));
 
-        let section = section_from_module(wasm).expect("the section derives");
+        let section =
+            section_from_module(wasm, WasmHandlerLimits::default()).expect("the section derives");
         let events: Vec<_> = section.handlers.iter().map(|entry| entry.event.as_str()).collect();
         assert_eq!(events, vec!["test::wasm::a", "test::wasm::b"]);
 
@@ -446,9 +454,31 @@ mod tests {
         // The records themselves parse; only the load rules refuse the module.
         assert_eq!(manifest_from_module(&wasm).expect("the manifest parses").len(), 1);
         assert!(matches!(
-            section_from_module(wasm),
+            section_from_module(wasm, WasmHandlerLimits::default()),
             Err(WasmHandlerLoadError::MissingMemoryExport)
         ));
+    }
+
+    #[test]
+    fn derivation_dry_loads_under_the_given_limits() {
+        // The table declares more elements than the default cap grants, so the default limits
+        // refuse a module that a host with a larger cap accepts. The producer must be able to
+        // build the section for that host.
+        let mut wasm = wat::parse_str(
+            "(module (memory (export \"memory\") 1) (table 5000 funcref) (func (export \"a\")))",
+        )
+        .expect("the WAT parses");
+        wasm.extend_from_slice(&custom_section(
+            MANIFEST_SECTION_NAME,
+            &manifest_records(&[("test::wasm::a", "a")]),
+        ));
+
+        assert!(section_from_module(wasm.clone(), WasmHandlerLimits::default()).is_err());
+        let looser = WasmHandlerLimits {
+            max_table_elements: 8192,
+            ..WasmHandlerLimits::default()
+        };
+        section_from_module(wasm, looser).expect("the looser table cap accepts the module");
     }
 
     #[test]

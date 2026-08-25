@@ -20,7 +20,7 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
-use miden_event_handler_abi::{FIELD_MODULUS, IMPORT_MODULE, Status, host_fn};
+use miden_event_handler_abi::{FIELD_MODULUS, IMPORT_MODULE, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
     ContextId, Felt, ProcessorState, Word,
     advice::{AdviceError, AdviceMap, AdviceMutation},
@@ -204,13 +204,12 @@ fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c ProcessorState<'c>, 
 /// Returns the guest's exported linear memory.
 ///
 /// The handle is resolved once per instantiation, so this is a field read, not an export lookup.
-/// The load path refuses a module without the `memory` export, so the handle is always set for a
-/// running handler; the error path is defense in depth for that invariant.
+/// The load path refuses a module without the [`MEMORY_EXPORT`] export, so the handle is always
+/// set for a running handler; the error path is defense in depth for that invariant.
 fn memory(caller: &mut Caller<'_, HostCtx>) -> Result<Memory, wasmi::Error> {
-    caller
-        .data()
-        .memory
-        .ok_or_else(|| trap("handler module does not export its linear memory as 'memory'"))
+    caller.data().memory.ok_or_else(|| {
+        trap(format!("handler module does not export its linear memory as '{MEMORY_EXPORT}'"))
+    })
 }
 
 /// Computes the byte range `[ptr, ptr + count * elem_size)` and checks it against the guest
@@ -373,7 +372,11 @@ fn ctx(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
 }
 
 /// Writes the memory element at address `addr` of the current context to `out`, or returns
-/// [`Status::Uninit`] when the cell was never written.
+/// [`Status::Uninit`] when no cell of the memory word that holds `addr` was ever written.
+///
+/// VM memory initializes one word (four elements) at a time, so presence is word-granular: after
+/// a write to any address of a word, the other three addresses of that word give [`Status::Ok`]
+/// with the value zero.
 fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
@@ -392,7 +395,8 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` to `out`, reading from
 /// `ctx` or, when it is `None`, from the current context. Returns a status when the range is out
-/// of bounds or any cell is uninitialized.
+/// of bounds or touches a memory word no cell of which was ever written. Presence is
+/// word-granular; see [`mem_get`].
 ///
 /// `mem_read` and `mem_read_ctx` are both this function, so the single charge here is the whole
 /// fuel charge of one call.
@@ -417,7 +421,8 @@ fn mem_read_range(
         // inside the u32 address space.
         match state.get_mem_value(ctx, addr + idx) {
             Some(felt) => felts.push(felt),
-            // The whole range must be written; use `mem_get` for per-cell checks.
+            // Every memory word the range touches must be written; use `mem_get` for per-word
+            // checks.
             None => return Ok(Status::Uninit.as_raw()),
         }
     }
@@ -426,7 +431,8 @@ fn mem_read_range(
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of the current context
-/// to `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
+/// to `out`, or returns a status when the range is out of bounds or touches an unwritten memory
+/// word.
 fn mem_read(
     mut caller: Caller<'_, HostCtx>,
     addr: u32,
@@ -437,7 +443,8 @@ fn mem_read(
 }
 
 /// Writes the `count` memory elements at addresses `addr..addr + count` of context `ctx` to
-/// `out`, or returns a status when the range is out of bounds or any cell is uninitialized.
+/// `out`, or returns a status when the range is out of bounds or touches an unwritten memory
+/// word.
 fn mem_read_ctx(
     mut caller: Caller<'_, HostCtx>,
     ctx: u32,
@@ -853,30 +860,41 @@ fn fail(mut caller: Caller<'_, HostCtx>, msg_ptr: u32, msg_len: u32) -> Result<(
 
 /// Defines the given host functions in the linker under the [`IMPORT_MODULE`] namespace.
 macro_rules! register {
-    ($linker:ident, $($name:path => $func:path),+ $(,)?) => {
+    ($linker:ident, $($name:path => $func:path),+ $(,)?) => {{
         $(
             $linker
                 .func_wrap(IMPORT_MODULE, $name, $func)
                 .expect("no duplicate host function definitions");
         )+
-    };
+        // The registered names, in registration order. wasmi's `Linker` does not expose its
+        // definitions, so this array is the only way to read back what the table holds.
+        [$($name),+]
+    }};
 }
 
 /// Builds the linker that provides the full `miden:event/v1` host function set.
 ///
-/// The registered names must be exactly [`host_fn::ALL`], which the loader uses as its import
-/// allowlist: a name in the table but not in `ALL` makes the loader refuse every module that
-/// imports it, and a name in `ALL` but not in the table fails at instantiation. The WAT import
-/// fixture of `tests/handlers.rs` declares the whole set, so every entry of the table below is
-/// resolved and type-checked by the tests.
-///
 /// # Panics
 /// Panics on a duplicate definition, which would be a bug in this crate.
 pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
+    build_linker_with_names(engine).0
+}
+
+/// Builds the linker and returns the host function names it registered.
+///
+/// The registered names must be exactly [`host_fn::ALL`], which the loader uses as its import
+/// allowlist: a name in the table but not in `ALL` makes the loader refuse every module that
+/// imports it, and a name in `ALL` but not in the table fails at instantiation. The array length
+/// pins the count at compile time, and `linker_registers_exactly_the_abi_host_functions` pins the
+/// names. The WAT import fixture of `tests/handlers.rs` declares the whole set, so every entry of
+/// the table below is also resolved and type-checked by the tests.
+fn build_linker_with_names(
+    engine: &Engine,
+) -> (Linker<HostCtx>, [&'static str; host_fn::ALL.len()]) {
     let mut linker = Linker::new(engine);
 
     // Keep in sync with `host_fn::ALL`; see the note above.
-    register!(linker,
+    let registered = register!(linker,
         // queries
         host_fn::STACK_DEPTH => stack_depth,
         host_fn::STACK_GET => stack_get,
@@ -909,5 +927,25 @@ pub(crate) fn build_linker(engine: &Engine) -> Linker<HostCtx> {
         host_fn::FAIL => fail,
     );
 
-    linker
+    (linker, registered)
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeSet;
+
+    use super::*;
+
+    #[test]
+    fn linker_registers_exactly_the_abi_host_functions() {
+        // `host_fn::ALL` is the loader's import allowlist. A name registered here but missing
+        // from `ALL` is dead code: the loader refuses every module that imports it.
+        let (_, registered) = build_linker_with_names(&Engine::default());
+        let registered: BTreeSet<&str> = registered.into_iter().collect();
+        let expected: BTreeSet<&str> = host_fn::ALL.into_iter().collect();
+        assert_eq!(registered, expected);
+    }
 }

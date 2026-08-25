@@ -287,6 +287,54 @@ fn mem_get_reports_uninitialized_memory() {
 }
 
 #[test]
+fn mem_get_presence_is_word_granular() {
+    use miden_assembly::{Assembler, DefaultSourceManager};
+
+    // VM memory initializes one word (four elements) at a time, so after the program writes
+    // address 0, address 1 reads as `Ok` with the value zero, and only the next word (address 4)
+    // is `Uninit`. The handler needs a program to write that word, so this test runs the whole
+    // VM instead of calling the handler against a fresh state.
+    //
+    // The sentinel at address 0 of the guest memory proves that the host wrote the zero, instead
+    // of leaving the output buffer as it was.
+    let wat_src = fixture(
+        "(i64.store (i32.const 0) (i64.const 7))
+         (i64.store (i32.const 8)
+             (i64.extend_i32_u (call $mem_get (i32.const 1) (i32.const 0))))
+         (i64.store (i32.const 16)
+             (i64.extend_i32_u (call $mem_get (i32.const 4) (i32.const 24))))
+         (call $adv_stack_extend (i32.const 0) (i32.const 3))",
+    );
+    let module = load(&wat_src);
+
+    let source = format!(
+        r#"
+        begin
+            push.1 mem_store.0
+            emit.event("{event}")
+            adv_push push.0 assert_eq
+            adv_push push.{ok} assert_eq
+            adv_push push.{uninit} assert_eq
+        end"#,
+        event = EVENT.as_str(),
+        ok = Status::Ok.as_raw(),
+        uninit = Status::Uninit.as_raw(),
+    );
+    let package = Assembler::new(Arc::new(DefaultSourceManager::default()))
+        .assemble_program("wasm_handler_partial_word", source)
+        .expect("program assembles");
+    let program = package.unwrap_program();
+
+    let mut host = DefaultHost::default();
+    for (event, handler) in module.handlers() {
+        host.register_handler(event, handler).expect("registration succeeds");
+    }
+    FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect("the unwritten cell of a written word reads as Ok with the value zero");
+}
+
+#[test]
 fn advice_stack_roundtrip() {
     let wat_src = fixture(
         "(local $len i32)
@@ -908,6 +956,32 @@ fn long_form_table_reftype_is_accepted_by_the_section_walk() {
     assert!(
         miden_wasm_event_handlers::fuzz_module_statics(&wasm),
         "the section walk must accept what wasmi validates"
+    );
+
+    // The real load path must accept it too. The module has no `memory` export, so the load
+    // stops there — after the static walk, which is what this test pins.
+    let err = WasmHandlerModule::new(&wasm, ABI_VERSION, Vec::new(), WasmHandlerLimits::default())
+        .unwrap_err();
+    assert!(
+        matches!(err, WasmHandlerLoadError::MissingMemoryExport),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn unknown_table_reftype_is_refused_by_the_section_walk() {
+    // The same module with an unknown reference-type byte (0x71). wasmi rejects it today, so the
+    // static walk must reject it as well: a lead byte it cannot read makes every following byte
+    // ambiguous, and a wrong instantiation charge would be silent.
+    let mut wasm = b"\x00\x61\x73\x6d\x01\x00\x00\x00".to_vec();
+    wasm.extend_from_slice(&[0x04, 0x04, 0x01, 0x71, 0x00, 0x01]);
+    assert!(
+        wasmi::Module::new(&wasmi::Engine::default(), &wasm).is_err(),
+        "the fixture must stay wasmi-invalid"
+    );
+    assert!(
+        !miden_wasm_event_handlers::fuzz_module_statics(&wasm),
+        "the section walk must fail closed on an unknown reference type"
     );
 }
 

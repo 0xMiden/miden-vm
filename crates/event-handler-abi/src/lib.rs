@@ -53,6 +53,12 @@ pub const ABI_VERSION: u32 = 1;
 /// The Wasm import module namespace that provides all host functions.
 pub const IMPORT_MODULE: &str = "miden:event/v1";
 
+/// The name under which a handler module must export its linear memory.
+///
+/// Every host function that takes a pointer reads or writes this memory, so the host refuses a
+/// module without the export.
+pub const MEMORY_EXPORT: &str = "memory";
+
 /// The name of the Wasm custom section that carries handler manifest records.
 ///
 /// The guest SDK macro writes one record per handler into this section. Package build tooling can
@@ -120,7 +126,11 @@ pub enum Status {
     OutOfBounds = 1,
     /// The advice map has no entry for the given key.
     NotFound = 2,
-    /// The memory cell was never written. Uninitialized memory is distinct from a zero value.
+    /// No cell of the memory word that holds the address was ever written.
+    ///
+    /// VM memory initializes one word (four elements) at a time, so this status is word-granular:
+    /// a cell that shares its word with a written cell reads as [`Status::Ok`] with the value
+    /// zero.
     Uninit = 3,
     /// The output buffer capacity is smaller than the value length.
     CapacityTooSmall = 4,
@@ -288,16 +298,19 @@ pub mod guest {
 
         /// Writes the memory element at address `addr` of the current context to `out`.
         ///
-        /// Returns `Status::Uninit` when the cell was never written; `out` is not changed in that
-        /// case. Uninitialized memory is distinct from a zero value.
+        /// Returns `Status::Uninit` when no cell of the memory word that holds `addr` was ever
+        /// written; `out` is not changed in that case. VM memory initializes one word (four
+        /// elements) at a time, so presence is word-granular: after a write to any address of a
+        /// word, the other three addresses of that word read as `Status::Ok` with the value zero.
         pub fn mem_get(addr: u32, out: *mut Felt) -> i32;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of the current
         /// context to `out`.
         ///
         /// Returns `Status::OutOfBounds` when `addr + count` goes past the `u32` address space,
-        /// and `Status::Uninit` when any cell in the range was never written; `out` is not
-        /// changed in either case. Use `mem_get` for a per-cell presence check.
+        /// and `Status::Uninit` when the range touches a memory word no cell of which was ever
+        /// written; `out` is not changed in either case. Presence is word-granular, as for
+        /// `mem_get`. Use `mem_get` for a per-word presence check.
         pub fn mem_read(addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the `count` memory elements at addresses `addr..addr + count` of context
@@ -305,8 +318,8 @@ pub mod guest {
         ///
         /// The same contract as `mem_read`, for an explicit execution context (for example the
         /// root context, ID `0`). Returns `Status::OutOfBounds` when `addr + count` goes past
-        /// the `u32` address space, and `Status::Uninit` when any cell in the range was never
-        /// written; `out` is not changed in either case.
+        /// the `u32` address space, and `Status::Uninit` when the range touches a memory word no
+        /// cell of which was ever written; `out` is not changed in either case.
         pub fn mem_read_ctx(ctx: u32, addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to

@@ -3,7 +3,10 @@
 //! Four measurements matter:
 //!
 //! - `call_empty_handler`: the fixed cost of one event call (fresh store, instantiation, one export
-//!   invocation) — the price of the stateless instantiate-per-call design.
+//!   invocation) — the price of the stateless instantiate-per-call design. Every fixture exports
+//!   its linear memory, which the loader requires, so this number also includes the allocation and
+//!   zeroing of one 64 KiB page per call. Subtract that term before you read it as the cost of the
+//!   call machinery alone.
 //! - `guest_arith_100k_iters`: pure guest execution with a known instruction count, giving the
 //!   wall-clock cost of one fuel unit.
 //! - `host_extend_4096_felts` / `host_stack_read_4096_felts`: one host call moving 4096 field

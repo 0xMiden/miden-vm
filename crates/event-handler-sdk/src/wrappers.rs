@@ -109,8 +109,11 @@ pub fn ctx() -> u32 {
     unsafe { guest::ctx() }
 }
 
-/// Returns the memory element at `addr` of the current context, or `None` when the cell was
-/// never written.
+/// Returns the memory element at `addr` of the current context, or `None` when no cell of the
+/// memory word that holds `addr` was ever written.
+///
+/// VM memory initializes one word (four elements) at a time, so presence is word-granular: after
+/// a write to any address of a word, the other three addresses of that word give `Some(0)`.
 pub fn mem_get(addr: u32) -> Option<Felt> {
     let mut out = Felt::ZERO;
     // SAFETY: the module contract; the host writes one element into the local `out`.
@@ -125,8 +128,9 @@ pub fn mem_get(addr: u32) -> Option<Felt> {
 /// context.
 ///
 /// Returns [`Status::OutOfBounds`] when the range goes past the `u32` address space and
-/// [`Status::Uninit`] when any cell in the range was never written; `out` is unchanged in both
-/// cases. Use [`mem_get`] for a per-cell presence check.
+/// [`Status::Uninit`] when the range touches a memory word no cell of which was ever written;
+/// `out` is unchanged in both cases. Presence is word-granular, as for [`mem_get`]. Use
+/// [`mem_get`] for a per-word presence check.
 pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
