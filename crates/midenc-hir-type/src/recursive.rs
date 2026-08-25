@@ -97,15 +97,6 @@ impl RecTypeRef {
         &self.group.defs[self.index as usize]
     }
 
-    /// The binding key of the definition this reference selects.
-    ///
-    /// Unique within the group, and what canonical ordering sorts by. This is an identifier for
-    /// the definition, not the aggregate's declared name; see [`Self::name`].
-    #[inline]
-    pub fn key(&self) -> &Arc<str> {
-        &self.def().key
-    }
-
     /// The declared name of the aggregate this reference selects, if it has one.
     ///
     /// This agrees with the name on the unfolded form, so the folded and unfolded views of a
@@ -246,37 +237,99 @@ impl Hash for RecGroup {
 /// A single definition within a [RecGroup].
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) struct RecDef {
-    /// The binding key: unique within the group, and the key canonical ordering sorts by.
-    ///
-    /// This is deliberately *not* the aggregate's own name. A frontend keys definitions by
-    /// something collision-free, such as a module-qualified path, while the aggregate keeps
-    /// whatever name it was declared with. Conflating the two would rewrite the name of every
-    /// aggregate routed through the builder, and `StructType::name` takes part in structural
-    /// equality.
-    pub(crate) key: Arc<str>,
     pub(crate) kind: AggregateKind,
     pub(crate) body: OpenAggregate,
     pub(crate) layout: TypeLayout,
 }
 
-fn hash_defs(defs: &[RecDef]) -> u64 {
-    // A small, dependency-free FNV-1a hasher. The cached value only needs to be a stable
-    // function of the definitions; it never leaves the crate.
-    struct Fnv(u64);
-    impl Hasher for Fnv {
-        fn finish(&self) -> u64 {
-            self.0
-        }
-
-        fn write(&mut self, bytes: &[u8]) {
-            for byte in bytes {
-                self.0 ^= u64::from(*byte);
-                self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+/// Hash a template, collapsing every back-reference to a single token. See
+/// [`AggregateTemplate::reference_blind_hash`].
+fn hash_template_blind(template: &TypeTemplate, hasher: &mut Fnv) {
+    match template {
+        TypeTemplate::Type(ty) => {
+            0u8.hash(hasher);
+            ty.hash(hasher);
+        },
+        // Every reference hashes the same, whichever definition it names.
+        TypeTemplate::Rec(_) => 1u8.hash(hasher),
+        TypeTemplate::Ptr(addrspace, pointee) => {
+            2u8.hash(hasher);
+            addrspace.hash(hasher);
+            hash_template_blind(pointee, hasher);
+        },
+        TypeTemplate::Array(element, len) => {
+            3u8.hash(hasher);
+            len.hash(hasher);
+            hash_template_blind(element, hasher);
+        },
+        TypeTemplate::List(element) => {
+            4u8.hash(hasher);
+            hash_template_blind(element, hasher);
+        },
+        TypeTemplate::Function(ty) => {
+            5u8.hash(hasher);
+            ty.abi.hash(hasher);
+            for t in ty.params.iter().chain(ty.results.iter()) {
+                hash_template_blind(t, hasher);
             }
-        }
+        },
+        TypeTemplate::Struct(ty) => {
+            6u8.hash(hasher);
+            ty.name.hash(hasher);
+            ty.repr.hash(hasher);
+            for field in &ty.fields {
+                field.name.hash(hasher);
+                hash_template_blind(&field.ty, hasher);
+            }
+        },
+        TypeTemplate::Enum(ty) => {
+            7u8.hash(hasher);
+            ty.name.hash(hasher);
+            ty.discriminant.hash(hasher);
+            for variant in &ty.variants {
+                variant.name.hash(hasher);
+                variant.discriminant_value.hash(hasher);
+                match variant.value.as_ref() {
+                    Some(value) => hash_template_blind(value, hasher),
+                    None => 0xffu8.hash(hasher),
+                }
+            }
+        },
+    }
+}
+
+/// A small, dependency-free FNV-1a hasher. Its values never leave the crate.
+pub(crate) struct Fnv(u64);
+
+impl Fnv {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for Fnv {
+    fn finish(&self) -> u64 {
+        self.0
     }
 
-    let mut hasher = Fnv(0xcbf2_9ce4_8422_2325);
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
+/// The key a group's definitions are canonically ordered by.
+///
+/// Every component is derived from the definition itself rather than from the key it was
+/// registered under, so that structurally identical groups order identically.
+fn structural_order_key(def: &TemplateDef) -> (Option<Arc<str>>, AggregateKind, u64) {
+    (def.body.declared_name(), def.kind, def.body.reference_blind_hash())
+}
+
+fn hash_defs(defs: &[RecDef]) -> u64 {
+    let mut hasher = Fnv::new();
     defs.hash(&mut hasher);
     hasher.finish()
 }
@@ -838,9 +891,15 @@ fn build_group(
     mut component: Vec<usize>,
     completed: &mut BTreeMap<Arc<str>, Type>,
 ) -> Result<(), RecursiveTypeError> {
-    // Canonical order: sort by name. Names are distinct, which was checked up front, so this is a
-    // total order and a function of the group's structure alone.
-    component.sort_by(|a, b| defs[*a].name.cmp(&defs[*b].name));
+    // Canonical order must be a function of the group's *structure*, not of the keys it happened
+    // to be built under. Keys are collision-free identifiers a frontend supplies to bind
+    // back-references -- typically module-qualified paths -- and ordering by them would make the
+    // same type declared in two modules order differently, and so compare unequal.
+    //
+    // Definitions are therefore ordered by what they are: declared name, kind, and a hash of the
+    // body taken with every back-reference treated alike, so that the ordering does not depend on
+    // the numbering it is being used to produce.
+    component.sort_by(|a, b| structural_order_key(&defs[*a]).cmp(&structural_order_key(&defs[*b])));
 
     let is_recursive = component.len() > 1
         || defs[component[0]].body.references().contains(&defs[component[0]].name);
@@ -903,7 +962,6 @@ fn build_group(
         })?;
         let body = def.body.open(&probe, &slot_of, completed)?;
         rec_defs.push(RecDef {
-            key: def.name.clone(),
             kind: def.kind,
             body,
             layout: layouts[slot].expect("layout computed above"),
@@ -911,9 +969,8 @@ fn build_group(
     }
 
     let group = Arc::new(RecGroup::new(rec_defs.into_boxed_slice()));
-    for slot in 0..component.len() {
-        let key = group.defs[slot].key.clone();
-        completed.insert(key, rec_type(group.clone(), slot as u16));
+    for (slot, member) in component.iter().enumerate() {
+        completed.insert(defs[*member].name.clone(), rec_type(group.clone(), slot as u16));
     }
 
     Ok(())
@@ -991,6 +1048,48 @@ fn topological_order(unguarded: &[BTreeSet<u16>]) -> Option<Vec<usize>> {
 // ================================================================================================
 
 impl AggregateTemplate {
+    /// The name the aggregate was declared with, if any.
+    fn declared_name(&self) -> Option<Arc<str>> {
+        match self {
+            Self::Struct(ty) => ty.name.clone(),
+            Self::Enum(ty) => Some(ty.name.clone()),
+        }
+    }
+
+    /// A hash of this definition's shape in which every back-reference is treated alike.
+    ///
+    /// Ordering the group is what assigns back-reference indices, so an ordering key cannot
+    /// depend on those indices without being circular. Collapsing all references to one token
+    /// breaks the cycle: the result is a function of the definition's shape alone.
+    fn reference_blind_hash(&self) -> u64 {
+        let mut hasher = Fnv::new();
+        match self {
+            Self::Struct(ty) => {
+                0u8.hash(&mut hasher);
+                ty.name.hash(&mut hasher);
+                ty.repr.hash(&mut hasher);
+                for field in &ty.fields {
+                    field.name.hash(&mut hasher);
+                    hash_template_blind(&field.ty, &mut hasher);
+                }
+            },
+            Self::Enum(ty) => {
+                1u8.hash(&mut hasher);
+                ty.name.hash(&mut hasher);
+                ty.discriminant.hash(&mut hasher);
+                for variant in &ty.variants {
+                    variant.name.hash(&mut hasher);
+                    variant.discriminant_value.hash(&mut hasher);
+                    match variant.value.as_ref() {
+                        Some(value) => hash_template_blind(value, &mut hasher),
+                        None => 0xffu8.hash(&mut hasher),
+                    }
+                }
+            },
+        }
+        hasher.finish()
+    }
+
     fn references(&self) -> BTreeSet<Arc<str>> {
         let mut references = BTreeSet::new();
         match self {
@@ -1450,6 +1549,61 @@ mod tests {
         assert!(printed.contains("Node"), "expected the name in {printed:?}");
     }
 
+    fn node_under_key(key: &str) -> Type {
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            key,
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec(key))),
+                ],
+            ),
+        );
+        build_one(builder, key)
+    }
+
+    #[test]
+    fn the_binding_key_does_not_affect_identity() {
+        // The key binds back-references while a group is being built; it is not part of what the
+        // type *is*. Two identical `Node` declarations in different modules are the same type,
+        // exactly as they would be if they were not recursive.
+        assert_eq!(node_under_key("left::Node"), node_under_key("right::Node"));
+    }
+
+    #[test]
+    fn a_mutual_group_is_ordered_structurally_not_by_key() {
+        // The same pair declared under differently-sorting keys must produce the same type. Here
+        // the keys sort opposite to the declared names, so key-based ordering would place the
+        // definitions in a different order and make the two groups compare unequal.
+        fn build(a_key: &str, b_key: &str) -> Type {
+            let mut builder = RecursiveTypeBuilder::new();
+            builder
+                .define_struct(
+                    a_key,
+                    StructTemplate::named(
+                        "Apple",
+                        TypeRepr::Default,
+                        [("z", TypeTemplate::ptr(TypeTemplate::rec(b_key)))],
+                    ),
+                )
+                .define_struct(
+                    b_key,
+                    StructTemplate::named(
+                        "Zebra",
+                        TypeRepr::Default,
+                        [("a", TypeTemplate::ptr(TypeTemplate::rec(a_key)))],
+                    ),
+                );
+            builder.build().expect("should build").remove(a_key).expect("Apple")
+        }
+
+        // "z::Apple" > "a::Zebra" by key, but "Apple" < "Zebra" by declared name.
+        assert_eq!(build("z::Apple", "a::Zebra"), build("apple", "zebra"));
+    }
+
     #[test]
     fn type_size_is_pinned() {
         // `Type` is embedded in every field, variant, and parameter list, so its size is worth
@@ -1486,10 +1640,11 @@ mod tests {
 
     #[test]
     fn the_binding_key_is_distinct_from_the_display_name() {
-        // A group's definitions are keyed by a name that must be unique within the group, which
-        // for a frontend means something like a module-qualified path. That key must not become
-        // the aggregate's own name, because `StructType::name` takes part in structural equality:
-        // routing an ordinary declaration through the builder would otherwise silently rename it.
+        // A group's definitions are registered under a key that must be unique within the group,
+        // which for a frontend means something like a module-qualified path. That key must not
+        // become the aggregate's own name, because `StructType::name` takes part in structural
+        // equality: routing an ordinary declaration through the builder would otherwise silently
+        // rename it. The key binds references during construction and is then discarded.
         let mut builder = RecursiveTypeBuilder::new();
         builder.define_struct(
             "lib::list::Node",
@@ -1510,7 +1665,6 @@ mod tests {
         assert_eq!(struct_ref.get().name().as_deref(), Some("Node"));
 
         let rec = struct_ref.as_recursive().expect("should be recursive");
-        assert_eq!(rec.key().as_ref(), "lib::list::Node");
         assert_eq!(rec.name().as_deref(), Some("Node"));
     }
 

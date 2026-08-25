@@ -229,9 +229,10 @@ fn write_recursive_group<W: ByteWriter>(ty: &RecTypeRef, target: &mut W) {
     target.write_u8(TAG_RECURSIVE_GROUP);
     target.write_u16(defs.len() as u16);
 
-    // Headers first, so a back-reference index can be resolved to a name while reading bodies.
+    // Kinds first, so a body can be read as the right sort of aggregate. A back-reference is
+    // already an index, so nothing else needs to precede the bodies; the declared names live in
+    // the bodies themselves.
     for def in defs {
-        write_str_with_len(&def.key, target);
         target.write_u8(match def.kind {
             AggregateKind::Struct => 0,
             AggregateKind::Enum => 1,
@@ -401,10 +402,8 @@ fn read_recursive_group<R: ByteReader>(
         )));
     }
 
-    let mut names = SmallVec::<[Arc<str>; 4]>::with_capacity(count);
     let mut kinds = SmallVec::<[AggregateKind; 4]>::with_capacity(count);
     for _ in 0..count {
-        names.push(Arc::<str>::from(String::read_from(source)?.into_boxed_str()));
         kinds.push(match source.read_u8()? {
             0 => AggregateKind::Struct,
             1 => AggregateKind::Enum,
@@ -416,14 +415,12 @@ fn read_recursive_group<R: ByteReader>(
         });
     }
 
-    // Definitions are written in canonical order (sorted by name, names distinct). Enforcing that
-    // on decode keeps the wire form unique for each type, so equal types cannot be encoded two
-    // different ways.
-    if names.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return Err(DeserializationError::InvalidValue(
-            "invalid recursive type: definitions are not in canonical order".to_string(),
-        ));
-    }
+    // Back-references are indices, so the builder only needs keys distinct within the group.
+    // These are synthetic: a definition's declared name lives in its body and plays no part in
+    // binding.
+    let names = (0..count)
+        .map(|index| Arc::<str>::from(alloc::format!("#{index}")))
+        .collect::<SmallVec<[Arc<str>; 4]>>();
 
     let mut builder = RecursiveTypeBuilder::new();
     for (index, name) in names.iter().enumerate() {
@@ -440,36 +437,47 @@ fn read_recursive_group<R: ByteReader>(
     }
 
     let root = source.read_u16()? as usize;
-    let root_name = names
-        .get(root)
-        .ok_or_else(|| {
-            DeserializationError::InvalidValue(format!(
-                "invalid recursive type: root index {root} is out of range"
-            ))
-        })?
-        .clone();
+    if root >= count {
+        return Err(DeserializationError::InvalidValue(format!(
+            "invalid recursive type: root index {root} is out of range"
+        )));
+    }
 
-    let mut built = builder
+    let built = builder
         .build()
         .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
 
-    let ty = built.remove(&root_name).ok_or_else(|| {
+    // Definitions are always written in canonical order, so each one must come back at the index
+    // it was written at. Rejecting anything else keeps a type's wire form unique, so two encodings
+    // cannot describe the same type.
+    for (index, name) in names.iter().enumerate() {
+        let position = built.get(name).and_then(|ty| match ty {
+            Type::Struct(StructRef::Rec(rec)) | Type::Enum(EnumRef::Rec(rec)) => {
+                Some((rec.index() as usize, rec.group_len()))
+            },
+            _ => None,
+        });
+        match position {
+            Some((position, group_len)) if position == index && group_len == count => {},
+            Some(_) => {
+                return Err(DeserializationError::InvalidValue(
+                    "invalid recursive type: definitions are not in canonical order".to_string(),
+                ));
+            },
+            None => {
+                return Err(DeserializationError::InvalidValue(
+                    "invalid recursive type: definitions do not form a single recursive group"
+                        .to_string(),
+                ));
+            },
+        }
+    }
+
+    let ty = built.get(&names[root]).cloned().ok_or_else(|| {
         DeserializationError::InvalidValue(
             "invalid recursive type: root definition was not produced".to_string(),
         )
     })?;
-
-    // The encoded group must be exactly one strongly connected component. If it decomposed into
-    // several, or into no recursion at all, the encoding did not describe a single group.
-    let group_len = match &ty {
-        Type::Struct(StructRef::Rec(rec)) | Type::Enum(EnumRef::Rec(rec)) => rec.group_len(),
-        _ => 0,
-    };
-    if group_len != count {
-        return Err(DeserializationError::InvalidValue(
-            "invalid recursive type: definitions do not form a single recursive group".to_string(),
-        ));
-    }
 
     Ok(ty)
 }
@@ -1089,22 +1097,74 @@ mod tests {
 
     #[test]
     fn a_non_canonical_group_encoding_is_rejected() {
-        // Definitions are always written sorted by name, so an encoding that is not sorted would
-        // give a second wire form for a type that already has one.
+        // Definitions are always written in canonical order -- here, by declared name, so
+        // "Apple" precedes "Zebra". An encoding that lists them the other way round would give a
+        // second wire form for a type that already has one.
+        fn write_struct_body(bytes: &mut Vec<u8>, name: &str, field: &str, target: u16) {
+            bytes.write_bool(true);
+            bytes.write_usize(name.len());
+            bytes.write_bytes(name.as_bytes());
+            bytes.write_u8(0); // TypeRepr::Default
+            bytes.write_u8(1); // one field
+            bytes.write_bool(true);
+            bytes.write_usize(field.len());
+            bytes.write_bytes(field.as_bytes());
+            bytes.write_u8(16); // Ptr
+            bytes.write_u8(0); // AddressSpace::Byte
+            bytes.write_u8(24); // back-reference
+            bytes.write_u16(target);
+        }
+
         let mut bytes = Vec::new();
         bytes.write_u8(23);
         bytes.write_u16(2);
-        for name in ["B", "A"] {
-            bytes.write_usize(name.len());
-            bytes.write_bytes(name.as_bytes());
-            bytes.write_u8(0);
-        }
+        bytes.write_u8(0); // struct
+        bytes.write_u8(0); // struct
+        write_struct_body(&mut bytes, "Zebra", "a", 1);
+        write_struct_body(&mut bytes, "Apple", "z", 0);
+        bytes.write_u16(0);
 
         let err = Type::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         let DeserializationError::InvalidValue(message) = err else {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("canonical order"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_canonical_two_definition_encoding_is_accepted() {
+        // The same group written the right way round decodes, which is what makes the rejection
+        // above a statement about ordering rather than about the encoding being malformed.
+        fn write_struct_body(bytes: &mut Vec<u8>, name: &str, field: &str, target: u16) {
+            bytes.write_bool(true);
+            bytes.write_usize(name.len());
+            bytes.write_bytes(name.as_bytes());
+            bytes.write_u8(0);
+            bytes.write_u8(1);
+            bytes.write_bool(true);
+            bytes.write_usize(field.len());
+            bytes.write_bytes(field.as_bytes());
+            bytes.write_u8(16);
+            bytes.write_u8(0);
+            bytes.write_u8(24);
+            bytes.write_u16(target);
+        }
+
+        let mut bytes = Vec::new();
+        bytes.write_u8(23);
+        bytes.write_u16(2);
+        bytes.write_u8(0);
+        bytes.write_u8(0);
+        write_struct_body(&mut bytes, "Apple", "z", 1);
+        write_struct_body(&mut bytes, "Zebra", "a", 0);
+        bytes.write_u16(0);
+
+        let ty = Type::read_from(&mut SliceReader::new(&bytes)).expect("should decode");
+        let Type::Struct(apple) = &ty else {
+            panic!("expected a struct")
+        };
+        assert_eq!(apple.name().as_deref(), Some("Apple"));
+        assert!(apple.is_recursive());
     }
 
     #[test]

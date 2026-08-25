@@ -281,7 +281,7 @@ impl PrettyPrint for StructRef {
             // A recursive struct renders by name, so that printing terminates.
             Self::Rec(ty) => miden_formatting::prettier::text(match ty.name() {
                 Some(name) => alloc::format!("struct {name}"),
-                None => alloc::format!("struct {}", ty.key()),
+                None => alloc::string::String::from("struct <anon>"),
             }),
         }
     }
