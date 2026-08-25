@@ -199,8 +199,11 @@ impl Hash for RecTypeRef {
 /// definitions sorted by name. Canonicalization is what makes structural equality a decision
 /// procedure: two independently constructed but structurally identical recursive types produce
 /// identical groups, and therefore compare and hash equal.
+///
+/// This is an implementation detail of [RecTypeRef]: a group is reachable only through one, and
+/// is never named in the crate's public interface.
 #[derive(Debug)]
-pub struct RecGroup {
+pub(crate) struct RecGroup {
     defs: Box<[RecDef]>,
     /// Structural hash of `defs`, computed once at construction.
     ///
