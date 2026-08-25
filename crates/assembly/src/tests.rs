@@ -6753,6 +6753,114 @@ fn test_assembler_debug_info_present() {
 }
 
 #[test]
+fn source_name_attribute_sets_debug_name_and_linkage_name() -> TestResult {
+    let context = TestContext::default();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace debug::names
+
+        @source_name("duplicate")
+        pub proc first
+            push.1
+        end
+
+        @source_name("duplicate")
+        pub proc second
+            push.2
+        end
+
+        pub proc normal
+            push.3
+        end
+        "#
+    ))?;
+    let package = Assembler::new(context.source_manager()).assemble_library(
+        "debug-names",
+        module,
+        None::<Box<Module>>,
+    )?;
+
+    let assert_function_names = |package: &Package| {
+        let debug_info = package
+            .debug_info()
+            .expect("package debug info should decode")
+            .expect("package should contain debug info");
+        let duplicate_functions = debug_info
+            .functions()
+            .iter()
+            .filter(|function| {
+                debug_info[function.name_idx].as_ref() == "::debug::names::duplicate"
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(duplicate_functions.len(), 2);
+        assert_eq!(duplicate_functions[0].name_idx, duplicate_functions[1].name_idx);
+        let linkage_names = duplicate_functions
+            .iter()
+            .map(|function| {
+                let linkage_name_idx = function
+                    .linkage_name_idx
+                    .into_option()
+                    .expect("source-named function should have a linkage name");
+                debug_info[linkage_name_idx].to_string()
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(linkage_names.len(), 2);
+        assert!(linkage_names.iter().any(|name| name.ends_with("::first")));
+        assert!(linkage_names.iter().any(|name| name.ends_with("::second")));
+
+        let normal = debug_info
+            .functions()
+            .iter()
+            .find(|function| debug_info[function.name_idx].ends_with("::normal"))
+            .expect("normal function should retain its assembler path as its name");
+        assert_eq!(normal.linkage_name_idx.into_option(), None);
+    };
+
+    assert_function_names(&package);
+    let round_tripped = Package::read_from_bytes(&package.to_bytes())
+        .expect("package with source-named functions should round trip");
+    assert_function_names(&round_tripped);
+
+    Ok(())
+}
+
+#[test]
+fn malformed_source_name_attributes_are_rejected() -> TestResult {
+    let context = TestContext::default();
+
+    for attribute in [
+        "@source_name",
+        "@source_name(unquoted)",
+        "@source_name(\"one\", \"two\")",
+        "@source_name(value = \"named\")",
+    ] {
+        let source = source_file!(
+            &context,
+            format!(
+                r#"
+                namespace debug::invalid
+
+                {attribute}
+                pub proc test
+                    nop
+                end
+                "#
+            )
+        );
+        let module = context.parse_module(source)?;
+        let error = Assembler::new(context.source_manager())
+            .assemble_library("invalid-source-name", module, None::<Box<Module>>)
+            .expect_err("malformed @source_name should be rejected");
+        assert_diagnostic!(&error, "invalid `@source_name` procedure attribute");
+        assert_diagnostic!(&error, "expected exactly one quoted string");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_cross_module_constant_resolution() -> TestResult {
     let context = TestContext::default();
 
