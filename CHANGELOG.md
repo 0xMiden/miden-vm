@@ -62,7 +62,7 @@
   `ExecutionOptions::with_max_deferred_elements` APIs were removed
   ([#3437](https://github.com/0xMiden/miden-vm/pull/3437)).
 - [BREAKING] Changed `HORNERBASE` and `HORNEREXT` to read the evaluation point from an aligned, zero-padded word: `[alpha0, alpha1, 0, 0]`. This reduces the memory-chiplet trace for `HORNERBASE` from two rows to one and gives both operations the same memory layout ([#3570](https://github.com/0xMiden/miden-vm/pull/3570)).
-- Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
+- [BREAKING] Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
 
 #### Fixes
 
