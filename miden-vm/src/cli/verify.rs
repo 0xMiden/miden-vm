@@ -35,11 +35,8 @@ pub struct VerifyCmd {
 
 impl VerifyCmd {
     pub fn execute(&self) -> Result<(), Report> {
-        // Validate the kernel file's extension before doing any other file I/O. Without this,
-        // a malformed `--kernel` argument was only caught deep inside `load_kernel_descriptor`,
-        // after the proof, input, and output files were already loaded -- so a bad kernel path
-        // was reported as a missing/invalid proof or input/output file instead of the actual
-        // problem (mirrors the same ordering issue already fixed for `prove` in #3587).
+        // Validate the kernel file's extension before doing any other file I/O (mirrors the
+        // same ordering issue already fixed for `prove` in #3587).
         if let Some(ref kernel_path) = self.kernel_file {
             validate_kernel_extension(kernel_path)?;
         }
@@ -123,9 +120,7 @@ impl VerifyCmd {
 }
 
 /// Validates that `kernel_path` has a `.masm` or `.masp` extension, without touching the
-/// filesystem. Cheap enough to run before any other file I/O, so a malformed `--kernel`
-/// argument is reported immediately instead of surfacing as a confusing error about some other
-/// file once execution gets further along.
+/// filesystem.
 fn validate_kernel_extension(kernel_path: &std::path::Path) -> Result<(), Report> {
     let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
     match ext.as_str() {
@@ -226,12 +221,8 @@ mod tests {
 
     #[test]
     fn execute_rejects_bad_kernel_extension_before_touching_other_files() {
-        // Regression test: before this fix, a malformed --kernel path was only caught deep
-        // inside load_kernel_descriptor, after the proof/input/output files were already
-        // loaded -- so with a nonexistent proof file, the user would see "Proof file does not
-        // exist" instead of the actual problem with --kernel (mirrors the ordering bug already
-        // fixed for `prove` in #3587). None of these paths need to exist: a bad kernel
-        // extension must now be caught first, before any of that file I/O.
+        // None of these paths need to exist: the bad kernel extension must be rejected before
+        // any of that file I/O runs.
         let cmd = VerifyCmd {
             input_file: None,
             output_file: None,
