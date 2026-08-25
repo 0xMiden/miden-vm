@@ -7,7 +7,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, host_fn};
+use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, MEMORY_EXPORT, host_fn};
 use miden_mast_package::{MAX_MODULE_BYTES, validate_manifest_entries};
 use miden_processor::{
     ProcessorState,
@@ -39,8 +39,9 @@ pub struct WasmHandlerLimits {
     /// The maximum total number of table elements. Tables are allocated eagerly, so without
     /// this cap a tiny module could demand a multi-gigabyte allocation before any fuel applies.
     pub max_table_elements: usize,
-    /// The maximum size of the Wasm binary, in bytes. A module over
-    /// [`MAX_MODULE_BYTES`] never reaches this check: no package can carry it.
+    /// The maximum size of the Wasm binary, in bytes. This limit binds the direct path through
+    /// [`WasmHandlerModule::new`]; the package path enforces [`MAX_MODULE_BYTES`] of its own,
+    /// whatever this value is.
     pub max_module_bytes: usize,
     /// The maximum total number of field elements across all mutations one call buffers.
     ///
@@ -308,7 +309,7 @@ impl WasmHandlerModule {
         }
         // Every host function that takes a guest pointer needs this export, so a module without
         // it is refused at load instead of at the first host call of the first event.
-        if instance.get_memory(&store, "memory").is_none() {
+        if instance.get_memory(&store, MEMORY_EXPORT).is_none() {
             return Err(WasmHandlerLoadError::MissingMemoryExport);
         }
         Ok(())
@@ -373,10 +374,11 @@ impl WasmHandlerModule {
 /// Stores the instance's exported linear memory in the store data.
 ///
 /// Host functions read the handle from there, so no host call repeats the export lookup. Load
-/// refuses a module without the `memory` export ([`WasmHandlerLoadError::MissingMemoryExport`]),
-/// so the lookup here always succeeds; the `Option` is defense in depth for that invariant.
+/// refuses a module without the [`MEMORY_EXPORT`] export
+/// ([`WasmHandlerLoadError::MissingMemoryExport`]), so the lookup here always succeeds; the
+/// `Option` is defense in depth for that invariant.
 fn cache_memory(store: &mut Store<HostCtx>, instance: Instance) {
-    let memory = instance.get_memory(&*store, "memory");
+    let memory = instance.get_memory(&*store, MEMORY_EXPORT);
     store.data_mut().memory = memory;
 }
 
@@ -565,14 +567,22 @@ fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
             // 0x6F externref). With the reference-types feature this loader enables, wasmi
             // also validates the long-form encoding 0x63 0x70 / 0x63 0x6F — `(ref null
             // func/extern)` — whose heaptype is an s33 LEB. wasmi 1.1.0 rejects every other
-            // long form (0x64, GC heap types, type indices), and 0x70/0x6F are one-byte LEB
-            // terminals, so the skip below consumes the same bytes today; it stays in sync
-            // with validation if a wasmi upgrade admits multi-byte heaptypes.
+            // encoding (0x64, GC heap types, type indices, the 0x40 table-with-initializer
+            // form), so the match below covers all of them.
+            //
+            // The default branch fails closed: a wasmi upgrade that admits one more encoding
+            // must not make this walk mis-read the bytes that follow and under-meter the
+            // instantiation. A false rejection is visible to the differential fuzz target
+            // (`wasm_section_walk_differential`); a wrong fuel value is not.
             let reftype = *payload.get(pos)?;
             pos += 1;
-            if reftype == 0x63 {
-                let (_, next) = read_leb_u64(payload, pos)?;
-                pos = next;
+            match reftype {
+                0x70 | 0x6f => {},
+                0x63 => {
+                    let (_, next) = read_leb_u64(payload, pos)?;
+                    pos = next;
+                },
+                _ => return None,
             }
         }
         let flags = *payload.get(pos)?;

@@ -53,6 +53,8 @@ The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`)
 
 Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
 
+**VM memory granularity.** VM memory initializes one word (four elements) at a time, so the `Uninit` status of the memory reads is word-granular: after a program writes any address of a word, the other three addresses of that word read as `Ok` with the value zero. `Uninit` therefore means that no cell of the containing word was ever written, not that the addressed cell alone was never written.
+
 **Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
 
 **Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
@@ -63,8 +65,8 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `stack_get(pos) -> u64` | Operand-stack element, returned directly in canonical form; position `0` holds the event ID, positions past the depth read as zero. |
 | `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count`, ordered from the top down. |
 | `clk() -> u64`, `ctx() -> u32` | Clock cycle and execution context. |
-| `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when the cell was never written (distinct from zero). |
-| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when any cell is unwritten, `OutOfBounds` past the `u32` address space. |
+| `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
+| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |
 | `mem_read_ctx(ctx, addr, out, count) -> status` | The same batch read for an explicit execution context, for example the root context (ID `0`). |
 | `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
 | `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. The result is a boolean, not a status code: do not put it through `Status::from_raw`, because `1` is also the raw value of `Status::OutOfBounds`. |
