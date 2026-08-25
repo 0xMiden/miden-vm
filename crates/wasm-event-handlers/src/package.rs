@@ -71,9 +71,9 @@ pub fn host_library_from_package(
 /// stops at [`MAX_HANDLERS`] entries and at names over [`MAX_NAME_BYTES`].
 ///
 /// # Errors
-/// Returns [`WasmHandlerLoadError::InvalidModule`] when the module is over the size cap, when
-/// the section layout or a manifest record is malformed, or when the records go over the
-/// manifest caps.
+/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap, and
+/// [`WasmHandlerLoadError::InvalidModule`] when the section layout or a manifest record is
+/// malformed, or when the records go over the manifest caps.
 pub fn manifest_from_module(
     wasm: &[u8],
 ) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
@@ -173,10 +173,10 @@ fn strip_manifest_sections(wasm: &[u8]) -> Option<Vec<u8>> {
 /// Checks the size of an untrusted module against the section cap.
 fn check_module_size(wasm: &[u8]) -> Result<(), WasmHandlerLoadError> {
     if wasm.len() > MAX_MODULE_BYTES {
-        return Err(WasmHandlerLoadError::InvalidModule(format!(
-            "module size {} goes over the cap of {MAX_MODULE_BYTES}",
-            wasm.len()
-        )));
+        return Err(WasmHandlerLoadError::ModuleTooLarge {
+            size: wasm.len(),
+            max: MAX_MODULE_BYTES,
+        });
     }
     Ok(())
 }
@@ -262,7 +262,7 @@ fn parse_manifest_records(
                 )));
             }
         }
-        if entries.len() == MAX_HANDLERS {
+        if entries.len() >= MAX_HANDLERS {
             return Err(WasmHandlerLoadError::InvalidModule(format!(
                 "module declares more than {MAX_HANDLERS} handlers"
             )));
@@ -411,6 +411,9 @@ mod tests {
         let mut wasm = module_with_manifest(&[("test::wasm::a", "a")]);
         wasm.resize(MAX_MODULE_BYTES + 1, 0);
         let err = manifest_from_module(&wasm).unwrap_err();
-        assert!(err.to_string().contains("cap"), "unexpected error: {err}");
+        assert!(
+            matches!(err, WasmHandlerLoadError::ModuleTooLarge { max: MAX_MODULE_BYTES, .. }),
+            "unexpected error: {err}"
+        );
     }
 }

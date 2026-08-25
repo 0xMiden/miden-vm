@@ -541,6 +541,40 @@ fn adv_stack_read(
     Ok(OK)
 }
 
+/// The shared prologue of the two advice-map value calls: charges the fuel of one key read and
+/// one map lookup, validates the output pointers, reads the key, looks it up, and writes the
+/// element count to `out_len`.
+///
+/// `value_buf` names the value buffer of a read call, as a pointer and an element capacity; a
+/// length probe passes `None`. Returns `None` when the map has no entry for the key, and the
+/// guest memory, the key word, and the element count when it has one.
+///
+/// The charge covers the work that both calls share, so a probe and a read pay the same for it.
+/// A read charges the value copy separately, when its size is known.
+fn adv_map_value_lookup(
+    caller: &mut Caller<'_, HostCtx>,
+    key: u32,
+    value_buf: Option<(u32, u32)>,
+    out_len: u32,
+) -> Result<Option<(Memory, Word, usize)>, wasmi::Error> {
+    charge_fuel(caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
+    let mem = memory(caller)?;
+    let data_len = mem.data(&*caller).len();
+    // Validate the output pointers before the lookup; see `mem_get`.
+    if let Some((out, cap)) = value_buf {
+        byte_range(data_len, out, FELT_BYTES, cap)?;
+    }
+    byte_range(data_len, out_len, 4, 1)?;
+    let key = read_word(mem.data(&*caller), key)?;
+    let Some(len) = state(caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
+    else {
+        return Ok(None);
+    };
+    let count = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
+    write_u32(mem.data_mut(&mut *caller), out_len, count)?;
+    Ok(Some((mem, key, len)))
+}
+
 /// Writes the length of the advice-map value for `key` to `out_len`, or returns
 /// [`Status::NotFound`] when the map has no entry for `key`.
 fn adv_map_value_len(
@@ -548,19 +582,10 @@ fn adv_map_value_len(
     key: u32,
     out_len: u32,
 ) -> Result<i32, wasmi::Error> {
-    // The call reads a key word and performs a map lookup.
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
-    let mem = memory(&mut caller)?;
-    // Validate the output pointer before the lookup; see `mem_get`.
-    byte_range(mem.data(&caller).len(), out_len, 4, 1)?;
-    let key = read_word(mem.data(&caller), key)?;
-    let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
-    else {
-        return Ok(Status::NotFound.as_raw());
-    };
-    let len = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
-    write_u32(mem.data_mut(&mut caller), out_len, len)?;
-    Ok(OK)
+    match adv_map_value_lookup(&mut caller, key, None, out_len)? {
+        Some(_) => Ok(OK),
+        None => Ok(Status::NotFound.as_raw()),
+    }
 }
 
 /// Writes the advice-map value for `key` to the `cap`-element buffer `out` and its element
@@ -574,22 +599,10 @@ fn adv_map_value_read(
     cap: u32,
     out_len: u32,
 ) -> Result<i32, wasmi::Error> {
-    // The key read and the map lookup are charged up front, so a probe that comes back
-    // `NotFound` or `CapacityTooSmall` still pays for the work it causes. The value copy is
-    // charged below, when its size is known.
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
-    let mem = memory(&mut caller)?;
-    let data_len = mem.data(&caller).len();
-    // Validate both output pointers before the lookup; see `mem_get`.
-    byte_range(data_len, out, FELT_BYTES, cap)?;
-    byte_range(data_len, out_len, 4, 1)?;
-    let key = read_word(mem.data(&caller), key)?;
-    let Some(len) = state(&caller)?.advice_provider().get_mapped_values(&key).map(<[Felt]>::len)
+    let Some((mem, key, len)) = adv_map_value_lookup(&mut caller, key, Some((out, cap)), out_len)?
     else {
         return Ok(Status::NotFound.as_raw());
     };
-    let count = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
-    write_u32(mem.data_mut(&mut caller), out_len, count)?;
     if len > cap as usize {
         return Ok(Status::CapacityTooSmall.as_raw());
     }
@@ -821,6 +834,9 @@ fn merkle_store_extend(
 /// This call charges no fuel: it always ends the call, so it cannot amplify work.
 fn fail(mut caller: Caller<'_, HostCtx>, msg_ptr: u32, msg_len: u32) -> Result<(), wasmi::Error> {
     let mem = memory(&mut caller)?;
+    // The deliberate exception to the rule that a declared range is validated as declared: the
+    // contract promises truncation of a long message, and a pointer trap in place of the guest's
+    // own failure message would lose the diagnostic. The truncated range is still bounds-checked.
     let len = msg_len.min(MAX_FAIL_MSG_BYTES);
     let range = byte_range(mem.data(&caller).len(), msg_ptr, 1, len)?;
     let msg = String::from_utf8_lossy(&mem.data(&caller)[range]).into_owned();

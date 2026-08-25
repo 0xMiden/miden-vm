@@ -154,13 +154,16 @@ pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [Felt]) -> Status {
 /// Returns the Merkle-store node of the tree with root `root` at `depth`/`index`, or `None` when
 /// the store has no such tree or no node at this position.
 ///
-/// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
-pub fn merkle_get_node(root: &Word, depth: u32, index: u64) -> Option<Word> {
+/// A `depth` outside the valid range for a Merkle tree, or an `index` outside the valid range for
+/// `depth`, ends the handler.
+pub fn merkle_get_node(root: &Word, depth: u32, index: Felt) -> Option<Word> {
     let root = canonical_word(root);
     let mut out = Word::empty();
     // SAFETY: the module contract; the host reads the local `root` and writes the local `out`,
     // one word each.
-    match status(unsafe { guest::merkle_get_node(&root, depth, index, &mut out) }) {
+    match status(unsafe {
+        guest::merkle_get_node(&root, depth, index.as_canonical_u64(), &mut out)
+    }) {
         Status::Ok => Some(out),
         Status::NotFound => None,
         _ => fail("merkle_get_node failed"),
@@ -170,11 +173,12 @@ pub fn merkle_get_node(root: &Word, depth: u32, index: u64) -> Option<Word> {
 /// Returns `true` when the Merkle store has a path for the node of the tree with root `root` at
 /// `depth`/`index`.
 ///
-/// A `depth` or `index` outside the valid range for a Merkle tree ends the handler.
-pub fn merkle_has_path(root: &Word, depth: u32, index: u64) -> bool {
+/// A `depth` outside the valid range for a Merkle tree, or an `index` outside the valid range for
+/// `depth`, ends the handler.
+pub fn merkle_has_path(root: &Word, depth: u32, index: Felt) -> bool {
     let root = canonical_word(root);
     // SAFETY: the module contract; the host reads one word from the local `root`.
-    unsafe { guest::merkle_has_path(&root, depth, index) != 0 }
+    unsafe { guest::merkle_has_path(&root, depth, index.as_canonical_u64()) != 0 }
 }
 
 /// Returns the number of elements on the advice stack.
