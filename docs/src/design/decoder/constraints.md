@@ -564,13 +564,13 @@ A row inside a basic block may only stay inside the block, or exit through
 > $$
 
 ### Block address constraints
-When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. This can be enforced with the following constraint:
+When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. The same is true when executing `REPEAT`, which re-enters the same loop parent for another body iteration. This can be enforced with the following constraint:
 
 > $$
-> sp \cdot (a' - a) = 0 \text{ | degree} = 2
+> (sp + f_{repeat}) \cdot (a' - a) = 0 \text{ | degree} = 5
 > $$
 
-Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
+Notice that this constraint does not apply when we execute most control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` and `REPEAT` operations. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
 
 Notice also that this constraint implies that when the next operation is the `END` operation, the value in the $a$ column must also be copied over to the next row. This is exactly the behavior we want to enforce so that when the `END` operation is executed, the block address is set to the address of the current span batch.
 

@@ -508,8 +508,12 @@ pub fn enforce_main<AB>(
     // controller pair, so addr increments by CONTROLLER_ROWS_PER_PERMUTATION.
 
     // Inside a basic block, addr must stay the same (all ops in one batch share the same
-    // hasher-table address).
-    builder.when_transition().when(in_span).assert_eq(addr_next, addr);
+    // hasher-table address). REPEAT also re-enters the same loop parent for another body
+    // iteration.
+    builder
+        .when_transition()
+        .when(in_span + op_flags.repeat())
+        .assert_eq(addr_next, addr);
 
     // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_PERMUTATION).
     builder

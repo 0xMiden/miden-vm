@@ -14,7 +14,7 @@ use miden_crypto::{
 use crate::helpers::read_memory_felt;
 
 const OOD_ROW_FELTS: usize = 1_536;
-const OOD_PTR: u32 = 3_225_426_432;
+const OOD_PTR: u32 = 3_225_426_440;
 const ALPHA_PTR: u32 = 1_000;
 const RESULT_PTR: u32 = 2_000;
 
