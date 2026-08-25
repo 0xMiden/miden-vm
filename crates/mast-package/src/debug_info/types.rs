@@ -859,21 +859,27 @@ fn reachable_components<Exec: Idx, Src: Idx>(
     let mut components = Vec::new();
     let mut next_index = 0usize;
 
-    debug_info.get_type(root)?;
-    let mut call_stack = alloc::vec![(root, 0usize)];
+    // Each frame keeps its own child list. Recomputing it per edge would allocate and copy all of
+    // a node's children once per child, which is quadratic in a row's fanout and reachable from
+    // untrusted debug data.
+    let mut call_stack = alloc::vec![(root, 0usize, row_children(debug_info.get_type(root)?))];
     state.insert(root, State { index: 0, lowlink: 0, on_stack: true });
     next_index += 1;
     stack.push(root);
 
-    while let Some((node, edge)) = call_stack.last_mut() {
-        let node = *node;
-        let children = row_children(debug_info.get_type(node)?);
-        if *edge < children.len() {
-            let successor = children[*edge];
-            *edge += 1;
-            debug_info.get_type(successor)?;
+    while let Some(frame) = call_stack.last_mut() {
+        let node = frame.0;
+        let successor = if frame.1 < frame.2.len() {
+            let successor = frame.2[frame.1];
+            frame.1 += 1;
+            Some(successor)
+        } else {
+            None
+        };
+        if let Some(successor) = successor {
             match state.get(&successor).copied() {
                 None => {
+                    let children = row_children(debug_info.get_type(successor)?);
                     state.insert(
                         successor,
                         State {
@@ -884,7 +890,7 @@ fn reachable_components<Exec: Idx, Src: Idx>(
                     );
                     next_index += 1;
                     stack.push(successor);
-                    call_stack.push((successor, 0));
+                    call_stack.push((successor, 0, children));
                 },
                 Some(successor_state) if successor_state.on_stack => {
                     let node_state = state.get_mut(&node).expect("visited");
@@ -908,9 +914,9 @@ fn reachable_components<Exec: Idx, Src: Idx>(
             }
             components.push(component);
         }
-        if let Some((parent, _)) = call_stack.last() {
+        if let Some(parent) = call_stack.last() {
             let child_lowlink = node_state.lowlink;
-            let parent_state = state.get_mut(parent).expect("visited");
+            let parent_state = state.get_mut(&parent.0).expect("visited");
             parent_state.lowlink = parent_state.lowlink.min(child_lowlink);
         }
     }
@@ -1013,6 +1019,23 @@ fn recover_recursive_component<Exec: Idx, Src: Idx>(
     for index in &definitions {
         let ty = built.get(&names[index])?.clone();
         cached_types.insert(*index, (ty, None));
+    }
+
+    // The component also holds the rows the cycle passes *through* -- the pointer, list, or
+    // function that breaks it, and any aggregate nested beneath one. A debug variable may name
+    // any of those, so recover them too. Their children are either cached aggregates or other
+    // rows of this component, so the ordinary path terminates now that the aggregates are known.
+    for index in component {
+        if cached_types.contains_key(index) {
+            continue;
+        }
+        let mut resolving = FxHashSet::default();
+        let recovered = debug_info.get_type(*index)?.recover_registered_type_inner(
+            debug_info,
+            cached_types,
+            &mut resolving,
+        )?;
+        cached_types.insert(*index, recovered);
     }
 
     Some(())
@@ -1213,7 +1236,9 @@ impl DebugTypeInfo {
                 }
             },
             Self::Struct { name_idx, size, fields } => {
-                if fields.len() > usize::from(u8::MAX) + 1 {
+                // `StructType` admits at most 255 fields, since the wire format encodes the
+                // count as a u8. Admitting 256 here would reach its constructor and panic.
+                if fields.len() > usize::from(u8::MAX) {
                     return None;
                 }
 
@@ -1893,6 +1918,52 @@ mod tests {
         let mut cache = FxHashMap::default();
 
         assert!(recover_type_at(reserved, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_from_a_row_inside_the_cycle_succeeds() {
+        // A debug variable's type_id can name any row, including the pointer that closes a
+        // recursive cycle. Recovering from there must work, not just from the aggregate.
+        let node = recursive_node_type();
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let node_idx = builder.register_debug_type(None, None, &node).expect("registerable");
+        let debug_info = builder.build();
+
+        let DebugTypeInfo::Struct { fields, .. } = &debug_info[node_idx] else {
+            panic!("expected a struct row");
+        };
+        let pointer_idx = fields[1].type_idx;
+        assert!(
+            matches!(debug_info[pointer_idx], DebugTypeInfo::Pointer { .. }),
+            "expected the `next` field to be a pointer row"
+        );
+
+        let mut cache = FxHashMap::default();
+        let (recovered, _) = recover_type_at(pointer_idx, debug_info.as_ref(), &mut cache)
+            .expect("a row inside the cycle should be recoverable");
+        assert!(recovered.is_pointer());
+    }
+
+    #[test]
+    fn recovery_rejects_a_struct_row_with_too_many_fields() {
+        // `StructType` admits at most 255 fields, so a row carrying 256 must be rejected rather
+        // than reaching the constructor and panicking.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Big");
+        let u8_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let fields = (0..256)
+            .map(|i| DebugFieldInfo {
+                name_idx: builder.add_string(alloc::format!("f{i}")),
+                type_idx: u8_idx,
+                offset: i,
+            })
+            .collect::<Vec<_>>();
+        let big = builder.add_type(DebugTypeInfo::Struct { name_idx, size: 256, fields });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(big, debug_info.as_ref(), &mut cache).is_none());
     }
 
     #[test]
