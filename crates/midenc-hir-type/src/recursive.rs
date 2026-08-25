@@ -13,6 +13,7 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -245,59 +246,94 @@ pub(crate) struct RecDef {
     pub(crate) layout: TypeLayout,
 }
 
-/// Hash a template, collapsing every back-reference to a single token. See
-/// [`AggregateTemplate::reference_blind_hash`].
-fn hash_template_blind(template: &TypeTemplate, hasher: &mut Fnv) {
+/// Append an exact encoding of `template` in which references *into the group* are collapsed to a
+/// single token, and everything else is written out in full.
+///
+/// This is a key, not a hash. Two definitions that share a key must be interchangeable, because
+/// the initial partition never splits them again on their own content -- only on what they refer
+/// to. A hash could collide, and a collision here would merge two types that are not the same,
+/// so every part is written with an explicit length or delimiter and nothing is elided.
+///
+/// References *out of* the group name definitions that are already complete, so they are written
+/// as the type they resolve to: two definitions differing only in which of those they use are
+/// different types, and two naming different declarations of the same type are not.
+fn write_blind_key(
+    template: &TypeTemplate,
+    in_group: &BTreeSet<Arc<str>>,
+    completed: &BTreeMap<Arc<str>, Type>,
+    out: &mut String,
+) {
+    use core::fmt::Write;
+
     match template {
         TypeTemplate::Type(ty) => {
-            0u8.hash(hasher);
-            ty.hash(hasher);
+            let _ = write!(out, "t[{ty:?}]");
         },
-        // Every reference hashes the same, whichever definition it names.
-        TypeTemplate::Rec(_) => 1u8.hash(hasher),
+        TypeTemplate::Rec(name) if in_group.contains(name) => out.push_str("v[]"),
+        TypeTemplate::Rec(name) => match completed.get(name) {
+            Some(ty) => {
+                let _ = write!(out, "t[{ty:?}]");
+            },
+            // Unresolvable here means the reference is dangling, which the caller rejects.
+            None => {
+                let _ = write!(out, "x[{name:?}]");
+            },
+        },
         TypeTemplate::Ptr(addrspace, pointee) => {
-            2u8.hash(hasher);
-            addrspace.hash(hasher);
-            hash_template_blind(pointee, hasher);
+            let _ = write!(out, "p[{addrspace:?}]");
+            write_blind_key(pointee, in_group, completed, out);
         },
         TypeTemplate::Array(element, len) => {
-            3u8.hash(hasher);
-            len.hash(hasher);
-            hash_template_blind(element, hasher);
+            let _ = write!(out, "a[{len}]");
+            write_blind_key(element, in_group, completed, out);
         },
         TypeTemplate::List(element) => {
-            4u8.hash(hasher);
-            hash_template_blind(element, hasher);
+            out.push_str("l[]");
+            write_blind_key(element, in_group, completed, out);
         },
         TypeTemplate::Function(ty) => {
-            5u8.hash(hasher);
-            ty.abi.hash(hasher);
+            // The list lengths matter: `fn(T)` and `fn() -> T` are otherwise the same tags in
+            // the same order.
+            let _ = write!(out, "f[{:?},{},{}]", ty.abi, ty.params.len(), ty.results.len());
             for t in ty.params.iter().chain(ty.results.iter()) {
-                hash_template_blind(t, hasher);
+                write_blind_key(t, in_group, completed, out);
             }
         },
-        TypeTemplate::Struct(ty) => {
-            6u8.hash(hasher);
-            ty.name.hash(hasher);
-            ty.repr.hash(hasher);
-            for field in &ty.fields {
-                field.name.hash(hasher);
-                hash_template_blind(&field.ty, hasher);
-            }
-        },
-        TypeTemplate::Enum(ty) => {
-            7u8.hash(hasher);
-            ty.name.hash(hasher);
-            ty.discriminant.hash(hasher);
-            for variant in &ty.variants {
-                variant.name.hash(hasher);
-                variant.discriminant_value.hash(hasher);
-                match variant.value.as_ref() {
-                    Some(value) => hash_template_blind(value, hasher),
-                    None => 0xffu8.hash(hasher),
-                }
-            }
-        },
+        TypeTemplate::Struct(ty) => write_blind_struct_key(ty, in_group, completed, out),
+        TypeTemplate::Enum(ty) => write_blind_enum_key(ty, in_group, completed, out),
+    }
+}
+
+fn write_blind_struct_key(
+    ty: &StructTemplate,
+    in_group: &BTreeSet<Arc<str>>,
+    completed: &BTreeMap<Arc<str>, Type>,
+    out: &mut String,
+) {
+    use core::fmt::Write;
+
+    let _ = write!(out, "s[{:?},{:?},{}]", ty.name, ty.repr, ty.fields.len());
+    for field in &ty.fields {
+        let _ = write!(out, "n[{:?}]", field.name);
+        write_blind_key(&field.ty, in_group, completed, out);
+    }
+}
+
+fn write_blind_enum_key(
+    ty: &EnumTemplate,
+    in_group: &BTreeSet<Arc<str>>,
+    completed: &BTreeMap<Arc<str>, Type>,
+    out: &mut String,
+) {
+    use core::fmt::Write;
+
+    let _ = write!(out, "e[{:?},{:?},{}]", ty.name, ty.discriminant, ty.variants.len());
+    for variant in &ty.variants {
+        let _ = write!(out, "w[{:?},{:?}]", variant.name, variant.discriminant_value);
+        match variant.value.as_ref() {
+            Some(value) => write_blind_key(value, in_group, completed, out),
+            None => out.push_str("z[]"),
+        }
     }
 }
 
@@ -327,8 +363,12 @@ impl Hasher for Fnv {
 ///
 /// Every component is derived from the definition itself rather than from the key it was
 /// registered under, so that structurally identical groups order identically.
-fn structural_order_key(def: &TemplateDef) -> (Option<Arc<str>>, AggregateKind, u64) {
-    (def.body.declared_name(), def.kind, def.body.reference_blind_hash())
+fn structural_order_key(
+    def: &TemplateDef,
+    in_group: &BTreeSet<Arc<str>>,
+    completed: &BTreeMap<Arc<str>, Type>,
+) -> (Option<Arc<str>>, AggregateKind, String) {
+    (def.body.declared_name(), def.kind, def.body.blind_key(in_group, completed))
 }
 
 fn hash_defs(defs: &[RecDef]) -> u64 {
@@ -923,7 +963,7 @@ fn build_group(
     // rather than break such ties arbitrarily, indistinguishable definitions are merged: they
     // denote the same type, exactly as two identically named and shaped non-recursive structs
     // already do. What comes back is one definition per equivalence class, canonically ordered.
-    let class_of = merge_isomorphic_definitions(defs, &component);
+    let class_of = merge_isomorphic_definitions(defs, &component, completed);
     let class_count = class_of.iter().copied().max().map_or(0, |max| max as usize + 1);
 
     // Every member of a class resolves to that class's definition, so a reference to any of them
@@ -1007,7 +1047,11 @@ fn build_group(
 /// Class numbering is canonical: at each round the distinct signatures are sorted, and a signature
 /// is built from the previous round's numbering, which is canonical by induction. The base case is
 /// the structural key, which does not depend on any numbering.
-fn merge_isomorphic_definitions(defs: &[TemplateDef], component: &[usize]) -> Vec<u16> {
+fn merge_isomorphic_definitions(
+    defs: &[TemplateDef],
+    component: &[usize],
+    completed: &BTreeMap<Arc<str>, Type>,
+) -> Vec<u16> {
     let position_of = component
         .iter()
         .enumerate()
@@ -1028,9 +1072,10 @@ fn merge_isomorphic_definitions(defs: &[TemplateDef], component: &[usize]) -> Ve
         })
         .collect::<Vec<_>>();
 
+    let in_group = component.iter().map(|member| defs[*member].name.clone()).collect();
     let keys = component
         .iter()
-        .map(|member| structural_order_key(&defs[*member]))
+        .map(|member| structural_order_key(&defs[*member], &in_group, completed))
         .collect::<Vec<_>>();
     let mut classes = rank(&keys);
 
@@ -1143,38 +1188,20 @@ impl AggregateTemplate {
         }
     }
 
-    /// A hash of this definition's shape in which every back-reference is treated alike.
+    /// An exact encoding of this definition's shape, with references into the group collapsed.
     ///
-    /// Ordering the group is what assigns back-reference indices, so an ordering key cannot
-    /// depend on those indices without being circular. Collapsing all references to one token
-    /// breaks the cycle: the result is a function of the definition's shape alone.
-    fn reference_blind_hash(&self) -> u64 {
-        let mut hasher = Fnv::new();
+    /// See [`write_blind_key`] for why this is a key rather than a hash.
+    fn blind_key(
+        &self,
+        in_group: &BTreeSet<Arc<str>>,
+        completed: &BTreeMap<Arc<str>, Type>,
+    ) -> String {
+        let mut key = String::new();
         match self {
-            Self::Struct(ty) => {
-                0u8.hash(&mut hasher);
-                ty.name.hash(&mut hasher);
-                ty.repr.hash(&mut hasher);
-                for field in &ty.fields {
-                    field.name.hash(&mut hasher);
-                    hash_template_blind(&field.ty, &mut hasher);
-                }
-            },
-            Self::Enum(ty) => {
-                1u8.hash(&mut hasher);
-                ty.name.hash(&mut hasher);
-                ty.discriminant.hash(&mut hasher);
-                for variant in &ty.variants {
-                    variant.name.hash(&mut hasher);
-                    variant.discriminant_value.hash(&mut hasher);
-                    match variant.value.as_ref() {
-                        Some(value) => hash_template_blind(value, &mut hasher),
-                        None => 0xffu8.hash(&mut hasher),
-                    }
-                }
-            },
+            Self::Struct(ty) => write_blind_struct_key(ty, in_group, completed, &mut key),
+            Self::Enum(ty) => write_blind_enum_key(ty, in_group, completed, &mut key),
         }
-        hasher.finish()
+        key
     }
 
     /// Every reference this definition makes, in the order it makes them.
@@ -1848,6 +1875,127 @@ mod tests {
             panic!("expected a struct")
         };
         assert_eq!(p.as_recursive().expect("recursive").group_len(), 4);
+    }
+
+    #[test]
+    fn definitions_differing_only_outside_the_group_are_kept_apart() {
+        // `p` and `q` share a name and shape and refer to each other, so nothing inside the group
+        // separates them. They carry different payloads, which are separate declarations and so
+        // outside the group -- that difference still makes them different types.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "X",
+                StructTemplate::named(
+                    "X",
+                    TypeRepr::Default,
+                    [("v", TypeTemplate::from(Type::U8))],
+                ),
+            )
+            .define_struct(
+                "Y",
+                StructTemplate::named(
+                    "Y",
+                    TypeRepr::Default,
+                    [("v", TypeTemplate::from(Type::U32))],
+                ),
+            )
+            .define_struct(
+                "p",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [
+                        ("next", TypeTemplate::ptr(TypeTemplate::rec("q"))),
+                        ("payload", TypeTemplate::rec("X")),
+                    ],
+                ),
+            )
+            .define_struct(
+                "q",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [
+                        ("next", TypeTemplate::ptr(TypeTemplate::rec("p"))),
+                        ("payload", TypeTemplate::rec("Y")),
+                    ],
+                ),
+            );
+        let built = builder.build().expect("should build");
+
+        assert_ne!(built.get("p"), built.get("q"));
+    }
+
+    #[test]
+    fn definitions_differing_in_signature_shape_are_kept_apart() {
+        // One takes its reference as a parameter, the other returns it. Same tags in the same
+        // order, so a key that omits the list lengths cannot tell them apart.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "a",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [("f", TypeTemplate::function(CallConv::Fast, [TypeTemplate::rec("b")], []))],
+                ),
+            )
+            .define_struct(
+                "b",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [("f", TypeTemplate::function(CallConv::Fast, [], [TypeTemplate::rec("a")]))],
+                ),
+            );
+        let built = builder.build().expect("should build");
+
+        assert_ne!(built.get("a"), built.get("b"));
+    }
+
+    #[test]
+    fn definitions_naming_equal_external_types_still_merge() {
+        // The two payload declarations are different names for the same type, so `p` and `q` are
+        // the same type. A key that recorded which declaration was named would keep them apart.
+        let mut builder = RecursiveTypeBuilder::new();
+        for key in ["X", "Y"] {
+            builder.define_struct(
+                key,
+                StructTemplate::named(
+                    "Payload",
+                    TypeRepr::Default,
+                    [("v", TypeTemplate::from(Type::U8))],
+                ),
+            );
+        }
+        builder
+            .define_struct(
+                "p",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [
+                        ("next", TypeTemplate::ptr(TypeTemplate::rec("q"))),
+                        ("payload", TypeTemplate::rec("X")),
+                    ],
+                ),
+            )
+            .define_struct(
+                "q",
+                StructTemplate::named(
+                    "N",
+                    TypeRepr::Default,
+                    [
+                        ("next", TypeTemplate::ptr(TypeTemplate::rec("p"))),
+                        ("payload", TypeTemplate::rec("Y")),
+                    ],
+                ),
+            );
+        let built = builder.build().expect("should build");
+
+        assert_eq!(built.get("X"), built.get("Y"));
+        assert_eq!(built.get("p"), built.get("q"));
     }
 
     #[test]
