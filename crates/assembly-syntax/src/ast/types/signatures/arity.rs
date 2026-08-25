@@ -48,7 +48,10 @@ enum Unit {
 fn count_units(ty: &Type, codecs: &[Box<dyn WitScalarCodec>], unit: Unit) -> Option<usize> {
     match ty {
         Type::Struct(struct_ty) => {
-            if codec_for_struct(codecs, struct_ty).is_some() {
+            // Unfolded once: a recursive struct is only reachable here through a pointer, list,
+            // or function field, each of which stops the walk below, so this terminates.
+            let struct_ty = struct_ty.get();
+            if codec_for_struct(codecs, &struct_ty).is_some() {
                 return Some(1);
             }
             let mut total = 0usize;

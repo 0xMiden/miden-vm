@@ -227,7 +227,8 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
             // A codec reads one token for the whole struct, not one per field, the same way
             // `token_count` and `decode_type` treat it. So the signature shows the codec's name
             // for it, not a field list that would wrongly ask the user for one token per field.
-            if let Some(codec) = codec_for_struct(codecs, struct_ty) {
+            let struct_ty = struct_ty.get();
+            if let Some(codec) = codec_for_struct(codecs, &struct_ty) {
                 return codec.wit_name().to_string();
             }
 
@@ -235,7 +236,7 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
             // A struct with mixed field names has no shape, and `Display` cannot show an error, so
             // the signature says so instead of looking correct. `decode_type` is where it becomes
             // an error.
-            match struct_shape(struct_ty) {
+            match struct_shape(&struct_ty) {
                 // A struct with a name is its name. Its fields are not part of the signature.
                 Some(
                     StructShape::Tuple { name: Some(name) }
