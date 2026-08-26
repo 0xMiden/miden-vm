@@ -196,6 +196,11 @@ fn set_poseidon2_cycle_multiplicity(
     poseidon2_row_mut(poseidon2, start + CYCLE_OUTPUT_ROW).witnesses[0] = multiplicity;
 }
 
+fn set_chip_clk(chiplets: &mut RowMajorMatrix<Felt>, row: usize) {
+    let width = chiplets.width();
+    chiplets.values[row * width + width - 1] = Felt::new_unchecked(row as u64 + 1);
+}
+
 fn find_first_iteration_window(trace: &miden_processor::trace::VmTrace) -> (usize, usize, usize) {
     let main = trace.main_trace();
     let is =
@@ -304,6 +309,77 @@ fn forged_early_loop_iteration_body_is_rejected() {
     assert!(
         result.is_err(),
         "the proof pipeline must reject a REPEAT whose body digest was not committed by LOOP: {result:?}"
+    );
+}
+
+#[test]
+fn loop_skip_body_with_retired_hasher_rows_verifies_before_decoder_fix() {
+    let program = build_loop_program(vec![Operation::Noop, Operation::Noop]);
+    let trace = execute(&program, &[0]);
+    let main = trace.main_trace();
+
+    // Honest fixture:
+    //   LOOP(gc=1) | SPAN | NOOP | NOOP | END_body | END_loop | HALT...
+    //
+    // Forged:
+    //   LOOP(gc=0) | END_loop | HALT | HALT | HALT | HALT | HALT...
+    //
+    // This skips the committed do-while body. Retiring the body's two hasher-controller rows
+    // avoids the incidental lookup imbalance from the earlier dead-end probe, so this is a
+    // proof-level witness for the missing LOOP -> END decoder constraint.
+    let loop_row = 0usize;
+    let body_op_row = 2usize;
+    let loop_end_row = 5usize;
+    let first_halt_row = 6usize;
+    assert_eq!(main.get_op_code(RowIndex::from(loop_row)), Felt::from_u8(opcodes::LOOP));
+    assert_eq!(main.get_op_code(RowIndex::from(loop_row + 1)), Felt::from_u8(opcodes::SPAN));
+    assert_eq!(main.get_op_code(RowIndex::from(loop_end_row)), Felt::from_u8(opcodes::END));
+    assert_eq!(main.get_op_code(RowIndex::from(first_halt_row)), Felt::from_u8(opcodes::HALT));
+
+    let body_addr = main.addr(RowIndex::from(body_op_row)).as_canonical_u64() as usize;
+    assert!(body_addr > 0, "body hash controller address is one-indexed");
+    let body_controller_row = body_addr - 1;
+    let body_cycle = body_controller_row / CONTROLLER_ROWS_PER_PERMUTATION;
+    let controller_padding_row = body_controller_row + CONTROLLER_ROWS_PER_PERMUTATION;
+
+    let (mut core, mut chiplets, mut poseidon2) = main.to_air_matrices();
+    let honest_core = core.clone();
+    let honest_chiplets = chiplets.clone();
+
+    // Pull the loop's own END up to directly follow LOOP, then pad over the old body rows.
+    copy_matrix_row(&mut core, loop_row + 1, &honest_core, loop_end_row);
+    for row in (loop_row + 2)..=loop_end_row {
+        copy_matrix_row(&mut core, row, &honest_core, first_halt_row);
+    }
+    for row in (loop_row + 1)..=loop_end_row {
+        core_row_mut(&mut core, row).system.clk = Felt::new_unchecked(row as u64);
+    }
+
+    // With multiplicity zero, the LOOP row emits no loop-body block-hash entry.
+    core_row_mut(&mut core, loop_row).decoder.group_count = Felt::ZERO;
+
+    // Remove the now-unrequested body hash response by replacing its controller input/output pair
+    // with existing controller-padding rows, preserving the positional chiplet clock.
+    for offset in 0..CONTROLLER_ROWS_PER_PERMUTATION {
+        let dst = body_controller_row + offset;
+        copy_matrix_row(&mut chiplets, dst, &honest_chiplets, controller_padding_row + offset);
+        set_chip_clk(&mut chiplets, dst);
+    }
+    set_poseidon2_cycle_multiplicity(&mut poseidon2, body_cycle, Felt::ZERO);
+
+    let repro = ReproTrace::new(&trace);
+    let outcome = repro
+        .prove_and_verify_parts_allowing_lookup_rejection(
+            core,
+            chiplets,
+            poseidon2,
+            *trace.stack_outputs(),
+        )
+        .expect("completed skip-body witness should verify before the decoder fix");
+    assert_eq!(outcome.security_level(), 96);
+    assert!(
+        outcome.is_complete(),
+        "skip-body witness should leave no outstanding precompile obligation"
     );
 }
 
