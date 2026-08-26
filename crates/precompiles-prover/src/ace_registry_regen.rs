@@ -391,7 +391,7 @@ fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
     let config = crate::stark_config::poseidon2_config(params, digest);
     // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
     let commitment: [Felt; 4] =
-        miden_precompiles_air::preprocessed::poseidon2(&config).commitment().into();
+        miden_precompiles_air::preprocessed::build_uncached(&config).commitment().into();
     Word::new(commitment)
 }
 

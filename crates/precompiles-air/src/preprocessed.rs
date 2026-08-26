@@ -18,7 +18,11 @@ use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
 use crate::{
     ChipletMultiAir,
     logup::NUM_PUBLIC_VALUES,
-    stark_config::{Blake3Config, KeccakConfig, Poseidon2Config, RpoConfig, RpxConfig},
+    stark_config::{
+        Blake3Config, KeccakConfig, PRECOMPILE_RELATION_DIGEST, Poseidon2Config, RpoConfig,
+        RpxConfig, blake3_256_config, keccak_config, poseidon2_config, precompile_pcs_params,
+        rpo_config, rpx_config,
+    },
 };
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
@@ -67,28 +71,36 @@ where
         .expect("chiplet stack always declares BytePairLut preprocessed columns")
 }
 
+/// Builds a bundle without caching it.
+pub fn build_uncached<SC>(config: &SC) -> Preprocessed<Felt, SC::Lmcs>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+{
+    build(config)
+}
+
 macro_rules! cached_preprocessed {
-    ($fn_name:ident, $config:ty) => {
-        pub fn $fn_name(
-            config: &$config,
-        ) -> PreprocessedHandle<'static, <$config as StarkConfig<Felt, QuadFelt>>::Lmcs> {
+    ($fn_name:ident, $config:ty, $config_fn:ident) => {
+        pub fn $fn_name()
+        -> PreprocessedHandle<'static, <$config as StarkConfig<Felt, QuadFelt>>::Lmcs> {
+            let config = $config_fn(precompile_pcs_params(), PRECOMPILE_RELATION_DIGEST);
             #[cfg(feature = "std")]
             {
                 static CACHE: std::sync::OnceLock<
                     Preprocessed<Felt, <$config as StarkConfig<Felt, QuadFelt>>::Lmcs>,
                 > = std::sync::OnceLock::new();
-                PreprocessedHandle::Cached(CACHE.get_or_init(|| build(config)))
+                PreprocessedHandle::Cached(CACHE.get_or_init(|| build(&config)))
             }
             #[cfg(not(feature = "std"))]
             {
-                PreprocessedHandle::Owned(build(config))
+                PreprocessedHandle::Owned(build(&config))
             }
         }
     };
 }
 
-cached_preprocessed!(blake3, Blake3Config);
-cached_preprocessed!(rpo, RpoConfig);
-cached_preprocessed!(rpx, RpxConfig);
-cached_preprocessed!(poseidon2, Poseidon2Config);
-cached_preprocessed!(keccak, KeccakConfig);
+cached_preprocessed!(blake3, Blake3Config, blake3_256_config);
+cached_preprocessed!(rpo, RpoConfig, rpo_config);
+cached_preprocessed!(rpx, RpxConfig, rpx_config);
+cached_preprocessed!(poseidon2, Poseidon2Config, poseidon2_config);
+cached_preprocessed!(keccak, KeccakConfig, keccak_config);

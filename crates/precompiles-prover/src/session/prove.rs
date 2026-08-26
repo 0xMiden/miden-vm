@@ -49,27 +49,27 @@ impl SessionTraces {
         match hash_fn {
             HashFunction::Blake3_256 => {
                 let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::blake3(&config);
+                let preprocessed = preprocessed::blake3();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpo256 => {
                 let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpo(&config);
+                let preprocessed = preprocessed::rpo();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Rpx256 => {
                 let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::rpx(&config);
+                let preprocessed = preprocessed::rpx();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Poseidon2 => {
                 let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::poseidon2(&config);
+                let preprocessed = preprocessed::poseidon2();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
             HashFunction::Keccak => {
                 let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-                let preprocessed = preprocessed::keccak(&config);
+                let preprocessed = preprocessed::keccak();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }
@@ -126,27 +126,27 @@ pub(crate) fn verify_stark(
     match proof.hash_fn() {
         HashFunction::Blake3_256 => {
             let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::blake3(&config);
+            let preprocessed = preprocessed::blake3();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpo256 => {
             let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpo(&config);
+            let preprocessed = preprocessed::rpo();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Rpx256 => {
             let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpx(&config);
+            let preprocessed = preprocessed::rpx();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Poseidon2 => {
             let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::poseidon2(&config);
+            let preprocessed = preprocessed::poseidon2();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
         HashFunction::Keccak => {
             let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::keccak(&config);
+            let preprocessed = preprocessed::keccak();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
     }

@@ -70,7 +70,7 @@ where
 }
 
 impl ChipletAir {
-    /// The ten AIRs in canonical [`SessionTraces::mains`] order.
+    /// The ten AIRs in canonical prover trace order.
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::ChunkNodeSponge,

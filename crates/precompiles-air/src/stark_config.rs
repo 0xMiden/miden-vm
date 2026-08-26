@@ -51,8 +51,7 @@ pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
     ]
 };
 
-/// Default hash function for compatibility APIs such as
-/// [`SessionTraces::prove`](crate::session::SessionTraces::prove).
+/// Default hash function for compatibility APIs.
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
     miden_core::proof::HashFunction::Poseidon2;
 
@@ -65,7 +64,7 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
 /// relying on the core VM's defaults. Every chiplet AIR in
-/// [`ChipletAir`](crate::session::ChipletAir) closes at a `log_quotient_degree`
+/// [`ChipletAir`](crate::ChipletAir) closes at a `log_quotient_degree`
 /// well under the core VM's degree-8 constraints (see the
 /// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), so `log_blowup` could be
 /// lowered in principle. The MASM verifier compiles the current PCS geometry,

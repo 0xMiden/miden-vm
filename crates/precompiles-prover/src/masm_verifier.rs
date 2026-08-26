@@ -155,7 +155,7 @@ fn build_verifier_advice(
         precompile_pcs_params(),
         crate::ace_registry::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed::poseidon2(&config);
+    let preprocessed = preprocessed::poseidon2();
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, Poseidon2Config> = deserialize_schema_exact::<

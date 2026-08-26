@@ -1,9 +1,8 @@
 //! Fixed environment loaded by verifier boundary consumes, not transcript claims.
 //!
-//! This is deterministic protocol data: [`Session`](super::Session) installs fixed uints in the
-//! uint store, preseeds fixed curve groups in the EC group table, and records external `UintVal`
-//! / `EcGroup` demands. Matching positive consumes are injected by
-//! `ChipletMultiAir::eval_external`.
+//! This is deterministic protocol data. The prover installs fixed uints in the uint store,
+//! preseeds fixed curve groups in the EC group table, and records external `UintVal` / `EcGroup`
+//! demands. Matching positive consumes are injected by `ChipletMultiAir::eval_external`.
 
 use miden_core::Felt;
 use miden_precompiles::{CurveId, Limbs, UintDomain};

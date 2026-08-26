@@ -81,12 +81,9 @@ mod prove;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
-pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir};
+pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
 pub use prove::VerifyError;
 pub(crate) use prove::verify_stark;
-
-/// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
-pub const NUM_CHIPLETS: usize = 10;
 
 /// Stateful builder over the full chiplet stack.
 ///
