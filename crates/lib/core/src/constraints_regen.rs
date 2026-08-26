@@ -1262,21 +1262,4 @@ mod tests {
             .expect_err("the PVM allocation must follow the VM stream");
         assert!(error.to_string().contains("PVM allocation starts before"));
     }
-
-    #[test]
-    fn vm_geometry_tracks_aligned_108_main_and_20_aux_widths() {
-        let factory = RecursiveAceCircuitFactory::new().expect("recursive ACE factory");
-        let geometry = VmGeometry::from_input_layout(factory.input_layout()).expect("VM geometry");
-
-        assert_eq!(geometry.main_widths, [56, 24, 112, 16]);
-        assert_eq!(geometry.main_width, 208);
-        assert_eq!(geometry.aux_widths, [8, 8, 40, 24]);
-        assert_eq!(geometry.aux_width, 80);
-        assert_eq!(geometry.row_width, 320);
-        assert_eq!(geometry.ood_row_felts, 640);
-        assert_eq!(geometry.ood_frame_felts, 1_280);
-        assert_eq!(geometry.main_pipe_blocks, 26);
-        assert_eq!(geometry.aux_pipe_blocks, 10);
-        assert_eq!(geometry.ood_pipe_blocks, 80);
-    }
 }

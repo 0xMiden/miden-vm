@@ -555,47 +555,77 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     const GENERIC_FRAME_START: u64 = 3_223_322_624;
     const GENERIC_FRAME_END: u64 = 3_223_322_776;
     const VM_FRAME_END: u64 = 3_223_323_864;
+    const VM_ACE_READ_START: u64 = 3_225_419_776;
     const PVM_FRAME_START: u64 = 3_225_432_064;
-    const PVM_FRAME_END: u64 = 3_225_452_280;
 
-    /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
-    /// New relation-owned addresses must be added here, including one-felt cells.
-    const RELATION_REGIONS: &[(&str, &str, i64, u64)] = &[
-        ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, 8),
-        ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
-        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, 32),
-        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 1088),
-        ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, 704),
-        ("pvm/layout.masm", "QUOTIENT_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, 32),
-        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 1088),
-        ("pvm/layout.masm", "AUX_NEXT_PTR", 0, 704),
-        ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
-        ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 24),
-        ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 15480),
-        ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
-        ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
-        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 920),
-        ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, 4),
-        ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, 1),
-        ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, 3),
-        ("vm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
-        ("vm/layout.masm", "C_TOTAL_PTR", 0, 4),
-        ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, 4),
-        ("vm/layout.masm", "CLAIM_PTR", 0, 40),
-        ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, 4),
-        ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, 8),
-        ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, 1020),
+    #[derive(Clone, Copy, Debug)]
+    enum RegionExtent {
+        Fixed(u64),
+        Until(&'static str),
+        UntilAddress(u64),
+        FractionOf {
+            start: &'static str,
+            end: &'static str,
+            divisor: u64,
+        },
+    }
+    use RegionExtent::{Fixed, FractionOf, Until, UntilAddress};
+
+    /// `(path below asm/sys, name, offset from the declared address, extent)`.
+    ///
+    /// Pointer-delimited extents keep the manifest tied to generated AIR geometry. New
+    /// relation-owned addresses must still be listed explicitly, including one-felt cells.
+    const RELATION_REGIONS: &[(&str, &str, i64, RegionExtent)] = &[
+        ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, Until("AUX_RAND_ELEM_PTR")),
+        ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Until("PREPROCESSED_CURRENT_PTR")),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, Until("MAIN_CURRENT_PTR")),
+        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, Until("AUX_CURRENT_PTR")),
+        ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, Until("QUOTIENT_CURRENT_PTR")),
+        ("pvm/layout.masm", "QUOTIENT_CURRENT_PTR", 0, Until("PREPROCESSED_NEXT_PTR")),
+        ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, Until("MAIN_NEXT_PTR")),
+        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, Until("AUX_NEXT_PTR")),
+        ("pvm/layout.masm", "AUX_NEXT_PTR", 0, Until("QUOTIENT_NEXT_PTR")),
+        ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
+        ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, Until("AUXILIARY_ACE_INPUTS_PTR")),
+        (
+            "pvm/layout.masm",
+            "AUXILIARY_ACE_INPUTS_PTR",
+            0,
+            Until("ACE_CIRCUIT_STREAM_PTR"),
+        ),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, Until("BUS_GAMMA_PTR")),
+        ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, Until("C_TOTAL_PTR")),
+        ("pvm/layout.masm", "C_TOTAL_PTR", 0, Until("CURRENT_TRACE_ROW_PTR")),
+        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, Until("PREPROCESSED_COM_PTR")),
+        ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, Fixed(4)),
+        ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
+        ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
+        ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
+        ("vm/layout.masm", "C_TOTAL_PTR", 0, Fixed(4)),
+        ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, Fixed(4)),
+        ("vm/layout.masm", "CLAIM_PTR", 0, Fixed(40)),
+        ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, Fixed(4)),
+        ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, Fixed(8)),
+        ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, Fixed(1020)),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
-        ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
-        // Two 320-evaluation rows, represented over the quadratic extension field.
-        ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, 2 * 320 * 2),
-        ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 8),
-        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 48),
+        ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Fixed(8)),
+        ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
+        ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, Fixed(8)),
+        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(48)),
         // Fixed VM stream reservation ending at the PVM allocation.
-        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 10944),
-        ("vm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 320),
+        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, UntilAddress(PVM_FRAME_START)),
+        (
+            "vm/layout.masm",
+            "CURRENT_TRACE_ROW_PTR",
+            0,
+            FractionOf {
+                start: "OOD_EVALUATIONS_PTR",
+                end: "AUX_BUS_BOUNDARY_PTR",
+                // The OOD allocation contains current and next rows, with every scalar
+                // evaluation represented by EXT_DEGREE base-field coordinates.
+                divisor: 2 * miden_ace_codegen::EXT_DEGREE as u64,
+            },
+        ),
     ];
 
     #[derive(Debug)]
@@ -790,27 +820,75 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     collect_masm_files(&sys, &mut relation_files);
     relation_files.sort();
 
-    let mut relation_manifest: BTreeMap<(String, String), (i64, u64)> = BTreeMap::new();
-    for &(source, name, offset, felts) in RELATION_REGIONS {
+    let mut relation_manifest: BTreeMap<(String, String), (i64, RegionExtent)> = BTreeMap::new();
+    for &(source, name, offset, extent) in RELATION_REGIONS {
         assert!(
             relation_manifest
-                .insert((source.to_string(), name.to_string()), (offset, felts))
+                .insert((source.to_string(), name.to_string()), (offset, extent))
                 .is_none(),
             "duplicate relation region manifest entry: {source}:{name}"
         );
     }
-    let mut relation_regions = Vec::new();
+
+    let mut relation_declarations = BTreeMap::new();
     for path in relation_files {
         let source = path
             .strip_prefix(&sys)
             .expect("relation module is below asm/sys")
             .to_string_lossy()
             .replace('\\', "/");
+        let mut source_declarations = BTreeMap::new();
         for (name, address) in declarations(&path) {
-            let (offset, felts) = relation_manifest
+            assert!(
+                source_declarations.insert(name.clone(), address).is_none(),
+                "duplicate relation address declaration: {source}:{name}"
+            );
+        }
+        if !source_declarations.is_empty() {
+            assert!(
+                relation_declarations.insert(source.clone(), source_declarations).is_none(),
+                "relation source visited twice: {source}"
+            );
+        }
+    }
+
+    let extent_between =
+        |source: &str, declarations: &BTreeMap<String, u64>, start: &str, end: &str| {
+            let start_address = declarations
+                .get(start)
+                .unwrap_or_else(|| panic!("{source} is missing extent boundary {start}"));
+            let end_address = declarations
+                .get(end)
+                .unwrap_or_else(|| panic!("{source} is missing extent boundary {end}"));
+            end_address
+                .checked_sub(*start_address)
+                .unwrap_or_else(|| panic!("{source}:{end} precedes {start}"))
+        };
+
+    let mut relation_regions = Vec::new();
+    for (source, declarations) in &relation_declarations {
+        for (name, &address) in declarations {
+            let (offset, extent) = relation_manifest
                 .remove(&(source.clone(), name.clone()))
                 .unwrap_or_else(|| panic!("unmanifested relation address: {source}:{name}"));
-            relation_regions.push(region(&source, name, address, offset, felts));
+            let felts = match extent {
+                Fixed(felts) => felts,
+                Until(end) => extent_between(source, declarations, name, end),
+                UntilAddress(end) => end
+                    .checked_sub(address)
+                    .unwrap_or_else(|| panic!("{source}:{name} begins after its frame boundary")),
+                FractionOf { start, end, divisor } => {
+                    assert_ne!(divisor, 0, "{source}:{name} has a zero extent divisor");
+                    let span = extent_between(source, declarations, start, end);
+                    assert_eq!(
+                        span % divisor,
+                        0,
+                        "{source}:{name} source span is not divisible by {divisor}"
+                    );
+                    span / divisor
+                },
+            };
+            relation_regions.push(region(source, name.clone(), address, offset, felts));
         }
     }
     assert!(
@@ -840,6 +918,11 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         .filter(|region| !GENERIC_ALIASES.contains(&region.name.as_str()))
         .collect();
     let relation_region_refs: Vec<_> = relation_regions.iter().collect();
+    let pvm_frame_end = relation_regions
+        .iter()
+        .find(|region| region.source == "pvm/layout.masm" && region.name == "PREPROCESSED_COM_PTR")
+        .and_then(|region| region.hi.checked_add(1))
+        .expect("the terminal PVM commitment region must define the frame end");
 
     assert_disjoint(&canonical_generic_regions, "generic");
     assert_disjoint(&relation_region_refs, "relation");
@@ -866,7 +949,8 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         GENERIC_FRAME_END,
     );
     assert_tiled_frame(&relation_region_refs, "vm/layout.masm", GENERIC_FRAME_END, VM_FRAME_END);
-    assert_tiled_frame(&relation_region_refs, "pvm/layout.masm", PVM_FRAME_START, PVM_FRAME_END);
+    assert_tiled_frame(&relation_region_refs, "vm/layout.masm", VM_ACE_READ_START, PVM_FRAME_START);
+    assert_tiled_frame(&relation_region_refs, "pvm/layout.masm", PVM_FRAME_START, pvm_frame_end);
 
     let kernel_witness = relation_regions
         .iter()

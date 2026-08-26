@@ -1,5 +1,6 @@
 //! Behavioral oracle for the PVM DEEP-query hook.
 
+use miden_ace_codegen::EXT_DEGREE;
 use miden_core::{
     Felt, Word,
     crypto::{
@@ -8,6 +9,7 @@ use miden_core::{
     },
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
+use miden_crypto::hash::eidos::BLOCK_LEN as EIDOS_RATE;
 
 use super::pvm_layout_const;
 use crate::helpers::{masm_push_word, read_memory_felt};
@@ -24,14 +26,21 @@ const MAIN_COM_PTR: u32 = 3_223_322_640;
 const AUX_COM_PTR: u32 = 3_223_322_644;
 const QUOTIENT_COM_PTR: u32 = 3_223_322_648;
 
-const PREPROCESSED_WIDTH: usize = 16;
-const MAIN_WIDTH: usize = 544;
-const AUX_WIDTH: usize = 352;
-const QUOTIENT_WIDTH: usize = 8;
-const QUERY_ROW_WIDTH: usize = PREPROCESSED_WIDTH + MAIN_WIDTH + AUX_WIDTH + QUOTIENT_WIDTH;
-
 const ALPHA: [u64; 2] = [3, 5];
 const DOMAIN_GENERATOR: u64 = 7;
+
+fn commitment_width(current_ptr: &str, next_ptr: &str) -> usize {
+    let current_ptr = pvm_layout_const(current_ptr);
+    let next_ptr = pvm_layout_const(next_ptr);
+    let ood_felts = next_ptr.checked_sub(current_ptr).expect("PVM OOD regions are ordered");
+    let ood_felts = usize::try_from(ood_felts).expect("PVM OOD extent fits in usize");
+    assert_eq!(
+        ood_felts % EXT_DEGREE,
+        0,
+        "PVM OOD region must contain whole extension-field evaluations"
+    );
+    ood_felts / EXT_DEGREE
+}
 
 fn row(width: usize, offset: u32) -> Vec<Felt> {
     (0..width)
@@ -60,13 +69,12 @@ fn add_path(
 }
 
 /// Mirrors the Eidos LMCS leaf hasher: a length-independent LMCS CV followed by complete
-/// eight-felt row blocks. All four PVM commitment-group widths are LMCS-aligned.
+/// Eidos-rate row blocks. All four PVM commitment-group widths are LMCS-aligned.
 fn lmcs_leaf(row: &[Felt]) -> Word {
-    assert_eq!(row.len() % 8, 0, "synthetic LMCS row must be block-aligned");
-    row.as_chunks::<8>()
-        .0
-        .iter()
-        .fold(Eidos::init_chaining_word(0, 0), |cv, block| Eidos::compress(cv, *block))
+    assert_eq!(row.len() % EIDOS_RATE, 0, "synthetic LMCS row must be block-aligned");
+    row.chunks_exact(EIDOS_RATE).fold(Eidos::init_chaining_word(0, 0), |cv, block| {
+        Eidos::compress(cv, block.try_into().expect("complete Eidos LMCS block"))
+    })
 }
 
 fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_root: Word) -> String {
@@ -133,10 +141,25 @@ fn source(preprocessed_root: Word, main_root: Word, aux_root: Word, quotient_roo
 #[test]
 fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group() {
     let result_row_ptr = pvm_layout_const("CURRENT_TRACE_ROW_PTR");
-    let preprocessed = row(PREPROCESSED_WIDTH, 100);
-    let main = row(MAIN_WIDTH, 200);
-    let aux = row(AUX_WIDTH, 300);
-    let quotient = row(QUOTIENT_WIDTH, 400);
+    let widths = [
+        commitment_width("PREPROCESSED_CURRENT_PTR", "MAIN_CURRENT_PTR"),
+        commitment_width("MAIN_CURRENT_PTR", "AUX_CURRENT_PTR"),
+        commitment_width("AUX_CURRENT_PTR", "QUOTIENT_CURRENT_PTR"),
+        commitment_width("QUOTIENT_CURRENT_PTR", "PREPROCESSED_NEXT_PTR"),
+    ];
+    let next_widths = [
+        commitment_width("PREPROCESSED_NEXT_PTR", "MAIN_NEXT_PTR"),
+        commitment_width("MAIN_NEXT_PTR", "AUX_NEXT_PTR"),
+        commitment_width("AUX_NEXT_PTR", "QUOTIENT_NEXT_PTR"),
+        commitment_width("QUOTIENT_NEXT_PTR", "AUX_BUS_BOUNDARY_PTR"),
+    ];
+    assert_eq!(widths, next_widths, "current and next PVM OOD rows must have equal geometry");
+
+    let [preprocessed_width, main_width, aux_width, quotient_width] = widths;
+    let preprocessed = row(preprocessed_width, 100);
+    let main = row(main_width, 200);
+    let aux = row(aux_width, 300);
+    let quotient = row(quotient_width, 400);
 
     let mut store = MerkleStore::new();
     let preprocessed_root =
@@ -159,7 +182,14 @@ fn pvm_deep_query_hook_authenticates_folded_setup_index_and_reduces_every_group(
 
     let opened_row: Vec<Felt> =
         preprocessed.into_iter().chain(main).chain(aux).chain(quotient).collect();
-    assert_eq!(opened_row.len(), QUERY_ROW_WIDTH);
+    let scratch_row_width = pvm_layout_const("PREPROCESSED_COM_PTR")
+        .checked_sub(result_row_ptr)
+        .expect("PVM query scratch precedes the preprocessed commitment");
+    assert_eq!(
+        opened_row.len(),
+        usize::try_from(scratch_row_width).expect("PVM query scratch extent fits in usize"),
+        "OOD commitment-group widths must match the independently allocated query scratch row"
+    );
     for (i, expected) in opened_row.iter().enumerate() {
         assert_eq!(
             read_memory_felt(&output, result_row_ptr + i as u32),
