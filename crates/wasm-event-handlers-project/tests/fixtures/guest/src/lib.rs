@@ -6,7 +6,6 @@
 #![no_std]
 
 use miden_event_handler_sdk as sdk;
-use sdk::Felt;
 
 /// Reads the stack element below the event ID, doubles it in the field, and pushes the result to
 /// the advice stack.

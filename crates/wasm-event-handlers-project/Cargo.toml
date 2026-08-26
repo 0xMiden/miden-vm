@@ -30,8 +30,6 @@ serde_json = { workspace = true, features = ["std"] }
 [dev-dependencies]
 # `testing` provides the in-memory package cache the project assembler needs.
 miden-assembly = { workspace = true, features = ["std", "testing"] }
-# The tests write the manifest records the guest SDK macro normally writes.
-miden-event-handler-abi.workspace = true
 miden-processor = { workspace = true, features = ["std"] }
 tempfile = { workspace = true, features = ["getrandom"] }
 wat.workspace = true

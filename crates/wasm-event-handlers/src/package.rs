@@ -230,6 +230,44 @@ pub fn fuzz_module_statics(wasm: &[u8]) -> bool {
     module_statics(wasm).is_some()
 }
 
+/// Test support: appends a `miden:event-manifest` custom section to `wasm` that holds one record
+/// per `(event, export)` pair, in the given order.
+///
+/// The section carries the layout the guest SDK macro writes, so a test or a fuzz target builds a
+/// manifest-carrying module without a Rust toolchain. Not part of the public API.
+#[doc(hidden)]
+pub fn test_append_manifest_section(mut wasm: Vec<u8>, handlers: &[(&str, &str)]) -> Vec<u8> {
+    let mut payload = leb_u32(MANIFEST_SECTION_NAME.len() as u32);
+    payload.extend_from_slice(MANIFEST_SECTION_NAME.as_bytes());
+    for (event, export) in handlers {
+        payload.push(MANIFEST_RECORD_VERSION);
+        for name in [event, export] {
+            payload.extend_from_slice(&(name.len() as u32).to_le_bytes());
+            payload.extend_from_slice(name.as_bytes());
+        }
+    }
+
+    // A custom section: ID 0, then the LEB128 payload size.
+    wasm.push(0x00);
+    wasm.extend_from_slice(&leb_u32(payload.len() as u32));
+    wasm.extend_from_slice(&payload);
+    wasm
+}
+
+/// Encodes `value` as LEB128.
+fn leb_u32(mut value: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
 /// Splits a custom-section payload into its name and its content.
 fn split_custom_section(payload: &[u8]) -> Option<(&[u8], &[u8])> {
     let (name_len, name_start) = read_leb_u32(payload, 0)?;
@@ -312,20 +350,6 @@ mod tests {
 
     use super::*;
 
-    /// Encodes `value` as LEB128.
-    fn leb_u32(mut value: u32) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let byte = (value & 0x7f) as u8;
-            value >>= 7;
-            if value == 0 {
-                out.push(byte);
-                return out;
-            }
-            out.push(byte | 0x80);
-        }
-    }
-
     /// Builds a loadable handler module: the exported linear memory plus one `() -> ()` export
     /// per distinct name. Derivation dry-loads the section it builds, so the fixtures must pass
     /// the load rules as well as the section rules.
@@ -342,39 +366,23 @@ mod tests {
             .expect("the fixture WAT parses")
     }
 
-    /// Encodes one custom section: ID 0, the LEB128 payload size, the LEB128-prefixed name, the
-    /// content.
-    fn custom_section(name: &str, content: &[u8]) -> Vec<u8> {
-        let mut payload = leb_u32(name.len() as u32);
-        payload.extend_from_slice(name.as_bytes());
-        payload.extend_from_slice(content);
+    /// Encodes one custom section that is not a manifest: ID 0, the payload size, the name length,
+    /// the name, the content. Both lengths stay under 128, so each one is a single LEB128 byte.
+    fn other_custom_section(name: &str, content: &[u8]) -> Vec<u8> {
+        let payload_len = 1 + name.len() + content.len();
+        assert!(payload_len < 128, "the fixture section must fit a one-byte length");
 
-        let mut section = vec![0x00];
-        section.extend_from_slice(&leb_u32(payload.len() as u32));
-        section.extend_from_slice(&payload);
+        let mut section = vec![0x00, payload_len as u8, name.len() as u8];
+        section.extend_from_slice(name.as_bytes());
+        section.extend_from_slice(content);
         section
-    }
-
-    /// Encodes one manifest record per `(event, export)` pair, in the given order.
-    fn manifest_records(handlers: &[(&str, &str)]) -> Vec<u8> {
-        let mut records = Vec::new();
-        for (event, export) in handlers {
-            records.push(MANIFEST_RECORD_VERSION);
-            for name in [event, export] {
-                records.extend_from_slice(&(name.len() as u32).to_le_bytes());
-                records.extend_from_slice(name.as_bytes());
-            }
-        }
-        records
     }
 
     /// Builds a loadable Wasm binary that carries a `miden:event-manifest` custom section with
     /// one record per `(event, export)` pair, in the given order.
     fn module_with_manifest(handlers: &[(&str, &str)]) -> Vec<u8> {
         let exports: Vec<&str> = handlers.iter().map(|(_, export)| *export).collect();
-        let mut wasm = base_module(&exports);
-        wasm.extend_from_slice(&custom_section(MANIFEST_SECTION_NAME, &manifest_records(handlers)));
-        wasm
+        test_append_manifest_section(base_module(&exports), handlers)
     }
 
     #[test]
@@ -412,18 +420,11 @@ mod tests {
 
     #[test]
     fn derivation_strips_the_manifest_sections() {
-        let other = custom_section("extra", b"keep me");
+        let other = other_custom_section("extra", b"keep me");
         let base = base_module(&["a", "b"]);
-        let mut wasm = base.clone();
-        wasm.extend_from_slice(&custom_section(
-            MANIFEST_SECTION_NAME,
-            &manifest_records(&[("test::wasm::a", "a")]),
-        ));
+        let mut wasm = test_append_manifest_section(base.clone(), &[("test::wasm::a", "a")]);
         wasm.extend_from_slice(&other);
-        wasm.extend_from_slice(&custom_section(
-            MANIFEST_SECTION_NAME,
-            &manifest_records(&[("test::wasm::b", "b")]),
-        ));
+        let wasm = test_append_manifest_section(wasm, &[("test::wasm::b", "b")]);
 
         let section =
             section_from_module(wasm, WasmHandlerLimits::default()).expect("the section derives");
@@ -445,11 +446,10 @@ mod tests {
     fn derived_section_must_load() {
         // The manifest records break no section rule, but the module exports no linear memory,
         // so every host would refuse it at load. Derivation refuses it at the producer instead.
-        let mut wasm = wat::parse_str("(module (func (export \"a\")))").expect("the WAT parses");
-        wasm.extend_from_slice(&custom_section(
-            MANIFEST_SECTION_NAME,
-            &manifest_records(&[("test::wasm::a", "a")]),
-        ));
+        let wasm = test_append_manifest_section(
+            wat::parse_str("(module (func (export \"a\")))").expect("the WAT parses"),
+            &[("test::wasm::a", "a")],
+        );
 
         // The records themselves parse; only the load rules refuse the module.
         assert_eq!(manifest_from_module(&wasm).expect("the manifest parses").len(), 1);
@@ -464,14 +464,13 @@ mod tests {
         // The table declares more elements than the default cap grants, so the default limits
         // refuse a module that a host with a larger cap accepts. The producer must be able to
         // build the section for that host.
-        let mut wasm = wat::parse_str(
-            "(module (memory (export \"memory\") 1) (table 5000 funcref) (func (export \"a\")))",
-        )
-        .expect("the WAT parses");
-        wasm.extend_from_slice(&custom_section(
-            MANIFEST_SECTION_NAME,
-            &manifest_records(&[("test::wasm::a", "a")]),
-        ));
+        let wasm = test_append_manifest_section(
+            wat::parse_str(
+                "(module (memory (export \"memory\") 1) (table 5000 funcref) (func (export \"a\")))",
+            )
+            .expect("the WAT parses"),
+            &[("test::wasm::a", "a")],
+        );
 
         assert!(section_from_module(wasm.clone(), WasmHandlerLimits::default()).is_err());
         let looser = WasmHandlerLimits {

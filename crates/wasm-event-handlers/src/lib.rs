@@ -36,7 +36,7 @@ mod package;
 pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
 #[doc(hidden)]
-pub use package::{fuzz_module_statics, fuzz_walk_sections};
+pub use package::{fuzz_module_statics, fuzz_walk_sections, test_append_manifest_section};
 pub use package::{
     handlers_from_package, host_library_from_package, manifest_from_module, section_from_module,
 };

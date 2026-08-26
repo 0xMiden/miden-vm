@@ -11,8 +11,9 @@ use miden_assembly::{
     Assembler, PackagePostProcessor, PostProcessContext, ProjectTargetSelector,
     diagnostics::Report, testing::TestRegistry,
 };
-use miden_event_handler_abi::{MANIFEST_RECORD_VERSION, MANIFEST_SECTION_NAME};
 use miden_mast_package::Package as MastPackage;
+// The tests write the manifest records the guest SDK macro normally writes.
+use miden_wasm_event_handlers::test_append_manifest_section;
 use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
 use tempfile::TempDir;
 
@@ -35,45 +36,9 @@ fn write(path: &Path, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
-/// Encodes `value` as LEB128.
-fn leb_u32(mut value: u32) -> Vec<u8> {
-    let mut out = Vec::new();
-    loop {
-        let byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return out;
-        }
-        out.push(byte | 0x80);
-    }
-}
-
-/// Appends a `miden:event-manifest` custom section that maps every `(event, export)` pair, in the
-/// binary layout the guest SDK macro writes.
-fn with_manifest(mut wasm: Vec<u8>, handlers: &[(&str, &str)]) -> Vec<u8> {
-    let mut records = Vec::new();
-    for (event, export) in handlers {
-        records.push(MANIFEST_RECORD_VERSION);
-        for name in [event, export] {
-            records.extend_from_slice(&(name.len() as u32).to_le_bytes());
-            records.extend_from_slice(name.as_bytes());
-        }
-    }
-
-    let mut payload = leb_u32(MANIFEST_SECTION_NAME.len() as u32);
-    payload.extend_from_slice(MANIFEST_SECTION_NAME.as_bytes());
-    payload.extend_from_slice(&records);
-
-    wasm.push(0x00);
-    wasm.extend_from_slice(&leb_u32(payload.len() as u32));
-    wasm.extend_from_slice(&payload);
-    wasm
-}
-
 /// Writes the `double` handler module, with its manifest record, next to the manifest.
 fn write_handler_module(root: &Path) {
-    let wasm = with_manifest(
+    let wasm = test_append_manifest_section(
         wat::parse_str(DOUBLE_WAT).expect("the fixture WAT parses"),
         &[("test::project::double", "double")],
     );
@@ -296,7 +261,7 @@ fn a_module_the_host_would_refuse_fails_the_build() {
     );
     // The module exports no linear memory, so every host refuses it at load. Build-time
     // validation must refuse it here instead.
-    let wasm = with_manifest(
+    let wasm = test_append_manifest_section(
         wat::parse_str(r#"(module (func (export "double")))"#).expect("the WAT parses"),
         &[("test::project::double", "double")],
     );
