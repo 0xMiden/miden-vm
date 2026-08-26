@@ -9,12 +9,13 @@ use miden_processor::{
 };
 use miden_vm::internal::InputFile;
 use miden_vm_stark::memory::{DEFAULT_MAX_PROVER_MEMORY_BYTES, canonical_budget};
+use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
     precompile_limits::PrecompileArgs,
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{get_masm_program, get_masp_package, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -166,7 +167,8 @@ fn run_masp_program(
     params: &RunCmd,
     exec_options: ExecutionOptions,
 ) -> Result<(VmTrace, [u8; 32]), Report> {
-    let program = get_masp_program(&params.program_file)?;
+    let package = get_masp_package(&params.program_file)?;
+    let program = package.try_into_program()?;
 
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
@@ -176,6 +178,13 @@ fn run_masp_program(
         .parse_advice_inputs_with_options(&exec_options)
         .map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    // Register the package's Wasm event handlers, if it carries any.
+    let handlers = host_library_from_package(&package, WasmHandlerLimits::default())
+        .into_diagnostic()
+        .wrap_err("Failed to load the package's Wasm event handlers")?;
+    host.load_library(handlers)
+        .into_diagnostic()
+        .wrap_err("Failed to register the package's Wasm event handlers")?;
 
     let program_hash: [u8; 32] = program.hash().into();
 

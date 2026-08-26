@@ -2823,6 +2823,7 @@ dependencies = [
  "miden-test-utils",
  "miden-verifier",
  "miden-vm-stark",
+ "miden-wasm-event-handlers",
  "predicates",
  "rand 0.10.2",
  "serde",

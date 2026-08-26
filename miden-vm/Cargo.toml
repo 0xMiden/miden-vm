@@ -60,6 +60,7 @@ executable = [
     "dep:clap",
     "dep:hex",
     "dep:tempfile",
+    "dep:miden-wasm-event-handlers",
     "dep:tracing-subscriber",
     "internal",
     "serde",
@@ -92,6 +93,7 @@ miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
 miden-verifier.workspace = true
+miden-wasm-event-handlers = { workspace = true, optional = true, features = ["std"] }
 
 # External dependencies
 clap = { workspace = true, optional = true }
