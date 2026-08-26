@@ -55,8 +55,9 @@ pub const COL_IP: usize = 0;
 pub const A_BYTES_RANGE: Range<usize> = 1..9;
 /// Source B value, byte-decomposed LSB-first. Real second operand only
 /// on rows with `is_xor | is_andnot` active; on pure-ROL and NOP rows
-/// the effective operand is gated to 0 at the message level (the raw
-/// column may hold anything).
+/// the trace writer stores 0. On active pure-ROL rows, the byte-pair
+/// lookup and the `r = a` passthrough constraint also force this value
+/// to 0; on inactive rows its lookup multiplicity is 0.
 pub const B_BYTES_RANGE: Range<usize> = 9..17;
 /// Logic result `r = a OP b`, byte-decomposed — or the passthrough
 /// `r = a` on rows with no logic op active (pinned by a local
@@ -109,20 +110,21 @@ pub fn lane_base(lane: usize) -> usize {
 // AUX COLUMN LAYOUT
 // ================================================================================================
 
-/// Flattened running-sum layout, repeated per lane: each lane's 10-column band holds
-/// 19 fractions split ≤ 2 per column, the band's col 0 a single fraction. The flattening does not
-/// bring this AIR to `log_quotient_degree = 1`; it derives 2 because the memory64 destination
-/// fraction carries degree 5 (see `dst_deg` in the lookup evaluator):
+/// Flattened running-sum layout, repeated per lane: each lane's 6-column band holds
+/// 19 fractions, the band's col 0 a single fraction. The flattening does not
+/// bring this AIR to `log_quotient_degree = 1`; the four-fraction columns and the gated
+/// memory64 destination closure both reach degree 5:
 /// - band col 0: memory64 dst provide.
 /// - band col 1: memory64 `src_a` + `src_b` requires.
-/// - band cols 2–5: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
-///   rows — see [`R_BYTES_RANGE`]), two per column.
-/// - band cols 6–9: 8 `Range16` requires on `rot_limbs`, two per column.
+/// - band cols 2–3: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
+///   rows — see [`R_BYTES_RANGE`]), four per column.
+/// - band cols 4–5: 8 `Range16` requires on `rot_limbs`, four per column.
 ///
 /// Aux column 0 (lane 0's dst provide) is the running sum; every later
 /// fraction column — including each later lane's dst provide — is folded into
 /// it by the col-0 recurrence.
-pub const NUM_AUX_COLS: usize = 10 * NUM_LANES;
+const AUX_LANE_WIDTH: usize = 6;
+pub const NUM_AUX_COLS: usize = AUX_LANE_WIDTH * NUM_LANES;
 
 // The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; col 0's recurrence aggregating both
@@ -342,19 +344,20 @@ fn memory_provide_c<E: Algebra<Felt>, V: Copy + Into<E>>(
 /// Aux column shape, repeated per lane (band-local):
 /// - band col 0: memory64 dst provide (lane 0's is the running sum).
 /// - band col 1: memory64 `src_a` + `src_b` requires.
-/// - band cols 2–5: 8 `BytePairLut` byte requires, two per column.
-/// - band cols 6–9: 8 `Range16` requires on `rot_limbs`, two per column.
+/// - band cols 2–3: 8 `BytePairLut` byte requires, four per column.
+/// - band cols 4–5: 8 `Range16` requires on `rot_limbs`, four per column.
 ///
-/// This AIR derives `log_quotient_degree = 2`: the memory64 destination fraction below carries
-/// `Deg { v: 5, .. }`. The symbolic derivation is authoritative; trace width does not enter it.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
+/// This AIR derives `log_quotient_degree = 2`: each four-fraction column below carries
+/// `Deg { v: 5, u: 4 }`. The symbolic derivation is authoritative; trace width does not enter it.
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
 
 const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
-    let mut shape = [2usize; NUM_AUX_COLS];
+    let mut shape = [4usize; NUM_AUX_COLS];
     let mut lane = 0;
     while lane < NUM_LANES {
         // Band-local col 0 is a single fraction (dst provide).
-        shape[lane * 10] = 1;
+        shape[lane * AUX_LANE_WIDTH] = 1;
+        shape[lane * AUX_LANE_WIDTH + 1] = 2;
         lane += 1;
     }
     shape
@@ -395,21 +398,18 @@ where
         let dst_mult: LB::Expr = periodic[PCOL_DST_MULT].into();
         let swap: LB::Expr = periodic[PCOL_SWAP].into();
         // Byte-pair-LUT op tag: the real op tag on XOR/ANDNOT rows, and
-        // defaults to Xor (tag 1) on rows with no logic active — combined
-        // with `gated_b` below (forced to 0 there), this issues
-        // `BPL(Xor, a, 0, r)` on those rows, which range-checks `a_bytes`
-        // and (redundantly with the passthrough pin in `KeccakRoundAir::eval`)
-        // forces `r = a`. This is what replaces a rotate chiplet's
-        // chain-trick range check now that every row commits its own bytes.
+        // defaults to Xor (tag 1) on rows with no logic active. On an
+        // active pure-ROL row, the raw `b_bytes` payload and the local
+        // `r = a` passthrough pin make `BPL(Xor, a, b, a)` force `b = 0`.
+        // This also range-checks `a_bytes` without a separate rotate chiplet.
         let bpl_op = LB::Expr::ONE - is_andnot.clone();
-        let logic_active = is_xor.clone() + is_andnot.clone();
 
-        let interaction_deg = Deg { v: 1, u: 1 };
-        let triple_deg = Deg { v: 3, u: 3 };
-        let pair_deg = Deg { v: 2, u: 2 };
-        let dst_deg = Deg { v: 5, u: 2 };
+        let linear_interaction_deg = Deg { v: 2, u: 1 };
+        let dst_deg = Deg { v: 2, u: 3 };
+        let source_pair_deg = Deg { v: 3, u: 2 };
+        let quad_deg = Deg { v: 5, u: 4 };
 
-        // Each lane emits its own 10-column band of fractions over its
+        // Each lane emits its own 6-column band of fractions over its
         // disjoint data columns, reading the shared periodic gates. Lane 0's
         // dst provide is the running sum (aux col 0); every later lane's
         // fractions — its dst provide included — are ordinary fraction
@@ -460,7 +460,7 @@ where
                     "dst",
                     neg_dst_mult,
                     Memory64Msg { addr: ip.clone(), lo: c_lo, hi: c_hi },
-                    interaction_deg
+                    dst_deg
                 ),
             );
             // band col 1: memory64 src_a + src_b requires.
@@ -469,7 +469,7 @@ where
             frac_col!(
                 builder,
                 "memory64",
-                triple_deg,
+                source_pair_deg,
                 (
                     "src_a",
                     is_active.clone(),
@@ -478,7 +478,7 @@ where
                         lo: a_lo,
                         hi: a_hi
                     },
-                    interaction_deg
+                    linear_interaction_deg
                 ),
                 (
                     "src_b",
@@ -488,34 +488,32 @@ where
                         lo: b_lo,
                         hi: b_hi
                     },
-                    interaction_deg
+                    linear_interaction_deg
                 ),
             );
-            // band cols 2–5: 8 BytePairLut byte requires verifying
-            // `r_bytes[i] = op(a_bytes[i], gated_b_bytes[i])`. `gated_b`
-            // forces the effective second operand to 0 on rows with no real
-            // logic op (message-field gating, not a column constraint — the
-            // raw `b_bytes` column may hold anything there since its
-            // contribution is zeroed regardless).
-            for pair in 0..4 {
-                let i0 = pair * 2;
+            // band cols 2–3: 8 BytePairLut byte requires, four per column.
+            // Using the committed raw `b_bytes` keeps every denominator
+            // linear. On active pure-ROL rows the XOR tuple plus `r = a`
+            // forces these bytes to zero; inactive rows emit no fraction.
+            for batch in 0..2 {
+                let i0 = batch * 4;
                 let i1 = i0 + 1;
-                let gated_b0 = logic_active.clone() * LB::Expr::from(b_bytes[i0]);
-                let gated_b1 = logic_active.clone() * LB::Expr::from(b_bytes[i1]);
+                let i2 = i0 + 2;
+                let i3 = i0 + 3;
                 frac_col!(
                     builder,
                     "byte-pair-lut",
-                    pair_deg,
+                    quad_deg,
                     (
                         "byte-req",
                         is_active.clone(),
                         BytePairLutMsg {
                             op: bpl_op.clone(),
                             a: a_bytes[i0].into(),
-                            b: gated_b0,
+                            b: b_bytes[i0].into(),
                             c: r_bytes[i0].into()
                         },
-                        interaction_deg
+                        linear_interaction_deg
                     ),
                     (
                         "byte-req",
@@ -523,32 +521,68 @@ where
                         BytePairLutMsg {
                             op: bpl_op.clone(),
                             a: a_bytes[i1].into(),
-                            b: gated_b1,
+                            b: b_bytes[i1].into(),
                             c: r_bytes[i1].into()
                         },
-                        interaction_deg
+                        linear_interaction_deg
+                    ),
+                    (
+                        "byte-req",
+                        is_active.clone(),
+                        BytePairLutMsg {
+                            op: bpl_op.clone(),
+                            a: a_bytes[i2].into(),
+                            b: b_bytes[i2].into(),
+                            c: r_bytes[i2].into()
+                        },
+                        linear_interaction_deg
+                    ),
+                    (
+                        "byte-req",
+                        is_active.clone(),
+                        BytePairLutMsg {
+                            op: bpl_op.clone(),
+                            a: a_bytes[i3].into(),
+                            b: b_bytes[i3].into(),
+                            c: r_bytes[i3].into()
+                        },
+                        linear_interaction_deg
                     ),
                 );
             }
-            // band cols 6–9: 8 Range16 requires on rot_limbs, two per column.
-            for pair in 0..4 {
-                let i0 = pair * 2;
+            // band cols 4–5: 8 Range16 requires on rot_limbs, four per column.
+            for batch in 0..2 {
+                let i0 = batch * 4;
                 let i1 = i0 + 1;
+                let i2 = i0 + 2;
+                let i3 = i0 + 3;
                 frac_col!(
                     builder,
                     "range16",
-                    pair_deg,
+                    quad_deg,
                     (
                         "limb",
                         rol_act.clone(),
                         Range16Msg { w: rot_limbs[i0].into() },
-                        interaction_deg
+                        linear_interaction_deg
                     ),
                     (
                         "limb",
                         rol_act.clone(),
                         Range16Msg { w: rot_limbs[i1].into() },
-                        interaction_deg
+                        linear_interaction_deg
+                    ),
+                    (
+                        "limb",
+                        rol_act.clone(),
+                        Range16Msg { w: rot_limbs[i2].into() },
+                        linear_interaction_deg
+                    ),
+                    (
+                        "limb",
+                        rol_act.clone(),
+                        Range16Msg { w: rot_limbs[i3].into() },
+                        linear_interaction_deg
                     ),
                 );
             }
