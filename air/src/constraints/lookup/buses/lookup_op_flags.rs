@@ -634,11 +634,11 @@ mod tests {
             assert_eq!(block_hash_selector(&flags), ONE, "block-hash selector for {opcode}");
             assert_eq!(
                 op_group_selector(
-                    &flags,
                     row.decoder.in_span,
                     row.decoder.group_count,
                     row_next.decoder.group_count,
-                    row.decoder.batch_flags,
+                    row.decoder.full_batch,
+                    row.decoder.batch_size_code,
                 ),
                 ZERO,
                 "op-group selector for block-hash opcode {opcode}",
@@ -647,18 +647,19 @@ mod tests {
 
         for opcode in [opcodes::SPAN, opcodes::RESPAN] {
             let mut row = generate_test_row(opcode.into());
-            row.decoder.batch_flags = [ONE, ZERO, ZERO];
+            row.decoder.full_batch = ONE;
+            row.decoder.batch_size_code = ZERO;
             let row_next = generate_test_row(0);
             let flags = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
 
             assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector for {opcode}");
             assert_eq!(
                 op_group_selector(
-                    &flags,
                     row.decoder.in_span,
                     row.decoder.group_count,
                     row_next.decoder.group_count,
-                    row.decoder.batch_flags,
+                    row.decoder.full_batch,
+                    row.decoder.batch_size_code,
                 ),
                 ONE,
                 "op-group batch selector for {opcode}",
@@ -675,11 +676,11 @@ mod tests {
         assert_eq!(block_hash_selector(&flags), ZERO, "block-hash selector inside a span");
         assert_eq!(
             op_group_selector(
-                &flags,
                 row.decoder.in_span,
                 row.decoder.group_count,
                 row_next.decoder.group_count,
-                row.decoder.batch_flags,
+                row.decoder.full_batch,
+                row.decoder.batch_size_code,
             ),
             ONE,
             "op-group removal selector inside a span",
@@ -699,14 +700,15 @@ mod tests {
     }
 
     fn op_group_selector(
-        flags: &LookupOpFlags<Felt>,
         in_span: Felt,
         group_count: Felt,
         group_count_next: Felt,
-        [c0, c1, c2]: [Felt; 3],
+        full_batch: Felt,
+        batch_size_code: Felt,
     ) -> Felt {
-        let batch_selector = (flags.span() + flags.respan())
-            * (c0 + (ONE - c0) * c1 * (ONE - c2) + (ONE - c0) * (ONE - c1) * c2);
+        let selectors =
+            crate::constraints::decoder::batch::OpBatchSelectors::new(full_batch, batch_size_code);
+        let batch_selector = selectors.groups_8 + selectors.groups_4 + selectors.groups_2;
         let removal_selector = in_span * (group_count - group_count_next);
         batch_selector + removal_selector
     }
