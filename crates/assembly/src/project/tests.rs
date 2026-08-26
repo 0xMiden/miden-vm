@@ -3363,3 +3363,172 @@ fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
         usize::try_from(value).expect("encoded usize does not fit host usize")
     }
 }
+
+// PACKAGE POST-PROCESSORS
+// ================================================================================================
+
+/// A test processor that records its invocation and appends a marker custom section, so a test
+/// can observe both the invocation order and the package mutation.
+struct MarkerPostProcessor {
+    tag: &'static str,
+    invocations: Arc<std::sync::Mutex<Vec<&'static str>>>,
+}
+
+impl PackagePostProcessor for MarkerPostProcessor {
+    fn post_process(
+        &self,
+        package: &mut MastPackage,
+        context: &PostProcessContext<'_>,
+    ) -> Result<(), Report> {
+        // The context must expose the resolved project manifest of the package under assembly.
+        assert!(context.assembly.manifest_path.ends_with("miden-project.toml"));
+        self.invocations.lock().unwrap().push(self.tag);
+        package
+            .sections
+            .push(Section::new(SectionId::custom(self.tag).unwrap(), Vec::new()));
+        Ok(())
+    }
+}
+
+/// Writes a minimal library project and returns its manifest path.
+fn write_post_processor_fixture(tempdir: &TempDir) -> PathBuf {
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "postproc"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc helper
+    push.1
+    push.2
+    add
+end
+"#,
+    );
+    manifest_path
+}
+
+#[test]
+fn package_post_processors_default_to_empty() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    assert!(project_assembler.post_processors.is_empty());
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("assembly without post-processors should succeed");
+    assert!(
+        !package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-a").unwrap())
+    );
+}
+
+#[test]
+fn package_post_processors_run_in_registration_order() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    project_assembler
+        .with_package_post_processor(MarkerPostProcessor {
+            tag: "pp-a",
+            invocations: invocations.clone(),
+        })
+        .with_package_post_processor(MarkerPostProcessor {
+            tag: "pp-b",
+            invocations: invocations.clone(),
+        });
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("assembly with post-processors should succeed");
+
+    assert_eq!(invocations.lock().unwrap().as_slice(), &["pp-a", "pp-b"]);
+    let marker_positions: Vec<_> = package
+        .sections
+        .iter()
+        .enumerate()
+        .filter_map(|(index, section)| {
+            (section.id == SectionId::custom("pp-a").unwrap()
+                || section.id == SectionId::custom("pp-b").unwrap())
+            .then_some((index, section.id.clone()))
+        })
+        .collect();
+    assert_eq!(marker_positions.len(), 2);
+    // The sections appear in registration order because the processors run in that order.
+    assert_eq!(marker_positions[0].1, SectionId::custom("pp-a").unwrap());
+    assert_eq!(marker_positions[1].1, SectionId::custom("pp-b").unwrap());
+}
+
+#[test]
+fn manually_provided_sources_skip_package_post_processors() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_post_processor_fixture(&tempdir);
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&manifest_path, &mut registry).unwrap();
+    project_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-manual",
+        invocations: invocations.clone(),
+    });
+
+    let project = project_assembler.project.clone();
+    let target = ProjectTargetSelector::Library.select_target(project.as_ref()).unwrap();
+    let source_manager = project_assembler.assembler.source_manager();
+    let root_path = tempdir.path().join("lib.masm").canonicalize().unwrap();
+    let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
+        &root_path,
+        Some(target.namespace.inner().clone()),
+        Some(ModuleKind::Library),
+        source_manager,
+        false,
+    )
+    .unwrap();
+
+    let root_id = project_assembler.dependency_graph.root().clone();
+    let mut cache = BTreeMap::new();
+    let resolved = match project_assembler
+        .assemble_source_package(
+            root_id,
+            project,
+            &target,
+            "dev",
+            InterruptedTargetRole::Root,
+            None,
+            Some(ProjectSourceInputs { root, support }),
+            None,
+            &mut cache,
+        )
+        .expect("assembly from manual sources should succeed")
+    {
+        ControlFlow::Continue(resolved) => resolved,
+        ControlFlow::Break(_) => panic!("assembly should not be interrupted"),
+    };
+
+    assert!(invocations.lock().unwrap().is_empty());
+    assert!(
+        !resolved
+            .package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-manual").unwrap())
+    );
+}
