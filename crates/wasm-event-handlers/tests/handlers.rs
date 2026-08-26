@@ -1068,6 +1068,85 @@ fn empty_host_calls_fit_a_budget_above_their_cost() {
     run(&module, &processor()).expect("handler succeeds");
 }
 
+/// The element values of the advice-map entry [`adv_map_read_processor`] seeds.
+const ADV_MAP_READ_VALUES: [u64; 3] = [10, 11, 12];
+
+/// The exact fuel budget one call of [`adv_map_read_fixture`] needs.
+///
+/// Derived from the `src/host.rs` constants; only the guest-instruction term is measured:
+///
+/// - instantiation: the 1-page memory costs 65536 / 8 = 8192 fuel (`module.rs` charges one unit per
+///   8 bytes), and the fixture declares no data, table, or element section;
+/// - the guest instructions of the fixture body cost 8 fuel (measured);
+/// - the `adv_map_value_read` prologue costs `HOST_CALL_BASE_FUEL` (25) + one key word (`4 *
+///   FUEL_PER_FELT` = 4) + one map probe (`FUEL_PER_MAP_PROBE` = 250) = 279;
+/// - the read itself costs the value copy (`3 * FUEL_PER_FELT` = 3) + a second map probe
+///   (`FUEL_PER_MAP_PROBE` = 250) = 253, because the borrow rules make it resolve the entry a
+///   second time;
+/// - the `adv_stack_extend` that publishes the value costs `HOST_CALL_BASE_FUEL` (25) + three felts
+///   (3) = 28.
+///
+/// 8192 + 8 + 279 + 253 + 28 = 8760.
+const ADV_MAP_READ_FUEL: u64 = 8760;
+
+/// A handler that reads the three-element advice-map value of a key it writes into memory, and
+/// publishes the value on the advice stack.
+fn adv_map_read_fixture() -> String {
+    // The key word sits at offset 0, the value buffer at 48, and the element count at 40.
+    fixture(
+        "(i64.store (i32.const 0) (i64.const 1))
+         (i64.store (i32.const 8) (i64.const 2))
+         (i64.store (i32.const 16) (i64.const 3))
+         (i64.store (i32.const 24) (i64.const 4))
+         (drop (call $adv_map_value_read
+             (i32.const 0) (i32.const 48) (i32.const 8) (i32.const 40)))
+         (call $adv_stack_extend (i32.const 48) (i32.const 3))",
+    )
+}
+
+/// Returns a processor whose advice map holds [`ADV_MAP_READ_VALUES`] under the key
+/// [`adv_map_read_fixture`] builds.
+fn adv_map_read_processor() -> FastProcessor {
+    let key = Word::new([1u64, 2, 3, 4].map(Felt::new_unchecked));
+    let values: Vec<Felt> = ADV_MAP_READ_VALUES.into_iter().map(Felt::new_unchecked).collect();
+    FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default().with_map([(key, values)]))
+        .expect("advice inputs fit")
+}
+
+#[test]
+fn the_advice_map_read_charges_its_second_map_probe() {
+    // One fuel under the exact cost must fail. The read resolves the advice-map entry a second
+    // time and charges `FUEL_PER_MAP_PROBE` (250) for it; without that charge the call would
+    // cost 250 less and this budget would pass.
+    let module = load_with_limits(
+        &adv_map_read_fixture(),
+        WasmHandlerLimits {
+            fuel: ADV_MAP_READ_FUEL - 1,
+            ..Default::default()
+        },
+    );
+    let err =
+        run_raw(&module, &adv_map_read_processor()).expect_err("handler must run out of fuel");
+    assert_run_error!(err, WasmHandlerRunError::OutOfFuel(_));
+}
+
+#[test]
+fn the_advice_map_read_fits_its_exact_charge() {
+    // The counterpart of `the_advice_map_read_charges_its_second_map_probe`: the exact budget
+    // completes the read, so the charge is not one fuel unit more than the arithmetic states.
+    let module = load_with_limits(
+        &adv_map_read_fixture(),
+        WasmHandlerLimits {
+            fuel: ADV_MAP_READ_FUEL,
+            ..Default::default()
+        },
+    );
+    let mutations = run(&module, &adv_map_read_processor()).expect("handler succeeds");
+    let expected: Vec<Felt> = ADV_MAP_READ_VALUES.into_iter().map(Felt::new_unchecked).collect();
+    assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
+}
+
 #[test]
 fn mutation_size_limit_is_enforced() {
     let wat_src = fixture("(call $adv_stack_extend (i32.const 0) (i32.const 5))");

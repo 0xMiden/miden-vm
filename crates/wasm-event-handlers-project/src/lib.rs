@@ -4,7 +4,8 @@
 //! knowledge as a [`PackagePostProcessor`](miden_assembly::PackagePostProcessor): a caller
 //! registers [`WasmEventHandlerProcessor`] with
 //! [`ProjectAssembler::with_package_post_processor`](miden_assembly::ProjectAssembler::with_package_post_processor),
-//! and every package the assembler builds from the project sources then carries the
+//! and every package of the project under assembly (its root target and its required
+//! libraries, whatever the target type — never a source dependency) then carries the
 //! `event_handlers` section the project manifest declares.
 //!
 //! # Manifest schema

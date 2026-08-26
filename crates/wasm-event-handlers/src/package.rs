@@ -212,9 +212,9 @@ fn check_module_size(wasm: &[u8]) -> Result<(), WasmHandlerLoadError> {
 pub fn fuzz_walk_sections(wasm: &[u8]) -> bool {
     let mut custom_sections_ok = true;
     let walked = walk_wasm_sections(wasm, |id, payload, _| {
-        if id == 0 {
-            custom_sections_ok &= split_custom_section(payload).is_some();
-        }
+        // The shared classifier is the one definition of a malformed custom section, so the
+        // fuzz pin follows every future change of that rule.
+        custom_sections_ok &= !matches!(classify_section(id, payload), SectionKind::Malformed);
     });
     walked.is_some() && custom_sections_ok
 }

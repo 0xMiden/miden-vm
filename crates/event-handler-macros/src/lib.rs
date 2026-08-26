@@ -19,7 +19,8 @@ use syn2::{ItemFn, LitStr, ReturnType, parse_macro_input, spanned::Spanned};
 ///
 /// This crate repeats the wire constants instead of depending on the ABI crate, which a
 /// proc-macro crate would build for the host. Keep the value in sync with
-/// `miden_event_handler_abi::MANIFEST_RECORD_VERSION`.
+/// `miden_event_handler_abi::MANIFEST_RECORD_VERSION`; the tests in this crate pin it against
+/// that crate through a dev-dependency.
 const RECORD_VERSION: u8 = 1;
 
 /// The name of the custom section that carries the manifest records.
@@ -42,6 +43,13 @@ const MEMORY_EXPORT: &str = "memory";
 ///
 /// The function must have the exact signature `fn name()`. Report errors with the SDK's `fail`
 /// function or with a panic.
+///
+/// The event name becomes the Wasm export name of the wrapper function, and therefore must:
+///
+/// - not be empty;
+/// - not start with `sys::`, the namespace reserved for system events;
+/// - be at most 255 UTF-8 bytes, the cap of the package format (bytes, not characters);
+/// - not be `memory`, the name the module must keep for its exported linear memory.
 #[proc_macro_attribute]
 pub fn miden_event_handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     let event_name = parse_macro_input!(attr as LitStr);
@@ -176,8 +184,36 @@ mod tests {
     }
 
     #[test]
+    fn the_name_length_cap_counts_bytes_not_characters() {
+        // The package format caps the name in bytes, so a multibyte name reaches the cap with
+        // far fewer characters: '€' is three UTF-8 bytes.
+        let at_the_cap = "€".repeat(MAX_NAME_BYTES / 3);
+        assert_eq!(at_the_cap.len(), MAX_NAME_BYTES, "the fixture must sit exactly at the cap");
+        check(&at_the_cap).expect("a multibyte name at the cap passes");
+
+        // 128 characters, well under the cap in characters, but 384 bytes.
+        let over_the_cap = "€".repeat(128);
+        assert!(
+            over_the_cap.chars().count() < MAX_NAME_BYTES,
+            "the fixture must be short in chars"
+        );
+        let err = check(&over_the_cap).expect_err("an over-long multibyte name fails");
+        assert!(err.to_string().contains("longer than"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn the_memory_export_name_is_rejected() {
         let err = check(MEMORY_EXPORT).expect_err("the memory export name fails");
         assert!(err.to_string().contains("linear memory"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn the_repeated_wire_constants_match_the_crates_that_own_them() {
+        // This crate repeats these values instead of depending on the owning crates; the
+        // dev-dependencies make the repetition checkable without adding a runtime dependency.
+        assert_eq!(RECORD_VERSION, miden_event_handler_abi::MANIFEST_RECORD_VERSION);
+        assert_eq!(MANIFEST_SECTION_NAME, miden_event_handler_abi::MANIFEST_SECTION_NAME);
+        assert_eq!(MAX_NAME_BYTES, miden_mast_package::MAX_NAME_BYTES);
+        assert_eq!(MEMORY_EXPORT, miden_event_handler_abi::MEMORY_EXPORT);
     }
 }

@@ -576,7 +576,8 @@ fn adv_stack_read(
 /// guest memory, the key word, and the element count when it has one.
 ///
 /// The charge covers the work that both calls share, so a probe and a read pay the same for it.
-/// A read charges the value copy separately, when its size is known.
+/// A read charges its value copy and its own second map probe separately, when the size is
+/// known.
 fn adv_map_value_lookup(
     caller: &mut Caller<'_, HostCtx>,
     key: u32,
@@ -634,8 +635,7 @@ fn adv_map_value_read(
         return Ok(Status::CapacityTooSmall.as_raw());
     }
     // The value copy, plus the second map probe: the `&ProcessorState` borrow conflicts with
-    // `mem.data_mut`, so the read resolves the entry again (see the standing borrow-split
-    // decision), and the guest pays for both probes.
+    // `mem.data_mut`, so the read resolves the entry again, and the guest pays for both probes.
     charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let values = state(&caller)?
         .advice_provider()
