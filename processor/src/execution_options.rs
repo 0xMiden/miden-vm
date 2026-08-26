@@ -21,8 +21,8 @@ pub struct ExecutionOptions {
     max_adv_map_value_size: usize,
     /// Maximum total number of field elements allowed in live advice map keys and values.
     max_adv_map_elements: usize,
-    /// Whether the synchronous prover overlaps hasher-chiplet trace building with program
-    /// execution (std-only; the sequential path is used on no_std regardless).
+    /// Whether the synchronous prover is asked to overlap hasher-chiplet trace building with
+    /// program execution (std-only; the sequential path is used on no_std regardless).
     overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
@@ -247,15 +247,18 @@ impl ExecutionOptions {
         self.max_deferred_elements
     }
 
-    /// Sets whether the synchronous prover overlaps hasher-chiplet trace building with
-    /// program execution (defaults to `true`; ignored on no_std, which always uses the
-    /// sequential path).
+    /// Selects the overlapped `prove_sync` route (defaults to `true`). Ignored on no_std, which
+    /// never reads it. That route still builds the trace sequentially where the builder thread
+    /// cannot be spawned.
     pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
         self.overlapped_trace_build = overlapped;
         self
     }
 
-    /// Returns whether the synchronous prover overlaps trace building with execution.
+    /// Returns whether the synchronous prover is asked to overlap trace building with execution.
+    ///
+    /// This reports the request, not the outcome: a target that cannot spawn a thread builds the
+    /// trace sequentially even when this returns `true`.
     pub fn overlapped_trace_build(&self) -> bool {
         self.overlapped_trace_build
     }

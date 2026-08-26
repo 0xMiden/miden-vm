@@ -39,6 +39,13 @@ let (outputs, proof) = prove(
 assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 ```
 
+### Synchronous execution and proving
+
+`prove_sync()` is the direct synchronous path for executing and fully proving a program. It overlaps
+execution with hasher-chiplet trace construction when enabled in `ExecutionOptions` and a thread can
+be spawned for it; targets that refuse the spawn, such as `wasm32-unknown-unknown`, build the same
+trace sequentially. The resulting trace and proof are identical either way.
+
 ## STARK Backend
 
 The prover uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.

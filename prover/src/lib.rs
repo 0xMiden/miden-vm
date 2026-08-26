@@ -115,8 +115,10 @@ pub async fn prove_partial(
 /// Synchronous variant of [`prove()`].
 ///
 /// Unlike `prove`, the sync path can overlap hasher-chiplet trace building with program
-/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
-/// default); the produced trace and proof are identical either way.
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by default and
+/// only where a thread can be spawned for it — targets that refuse the spawn, such as
+/// `wasm32-unknown-unknown`, build the same trace sequentially); the produced trace and proof are
+/// identical either way.
 #[instrument("prove_program_sync", skip_all)]
 pub fn prove_sync(
     program: &Program,
@@ -155,8 +157,9 @@ pub fn prove_sync(
 /// Synchronous variant of [`prove_partial()`].
 ///
 /// Like [`prove_sync`], the sync path can overlap hasher-chiplet trace building with program
-/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by
-/// default); the produced trace and proof are identical either way.
+/// execution (controlled by [`ExecutionOptions::with_overlapped_trace_build`], on by default and
+/// only where a thread can be spawned for it); the produced trace and proof are identical either
+/// way.
 #[instrument("prove_program_partial_sync", skip_all)]
 pub fn prove_partial_sync(
     program: &Program,

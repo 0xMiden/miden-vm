@@ -1,5 +1,9 @@
 //! The overlapped execute-and-build path must produce exactly the trace the
 //! buffered path produces: same values, byte for byte, in every segment.
+//!
+//! Run under `make test-wasm-threadless`, on a target that genuinely refuses to
+//! spawn, the same equality also pins that the overlapped entry point returns at
+//! all and that what it falls back to is the buffered path.
 
 use miden_assembly::Assembler;
 use miden_processor::{
@@ -121,25 +125,30 @@ fn overlapped_build_matches_buffered_merkle() {
 
 /// The overlap path spawns the hasher builder on its own thread; span context is
 /// thread-local, so the builder re-enters the `execute_and_build_trace_sync` span
-/// to stay attributed under it. This asserts the span is entered on both threads:
-/// once by `#[instrument]` on the caller and once by the builder.
+/// to stay attributed under it. This records which threads enter that span rather
+/// than how many times it is entered, so it cannot be satisfied by one thread
+/// entering twice — the point is that the builder ran somewhere else.
+///
+/// Requires a host that can actually spawn: where the spawn is refused the serial
+/// fallback runs and only the caller enters. That is why `make test-wasm-threadless`
+/// skips this one test and runs everything else in the file.
 #[test]
 fn overlap_builder_thread_enters_the_instrument_span() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        collections::HashSet,
+        sync::{Arc, Mutex},
+        thread::ThreadId,
     };
 
     use tracing::span::{Attributes, Id};
     use tracing_subscriber::{Registry, layer::SubscriberExt};
 
-    #[derive(Default)]
-    struct EnterCounter {
-        target: std::sync::Mutex<Option<Id>>,
-        enters: Arc<AtomicUsize>,
+    struct EnteringThreads {
+        target: Mutex<Option<Id>>,
+        threads: Arc<Mutex<HashSet<ThreadId>>>,
     }
 
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EnterCounter {
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EnteringThreads {
         fn on_new_span(
             &self,
             attrs: &Attributes<'_>,
@@ -153,19 +162,20 @@ fn overlap_builder_thread_enters_the_instrument_span() {
 
         fn on_enter(&self, id: &Id, _ctx: tracing_subscriber::layer::Context<'_, S>) {
             if self.target.lock().unwrap().as_ref() == Some(id) {
-                self.enters.fetch_add(1, Ordering::SeqCst);
+                self.threads.lock().unwrap().insert(std::thread::current().id());
             }
         }
     }
 
-    let enters = Arc::new(AtomicUsize::new(0));
-    let layer = EnterCounter {
-        target: std::sync::Mutex::new(None),
-        enters: Arc::clone(&enters),
+    let threads = Arc::new(Mutex::new(HashSet::new()));
+    let layer = EnteringThreads {
+        target: Mutex::new(None),
+        threads: Arc::clone(&threads),
     };
     let subscriber = Registry::default().with(layer);
 
     let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
+    let caller = std::thread::current().id();
     tracing::subscriber::with_default(subscriber, || {
         let mut host = DefaultHost::default();
         processor(&[1], AdviceInputs::default())
@@ -173,9 +183,16 @@ fn overlap_builder_thread_enters_the_instrument_span() {
             .unwrap();
     });
 
+    let threads = threads.lock().unwrap();
+    assert!(
+        threads.contains(&caller),
+        "the caller's own `#[instrument]` span was never entered"
+    );
     assert_eq!(
-        enters.load(Ordering::SeqCst),
+        threads.len(),
         2,
-        "span must be entered by the caller and re-entered by the builder thread"
+        "the builder thread did not re-enter the span: expected the caller and the builder, but \
+         it was entered by {threads:?} (caller is {caller:?}). Either the builder stopped \
+         re-entering it, or -- on a host that cannot spawn -- the serial fallback ran"
     );
 }

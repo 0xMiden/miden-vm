@@ -136,13 +136,16 @@ impl FastProcessor {
         .await
     }
 
-    /// Executes the program and builds its execution trace, overlapping the two: the hasher
-    /// chiplet — the dominant serial part of trace building — is built on a second thread from a
-    /// live stream of requests while execution is still running, hiding its cost behind the
-    /// (inherently sequential) execution itself.
+    /// Executes the program and builds its execution trace, overlapping the two where the target
+    /// can spawn a thread: the hasher chiplet — the dominant serial part of trace building — is
+    /// built on a second thread from a live stream of requests while execution is still running,
+    /// hiding its cost behind the (inherently sequential) execution itself.
     ///
-    /// Produces the same trace as `execute_trace_inputs_sync` followed by
-    /// [`crate::trace::build_trace`].
+    /// Where that thread cannot be spawned the trace is built serially instead, `std` being no
+    /// guarantee of threads — `wasm32-unknown-unknown` has the one without the other.
+    ///
+    /// Produces the same trace either way, and the same as `execute_trace_inputs_sync` followed by
+    /// [`crate::trace::build_trace`] — which is exactly what the serial path runs.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
@@ -153,25 +156,49 @@ impl FastProcessor {
         use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        let mut tracer = ExecutionTracer::new_with_streamed_hasher(
-            self.options.core_trace_fragment_size(),
-            self.options.max_stack_depth(),
-            sender,
-        );
 
         std::thread::scope(|scope| {
             // Only the receiver crosses threads; execution (and the host) stay on this one.
             // Spans are thread-local, so the builder thread re-enters this function's span
             // to keep its work attributed under it in profiling traces.
             let span = tracing::Span::current();
-            let hasher = scope.spawn(move || {
-                let _span = span.entered();
-                build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
-            });
 
-            // Liveness invariant: both match arms consume `tracer` by value, so the scope
-            // closure captures it by move and any unwind (including a panic in execution)
-            // drops the stream's sender, unblocking the builder before the scope's join.
+            // `Scope::spawn` panics when the target refuses, and `wasm32-unknown-unknown` — full
+            // `std`, no threads — always refuses. Under `panic=abort` that panic traps the module,
+            // and a trapped wasm-bindgen future never settles its JS promise. A `cfg` cannot stand
+            // in for attempting the spawn: `wasm32-wasip1` and `wasm32-wasip1-threads` print
+            // identical `cfg`s yet differ here.
+            let hasher = std::thread::Builder::new()
+                .name("hasher-chiplet-builder".into())
+                .spawn_scoped(scope, move || {
+                    let _span = span.entered();
+                    build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
+                });
+
+            // The tracer below is what binds execution to the builder and does not exist yet, so
+            // a refused spawn can still take the serial route. Only the spawn decision is covered
+            // here: `build_trace` goes on to initialize rayon's pool, whose own threadless
+            // fallback is limited to `Unsupported`.
+            let hasher = match hasher {
+                Ok(hasher) => hasher,
+                Err(err) => {
+                    Self::log_refused_builder_spawn(&err, cfg!(target_family = "wasm"));
+
+                    return crate::trace::build_trace(
+                        self.execute_trace_inputs_sync(program, host)?,
+                    );
+                },
+            };
+
+            let mut tracer = ExecutionTracer::new_with_streamed_hasher(
+                self.options.core_trace_fragment_size(),
+                self.options.max_stack_depth(),
+                sender,
+            );
+
+            // Liveness invariant: `tracer` is a local of this closure and both match arms below
+            // consume it by value, so any unwind (including a panic in execution) drops the
+            // stream's sender, unblocking the builder before the scope's join.
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
 
             let mut inputs = match execution_output {
@@ -201,6 +228,35 @@ impl FastProcessor {
 
             build_trace_with_prebuilt_hasher(inputs, hasher)
         })
+    }
+
+    /// Records a refused builder-thread spawn at a level matching how expected it is.
+    ///
+    /// Only wasm refusing as unsupported is the case the fallback is designed around; it stays at
+    /// debug. Everything else is a host that was expected to spawn and did not — thread or memory
+    /// pressure, or a sandbox answering `clone` with `ENOSYS`, which `std` also reports as
+    /// [`std::io::ErrorKind::Unsupported`] — which silently costs the overlap, leaving a profile
+    /// missing a second thread as the only other sign.
+    ///
+    /// `target_is_wasm` is a parameter rather than a `cfg!` so that both levels are reachable from
+    /// a test: the lib tests do not build for wasm. It cannot narrow further than the family,
+    /// since `wasm32-wasip1` and `wasm32-wasip1-threads` are indistinguishable to `cfg`.
+    #[cfg(feature = "std")]
+    fn log_refused_builder_spawn(err: &std::io::Error, target_is_wasm: bool) {
+        if target_is_wasm && err.kind() == std::io::ErrorKind::Unsupported {
+            tracing::debug!(
+                %err,
+                kind = ?err.kind(),
+                "target cannot spawn threads; building the trace serially"
+            );
+        } else {
+            tracing::warn!(
+                %err,
+                kind = ?err.kind(),
+                "could not spawn the hasher-chiplet trace builder; building the trace serially, \
+                 which is slower — check the host's thread and memory limits"
+            );
+        }
     }
 
     /// Executes the given program synchronously and returns the bundled trace inputs required by
@@ -1376,5 +1432,65 @@ impl FastProcessor {
             )
             .await;
         Self::stack_result_from_flow(flow)
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use std::{
+        io::{Error, ErrorKind},
+        sync::{Arc, Mutex},
+        vec::Vec,
+    };
+
+    use tracing::Level;
+    use tracing_subscriber::{Registry, layer::SubscriberExt};
+
+    use super::FastProcessor;
+
+    /// Captures the level of every event emitted while it is the active subscriber.
+    struct LevelCapture(Arc<Mutex<Vec<Level>>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LevelCapture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.0.lock().unwrap().push(*event.metadata().level());
+        }
+    }
+
+    fn level_for(kind: ErrorKind, target_is_wasm: bool) -> Level {
+        let levels = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = Registry::default().with(LevelCapture(Arc::clone(&levels)));
+        tracing::subscriber::with_default(subscriber, || {
+            FastProcessor::log_refused_builder_spawn(&Error::from(kind), target_is_wasm)
+        });
+        let levels = levels.lock().unwrap();
+        assert_eq!(levels.len(), 1, "expected exactly one event, got {levels:?}");
+        levels[0]
+    }
+
+    /// Wasm having no threads is why the fallback exists, so it alone is quiet.
+    #[test]
+    fn a_refused_spawn_stays_at_debug_only_on_wasm() {
+        assert_eq!(level_for(ErrorKind::Unsupported, true), Level::DEBUG);
+    }
+
+    /// A host that was expected to spawn and did not is worth a warning: it silently costs the
+    /// overlap, and nothing else reports it. `Unsupported` is not wasm-exclusive — a sandbox
+    /// refusing `clone` with `ENOSYS` reports it too — so that kind alone must not buy silence.
+    #[test]
+    fn a_refused_spawn_warns_on_a_target_that_should_have_threads() {
+        assert_eq!(level_for(ErrorKind::Unsupported, false), Level::WARN);
+        for kind in [ErrorKind::WouldBlock, ErrorKind::OutOfMemory, ErrorKind::PermissionDenied] {
+            assert_eq!(level_for(kind, false), Level::WARN);
+            assert_eq!(
+                level_for(kind, true),
+                Level::WARN,
+                "{kind:?} is a host problem on wasm too"
+            );
+        }
     }
 }

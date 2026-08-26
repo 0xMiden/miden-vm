@@ -28,6 +28,7 @@ For more control over execution and trace generation, you can use `FastProcessor
 * `FastProcessor::execute()` - Executes a program without any trace generation overhead. Returns `ExecutionOutput` containing the final stack state and other execution results.
 * `FastProcessor::execute_trace_inputs()` / `FastProcessor::execute_trace_inputs_sync()` - Executes a program while collecting the execution metadata required for trace generation. Returns a `TraceBuildInputs` bundle.
 * `build_trace()` - Takes the `TraceBuildInputs` bundle from `execute_trace_inputs*()` and constructs the full execution trace. When the `concurrent` feature is enabled, trace building is parallelized.
+* `FastProcessor::execute_and_build_trace_sync()` - With the `std` feature, takes the optimized synchronous path that overlaps execution with hasher trace construction. Targets that cannot spawn a thread, such as `wasm32-unknown-unknown`, build the same trace sequentially instead.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.
