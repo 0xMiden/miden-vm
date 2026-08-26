@@ -112,5 +112,10 @@ $b_{\mathrm{range}}$ value be zero.
 
 The table height is always $2^{16}$ and is independent of VM program length. Its eleven
 preprocessed columns are commitment-cached, while its ten main columns contain only dynamic
-multiplicities. The table supplies both 16-bit range checks and the byte operations required by the
-native Eidos compression AIR.
+multiplicities. The ten table-side fractions are paired into five auxiliary LogUp columns: the
+byte-AND and range-check messages share one column, and each rotate-right-by-12 position shares a
+column with the corresponding rotate-right-by-7 position. Each pair retains two independently
+typed denominators, so the closing constraints have degree three without merging bus domains.
+
+The table supplies both 16-bit range checks and the byte operations required by the native Eidos
+compression AIR.
