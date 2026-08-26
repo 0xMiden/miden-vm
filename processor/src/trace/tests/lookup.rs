@@ -14,6 +14,7 @@
 //! 4. **Constraint agreement**: the trace and its prover-built auxiliary columns satisfy the AIR.
 
 use alloc::{boxed::Box, vec::Vec};
+use std::collections::HashMap;
 
 use miden_air::{
     BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
@@ -702,6 +703,102 @@ fn assert_eidos_compression_oracle_coverage(
     );
 }
 
+/// Checks the honest trace against the complete composed AIR, including global lookup closure.
+pub(super) fn assert_global_lookup_balance(trace: &VmTrace) {
+    trace.check_constraints();
+}
+
+/// Checks that caller-supplied matrices change the prover-emitted lookup multiset.
+///
+/// Boundary interactions are unchanged, so a nonzero delta against the honest matrices implies
+/// that the mutated complete lookup ledger cannot close. Comparing raw encoded interactions keeps
+/// this regression independent of constraint-builder diagnostics.
+pub(super) fn assert_global_lookup_balance_rejects(
+    label: &str,
+    trace: &VmTrace,
+    core_matrix: &RowMajorMatrix<Felt>,
+    chip_matrix: &RowMajorMatrix<Felt>,
+    eidos_compression_matrix: &RowMajorMatrix<Felt>,
+    and8_matrix: &RowMajorMatrix<Felt>,
+    expected_bus: &str,
+) {
+    let (honest_core, honest_chiplets, honest_eidos, honest_and8) =
+        trace.main_trace().clone_air_matrices();
+    let raw = rand_array::<Felt, 4>();
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([raw[0], raw[1]]),
+        QuadFelt::new([raw[2], raw[3]]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+
+    let honest = lookup_multiplicities(
+        &honest_core,
+        &honest_chiplets,
+        &honest_eidos,
+        &honest_and8,
+        &challenges,
+    );
+    let attacked = lookup_multiplicities(
+        core_matrix,
+        chip_matrix,
+        eidos_compression_matrix,
+        and8_matrix,
+        &challenges,
+    );
+
+    let mut delta = honest;
+    for (denominator, multiplicity) in attacked {
+        *delta.entry(denominator).or_insert(Felt::ZERO) -= multiplicity;
+    }
+    delta.retain(|_, multiplicity| *multiplicity != Felt::ZERO);
+
+    assert!(
+        !delta.is_empty(),
+        "{label}: mutation did not change the {expected_bus} lookup multiset",
+    );
+}
+
+fn lookup_multiplicities(
+    core_matrix: &RowMajorMatrix<Felt>,
+    chip_matrix: &RowMajorMatrix<Felt>,
+    eidos_compression_matrix: &RowMajorMatrix<Felt>,
+    and8_matrix: &RowMajorMatrix<Felt>,
+    challenges: &Challenges<QuadFelt>,
+) -> HashMap<QuadFelt, Felt> {
+    let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+    let eidos_compression_periodic =
+        BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+    let and8_preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("And8 lookup AIR declares a preprocessed table");
+    let fractions = [
+        build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], challenges),
+        build_lookup_fractions(&MidenAir::CHIPLETS, chip_matrix, None, &chip_periodic, challenges),
+        build_lookup_fractions(
+            &MidenAir::EIDOS_COMPRESSION,
+            eidos_compression_matrix,
+            None,
+            &eidos_compression_periodic,
+            challenges,
+        ),
+        build_lookup_fractions(
+            &MidenAir::AND8_LOOKUP,
+            and8_matrix,
+            Some(&and8_preprocessed),
+            &[],
+            challenges,
+        ),
+    ];
+
+    let mut totals = HashMap::new();
+    for fractions in fractions {
+        for &(multiplicity, denominator) in fractions.fractions() {
+            *totals.entry(denominator).or_insert(Felt::ZERO) += multiplicity;
+        }
+    }
+    totals
+}
 fn aead_stream_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
     let width = chip_matrix.width();
     (0..chip_matrix.height())
