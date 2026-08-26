@@ -2901,7 +2901,6 @@ name = "miden-wasm-event-handlers-project"
 version = "0.30.0"
 dependencies = [
  "miden-assembly",
- "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",
  "miden-project",

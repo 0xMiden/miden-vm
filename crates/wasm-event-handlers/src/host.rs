@@ -20,7 +20,7 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
-use miden_event_handler_abi::{FIELD_MODULUS, IMPORT_MODULE, MEMORY_EXPORT, Status, host_fn};
+use miden_event_handler_abi::{IMPORT_MODULE, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
     ContextId, Felt, ProcessorState, Word,
     advice::{AdviceError, AdviceMap, AdviceMutation},
@@ -240,16 +240,15 @@ fn read_felts(data: &[u8], ptr: u32, count: u32) -> Result<Vec<Felt>, wasmi::Err
     // The discarded `as_chunks` remainder is empty: `byte_range` sized the range as an exact
     // multiple of the chunk size.
     for chunk in data[range].as_chunks::<FELT_BYTES>().0 {
-        let raw = u64::from_le_bytes(*chunk);
-        if raw >= FIELD_MODULUS {
-            return Err(trap(format!("non-canonical field element {raw}")));
-        }
-        out.push(Felt::new_unchecked(raw));
+        out.push(felt_arg(u64::from_le_bytes(*chunk))?);
     }
     Ok(out)
 }
 
-/// Converts a `u64` the guest passed by value into a field element; a non-canonical value traps.
+/// Converts a raw `u64` the guest supplied into a field element; a non-canonical value traps.
+///
+/// Every field element that crosses the host boundary passes through here, so the boundary holds
+/// one canonicality check.
 fn felt_arg(raw: u64) -> Result<Felt, wasmi::Error> {
     Felt::from_canonical_checked(raw)
         .ok_or_else(|| trap(format!("non-canonical field element {raw}")))

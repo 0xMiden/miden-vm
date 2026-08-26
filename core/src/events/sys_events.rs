@@ -743,10 +743,11 @@ mod test {
                 looked_up_id.as_u64()
             );
 
-            // Verify name has correct "sys::" prefix
+            // Verify name has the reserved namespace prefix
             assert!(
-                entry.name.starts_with("sys::"),
-                "SystemEvent name should start with 'sys::': {}",
+                entry.name.starts_with(EventName::RESERVED_NAMESPACE),
+                "SystemEvent name should start with '{}': {}",
+                EventName::RESERVED_NAMESPACE,
                 entry.name
             );
 

@@ -141,11 +141,13 @@ fn build_rust_guest_fixture() -> Vec<u8> {
 
         // An inherited `RUSTFLAGS` replaces the rustflags of the fixture's `.cargo/config.toml`
         // and silently drops `-simd128`, which gives a SIMD module the handler loader rejects.
-        // Set the flags that config specifies, so the fixture builds the same way whatever the
-        // caller's environment holds.
+        // `CARGO_ENCODED_RUSTFLAGS` in turn replaces `RUSTFLAGS`. The first is pinned to the flags
+        // that config specifies and the second removed, so the fixture builds the same way
+        // whatever the caller's environment holds.
         let output = Command::new(env!("CARGO"))
             .current_dir(&fixtures_dir)
             .env("RUSTFLAGS", "-C target-feature=-simd128")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
             .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])
             .arg(&target_dir)
