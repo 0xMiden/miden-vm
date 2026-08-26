@@ -382,10 +382,10 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
 
 /// Commitment to the setup (preprocessed) trace tree under the Poseidon2 config.
 ///
-/// Built through the same cache the prover and Rust verifier use, seeded with the freshly
-/// minted relation digest, so the config matches production exactly and the minted constant
-/// is by construction the value they observe into the transcript. (The commitment itself
-/// is digest-independent; threading the digest avoids relying on that property here.)
+/// Built through the same preprocessing code as the prover and Rust verifier, seeded with the
+/// freshly minted relation digest, so the config matches production exactly and the minted
+/// constant is by construction the value they observe into the transcript. (The commitment
+/// itself is digest-independent; threading the digest avoids relying on that property here.)
 fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
     let params = crate::stark_config::precompile_pcs_params();
     let config = crate::stark_config::poseidon2_config(params, digest);
