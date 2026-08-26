@@ -20,12 +20,12 @@ use std::{
 };
 
 use miden_ace_codegen::{
-    FactoredCircuitFactory, InputKey, InputLayout, MasmConstraintsEvalConfig, PackedLeafScratch,
-    ShuffleEncodeBuffer, fold_row_to_root, order_from_tag, order_tag, render_masm_constraints_eval,
-    subtree_leaves,
+    EXT_DEGREE, FactoredCircuitFactory, InputKey, InputLayout, MasmConstraintsEvalConfig,
+    PackedLeafScratch, ShuffleEncodeBuffer, fold_row_to_root, order_from_tag, order_tag,
+    render_masm_constraints_eval, subtree_leaves,
 };
 use miden_core::{Felt, Word, crypto::hash::Eidos};
-use miden_crypto::merkle::MerkleTree;
+use miden_crypto::{hash::eidos::BLOCK_LEN as EIDOS_BLOCK_WIDTH, merkle::MerkleTree};
 use miden_lifted_air::BaseAir;
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{
@@ -48,14 +48,16 @@ use crate::{
 const DATA_PATH: &str = "src/ace_registry/data.rs";
 const PROTOCOL_PATH: &str = "../precompiles-air/src/protocol.rs";
 const PVM_CONSTRAINTS_EVAL_PATH: &str = "../lib/core/asm/sys/pvm/constraints_eval.masm";
+const PVM_DEEP_QUERIES_PATH: &str = "../lib/core/asm/sys/pvm/deep_queries.masm";
 const PVM_LAYOUT_PATH: &str = "../lib/core/asm/sys/pvm/layout.masm";
+const PVM_OOD_FRAMES_PATH: &str = "../lib/core/asm/sys/pvm/ood_frames.masm";
 const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 
 /// First felt after the VM relation's fixed ACE stream reservation. The PVM's complete READ
 /// section starts here; its aux-randomness anchor is later because four public EF inputs precede
 /// it.
-// The narrowed four-AIR VM evaluator occupies 8,520 felts; place the PVM frame at the next
-// 4-Ki-felt boundary after that stream so the two relation-owned allocations cannot overlap.
+// Place the PVM frame at the fixed 4-Ki-felt boundary after the VM relation's reserved READ
+// section so the two relation-owned allocations cannot overlap.
 const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = 3_238_002_688;
@@ -101,8 +103,54 @@ struct GeneratedArtifacts {
     /// Generated PVM constraint evaluator, rendered from the same circuit metadata as the
     /// registry constants.
     constraints_eval_masm: String,
+    /// Hand-written DEEP-query implementation with its row-block constants updated.
+    deep_queries_masm: String,
+    /// Hand-written OOD-frame implementation with its row-block constant and geometry prose
+    /// updated.
+    ood_frames_masm: String,
     /// Hand-written relation wrapper with its generated registry root and relation digest updated.
     relation_mod_masm: String,
+}
+
+/// Committed base-coordinate widths for one PVM trace row.
+///
+/// Auxiliary and quotient extension-field values each occupy [`EXT_DEGREE`] committed base
+/// coordinates. OOD advice then supplies an extension-field evaluation for every one of these
+/// committed coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PvmRowWidths {
+    preprocessed: usize,
+    main: usize,
+    auxiliary: usize,
+    quotient: usize,
+}
+
+impl PvmRowWidths {
+    fn total(self) -> Result<usize, String> {
+        [self.preprocessed, self.main, self.auxiliary, self.quotient]
+            .into_iter()
+            .try_fold(0usize, |total, width| {
+                total
+                    .checked_add(width)
+                    .ok_or_else(|| "PVM trace row width overflows".to_string())
+            })
+    }
+
+    fn named(self) -> [(&'static str, usize); 4] {
+        [
+            ("preprocessed", self.preprocessed),
+            ("main", self.main),
+            ("auxiliary-coordinate", self.auxiliary),
+            ("quotient-coordinate", self.quotient),
+        ]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PvmTraceGeometry {
+    row_widths: PvmRowWidths,
+    ood_row_felts: usize,
+    ood_row_blocks: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -117,6 +165,109 @@ struct PvmReadRegion {
     constant: &'static str,
     ptr: u32,
     extent: u32,
+}
+
+impl PvmTraceGeometry {
+    fn from_input_layout(layout: &InputLayout) -> Result<Self, String> {
+        let expected = PvmRowWidths {
+            preprocessed: layout.counts.preprocessed_width,
+            main: layout.counts.width,
+            auxiliary: layout
+                .counts
+                .aux_width
+                .checked_mul(EXT_DEGREE)
+                .ok_or_else(|| "PVM auxiliary-coordinate width overflows".to_string())?,
+            quotient: layout
+                .counts
+                .num_quotient_chunks
+                .checked_mul(EXT_DEGREE)
+                .ok_or_else(|| "PVM quotient-coordinate width overflows".to_string())?,
+        };
+        let current = trace_row_widths(layout, 0, InputKey::Preprocessed { offset: 1, index: 0 })?;
+        let next = trace_row_widths(layout, 1, InputKey::AuxBusBoundary(0))?;
+
+        if current != next {
+            return Err(format!(
+                "PVM current/next trace-row widths differ: {current:?} versus {next:?}"
+            ));
+        }
+        if current != expected {
+            return Err(format!(
+                "PVM trace-row boundaries {current:?} disagree with InputLayout counts {expected:?}"
+            ));
+        }
+        for (name, width) in current.named() {
+            if !width.is_multiple_of(EIDOS_BLOCK_WIDTH) {
+                return Err(format!(
+                    "PVM {name} row width {width} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
+                ));
+            }
+        }
+
+        let row_width = current.total()?;
+        let ood_row_felts = row_width
+            .checked_mul(EXT_DEGREE)
+            .ok_or_else(|| "PVM OOD row felt width overflows".to_string())?;
+        if !ood_row_felts.is_multiple_of(EIDOS_BLOCK_WIDTH) {
+            return Err(format!(
+                "PVM OOD row width {ood_row_felts} is not {EIDOS_BLOCK_WIDTH}-felt aligned"
+            ));
+        }
+
+        Ok(Self {
+            row_widths: current,
+            ood_row_felts,
+            ood_row_blocks: ood_row_felts / EIDOS_BLOCK_WIDTH,
+        })
+    }
+
+    fn row_width(self) -> Result<usize, String> {
+        self.row_widths.total()
+    }
+
+    fn deep_query_blocks(self) -> [(&'static str, usize); 4] {
+        [
+            (
+                "PREPROCESSED_ROW_DOUBLE_WORDS",
+                self.row_widths.preprocessed / EIDOS_BLOCK_WIDTH,
+            ),
+            ("MAIN_ROW_DOUBLE_WORDS", self.row_widths.main / EIDOS_BLOCK_WIDTH),
+            ("AUX_ROW_DOUBLE_WORDS", self.row_widths.auxiliary / EIDOS_BLOCK_WIDTH),
+            ("QUOTIENT_ROW_DOUBLE_WORDS", self.row_widths.quotient / EIDOS_BLOCK_WIDTH),
+        ]
+    }
+}
+
+fn trace_row_widths(
+    layout: &InputLayout,
+    offset: usize,
+    row_end: InputKey,
+) -> Result<PvmRowWidths, String> {
+    let [preprocessed, main, auxiliary, quotient, end] = [
+        InputKey::Preprocessed { offset, index: 0 },
+        InputKey::Main { offset, index: 0 },
+        InputKey::AuxCoord { offset, index: 0, coord: 0 },
+        InputKey::QuotientChunkCoord { offset, chunk: 0, coord: 0 },
+        row_end,
+    ]
+    .map(|key| {
+        layout
+            .index(key)
+            .ok_or_else(|| format!("PVM ACE layout is missing trace-row boundary {key:?}"))
+    });
+    let (preprocessed, main, auxiliary, quotient, end) =
+        (preprocessed?, main?, auxiliary?, quotient?, end?);
+    let extent = |start: usize, end: usize, name: &str| {
+        end.checked_sub(start)
+            .ok_or_else(|| format!("PVM {name} trace-row boundary is reversed"))
+    };
+
+    Ok(PvmRowWidths {
+        preprocessed: extent(preprocessed, main, "preprocessed")?,
+        main: extent(main, auxiliary, "main")?,
+        auxiliary: extent(auxiliary, quotient, "auxiliary")?,
+        quotient: extent(quotient, end, "quotient")?,
+    })
 }
 
 /// The encoded ACE stream's shape, which an in-VM verifier needs as compile-time
@@ -135,7 +286,9 @@ struct CircuitShape {
 impl CircuitShape {
     fn of(circuit: &miden_ace_codegen::FactoredEncodedCircuit) -> Result<Self, String> {
         let stream_len = circuit.encoded.size_in_felt();
-        if !stream_len.is_multiple_of(8) || !circuit.shuffle_prefix_len.is_multiple_of(8) {
+        if !stream_len.is_multiple_of(EIDOS_BLOCK_WIDTH)
+            || !circuit.shuffle_prefix_len.is_multiple_of(EIDOS_BLOCK_WIDTH)
+        {
             return Err(format!(
                 "ACE stream segments must be adv_pipe-block aligned; got {stream_len} felts \
                  with a {}-felt prefix",
@@ -181,7 +334,7 @@ impl PvmReadLayout {
             let index = layout.index(key).ok_or_else(|| {
                 format!("PVM ACE layout is missing boundary {constant} ({key:?})")
             })?;
-            let felt_offset = u32::try_from(index.checked_mul(2).ok_or_else(|| {
+            let felt_offset = u32::try_from(index.checked_mul(EXT_DEGREE).ok_or_else(|| {
                 format!("PVM ACE layout boundary {constant} overflows its felt offset")
             })?)
             .map_err(|_| format!("PVM ACE layout boundary {constant} exceeds u32 memory"))?;
@@ -201,7 +354,7 @@ impl PvmReadLayout {
         let read_extent = u32::try_from(
             layout
                 .total_inputs
-                .checked_mul(2)
+                .checked_mul(EXT_DEGREE)
                 .ok_or_else(|| "PVM ACE READ extent overflows usize".to_string())?,
         )
         .map_err(|_| "PVM ACE READ extent exceeds u32 memory".to_string())?;
@@ -241,7 +394,18 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     let factored = build_precompile_factored_ace_circuit().map_err(|e| format!("{e}"))?;
     let factory = FactoredCircuitFactory::new(factored).map_err(|e| format!("{e}"))?;
     let input_layout = factory.factored().layout();
+    let trace_geometry = PvmTraceGeometry::from_input_layout(input_layout)?;
     let read_layout = PvmReadLayout::from_input_layout(input_layout)?;
+    if usize::try_from(read_layout.query_row_felts)
+        .map_err(|_| "PVM query-row scratch width does not fit the host usize".to_string())?
+        != trace_geometry.row_width()?
+    {
+        return Err(format!(
+            "PVM query-row scratch width {} disagrees with trace-row width {}",
+            read_layout.query_row_felts,
+            trace_geometry.row_width()?,
+        ));
+    }
     let num_quotient_chunks = input_layout.counts.num_quotient_chunks;
     if !num_quotient_chunks.is_power_of_two() {
         return Err(format!(
@@ -366,12 +530,15 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     let preprocessed_commitment = preprocessed_commitment(digest);
     let layout_masm = render_pvm_layout(&read_layout, shape.stream_len)?;
     let constraints_eval_masm = render_pvm_constraints_eval(shape, quotient_inputs)?;
+    let deep_queries_masm = render_pvm_deep_queries(trace_geometry)?;
+    let ood_frames_masm = render_pvm_ood_frames(trace_geometry)?;
     let mut relation_mod_masm = read_generated_file(PVM_RELATION_MOD_PATH)?;
     for (index, felt) in digest.iter().enumerate() {
         replace_masm_const(
             &mut relation_mod_masm,
             &format!("RELATION_DIGEST_{index}"),
             felt.as_canonical_u64(),
+            PVM_RELATION_MOD_PATH,
         )?;
     }
     for (index, felt) in root.iter().enumerate() {
@@ -379,6 +546,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
             &mut relation_mod_masm,
             &format!("ACE_REGISTRY_ROOT_{index}"),
             felt.as_canonical_u64(),
+            PVM_RELATION_MOD_PATH,
         )?;
     }
     for (index, felt) in preprocessed_commitment.iter().enumerate() {
@@ -386,6 +554,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
             &mut relation_mod_masm,
             &format!("PREPROCESSED_COMMITMENT_{index}"),
             felt.as_canonical_u64(),
+            PVM_RELATION_MOD_PATH,
         )?;
     }
 
@@ -397,6 +566,8 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
         shape,
         layout_masm,
         constraints_eval_masm,
+        deep_queries_masm,
+        ood_frames_masm,
         relation_mod_masm,
     })
 }
@@ -448,9 +619,10 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     out.push_str("###\n");
     out.push_str("### The ACE READ section is one dense vector of quadratic-extension inputs.\n");
     out.push_str("### Every boundary below is derived from the PVM circuit's InputLayout; each\n");
+    let extension_degree = small_number_label(EXT_DEGREE);
     writeln!(
         out,
-        "### input occupies two base-field felts. The complete allocation, including relation-local\n### scratch after the stream, is the half-open range {PVM_READ_START}..{allocation_end}."
+        "### input occupies {extension_degree} base-field felts. The complete allocation, including relation-local\n### scratch after the stream, is the half-open range {PVM_READ_START}..{allocation_end}."
     )
     .expect("writing to String cannot fail");
     out.push_str("### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()\n");
@@ -540,6 +712,91 @@ fn render_pvm_constraints_eval(
     .map_err(|err| err.to_string())
 }
 
+fn render_pvm_deep_queries(geometry: PvmTraceGeometry) -> Result<String, String> {
+    let mut deep_queries = read_generated_file(PVM_DEEP_QUERIES_PATH)?;
+    for (name, blocks) in geometry.deep_query_blocks() {
+        replace_masm_const(&mut deep_queries, name, blocks, PVM_DEEP_QUERIES_PATH)?;
+    }
+    Ok(deep_queries)
+}
+
+fn render_pvm_ood_frames(geometry: PvmTraceGeometry) -> Result<String, String> {
+    const GEOMETRY_START: &str = "#! The row is the LMCS-aligned wire sequence used by the lifted PCS, in commitment-group order:";
+    const GEOMETRY_END: &str = "pub proc process_row_ood_evaluations";
+
+    let mut ood_frames = read_generated_file(PVM_OOD_FRAMES_PATH)?;
+    replace_masm_const(
+        &mut ood_frames,
+        "OOD_ROW_DOUBLE_WORDS",
+        geometry.ood_row_blocks,
+        PVM_OOD_FRAMES_PATH,
+    )?;
+
+    let quotient_chunks = geometry.row_widths.quotient / EXT_DEGREE;
+    let air_count = small_number_label(NUM_CHIPLETS);
+    let quotient_chunk_count = small_number_label(quotient_chunks);
+    let row_width = geometry.row_width()?;
+    let geometry_docs = format!(
+        "#! The row is the LMCS-aligned wire sequence used by the lifted PCS, in commitment-group order:\n\
+#!\n\
+#! - {} preprocessed extension-field slots;\n\
+#! - {} main extension-field slots across {air_count} AIRs in proof order;\n\
+#! - {} auxiliary-coordinate extension-field slots across {air_count} AIRs in proof order;\n\
+#! - {} quotient extension-field slots ({quotient_chunk_count} quadratic-extension chunks).\n\
+#!\n\
+#! This is {} extension-field values = {} felts = {} `adv_pipe` blocks. Each block is stored,\n\
+#! folded into the DEEP fixed term with `horner_eval_ext`, and compressed into the Eidos\n\
+#! transcript.\n\
+#!\n\
+#! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]\n\
+#! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']\n",
+        geometry.row_widths.preprocessed,
+        geometry.row_widths.main,
+        geometry.row_widths.auxiliary,
+        geometry.row_widths.quotient,
+        format_with_commas(row_width),
+        format_with_commas(geometry.ood_row_felts),
+        format_with_commas(geometry.ood_row_blocks),
+    );
+    replace_unique_block(
+        &mut ood_frames,
+        GEOMETRY_START,
+        GEOMETRY_END,
+        &geometry_docs,
+        PVM_OOD_FRAMES_PATH,
+    )?;
+    Ok(ood_frames)
+}
+
+fn small_number_label(value: usize) -> String {
+    match value {
+        0 => "zero".into(),
+        1 => "one".into(),
+        2 => "two".into(),
+        3 => "three".into(),
+        4 => "four".into(),
+        5 => "five".into(),
+        6 => "six".into(),
+        7 => "seven".into(),
+        8 => "eight".into(),
+        9 => "nine".into(),
+        10 => "ten".into(),
+        _ => value.to_string(),
+    }
+}
+
+fn format_with_commas(value: usize) -> String {
+    let digits = value.to_string();
+    let mut output = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.bytes().enumerate() {
+        if index != 0 && (digits.len() - index).is_multiple_of(3) {
+            output.push(',');
+        }
+        output.push(char::from(digit));
+    }
+    output
+}
+
 fn max_periodic_cycle_len_log() -> Result<u32, String> {
     let max_len = ChipletAir::all()
         .iter()
@@ -587,6 +844,14 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
         return Err(format!(
             "{PVM_CONSTRAINTS_EVAL_PATH} is stale; run `make regenerate-pvm-registry`"
         ));
+    }
+    if read_generated_file(PVM_DEEP_QUERIES_PATH)? != artifacts.deep_queries_masm {
+        return Err(format!(
+            "{PVM_DEEP_QUERIES_PATH} is stale; run `make regenerate-pvm-registry`"
+        ));
+    }
+    if read_generated_file(PVM_OOD_FRAMES_PATH)? != artifacts.ood_frames_masm {
+        return Err(format!("{PVM_OOD_FRAMES_PATH} is stale; run `make regenerate-pvm-registry`"));
     }
     if read_generated_file(PVM_RELATION_MOD_PATH)? != artifacts.relation_mod_masm {
         return Err(format!(
@@ -638,16 +903,14 @@ fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
 }
 
 fn render_protocol(artifacts: &GeneratedArtifacts) -> String {
-    let digest = artifacts
-        .digest
-        .iter()
-        .map(Felt::as_canonical_u64)
-        .map(|felt| felt.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let digest = artifacts.digest.iter().fold(String::new(), |mut output, felt| {
+        writeln!(output, "    {},", felt.as_canonical_u64())
+            .expect("writing to String cannot fail");
+        output
+    });
     format!(
         "/// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.\n\
-         pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [{digest}];\n"
+         pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{digest}];\n"
     )
 }
 
@@ -663,6 +926,8 @@ fn write(artifacts: &GeneratedArtifacts) -> io::Result<()> {
     write_generated_file(PROTOCOL_PATH, &render_protocol(artifacts))?;
     write_generated_file(PVM_LAYOUT_PATH, &artifacts.layout_masm)?;
     write_generated_file(PVM_CONSTRAINTS_EVAL_PATH, &artifacts.constraints_eval_masm)?;
+    write_generated_file(PVM_DEEP_QUERIES_PATH, &artifacts.deep_queries_masm)?;
+    write_generated_file(PVM_OOD_FRAMES_PATH, &artifacts.ood_frames_masm)?;
     write_generated_file(PVM_RELATION_MOD_PATH, &artifacts.relation_mod_masm)?;
     Ok(())
 }
@@ -684,7 +949,12 @@ fn write_generated_file(relative: &str, contents: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn replace_masm_const(content: &mut String, name: &str, value: u64) -> Result<(), String> {
+fn replace_masm_const(
+    content: &mut String,
+    name: &str,
+    value: impl core::fmt::Display,
+    path: &str,
+) -> Result<(), String> {
     let prefix = format!("const {name} = ");
     let mut declarations = content
         .match_indices(&prefix)
@@ -692,9 +962,9 @@ fn replace_masm_const(content: &mut String, name: &str, value: u64) -> Result<()
     let line_start = declarations
         .next()
         .map(|(start, _)| start)
-        .ok_or_else(|| format!("{name} not found in {PVM_RELATION_MOD_PATH}"))?;
+        .ok_or_else(|| format!("{name} not found in {path}"))?;
     if declarations.next().is_some() {
-        return Err(format!("{name} is declared more than once in {PVM_RELATION_MOD_PATH}"));
+        return Err(format!("{name} is declared more than once in {path}"));
     }
     let line_end = content[line_start..]
         .find('\n')
@@ -704,13 +974,54 @@ fn replace_masm_const(content: &mut String, name: &str, value: u64) -> Result<()
     Ok(())
 }
 
+fn replace_unique_block(
+    content: &mut String,
+    start_marker: &str,
+    end_marker: &str,
+    replacement: &str,
+    path: &str,
+) -> Result<(), String> {
+    let find_unique_line = |marker: &str| {
+        let mut matches = content.match_indices(marker).filter(|(start, _)| {
+            let end = *start + marker.len();
+            (*start == 0 || content.as_bytes()[start - 1] == b'\n')
+                && (end == content.len() || content.as_bytes()[end] == b'\n')
+        });
+        let start = matches
+            .next()
+            .map(|(start, _)| start)
+            .ok_or_else(|| format!("marker {marker:?} not found in {path}"))?;
+        if matches.next().is_some() {
+            return Err(format!("marker {marker:?} occurs more than once in {path}"));
+        }
+        Ok(start)
+    };
+
+    let start = find_unique_line(start_marker)?;
+    let end = find_unique_line(end_marker)?;
+    if start >= end {
+        return Err(format!("marker {end_marker:?} does not follow {start_marker:?} in {path}"));
+    }
+    if replacement.lines().next() != Some(start_marker) || !replacement.ends_with('\n') {
+        return Err(format!(
+            "replacement for the block beginning {start_marker:?} in {path} has invalid boundaries"
+        ));
+    }
+    content.replace_range(start..end, replacement);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::string::String;
 
     use miden_core::{Felt, Word};
 
-    use super::{format_word, replace_masm_const};
+    use super::{
+        PVM_DEEP_QUERIES_PATH, PVM_OOD_FRAMES_PATH, PvmTraceGeometry, format_word,
+        read_generated_file, render_pvm_deep_queries, render_pvm_ood_frames, replace_masm_const,
+        replace_unique_block,
+    };
 
     #[test]
     fn generated_words_put_one_limb_on_each_line() {
@@ -720,12 +1031,12 @@ mod tests {
     }
 
     #[test]
-    fn relation_constants_are_replaced_without_touching_the_wrapper() {
+    fn masm_constants_are_replaced_without_touching_surrounding_source() {
         let mut source = String::from(
             "before\nconst RELATION_DIGEST_0 = 1\nconst ACE_REGISTRY_ROOT_3 = 2\nafter\n",
         );
-        replace_masm_const(&mut source, "RELATION_DIGEST_0", 42).unwrap();
-        replace_masm_const(&mut source, "ACE_REGISTRY_ROOT_3", 99).unwrap();
+        replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap();
+        replace_masm_const(&mut source, "ACE_REGISTRY_ROOT_3", 99, "test.masm").unwrap();
         assert_eq!(
             source,
             "before\nconst RELATION_DIGEST_0 = 42\nconst ACE_REGISTRY_ROOT_3 = 99\nafter\n"
@@ -733,16 +1044,89 @@ mod tests {
     }
 
     #[test]
-    fn relation_constant_replacement_fails_closed_when_a_constant_is_missing() {
+    fn masm_constant_replacement_fails_closed_when_a_constant_is_missing() {
         let mut source = String::from("const RELATION_DIGEST_0 = 1\n");
-        let error = replace_masm_const(&mut source, "ACE_REGISTRY_ROOT_0", 42).unwrap_err();
+        let error =
+            replace_masm_const(&mut source, "ACE_REGISTRY_ROOT_0", 42, "test.masm").unwrap_err();
         assert!(error.contains("ACE_REGISTRY_ROOT_0 not found"));
+        assert!(error.contains("test.masm"));
     }
 
     #[test]
-    fn relation_constant_replacement_rejects_duplicate_declarations() {
+    fn masm_constant_replacement_rejects_duplicate_declarations() {
         let mut source = String::from("const RELATION_DIGEST_0 = 1\nconst RELATION_DIGEST_0 = 2\n");
-        let error = replace_masm_const(&mut source, "RELATION_DIGEST_0", 42).unwrap_err();
+        let error =
+            replace_masm_const(&mut source, "RELATION_DIGEST_0", 42, "test.masm").unwrap_err();
         assert!(error.contains("RELATION_DIGEST_0 is declared more than once"));
+    }
+
+    #[test]
+    fn masm_block_replacement_fails_closed_on_duplicate_body_markers() {
+        let mut source = String::from("# start\nold\nproc body\nproc body\n");
+        let error = replace_unique_block(
+            &mut source,
+            "# start",
+            "proc body",
+            "# start\nnew\n",
+            "test.masm",
+        )
+        .unwrap_err();
+        assert!(error.contains("occurs more than once"));
+    }
+
+    #[test]
+    fn masm_geometry_block_replacement_preserves_procedure_suffix() {
+        const START: &str = "#! generated geometry";
+        const PROCEDURE: &str = "pub proc process_row_ood_evaluations\n    push.42\nend\n";
+
+        let mut source = String::from(
+            "#! module docs\n#! generated geometry\n#! old values\npub proc process_row_ood_evaluations\n    push.42\nend\n",
+        );
+        replace_unique_block(
+            &mut source,
+            START,
+            "pub proc process_row_ood_evaluations",
+            "#! generated geometry\n#! new values\n",
+            "test.masm",
+        )
+        .unwrap();
+
+        assert_eq!(
+            source,
+            "#! module docs\n#! generated geometry\n#! new values\npub proc process_row_ood_evaluations\n    push.42\nend\n"
+        );
+        assert!(source.ends_with(PROCEDURE));
+    }
+
+    #[test]
+    fn masm_block_replacement_rejects_marker_prefixes() {
+        let mut source = String::from("# start\nold\nproc body_v2\n");
+        let error = replace_unique_block(
+            &mut source,
+            "# start",
+            "proc body",
+            "# start\nnew\n",
+            "test.masm",
+        )
+        .unwrap_err();
+        assert!(error.contains("not found"));
+    }
+
+    #[test]
+    fn checked_in_pvm_geometry_masm_is_idempotent_under_rendering() {
+        let factored = crate::ace::build_precompile_factored_ace_circuit().unwrap();
+        let geometry = PvmTraceGeometry::from_input_layout(factored.layout()).unwrap();
+
+        let checked_in_deep_queries = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
+        assert_eq!(
+            render_pvm_deep_queries(geometry).unwrap().as_bytes(),
+            checked_in_deep_queries.as_bytes(),
+        );
+
+        let checked_in_ood_frames = read_generated_file(PVM_OOD_FRAMES_PATH).unwrap();
+        assert_eq!(
+            render_pvm_ood_frames(geometry).unwrap().as_bytes(),
+            checked_in_ood_frames.as_bytes(),
+        );
     }
 }
