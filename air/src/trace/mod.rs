@@ -17,12 +17,12 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack          chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (24 columns)
+//    (6 columns)     (23 columns)    (19 columns)    (24 columns)
 // ├───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_WIDTH: usize = 6;
 
-pub const DECODER_TRACE_WIDTH: usize = 24;
+pub const DECODER_TRACE_WIDTH: usize = 23;
 
 pub const STACK_TRACE_WIDTH: usize = 19;
 

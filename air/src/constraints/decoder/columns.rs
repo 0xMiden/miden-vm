@@ -1,9 +1,8 @@
 use crate::trace::decoder::{
-    NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
-    NUM_USER_OP_HELPERS,
+    NUM_HASHER_COLUMNS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS, NUM_USER_OP_HELPERS,
 };
 
-/// Decoder columns in the main execution trace (24 columns).
+/// Decoder columns in the main execution trace (23 columns).
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
 pub struct DecoderCols<T> {
@@ -19,8 +18,10 @@ pub struct DecoderCols<T> {
     pub group_count: T,
     /// Position within operation group (0-8).
     pub op_index: T,
-    /// Operation batch flags c0, c1, c2.
-    pub batch_flags: [T; NUM_OP_BATCH_FLAGS],
+    /// Boolean flag selecting a full 8-group operation batch.
+    pub full_batch: T,
+    /// Short-batch code: 1 for 4 groups, -1 for 2 groups, and 0 for 1 group.
+    pub batch_size_code: T,
     /// Degree-reduction extra columns e0, e1.
     pub extra: [T; NUM_OP_BITS_EXTRA_COLS],
 }
