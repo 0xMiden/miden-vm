@@ -64,6 +64,15 @@ pub(crate) const FUEL_PER_FELT: u64 = 1;
 /// `call` instructions while it burns a host transition per iteration.
 const HOST_CALL_BASE_FUEL: u64 = 25;
 
+/// Fuel charged per probe of a host-side lookup structure: one VM memory element read, one
+/// Merkle-store level, or one advice-map lookup.
+///
+/// These reads are `BTreeMap`/tree probes over wide keys, not contiguous copies: one probe of a
+/// populated map costs ~50-200 ns, which is two orders of magnitude over [`FUEL_PER_FELT`].
+/// The charge prices the upper end (~200 ns at ~0.8 ns per fuel unit), so the fuel budget
+/// bounds the host work of probe-heavy handlers the way it bounds hashing.
+const FUEL_PER_MAP_PROBE: u64 = 250;
+
 /// Fuel charged per Poseidon2 permutation the host computes for the guest.
 ///
 /// Calibrated with `benches/handler_call.rs` (Apple M-series): one merge measures ~1.5 us,
@@ -377,7 +386,8 @@ fn ctx(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
 /// a write to any address of a word, the other three addresses of that word give [`Status::Ok`]
 /// with the value zero.
 fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, wasmi::Error> {
-    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
+    // One element = one memory-map probe plus one moved felt.
+    charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_MAP_PROBE + FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     // Output pointers are validated before the lookup, so a defect traps even when the
     // result would be a status.
@@ -406,7 +416,11 @@ fn mem_read_range(
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    charge_fuel(caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
+    // Each element is one probe of the VM's memory map plus one moved felt.
+    charge_fuel(
+        caller,
+        HOST_CALL_BASE_FUEL + u64::from(count) * (FUEL_PER_MAP_PROBE + FUEL_PER_FELT),
+    )?;
     let mem = memory(caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     if u64::from(addr) + u64::from(count) > u64::from(u32::MAX) + 1 {
@@ -462,12 +476,13 @@ fn merkle_lookup_args(
     depth: u32,
     index: u64,
 ) -> Result<(Memory, Word, Felt, Felt), wasmi::Error> {
-    // The lookup walks one level per depth unit. The eight-felt charge is a shared upper bound
-    // for both callers: `merkle_get_node` moves the root in and the node out, while
-    // `merkle_has_path` moves only the root in and returns an `i32`.
+    // The store lookup probes one node map entry per level, plus one for the root. The
+    // eight-felt charge is a shared upper bound for both callers: `merkle_get_node` moves the
+    // root in and the node out, while `merkle_has_path` moves only the root in and returns an
+    // `i32`.
     charge_fuel(
         caller,
-        HOST_CALL_BASE_FUEL + u64::from(depth) * FUEL_PER_FELT + 8 * FUEL_PER_FELT,
+        HOST_CALL_BASE_FUEL + (u64::from(depth) + 1) * FUEL_PER_MAP_PROBE + 8 * FUEL_PER_FELT,
     )?;
     let mem = memory(caller)?;
     let root = read_word(mem.data(&caller), root)?;
@@ -567,7 +582,8 @@ fn adv_map_value_lookup(
     value_buf: Option<(u32, u32)>,
     out_len: u32,
 ) -> Result<Option<(Memory, Word, usize)>, wasmi::Error> {
-    charge_fuel(caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT)?;
+    // One key read (four felts) plus one advice-map probe.
+    charge_fuel(caller, HOST_CALL_BASE_FUEL + 4 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let mem = memory(caller)?;
     let data_len = mem.data(&*caller).len();
     // Validate the output pointers before the lookup; see `mem_get`.

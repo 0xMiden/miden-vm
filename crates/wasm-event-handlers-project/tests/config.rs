@@ -331,10 +331,11 @@ fn a_source_path_is_read_once_per_processor() {
         .assemble(ProjectTargetSelector::Library, "dev")
         .expect("the first assembly derives the section");
 
-    // The memoized section outlives the source it came from, so a second assembly with the same
-    // processor must not touch the file again. A guest crate is memoized the same way, which is
-    // what keeps `cargo` to one run per path.
-    fs::remove_file(tempdir.path().join("handlers.wasm")).unwrap();
+    // The memoized section outlives the source content, so a second assembly with the same
+    // processor must not read the file again — garbage in it would fail the build. A guest
+    // crate is memoized the same way, which is what keeps `cargo` to one run per source. (The
+    // file stays in place: the resolved path is canonicalized, which needs it to exist.)
+    fs::write(tempdir.path().join("handlers.wasm"), b"not a wasm module").unwrap();
     let mut second_registry = TestRegistry::default();
     let mut second = Assembler::default()
         .for_project_at_path(&manifest_path, &mut second_registry)

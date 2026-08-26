@@ -18,7 +18,10 @@ const CRATE_KEY: &str = "crate";
 const MODULE_KEY: &str = "module";
 
 /// Where the handler module of a package comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The whole value — the variant and the path — identifies one way of producing the module, so
+/// it is also the memoization key of the derived section.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum HandlerSource {
     /// A Rust guest crate directory, which is built for `wasm32-unknown-unknown`.
     GuestCrate(PathBuf),
@@ -28,8 +31,6 @@ pub(crate) enum HandlerSource {
 
 impl HandlerSource {
     /// Returns the resolved path this source names.
-    ///
-    /// The path identifies the source, so it is also the memoization key of the derived section.
     pub(crate) fn path(&self) -> &Path {
         match self {
             Self::GuestCrate(path) | Self::Module(path) => path,
@@ -80,7 +81,11 @@ pub(crate) fn read(
                 ),
             )
         })?;
-        *slot = Some(project_root.join(path));
+        let joined = project_root.join(path);
+        // Canonicalize so that two spellings of one path (`../guest` vs its absolute form)
+        // share one memoization entry. A path that does not exist yet keeps its joined form;
+        // the later read or build reports it.
+        *slot = Some(joined.canonicalize().unwrap_or(joined));
     }
 
     match (guest_crate, module) {

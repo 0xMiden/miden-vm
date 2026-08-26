@@ -2,7 +2,6 @@
 
 use std::{
     collections::{BTreeMap, btree_map::Entry},
-    path::{Path, PathBuf},
     sync::{Mutex, PoisonError},
 };
 
@@ -33,11 +32,14 @@ use crate::{
 /// memoized for the life of the processor.
 #[derive(Debug, Default)]
 pub struct WasmEventHandlerProcessor {
-    /// The derived section per resolved source path.
+    /// The derived section per handler source (the variant and the resolved path together, so
+    /// a `crate` and a `module` entry that name one path do not share an outcome).
     ///
-    /// A failure is memoized as its message, because a build error is not clonable. The lock is
-    /// held across the derivation, so `cargo` runs at most once per path.
-    derived: Mutex<BTreeMap<PathBuf, Result<EventHandlerSection, String>>>,
+    /// A failure is memoized as its message, because a build error is not clonable. The message
+    /// carries no manifest path — the caller prefixes the manifest of the package it is
+    /// processing, so a shared source reports against the right project. The lock is held
+    /// across the derivation, so `cargo` runs at most once per source.
+    derived: Mutex<BTreeMap<HandlerSource, Result<EventHandlerSection, String>>>,
 }
 
 impl WasmEventHandlerProcessor {
@@ -46,20 +48,18 @@ impl WasmEventHandlerProcessor {
         Self::default()
     }
 
-    /// Returns the section `source` gives, deriving it on the first call for that path.
-    fn section(
-        &self,
-        source: &HandlerSource,
-        manifest_path: &Path,
-    ) -> Result<EventHandlerSection, Report> {
+    /// Returns the section `source` gives, deriving it on the first call for that source.
+    ///
+    /// The error is the bare failure message, without a manifest label.
+    fn section(&self, source: &HandlerSource) -> Result<EventHandlerSection, String> {
         let mut derived = self.derived.lock().unwrap_or_else(PoisonError::into_inner);
-        let outcome = match derived.entry(source.path().to_path_buf()) {
+        let outcome = match derived.entry(source.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                entry.insert(derive(source, manifest_path).map_err(|error| format!("{error}")))
+                entry.insert(derive(source).map_err(|error| format!("{error:#}")))
             },
         };
-        outcome.clone().map_err(Report::msg)
+        outcome.clone()
     }
 }
 
@@ -77,7 +77,8 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
             return Ok(());
         };
 
-        let section = self.section(&source, manifest_path)?;
+        let section =
+            self.section(&source).map_err(|message| config::error(manifest_path, message))?;
         // The attachment refuses a package that already has the section, which keeps a second
         // producer of the section visible instead of silently replacing the first.
         package.attach_event_handlers(&section).map_err(|error| {
@@ -92,39 +93,32 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
 }
 
 /// Produces the module `source` names and derives its `event_handlers` section.
-fn derive(source: &HandlerSource, manifest_path: &Path) -> Result<EventHandlerSection, Report> {
+///
+/// Errors name the source path but not the manifest: the caller adds the manifest label of the
+/// package it is processing.
+fn derive(source: &HandlerSource) -> Result<EventHandlerSection, Report> {
     let path = source.path();
     let wasm = match source {
-        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir)
-            .map_err(|error| config::error(manifest_path, format!("{error:#}")))?,
+        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir)?,
         HandlerSource::Module(module) => std::fs::read(module).map_err(|error| {
-            config::error(
-                manifest_path,
-                format!("cannot read the handler module '{}': {error}", module.display()),
-            )
+            Report::msg(format!("cannot read the handler module '{}': {error}", module.display()))
         })?,
     };
 
     let section = section_from_module(wasm, WasmHandlerLimits::default()).map_err(|error| {
-        config::error(
-            manifest_path,
-            format!("the handler module of '{}' is not valid: {error}", path.display()),
-        )
+        Report::msg(format!("the handler module of '{}' is not valid: {error}", path.display()))
     })?;
 
     // A module with no manifest records derives an empty, and therefore useless, section. The
     // records come from the guest SDK macro, so an empty manifest almost always means the macro
     // is missing.
     if section.handlers.is_empty() {
-        return Err(config::error(
-            manifest_path,
-            format!(
-                "the handler module of '{}' declares no event handlers; mark every handler \
-                 function with `#[miden_event_handler(\"<event name>\")]` from the \
-                 `miden-event-handler-sdk` crate",
-                path.display()
-            ),
-        ));
+        return Err(Report::msg(format!(
+            "the handler module of '{}' declares no event handlers; mark every handler \
+             function with `#[miden_event_handler(\"<event name>\")]` from the \
+             `miden-event-handler-sdk` crate",
+            path.display()
+        )));
     }
 
     Ok(section)
