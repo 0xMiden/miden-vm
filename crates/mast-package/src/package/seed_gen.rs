@@ -164,7 +164,7 @@ fn build_packages_with_invalid_struct_types() -> Vec<(&'static str, Vec<u8>)> {
     let enum_type =
         EnumType::new(Arc::from("E"), Type::U8, [Variant::new(Arc::from("V"), Type::Felt, None)])
             .expect("seed enum should be valid");
-    let signature = FunctionType::new(CallConv::Fast, [Type::Enum(Arc::new(enum_type))], []);
+    let signature = FunctionType::new(CallConv::Fast, [Type::from(enum_type)], []);
     let signature_bytes = signature.to_bytes();
     let (package, ..) = build_package_with_debug_info(Some(signature));
     let mut package_bytes = package.to_bytes();

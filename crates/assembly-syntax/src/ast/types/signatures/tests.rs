@@ -33,34 +33,34 @@ fn account_id_ty() -> Type {
 }
 
 fn named_struct<const N: usize>(name: &str, fields: [(&str, Type); N]) -> Type {
-    Type::Struct(Arc::new(StructType::named(
+    Type::from(StructType::named(
         Arc::from(name),
         fields.map(|(name, ty)| (Arc::<str>::from(name), ty)),
-    )))
+    ))
 }
 
 /// A struct whose first field has a name and whose second does not, so it is neither a record nor
 /// a tuple. No compiler writes this shape.
 fn half_named_struct(name: &str, named: (&str, Type), unnamed: Type) -> Type {
-    Type::Struct(Arc::new(StructType::named(
+    Type::from(StructType::named(
         Arc::from(name),
         [
             NameAndType::from((Arc::<str>::from(named.0), named.1)),
             NameAndType::from(unnamed),
         ],
-    )))
+    ))
 }
 
 fn tuple_struct<const N: usize>(name: &str, fields: [Type; N]) -> Type {
-    Type::Struct(Arc::new(StructType::named(Arc::from(name), fields)))
+    Type::from(StructType::named(Arc::from(name), fields))
 }
 
 fn unnamed_record<const N: usize>(fields: [(&str, Type); N]) -> Type {
-    Type::Struct(Arc::new(StructType::new(fields.map(|(name, ty)| (Arc::<str>::from(name), ty)))))
+    Type::from(StructType::new(fields.map(|(name, ty)| (Arc::<str>::from(name), ty))))
 }
 
 fn unnamed_tuple<const N: usize>(fields: [Type; N]) -> Type {
-    Type::Struct(Arc::new(StructType::new(fields)))
+    Type::from(StructType::new(fields))
 }
 
 /// Builds a typed view without a package, so a test can name its own types.
@@ -68,6 +68,53 @@ fn unnamed_tuple<const N: usize>(fields: [Type; N]) -> Type {
 /// Every fixture is `component-model`. That is the one convention this crate encodes, and the
 /// compiler gives it to every high-level export of a component. See
 /// [`only_the_canonical_calling_convention_has_the_layout_we_encode`].
+#[test]
+fn a_recursive_struct_argument_is_refused_rather_than_walked_forever() {
+    use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+
+    // A recursive aggregate always reaches itself through a pointer, list, or function, and this
+    // module takes none of those from a user. So walking one terminates instead of unfolding
+    // forever, and the argument is refused rather than promising a stack shape the encoder
+    // cannot produce.
+    let mut builder = RecursiveTypeBuilder::new();
+    builder.define_struct(
+        "node",
+        StructTemplate::named(
+            "node",
+            TypeRepr::Default,
+            [
+                ("value", TypeTemplate::from(Type::U32)),
+                ("next", TypeTemplate::ptr(TypeTemplate::rec("node"))),
+            ],
+        ),
+    );
+    let node = builder.build().expect("node should build").remove("node").expect("node");
+
+    let info = proc("f", [node.clone()], []);
+    assert!(matches!(info.encode_args(&["1"]), Err(TypedError::UnsupportedParameter { .. })));
+
+    let info = proc("f", [], [node]);
+    assert!(matches!(
+        info.decode_result(&felts([1, 2])),
+        Err(TypedError::UnsupportedResult { .. })
+    ));
+}
+
+#[test]
+fn an_anonymous_recursive_signature_formats_without_aborting() {
+    use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+
+    let mut builder = RecursiveTypeBuilder::new();
+    builder.define_struct(
+        "node",
+        StructTemplate::new(TypeRepr::Default, [TypeTemplate::ptr(TypeTemplate::rec("node"))]),
+    );
+    let node = builder.build().expect("node should build").remove("node").expect("node");
+    let info = proc("f", [node], []);
+
+    assert!(!info.to_string().is_empty());
+}
+
 fn proc(
     name: &str,
     params: impl IntoIterator<Item = Type>,
@@ -200,7 +247,7 @@ fn only_the_canonical_calling_convention_has_the_layout_we_encode() {
     // [`a_fast_procedure_reads_our_felts_as_a_different_value`], for what it reads there.
     for cc in [CallConv::C, CallConv::Wasm] {
         let refused =
-            TypedProcInfo::new("f", FunctionType::new(cc, [pair.clone()], [pair.clone()]));
+            TypedProcInfo::new("f", FunctionType::new(cc.clone(), [pair.clone()], [pair.clone()]));
         assert!(matches!(refused, Err(TypedError::UnsupportedCallConv { .. })), "{cc}");
     }
 

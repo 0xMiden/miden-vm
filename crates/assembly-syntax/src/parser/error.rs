@@ -315,9 +315,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help(
-        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
-    ))]
+    #[diagnostic(help("expected one of: '@packed', '@packed(N)', '@transparent', or '@align(N)'"))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,

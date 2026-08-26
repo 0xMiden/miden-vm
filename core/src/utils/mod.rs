@@ -175,6 +175,8 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use proptest::prelude::*;
 
     use super::*;

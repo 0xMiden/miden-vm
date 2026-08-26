@@ -34,8 +34,8 @@ impl LinkLibrary {
 
     /// Returns the digest of the package's exported interface.
     #[inline(always)]
-    pub fn interface_digest(&self) -> Result<Word, ManifestValidationError> {
-        self.package.interface_digest()
+    pub fn interface_commitment(&self) -> Result<Word, ManifestValidationError> {
+        self.package.interface_commitment()
     }
 
     #[inline(always)]

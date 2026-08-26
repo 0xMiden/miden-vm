@@ -21,7 +21,8 @@ pub enum VersionRequirement {
     Semantic(Span<VersionReq>),
     /// The most precise and onerous form of versioning constraint.
     ///
-    /// This requires that the dependency's package digest exactly matches the one provided here.
+    /// This requires that the dependency's package commitment exactly matches the one provided
+    /// here.
     ///
     /// Digest constraints also effectively require that the dependency already be compiled to a
     /// Miden package, as digests are derived from the MAST of a compiled package. This means that
