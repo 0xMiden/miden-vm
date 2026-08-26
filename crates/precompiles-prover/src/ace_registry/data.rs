@@ -2,7 +2,7 @@
 //!
 //! Protocol constants of the PVM ACE circuit registry. The row is authenticated
 //! against the root at first use (`verified_pyramid`), so it carries no trust; the
-//! root and relation digest are the protocol-visible values.
+//! root is protocol-visible.
 
 /// Root of the PVM ACE circuit registry (raw canonical u64 limbs).
 pub const PVM_ACE_REGISTRY_ROOT: [u64; 4] = [
@@ -10,15 +10,6 @@ pub const PVM_ACE_REGISTRY_ROOT: [u64; 4] = [
     16707971856776838831,
     806847535208234121,
     14144940089702641586,
-];
-
-/// Relation digest binding the registry root into the Fiat-Shamir transcript
-/// (raw canonical u64 limbs): `Poseidon2(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT)`.
-pub const PVM_RELATION_DIGEST: [u64; 4] = [
-    12765330256215748392,
-    11318082190661185302,
-    11045448100533503580,
-    1141539045039940094,
 ];
 
 /// Commitment to the preprocessed (setup) trace tree under the Poseidon2 config (raw canonical

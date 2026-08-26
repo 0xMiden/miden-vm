@@ -15,15 +15,15 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::Statement;
 use miden_lifted_stark::{Preprocessed, StarkConfig, lmcs::Lmcs};
 
-use super::prove::ChipletMultiAir;
 use crate::{
+    ChipletMultiAir,
     logup::NUM_PUBLIC_VALUES,
     stark_config::{Blake3Config, KeccakConfig, Poseidon2Config, RpoConfig, RpxConfig},
 };
 
 /// Either a process-cached (`std`) or freshly built (`no_std`) bundle;
 /// callers dereference to the underlying [`Preprocessed`] either way.
-pub(crate) enum PreprocessedHandle<'a, L>
+pub enum PreprocessedHandle<'a, L>
 where
     L: Lmcs<F = Felt>,
 {
@@ -69,7 +69,7 @@ where
 
 macro_rules! cached_preprocessed {
     ($fn_name:ident, $config:ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             config: &$config,
         ) -> PreprocessedHandle<'static, <$config as StarkConfig<Felt, QuadFelt>>::Lmcs> {
             #[cfg(feature = "std")]

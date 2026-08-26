@@ -395,7 +395,7 @@ fn prove_deferred_state_proves_non_empty_root() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`session::preprocessed_cache`, keyed by LMCS type). Proving and
+/// (`miden_precompiles_air::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises both the cold path (first
 /// call in the process, builds and caches the bundle) and the warm path
 /// (later calls, reused from cache) for every slot, guarding against a

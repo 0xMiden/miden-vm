@@ -32,7 +32,7 @@ pub mod masm_verifier;
 pub(crate) mod math;
 pub(crate) mod primitives;
 pub(crate) mod relations;
-pub mod security;
+pub use miden_precompiles_air::security;
 pub(crate) mod session;
 pub(crate) mod stark_config;
 pub(crate) mod transcript;

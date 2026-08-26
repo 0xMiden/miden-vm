@@ -21,6 +21,7 @@ concurrent = [
     "miden-air/concurrent",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
+    "miden-precompiles-air/concurrent",
 ]
 registry-tools = ["std", "dep:rayon"]
 std = [
@@ -28,8 +29,8 @@ std = [
     "miden-air/std",
     "miden-core/std",
     "miden-crypto/std",
+    "miden-precompiles-air/std",
     "miden-precompiles/std",
-    "ruint/std",
     "thiserror/std",
 ]
 
@@ -41,10 +42,9 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
+miden-precompiles-air.workspace = true
 miden-precompiles.workspace = true
 miden-serde-utils.workspace = true
-p3-security.workspace = true
-ruint.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true

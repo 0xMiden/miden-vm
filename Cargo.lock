@@ -2526,6 +2526,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-precompiles-air"
+version = "0.30.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
+ "ruint",
+]
+
+[[package]]
 name = "miden-precompiles-prover"
 version = "0.31.0"
 dependencies = [
@@ -2538,11 +2551,11 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
+ "miden-precompiles-air",
  "miden-serde-utils",
  "p3-security",
  "rand 0.10.2",
  "rayon",
- "ruint",
  "serde",
  "serde-wincode",
  "thiserror",

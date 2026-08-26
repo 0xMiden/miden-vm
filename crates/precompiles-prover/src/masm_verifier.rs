@@ -30,6 +30,7 @@ use miden_crypto::{
 };
 use miden_lifted_air::Statement;
 use miden_lifted_stark::VerifierInstance;
+use miden_precompiles_air::preprocessed;
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
@@ -37,7 +38,7 @@ use crate::{
     MAX_STARK_PROOF_BYTES,
     ace::{order_tag_from_log_heights, proof_order_from_log_heights},
     ace_registry::{factory, pvm_ace_registry_path},
-    session::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed_cache},
+    session::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS},
     stark_config::{
         Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
     },
@@ -154,7 +155,7 @@ fn build_verifier_advice(
         precompile_pcs_params(),
         crate::ace_registry::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed_cache::poseidon2(&config);
+    let preprocessed = preprocessed::poseidon2(&config);
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
     let proof_data: StarkProofData<Felt, Challenge, Poseidon2Config> = deserialize_schema_exact::<

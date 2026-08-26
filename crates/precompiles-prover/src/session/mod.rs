@@ -77,13 +77,13 @@ use crate::{
 };
 
 mod fixed;
-pub(crate) mod preprocessed_cache;
 mod prove;
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
+pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir};
+pub use prove::VerifyError;
 pub(crate) use prove::verify_stark;
-pub use prove::{ChipletAir, ChipletMultiAir, VerifyError};
 
 /// Number of chiplets in the stack (= the width of [`SessionTraces::mains`]).
 pub const NUM_CHIPLETS: usize = 10;

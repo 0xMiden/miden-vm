@@ -35,9 +35,8 @@ use crate::{
 
 mod data;
 pub(crate) use data::PVM_ACE_REGISTRY_LEVEL12_ROW;
-pub use data::{
-    PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT, PVM_RELATION_DIGEST,
-};
+pub use data::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT};
+pub use miden_precompiles_air::PVM_RELATION_DIGEST;
 
 /// Depth of the checked-in node row (see `data.rs`).
 ///

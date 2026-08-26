@@ -24,13 +24,14 @@ use p3_security::{
 
 use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
+    fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::{LookupAir, ProverLookupBuilder},
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
-    session::{ChipletAir, fixed_ecgroup_msgs, fixed_uintval_msgs},
     transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
+    ChipletAir,
 };
 
 /// Number of out-of-domain points opened per committed column.
