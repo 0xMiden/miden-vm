@@ -108,15 +108,25 @@ The main task of the decoder is to output exactly the same program hash, regardl
 
 The decoder is one of the more complex parts of the VM. It consists of the following components:
 
-* Main [execution trace](#decoder-trace) consisting of $24$ trace columns which contain the state of the decoder at a given cycle of a computation.
+* Main [execution trace](#decoder-trace) consisting of $23$ trace columns which contain the state of the decoder at a given cycle of a computation.
 * Connection to the hash chiplet, which is used to offload [hash computations](#program-block-hashing) from the decoder.
 * $3$ [virtual tables](#control-flow-tables) (implemented via multi-set checks), which keep track of code blocks and operations executing on the VM.
 
 ### Decoder trace
 
-Decoder trace columns can be grouped into several logical sets of registers as illustrated below.
+Decoder trace columns are grouped as follows:
 
-![decoder_trace.png](../../img/design/decoder/decoder_trace.png)
+| Columns | Registers | Purpose |
+| :-----: | --------- | ------- |
+| $0$ | $a$ | Block address |
+| $1$--$7$ | $b_0, \ldots, b_6$ | Opcode bits |
+| $8$--$15$ | $h_0, \ldots, h_7$ | Hasher state and operation helpers |
+| $16$ | $sp$ | In-basic-block flag |
+| $17$ | $gc$ | Remaining operation-group count |
+| $18$ | $ox$ | Index within the current operation group |
+| $19$ | `full_batch` | Full eight-group batch indicator |
+| $20$ | `batch_size_code` | Short-batch size code ($1$, $-1$, or $0$) |
+| $21$--$22$ | $e_0, e_1$ | Degree-reduction registers |
 
 These registers have the following meanings:
 
@@ -126,8 +136,8 @@ These registers have the following meanings:
 4. Register $sp$ which contains a binary flag indicating whether the VM is currently executing instructions inside a *basic* block (historically called "span block"). The flag is set to $1$ when the VM executes non-control flow instructions, and is set to $0$ otherwise.
 5. Register $gc$ which keeps track of the number of unprocessed operation groups in a given *basic* block (historically called "span block").
 6. Register $ox$ which keeps track of a currently executing operation's index within its operation group.
-7. Operation batch flags $c_0, c_1, c_2$ which indicate how many operation groups a given operation batch contains. These flags are set only for `SPAN` and `RESPAN` operations, and are set to $0$'s otherwise.
-8. Two additional registers (not shown) are used primarily for constraint degree reduction.
+7. Operation batch registers `full_batch` and `batch_size_code`, which encode how many operation groups a batch contains. The first is binary, the second is in $\{-1, 0, 1\}$, and each is constrained to zero on every other opcode.
+8. Two additional registers $e_0$ and $e_1$ are used primarily for constraint degree reduction.
 
 ### Program block hashing
 
@@ -312,7 +322,7 @@ In the above diagram, `blk` is the ID of the *basic* block which is about to be 
 When the VM executes a `SPAN` operation, it does the following:
 
 1. Adds a tuple `(blk, prnt, 0, 0...)` to the block stack table.
-2. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table.
+2. Adds groups of the operation batch, as specified by the batch encoding (see [here](#operation-batch-encoding)) to the op group table.
 3. Initiates a sequential hash computation in the hash chiplet (as described [here](#sequential-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
 4. Sets the `in_span` register to $1$.
 5. Decrements `group_count` register by $1$.
@@ -423,7 +433,7 @@ When the VM executes a `RESPAN` operation, it does the following:
 3. Adds the tuple `(blk+2, prnt, 0, 0...)` to the block stack table.
 4. Absorbs values in registers $h_0, ..., h_7$ into the hasher state of the hash chiplet (as described [here](#sequential-hash)).
 5. Sets the `in_span` register to $1$.
-6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+2` as batch ID.
+6. Adds groups of the operation batch, as specified by the batch encoding (see [here](#operation-batch-encoding)) to the op group table using `blk+2` as batch ID.
 
 The net result of the above is that we incremented the ID of the current block by $2$ (the next controller input row) and added the next set of operation groups to the op group table.
 
@@ -525,7 +535,7 @@ As described previously, when the VM executes a `DYN` operation, the hash of the
 As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups. At the high level, decoding of a basic block is done as follows:
 
 1. At the beginning of the block, we make a request to the hash chiplet which initiates the hasher, absorbs the first operation batch ($8$ field elements) into the hasher, and returns the row address of the hasher, which we use as the unique ID for the *basic* block (see [here](#sequential-hash)).
-2. We then add groups of the operation batch, as specified by op batch flags (but always skipping the first one) to the op group table.
+2. We then add groups of the operation batch, as specified by the batch encoding (but always skipping the first one) to the op group table.
 3. We then remove operation groups from the op group table in the FIFO order one by one, and decode them in the manner similar to the one described [here](#operation-group-decoding).
 4. Once all operation groups in a batch have been decoded, we absorb the next batch into the hasher and repeat the process described above.
 5. Once all batches have been decoded, we return the hash of the basic block from the hasher.
@@ -548,23 +558,23 @@ Notice that despite their appearance, `op bits` is actually $7$ separate registe
 
 We also need to make sure that at most $9$ operations are executed as a part of a single group. For this purpose we use the `op_index` column. Values in this column start out at $0$ for each operation group, and are incremented by $1$ for each executed operation. To make sure that at most $9$ operations can be executed in a group, the value of the `op_index` column is not allowed to exceed $8$.
 
-#### Operation batch flags
+#### Operation batch encoding
 
-Operation batch flags are used to specify how many operation groups comprise a given operation batch. For most batches, the number of groups will be equal to $8$. However, for the last batch in a block (or for the first batch, if the block consists of only a single batch), the number of groups may be less than $8$. Since processing of new batches starts only on `SPAN` and `RESPAN` operations, only for these operations the flags can be set to non-zero values.
+Two operation batch registers specify how many operation groups comprise a given operation batch. For most batches, the number of groups will be equal to $8$. However, for the last batch in a block (or for the first batch, if the block consists of only a single batch), the number of groups may be less than $8$. Since processing of new batches starts only on `SPAN` and `RESPAN` operations, the encoding is active only for these operations.
 
-To simplify the constraint system, the number of groups in a batch can be only one of the following values: $1$, $2$, $4$, and $8$. If the number of groups in a batch does not match one of these values, the batch is simply padded with `NOOP`'s (one `NOOP` per added group). Consider the diagram below.
+To simplify the constraint system, the number of groups in a batch can be only one of the following values: $1$, $2$, $4$, and $8$. If the number of groups in a batch does not match one of these values, the batch is padded with `NOOP` operations, one per added group. For example, a three-group batch is padded to four groups. Since the numeric value of `NOOP` is $0$, a zero-valued operation group represents the padding operation.
 
-![decoder_OPERATION_batch_flags](../../img/design/decoder/decoder_OPERATION_batch_flags.png)
+The pair $(full\_batch, batch\_size\_code)$ encodes the batch size and determines which groups are added to the op group table:
 
-In the above, the batch contains $3$ operation groups. To bring the count up to $4$, we consider the $4$-th group (i.e., $0$) to be a part of the batch. Since a numeric value for `NOOP` operation is $0$, op group value of $0$ can be interpreted as a single `NOOP`.
+| Encoding | Batch size | Groups added to the op group table |
+| :------: | :--------: | ---------------------------------- |
+| $(1, 0)$ | $8$ | $h_1, \ldots, h_7$ |
+| $(0, 1)$ | $4$ | $h_1, \ldots, h_3$ |
+| $(0, -1)$ | $2$ | $h_1$ |
+| $(0, 0)$ on `SPAN` or `RESPAN` | $1$ | None |
+| $(0, 0)$ otherwise | Inactive | None |
 
-Operation batch flags (denoted as $c_0, c_1, c_2$), encode the number of groups and define how many groups are added to the op group table as follows:
-
-* `(1, -, -)` - $8$ groups. Groups in $h_1, ... h_7$ are added to the op group table.
-* `(0, 1, 0)` - $4$ groups. Groups in $h_1, ... h_3$ are added to the op group table
-* `(0, 0, 1)` - $2$ groups. Groups in $h_1$ is added to the op group table.
-* `(0, 1, 1)` - $1$ group. Nothing is added to the op group table
-* `(0, 0, 0)` - not a `SPAN` or `RESPAN` operation.
+Thus, the constrained `SPAN`/`RESPAN` selector distinguishes a one-group batch from an inactive row; both use the same two committed values.
 
 #### Single-batch span
 

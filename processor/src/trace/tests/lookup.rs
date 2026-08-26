@@ -754,7 +754,7 @@ fn assert_eidos_compression_oracle_coverage(
     );
 }
 
-fn assert_global_lookup_balance(trace: &VmTrace) {
+pub(super) fn assert_global_lookup_balance(trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().clone_air_matrices();
     let residuals = global_lookup_residuals(
@@ -772,7 +772,7 @@ fn assert_global_lookup_balance(trace: &VmTrace) {
     );
 }
 
-fn assert_global_lookup_balance_rejects(
+pub(super) fn assert_global_lookup_balance_rejects(
     label: &str,
     trace: &VmTrace,
     core_matrix: &RowMajorMatrix<Felt>,
