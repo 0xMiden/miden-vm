@@ -1,5 +1,5 @@
 # Changelog
-## v0.30.0 (Unreleased)
+## v0.30.0 (2026-08-26)
 
 #### Features
 
@@ -112,7 +112,7 @@
 - Rejected MAST basic block payloads whose batch metadata does not cover every serialized operation, instead of silently dropping the trailing operations during deserialization ([#3594](https://github.com/0xMiden/miden-vm/issues/3594)).
 - Hashed the local registry `index.toml` with ASCII trim on load, matching the write-path staleness check, so a leading NBSP or vertical tab no longer makes every write fail with `WriteToStaleIndex` ([#3651](https://github.com/0xMiden/miden-vm/issues/3651)).
 
-## v0.29.4 (Unreleased)
+## v0.29.4 (2026-08-26)
 
 #### Fixes
 
