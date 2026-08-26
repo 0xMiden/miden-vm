@@ -124,8 +124,8 @@ function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes 
 one synchronous call while preserving optimized overlapped execution and trace construction.
 
 `prove_sync()` overlaps execution with hasher-chiplet trace construction when a Rayon worker is
-available. Rayon's supported fallback runs the same path sequentially on targets without threads,
-such as `wasm32-unknown-unknown`.
+available. A caller with no separate Rayon worker uses compact buffered replay, including on
+targets such as `wasm32-unknown-unknown`.
 
 #### Proof generation example
 

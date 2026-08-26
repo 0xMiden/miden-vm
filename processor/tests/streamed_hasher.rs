@@ -1,8 +1,8 @@
 //! The overlapped execute-and-build path must produce exactly the trace the
 //! buffered path produces: same values, byte for byte, in every segment.
 //!
-//! `make test-wasm-threadless` runs the equality tests on Rayon's single-thread
-//! fallback and proves the overlapped entry point returns without trapping.
+//! `make test-wasm-threadless` runs the equality tests through the compact
+//! buffered fallback and proves the entry point returns without trapping.
 
 use miden_assembly::Assembler;
 use miden_processor::{
@@ -31,6 +31,21 @@ begin
     padw padw padw hperm dropw dropw dropw
     repeat.4
         push.11 u32wrapping_add
+    end
+    drop
+end
+";
+
+/// Replays the same large basic block often enough that streaming it without a consumer would
+/// retain many owned request payloads.
+const QUEUE_HEAVY_PROGRAM: &str = "
+begin
+    push.0
+    repeat.1024
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
+        push.1 add push.1 add push.1 add push.1 add
     end
     drop
 end
@@ -86,6 +101,17 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
 #[test]
 fn overlapped_build_matches_buffered() {
     assert_overlapped_matches_buffered(PROGRAM, &[1], &AdviceInputs::default());
+}
+
+#[test]
+fn single_worker_handles_queue_heavy_program() {
+    #[cfg(not(target_family = "wasm"))]
+    rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap().install(|| {
+        assert_overlapped_matches_buffered(QUEUE_HEAVY_PROGRAM, &[], &AdviceInputs::default());
+    });
+
+    #[cfg(target_family = "wasm")]
+    assert_overlapped_matches_buffered(QUEUE_HEAVY_PROGRAM, &[], &AdviceInputs::default());
 }
 
 /// Covers the two Merkle op kinds in the streamed replay (`BuildMerkleRoot`

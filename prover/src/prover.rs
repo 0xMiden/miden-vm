@@ -215,9 +215,8 @@ impl Prover {
 /// execution/trace-building path. Proving policy belongs on [`Prover`].
 ///
 /// When enabled in `execution_options`, the processor may build the hasher chiplet alongside
-/// execution. Rayon's supported fallback runs the same path sequentially when threads are
-/// unavailable. Both cases use the same private VM STARK and complete-local packaging
-/// implementation.
+/// execution. A caller with no separate Rayon worker uses compact buffered replay. Both cases use
+/// the same private VM STARK and complete-local packaging implementation.
 #[tracing::instrument(name = "prove_program_sync", skip_all)]
 pub fn prove_sync(
     prover: &Prover,

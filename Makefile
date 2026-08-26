@@ -266,9 +266,9 @@ test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WA
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
 
-# wasm32-wasip1 refuses to spawn at runtime, so this runs Rayon's fallback for real. Only the span
-# test is skipped -- it asserts a Rayon worker ran, which cannot hold where threads are unavailable
-# -- so equality tests added later are covered here without touching this target. A
+# wasm32-wasip1 refuses to spawn at runtime, so this runs the compact fallback for real. Only the
+# span test is skipped -- it asserts a Rayon worker ran, which cannot hold where threads are
+# unavailable -- so equality tests added later are covered here without touching this target. A
 # passing run is not enough to trust: libtest exits 0 when a filter selects nothing, so a zero-test
 # run would otherwise leave this green while guarding nothing.
 .PHONY: test-wasm-threadless

@@ -204,8 +204,8 @@ impl ExecutionOptions {
 
     /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
     /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
-    /// When enabled, overlap is opportunistic: targets without threading support use Rayon's
-    /// sequential fallback.
+    /// When enabled, overlap is opportunistic. A caller with no separate Rayon worker uses compact
+    /// buffered replay.
     pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
         self.overlapped_trace_build = overlapped;
         self

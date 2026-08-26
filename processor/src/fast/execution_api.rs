@@ -141,8 +141,8 @@ impl FastProcessor {
     /// Executes the program and builds its execution trace, overlapping the two when a Rayon worker
     /// is available. The hasher chiplet — the dominant serial part of trace building — consumes a
     /// live stream of requests while execution is still running, hiding its cost behind the
-    /// (inherently sequential) execution itself. On targets without threads, Rayon's global
-    /// fallback runs execution and trace building sequentially.
+    /// (inherently sequential) execution itself. When the caller is Rayon's only worker, this uses
+    /// compact buffered replay and builds the trace after execution.
     ///
     /// `max_prover_memory_bytes` bounds the trace the same way
     /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
@@ -162,7 +162,17 @@ impl FastProcessor {
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
         use miden_air::{config, memory};
 
-        use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+        use crate::trace::{
+            MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,
+            build_trace_with_prebuilt_hasher,
+        };
+
+        if Self::rayon_has_no_parallel_worker() {
+            let (vm_witness, precompiles_witness) =
+                self.execute_for_proving_sync(program, host)?.into_parts();
+            let trace = build_trace_with_budget(vm_witness, max_prover_memory_bytes)?;
+            return Ok((trace, precompiles_witness));
+        }
 
         let stack_inputs = self.initial_stack_inputs();
         let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
@@ -182,8 +192,7 @@ impl FastProcessor {
         // stream before Rayon waits for the builder, so the builder cannot remain blocked on input.
         let execution_output = rayon::in_place_scope(move |scope| {
             // Execution and the host remain on the calling thread. An idle Rayon worker can steal
-            // only the builder task; if threads are unsupported, Rayon's global fallback runs the
-            // task on this thread after the scope body closes the stream.
+            // only the builder task.
             let span = tracing::Span::current();
             scope.spawn(move |_| {
                 let _span = span.entered();
@@ -198,8 +207,7 @@ impl FastProcessor {
                     let (mut vm_witness, precompiles_witness) =
                         Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
                             .into_parts();
-                    // End the stream before this scope waits for the builder. This is required for
-                    // both the parallel path and Rayon's single-thread fallback.
+                    // End the stream before this scope waits for the builder.
                     drop(vm_witness.take_hasher_replay());
                     Ok((vm_witness, precompiles_witness))
                 },
@@ -226,6 +234,12 @@ impl FastProcessor {
 
         let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, max_prover_memory_bytes)?;
         Ok((trace, precompiles_witness))
+    }
+
+    #[cfg(feature = "std")]
+    fn rayon_has_no_parallel_worker() -> bool {
+        // `current_num_threads` initializes Rayon's global fallback before the thread-index check.
+        rayon::current_num_threads() == 1 && rayon::current_thread_index().is_some()
     }
 
     /// Executes the given program synchronously and returns its complete post-execution witness.
@@ -1507,5 +1521,19 @@ impl FastProcessor {
             )
             .await;
         Self::stack_result_from_flow(flow)
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::FastProcessor;
+
+    #[test]
+    fn sole_rayon_worker_requires_buffered_trace_building() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap()
+            .install(|| assert!(FastProcessor::rayon_has_no_parallel_worker()));
     }
 }

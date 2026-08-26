@@ -25,7 +25,8 @@
 
 #### Changes
 
-- Replaced the synchronous streamed hasher's dedicated thread and fallback execution route with Rayon's in-place scope, preserving native overlap and threadless sequential execution ([#3726](https://github.com/0xMiden/miden-vm/pull/3726)).
+- Replaced the synchronous streamed hasher's dedicated thread with Rayon's in-place scope while
+  retaining compact buffered replay when no worker can overlap execution ([#3726](https://github.com/0xMiden/miden-vm/pull/3726)).
 - Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
@@ -118,8 +119,8 @@
 - Fixed `FastProcessor::execute_and_build_trace_sync` aborting on targets that build a full `std`
   but cannot spawn threads, such as `wasm32-unknown-unknown`. The failed spawn panicked under
   `panic=abort`, trapping the module, which left an in-browser prove hung with no error instead of
-  failed. Rayon now schedules the streamed trace builder. Its supported fallback runs the same path
-  sequentially when threads are unavailable ([#3722](https://github.com/0xMiden/miden-vm/pull/3722)).
+  failed. Rayon now schedules the streamed trace builder. Targets without a separate worker use
+  compact buffered replay ([#3722](https://github.com/0xMiden/miden-vm/pull/3722)).
 
 ## v0.29.3 (2026-08-25)
 

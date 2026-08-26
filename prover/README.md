@@ -62,9 +62,8 @@ Transport, hydration, structural validity, and fixed limits are specified in the
 
 The FastProcessor-backed `prove_sync(&Prover, ...)` function is the direct synchronous path for
 executing and fully proving a program. When enabled in `ExecutionOptions`, it overlaps execution
-with hasher trace construction when a Rayon worker is available. Rayon's supported fallback runs
-the same path sequentially on targets without threads. Proof generation remains configured on
-`Prover`.
+with hasher trace construction when a Rayon worker is available. A caller with no separate Rayon
+worker uses compact buffered replay. Proof generation remains configured on `Prover`.
 
 ## STARK Backend
 
