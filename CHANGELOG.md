@@ -117,8 +117,8 @@
 - Fixed `FastProcessor::execute_and_build_trace_sync` aborting on targets that build a full `std`
   but cannot spawn threads, such as `wasm32-unknown-unknown`. The failed spawn panicked under
   `panic=abort`, trapping the module, which left an in-browser prove hung with no error instead of
-  failed. The builder thread is now spawned fallibly and the trace is built sequentially whenever
-  that spawn is refused ([#3722](https://github.com/0xMiden/miden-vm/pull/3722)).
+  failed. Rayon now schedules the streamed trace builder. Its supported fallback runs the same path
+  sequentially when threads are unavailable ([#3722](https://github.com/0xMiden/miden-vm/pull/3722)).
 
 ## v0.29.3 (2026-08-25)
 

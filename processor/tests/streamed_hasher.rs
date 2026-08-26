@@ -1,9 +1,8 @@
 //! The overlapped execute-and-build path must produce exactly the trace the
 //! buffered path produces: same values, byte for byte, in every segment.
 //!
-//! Run under `make test-wasm-threadless`, on a target that genuinely refuses to
-//! spawn, the same equality also pins that the overlapped entry point returns at
-//! all and that what it falls back to is the buffered path.
+//! `make test-wasm-threadless` runs the equality tests on Rayon's single-thread
+//! fallback and proves the overlapped entry point returns without trapping.
 
 use miden_assembly::Assembler;
 use miden_processor::{
@@ -32,6 +31,18 @@ begin
     padw padw padw hperm dropw dropw dropw
     repeat.4
         push.11 u32wrapping_add
+    end
+    drop
+end
+";
+
+/// Keeps the scope body busy long enough for an idle Rayon worker to steal the
+/// hasher task. The shorter equality fixture may finish before a steal occurs.
+const OVERLAP_PROGRAM: &str = "
+begin
+    push.0
+    repeat.10000
+        push.1 add
     end
     drop
 end
@@ -128,15 +139,10 @@ fn overlapped_build_matches_buffered_merkle() {
     assert_overlapped_matches_buffered("begin mtree_set end", &set_stack, &advice);
 }
 
-/// The overlap path spawns the hasher builder on its own thread; span context is
-/// thread-local, so the builder re-enters the `execute_and_build_trace_sync` span
-/// to stay attributed under it. This records which threads enter that span rather
-/// than how many times it is entered, so it cannot be satisfied by one thread
-/// entering twice — the point is that the builder ran somewhere else.
-///
-/// Requires a host that can actually spawn. When the target reports that threads are unsupported,
-/// the serial fallback runs and only the caller enters. That is why `make test-wasm-threadless`
-/// skips this one test and runs everything else in the file.
+/// The overlap path makes the hasher builder available to Rayon workers. Span
+/// context is thread-local, so the builder re-enters the
+/// `execute_and_build_trace_sync` span to stay attributed under it. This asserts
+/// an idle worker steals the builder under a two-thread pool.
 #[test]
 fn overlap_builder_thread_enters_the_instrument_span() {
     use std::{
@@ -179,25 +185,23 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     };
     let subscriber = Registry::default().with(layer);
 
-    let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
-    let caller = std::thread::current().id();
-    tracing::subscriber::with_default(subscriber, || {
-        let mut host = DefaultHost::default();
-        processor(&[1], AdviceInputs::default())
-            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
-            .unwrap();
+    let program = Assembler::default()
+        .assemble_program("test", OVERLAP_PROGRAM)
+        .unwrap()
+        .unwrap_program();
+    rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap().install(|| {
+        tracing::subscriber::with_default(subscriber, || {
+            let mut host = DefaultHost::default();
+            processor(&[1], AdviceInputs::default())
+                .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+                .unwrap();
+        });
     });
 
     let threads = threads.lock().unwrap();
-    assert!(
-        threads.contains(&caller),
-        "the caller's own `#[instrument]` span was never entered"
-    );
     assert_eq!(
         threads.len(),
         2,
-        "the builder thread did not re-enter the span: expected the caller and the builder, but \
-         it was entered by {threads:?} (caller is {caller:?}). Either the builder stopped \
-         re-entering it, or the target reported threads as unsupported and the serial fallback ran"
+        "expected execution and the hasher builder to use separate threads, got {threads:?}"
     );
 }

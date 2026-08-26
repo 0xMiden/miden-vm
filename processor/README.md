@@ -28,8 +28,9 @@ building is parallel when the `concurrent` feature is enabled.
 
 With the `std` feature, `FastProcessor::execute_and_build_trace_sync()` preserves the optimized
 synchronous path that overlaps execution with hasher trace construction. It returns
-`(VmTrace, Option<PrecompileWitness>)`. Targets that report thread spawning as unsupported
-construct the same trace sequentially. Other spawn failures are returned as errors.
+`(VmTrace, Option<PrecompileWitness>)`. Execution stays on the calling thread while Rayon may run
+the hasher builder on a worker. Rayon's supported fallback runs the same path sequentially on
+targets without threads.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.

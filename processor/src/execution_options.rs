@@ -15,9 +15,8 @@ pub struct ExecutionOptions {
     core_trace_fragment_size: usize,
     /// Maximum combined logical size, in bytes, of the advice stack, map, and Merkle store.
     max_advice_size_bytes: usize,
-    /// Whether the synchronous prover is asked to overlap hasher-chiplet trace building with
-    /// program execution. The sequential path is used on no_std and when the target reports that
-    /// threads are unsupported.
+    /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
+    /// execution (std-only; the sequential path is used on no_std regardless).
     overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
@@ -203,17 +202,16 @@ impl ExecutionOptions {
         self.max_hash_len_bytes
     }
 
-    /// Selects the overlapped synchronous proving route. It defaults to `true`. The route falls
-    /// back to sequential trace building when the target reports that threads are unsupported.
+    /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
+    /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
+    /// When enabled, overlap is opportunistic: targets without threading support use Rayon's
+    /// sequential fallback.
     pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
         self.overlapped_trace_build = overlapped;
         self
     }
 
-    /// Returns whether the synchronous prover is asked to overlap trace building with execution.
-    ///
-    /// A target that reports threads as unsupported uses the sequential route even when this
-    /// returns `true`. Other spawn failures are returned as errors.
+    /// Returns whether the synchronous prover may overlap trace building with execution.
     pub fn overlapped_trace_build(&self) -> bool {
         self.overlapped_trace_build
     }

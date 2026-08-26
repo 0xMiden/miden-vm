@@ -214,10 +214,10 @@ impl Prover {
 /// This FastProcessor-backed orchestration function preserves the optimized overlapped
 /// execution/trace-building path. Proving policy belongs on [`Prover`].
 ///
-/// When enabled in `execution_options`, the processor tries to build the hasher chiplet alongside
-/// execution. If the target reports that threads are unsupported, it builds the same trace
-/// sequentially. Other spawn failures return an error. Both routes converge at the same private VM
-/// STARK and complete-local packaging implementation.
+/// When enabled in `execution_options`, the processor may build the hasher chiplet alongside
+/// execution. Rayon's supported fallback runs the same path sequentially when threads are
+/// unavailable. Both cases use the same private VM STARK and complete-local packaging
+/// implementation.
 #[tracing::instrument(name = "prove_program_sync", skip_all)]
 pub fn prove_sync(
     prover: &Prover,

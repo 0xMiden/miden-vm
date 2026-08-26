@@ -138,14 +138,11 @@ impl FastProcessor {
         .await
     }
 
-    /// Executes the program and builds its execution trace, overlapping the two where the target
-    /// can spawn a thread: the hasher chiplet — the dominant serial part of trace building — is
-    /// built on a second thread from a live stream of requests while execution is still running,
-    /// hiding its cost behind the (inherently sequential) execution itself.
-    ///
-    /// When the target reports that threads are unsupported, the trace is built serially instead.
-    /// Having `std` does not guarantee threads. For example, `wasm32-unknown-unknown` has one
-    /// without the other. Other spawn failures are returned as errors.
+    /// Executes the program and builds its execution trace, overlapping the two when a Rayon worker
+    /// is available. The hasher chiplet — the dominant serial part of trace building — consumes a
+    /// live stream of requests while execution is still running, hiding its cost behind the
+    /// (inherently sequential) execution itself. On targets without threads, Rayon's global
+    /// fallback runs execution and trace building sequentially.
     ///
     /// `max_prover_memory_bytes` bounds the trace the same way
     /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
@@ -173,108 +170,62 @@ impl FastProcessor {
             &config::pcs_params(),
         ));
         let (sender, receiver) = std::sync::mpsc::channel();
+        let mut tracer = ExecutionTracer::new_with_streamed_hasher(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+            sender,
+        );
 
-        std::thread::scope(|scope| {
-            // Only the receiver crosses threads; execution (and the host) stay on this one.
-            // Spans are thread-local, so the builder thread re-enters this function's span
-            // to keep its work attributed under it in profiling traces.
+        let hasher = std::sync::OnceLock::new();
+        let hasher_slot = &hasher;
+        // Keep `tracer` owned by the scope body. If execution unwinds, dropping the body closes the
+        // stream before Rayon waits for the builder, so the builder cannot remain blocked on input.
+        let execution_output = rayon::in_place_scope(move |scope| {
+            // Execution and the host remain on the calling thread. An idle Rayon worker can steal
+            // only the builder task; if threads are unsupported, Rayon's global fallback runs the
+            // task on this thread after the scope body closes the stream.
             let span = tracing::Span::current();
-            let hasher = std::thread::Builder::new()
-                .name("hasher-chiplet-builder".into())
-                .spawn_scoped(scope, move || {
-                    let _span = span.entered();
-                    build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len)
-                });
+            scope.spawn(move |_| {
+                let _span = span.entered();
+                let result = build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len);
+                assert!(hasher_slot.set(result).is_ok(), "hasher builder ran more than once");
+            });
 
-            let hasher = match hasher {
-                Ok(hasher) => hasher,
-                Err(err) => {
-                    let can_fallback = Self::can_fallback_after_builder_spawn_error(&err);
-                    Self::log_refused_builder_spawn(&err, cfg!(target_family = "wasm"));
-                    if !can_fallback {
-                        return Err(ExecutionError::TraceBuilderThreadSpawn(err));
-                    }
-                    let (vm_witness, precompiles_witness) =
-                        self.execute_for_proving_sync(program, host)?.into_parts();
-                    let trace =
-                        crate::trace::build_trace_with_budget(vm_witness, max_prover_memory_bytes)?;
-                    return Ok((trace, precompiles_witness));
-                },
-            };
-
-            let mut tracer = ExecutionTracer::new_with_streamed_hasher(
-                self.options.core_trace_fragment_size(),
-                self.options.max_stack_depth(),
-                sender,
-            );
-
-            // Liveness invariant: `tracer` is local to this closure. Any unwind, including a panic
-            // in execution, drops the stream's sender and unblocks the builder before the scope
-            // joins it.
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
 
-            let (mut vm_witness, precompiles_witness) = match execution_output {
+            match execution_output {
                 Ok(output) => {
-                    Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
-                        .into_parts()
+                    let (mut vm_witness, precompiles_witness) =
+                        Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
+                            .into_parts();
+                    // End the stream before this scope waits for the builder. This is required for
+                    // both the parallel path and Rayon's single-thread fallback.
+                    drop(vm_witness.take_hasher_replay());
+                    Ok((vm_witness, precompiles_witness))
                 },
                 Err(err) => {
-                    // Dropping the tracer drops the stream's sender; the builder then sees
-                    // end-of-input and finishes, letting the scope join it cleanly. The
-                    // execution error is the root cause, so the builder's outcome is only
-                    // logged, not propagated.
+                    // Dropping the tracer closes the stream and lets the builder finish. The
+                    // execution error remains the root cause even if the partial replay also
+                    // failed.
                     drop(tracer);
-                    match hasher.join() {
-                        Ok(Err(builder_err)) => {
-                            tracing::debug!(%builder_err, "hasher builder also failed");
-                        },
-                        Ok(Ok(_)) => (),
-                        Err(panic) => std::panic::resume_unwind(panic),
-                    }
-                    return Err(err);
+                    Err(err)
                 },
-            };
-            // End the stream before joining the builder.
-            drop(vm_witness.take_hasher_replay());
-            let hasher = match hasher.join() {
-                Ok(result) => result?,
-                Err(panic) => std::panic::resume_unwind(panic),
-            };
+            }
+        });
 
-            let trace =
-                build_trace_with_prebuilt_hasher(vm_witness, hasher, max_prover_memory_bytes)?;
-            Ok((trace, precompiles_witness))
-        })
-    }
+        let hasher = hasher.into_inner().expect("hasher builder did not run");
+        let (vm_witness, precompiles_witness) = match execution_output {
+            Ok(output) => output,
+            Err(err) => {
+                if let Err(builder_err) = hasher {
+                    tracing::debug!(%builder_err, "hasher builder also failed");
+                }
+                return Err(err);
+            },
+        };
 
-    /// Records a refused builder-thread spawn at a level matching how expected it is.
-    #[cfg(feature = "std")]
-    fn log_refused_builder_spawn(err: &std::io::Error, target_is_wasm: bool) {
-        let can_fallback = Self::can_fallback_after_builder_spawn_error(err);
-        if target_is_wasm && can_fallback {
-            tracing::debug!(
-                %err,
-                kind = ?err.kind(),
-                "target cannot spawn threads; building the trace serially"
-            );
-        } else if can_fallback {
-            tracing::warn!(
-                %err,
-                kind = ?err.kind(),
-                "target reported threads as unsupported; building the trace serially"
-            );
-        } else {
-            tracing::warn!(
-                %err,
-                kind = ?err.kind(),
-                "could not spawn the hasher-chiplet trace builder; returning an error"
-            );
-        }
-    }
-
-    #[cfg(feature = "std")]
-    fn can_fallback_after_builder_spawn_error(err: &std::io::Error) -> bool {
-        err.kind() == std::io::ErrorKind::Unsupported
+        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, max_prover_memory_bytes)?;
+        Ok((trace, precompiles_witness))
     }
 
     /// Executes the given program synchronously and returns its complete post-execution witness.
@@ -1556,63 +1507,5 @@ impl FastProcessor {
             )
             .await;
         Self::stack_result_from_flow(flow)
-    }
-}
-
-#[cfg(all(test, feature = "std"))]
-mod tests {
-    use std::{
-        io::{Error, ErrorKind},
-        sync::{Arc, Mutex},
-        vec::Vec,
-    };
-
-    use tracing::Level;
-    use tracing_subscriber::{Registry, layer::SubscriberExt};
-
-    use super::FastProcessor;
-
-    struct LevelCapture(Arc<Mutex<Vec<Level>>>);
-
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LevelCapture {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-            self.0.lock().unwrap().push(*event.metadata().level());
-        }
-    }
-
-    fn level_for(kind: ErrorKind, target_is_wasm: bool) -> Level {
-        let levels = Arc::new(Mutex::new(Vec::new()));
-        let subscriber = Registry::default().with(LevelCapture(Arc::clone(&levels)));
-        tracing::subscriber::with_default(subscriber, || {
-            FastProcessor::log_refused_builder_spawn(&Error::from(kind), target_is_wasm)
-        });
-        let levels = levels.lock().unwrap();
-        assert_eq!(levels.len(), 1, "expected exactly one event, got {levels:?}");
-        levels[0]
-    }
-
-    #[test]
-    fn a_refused_spawn_stays_at_debug_only_on_wasm() {
-        let err = Error::from(ErrorKind::Unsupported);
-        assert!(FastProcessor::can_fallback_after_builder_spawn_error(&err));
-        assert_eq!(level_for(err.kind(), true), Level::DEBUG);
-    }
-
-    #[test]
-    fn a_refused_spawn_warns_on_a_target_that_should_have_threads() {
-        assert_eq!(level_for(ErrorKind::Unsupported, false), Level::WARN);
-        for kind in [ErrorKind::WouldBlock, ErrorKind::OutOfMemory, ErrorKind::PermissionDenied] {
-            assert!(!FastProcessor::can_fallback_after_builder_spawn_error(&Error::from(kind)));
-            assert_eq!(level_for(kind, false), Level::WARN);
-            assert_eq!(
-                level_for(kind, true),
-                Level::WARN,
-                "{kind:?} is a host problem on wasm too"
-            );
-        }
     }
 }
