@@ -37,18 +37,16 @@ CoreCols {
         in_span: 22,
         group_count: 23,
         op_index: 24,
-        batch_flags: [
-            25,
-            26,
-            27,
-        ],
+        full_batch: 25,
+        batch_size_code: 26,
         extra: [
+            27,
             28,
-            29,
         ],
     },
     stack: StackCols {
         top: [
+            29,
             30,
             31,
             32,
@@ -64,10 +62,9 @@ CoreCols {
             42,
             43,
             44,
-            45,
         ],
-        b0: 46,
-        b1: 47,
-        h0: 48,
+        b0: 45,
+        b1: 46,
+        h0: 47,
     },
 }

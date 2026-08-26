@@ -14,7 +14,7 @@
 //! 6. **Group count constraints**: Group-count transitions inside basic blocks.
 //! 7. **Op group decoding (h0) constraints**: Base-128 opcode packing in h0.
 //! 8. **Op index constraints**: Position tracking within an operation group.
-//! 9. **Batch flag constraints**: Batch size encoding and unused-lane zeroing.
+//! 9. **Batch encoding constraints**: Batch size encoding and unused-lane zeroing.
 //! 10. **Block address (addr) constraints**: Hasher-table address management.
 //! 11. **Control flow constraint**: Mutual exclusivity of `in_span` and `f_ctrl`.
 //!
@@ -28,7 +28,8 @@
 //! 1. **Opcode decoding is well-formed** (op bits and degree-reduction columns are consistent).
 //! 2. **Span state is coherent** (`in_span`, `group_count`, `op_index` evolve exactly as
 //!    control-flow allows).
-//! 3. **Hasher lanes match batch semantics** (batch flags and h0..h7 encode the pending groups).
+//! 3. **Hasher lanes match batch semantics** (the batch encoding and h0..h7 encode the pending
+//!    groups).
 //!
 //! Read the sections in that order: first the binary/format checks, then the span state machine,
 //! then the counters and packing rules that make group decoding deterministic.
@@ -36,8 +37,8 @@
 //! ## Decoder Trace Layout
 //!
 //! ```text
-//! addr | b0 b1 b2 b3 b4 b5 b6 | h0 h1 h2 h3 h4 h5 h6 h7 | sp | gc | ox | c0 c1 c2 | e0 e1
-//!  (1)        (7 op bits)             (8 hasher state)    (1)  (1)  (1)    (3)        (2)
+//! addr | b0 b1 b2 b3 b4 b5 b6 | h0 h1 h2 h3 h4 h5 h6 h7 | sp | gc | ox | full | size | e0 e1
+//!  (1)        (7 op bits)             (8 hasher state)    (1)  (1)  (1)    (1)    (1)     (2)
 //! ```
 //!
 //! ### Hasher state dual-purpose (`h0`–`h7`)
@@ -66,6 +67,7 @@
 //! | PUSH      | f_push       |   5    |
 //! | f_ctrl    | (composite)  |   5    |
 
+pub(crate) mod batch;
 pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
@@ -101,13 +103,13 @@ pub fn enforce_main<AB>(
         in_span,
         group_count,
         op_index,
-        batch_flags,
+        full_batch,
+        batch_size_code,
         extra,
     } = local.decoder;
     // b2 and b3 are not used directly in decoder constraints — they are consumed only
     // by the op_flags module for individual opcode discrimination.
     let [b0, b1, _, _, b4, b5, b6] = op_bits;
-    let [bc0, bc1, bc2] = batch_flags;
     let [e0, e1] = extra;
     let h0 = hasher_state[0];
 
@@ -400,13 +402,15 @@ pub fn enforce_main<AB>(
     }
 
     // =============================================
-    // Batch flag constraints
+    // Operation-batch encoding constraints
     // =============================================
-    // Batch flags (c0, c1, c2) encode the number of op groups in the current batch.
+    // `full_batch` and `batch_size_code` encode the number of op groups in the current batch.
     // This matters for the last batch in a basic block (or the only batch), since all
     // other batches must be completely full (8 groups).
     //
-    // The flags are mutually exclusive (exactly one is set during SPAN/RESPAN).
+    // The valid active encodings are (1, 0), (0, 1), (0, -1), and (0, 0), corresponding to
+    // 8, 4, 2, and 1 groups. Inactive rows are pinned to (0, 0); the SPAN/RESPAN opcode
+    // distinguishes an active 1-group batch from an inactive row.
     // Unused hasher lanes must be zero to prevent the prover from smuggling
     // arbitrary values through unused group slots. The zeroed lanes cascade:
     //
@@ -416,51 +420,13 @@ pub fn enforce_main<AB>(
     //      4   | h4..h7
     //      2   | h2..h7
     //      1   | h1..h7
-    {
-        // Batch flag bits must be binary.
-        builder.assert_bools([bc0, bc1, bc2]);
-
-        // 8 groups: c0 = 1 (c1, c2 don't matter).
-        let groups_8 = bc0;
-        // 4 groups: c0 = 0, c1 = 1, c2 = 0.
-        let not_bc0 = bc0.into().not();
-        let groups_4 = not_bc0.clone() * bc1 * bc2.into().not();
-        // 2 groups: c0 = 0, c1 = 0, c2 = 1.
-        let groups_2 = not_bc0.clone() * bc1.into().not() * bc2;
-        // 1 group: c0 = 0, c1 = 1, c2 = 1.
-        let groups_1 = not_bc0 * bc1 * bc2;
-
-        // Combined flags for the cascading lane-zeroing constraints.
-        let groups_1_or_2 = groups_1.clone() + groups_2;
-        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4;
-
-        let span_or_respan = op_flags.span() + op_flags.respan();
-
-        // During SPAN/RESPAN, exactly one batch flag must be set.
-        builder.assert_eq(span_or_respan.clone(), groups_1_or_2_or_4.clone() + groups_8);
-
-        // Outside SPAN/RESPAN, all batch flags must be zero.
-        builder.when(span_or_respan.not()).assert_zero(bc0 + bc1 + bc2);
-
-        // Fewer than 8 groups: h4..h7 are unused and must be zero.
-        {
-            let builder = &mut builder.when(groups_1_or_2_or_4);
-            for i in 0..4 {
-                builder.assert_zero(hasher_state[4 + i]);
-            }
-        }
-
-        // Fewer than 4 groups: h2..h3 are also unused.
-        {
-            let builder = &mut builder.when(groups_1_or_2);
-            for i in 0..2 {
-                builder.assert_zero(hasher_state[2 + i]);
-            }
-        }
-
-        // Only 1 group: h1 is also unused.
-        builder.when(groups_1).assert_zero(hasher_state[1]);
-    }
+    batch::enforce(
+        builder,
+        op_flags.span() + op_flags.respan(),
+        full_batch,
+        batch_size_code,
+        &hasher_state,
+    );
 
     // =============================================
     // Block address (addr) constraints
