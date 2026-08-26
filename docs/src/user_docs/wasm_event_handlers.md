@@ -49,7 +49,11 @@ module = "handlers.wasm"    # a prebuilt core-Wasm module
 
 Set exactly one of the two keys. Both keys, no key, an unknown key, or a value that is not a string stop the build with an error that names the manifest and the key. Both paths are relative to the directory of the `miden-project.toml` file. A package declares at most one handler module, and the section attaches to every target the package builds — the library target and each executable target alike.
 
+Every package of the project therefore carries the same, full handler set. A host registers the handlers of **one** package of a project: a host that loads the handlers of a second package of the same project fails with a duplicate-handler error, because both packages declare the same events. The failure is deliberate — a silent second registration would hide which package answers an event.
+
 Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build, it writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag. The guest crate must produce exactly one Wasm module; give it a library target with `crate-type = ["cdylib"]`.
+
+The build pins those flags through `RUSTFLAGS`, which keeps the module the same whatever the environment of the caller holds. By cargo precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own `.cargo/config.toml`, so a guest crate must not depend on flags it sets there; state what the crate needs in the crate itself.
 
 Use `module` to ship a module that another build produced. The build reads the file and does not compile anything.
 

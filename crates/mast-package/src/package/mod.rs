@@ -40,7 +40,7 @@ pub use self::{
     error::{PackageDebugInfoError, PackageStripError},
     event_handlers::{
         EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
-        MAX_MODULE_BYTES, MAX_NAME_BYTES, validate_manifest_entries,
+        MAX_MODULE_BYTES, MAX_NAME_BYTES, MIN_ABI_VERSION, validate_manifest_entries,
     },
     id::PackageId,
     manifest::{
@@ -1756,6 +1756,8 @@ mod tests {
         assert_ne!(package_commitment, with_advice.commitment());
     }
 
+    /// Returns a valid `event_handlers` section with one manifest entry, for the tests that
+    /// attach a section to a package.
     fn sample_event_handlers() -> EventHandlerSection {
         EventHandlerSection {
             abi_version: 1,

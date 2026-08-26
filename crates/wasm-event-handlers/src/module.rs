@@ -8,7 +8,7 @@ use alloc::{
 };
 
 use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, MEMORY_EXPORT, host_fn};
-use miden_mast_package::{MAX_MODULE_BYTES, validate_manifest_entries};
+use miden_mast_package::{MAX_MODULE_BYTES, MIN_ABI_VERSION, validate_manifest_entries};
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -110,7 +110,8 @@ impl WasmHandlerModule {
     ///
     /// # Errors
     /// Returns an error when:
-    /// - `abi_version` is zero or newer than the version this crate implements;
+    /// - `abi_version` is below [`MIN_ABI_VERSION`] or newer than the version this crate
+    ///   implements;
     /// - the Wasm binary is larger than `limits.max_module_bytes`;
     /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
     ///   ([`EnforcedLimits::strict`]);
@@ -131,9 +132,9 @@ impl WasmHandlerModule {
         manifest: Vec<(EventName, String)>,
         limits: WasmHandlerLimits,
     ) -> Result<Self, WasmHandlerLoadError> {
-        // ABI version bumps are additive only, so every version from 1 up to the version this
-        // crate implements is acceptable. See `miden_event_handler_abi::ABI_VERSION`.
-        if abi_version == 0 || abi_version > ABI_VERSION {
+        // ABI version bumps are additive only, so every version from `MIN_ABI_VERSION` up to the
+        // version this crate implements is acceptable. See `miden_event_handler_abi::ABI_VERSION`.
+        if abi_version < MIN_ABI_VERSION || abi_version > ABI_VERSION {
             return Err(WasmHandlerLoadError::AbiVersionMismatch {
                 declared: abi_version,
                 supported: ABI_VERSION,
@@ -409,6 +410,9 @@ fn classify_trap(err: &wasmi::Error, fuel: u64) -> WasmHandlerRunError {
 
 /// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
 /// position.
+///
+/// An encoding over five bytes returns `None`, and so does a five-byte encoding whose value
+/// does not fit a `u32`.
 pub(crate) fn read_leb_u32(data: &[u8], mut pos: usize) -> Option<(u32, usize)> {
     let mut value: u64 = 0;
     let mut shift = 0u32;
@@ -499,10 +503,13 @@ pub(crate) struct ModuleStatics {
 /// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
 /// invalid module.
 pub(crate) fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
-    /// The section IDs whose contents instantiation materializes.
+    /// The section ID of the table section, whose elements instantiation allocates.
     const TABLE_SECTION_ID: u8 = 4;
+    /// The section ID of the memory section, whose pages instantiation allocates.
     const MEMORY_SECTION_ID: u8 = 5;
+    /// The section ID of the element section, whose segments instantiation materializes.
     const ELEMENT_SECTION_ID: u8 = 9;
+    /// The section ID of the data section, whose segments instantiation materializes.
     const DATA_SECTION_ID: u8 = 11;
     /// The section ID of the start section.
     const START_SECTION_ID: u8 = 8;

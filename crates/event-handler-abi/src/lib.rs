@@ -76,6 +76,12 @@ pub const MANIFEST_RECORD_VERSION: u8 = 1;
 /// A wire field element is canonical when its value is less than this modulus.
 pub const FIELD_MODULUS: u64 = 0xffff_ffff_0000_0001;
 
+/// The maximum number of bytes the host reads from the message of a `fail` call.
+///
+/// A message that declares more bytes is truncated to this length. The cap is part of the
+/// contract, so a guest that must keep its whole message readable keeps it under this size.
+pub const MAX_FAIL_MSG_BYTES: u32 = 4096;
+
 // VALUE TYPES
 // ================================================================================================
 
@@ -450,6 +456,9 @@ pub mod guest {
         ///
         /// The host discards all buffered mutations and reports the message together with the
         /// event name and ID.
+        ///
+        /// The host reads at most [`crate::MAX_FAIL_MSG_BYTES`] bytes of the message; it
+        /// truncates a longer message to that length.
         pub fn fail(msg_ptr: *const u8, msg_len: u32) -> !;
     }
 }

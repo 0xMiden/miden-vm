@@ -34,6 +34,7 @@ begin
     drop
 end"#;
 
+/// Assembles the `double` program and attaches the `double` handler module to its package.
 fn assemble_package_with_handlers() -> Package {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Assembler::new(source_manager)
@@ -146,7 +147,7 @@ fn build_rust_guest_fixture() -> Vec<u8> {
         // whatever the caller's environment holds.
         let output = Command::new(env!("CARGO"))
             .current_dir(&fixtures_dir)
-            .env("RUSTFLAGS", "-C target-feature=-simd128")
+            .env("RUSTFLAGS", miden_wasm_event_handlers::GUEST_RUSTFLAGS)
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .args(["build", "-p", "miden-wasm-handler-guest-fixture"])
             .args(["--target", "wasm32-unknown-unknown", "--release", "--target-dir"])

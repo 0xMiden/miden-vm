@@ -48,7 +48,7 @@ pub const MAX_HANDLERS: usize = 256;
 pub const MAX_NAME_BYTES: usize = 255;
 
 /// The lowest ABI version a section can declare. Version 0 names no host/guest contract.
-const MIN_ABI_VERSION: u32 = 1;
+pub const MIN_ABI_VERSION: u32 = 1;
 
 /// A lower bound on the serialized size of one manifest entry: the two name length prefixes.
 const MIN_ENTRY_BYTES: usize = 2;
@@ -386,6 +386,8 @@ mod tests {
 
     use super::*;
 
+    /// Returns a valid section: an ABI v1 header, an empty Wasm module, and two manifest entries
+    /// in canonical order.
     fn sample() -> EventHandlerSection {
         EventHandlerSection {
             abi_version: 1,

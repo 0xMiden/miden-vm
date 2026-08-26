@@ -1,3 +1,8 @@
+//! The package post-processing hook of the project assembler.
+//!
+//! A caller registers a [`PackagePostProcessor`] to transform every package the project
+//! assembler builds, for example to attach a package section the assembler knows nothing about.
+
 use super::*;
 
 /// Context given to [`PackagePostProcessor`] implementations.

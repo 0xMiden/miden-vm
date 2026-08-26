@@ -44,6 +44,9 @@ wasmi = { workspace = true, features = ["simd"] }
 
 [dev-dependencies]
 miden-assembly.workspace = true
+# `testing` provides `FastProcessor::execute_mut_sync`, which the fuel-calibration bench needs to
+# keep the processor whose memory a program populated.
+miden-processor = { workspace = true, features = ["testing"] }
 wat.workspace = true
 # The import-set test parses the guest fixture with the same parser the loader uses.
 wasmi.workspace = true

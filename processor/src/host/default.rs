@@ -355,6 +355,7 @@ mod tests {
         HostLibrary::from(Arc::new(mast_forest)).set_handlers(handlers)
     }
 
+    /// Returns `true` when the host resolves a handler for the named event.
     fn is_registered(host: &DefaultHost, event: &'static str) -> bool {
         host.resolve_event(EventName::new(event).to_event_id()).is_some()
     }
