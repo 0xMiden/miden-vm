@@ -82,18 +82,6 @@ fn core_row(matrix: &RowMajorMatrix<Felt>, row: usize) -> &miden_air::CoreCols<F
     matrix.values[row * width..(row + 1) * width].borrow()
 }
 
-fn set_opcode(row: &mut miden_air::CoreCols<Felt>, opcode: u8) {
-    for bit_idx in 0..7 {
-        row.decoder.op_bits[bit_idx] = Felt::from_u8((opcode >> bit_idx) & 1);
-    }
-
-    let b4 = row.decoder.op_bits[4];
-    let b5 = row.decoder.op_bits[5];
-    let b6 = row.decoder.op_bits[6];
-    row.decoder.extra[0] = b6 * (Felt::ONE - b5) * b4;
-    row.decoder.extra[1] = b6 * b5;
-}
-
 fn count_loop_body_end_removals(
     core: &RowMajorMatrix<Felt>,
     parent: Felt,
@@ -222,17 +210,6 @@ fn find_first_iteration_window(trace: &miden_processor::trace::VmTrace) -> (usiz
     (span, span + 4, span + 1)
 }
 
-fn find_halt_padding_pair(trace: &miden_processor::trace::VmTrace) -> (usize, usize) {
-    let main = trace.main_trace();
-    let is =
-        |row: usize, opcode: u8| main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcode);
-
-    let halt = (0..main.core_height() - 1)
-        .find(|&row| is(row, opcodes::HALT) && is(row + 1, opcodes::HALT))
-        .expect("fixture trace must include adjacent HALT padding rows");
-    (halt, halt + 1)
-}
-
 fn build_forged_early_iteration_trace() -> ForgedLoopTrace {
     let victim = build_loop_program(vec![Operation::Not, Operation::Not]);
     let victim_trace = execute(&victim, &[1, 1, 0]);
@@ -313,7 +290,7 @@ fn forged_early_loop_iteration_body_is_rejected() {
 }
 
 #[test]
-fn loop_skip_body_with_retired_hasher_rows_verifies_before_decoder_fix() {
+fn loop_skip_body_with_retired_hasher_rows_is_rejected() {
     let program = build_loop_program(vec![Operation::Noop, Operation::Noop]);
     let trace = execute(&program, &[0]);
     let main = trace.main_trace();
@@ -325,8 +302,8 @@ fn loop_skip_body_with_retired_hasher_rows_verifies_before_decoder_fix() {
     //   LOOP(gc=0) | END_loop | HALT | HALT | HALT | HALT | HALT...
     //
     // This skips the committed do-while body. Retiring the body's two hasher-controller rows
-    // avoids the incidental lookup imbalance from the earlier dead-end probe, so this is a
-    // proof-level witness for the missing LOOP -> END decoder constraint.
+    // avoids the incidental lookup imbalance from the earlier dead-end probe, so the current
+    // tree must reject this specifically through the new LOOP -> END decoder constraint.
     let loop_row = 0usize;
     let body_op_row = 2usize;
     let loop_end_row = 5usize;
@@ -368,32 +345,40 @@ fn loop_skip_body_with_retired_hasher_rows_verifies_before_decoder_fix() {
     set_poseidon2_cycle_multiplicity(&mut poseidon2, body_cycle, Felt::ZERO);
 
     let repro = ReproTrace::new(&trace);
-    let outcome = repro
-        .prove_and_verify_parts_allowing_lookup_rejection(
-            core,
-            chiplets,
-            poseidon2,
-            *trace.stack_outputs(),
-        )
-        .expect("completed skip-body witness should verify before the decoder fix");
-    assert_eq!(outcome.security_level(), 96);
+    let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
+        core,
+        chiplets,
+        poseidon2,
+        *trace.stack_outputs(),
+    );
+    let error = result.expect_err("D15 must reject a LOOP row that jumps directly to END");
     assert!(
-        outcome.is_complete(),
-        "skip-body witness should leave no outstanding precompile obligation"
+        error.starts_with("verifier rejected:"),
+        "the completed skip-body witness should produce a proof and fail verification, not fail \
+         lookup construction or another prover precheck: {error}"
     );
 }
 
 #[test]
-fn compensated_loop_body_multiplicity_with_synthetic_end_is_rejected() {
+fn loop_body_end_flag_cannot_be_reassigned_to_another_end() {
     let program = build_loop_program(vec![Operation::Not, Operation::Not]);
     let trace = execute(&program, &[1, 1, 0]);
     let main = trace.main_trace();
 
-    let (first_span, _, first_body_op) = find_first_iteration_window(&trace);
+    let (first_span, first_repeat, first_body_op) = find_first_iteration_window(&trace);
     let loop_row = first_span - 1;
     assert_eq!(main.get_op_code(RowIndex::from(loop_row)), Felt::from_u8(opcodes::LOOP));
     assert_eq!(main.get_op_code(RowIndex::from(first_body_op)), Felt::from_u8(opcodes::NOT));
-    let (synthetic_end_row, synthetic_successor_row) = find_halt_padding_pair(&trace);
+    let body_end_row = first_repeat - 1;
+    assert_eq!(main.get_op_code(RowIndex::from(body_end_row)), Felt::from_u8(opcodes::END));
+    assert_eq!(main.is_loop_body_flag(RowIndex::from(body_end_row)), Felt::ONE);
+
+    let non_body_end_row = ((first_repeat + 1)..main.core_height())
+        .find(|&row| {
+            main.get_op_code(RowIndex::from(row)) == Felt::from_u8(opcodes::END)
+                && main.is_loop_body_flag(RowIndex::from(row)) == Felt::ZERO
+        })
+        .expect("fixture must end the root LOOP after ending its bodies");
 
     let loop_parent = main.addr(RowIndex::from(first_span));
     let hasher_state = main.decoder_hasher_state(RowIndex::from(loop_row));
@@ -407,48 +392,12 @@ fn compensated_loop_body_multiplicity_with_synthetic_end_is_rejected() {
         "fixture sanity: honest LOOP multiplicity must match same-key body END count"
     );
 
-    // Model the compensated-multiplicity attack shape directly:
-    //
-    // - the original LOOP row claims one extra same-key body entry;
-    // - a HALT padding row is forged into an END;
-    // - the following HALT row claims the loop body's dynamic parent address, making the
-    //   synthetic END remove exactly the same `(loop_parent, loop_body_hash, is_loop_body = 1)`
-    //   key without deleting an existing block-hash entry.
-    //
-    // The block-hash lookup only sees aggregate same-key balance. This fixture must still be
-    // rejected by the surrounding decoder/hasher/block-stack provenance constraints.
-    core_row_mut(&mut core, loop_row).decoder.group_count =
-        Felt::new_unchecked(honest_body_count as u64 + 1);
-
-    {
-        let synthetic_end = core_row_mut(&mut core, synthetic_end_row);
-        set_opcode(synthetic_end, opcodes::END);
-        synthetic_end.decoder.in_span = Felt::ZERO;
-        synthetic_end.decoder.group_count = Felt::ZERO;
-        synthetic_end.decoder.hasher_state[..4].copy_from_slice(&loop_body_hash);
-        synthetic_end.decoder.hasher_state[4] = Felt::ONE;
-        synthetic_end.decoder.hasher_state[5] = Felt::ZERO;
-        synthetic_end.decoder.hasher_state[6] = Felt::ZERO;
-        synthetic_end.decoder.hasher_state[7] = Felt::ZERO;
-    }
-
-    {
-        let synthetic_successor = core_row_mut(&mut core, synthetic_successor_row);
-        assert_eq!(decode_opcode(&synthetic_successor.decoder.op_bits), opcodes::HALT);
-        synthetic_successor.decoder.addr = loop_parent;
-    }
-
-    let forged_body_count = count_loop_body_end_removals(&core, loop_parent, loop_body_hash);
-    assert_eq!(
-        forged_body_count,
-        honest_body_count + 1,
-        "fixture sanity: the synthetic END must compensate the forged LOOP multiplicity"
-    );
-    assert_eq!(
-        core_row(&core, loop_row).decoder.group_count,
-        Felt::new_unchecked(forged_body_count as u64),
-        "fixture sanity: block-hash same-key aggregate balance is intentionally restored"
-    );
+    // `is_loop_body` is not directly copied out of the block-stack message. Its 0/1 value is
+    // nevertheless authenticated by the full block-hash key: child digest + dynamic parent +
+    // entry kind. Moving the flag from a real loop-body END to a different END preserves the
+    // global number of zero/one flags, but changes two lookup keys and must be rejected.
+    core_row_mut(&mut core, body_end_row).decoder.hasher_state[4] = Felt::ZERO;
+    core_row_mut(&mut core, non_body_end_row).decoder.hasher_state[4] = Felt::ONE;
 
     let repro = ReproTrace::new(&trace);
     let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
@@ -457,9 +406,10 @@ fn compensated_loop_body_multiplicity_with_synthetic_end_is_rejected() {
         poseidon2,
         *trace.stack_outputs(),
     );
+    let error = result.expect_err("reassigning is_loop_body between END rows must be rejected");
     assert!(
-        result.is_err(),
-        "the proof pipeline must reject a compensated synthetic loop-body END: {result:?}"
+        error.starts_with("prover rejected an unbalanced lookup:"),
+        "the forged END flags must fail at lookup construction, not for an incidental reason: {error}"
     );
 }
 

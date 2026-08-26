@@ -949,7 +949,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
         /// Operation Flag of LOOP operation.
-        #[expect(dead_code)]
         loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,

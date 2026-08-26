@@ -286,13 +286,28 @@ pub fn enforce_main<AB>(
         builder.assert_zero(is_loop * restores_caller_frame);
     }
 
+    // `is_loop_body` is intentionally not authenticated by a standalone decoder constraint. The
+    // block-hash relation includes it in the END key. A value of one can match only a LoopBody
+    // entry emitted by the unique LOOP row that owns `addr_next`; a value of zero can match only a
+    // non-loop child entry. The block-stack relation separately authenticates the END's
+    // child-to-parent edge. Keeping this provenance argument next to the apparent free lane avoids
+    // mistaking booleanity alone for the required semantic binding.
+
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
     // (h4) into the next row so the loop body can be re-entered.
     {
+        // Two invalid edges share one constraint:
+        // - only END may precede REPEAT;
+        // - LOOP may not jump directly to END and skip its do-while body with multiplicity zero.
+        //
+        // The op bits and `e0`/`e1` are constrained, so every op flag is boolean and both terms
+        // are boolean products. Their sum therefore vanishes only when both vanish. That is what
+        // rules out cancellation, rather than REPEAT and END being unable to share the next row.
+        let invalid_repeat_predecessor = op_flags.repeat_next() * op_flags.end().not();
+        let skipped_loop_body = op_flags.loop_op() * op_flags.end_next();
         builder
             .when_transition()
-            .when(op_flags.repeat_next())
-            .assert_one(op_flags.end());
+            .assert_zero(invalid_repeat_predecessor + skipped_loop_body);
 
         let gate = op_flags.end() * op_flags.repeat_next();
         let builder = &mut builder.when(gate);
@@ -713,6 +728,19 @@ mod tests {
         assert!(
             !decoder_accepts(&in_span, &split),
             "a basic-block row cannot exit via arbitrary control flow"
+        );
+    }
+
+    #[test]
+    fn loop_cannot_jump_directly_to_its_end() {
+        let loop_row = generate_test_row(opcodes::LOOP.into());
+        let span = span_row_with_single_group();
+        assert!(decoder_accepts(&loop_row, &span), "LOOP must be allowed to enter its body");
+
+        let end = generate_test_row(opcodes::END.into());
+        assert!(
+            !decoder_accepts(&loop_row, &end),
+            "LOOP must not skip its do-while body by jumping directly to END"
         );
     }
 

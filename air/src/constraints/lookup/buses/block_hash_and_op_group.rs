@@ -130,9 +130,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                     // multiplicities for `(parent, body_hash, is_loop_body = 1)` must match the
                     // matching body END removals, except with negligible lookup soundness error.
                     // Per-loop provenance comes from the surrounding decoder/address/block-stack
-                    // constraints. REPEAT must not add an entry for the digest on its own row,
-                    // because that lets a forged body END self-cancel against the following
-                    // REPEAT.
+                    // constraints: multiplicity-one hasher responses make `parent` a unique
+                    // dynamic LOOP id, and the block-stack relation authenticates every END's
+                    // child-to-parent edge. Consequently an END with `is_loop_body = 1` can match
+                    // only this LOOP-owned key. REPEAT must not add an entry for the digest on its
+                    // own row, because that lets a forged body END self-cancel against the
+                    // following REPEAT.
                     g.insert(
                         "loop_body",
                         op_flags.loop_op(),
