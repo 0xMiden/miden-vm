@@ -165,7 +165,9 @@ The Eidos compression AIR represents its u32 logic with byte-level lookup messag
 - range checks for packed u32 limbs.
 
 `And8LookupAir` owns the fixed 256×256 byte table and balances those requests. The same table also
-supports the bytewise XORs in the AEAD stream trace.
+supports the bytewise XORs in the AEAD stream trace. Its ten typed table interactions are
+pair-batched into five auxiliary columns. Pairing preserves the distinct bus and byte-position
+tags and keeps the closing constraints at degree three.
 
 ## Lookup buses {#lookup-buses}
 
