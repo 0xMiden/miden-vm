@@ -36,18 +36,6 @@ begin
 end
 ";
 
-/// Keeps the scope body busy long enough for an idle Rayon worker to steal the
-/// hasher task. The shorter equality fixture may finish before a steal occurs.
-const OVERLAP_PROGRAM: &str = "
-begin
-    push.0
-    repeat.10000
-        push.1 add
-    end
-    drop
-end
-";
-
 fn processor(stack: &[u64], advice: AdviceInputs) -> FastProcessor {
     let stack: Vec<Felt> = stack.iter().map(|&v| Felt::new(v).unwrap()).collect();
     FastProcessor::new_with_options(
@@ -139,10 +127,8 @@ fn overlapped_build_matches_buffered_merkle() {
     assert_overlapped_matches_buffered("begin mtree_set end", &set_stack, &advice);
 }
 
-/// The overlap path makes the hasher builder available to Rayon workers. Span
-/// context is thread-local, so the builder re-enters the
-/// `execute_and_build_trace_sync` span to stay attributed under it. This asserts
-/// an idle worker steals the builder under a two-thread pool.
+/// The overlap path makes the hasher builder available to Rayon workers. The caller is an ordinary
+/// test thread, so a second thread entering the span proves a global-pool worker ran the builder.
 #[test]
 fn overlap_builder_thread_enters_the_instrument_span() {
     use std::{
@@ -185,20 +171,17 @@ fn overlap_builder_thread_enters_the_instrument_span() {
     };
     let subscriber = Registry::default().with(layer);
 
-    let program = Assembler::default()
-        .assemble_program("test", OVERLAP_PROGRAM)
-        .unwrap()
-        .unwrap_program();
-    rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap().install(|| {
-        tracing::subscriber::with_default(subscriber, || {
-            let mut host = DefaultHost::default();
-            processor(&[1], AdviceInputs::default())
-                .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
-                .unwrap();
-        });
+    let program = Assembler::default().assemble_program("test", PROGRAM).unwrap().unwrap_program();
+    let caller = std::thread::current().id();
+    tracing::subscriber::with_default(subscriber, || {
+        let mut host = DefaultHost::default();
+        processor(&[1], AdviceInputs::default())
+            .execute_and_build_trace_sync(&program, &mut host, DEFAULT_MAX_PROVER_MEMORY_BYTES)
+            .unwrap();
     });
 
     let threads = threads.lock().unwrap();
+    assert!(threads.contains(&caller), "the caller did not enter the instrument span");
     assert_eq!(
         threads.len(),
         2,
