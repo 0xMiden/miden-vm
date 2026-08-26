@@ -7,11 +7,11 @@ use miden_core::{
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
+use miden_crypto::hash::eidos::BLOCK_LEN as EIDOS_RATE;
 
 use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
-const OOD_ROW_FELTS: usize = 1_840;
 const ALPHA_PTR: u32 = 1_000;
 const RESULT_PTR: u32 = 2_000;
 
@@ -72,16 +72,19 @@ fn source() -> String {
     )
 }
 
-fn row() -> Vec<Felt> {
-    (0..OOD_ROW_FELTS)
-        .map(|i| Felt::from_u32((17 * i as u32 + 23) % 65_521))
-        .collect()
+fn row(width: usize) -> Vec<Felt> {
+    (0..width).map(|i| Felt::from_u32((17 * i as u32 + 23) % 65_521)).collect()
 }
 
 #[test]
 fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
-    let row = row();
     let ood_ptr = pvm_layout_const("PREPROCESSED_CURRENT_PTR");
+    let ood_row_felts = pvm_layout_const("PREPROCESSED_NEXT_PTR")
+        .checked_sub(ood_ptr)
+        .expect("PVM current OOD row precedes the next OOD row");
+    let ood_row_felts = usize::try_from(ood_row_felts).expect("PVM OOD extent fits in usize");
+    assert_eq!(ood_row_felts % EIDOS_RATE, 0, "PVM OOD row must contain complete Eidos blocks");
+    let row = row(ood_row_felts);
     let mut advice = AdviceStack::new();
     advice.append_for_adv_pipe(&row);
 
@@ -98,7 +101,7 @@ fn pvm_ood_hook_matches_memory_horner_and_transcript_oracles() {
     }
     assert_eq!(
         read_memory_felt(&output, RESULT_PTR + 12),
-        Felt::from_u32(ood_ptr + OOD_ROW_FELTS as u32),
+        Felt::from_u32(ood_ptr + u32::try_from(ood_row_felts).expect("PVM OOD extent fits in u32")),
         "OOD pointer did not advance by exactly one row"
     );
 
