@@ -107,9 +107,13 @@ pub enum WasmHandlerLoadError {
         reason: String,
     },
 
-    /// The module does not export its linear memory under the name `memory`. Every host function
-    /// that takes a guest pointer needs that export, so a module without it can answer no event.
-    #[error("handler module does not export its linear memory as 'memory'")]
+    /// The module does not export its linear memory under the name
+    /// [`MEMORY_EXPORT`](miden_event_handler_abi::MEMORY_EXPORT). Every host function that takes
+    /// a guest pointer needs that export, so a module without it can answer no event.
+    #[error(
+        "handler module does not export its linear memory as '{export}'",
+        export = miden_event_handler_abi::MEMORY_EXPORT
+    )]
     MissingMemoryExport,
 
     /// The manifest breaks a section rule: an over-long manifest, an empty or over-long name, a

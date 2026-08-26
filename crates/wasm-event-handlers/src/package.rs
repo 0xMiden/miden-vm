@@ -90,18 +90,10 @@ pub fn manifest_from_module(
     // no allocation here.
     let mut manifests = Vec::new();
     let mut malformed = false;
-    walk_wasm_sections(wasm, |id, payload, _| {
-        // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
-        if id != 0 {
-            return;
-        }
-        match split_custom_section(payload) {
-            Some((name, records)) if name == MANIFEST_SECTION_NAME.as_bytes() => {
-                manifests.push(records);
-            },
-            Some(_) => {},
-            None => malformed = true,
-        }
+    walk_wasm_sections(wasm, |id, payload, _| match classify_section(id, payload) {
+        SectionKind::Manifest(records) => manifests.push(records),
+        SectionKind::Other => {},
+        SectionKind::Malformed => malformed = true,
     })
     .ok_or_else(|| WasmHandlerLoadError::InvalidModule("malformed section layout".to_string()))?;
     if malformed {
@@ -143,9 +135,15 @@ pub fn section_from_module(
     let module = strip_manifest_sections(&wasm).ok_or_else(|| {
         WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
     })?;
+    // While only ABI v1 exists, the module cannot need more than the current version. This
+    // tripwire fails the build at the first version bump, because derivation must then compute
+    // the lowest ABI version the module's imports need — otherwise every derived package would
+    // declare the new version and older hosts would refuse modules that only use v1 imports.
+    const _: () = assert!(
+        ABI_VERSION == 1,
+        "ABI version bumped: section_from_module must compute the lowest version the module needs"
+    );
     let section = EventHandlerSection {
-        // While only ABI v1 exists, the module cannot need more than the current version. Once
-        // ABI v2 exists, derivation must compute the lowest version the module's imports need.
         abi_version: ABI_VERSION,
         module,
         handlers,
@@ -174,17 +172,13 @@ fn strip_manifest_sections(wasm: &[u8]) -> Option<Vec<u8>> {
 
     let mut malformed = false;
     walk_wasm_sections(wasm, |id, payload, section| {
-        // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
-        let is_manifest = if id == 0 {
-            match split_custom_section(payload) {
-                Some((name, _)) => name == MANIFEST_SECTION_NAME.as_bytes(),
-                None => {
-                    malformed = true;
-                    false
-                },
-            }
-        } else {
-            false
+        let is_manifest = match classify_section(id, payload) {
+            SectionKind::Manifest(_) => true,
+            SectionKind::Other => false,
+            SectionKind::Malformed => {
+                malformed = true;
+                false
+            },
         };
         if !is_manifest {
             // The copy holds the section ID and the size prefix as they were encoded.
@@ -271,6 +265,35 @@ fn leb_u32(mut value: u32) -> Vec<u8> {
             return out;
         }
         out.push(byte | 0x80);
+    }
+}
+
+/// What one top-level section of a Wasm binary is to the manifest readers.
+enum SectionKind<'a> {
+    /// A `miden:event-manifest` custom section, holding its records.
+    Manifest(&'a [u8]),
+    /// Any other section.
+    Other,
+    /// A custom section whose payload does not split into a name and a content.
+    Malformed,
+}
+
+/// Classifies one top-level section for the manifest readers.
+///
+/// The reader that collects the records and the reader that strips the sections share this
+/// predicate, so they cannot drift apart on what a manifest section is or on how a malformed
+/// custom section is treated.
+fn classify_section(id: u8, payload: &[u8]) -> SectionKind<'_> {
+    // Custom sections have ID 0; their payload starts with a LEB128-prefixed name.
+    if id != 0 {
+        return SectionKind::Other;
+    }
+    match split_custom_section(payload) {
+        Some((name, records)) if name == MANIFEST_SECTION_NAME.as_bytes() => {
+            SectionKind::Manifest(records)
+        },
+        Some(_) => SectionKind::Other,
+        None => SectionKind::Malformed,
     }
 }
 

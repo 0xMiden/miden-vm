@@ -408,12 +408,12 @@ fn classify_trap(err: &wasmi::Error, fuel: u64) -> WasmHandlerRunError {
     }
 }
 
-/// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
+/// Decodes a LEB128 value from `data` at `pos` into a `u64`; returns the value and the next
 /// position.
 ///
-/// An encoding over five bytes returns `None`, and so does a five-byte encoding whose value
-/// does not fit a `u32`.
-pub(crate) fn read_leb_u32(data: &[u8], mut pos: usize) -> Option<(u32, usize)> {
+/// `max_shift` bounds the encoding length: the read stops with `None` when a continuation byte
+/// asks for a shift of `max_shift` or more.
+fn read_leb(data: &[u8], mut pos: usize, max_shift: u32) -> Option<(u64, usize)> {
     let mut value: u64 = 0;
     let mut shift = 0u32;
     loop {
@@ -424,10 +424,20 @@ pub(crate) fn read_leb_u32(data: &[u8], mut pos: usize) -> Option<(u32, usize)> 
             break;
         }
         shift += 7;
-        if shift >= 35 {
+        if shift >= max_shift {
             return None;
         }
     }
+    Some((value, pos))
+}
+
+/// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
+/// position.
+///
+/// An encoding over five bytes returns `None`, and so does a five-byte encoding whose value
+/// does not fit a `u32`.
+pub(crate) fn read_leb_u32(data: &[u8], pos: usize) -> Option<(u32, usize)> {
+    let (value, pos) = read_leb(data, pos, 35)?;
     u32::try_from(value).ok().map(|value| (value, pos))
 }
 
@@ -463,22 +473,8 @@ pub(crate) fn walk_wasm_sections<'a>(
 /// At the last shift (63), the bits of an over-long encoding drop silently instead of
 /// returning `None`. This is harmless here: the reader runs after `Module::new` validated the
 /// binary, and its result only feeds the instantiation-cost upper bound.
-fn read_leb_u64(data: &[u8], mut pos: usize) -> Option<(u64, usize)> {
-    let mut value: u64 = 0;
-    let mut shift = 0u32;
-    loop {
-        let byte = *data.get(pos)?;
-        pos += 1;
-        value |= u64::from(byte & 0x7f) << shift;
-        if byte & 0x80 == 0 {
-            break;
-        }
-        shift += 7;
-        if shift >= 70 {
-            return None;
-        }
-    }
-    Some((value, pos))
+fn read_leb_u64(data: &[u8], pos: usize) -> Option<(u64, usize)> {
+    read_leb(data, pos, 70)
 }
 
 /// The load-time facts one walk of the module sections provides.
