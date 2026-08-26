@@ -23,14 +23,17 @@ const CDYLIB_TARGET_KIND: &str = "cdylib";
 /// produces.
 ///
 /// The crate must produce exactly one `.wasm` artifact from a `cdylib` target, which a `[lib]`
-/// with `crate-type = ["cdylib"]` gives. Other targets of the crate, such as a binary, are
-/// ignored. The build is a release build for `wasm32-unknown-unknown` and writes into a dedicated
-/// directory under the guest crate, so it never shares a target directory, and therefore never
-/// shares a build lock, with the build that runs the project assembler.
+/// with `crate-type = ["cdylib"]` gives. The build passes `--lib`, so the other targets of the
+/// crate, such as a binary or an example, are not built at all: they cannot fail the handler
+/// build and they cost no build time. The build is a release build for `wasm32-unknown-unknown`
+/// and writes into a dedicated directory under the guest crate, so it never shares a target
+/// directory, and therefore never shares a build lock, with the build that runs the project
+/// assembler.
 ///
 /// # Errors
 /// Returns an error when `cargo` is not available, when the build fails (the message carries the
-/// captured build output), or when the build does not produce exactly one Wasm artifact.
+/// captured build output), or when the build does not produce exactly one Wasm artifact. A crate
+/// with no library target fails in the build, with cargo's own message.
 pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
     if !crate_dir.is_dir() {
         return Err(Report::msg(format!(
@@ -48,7 +51,10 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         // holds.
         .env("RUSTFLAGS", GUEST_RUSTFLAGS)
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .args(["build", "--release", "--target", TARGET, "--message-format"])
+        // `--lib` builds the library target only. A binary or an example of the guest crate is
+        // not the handler module, and a build failure in one of them must not fail the handler
+        // build.
+        .args(["build", "--lib", "--release", "--target", TARGET, "--message-format"])
         .arg("json-render-diagnostics")
         .arg("--target-dir")
         .arg(&target_dir)
@@ -77,9 +83,11 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
                 artifacts[0].display()
             ))
         }),
+        // A crate with no library target at all does not reach this arm: `--lib` makes cargo
+        // itself fail the build with its own "no library targets" message.
         0 => Err(Report::msg(format!(
-            "the Wasm handler guest crate '{}' produced no {TARGET} module; its manifest must \
-             declare a library target with crate-type = [\"cdylib\"]",
+            "the Wasm handler guest crate '{}' produced no {TARGET} module; its library target \
+             must have crate-type = [\"cdylib\"]",
             crate_dir.display()
         ))),
         _ => {
@@ -111,8 +119,9 @@ fn cargo() -> OsString {
 /// name, because the crate name is not the file name: cargo replaces `-` with `_`, and a manifest
 /// can rename the library target.
 ///
-/// Only the `cdylib` targets count. A guest crate can hold a second Wasm-producing target, such
-/// as a `src/main.rs` binary, and that target is not the handler module.
+/// Only the `cdylib` targets count. The build already limits itself to the library target with
+/// `--lib`, so this filter is defense in depth: it keeps the artifact of a library target that
+/// declares more crate types than `cdylib`, or of a dependency, out of the result.
 fn wasm_artifacts(stdout: &[u8]) -> Vec<PathBuf> {
     let mut artifacts = Vec::new();
     for line in stdout.split(|byte| *byte == b'\n') {
@@ -165,10 +174,18 @@ not json
 
     #[test]
     fn only_the_cdylib_artifacts_count() {
-        // A guest crate with a `src/main.rs` also produces a `.wasm` binary; only the cdylib is
-        // the handler module.
+        // `--lib` keeps a `src/main.rs` binary out of the build; the filter is defense in depth.
         let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["bin"]},"filenames":["/out/guest-bin.wasm"]}
 {"reason":"compiler-artifact","target":{"kind":["cdylib"]},"filenames":["/out/guest.wasm"]}
+"#;
+        assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
+    }
+
+    #[test]
+    fn a_multi_kind_library_target_gives_its_wasm_artifact_only() {
+        // A `[lib]` with crate-type = ["cdylib", "rlib"] reports one message with both kinds and
+        // both files; only the `.wasm` is the handler module.
+        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["cdylib","rlib"]},"filenames":["/out/guest.wasm","/out/libguest.rlib"]}
 "#;
         assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
     }

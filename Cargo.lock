@@ -2369,6 +2369,8 @@ dependencies = [
 name = "miden-event-handler-macros"
 version = "0.30.0"
 dependencies = [
+ "miden-event-handler-abi",
+ "miden-mast-package",
  "quote",
  "syn 2.0.119",
 ]
