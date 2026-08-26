@@ -3,6 +3,7 @@ name = "miden-precompiles-verifier"
 version.workspace = true
 description = "Verifier for Miden VM precompile proofs"
 documentation = "https://docs.rs/miden-precompiles-verifier"
+readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["miden", "precompile", "verifier", "zkp"]
 edition.workspace = true
