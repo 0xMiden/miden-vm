@@ -26,8 +26,9 @@ pub use self::{
     package::{
         ConstantExport, EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError,
         InvalidSectionIdError, InvalidTargetTypeError, MAX_HANDLERS, MAX_MODULE_BYTES,
-        MAX_NAME_BYTES, ManifestValidationError, Package, PackageDebugInfoError, PackageExport,
-        PackageId, PackageManifest, PackageModule, PackageStripError, PackageSubmodule,
-        ProcedureExport, Section, SectionId, TargetType, TypeExport, validate_manifest_entries,
+        MAX_NAME_BYTES, MIN_ABI_VERSION, ManifestValidationError, Package, PackageDebugInfoError,
+        PackageExport, PackageId, PackageManifest, PackageModule, PackageStripError,
+        PackageSubmodule, ProcedureExport, Section, SectionId, TargetType, TypeExport,
+        validate_manifest_entries,
     },
 };

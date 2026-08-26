@@ -7,16 +7,10 @@ use std::{
 };
 
 use miden_assembly::diagnostics::Report;
+use miden_wasm_event_handlers::GUEST_RUSTFLAGS;
 
 /// The target the guest crate is built for.
 const TARGET: &str = "wasm32-unknown-unknown";
-
-/// The rustflags the guest build runs with.
-///
-/// The handler runner executes a deterministic, non-SIMD instruction set, so a guest module that
-/// holds `simd128` instructions is refused at load. A toolchain or a `.cargo/config.toml` can turn
-/// `simd128` on for `wasm32-unknown-unknown`, so the build states the flag itself.
-const RUSTFLAGS: &str = "-C target-feature=-simd128";
 
 /// The advice a message carries when the toolchain may lack the Wasm target.
 const TARGET_HINT: &str =
@@ -49,7 +43,7 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         // `CARGO_ENCODED_RUSTFLAGS` in turn replaces `RUSTFLAGS`. The first is pinned and the
         // second removed, so the guest builds the same way whatever the caller's environment
         // holds.
-        .env("RUSTFLAGS", RUSTFLAGS)
+        .env("RUSTFLAGS", GUEST_RUSTFLAGS)
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .args(["build", "--release", "--target", TARGET, "--message-format"])
         .arg("json-render-diagnostics")

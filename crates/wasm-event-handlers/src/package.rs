@@ -71,10 +71,16 @@ pub fn host_library_from_package(
 /// stops at [`MAX_HANDLERS`] entries and at names over [`MAX_NAME_BYTES`].
 ///
 /// # Errors
-/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap,
+/// Returns [`WasmHandlerLoadError::ModuleTooLarge`] when the module is over the size cap, and
 /// [`WasmHandlerLoadError::InvalidModule`] when the section layout or a manifest record is
-/// malformed, and [`WasmHandlerLoadError::InvalidManifest`] when the records break a manifest
-/// rule of the package format.
+/// malformed.
+///
+/// Returns [`WasmHandlerLoadError::InvalidManifest`] for the three manifest rules this function
+/// applies to the records themselves: an empty event or export name, a name over
+/// [`MAX_NAME_BYTES`], and more than [`MAX_HANDLERS`] entries. The other manifest rules of the
+/// package format — the reserved `sys::` namespace, duplicate events, and the canonical entry
+/// order — run later: [`EventHandlerSection::validate`] applies them to a derived section, and
+/// [`WasmHandlerModule::new`] applies them to the manifest it registers.
 pub fn manifest_from_module(
     wasm: &[u8],
 ) -> Result<Vec<EventHandlerManifestEntry>, WasmHandlerLoadError> {
@@ -292,6 +298,9 @@ fn parse_manifest_records(
         WasmHandlerLoadError::InvalidManifest(err)
     }
 
+    /// Reads one length-prefixed UTF-8 name from `records`; returns the name and the rest of the
+    /// records. Returns `None` when the length or the bytes run past the end, or when the bytes
+    /// are not UTF-8.
     fn read_name(records: &[u8]) -> Option<(&str, &[u8])> {
         let len_bytes: [u8; 4] = records.get(..4)?.try_into().ok()?;
         let len = u32::from_le_bytes(len_bytes) as usize;

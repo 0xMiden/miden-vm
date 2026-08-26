@@ -30,6 +30,14 @@ use crate::{
 /// One project assembles several targets, and the processor runs once per assembled package. The
 /// module is built, read, and derived once per source path: the outcome, success or failure, is
 /// memoized for the life of the processor.
+///
+/// # One package per host
+///
+/// Every package of a project carries the same, full handler set, so a host registers the
+/// handlers of ONE package of a project. A host that loads the handlers of a second package of
+/// the same project fails with a duplicate-handler error, because the two packages declare the
+/// same events. The failure is deliberate: a silent second registration would hide which package
+/// answers an event.
 #[derive(Debug, Default)]
 pub struct WasmEventHandlerProcessor {
     /// The derived section per handler source (the variant and the resolved path together, so

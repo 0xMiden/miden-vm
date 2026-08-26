@@ -25,6 +25,11 @@
 //!
 //! The `crate` key needs `cargo` and the `wasm32-unknown-unknown` target. The processor builds the
 //! guest crate once per project assembly, whatever number of targets the project holds.
+//!
+//! The build pins [`GUEST_RUSTFLAGS`](miden_wasm_event_handlers::GUEST_RUSTFLAGS) through
+//! `RUSTFLAGS`, so the module is the same whatever the environment of the caller holds. By cargo
+//! precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own
+//! `.cargo/config.toml`, so a guest crate must not depend on flags it sets there.
 
 mod config;
 mod guest;

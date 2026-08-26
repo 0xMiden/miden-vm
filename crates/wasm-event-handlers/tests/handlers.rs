@@ -127,10 +127,12 @@ macro_rules! assert_run_error {
     };
 }
 
+/// Returns a processor with an empty operand stack and empty advice inputs.
 fn processor() -> FastProcessor {
     FastProcessor::new(StackInputs::default())
 }
 
+/// Returns a processor whose operand stack is initialized with `values`.
 fn processor_with_stack(values: &[u64]) -> FastProcessor {
     let felts: Vec<Felt> = values.iter().map(|value| Felt::new_unchecked(*value)).collect();
     FastProcessor::new(StackInputs::new(&felts).expect("valid stack inputs"))
@@ -1079,6 +1081,19 @@ fn mutation_size_limit_is_enforced() {
 
 // LOAD-TIME VALIDATION TESTS
 // ================================================================================================
+
+#[test]
+fn the_import_fixture_declares_every_abi_host_function() {
+    // `build_linker` in `src/host.rs` states that this fixture declares the whole host set, so
+    // every fixture also resolves and type-checks each host function. A new host function that
+    // the fixture misses would leave its signature untested.
+    for name in miden_event_handler_abi::host_fn::ALL {
+        assert!(
+            IMPORTS.contains(&format!("\"{name}\"")),
+            "the import fixture does not declare the host function '{name}'"
+        );
+    }
+}
 
 #[test]
 fn oversized_table_is_rejected_at_load() {

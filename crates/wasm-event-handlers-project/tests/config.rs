@@ -12,8 +12,11 @@ use miden_assembly::{
     diagnostics::Report, testing::TestRegistry,
 };
 use miden_mast_package::Package as MastPackage;
+use miden_processor::DefaultHost;
 // The tests write the manifest records the guest SDK macro normally writes.
-use miden_wasm_event_handlers::test_append_manifest_section;
+use miden_wasm_event_handlers::{
+    WasmHandlerLimits, host_library_from_package, test_append_manifest_section,
+};
 use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
 use tempfile::TempDir;
 
@@ -67,6 +70,46 @@ path = "lib.masm"
 end
 "#,
     );
+    manifest_path
+}
+
+/// Writes a project with a library target and one executable target, both of which get the
+/// `double` handler module, and returns the manifest path.
+fn write_lib_and_bin_project(root: &Path) -> std::path::PathBuf {
+    let manifest_path = root.join("miden-project.toml");
+    write(
+        &manifest_path,
+        r#"[package]
+name = "handlerapp"
+version = "1.0.0"
+
+[package.metadata.wasm-event-handlers]
+module = "handlers.wasm"
+
+[lib]
+path = "lib.masm"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+"#,
+    );
+    write(
+        &root.join("lib.masm"),
+        r#"pub proc helper
+    push.1
+end
+"#,
+    );
+    write(
+        &root.join("main.masm"),
+        r#"begin
+    push.1
+    drop
+end
+"#,
+    );
+    write_handler_module(root);
     manifest_path
 }
 
@@ -124,40 +167,7 @@ fn a_prebuilt_module_attaches_to_the_package() {
 #[test]
 fn the_section_attaches_to_every_target_of_the_package() {
     let tempdir = TempDir::new().unwrap();
-    let manifest_path = tempdir.path().join("miden-project.toml");
-    write(
-        &manifest_path,
-        r#"[package]
-name = "handlerapp"
-version = "1.0.0"
-
-[package.metadata.wasm-event-handlers]
-module = "handlers.wasm"
-
-[lib]
-path = "lib.masm"
-
-[[bin]]
-name = "main"
-path = "main.masm"
-"#,
-    );
-    write(
-        &tempdir.path().join("lib.masm"),
-        r#"pub proc helper
-    push.1
-end
-"#,
-    );
-    write(
-        &tempdir.path().join("main.masm"),
-        r#"begin
-    push.1
-    drop
-end
-"#,
-    );
-    write_handler_module(tempdir.path());
+    let manifest_path = write_lib_and_bin_project(tempdir.path());
 
     for target in [ProjectTargetSelector::Library, ProjectTargetSelector::Executable("main")] {
         let package = assemble(&manifest_path, target).expect("the target assembles");
@@ -167,6 +177,34 @@ end
             package.name,
         );
     }
+}
+
+#[test]
+fn a_host_loads_the_handlers_of_one_package_of_the_project() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = write_lib_and_bin_project(tempdir.path());
+
+    let library_package = assemble(&manifest_path, ProjectTargetSelector::Library)
+        .expect("the library target assembles");
+    let binary_package = assemble(&manifest_path, ProjectTargetSelector::Executable("main"))
+        .expect("the executable target assembles");
+
+    let mut host = DefaultHost::default();
+    let first = host_library_from_package(&library_package, WasmHandlerLimits::default())
+        .expect("the handlers of the library package load");
+    host.load_library(first).expect("the first package registers its handlers");
+
+    // Both packages carry the same handler set, so the second registration hits the event the
+    // first one registered. The failure is the rule, not a defect: a host takes the handlers of
+    // one package of a project.
+    let second = host_library_from_package(&binary_package, WasmHandlerLimits::default())
+        .expect("the handlers of the executable package load");
+    let error = host
+        .load_library(second)
+        .expect_err("the second package must not register the same handlers")
+        .to_string();
+    assert!(error.contains("already registered"), "unexpected error: {error}");
+    assert!(error.contains("test::project::double"), "unexpected error: {error}");
 }
 
 #[test]

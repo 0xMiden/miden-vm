@@ -5,6 +5,9 @@ use core::fmt::Write;
 use miden_event_handler_abi::guest;
 
 /// A fixed-size message buffer; text past the capacity is dropped.
+///
+/// The capacity is a guest-side choice, below the
+/// [`MAX_FAIL_MSG_BYTES`](miden_event_handler_abi::MAX_FAIL_MSG_BYTES) cap the host reads.
 struct MsgBuf {
     /// The message bytes; the capacity is the maximum message length.
     data: [u8; 512],

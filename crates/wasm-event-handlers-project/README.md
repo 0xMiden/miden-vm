@@ -1,6 +1,6 @@
 # miden-wasm-event-handlers-project
 
-A [`PackagePostProcessor`] plugin for the Miden project assembler. It reads the
+A `PackagePostProcessor` plugin for the Miden project assembler. It reads the
 `[package.metadata.wasm-event-handlers]` table of a `miden-project.toml` manifest, produces the
 handler module the table names, and attaches the `event_handlers` section to every package the
 project assembles.
@@ -20,4 +20,5 @@ manifest schema and the toolchain requirements.
 
 ## License
 
-This project is [MIT licensed](../../LICENSE).
+This project is dual-licensed under the [MIT](../../LICENSE-MIT) and
+[Apache 2.0](../../LICENSE-APACHE) licenses.

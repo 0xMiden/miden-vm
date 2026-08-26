@@ -33,6 +33,18 @@ mod host;
 mod module;
 mod package;
 
+// CONSTANTS
+// ================================================================================================
+
+/// The rustflags a guest-crate build must pin so the module it produces passes the loader's
+/// non-SIMD policy.
+///
+/// The handler runner executes a deterministic, non-SIMD instruction set, so a module that holds
+/// `simd128` instructions is refused at load. A toolchain or a `.cargo/config.toml` can turn
+/// `simd128` on for `wasm32-unknown-unknown`, so a toolchain that builds guest crates sets this
+/// string as `RUSTFLAGS` and removes `CARGO_ENCODED_RUSTFLAGS`, which would replace it.
+pub const GUEST_RUSTFLAGS: &str = "-C target-feature=-simd128";
+
 pub use error::{WasmHandlerLoadError, WasmHandlerRunError};
 pub use module::{WasmEventHandler, WasmHandlerLimits, WasmHandlerModule};
 #[doc(hidden)]

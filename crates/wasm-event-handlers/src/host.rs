@@ -20,7 +20,7 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
-use miden_event_handler_abi::{IMPORT_MODULE, MEMORY_EXPORT, Status, host_fn};
+use miden_event_handler_abi::{IMPORT_MODULE, MAX_FAIL_MSG_BYTES, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
     ContextId, Felt, ProcessorState, Word,
     advice::{AdviceError, AdviceMap, AdviceMutation},
@@ -45,10 +45,6 @@ const MERKLE_NODE_FELTS: usize = 12;
 /// The number of field elements in the Poseidon2 permutation state.
 const POSEIDON2_STATE_FELTS: usize = 12;
 
-/// The maximum number of bytes the host reads from a `fail` message. Longer messages are
-/// truncated.
-const MAX_FAIL_MSG_BYTES: u32 = 4096;
-
 /// Fuel charged per field element a host call moves between the VM and the guest.
 ///
 /// Calibrated with `benches/handler_call.rs` (Apple M-series, wasmi 1.1): one fuel unit of
@@ -71,6 +67,9 @@ const HOST_CALL_BASE_FUEL: u64 = 25;
 /// populated map costs ~50-200 ns, which is two orders of magnitude over [`FUEL_PER_FELT`].
 /// The charge prices the upper end (~200 ns at ~0.8 ns per fuel unit), so the fuel budget
 /// bounds the host work of probe-heavy handlers the way it bounds hashing.
+///
+/// `host_mem_read_4096_felts_populated` in `benches/handler_call.rs` measures the probe against
+/// a populated VM memory. That case reads one contiguous range, so it reports the cheap end.
 const FUEL_PER_MAP_PROBE: u64 = 250;
 
 /// Fuel charged per Poseidon2 permutation the host computes for the guest.
