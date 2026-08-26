@@ -186,8 +186,8 @@ impl FastProcessor {
             sender,
         );
 
-        let hasher = std::sync::OnceLock::new();
-        let hasher_slot = &hasher;
+        let mut hasher = None;
+        let hasher_slot = &mut hasher;
         // Keep `tracer` owned by the scope body. If execution unwinds, dropping the body closes the
         // stream before Rayon waits for the builder, so the builder cannot remain blocked on input.
         let execution_output = rayon::in_place_scope(move |scope| {
@@ -197,7 +197,7 @@ impl FastProcessor {
             scope.spawn(move |_| {
                 let _span = span.entered();
                 let result = build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len);
-                assert!(hasher_slot.set(result).is_ok(), "hasher builder ran more than once");
+                *hasher_slot = Some(result);
             });
 
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
@@ -221,7 +221,7 @@ impl FastProcessor {
             }
         });
 
-        let hasher = hasher.into_inner().expect("hasher builder did not run");
+        let hasher = hasher.expect("hasher builder did not run");
         let (vm_witness, precompiles_witness) = match execution_output {
             Ok(output) => output,
             Err(err) => {
