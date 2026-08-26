@@ -21,7 +21,11 @@ use miden_air::{
     lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
-        and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
+        and8_lookup::{
+            AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT,
+            BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12,
+            NUM_AND8_LOOKUP_COLS, RANGE_CHECK_LOOKUP_COL,
+        },
         eidos_compression::{
             EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
             NUM_EIDOS_COMPRESSION_COLS,
@@ -34,7 +38,7 @@ use miden_core::{
         hash::Eidos,
         merkle::{MerkleStore, MerkleTree},
     },
-    field::QuadFelt,
+    field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -49,6 +53,26 @@ const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
 const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
 const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
     EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
+const AND8_PAIR_BATCH_COLUMNS: usize = 5;
+const AND8_PAIRED_MAIN_COLUMNS: [(usize, usize); AND8_PAIR_BATCH_COLUMNS] = [
+    (BYTE_LOOKUP_KIND_AND8, RANGE_CHECK_LOOKUP_COL),
+    (
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[0],
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[0],
+    ),
+    (
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[1],
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[1],
+    ),
+    (
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[2],
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[2],
+    ),
+    (
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[3],
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[3],
+    ),
+];
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
@@ -152,6 +176,95 @@ fn test_word(value: usize) -> Word {
     [Felt::new_unchecked(value as u64), Felt::ZERO, Felt::ZERO, Felt::ZERO].into()
 }
 
+/// Cross-multiply each row-local lookup column directly from the prover's raw fractions.
+///
+/// Keeping this helper data-only tests the public prover-fraction boundary without coupling these
+/// assertions to the internal constraint builder.
+fn lookup_column_folds(
+    fractions: &LookupFractions<Felt, QuadFelt>,
+) -> Vec<Vec<(QuadFelt, QuadFelt)>> {
+    let num_columns = fractions.num_columns();
+    let mut cursor = 0;
+    let mut rows = Vec::with_capacity(fractions.num_rows());
+
+    for row_counts in fractions.counts().chunks(num_columns) {
+        let mut row = Vec::with_capacity(num_columns);
+        for &count in row_counts {
+            let mut numerator = QuadFelt::ZERO;
+            let mut denominator = QuadFelt::ONE;
+            for &(multiplicity, encoded) in &fractions.fractions()[cursor..cursor + count] {
+                let multiplicity = QuadFelt::new([multiplicity, Felt::ZERO]);
+                numerator = numerator * encoded + multiplicity * denominator;
+                denominator *= encoded;
+            }
+            cursor += count;
+            row.push((numerator, denominator));
+        }
+        rows.push(row);
+    }
+
+    assert_eq!(cursor, fractions.fractions().len());
+    rows
+}
+
+/// Checks the exact cross-multiplied constraints emitted by the lookup AIR. Column zero is the
+/// normalized cyclic accumulator; the remaining columns store their row-local batched fractions.
+fn and8_aux_constraints_hold(
+    aux: &RowMajorMatrix<QuadFelt>,
+    sigma_prime: QuadFelt,
+    column_folds: &[Vec<(QuadFelt, QuadFelt)>],
+) -> bool {
+    let num_rows = column_folds.len();
+    let width = aux.width();
+    if width != AND8_PAIR_BATCH_COLUMNS
+        || aux.height() != num_rows
+        || aux.values[0] != QuadFelt::ZERO
+    {
+        return false;
+    }
+
+    for (row, folds) in column_folds.iter().enumerate() {
+        if folds.len() != width {
+            return false;
+        }
+
+        let current = &aux.values[row * width..(row + 1) * width];
+        let current_sum: QuadFelt = current.iter().copied().sum();
+        let next_acc = aux.values[((row + 1) % num_rows) * width];
+        let (v, u) = folds[0];
+        if u * (next_acc - current_sum + sigma_prime) != v {
+            return false;
+        }
+
+        for col in 1..width {
+            let (v, u) = folds[col];
+            if u * current[col] != v {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn and8_aux_column_constraint_holds_at(
+    aux: &RowMajorMatrix<QuadFelt>,
+    sigma_prime: QuadFelt,
+    column_folds: &[Vec<(QuadFelt, QuadFelt)>],
+    row: usize,
+    col: usize,
+) -> bool {
+    let width = aux.width();
+    let current = &aux.values[row * width..(row + 1) * width];
+    let (v, u) = column_folds[row][col];
+    if col == 0 {
+        let current_sum: QuadFelt = current.iter().copied().sum();
+        let next_acc = aux.values[((row + 1) % aux.height()) * width];
+        u * (next_acc - current_sum + sigma_prime) == v
+    } else {
+        u * current[col] == v
+    }
+}
 #[test]
 fn lookup_constraints_close_for_tiny_span() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
@@ -669,6 +782,124 @@ fn build_lookup_fractions_run_for_aead_stream() {
 fn build_lookup_fractions_run_for_mixed_bitwise_aead_stream() {
     let trace = mixed_bitwise_aead_stream_trace();
     assert_lookup_fractions_run("mixed bitwise/AEAD stream", &trace);
+}
+
+#[test]
+fn and8_pair_batches_bind_every_aux_column_through_the_cyclic_wrap() {
+    let trace = build_trace_from_ops(tiny_span(), &[]);
+    let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
+    let preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("And8 AIR must declare its fixed byte-pair table");
+
+    let raw = rand_array::<Felt, 4>();
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([raw[0], raw[1]]),
+        QuadFelt::new([raw[2], raw[3]]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+    let fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    assert_eq!(fractions.shape(), &[2; AND8_PAIR_BATCH_COLUMNS]);
+
+    let (aux, sigma_prime) = accumulate(&fractions);
+    let folds = lookup_column_folds(&fractions);
+    assert!(
+        and8_aux_constraints_hold(&aux, sigma_prime, &folds),
+        "honest And8 auxiliary trace must satisfy every cross-multiplied equation",
+    );
+
+    let final_row = aux.height() - 1;
+    assert!(
+        and8_aux_column_constraint_holds_at(&aux, sigma_prime, &folds, final_row, 0),
+        "the last-row accumulator constraint must close through the wrapped next row",
+    );
+
+    for row in [AND8_TABLE_ROWS / 2 + 37, final_row] {
+        for col in 0..AND8_PAIR_BATCH_COLUMNS {
+            let mut tampered = aux.clone();
+            tampered.values[row * AND8_PAIR_BATCH_COLUMNS + col] += QuadFelt::ONE;
+            assert!(
+                !and8_aux_column_constraint_holds_at(&tampered, sigma_prime, &folds, row, col,),
+                "And8 auxiliary mutation survived at row {row}, column {col}",
+            );
+        }
+    }
+}
+
+#[test]
+fn and8_pair_batches_reject_opposite_multiplicity_deltas_across_domains() {
+    let trace = build_trace_from_ops(tiny_span(), &[]);
+    let (core_matrix, chip_matrix, eidos_compression_matrix, honest_and8_matrix) =
+        trace.main_trace().clone_air_matrices();
+    let preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("And8 AIR must declare its fixed byte-pair table");
+
+    let raw = rand_array::<Felt, 4>();
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([raw[0], raw[1]]),
+        QuadFelt::new([raw[2], raw[3]]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+    let honest_fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &honest_and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    let (honest_aux, honest_sigma_prime) = accumulate(&honest_fractions);
+
+    // Each attack preserves the untagged sum of the two multiplicities. Distinct bus prefixes
+    // and payloads must nevertheless keep both denominators independently binding.
+    let attack_rows = [257, 1025, 4097, 16385, AND8_TABLE_ROWS - 1];
+    let mut attacked_and8_matrix = honest_and8_matrix.clone();
+    let main_width = attacked_and8_matrix.width();
+    for (pair, &row) in AND8_PAIRED_MAIN_COLUMNS.iter().zip(&attack_rows) {
+        attacked_and8_matrix.values[row * main_width + pair.0] += Felt::ONE;
+        attacked_and8_matrix.values[row * main_width + pair.1] -= Felt::ONE;
+    }
+
+    let attacked_fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &attacked_and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    let attacked_folds = lookup_column_folds(&attacked_fractions);
+    for (col, &row) in attack_rows.iter().enumerate() {
+        assert!(
+            !and8_aux_column_constraint_holds_at(
+                &honest_aux,
+                honest_sigma_prime,
+                &attacked_folds,
+                row,
+                col,
+            ),
+            "opposite multiplicity deltas survived in And8 pair column {col}",
+        );
+    }
+
+    // A prover can rebuild locally valid auxiliary columns for the mutated provider trace, but
+    // the tagged global buses must still reject those changed multiplicities.
+    let (attacked_aux, attacked_sigma_prime) = accumulate(&attacked_fractions);
+    assert!(and8_aux_constraints_hold(&attacked_aux, attacked_sigma_prime, &attacked_folds,));
+    assert_trace_constraints_reject(
+        &trace,
+        core_matrix,
+        chip_matrix,
+        eidos_compression_matrix,
+        attacked_and8_matrix,
+    );
 }
 
 fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
