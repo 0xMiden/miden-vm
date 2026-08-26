@@ -1,0 +1,37 @@
+[package]
+name = "miden-wasm-event-handlers-project"
+version = "0.30.0"
+description = "Project assembler plugin that embeds Wasm event handlers into a Miden package"
+documentation = "https://docs.rs/miden-wasm-event-handlers-project"
+readme = "README.md"
+categories = ["development-tools", "wasm"]
+keywords = ["events", "miden", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[dependencies]
+# Miden dependencies
+miden-assembly = { workspace = true, features = ["std"] }
+miden-mast-package = { workspace = true, features = ["std"] }
+miden-project = { workspace = true, features = ["std", "serde"] }
+miden-wasm-event-handlers = { workspace = true, features = ["std"] }
+
+# External dependencies
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+# `testing` provides the in-memory package cache the project assembler needs.
+miden-assembly = { workspace = true, features = ["std", "testing"] }
+# The tests write the manifest records the guest SDK macro normally writes.
+miden-event-handler-abi.workspace = true
+miden-processor = { workspace = true, features = ["std"] }
+tempfile = { workspace = true, features = ["getrandom"] }
+wat.workspace = true

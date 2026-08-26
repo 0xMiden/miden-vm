@@ -39,6 +39,7 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "crates/wasm-event-handlers",
+    "crates/wasm-event-handlers-project",
     "miden-vm",
     "crates/precompiles",
     "crates/precompiles-air",
@@ -127,6 +128,7 @@ miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.31", 
 miden-utils-sync        = { path = "./crates/utils-sync", version = "0.31", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
 miden-verifier          = { path = "./verifier", version = "0.31", default-features = false }
+miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "0.31", default-features = false }
 
 # Miden crates
 miden-formatting = { version = "0.1", default-features = false }
