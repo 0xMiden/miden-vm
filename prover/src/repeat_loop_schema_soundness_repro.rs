@@ -1,9 +1,9 @@
 //! Repro for repeated-loop body digest telescoping.
 //!
-//! This is intentionally a baseline confirmation test: before the schema fix, a forged trace can
-//! execute an attacker-selected first loop iteration while keeping the final iteration equal to the
-//! committed loop body. The block-hash multiset then telescopes through REPEAT rows and only binds
-//! the final iteration to the LOOP row's committed body digest.
+//! A forged trace used to be able to execute an attacker-selected first loop iteration while
+//! keeping the final iteration equal to the committed loop body. The block-hash multiset
+//! telescoped through REPEAT rows and only bound the final iteration to the LOOP row's committed
+//! body digest. REPEAT rows no longer add loop-body entries, so this forgery must be rejected.
 
 use alloc::{vec, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
@@ -195,8 +195,9 @@ fn build_forged_early_iteration_trace() -> ForgedLoopTrace {
     //   committed: LOOP(B) | SPAN_B | NOT  | NOT  | END_B | REPEAT(B) | ...
     //   forged:    LOOP(B) | SPAN_X | NOOP | NOOP | END_X | REPEAT(X) | ...
     //
-    // The later iterations stay honest, so the block-hash multiset balances as
-    // `{B, X, B} == {X, B, B}`.
+    // Before the schema fix, the later iterations stayed honest and the block-hash multiset
+    // balanced as `{B, X, B} == {X, B, B}`. Under the fixed schema, only the original LOOP row
+    // adds body entries, so the forged END_X has no matching add.
     for (dst, src) in (first_span..=first_repeat).zip(attacker_first_span..=attacker_first_repeat) {
         copy_matrix_row(&mut core, dst, &attacker_core, src);
     }
@@ -237,18 +238,18 @@ fn build_forged_early_iteration_trace() -> ForgedLoopTrace {
 }
 
 #[test]
-fn forged_early_loop_iteration_body_verifies_before_schema_fix() {
+fn forged_early_loop_iteration_body_is_rejected() {
     let forged = build_forged_early_iteration_trace();
 
-    let result = forged.repro.prove_and_verify_parts_with_outputs(
+    let result = forged.repro.prove_and_verify_parts_allowing_lookup_rejection(
         forged.core,
         forged.chiplets,
         forged.poseidon2,
         forged.outputs,
     );
     assert!(
-        result.is_ok(),
-        "baseline D2 forgery should verify before the schema fix: {result:?}"
+        result.is_err(),
+        "the proof pipeline must reject a REPEAT whose body digest was not committed by LOOP: {result:?}"
     );
 }
 
@@ -268,20 +269,15 @@ fn forged_intermediate_repeat_parent_addr_is_rejected() {
     let (mut core, chiplets, poseidon2) = main.to_air_matrices();
     let forged_parent = Felt::new_unchecked(99);
 
-    // The second iteration is followed by another REPEAT, so changing both endpoints of the
-    // iteration's parent edge keeps the block-hash and block-stack multisets balanced:
-    //
-    //   REPEAT_1 adds LoopBody(parent = forged_parent, body_hash)
-    //   SPAN_2 pushes Continuation(parent_id = forged_parent)
-    //   END_2 removes both under parent/parent_id = forged_parent
-    //
-    // The following REPEAT then tries to jump back to the honest parent; the address-continuity
-    // constraint must reject that final edge.
+    // The second iteration is followed by another REPEAT, so this mutates both endpoints of that
+    // iteration's parent edge. Before REPEAT parent-address continuity and LOOP-side body
+    // multiplicities, this shape could keep the local add/remove edges balanced. The proof
+    // pipeline must reject it.
     core_row_mut(&mut core, second_span).decoder.addr = forged_parent;
     core_row_mut(&mut core, second_repeat).decoder.addr = forged_parent;
 
     let repro = ReproTrace::new(&trace);
-    let result = repro.prove_and_verify_parts_with_outputs(
+    let result = repro.prove_and_verify_parts_allowing_lookup_rejection(
         core,
         chiplets,
         poseidon2,
@@ -289,6 +285,6 @@ fn forged_intermediate_repeat_parent_addr_is_rejected() {
     );
     assert!(
         result.is_err(),
-        "the verifier must reject a REPEAT row whose successor changes parent address: {result:?}"
+        "the proof pipeline must reject a REPEAT row whose successor changes parent address: {result:?}"
     );
 }

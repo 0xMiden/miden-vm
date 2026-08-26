@@ -201,11 +201,11 @@ fn build_body_hash_evidence_without_direct_repeat_trace() -> ForgedRepeatTrace {
 }
 
 #[test]
-fn forged_in_span_repeat_injection_is_rejected() {
+fn forged_in_span_repeat_injection_is_rejected_by_proof_pipeline() {
     let forged = build_forged_repeat_injection_trace();
     assert_ne!(forged.forged_outputs, forged.repro.outputs());
 
-    let result = forged.repro.prove_and_verify_parts_with_outputs(
+    let result = forged.repro.prove_and_verify_parts_allowing_lookup_rejection(
         forged.core,
         forged.chiplets,
         forged.poseidon2,
@@ -213,7 +213,7 @@ fn forged_in_span_repeat_injection_is_rejected() {
     );
     assert!(
         result.is_err(),
-        "the verifier must reject an in-span row exiting directly to REPEAT: {result:?}"
+        "the proof pipeline must reject an in-span row exiting directly to REPEAT: {result:?}"
     );
 }
 

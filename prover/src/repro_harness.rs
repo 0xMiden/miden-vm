@@ -81,23 +81,7 @@ impl ReproTrace {
         self.verify(proof_bytes, outputs)
     }
 
-    /// Like [`Self::prove_and_verify_with_outputs`], but allows tests to replace all three AIR
-    /// trace matrices. This is needed for forgeries that add matching chiplet/permutation rows
-    /// rather than mutating only the Core trace.
-    pub fn prove_and_verify_parts_with_outputs(
-        &self,
-        core: RowMajorMatrix<Felt>,
-        chiplets: RowMajorMatrix<Felt>,
-        poseidon2: RowMajorMatrix<Felt>,
-        outputs: StackOutputs,
-    ) -> Result<VerificationOutcome, VerificationError> {
-        let proof_bytes = self.prove(core, chiplets, poseidon2, outputs).unwrap_or_else(|error| {
-            panic!("the low-level prover should encode the forged trace: {error}")
-        });
-        self.verify(proof_bytes, outputs)
-    }
-
-    /// Like [`Self::prove_and_verify_parts_with_outputs`], but permits lookup construction to
+    /// Proves and verifies caller-supplied AIR matrices while permitting lookup construction to
     /// reject an unbalanced adversarial trace. Other proving failures remain test failures.
     pub fn prove_and_verify_parts_allowing_lookup_rejection(
         &self,
