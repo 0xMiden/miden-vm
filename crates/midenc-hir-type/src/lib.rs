@@ -9,28 +9,51 @@ mod enum_type;
 mod function_type;
 mod layout;
 mod pointer_type;
+mod recursive;
 #[cfg(feature = "serde")]
 mod serialization;
 mod struct_type;
 
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc};
 use core::fmt;
 
 use miden_formatting::prettier::PrettyPrint;
 
 pub use self::{
     alignable::Alignable, array_type::ArrayType, enum_type::*, function_type::*, pointer_type::*,
-    struct_type::*,
+    recursive::*, struct_type::*,
 };
 
 /// Represents the type of a value in the HIR type system
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Type {
     /// This indicates a failure to type a value, or a value which is untypable
     Unknown,
     /// This type is the bottom type, and represents divergence, akin to Rust's Never/! type
     Never,
+    /// This type represents a variadic type parameter, i.e. it can represent zero or more values
+    /// of arbitrary type.
+    ///
+    /// It is only valid in function types, and must always be in trailing position, i.e. if mixed
+    /// with other types, it must come last in the list, as shown below:
+    ///
+    /// ## Valid
+    ///
+    /// * `fn (...)`
+    /// * `fn () -> ...`
+    /// * `fn (...) -> ...`
+    /// * `fn (i8, ...)`
+    /// * `fn () -> (i8, ...)`
+    /// * `fn (i8, ...) -> (i8, ...)`
+    ///
+    /// ## Invalid
+    ///
+    /// * `fn (..., ...)`
+    /// * `fn () -> (..., ...)`
+    /// * `fn (..., i8)`
+    /// * `fn (i8, ..., i8)`
+    /// * `fn () -> (..., i8)`
+    Variadic,
     /// A 1-bit integer, i.e. a boolean value.
     ///
     /// When the bit is 1, the value is true; 0 is false.
@@ -69,18 +92,212 @@ pub enum Type {
     /// Miden Assembly documentation, but do have a straightforward conversion.
     Ptr(Arc<PointerType>),
     /// A compound type of fixed shape and size
-    Struct(Arc<StructType>),
+    ///
+    /// This matches both ordinary and recursive structs; see [StructRef].
+    Struct(StructRef),
     /// A tagged type enumeration with a fixed number of variants
-    Enum(Arc<EnumType>),
+    ///
+    /// This matches both ordinary and recursive enums; see [EnumRef].
+    Enum(EnumRef),
     /// A vector of fixed size
     Array(Arc<ArrayType>),
     /// A dynamically sized list of values of the given type.
     ///
-    /// Lists use a fat pointer layout containing a pointer and a length.
+    /// This is represented as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and is therefore
+    /// 8 bytes in size with an alignment of 4. Its layout does not depend on the element type.
+    ///
+    /// NOTE: This primarily exists to support the Wasm Canonical ABI.
     List(Arc<Type>),
     /// A reference to a function with the given type signature
     Function(Arc<FunctionType>),
 }
+
+/// A struct type, which may be ordinary or recursive.
+///
+/// Recursive structs are kept inside [`Type::Struct`] rather than given their own [Type] variant
+/// so that shape tests such as [`Type::is_struct`], and any `match` arm selecting a struct, keep
+/// working unchanged and correctly include recursive types. Reading a struct's *contents* goes
+/// through [`StructRef::get`], which is where the recursive case has to be considered.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StructRef {
+    /// An ordinary struct.
+    Plain(Arc<StructType>),
+    /// A recursive struct: one definition of a recursive group.
+    Rec(RecTypeRef),
+}
+
+impl StructRef {
+    /// Read this struct's definition.
+    ///
+    /// This is borrowed for an ordinary struct, and owned for a recursive one, where it is the
+    /// one-level unfolding of the definition. Every field type of the result is an ordinary,
+    /// closed [Type].
+    ///
+    /// NOTE: The unfolded form of a recursive struct is a transient view, not a canonical value:
+    /// it does not compare equal to the recursive type it came from. Do not store it as the
+    /// representation of a type.
+    pub fn get(&self) -> Cow<'_, StructType> {
+        match self {
+            Self::Plain(ty) => Cow::Borrowed(ty),
+            Self::Rec(ty) => Cow::Owned(ty.unfold_struct()),
+        }
+    }
+
+    /// The name of this struct, if it has one. Never unfolds.
+    pub fn name(&self) -> Option<Arc<str>> {
+        match self {
+            Self::Plain(ty) => ty.name(),
+            Self::Rec(ty) => ty.name(),
+        }
+    }
+
+    /// The representation of this struct. Never unfolds.
+    pub fn repr(&self) -> TypeRepr {
+        match self {
+            Self::Plain(ty) => ty.repr(),
+            Self::Rec(ty) => ty.struct_repr(),
+        }
+    }
+
+    /// The size in bytes of this struct, including alignment padding. Never unfolds.
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Plain(ty) => ty.size(),
+            Self::Rec(ty) => ty.layout().size_in_bytes(),
+        }
+    }
+
+    /// The minimum alignment of this struct. Never unfolds.
+    pub fn min_alignment(&self) -> usize {
+        match self {
+            Self::Plain(ty) => ty.min_alignment(),
+            Self::Rec(ty) => ty.layout().min_alignment(),
+        }
+    }
+
+    /// Whether this struct is zero-sized. Never unfolds.
+    pub fn is_zst(&self) -> bool {
+        match self {
+            Self::Plain(ty) => ty.fields().iter().all(|f| f.ty.is_zst()),
+            Self::Rec(ty) => ty.layout().is_zst(),
+        }
+    }
+
+    /// Whether this struct is recursive.
+    #[inline]
+    pub fn is_recursive(&self) -> bool {
+        matches!(self, Self::Rec(_))
+    }
+
+    /// The recursive definition this struct refers to, if it is recursive.
+    #[inline]
+    pub fn as_recursive(&self) -> Option<&RecTypeRef> {
+        match self {
+            Self::Rec(ty) => Some(ty),
+            Self::Plain(_) => None,
+        }
+    }
+}
+
+/// An enum type, which may be ordinary or recursive. See [StructRef] for the rationale.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EnumRef {
+    /// An ordinary enum.
+    Plain(Arc<EnumType>),
+    /// A recursive enum: one definition of a recursive group.
+    Rec(RecTypeRef),
+}
+
+impl EnumRef {
+    /// Read this enum's definition. See [`StructRef::get`] for the borrowing and canonicity rules.
+    pub fn get(&self) -> Cow<'_, EnumType> {
+        match self {
+            Self::Plain(ty) => Cow::Borrowed(ty),
+            Self::Rec(ty) => Cow::Owned(ty.unfold_enum()),
+        }
+    }
+
+    /// The name of this enum. Never unfolds.
+    pub fn name(&self) -> Arc<str> {
+        match self {
+            Self::Plain(ty) => ty.name().clone(),
+            // An enum definition always carries a name.
+            Self::Rec(ty) => ty.name().expect("an enum always has a name"),
+        }
+    }
+
+    /// The size in bytes of this enum. Never unfolds.
+    pub fn size_in_bytes(&self) -> usize {
+        match self {
+            Self::Plain(ty) => ty.size_in_bytes(),
+            Self::Rec(ty) => ty.layout().size_in_bytes(),
+        }
+    }
+
+    /// The size in bits of this enum. Never unfolds.
+    pub fn size_in_bits(&self) -> usize {
+        match self {
+            Self::Plain(ty) => ty.size_in_bits(),
+            Self::Rec(ty) => ty.layout().size_in_bytes() * 8,
+        }
+    }
+
+    /// The minimum alignment of this enum. Never unfolds.
+    pub fn min_alignment(&self) -> usize {
+        match self {
+            Self::Plain(ty) => ty.min_alignment(),
+            Self::Rec(ty) => ty.layout().min_alignment(),
+        }
+    }
+
+    /// Whether this enum is zero-sized. Never unfolds.
+    pub fn is_zst(&self) -> bool {
+        match self {
+            Self::Plain(ty) => ty.is_zst(),
+            Self::Rec(ty) => ty.layout().is_zst(),
+        }
+    }
+
+    /// Whether this enum is recursive.
+    #[inline]
+    pub fn is_recursive(&self) -> bool {
+        matches!(self, Self::Rec(_))
+    }
+
+    /// The recursive definition this enum refers to, if it is recursive.
+    #[inline]
+    pub fn as_recursive(&self) -> Option<&RecTypeRef> {
+        match self {
+            Self::Rec(ty) => Some(ty),
+            Self::Plain(_) => None,
+        }
+    }
+}
+
+impl PrettyPrint for StructRef {
+    fn render(&self) -> miden_formatting::prettier::Document {
+        match self {
+            Self::Plain(ty) => ty.render(),
+            // A recursive struct renders by name, so that printing terminates.
+            Self::Rec(ty) => miden_formatting::prettier::text(match ty.name() {
+                Some(name) => alloc::format!("struct {name}"),
+                None => alloc::string::String::from("struct <anon>"),
+            }),
+        }
+    }
+}
+
+impl PrettyPrint for EnumRef {
+    fn render(&self) -> miden_formatting::prettier::Document {
+        match self {
+            Self::Plain(ty) => ty.render(),
+            Self::Rec(_) => {
+                miden_formatting::prettier::text(alloc::format!("enum {}", self.name()))
+            },
+        }
+    }
+}
+
 impl Type {
     /// Returns true if this type is a zero-sized type, which includes:
     ///
@@ -92,8 +309,9 @@ impl Type {
         match self {
             Self::Unknown => false,
             Self::Never => true,
+            Self::Variadic => false,
             Self::Array(ty) => ty.is_zst(),
-            Self::Struct(struct_ty) => struct_ty.fields.iter().all(|f| f.ty.is_zst()),
+            Self::Struct(struct_ty) => struct_ty.is_zst(),
             Self::Enum(enum_ty) => enum_ty.is_zst(),
             Self::I1
             | Self::I8
@@ -254,21 +472,35 @@ impl Type {
 impl From<StructType> for Type {
     #[inline]
     fn from(ty: StructType) -> Type {
-        Type::Struct(Arc::new(ty))
+        Type::Struct(StructRef::Plain(Arc::new(ty)))
     }
 }
 
 impl From<Box<StructType>> for Type {
     #[inline]
     fn from(ty: Box<StructType>) -> Type {
-        Type::Struct(Arc::from(ty))
+        Type::Struct(StructRef::Plain(Arc::from(ty)))
     }
 }
 
 impl From<Arc<StructType>> for Type {
     #[inline]
     fn from(ty: Arc<StructType>) -> Type {
-        Type::Struct(ty)
+        Type::Struct(StructRef::Plain(ty))
+    }
+}
+
+impl From<EnumType> for Type {
+    #[inline]
+    fn from(ty: EnumType) -> Type {
+        Type::Enum(EnumRef::Plain(Arc::new(ty)))
+    }
+}
+
+impl From<Arc<EnumType>> for Type {
+    #[inline]
+    fn from(ty: Arc<EnumType>) -> Type {
+        Type::Enum(EnumRef::Plain(ty))
     }
 }
 
@@ -349,6 +581,7 @@ impl PrettyPrint for Type {
         match self {
             Self::Unknown => const_text("?"),
             Self::Never => const_text("!"),
+            Self::Variadic => const_text("..."),
             Self::I1 => const_text("i1"),
             Self::I8 => const_text("i8"),
             Self::U8 => const_text("u8"),

@@ -143,20 +143,31 @@ impl FastProcessor {
     /// live stream of requests while execution is still running, hiding its cost behind the
     /// (inherently sequential) execution itself.
     ///
+    /// `max_prover_memory_bytes` bounds the trace the same way
+    /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
+    /// call, so it needs its own copy of the derived row cap.
+    ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
-    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional precompile
-    /// witness is returned separately because [`crate::trace::VmTrace`] retains only its
-    /// authenticated root.
+    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace_with_budget`]. The optional
+    /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
+    /// its authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
         self,
         program: &Program,
         host: &mut impl SyncHost,
+        max_prover_memory_bytes: u64,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
+        use miden_air::{config, memory};
+
         use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
 
         let stack_inputs = self.initial_stack_inputs();
+        let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
+            max_prover_memory_bytes,
+            &config::pcs_params(),
+        ));
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),
@@ -171,7 +182,7 @@ impl FastProcessor {
             let span = tracing::Span::current();
             let hasher = scope.spawn(move || {
                 let _span = span.entered();
-                build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
+                build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len)
             });
 
             // Liveness invariant: both match arms consume `tracer` by value, so the scope
@@ -207,7 +218,8 @@ impl FastProcessor {
                 Err(panic) => std::panic::resume_unwind(panic),
             };
 
-            let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher)?;
+            let trace =
+                build_trace_with_prebuilt_hasher(vm_witness, hasher, max_prover_memory_bytes)?;
             Ok((trace, precompiles_witness))
         })
     }

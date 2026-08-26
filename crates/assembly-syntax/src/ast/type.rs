@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
-use midenc_hir_type::{AddressSpace, Type, TypeRepr};
+use midenc_hir_type::{AddressSpace, Type, TypeRepr, TypeTemplate};
 
 use super::{
     ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
@@ -32,15 +32,33 @@ pub trait TypeResolver<E> {
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
     /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
-    /// Get the [Type] corresponding to the item given by `gid`
-    fn get_type(&mut self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
-    /// Get the [Type] corresponding to the item in the current module given by `id`
-    fn get_local_type(&mut self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
+    /// Resolve the item given by `gid` to a type template.
+    ///
+    /// This yields a template rather than a [Type] because a declaration may be part of a
+    /// recursive group that is still being resolved, in which case the only thing that can be
+    /// produced for it is a back-reference. Nothing becomes a [Type] until the whole group is
+    /// known; see [`Self::finalize`].
+    fn get_type(
+        &mut self,
+        context: SourceSpan,
+        gid: GlobalItemIndex,
+    ) -> Result<Option<TypeTemplate>, E>;
+    /// Resolve the item in the current module given by `id` to a type template.
+    fn get_local_type(
+        &mut self,
+        context: SourceSpan,
+        id: ItemIndex,
+    ) -> Result<Option<TypeTemplate>, E>;
     /// Attempt to resolve a symbol path, given by a `TypeExpr::Ref`, to an item
     fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, E>;
+    /// Materialize a template as a concrete [Type], building any recursive group it takes part in.
+    fn finalize(&mut self, context: SourceSpan, template: TypeTemplate) -> Result<Type, E>;
     /// Resolve a [TypeExpr] to a concrete [Type]
     fn resolve(&mut self, ty: &TypeExpr) -> Result<Option<Type>, E> {
-        ty.resolve_type(self)
+        match ty.resolve_template(self)? {
+            Some(template) => self.finalize(ty.span(), template).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -281,18 +299,20 @@ impl TypeExpr {
     }
 
     /// Resolve this type expression to a concrete type, using `resolver`
-    pub fn resolve_type<E, R>(&self, resolver: &mut R) -> Result<Option<Type>, E>
+    /// Resolve this expression to a template, leaving references to declarations which are still
+    /// being resolved as back-references.
+    pub fn resolve_template<E, R>(&self, resolver: &mut R) -> Result<Option<TypeTemplate>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
-        self.resolve_type_with_depth(resolver, 0)
+        self.resolve_template_with_depth(resolver, 0)
     }
 
-    fn resolve_type_with_depth<E, R>(
+    fn resolve_template_with_depth<E, R>(
         &self,
         resolver: &mut R,
         depth: usize,
-    ) -> Result<Option<Type>, E>
+    ) -> Result<Option<TypeTemplate>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
@@ -323,7 +343,7 @@ impl TypeExpr {
                             current_path = path;
                         },
                         SymbolResolution::Exact { gid, .. } => {
-                            return resolver.get_type(current_path.span(), gid).map(Some);
+                            return resolver.get_type(current_path.span(), gid);
                         },
                         SymbolResolution::Module { path: module_path, .. } => {
                             break Err(resolver.resolve_local_failed(
@@ -348,30 +368,33 @@ impl TypeExpr {
                     }
                 }
             },
-            TypeExpr::Primitive(t) => Ok(Some(t.inner().clone())),
+            TypeExpr::Primitive(t) => Ok(Some(TypeTemplate::Type(t.inner().clone()))),
             TypeExpr::Array(t) => Ok(t
                 .elem
-                .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|elem| Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
+                .resolve_template_with_depth(resolver, depth + 1)?
+                .map(|elem| TypeTemplate::array(elem, t.arity))),
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
-                .resolve_type_with_depth(resolver, depth + 1)?
-                .map(|pointee| Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
+                .resolve_template_with_depth(resolver, depth + 1)?
+                .map(TypeTemplate::ptr)),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {
-                    let field_ty = field.ty.resolve_type_with_depth(resolver, depth + 1)?;
+                    let field_ty = field.ty.resolve_template_with_depth(resolver, depth + 1)?;
                     if let Some(field_ty) = field_ty {
-                        fields.push((field.name.clone().into_inner(), field_ty));
+                        fields.push(types::FieldTemplate {
+                            name: Some(field.name.clone().into_inner()),
+                            ty: field_ty,
+                        });
                     } else {
                         return Ok(None);
                     }
                 }
-                Ok(Some(Type::Struct(Arc::new(types::StructType::from_parts(
-                    t.name.clone().map(Ident::into_inner),
-                    t.repr.into_inner(),
+                Ok(Some(TypeTemplate::Struct(Box::new(types::StructTemplate {
+                    name: t.name.clone().map(Ident::into_inner),
+                    repr: t.repr.into_inner(),
                     fields,
-                )))))
+                }))))
             },
         }
     }
@@ -379,11 +402,50 @@ impl TypeExpr {
 
 impl From<Type> for TypeExpr {
     fn from(ty: Type) -> Self {
-        match ty {
-            Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
-            Type::Struct(t) => {
-                let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
-                let fields = t.fields().iter().enumerate().map(|(i, ft)| {
+        let mut expanding = Vec::new();
+        type_expr_from(ty, &mut expanding)
+    }
+}
+
+/// Convert a [Type] to a [TypeExpr], rendering a recursive aggregate's backedge as a reference by
+/// name rather than expanding it again.
+///
+/// `expanding` holds the recursive definitions whose bodies are currently being written out.
+/// Without it a recursive struct expands forever: the body is unfolded, its pointer field is
+/// converted, and converting the pointee unfolds the same body again.
+fn type_expr_from(ty: Type, expanding: &mut Vec<types::RecTypeRef>) -> TypeExpr {
+    match ty {
+        Type::Array(t) => TypeExpr::Array(ArrayType::new(
+            type_expr_from(t.element_type().clone(), expanding),
+            t.len(),
+        )),
+        Type::Struct(t) => {
+            let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
+
+            // A backedge to a definition already being written out becomes a reference to it,
+            // which is how it would have been written in source in the first place.
+            if let Some(rec) = t.as_recursive() {
+                if expanding.contains(rec) {
+                    let name = name.unwrap_or_else(|| {
+                        panic!(
+                            "unrepresentable type value: a recursive struct without a name cannot \
+                             be referred to as a type expression"
+                        )
+                    });
+                    return TypeExpr::Ref(Span::unknown(
+                        Path::from_ident(&name).into_owned().into(),
+                    ));
+                }
+                expanding.push(rec.clone());
+            }
+
+            let is_recursive = t.is_recursive();
+            let body = t.get();
+            let fields = body
+                .fields()
+                .iter()
+                .enumerate()
+                .map(|(i, ft)| {
                     let name = ft
                         .name
                         .as_deref()
@@ -393,25 +455,36 @@ impl From<Type> for TypeExpr {
                     StructField {
                         span: SourceSpan::UNKNOWN,
                         name,
-                        ty: ft.ty.clone().into(),
+                        ty: type_expr_from(ft.ty.clone(), expanding),
                     }
-                });
-                Self::Struct(
-                    StructType::new(name, fields)
-                        .with_repr(Span::unknown(t.repr()))
-                        .with_span(SourceSpan::UNKNOWN),
-                )
-            },
-            Type::Ptr(t) => Self::Ptr((*t).clone().into()),
-            Type::Function(_) => {
-                Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
-            },
-            Type::List(t) => Self::Ptr(
-                PointerType::new((*t).clone().into()).with_address_space(AddressSpace::Byte),
-            ),
-            Type::Unknown | Type::Never | Type::F64 => panic!("unrepresentable type value: {ty}"),
-            ty => Self::Primitive(Span::unknown(ty)),
-        }
+                })
+                .collect::<Vec<_>>();
+            let converted = TypeExpr::Struct(
+                StructType::new(name, fields)
+                    .with_repr(Span::unknown(body.repr()))
+                    .with_span(SourceSpan::UNKNOWN),
+            );
+
+            if is_recursive {
+                expanding.pop();
+            }
+            converted
+        },
+        Type::Ptr(t) => TypeExpr::Ptr(
+            PointerType::new(type_expr_from(t.pointee().clone(), expanding))
+                .with_address_space(t.addrspace()),
+        ),
+        Type::Function(_) => {
+            TypeExpr::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
+        },
+        Type::List(t) => TypeExpr::Ptr(
+            PointerType::new(type_expr_from((*t).clone(), expanding))
+                .with_address_space(AddressSpace::Byte),
+        ),
+        Type::Unknown | Type::Never | Type::F64 => {
+            panic!("unrepresentable type value: {ty}")
+        },
+        ty => TypeExpr::Primitive(Span::unknown(ty)),
     }
 }
 
@@ -651,7 +724,6 @@ impl crate::prettier::PrettyPrint for StructType {
 
         let repr = match &*self.repr {
             TypeRepr::Default => Document::Empty,
-            TypeRepr::BigEndian => const_text(" @bigendian"),
             repr @ (TypeRepr::Align(_) | TypeRepr::Packed(_) | TypeRepr::Transparent) => {
                 text(format!(" @{repr}"))
             },
@@ -1218,7 +1290,7 @@ mod tests {
             &mut self,
             context: SourceSpan,
             _gid: GlobalItemIndex,
-        ) -> Result<Type, SymbolResolutionError> {
+        ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
             Err(SymbolResolutionError::undefined(context, self.source_manager.as_ref()))
         }
 
@@ -1226,7 +1298,7 @@ mod tests {
             &mut self,
             _context: SourceSpan,
             _id: ItemIndex,
-        ) -> Result<Option<Type>, SymbolResolutionError> {
+        ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
             Ok(None)
         }
 
@@ -1235,6 +1307,17 @@ mod tests {
             ty: Span<&Path>,
         ) -> Result<SymbolResolution, SymbolResolutionError> {
             Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
+        }
+
+        fn finalize(
+            &mut self,
+            context: SourceSpan,
+            template: TypeTemplate,
+        ) -> Result<Type, SymbolResolutionError> {
+            // This resolver never produces back-references, so closing can never fail on one.
+            midenc_hir_type::close_template(&template, |_| None).map_err(|_| {
+                SymbolResolutionError::undefined(context, self.source_manager.as_ref())
+            })
         }
     }
 
@@ -1302,10 +1385,12 @@ mod tests {
         let mut resolver = DummyResolver::new();
 
         let ok_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING);
-        assert!(ok_expr.resolve_type(&mut resolver).is_ok());
+        assert!(ok_expr.resolve_template(&mut resolver).is_ok());
 
         let err_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING + 1);
-        let err = err_expr.resolve_type(&mut resolver).expect_err("expected depth-exceeded error");
+        let err = err_expr
+            .resolve_template(&mut resolver)
+            .expect_err("expected depth-exceeded error");
         assert!(
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)
@@ -1315,7 +1400,6 @@ mod tests {
     #[test]
     fn struct_type_expr_render_round_trips_non_default_reprs() {
         for repr in [
-            TypeRepr::BigEndian,
             TypeRepr::align(16),
             TypeRepr::packed(1),
             TypeRepr::packed(2),
@@ -1350,9 +1434,9 @@ mod tests {
 
     #[test]
     fn type_expr_from_type_preserves_struct_metadata() {
-        let ty = Type::Struct(Arc::new(types::StructType::from_parts(
+        let ty = Type::from(Arc::new(types::StructType::from_parts(
             Some(Arc::from("miden:base/core-types@1.0.0/account-id")),
-            TypeRepr::BigEndian,
+            TypeRepr::align(16),
             [
                 (Arc::<str>::from("prefix"), Type::Felt),
                 (Arc::<str>::from("suffix"), Type::Felt),
@@ -1366,33 +1450,62 @@ mod tests {
             actual.name.as_ref().map(Ident::as_str),
             Some("miden:base/core-types@1.0.0/account-id"),
         );
-        assert_eq!(*actual.repr, TypeRepr::BigEndian);
+        assert_eq!(*actual.repr, TypeRepr::align(16));
         assert_eq!(actual.fields[0].name.as_str(), "prefix");
         assert_eq!(actual.fields[1].name.as_str(), "suffix");
     }
 
     #[test]
+    fn type_expr_conversion_of_a_recursive_struct_terminates() {
+        use midenc_hir_type::{RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate};
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [("next", TypeTemplate::ptr(TypeTemplate::rec("Node")))],
+            ),
+        );
+        let node = builder.build().unwrap().remove("Node").unwrap();
+
+        // The backedge must come back as a reference by name, not as another copy of the body,
+        // or the conversion never terminates.
+        let TypeExpr::Struct(converted) = TypeExpr::from(node) else {
+            panic!("expected a struct type expression");
+        };
+        let TypeExpr::Ptr(pointer) = &converted.fields[0].ty else {
+            panic!("expected a pointer");
+        };
+        let TypeExpr::Ref(target) = pointer.pointee.as_ref() else {
+            panic!("expected the pointee to be a reference, got {:?}", pointer.pointee);
+        };
+        assert_eq!(target.inner().to_string(), "Node");
+    }
+
+    #[test]
     fn parsed_struct_type_preserves_field_names_through_resolution() {
         let expr = parse_type_alias_expr(
-            "type AccountId = struct @bigendian { prefix: felt, suffix: felt }\n",
+            "type AccountId = struct @align(16) { prefix: felt, suffix: felt }\n",
         );
 
         let mut resolver = DummyResolver::new();
-        let resolved = expr
-            .resolve_type(&mut resolver)
+        let resolved = TypeResolver::resolve(&mut resolver, &expr)
             .expect("struct type should resolve")
             .expect("struct type should be concrete");
         let Type::Struct(resolved_struct) = &resolved else {
             panic!("expected resolved struct type, got {resolved:?}");
         };
-        assert_eq!(resolved_struct.repr(), TypeRepr::BigEndian);
-        assert_eq!(resolved_struct.fields()[0].name.as_deref(), Some("prefix"));
-        assert_eq!(resolved_struct.fields()[1].name.as_deref(), Some("suffix"));
+        assert_eq!(resolved_struct.repr(), TypeRepr::align(16));
+        let resolved_fields = resolved_struct.get();
+        assert_eq!(resolved_fields.fields()[0].name.as_deref(), Some("prefix"));
+        assert_eq!(resolved_fields.fields()[1].name.as_deref(), Some("suffix"));
 
         let TypeExpr::Struct(converted) = TypeExpr::from(resolved) else {
             panic!("expected concrete struct to convert back to struct type expression");
         };
-        assert_eq!(*converted.repr, TypeRepr::BigEndian);
+        assert_eq!(*converted.repr, TypeRepr::align(16));
         assert_eq!(converted.fields[0].name.as_str(), "prefix");
         assert_eq!(converted.fields[1].name.as_str(), "suffix");
     }

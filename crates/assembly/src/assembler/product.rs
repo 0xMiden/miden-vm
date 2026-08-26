@@ -47,7 +47,7 @@ impl AssemblyProduct {
             if let Some(kernel_dep) =
                 package.manifest.dependencies().find(|dep| dep.id() == &kernel_package.name)
             {
-                if kernel_dep.digest != kernel_package.digest()
+                if kernel_dep.digest != kernel_package.dependency_commitment()
                     || kernel_dep.kind != kernel_package.kind
                     || kernel_dep.version() != &kernel_package.version
                 {
@@ -63,7 +63,7 @@ impl AssemblyProduct {
                         name: kernel_package.name.clone(),
                         kind: kernel_package.kind,
                         version: kernel_package.version.clone(),
-                        digest: kernel_package.digest(),
+                        digest: kernel_package.dependency_commitment(),
                     })
                     .map_err(|err| {
                         Report::msg(format!("unable to register kernel dependency: {err}"))

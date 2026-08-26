@@ -27,7 +27,8 @@ where
 {
     match ty {
         Type::Struct(struct_ty) => {
-            if let Some(codec) = codec_for_struct(codecs, struct_ty) {
+            let struct_ty = struct_ty.get();
+            if let Some(codec) = codec_for_struct(codecs, &struct_ty) {
                 let token = tokens.next().ok_or(TypedError::TokenCountMismatch)?;
                 let felts = codec.encode(token.as_ref())?;
                 // A codec chooses the text form of its type, but not the width. A wrong width

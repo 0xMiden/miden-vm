@@ -1266,6 +1266,7 @@ impl<'input> Parser<'input> {
                     | SyntaxKind::Equal
                     | SyntaxKind::Comma
                     | SyntaxKind::DotDot
+                    | SyntaxKind::DotDotDot
                     | SyntaxKind::Colon
                     | SyntaxKind::ColonColon
                     | SyntaxKind::RArrow
@@ -1676,6 +1677,7 @@ fn expects_continuation_operand(kind: SyntaxKind) -> bool {
             | SyntaxKind::Equal
             | SyntaxKind::Comma
             | SyntaxKind::DotDot
+            | SyntaxKind::DotDotDot
             | SyntaxKind::Colon
             | SyntaxKind::ColonColon
             | SyntaxKind::RArrow
@@ -1697,6 +1699,7 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
             | SyntaxKind::Equal
             | SyntaxKind::Comma
             | SyntaxKind::DotDot
+            | SyntaxKind::DotDotDot
             | SyntaxKind::Colon
             | SyntaxKind::ColonColon
             | SyntaxKind::RArrow

@@ -224,7 +224,7 @@ fn is_abi_attribute(name: &str) -> bool {
 /// the `name :` prefix from each struct field so such deltas compare equal.
 ///
 /// It deliberately preserves everything that *is* part of the ABI: field types, field count, field
-/// order, struct names, `repr` attributes (`@bigendian`, `@packed`, etc.), and all non-struct
+/// order, struct names, `repr` attributes (`@packed`, etc.), and all non-struct
 /// syntax. Only the leading `ident :` of a struct field is removed.
 fn canonicalize_type_string(value: &str) -> String {
     normalize(&strip_field_labels(value))

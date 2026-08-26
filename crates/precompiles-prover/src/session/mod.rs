@@ -361,47 +361,13 @@ impl Session {
     /// the chiplet's internal `idx` storage order (hence not of the
     /// addition-chain strategy). The caller's pairing is validated against the
     /// expression by the bus; each scalar node must be stored under the group's
-    /// scalar bound. Bumps the resolve use count.
+    /// scalar bound. Bumps the resolve use count on a new eval row.
     ///
     /// Panics unless the claim is **fully merged** — distinct bases, exactly
     /// one pair per term — the canonical form that makes the root well-defined
     /// (an unmerged `P×a, P×b` would hash differently from `P×(a+b)`).
     pub fn ec_msm(&mut self, expr: EcExprPtr, terms: &[(EcNode, UintNode)]) -> EcNode {
-        let group = self.msm.group(expr);
-        let sbound = self.msm.sbound(expr);
-        let val = self.msm.value(expr);
-        let chiplet = self.msm.terms(expr);
-
-        // Fully-merged claim: one pair per chiplet term, distinct bases, each
-        // pair a real term of `expr`. With distinct bases + matching count +
-        // each-pair-a-term, the pairs *are* the chiplet's term set — so the
-        // seam's set match is well-defined and the root tracks the term set,
-        // not an unmerged split.
-        assert_eq!(
-            terms.len(),
-            chiplet.len(),
-            "ec_msm needs exactly one (base, scalar) pair per claim term",
-        );
-        for i in 0..terms.len() {
-            for j in (i + 1)..terms.len() {
-                assert_ne!(terms[i].0.point, terms[j].0.point, "duplicate base in ec_msm claim");
-            }
-            assert!(
-                chiplet.iter().any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
-                "(base, scalar) pair is not a term of this MSM expression",
-            );
-        }
-
-        let value = self.eval.record_ec_msm(
-            expr.addr(),
-            group.addr(),
-            val,
-            sbound.addr(),
-            terms,
-            &mut self.p2,
-        );
-        self.msm.consume_claim(expr, 1);
-        value
+        self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.p2)
     }
 
     /// Number of MSM expressions laid so far (intros + combines + negs) — a

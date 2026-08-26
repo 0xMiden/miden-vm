@@ -496,6 +496,27 @@ end
 }
 
 #[test]
+fn parse_variadic_procedure_signatures() {
+    let source = test_source_file(
+        "\
+pub proc log(...)
+    nop
+end
+
+pub proc collect(prefix: felt, ...) -> (count: u32, ...)
+    nop
+end
+
+pub proc passthrough() -> ...
+    nop
+end
+",
+    );
+
+    assert_parses(source);
+}
+
+#[test]
 fn parse_advice_map_and_begin_forms() {
     let source = test_source_file(
         "\

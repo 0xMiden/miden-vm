@@ -39,7 +39,7 @@ impl Arbitrary for InvalidVersionError {
 /// The representation of versioning information associated with packages in the package index.
 ///
 /// This type provides the means by which dependency resolution can satisfy versioning constraints
-/// on packages using either semantic version constraints or explicit package digests
+/// on packages using either semantic version constraints or explicit package commitments
 /// simultaneously.
 ///
 /// All packages have an associated semantic version. Packages which have been assembled to MAST,
