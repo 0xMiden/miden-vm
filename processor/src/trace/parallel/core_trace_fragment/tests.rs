@@ -3,8 +3,8 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_air::trace::{
     chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
     decoder::{
-        NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS,
-        OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
+        NUM_HASHER_COLUMNS, NUM_OP_BATCH_ENCODING_COLS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
+        OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     },
 };
 
@@ -20,8 +20,8 @@ const HASHER_STATE_RANGE: core::ops::Range<usize> = 8..8 + NUM_HASHER_COLUMNS;
 const IN_SPAN_COL_IDX: usize = 16;
 const GROUP_COUNT_COL_IDX: usize = 17;
 const OP_INDEX_COL_IDX: usize = 18;
-const OP_BATCH_FLAGS_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_FLAGS;
-const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 22..24;
+const OP_BATCH_ENCODING_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_ENCODING_COLS;
+const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 21..23;
 use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     events::{EventName, SystemEvent},
@@ -1730,16 +1730,16 @@ fn check_op_decoding(
         "op index mismatch"
     );
 
-    let expected_batch_flags =
+    let expected_batch_encoding =
         if expected_opcode == opcodes::SPAN || expected_opcode == opcodes::RESPAN {
             let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
-            build_op_batch_flags(num_groups)
+            build_op_batch_encoding(num_groups)
         } else {
-            [ZERO, ZERO, ZERO]
+            [ZERO; NUM_OP_BATCH_ENCODING_COLS]
         };
 
-    for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
-        assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {i}");
+    for (i, value) in OP_BATCH_ENCODING_RANGE.zip(expected_batch_encoding) {
+        assert_eq!(trace[i][row_idx], value, "op batch encoding mismatch at column {i}");
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
@@ -1804,7 +1804,7 @@ fn read_opcode(trace: &DecoderTrace, row_idx: usize) -> u8 {
     result as u8
 }
 
-fn build_op_batch_flags(num_groups: usize) -> [Felt; NUM_OP_BATCH_FLAGS] {
+fn build_op_batch_encoding(num_groups: usize) -> [Felt; NUM_OP_BATCH_ENCODING_COLS] {
     match num_groups {
         1 => OP_BATCH_1_GROUPS,
         2 => OP_BATCH_2_GROUPS,

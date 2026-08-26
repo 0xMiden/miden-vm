@@ -1077,7 +1077,8 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         in_span: "in_span",
         group_count: "group_count",
         op_index: "op_index",
-        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        full_batch: "full_batch",
+        batch_size_code: "batch_size_code",
         extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
     },
     stack: StackCols {

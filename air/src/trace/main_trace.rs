@@ -13,7 +13,7 @@ use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
     and8_lookup::NUM_AND8_LOOKUP_COLS,
     chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
-    decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS},
+    decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_ENCODING_COLS},
     eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
 use crate::constraints::{
@@ -344,10 +344,10 @@ impl MainTrace {
         self.core_row(i).decoder.end_block_flags().is_syscall
     }
 
-    /// Returns the operation batch flags at row i. This indicates the number of op groups in
-    /// the current batch that is being processed.
-    pub fn op_batch_flag(&self, i: RowIndex) -> [Felt; NUM_OP_BATCH_FLAGS] {
-        self.core_row(i).decoder.batch_flags
+    /// Returns the operation-batch encoding at row i.
+    pub fn op_batch_encoding(&self, i: RowIndex) -> [Felt; NUM_OP_BATCH_ENCODING_COLS] {
+        let decoder = &self.core_row(i).decoder;
+        [decoder.full_batch, decoder.batch_size_code]
     }
 
     /// Returns the operation group count. This indicates the number of operation that remain

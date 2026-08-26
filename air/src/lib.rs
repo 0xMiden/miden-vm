@@ -1281,6 +1281,23 @@ mod tests {
     }
 
     #[test]
+    fn core_shape_and_degree_match_design() {
+        let air = MidenAir::CORE;
+        let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&HandwrittenMidenAir(air));
+
+        assert_eq!(air.width(), 48);
+        assert_eq!(constraints::columns::NUM_DECODER_COLS, 23);
+        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
+        assert_eq!(symbolic, ConstraintDegrees { base: 9, ext: 9 });
+        assert_eq!(
+            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
+            symbolic,
+            "Core's declared degree must match its handwritten constraints",
+        );
+        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+    }
+
+    #[test]
     fn and8_lookup_shape_and_degree_match_design() {
         let air = MidenAir::AND8_LOOKUP;
 
