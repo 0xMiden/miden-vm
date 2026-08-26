@@ -1,9 +1,9 @@
 //! Checks or regenerates the PVM ACE registry and its generated MASM artifacts.
 //!
-//! Usage: `cargo run -p miden-precompiles-prover --features registry-tools --release \
+//! Usage: `cargo run -p miden-precompiles-verifier --features registry-tools --release \
 //!         --bin pvm-registry-regen -- [--check | --write]`
 
-use miden_precompiles_prover::ace_registry_regen::{Mode, run};
+use miden_precompiles_verifier::ace_registry_regen::{Mode, run};
 
 fn parse_mode(args: Vec<String>) -> Result<Mode, Vec<String>> {
     match args.as_slice() {

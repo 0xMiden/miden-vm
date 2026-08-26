@@ -13,6 +13,7 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
+use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -24,13 +25,12 @@ use crate::{
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, VerifyError},
+    session::{Session, SessionTraces},
     tests::{
         SessionTracesTestExt, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
     transcript::poseidon2::P2Digest,
-    verify_deferred,
 };
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.

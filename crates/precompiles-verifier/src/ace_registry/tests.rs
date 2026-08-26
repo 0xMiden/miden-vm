@@ -1,15 +1,10 @@
 use miden_ace_codegen::{ShuffleEncodeBuffer, order_tag, padding_leaf};
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-};
+use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::MultiAir;
+use miden_precompiles_air::{ChipletMultiAir, NUM_CHIPLETS};
 
 use super::*;
-use crate::{
-    ace::{PVM_REGISTRY_LAYOUT, structured_orders},
-    session::{ChipletMultiAir, NUM_CHIPLETS},
-};
+use crate::ace::{PVM_REGISTRY_LAYOUT, structured_orders};
 
 /// The registry does not include statement-level assertions, so each protocol version pins their
 /// result on a fixed, non-zero fixture independently of the implementation helpers.
@@ -96,7 +91,7 @@ fn relation_digest_matches_the_checked_in_root() {
          `make regenerate-pvm-registry` for an intentional protocol change"
     );
     assert_eq!(
-        crate::stark_config::PRECOMPILE_RELATION_DIGEST,
+        miden_precompiles_air::stark_config::PRECOMPILE_RELATION_DIGEST,
         expected,
         "production configs must use the generated PVM registry digest"
     );

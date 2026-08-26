@@ -1,6 +1,6 @@
 //! Proving for the precompile multi-AIR relation.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
@@ -10,8 +10,7 @@ use miden_core::{
 };
 use miden_lifted_air::{ProverStatement, Statement};
 use miden_lifted_stark::{
-    Preprocessed, PreprocessedValidationError, ProverInstance, StarkConfig, VerifierError,
-    VerifierInstance, check_constraints,
+    Preprocessed, ProverInstance, StarkConfig, check_constraints,
     lmcs::Lmcs as LmcsTrait,
     proof::{StarkOutput, StarkProofData},
 };
@@ -22,12 +21,11 @@ use miden_precompiles_air::{
         poseidon2_config, precompile_pcs_params, rpo_config, rpx_config, test_challenger,
     },
 };
-use miden_serde_utils::deserialize_schema_exact;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use serde_wincode::SerdeCompat;
 
 use super::SessionTraces;
-use crate::{MAX_STARK_PROOF_BYTES, ProveError, transcript::poseidon2::P2Digest};
+use crate::ProveError;
 
 impl SessionTraces {
     fn prover_statement(&self) -> ProverStatement<Felt, QuadFelt, ChipletMultiAir> {
@@ -103,102 +101,4 @@ impl SessionTraces {
         >>::serialize(&output.proof, proof_encoding_config)?;
         Ok(StarkProof::new(proof_bytes, hash_fn))
     }
-}
-
-/// Verify a core serialized STARK proof envelope against a public root.
-///
-/// Returns the proof's largest chiplet log trace height and its LMCS's column alignment iff the
-/// verifier accepts, including the `Σ σ = 0` cross-chiplet identity via `eval_external`. Both feed
-/// the security estimate: the lookup and out-of-domain rounds degrade with the height, and the
-/// DEEP round's term count depends on the alignment.
-pub(crate) fn verify_stark(
-    proof: &StarkProof,
-    public_root: P2Digest,
-) -> Result<(u32, usize), VerifyError> {
-    if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
-        return Err(VerifyError::ProofTooLarge {
-            size: proof.bytes().len(),
-            max: MAX_STARK_PROOF_BYTES,
-        });
-    }
-
-    let params = precompile_pcs_params();
-    match proof.hash_fn() {
-        HashFunction::Blake3_256 => {
-            let config = blake3_256_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::blake3();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Rpo256 => {
-            let config = rpo_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpo();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Rpx256 => {
-            let config = rpx_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::rpx();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Poseidon2 => {
-            let config = poseidon2_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::poseidon2();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-        HashFunction::Keccak => {
-            let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
-            let preprocessed = preprocessed::keccak();
-            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
-        },
-    }
-}
-
-fn verify_stark_with_config<SC>(
-    config: &SC,
-    preprocessed: &Preprocessed<Felt, SC::Lmcs>,
-    proof_bytes: &[u8],
-    public_root: P2Digest,
-) -> Result<(u32, usize), VerifyError>
-where
-    SC: StarkConfig<Felt, QuadFelt>,
-    <SC::Lmcs as LmcsTrait>::Commitment: DeserializeOwned,
-{
-    let proof_encoding_config = wincode::config::Configuration::default()
-        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof = deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, QuadFelt, SC>>, _>(
-        proof_bytes,
-        proof_encoding_config,
-    )?;
-
-    let statement =
-        Statement::new(ChipletMultiAir::new(), public_root.as_array().to_vec(), Vec::new())
-            .expect("chiplet statement inputs are valid");
-
-    let mut challenger = config.challenger();
-    observe_protocol_params(config.pcs(), &mut challenger);
-
-    VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
-        .verify(&proof, challenger)?;
-
-    let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
-    Ok((log_max_height, config.lmcs().alignment()))
-}
-
-/// Why precompile STARK verification rejected a proof.
-#[derive(Debug, thiserror::Error)]
-pub enum VerifyError {
-    /// The chiplet stack declares preprocessed columns, but no preprocessed bundle was produced.
-    #[error("chiplet stack declares preprocessed columns, but no preprocessed bundle was built")]
-    MissingPreprocessed,
-    /// The serialized STARK proof bytes could not be decoded.
-    #[error("failed to deserialize STARK proof: {0}")]
-    Deserialization(#[from] wincode::error::ReadError),
-    /// The serialized STARK proof exceeds the verifier's byte limit.
-    #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
-    ProofTooLarge { size: usize, max: usize },
-    /// The preprocessed commitment did not match the AIR columns and configuration.
-    #[error(transparent)]
-    Preprocessed(#[from] PreprocessedValidationError),
-    /// The verifier rejected the proof.
-    #[error(transparent)]
-    Verifier(#[from] VerifierError),
 }

@@ -12,9 +12,9 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::Keccak256Precompile;
-use miden_precompiles_prover::{
-    masm_verifier::{PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError},
-    prove_deferred_state,
+use miden_precompiles_prover::prove_deferred_state;
+use miden_precompiles_verifier::masm_verifier::{
+    PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::ExecutionOutput;
 use miden_utils_testing::recursive_verifier::VerifierData;

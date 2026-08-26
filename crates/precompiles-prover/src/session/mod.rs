@@ -82,8 +82,6 @@ pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
 pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
-pub use prove::VerifyError;
-pub(crate) use prove::verify_stark;
 
 /// Stateful builder over the full chiplet stack.
 ///

@@ -16,26 +16,32 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "std"))]
 use std::sync::OnceLock;
 
+#[cfg(all(feature = "concurrent", any(test, feature = "std")))]
+use miden_ace_codegen::order_from_tag;
+#[cfg(all(not(feature = "concurrent"), any(test, feature = "std")))]
+use miden_ace_codegen::subtree_leaves;
 #[cfg(any(test, feature = "std"))]
 use miden_ace_codegen::{
-    FactoredCircuitFactory, PackedLeafScratch, order_from_tag, padding_leaf, path_in_verified_tree,
-    subtree_leaves, verify_row,
+    FactoredCircuitFactory, PackedLeafScratch, padding_leaf, path_in_verified_tree, verify_row,
 };
 #[cfg(any(test, feature = "std"))]
 use miden_core::field::QuadFelt;
 use miden_core::{Felt, Word};
 #[cfg(any(test, feature = "std"))]
 use miden_crypto::merkle::{MerklePath, MerkleTree};
+#[cfg(all(feature = "concurrent", any(test, feature = "std")))]
+use miden_precompiles_air::NUM_CHIPLETS;
 
+#[cfg(test)]
+use crate::ace::PVM_ORDER_COUNT;
 #[cfg(any(test, feature = "std"))]
-use crate::{
-    ace::{PVM_ORDER_COUNT, PVM_REGISTRY_LAYOUT, build_precompile_factored_ace_circuit},
-    session::NUM_CHIPLETS,
-};
+use crate::ace::{PVM_REGISTRY_LAYOUT, build_precompile_factored_ace_circuit};
 
 mod data;
 pub(crate) use data::PVM_ACE_REGISTRY_LEVEL12_ROW;
-pub use data::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT};
+pub use data::PVM_ACE_REGISTRY_ROOT;
+#[cfg(test)]
+pub use data::{PVM_CIRCUIT_SHAPE, PVM_PREPROCESSED_COMMITMENT};
 pub use miden_precompiles_air::PVM_RELATION_DIGEST;
 
 /// Depth of the checked-in node row (see `data.rs`).
@@ -48,9 +54,11 @@ pub const PVM_REGISTRY_ROW_DEPTH: usize = 12;
 /// The ACE registry binds the generated circuit, but not external multi-AIR assertions such as
 /// `ChipletMultiAir::eval_external`. Changes to those semantics require a protocol-version bump.
 /// The Miden VM currently uses the same version; distinct registry roots separate the relations.
+#[cfg(any(test, feature = "registry-tools"))]
 pub(crate) const PVM_PROTOCOL_ID: u64 = 1;
 
 /// Compute the relation digest binding a registry root into the Fiat-Shamir transcript.
+#[cfg(any(test, feature = "registry-tools"))]
 pub(crate) fn relation_digest_for_root(root: &Word) -> [Felt; 4] {
     miden_air::config::relation_digest(PVM_PROTOCOL_ID, root)
 }

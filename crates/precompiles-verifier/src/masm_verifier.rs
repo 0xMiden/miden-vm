@@ -17,7 +17,9 @@ use miden_core::{
     deferred::DeferredClaim,
     field::{BasedVectorSpace, QuadFelt},
     program::proof_request_key,
-    proof::{HashFunction, PrecompileProof, StarkProof as SerializedStarkProof},
+    proof::{
+        HashFunction, MAX_STARK_PROOF_BYTES, PrecompileProof, StarkProof as SerializedStarkProof,
+    },
 };
 use miden_crypto::{
     merkle::{MerklePath, PartialMerkleTree},
@@ -30,18 +32,18 @@ use miden_crypto::{
 };
 use miden_lifted_air::Statement;
 use miden_lifted_stark::VerifierInstance;
-use miden_precompiles_air::preprocessed;
+use miden_precompiles_air::{
+    ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
+    stark_config::{
+        Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
+    },
+};
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
 use crate::{
-    MAX_STARK_PROOF_BYTES,
     ace::{order_tag_from_log_heights, proof_order_from_log_heights},
     ace_registry::{factory, pvm_ace_registry_path},
-    session::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS},
-    stark_config::{
-        Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
-    },
 };
 
 type Challenge = QuadFelt;

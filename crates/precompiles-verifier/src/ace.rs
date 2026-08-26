@@ -10,18 +10,21 @@
 //! The cross-chiplet LogUp identity enforced by `ChipletMultiAir::eval_external` remains an
 //! external multi-AIR assertion.
 
+#[cfg(any(test, feature = "registry-tools"))]
 use alloc::vec::Vec;
 
+#[cfg(feature = "std")]
+use miden_ace_codegen::order_tag;
+#[cfg(test)]
+use miden_ace_codegen::{AceCircuit, build_multi_air_ace_circuit};
 use miden_ace_codegen::{
-    AceCircuit, AceConfig, AceError, FactoredMultiAirCircuit, LayoutKind, RegistryLayout,
-    build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit, order_tag,
+    AceConfig, AceError, FactoredMultiAirCircuit, LayoutKind, RegistryLayout,
+    build_factored_multi_air_ace_circuit,
 };
 use miden_core::{Felt, field::QuadFelt};
+use miden_precompiles_air::{ChipletAir, NUM_CHIPLETS};
 
-use crate::{
-    ace_registry::PVM_REGISTRY_ROW_DEPTH,
-    session::{ChipletAir, NUM_CHIPLETS},
-};
+use crate::ace_registry::PVM_REGISTRY_ROW_DEPTH;
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
@@ -56,6 +59,7 @@ fn precompile_ace_config() -> AceConfig {
 ///
 /// This independent, unfactored construction is retained as a reference for testing the factored
 /// circuit assembly.
+#[cfg(test)]
 pub fn build_precompile_multi_air_ace_circuit() -> Result<AceCircuit<QuadFelt>, AceError> {
     let airs = ChipletAir::all();
     let proof_order: Vec<_> = (0..airs.len()).collect();
@@ -100,11 +104,13 @@ pub const PVM_REGISTRY_LAYOUT: RegistryLayout =
 pub const PVM_ORDER_COUNT: usize = PVM_REGISTRY_LAYOUT.order_count();
 
 /// Smallest Merkle tree depth covering every proof-order tag.
+#[cfg(any(test, feature = "registry-tools"))]
 pub const PVM_ACE_REGISTRY_DEPTH: usize = PVM_REGISTRY_LAYOUT.tree_depth();
 
 const _: () = assert!(PVM_ORDER_COUNT <= u32::MAX as usize, "order tags must fit in u32");
 
 /// Registry tag for the ordering the proof commits its traces in.
+#[cfg(feature = "std")]
 pub fn order_tag_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> u32 {
     order_tag(&proof_order_from_log_heights(log_heights))
 }
@@ -112,6 +118,7 @@ pub fn order_tag_from_log_heights(log_heights: &[u8; NUM_CHIPLETS]) -> u32 {
 /// Orders used by registry and semantic checks: identity, reversal, adjacent swaps, each chiplet
 /// moved to either end, and a deterministic random sample. The sample includes non-involutions,
 /// where the source and destination permutations differ.
+#[cfg(any(test, feature = "registry-tools"))]
 pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
     let identity: [usize; NUM_CHIPLETS] = core::array::from_fn(|i| i);
     let mut orders = Vec::new();
@@ -161,9 +168,9 @@ pub(crate) fn structured_orders() -> Vec<[usize; NUM_CHIPLETS]> {
 mod tests {
     use alloc::{format, string::String, vec::Vec};
 
-    use miden_ace_codegen::{InputKey, order_from_tag};
+    use miden_ace_codegen::{InputKey, order_from_tag, order_tag};
     use miden_core::{Felt, Word, field::QuadFelt};
-    use miden_crypto::field::{BasedVectorSpace, PrimeCharacteristicRing};
+    use miden_crypto::field::BasedVectorSpace;
 
     use super::*;
     use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST};
@@ -371,7 +378,7 @@ mod tests {
 
     #[test]
     fn pvm_aux_hook_matches_the_logup_registry() {
-        use crate::relations::{BusId, MAX_MESSAGE_WIDTH};
+        use miden_precompiles_air::relations::{BusId, MAX_MESSAGE_WIDTH};
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
@@ -384,8 +391,9 @@ mod tests {
     #[test]
     fn pvm_public_input_hook_matches_the_statement_schema() {
         use miden_lifted_air::MultiAir;
+        use miden_precompiles_air::ChipletMultiAir;
 
-        use crate::{ace_registry::PVM_PREPROCESSED_COMMITMENT, session::ChipletMultiAir};
+        use crate::ace_registry::PVM_PREPROCESSED_COMMITMENT;
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
@@ -478,7 +486,9 @@ mod tests {
 
     #[test]
     fn pvm_deep_query_hook_matches_commitment_group_geometry() {
-        use crate::{primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params};
+        use miden_precompiles_air::{
+            primitives::byte_pair_lut::TRACE_HEIGHT, stark_config::precompile_pcs_params,
+        };
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/deep_queries.masm");
@@ -609,7 +619,7 @@ mod tests {
         assert!(num_chunks.is_power_of_two());
         let expected = miden_lifted_stark::quotient_recomposition_inputs::<Felt>(
             num_chunks.ilog2() as u8,
-            crate::stark_config::precompile_pcs_params().log_blowup(),
+            miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup(),
         )
         .expect("PVM quotient degree fits the PCS blowup");
 

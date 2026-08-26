@@ -1,5 +1,5 @@
 ---
-source: crates/precompiles-prover/src/ace.rs
+source: crates/precompiles-verifier/src/ace.rs
 expression: snapshot
 ---
 layout_inputs: 1596
