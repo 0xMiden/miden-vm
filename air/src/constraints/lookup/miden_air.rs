@@ -92,7 +92,13 @@ pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 mod tests {
     extern crate std;
 
-    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+    use std::{vec, vec::Vec};
+
+    use miden_core::{
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::{Matrix, RowMajorMatrix},
+    };
+    use miden_crypto::stark::air::BaseAir;
 
     use crate::{
         ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
@@ -105,7 +111,10 @@ mod tests {
                 main_air::MAIN_COLUMN_SHAPE,
             },
         },
-        lookup::debug::{ValidateLayout, ValidateLookupAir},
+        lookup::{
+            Challenges, build_lookup_fractions,
+            debug::{ValidateLayout, ValidateLookupAir},
+        },
         trace::AUX_TRACE_RAND_CHALLENGES,
     };
 
@@ -220,5 +229,43 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
             .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
+        assert_eq!(crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [2; 5]);
+    }
+
+    #[test]
+    fn and8_lookup_packs_all_ten_live_interactions_into_five_pairs() {
+        const NUM_ROWS: usize = 2;
+
+        let air = MidenAir::AND8_LOOKUP;
+        let full_preprocessed =
+            air.preprocessed_trace().expect("And8 lookup AIR declares a preprocessed table");
+        let preprocessed_width = full_preprocessed.width();
+        let last_row = full_preprocessed.height() - 1;
+        let mut preprocessed_values = Vec::with_capacity(NUM_ROWS * preprocessed_width);
+        for row in [0, last_row] {
+            let start = row * preprocessed_width;
+            preprocessed_values
+                .extend_from_slice(&full_preprocessed.values[start..start + preprocessed_width]);
+        }
+        let preprocessed = RowMajorMatrix::new(preprocessed_values, preprocessed_width);
+        let main = RowMajorMatrix::new(
+            vec![
+                Felt::ONE;
+                NUM_ROWS * crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+            ],
+            crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
+        );
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::from_u32(7),
+            QuadFelt::from_u32(11),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let fractions = build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &challenges);
+
+        assert_eq!(fractions.shape(), &[2; 5]);
+        assert_eq!(fractions.counts(), &[2; NUM_ROWS * 5]);
+        assert_eq!(fractions.fractions().len(), NUM_ROWS * 10);
     }
 }

@@ -11,39 +11,53 @@ use crate::{
     constraints::and8_lookup::columns::{
         And8LookupCols, And8LookupPreprocessedCols, BYTE_LOOKUP_COLUMN_COUNT,
     },
-    lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
+    lookup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
 };
 
 /// Extension trait required by the byte-pair table [`LookupAir`](crate::lookup::LookupAir).
 pub(crate) trait And8LookupBuilder: LookupBuilder<F = Felt> {}
 
 /// Per-column fraction stride for the byte-pair table AIR.
-pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; BYTE_LOOKUP_COLUMN_COUNT] =
-    [1; BYTE_LOOKUP_COLUMN_COUNT];
+pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; BYTE_LOOKUP_COLUMN_COUNT / 2] =
+    [2; BYTE_LOOKUP_COLUMN_COUNT / 2];
+const _: () = assert!(BYTE_LOOKUP_COLUMN_COUNT.is_multiple_of(2));
 
 const BYTE_TABLE_DEG: Deg = Deg { v: 1, u: 1 };
+const BYTE_TABLE_PAIR_DEG: Deg = Deg { v: 2, u: 2 };
 
-fn emit_byte_table_column<LB, M>(
+fn emit_byte_table_pair<LB, M0, M1>(
     builder: &mut LB,
     group_name: &'static str,
-    row_name: &'static str,
-    multiplicity: LB::Expr,
-    msg: impl FnOnce() -> M,
+    row0_name: &'static str,
+    multiplicity0: LB::Expr,
+    msg0: impl FnOnce() -> M0,
+    row1_name: &'static str,
+    multiplicity1: LB::Expr,
+    msg1: impl FnOnce() -> M1,
 ) where
     LB: And8LookupBuilder,
-    M: LookupMessage<LB::Expr, LB::ExprEF>,
+    M0: LookupMessage<LB::Expr, LB::ExprEF>,
+    M1: LookupMessage<LB::Expr, LB::ExprEF>,
 {
     builder.next_column(
         |col| {
             col.group(
                 group_name,
                 |g| {
-                    g.insert(row_name, LB::Expr::ONE, multiplicity, msg, BYTE_TABLE_DEG);
+                    g.batch(
+                        group_name,
+                        LB::Expr::ONE,
+                        |batch| {
+                            batch.insert(row0_name, multiplicity0, msg0(), BYTE_TABLE_DEG);
+                            batch.insert(row1_name, multiplicity1, msg1(), BYTE_TABLE_DEG);
+                        },
+                        BYTE_TABLE_PAIR_DEG,
+                    );
                 },
-                BYTE_TABLE_DEG,
+                BYTE_TABLE_PAIR_DEG,
             );
         },
-        BYTE_TABLE_DEG,
+        BYTE_TABLE_PAIR_DEG,
     );
 }
 
@@ -70,12 +84,18 @@ where
         fixed.rot7_pos3.into(),
     ];
 
-    emit_byte_table_column(
+    emit_byte_table_pair(
         builder,
-        "and8_table",
+        "and8_and_range_tables",
         "and8_row",
         local.and_multiplicity.into(),
         || And8Msg::new(a.clone(), b.clone(), and.clone()),
+        "range_row",
+        local.range_multiplicity.into(),
+        || {
+            let value = a.clone() * LB::Expr::from_u16(256) + b.clone();
+            RangeMsg { value }
+        },
     );
 
     let rot12_mults = [
@@ -84,36 +104,25 @@ where
         local.rot12_pos2_multiplicity,
         local.rot12_pos3_multiplicity,
     ];
-    for (pos, (result, multiplicity)) in rot12.into_iter().zip(rot12_mults).enumerate() {
-        emit_byte_table_column(
-            builder,
-            "and8_table_rot12",
-            "rot12_row",
-            multiplicity.into(),
-            || And8Msg::eidos_compression_rot12(pos, a.clone(), b.clone(), result.clone()),
-        );
-    }
-
     let rot7_mults = [
         local.rot7_pos0_multiplicity,
         local.rot7_pos1_multiplicity,
         local.rot7_pos2_multiplicity,
         local.rot7_pos3_multiplicity,
     ];
-    for (pos, (result, multiplicity)) in rot7.into_iter().zip(rot7_mults).enumerate() {
-        emit_byte_table_column(builder, "and8_table_rot7", "rot7_row", multiplicity.into(), || {
-            And8Msg::eidos_compression_rot7(pos, a.clone(), b.clone(), result.clone())
-        });
+    let rotations = rot12.into_iter().zip(rot12_mults).zip(rot7.into_iter().zip(rot7_mults));
+    for (pos, ((rot12_result, rot12_multiplicity), (rot7_result, rot7_multiplicity))) in
+        rotations.enumerate()
+    {
+        emit_byte_table_pair(
+            builder,
+            "and8_rotation_tables",
+            "rot12_row",
+            rot12_multiplicity.into(),
+            || And8Msg::eidos_compression_rot12(pos, a.clone(), b.clone(), rot12_result),
+            "rot7_row",
+            rot7_multiplicity.into(),
+            || And8Msg::eidos_compression_rot7(pos, a.clone(), b.clone(), rot7_result),
+        );
     }
-
-    emit_byte_table_column(
-        builder,
-        "range_table",
-        "range_row",
-        local.range_multiplicity.into(),
-        || {
-            let value = a.clone() * LB::Expr::from_u16(256) + b;
-            RangeMsg { value }
-        },
-    );
 }

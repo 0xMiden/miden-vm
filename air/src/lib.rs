@@ -909,7 +909,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
             Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
-            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 2 },
+            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 3 },
         }
     }
 
@@ -1278,6 +1278,21 @@ mod tests {
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn and8_lookup_shape_and_degree_match_design() {
+        let air = MidenAir::AND8_LOOKUP;
+
+        assert_eq!(air.width(), 10);
+        assert_eq!(air.preprocessed_width(), 11);
+        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 5);
+        assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [2; 5]);
+        assert_eq!(
+            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
+            ConstraintDegrees { base: 0, ext: 3 }
+        );
+        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
     }
 
     #[test]

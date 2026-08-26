@@ -4,7 +4,8 @@
 //! ten lookup domains: ordinary `(a, b, a & b)`, one Eidos compression rotation-contribution
 //! domain for each `(rotation, byte-position)` pair, and `RangeCheck` for the
 //! 16-bit value `256 * a + b`. The dynamic main trace carries one multiplicity
-//! column per domain.
+//! column per domain. The ten simultaneous table interactions are pair-batched
+//! into five degree-three LogUp auxiliary columns.
 
 use miden_core::{Felt, utils::RowMajorMatrix};
 
