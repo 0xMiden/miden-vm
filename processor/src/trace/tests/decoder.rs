@@ -12,7 +12,7 @@
 //! batching). Broader end-to-end soundness comes from
 //! `build_lookup_fractions_runs_on_execution_trace` in `tests/lookup.rs`.
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg, StackOverflowMsg};
 use miden_core::{
@@ -472,9 +472,9 @@ fn block_hash_join_enqueue_dequeue() {
     log.assert_contains(&exp);
 }
 
-/// LOOP and REPEAT both enqueue a `LoopBody` entry for the body, and the END at the end of
-/// each body dequeues it with `is_loop_body = 1`. Runs two iterations (inputs `[1, 0]`) so both
-/// the LOOP entry and the REPEAT branches fire.
+/// LOOP enqueues one weighted `LoopBody` entry for all executions of the body, and the END at the
+/// end of each body dequeues it with `is_loop_body = 1`. Runs two iterations (inputs `[1, 0]`) so
+/// the LOOP entry has multiplicity 2 and the REPEAT branch fires without adding a body entry.
 #[test]
 fn block_hash_loop_body_with_repeat() {
     let program = {
@@ -498,8 +498,9 @@ fn block_hash_loop_body_with_repeat() {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    let mut fired_loop_body = 0usize;
+    let mut fired_loop_body_enqueue = 0usize;
     let mut fired_loop_body_end = 0usize;
+    let mut repeat_rows = 0usize;
 
     let mut exp = Expectations::new(&log);
     for_each_op(&trace, |row, op| {
@@ -509,14 +510,28 @@ fn block_hash_loop_body_with_repeat() {
         let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
         let addr_next = main.addr(next);
 
-        // Under do-while the LOOP unconditionally enqueues the body for the first iteration,
-        // and each REPEAT enqueues for a subsequent iteration. The AIR's `f_loop_body` expression
-        // becomes `loop_op + repeat` in Phase 3.
-        let is_loop_entering = op == Felt::from_u8(opcodes::LOOP);
-        let is_repeat = op == Felt::from_u8(opcodes::REPEAT);
-        if is_loop_entering || is_repeat {
-            exp.add(row, &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 });
-            fired_loop_body += 1;
+        // Under do-while the LOOP unconditionally enqueues the committed body digest. REPEAT
+        // re-enters the loop but does not add a block-hash entry from its own row.
+        if op == Felt::from_u8(opcodes::LOOP) {
+            let multiplicity = main.group_count(idx);
+            assert_eq!(
+                multiplicity,
+                Felt::new_unchecked(2),
+                "the LOOP row must carry one body entry per iteration"
+            );
+            exp.push(
+                row,
+                multiplicity,
+                &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 },
+            );
+            fired_loop_body_enqueue += 1;
+        } else if op == Felt::from_u8(opcodes::REPEAT) {
+            assert_eq!(
+                main.group_count(idx),
+                ZERO,
+                "REPEAT rows must not carry the LOOP-side body multiplicity"
+            );
+            repeat_rows += 1;
         }
 
         // END of the loop body: `is_loop_body` bit is set on the END overlay.
@@ -535,9 +550,109 @@ fn block_hash_loop_body_with_repeat() {
         }
     });
 
-    // Sanity: each iteration fires one LoopBody enqueue and one body-ending END remove.
-    assert_eq!(fired_loop_body, 2, "expected LOOP + REPEAT to each fire a LoopBody enqueue");
+    // Sanity: one weighted LOOP enqueue covers both iterations; REPEAT itself fires no enqueue.
+    assert_eq!(fired_loop_body_enqueue, 1, "expected one weighted LOOP body enqueue");
+    assert_eq!(repeat_rows, 1, "fixture must execute one REPEAT row");
     assert_eq!(fired_loop_body_end, 2, "expected one END-of-loop-body remove per iteration");
+
+    log.assert_contains(&exp);
+}
+
+/// Nested loops exercise the keying of LOOP-side body multiplicities by dynamic loop
+/// address. This fixture produces three dynamic LOOP rows with body-execution counts `[2, 2, 3]`.
+/// The same static inner loop node appears multiple times, but each dynamic instance has a
+/// distinct controller address and therefore its own multiplicity.
+#[test]
+fn block_hash_nested_loop_body_multiplicities_are_keyed_by_dynamic_address() {
+    let program = {
+        let mut mast_forest = MastForest::new();
+        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        let inner_loop = LoopNodeBuilder::new(body).add_to_forest(&mut mast_forest).unwrap();
+        let outer_loop = LoopNodeBuilder::new(inner_loop).add_to_forest(&mut mast_forest).unwrap();
+        mast_forest.make_root(outer_loop);
+        Program::new(mast_forest.into(), outer_loop)
+    };
+
+    // Stack inputs mirror the nested-loop fragmentation fixture. The exact fixture shape is pinned
+    // below; the important invariant is that every LOOP multiplicity is keyed by the dynamic
+    // controller address reached from that LOOP row.
+    let trace = build_trace_from_program(&program, &[1, 1, 0, 1, 1, 0, 0, 9999]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut body_end_counts = BTreeMap::<u64, u64>::new();
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
+            let loop_addr = main.addr(RowIndex::from(row + 1)).as_canonical_u64();
+            *body_end_counts.entry(loop_addr).or_insert(0) += 1;
+        }
+    });
+
+    let mut exp = Expectations::new(&log);
+    let mut loop_multiplicities = Vec::new();
+    let mut body_end_rows = 0usize;
+    let mut repeat_rows = 0usize;
+
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        let next = RowIndex::from(row + 1);
+        let first = main.decoder_hasher_state_first_half(idx);
+        let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
+        let addr_next = main.addr(next);
+
+        if op == Felt::from_u8(opcodes::LOOP) {
+            let expected_count = body_end_counts
+                .get(&addr_next.as_canonical_u64())
+                .copied()
+                .expect("every dynamic LOOP must have at least one body END");
+            let multiplicity = main.group_count(idx);
+            assert_eq!(
+                multiplicity,
+                Felt::new_unchecked(expected_count),
+                "row {row}: honest LOOP.group_count must equal body END count at its dynamic address"
+            );
+
+            loop_multiplicities.push(expected_count);
+            exp.push(
+                row,
+                multiplicity,
+                &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 },
+            );
+        } else if op == Felt::from_u8(opcodes::REPEAT) {
+            assert_eq!(
+                main.group_count(idx),
+                ZERO,
+                "row {row}: REPEAT rows must not carry the LOOP-side body multiplicity"
+            );
+            repeat_rows += 1;
+        }
+
+        if op == Felt::from_u8(opcodes::END) && main.is_loop_body_flag(idx) == ONE {
+            let is_first_child = next_op_first_child_flag(main, next);
+            exp.remove(
+                row,
+                &BlockHashMsg::End {
+                    parent: addr_next,
+                    child_hash: h0,
+                    is_first_child,
+                    is_loop_body: ONE,
+                },
+            );
+            body_end_rows += 1;
+        }
+    });
+
+    loop_multiplicities.sort_unstable();
+    assert_eq!(
+        loop_multiplicities,
+        vec![2, 2, 3],
+        "expected the nested fixture's dynamic loop body counts"
+    );
+    assert_eq!(repeat_rows, 4, "fixture must execute four REPEAT rows");
+    assert_eq!(body_end_rows, 7, "fixture must produce seven loop-body END rows");
 
     log.assert_contains(&exp);
 }

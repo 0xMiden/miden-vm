@@ -43,7 +43,6 @@ use crate::constraints::{
 pub struct LookupOpFlags<E> {
     // -- Degree-4 individual ops (current row) --------------------------------------------------
     end: E,
-    repeat: E,
     respan: E,
     call: E,
     syscall: E,
@@ -224,7 +223,6 @@ where
 
         Self {
             end,
-            repeat,
             respan,
             call,
             syscall,
@@ -307,7 +305,7 @@ impl LookupOpFlags<Felt> {
             opcodes::HORNERBASE => f.hornerbase = Felt::ONE,
             opcodes::HORNEREXT => f.hornerext = Felt::ONE,
             opcodes::END => f.end = Felt::ONE,
-            opcodes::REPEAT => f.repeat = Felt::ONE,
+            opcodes::REPEAT => {},
             opcodes::RESPAN => f.respan = Felt::ONE,
             opcodes::CALL => f.call = Felt::ONE,
             opcodes::SYSCALL => f.syscall = Felt::ONE,
@@ -370,7 +368,6 @@ impl LookupOpFlags<Felt> {
     fn all_zero() -> Self {
         Self {
             end: Felt::ZERO,
-            repeat: Felt::ZERO,
             respan: Felt::ZERO,
             call: Felt::ZERO,
             syscall: Felt::ZERO,
@@ -435,7 +432,6 @@ impl LookupOpFlags<Felt> {
         }
         check!(
             end,
-            repeat,
             respan,
             call,
             syscall,
@@ -512,7 +508,6 @@ macro_rules! accessors {
 accessors!(
     // Degree-4 individual ops
     end,
-    repeat,
     respan,
     call,
     syscall,
@@ -617,7 +612,6 @@ mod tests {
             opcodes::JOIN,
             opcodes::SPLIT,
             opcodes::LOOP,
-            opcodes::REPEAT,
             opcodes::DYN,
             opcodes::DYNCALL,
             opcodes::CALL,
@@ -643,6 +637,23 @@ mod tests {
                 "op-group selector for block-hash opcode {opcode}",
             );
         }
+
+        let repeat = generate_test_row(opcodes::REPEAT.into());
+        let repeat_next = generate_test_row(0);
+        let repeat_flags =
+            LookupOpFlags::from_main_cols(&repeat.decoder, &repeat.stack, &repeat_next.decoder);
+        assert_eq!(block_hash_selector(&repeat_flags), ZERO, "REPEAT adds no block-hash entry");
+        assert_eq!(
+            op_group_selector(
+                &repeat_flags,
+                repeat.decoder.in_span,
+                repeat.decoder.group_count,
+                repeat_next.decoder.group_count,
+                repeat.decoder.batch_flags,
+            ),
+            ZERO,
+            "REPEAT is not an op-group selector",
+        );
 
         for opcode in [opcodes::SPAN, opcodes::RESPAN] {
             let mut row = generate_test_row(opcode.into());
@@ -689,7 +700,6 @@ mod tests {
         flags.join()
             + flags.split()
             + flags.loop_op()
-            + flags.repeat()
             + flags.dyn_op()
             + flags.dyncall()
             + flags.call()
@@ -813,7 +823,6 @@ mod tests {
 
         check!(
             end,
-            repeat,
             respan,
             call,
             syscall,

@@ -307,7 +307,10 @@ pub fn enforce_main<AB>(
     // =============================================
     // Group count constraints
     // =============================================
-    // The group_count column tracks remaining operation groups in the current basic block.
+    // The group_count column tracks remaining operation groups in the current basic block. On
+    // LOOP control-flow rows, it is also reused by the block-hash lookup as the multiplicity of
+    // the LOOP-committed body digest. That LOOP-side value is ignored by the op-group relation
+    // because control-flow rows have `in_span = 0`.
     //
     // ## Lifecycle
     //

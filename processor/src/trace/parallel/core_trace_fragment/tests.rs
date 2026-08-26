@@ -721,8 +721,10 @@ fn test_loop_node_decoding() {
     let (trace, trace_len) = build_trace_helper(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
+    // On the LOOP row, `group_count` carries the number of body ENDs returning to this loop
+    // address, which the block-hash lookup uses as the body digest's multiplicity.
     let body_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
-    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 1, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, body_addr, opcodes::PAD, 0, 0, 1);
     check_op_decoding(&trace, 3, body_addr, opcodes::DROP, 0, 1, 1);
@@ -782,7 +784,8 @@ fn test_loop_node_repeat_decoding() {
     let iter1_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
     let iter2_addr = iter1_addr + CONTROLLER_ROWS_PER_PERM_FELT;
 
-    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
+    // The LOOP row's `group_count` covers both body executions; the REPEAT row adds nothing.
+    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 2, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     check_op_decoding(&trace, 2, iter1_addr, opcodes::PAD, 0, 0, 1);
     check_op_decoding(&trace, 3, iter1_addr, opcodes::DROP, 0, 1, 1);

@@ -426,7 +426,7 @@ the block-stack contributions must be zero, proving multiset equality between in
 tagged messages. The compiled constraint has degree $9$.
 
 ## Block hash table constraints
-As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `REPEAT`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children).
+As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children). `REPEAT` re-enters a loop body that the `LOOP` operation already accounted for, so it does not add an entry of its own.
 
 Adding and removing entries to/from the block hash table is accomplished as follows:
 * To add an entry, we multiply the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' = p_2 \cdot v$, where $v$ is the value representing the row to be added.
@@ -469,15 +469,21 @@ $$
 
 When `LOOP` operation is executed, the hash of the loop body is unconditionally added to the
 block hash table (with `is_loop_body = 1`), since the body is always entered for the first
-iteration:
+iteration. The entry is added with multiplicity $gc$, the value of the `group_count` column on
+the `LOOP` row, which the prover sets to the number of body `END` rows that return to this loop
+instance. A single `LOOP` row therefore accounts for every iteration of that loop:
 
 $$
-v_{loop} = f_{loop} \cdot m(a', h_0..h_3, 0, 1) \text{ | degree} = 6
+v_{loop} = gc \cdot f_{loop} \cdot m(a', h_0..h_3, 0, 1) \text{ | degree} = 6
 $$
 
-When `REPEAT` operation is executed, hash of the loop body is added to the block hash table:
+`REPEAT` does not add anything to the block hash table. Were it to add the digest carried on its
+own row, a forged body `END` could be cancelled by the `REPEAT` that follows it, and the loop body
+executed by an iteration would no longer have to be the body that `LOOP` committed to.
 
-$$v_{repeat} = f_{repeat} \cdot m(a', h_0..h_3, 0, 1) \text{ | } \text{degree} = 5$$
+Note that `group_count` is reused here: on `LOOP` rows it carries this multiplicity rather than a
+number of operation groups. The op group table is unaffected because control-flow rows have
+`in_span = 0`.
 
 When `DYN`, `DYNCALL`, `CALL` or `SYSCALL` operation is executed, the hash of the child is
 added to the block hash table. In all cases, this child is found in the first half
@@ -502,7 +508,7 @@ Using the above definitions, we can describe the constraint for updating the blo
 
 > $$
 > p_2' \cdot (u_{end} + 1 - f_{end}) = 
-> p_2 \cdot (v_{join} + v_{split} + v_{loop} + v_{repeat} + v_{allcalls} + 1 - (f_{join} + f_{split} + f_{loop} + f_{repeat} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
+> p_2 \cdot (v_{join} + v_{split} + v_{loop} + v_{allcalls} + 1 - (f_{join} + f_{split} + f_{loop} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
 > $$
 
 We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_2' = p_2$.

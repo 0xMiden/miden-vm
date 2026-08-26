@@ -206,6 +206,7 @@
 - [BREAKING] Enforced decoder span-entry, span-exit, and `REPEAT` predecessor adjacency. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
 - [BREAKING] Rejected unused degree-5 opcode 95 and completed the stack route for unused opcode 6. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
 - [BREAKING] Constrained `REPEAT` to re-enter the same loop parent address. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
+- [BREAKING] Authenticated repeated loop-body digests against the committing `LOOP` row, so `REPEAT` no longer adds a block-hash entry for the body digest it claims. This changes the AIR relation digest and ACE registry root, invalidating older proofs.
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though
