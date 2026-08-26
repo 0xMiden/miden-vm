@@ -37,6 +37,36 @@ The attribute macro exports the function under the event name and embeds a manif
 
 A handler module must not contain SIMD instructions: the runner executes a deterministic, non-SIMD instruction set, and the loader rejects a module that uses `simd128`. Compile handler crates with `-C target-feature=-simd128`, because a toolchain or a workspace `.cargo/config.toml` can turn `simd128` on for `wasm32-unknown-unknown` (this repository does). The test fixtures show the override in `crates/wasm-event-handlers/tests/fixtures/.cargo/config.toml`.
 
+## Project integration
+
+A Miden project declares its handler module in `miden-project.toml`. The project assembler then embeds the `event_handlers` section into each package it builds, so a handler needs no separate packaging step:
+
+```toml
+[package.metadata.wasm-event-handlers]
+crate = "handlers"          # a Rust guest crate directory, XOR:
+module = "handlers.wasm"    # a prebuilt core-Wasm module
+```
+
+Set exactly one of the two keys. Both keys, no key, an unknown key, or a value that is not a string stop the build with an error that names the manifest and the key. Both paths are relative to the directory of the `miden-project.toml` file. A package declares at most one handler module, and the section attaches to every target the package builds — the library target and each executable target alike.
+
+Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build, it writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag. The guest crate must produce exactly one Wasm module; give it a library target with `crate-type = ["cdylib"]`.
+
+Use `module` to ship a module that another build produced. The build reads the file and does not compile anything.
+
+The manifest of the section comes from the module's own `miden:event-manifest` records, so a module whose functions carry no `#[miden_event_handler("...")]` attribute stops the build.
+
+The build also validates the module: it applies the same load rules a host applies, with the **default** `WasmHandlerLimits`. A forbidden import, a SIMD instruction, a start section, a missing or wrongly-typed export, or an instantiation charge over the fuel budget therefore fails the build instead of every host that later loads the package. Limits stay host policy: a host can run stricter limits than the default and refuse a module this validation accepted. See [Determinism across hosts](#determinism-across-hosts).
+
+The project assembler holds no knowledge of event handlers. The `miden-wasm-event-handlers-project` crate supplies it as a package post-processor, which the toolchain registers:
+
+```rust
+use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+
+let mut project_assembler = assembler.for_project_at_path(&manifest_path, &mut registry)?;
+project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+let package = project_assembler.assemble(target_selector, "release")?;
+```
+
 ## Loading handlers in a host
 
 ```rust
