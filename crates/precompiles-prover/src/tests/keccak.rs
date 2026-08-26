@@ -6,16 +6,41 @@
 
 use std::{vec, vec::Vec};
 
-use miden_core::{Felt, utils::Matrix};
+use miden_air::lookup::debug::{
+    ValidateLayout, ValidateLookupAir, trace::collect_column_oracle_folds,
+};
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+    utils::{Matrix, RowMajorMatrix},
+};
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
-use crate::hash::keccak::{
-    reference::{KECCAK_RC, keccak_f1600, keccak_round},
-    round::{
-        KeccakRoundAir, NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, ROT_LIMBS_RANGE, extract_output,
-        extract_outputs, generate_trace_from_states, program::SLOT_D_ROL_BEGIN,
+use crate::{
+    hash::keccak::{
+        reference::{KECCAK_RC, keccak_f1600, keccak_round},
+        round::{
+            A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, COLUMN_SHAPE, KeccakRoundAir, NUM_AUX_COLS,
+            NUM_LANES, NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_LIMBS_RANGE,
+            extract_output, extract_outputs, generate_trace_from_states, lane_base,
+            program::SLOT_D_ROL_BEGIN,
+        },
     },
+    logup::{Challenges, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::{ChipletAir, Session},
+    tests::bus_balance::session_stack_residual,
 };
+
+fn lookup_challenges() -> Challenges<QuadFelt> {
+    Challenges::new(
+        QuadFelt::from_u64(101),
+        QuadFelt::from_u64(103),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    )
+}
 
 // TESTS
 // ================================================================================================
@@ -206,6 +231,119 @@ fn keccak_round_constraints_hold_on_random_input() {
     crate::tests::check_local(KeccakRoundAir, &main);
 }
 
+#[test]
+fn keccak_round_shape_and_degree_match_design() {
+    let air = KeccakRoundAir;
+
+    assert_eq!(air.width(), 68);
+    assert_eq!(air.aux_width(), 12);
+    assert_eq!(COLUMN_SHAPE, [1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4]);
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 4, ext: 5 }
+    );
+    assert_eq!(crate::tests::log_quotient_degree(&air), 2);
+
+    let layout = ValidateLayout {
+        preprocessed_width: air.preprocessed_width(),
+        trace_width: air.width(),
+        num_public_values: NUM_PUBLIC_VALUES,
+        num_periodic_columns: air.periodic_columns().len(),
+        permutation_width: NUM_AUX_COLS,
+        num_permutation_challenges: NUM_RANDOMNESS,
+        num_permutation_values: NUM_SIGMA_VALUES,
+    };
+    ValidateLookupAir::validate(&air, layout)
+        .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
+}
+
+#[test]
+fn pure_rol_raw_b_is_load_bearing_in_every_byte_and_lane() {
+    let states = [[0x0123_4567_89ab_cdef; 25], [0xfedc_ba98_7654_3210; 25]];
+    let main = generate_trace_from_states(&states, &KECCAK_RC);
+    let row = SLOT_D_ROL_BEGIN;
+    let air = KeccakRoundAir;
+    let one_row = RowMajorMatrix::new(
+        main.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS].to_vec(),
+        NUM_MAIN_COLS,
+    );
+    let periodic: Vec<Vec<Felt>> = air
+        .periodic_columns()
+        .into_iter()
+        .map(|column| vec![column[row % column.len()]])
+        .collect();
+    let public_values = [Felt::ZERO; NUM_PUBLIC_VALUES];
+    let challenges = lookup_challenges();
+    let baseline =
+        collect_column_oracle_folds(&air, &one_row, &periodic, &public_values, &challenges);
+
+    for lane in 0..NUM_LANES {
+        let lane_base = lane_base(lane);
+        assert_eq!(one_row.values[lane_base + COL_ACT], Felt::ONE);
+
+        for byte in 0..B_BYTES_RANGE.len() {
+            let cell = lane_base + B_BYTES_RANGE.start + byte;
+            assert_eq!(one_row.values[cell], Felt::ZERO);
+
+            let mut attacked = one_row.clone();
+            attacked.values[cell] = Felt::ONE;
+            let attacked_folds = collect_column_oracle_folds(
+                &air,
+                &attacked,
+                &periodic,
+                &public_values,
+                &challenges,
+            );
+            let target_col = lane * (NUM_AUX_COLS / NUM_LANES) + 2 + byte / 4;
+            let source_col = lane * (NUM_AUX_COLS / NUM_LANES) + 1;
+
+            for col in 0..NUM_AUX_COLS {
+                if col == target_col {
+                    let (attacked_v, attacked_u) = attacked_folds[0][col];
+                    let (baseline_v, baseline_u) = baseline[0][col];
+                    assert_ne!(attacked_v * baseline_u, baseline_v * attacked_u);
+                } else if col == source_col {
+                    // `src_b` has zero multiplicity on a pure-ROL row, so changing its
+                    // denominator must not change the represented rational sum.
+                    let (attacked_v, attacked_u) = attacked_folds[0][col];
+                    let (baseline_v, baseline_u) = baseline[0][col];
+                    assert_eq!(attacked_v * baseline_u, baseline_v * attacked_u);
+                } else {
+                    assert_eq!(attacked_folds[0][col], baseline[0][col]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pure_rol_nonzero_b_unbalances_the_full_chiplet_stack() {
+    let mut session = Session::new();
+    let (_, claim) = session.keccak(b"KeccakRound raw-b binding");
+    let root = session.assert_and_fold([claim]);
+    let traces = session.finish(root);
+    let mains = traces.mains();
+    let challenges = lookup_challenges();
+    let round_idx = ChipletAir::all()
+        .into_iter()
+        .position(|air| air == ChipletAir::KeccakRound)
+        .expect("KeccakRound is present in the chiplet stack");
+
+    let honest = session_stack_residual(&mains, &[], &challenges);
+    assert!(honest.is_empty(), "honest session must balance: {honest:#?}");
+
+    let mut attacked = mains[round_idx].clone();
+    let cell = SLOT_D_ROL_BEGIN * NUM_MAIN_COLS + B_BYTES_RANGE.start;
+    assert_eq!(attacked.values[cell], Felt::ZERO);
+    attacked.values[cell] = Felt::ONE;
+    let residual = session_stack_residual(&mains, &[(round_idx, &attacked)], &challenges);
+
+    assert!(
+        !residual.is_empty(),
+        "a forged pure-ROL operand must leave a lookup residual: {residual:#?}"
+    );
+}
+
 /// Stack 3 independent perms in one trace and verify both per-perm
 /// output correctness (via `extract_outputs`) and constraint
 /// satisfaction. With NUM_LANES=2, the 3 perms split into a busiest lane of
@@ -236,6 +374,31 @@ fn keccak_round_multi_perm_oracle_and_constraints() {
 
 // NEGATIVE TESTS — confirm `check_constraints` catches deliberate corruption.
 // ================================================================================================
+
+/// On the first pure-ROL row, forge the otherwise valid byte lookup `Xor(0, 1, 1)` and update the
+/// first rotation limb to preserve the rotation-decomposition identity. The local `r = a`
+/// passthrough constraint must be the remaining reason this trace is rejected.
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn pure_rol_passthrough_rejects_bpl_valid_nonzero_b() {
+    let mut main = generate_trace_from_states(&[[0u64; 25]], &KECCAK_RC);
+    let row_start = SLOT_D_ROL_BEGIN * NUM_MAIN_COLS;
+
+    for col in [
+        A_BYTES_RANGE.start,
+        B_BYTES_RANGE.start,
+        R_BYTES_RANGE.start,
+        ROT_LIMBS_RANGE.start,
+    ] {
+        assert_eq!(main.values[row_start + col], Felt::ZERO);
+    }
+
+    main.values[row_start + B_BYTES_RANGE.start] = Felt::ONE;
+    main.values[row_start + R_BYTES_RANGE.start] = Felt::ONE;
+    main.values[row_start + ROT_LIMBS_RANGE.start] = Felt::from(2u8);
+
+    crate::tests::check_local(KeccakRoundAir, &main);
+}
 
 /// Corrupting a `rot_limbs` cell on an active ROL row must now be
 /// rejected by the rotation limb-decomposition binding constraint:
