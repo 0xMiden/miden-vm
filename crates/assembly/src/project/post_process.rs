@@ -15,8 +15,10 @@ pub struct PostProcessContext<'a> {
 ///
 /// The project assembler runs every registered processor after the source provider's own
 /// [`ProjectSourceProvider::post_process_package`] hook, in registration order, and before the
-/// package enters the package cache/registry. The assembler registers no processor by default;
-/// callers opt in with [`ProjectAssembler::with_package_post_processor`].
+/// package enters the package cache/registry. Processors run only on the packages of the
+/// project under assembly, never on source dependencies (see
+/// [`ProjectAssembler::with_package_post_processor`]). The assembler registers no processor by
+/// default; callers opt in with that method.
 ///
 /// A processor must be generic infrastructure from the assembler's point of view: the assembler
 /// knows nothing about what a processor adds to a package. Domain-specific knowledge (for

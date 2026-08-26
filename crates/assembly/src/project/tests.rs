@@ -3532,3 +3532,77 @@ fn manually_provided_sources_skip_package_post_processors() {
             .any(|section| section.id == SectionId::custom("pp-manual").unwrap())
     );
 }
+
+#[test]
+fn source_dependencies_skip_package_post_processors() {
+    let tempdir = TempDir::new().unwrap();
+
+    let dep_dir = tempdir.path().join("pathdep");
+    write_file(
+        &dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "pathdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::pathdep"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc leaf
+    push.7
+    drop
+end
+"#,
+    );
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+pathdep = { path = "../pathdep", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::pathdep
+
+pub proc entry
+    exec.pathdep::leaf
+end
+"#,
+    );
+
+    let invocations = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = TestRegistry::default();
+    let mut project_assembler =
+        Assembler::default().for_project_at_path(&root_manifest, &mut registry).unwrap();
+    project_assembler.with_package_post_processor(MarkerPostProcessor {
+        tag: "pp-root-only",
+        invocations: invocations.clone(),
+    });
+
+    let package = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect("the root and its source dependency assemble");
+
+    // The processor ran exactly once — for the root package, not for the source dependency —
+    // and the one marker section sits on the root package.
+    assert_eq!(invocations.lock().unwrap().len(), 1);
+    assert!(
+        package
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::custom("pp-root-only").unwrap())
+    );
+}

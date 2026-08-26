@@ -14,12 +14,16 @@ use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
 
-/// Returns a `Program` type from a `.masp` package file.
-pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
-    let package = Package::deserialize_from_file(path)
+/// Returns the `Package` read from a `.masp` package file.
+///
+/// The callers extract the program with [`Package::try_into_program`] and register the package's
+/// Wasm event handlers, if any, with
+/// [`miden_wasm_event_handlers::host_library_from_package`].
+pub fn get_masp_package(path: &Path) -> Result<Arc<Package>, Report> {
+    Package::deserialize_from_file(path)
         .into_diagnostic()
-        .wrap_err("Failed to deserialize package")?;
-    package.try_into_program()
+        .wrap_err("Failed to deserialize package")
+        .map(Arc::new)
 }
 
 /// Returns a `Program` type from a `.masm` assembly file.

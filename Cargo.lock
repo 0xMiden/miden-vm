@@ -2825,6 +2825,7 @@ dependencies = [
  "miden-prover",
  "miden-test-utils",
  "miden-verifier",
+ "miden-wasm-event-handlers",
  "predicates",
  "serde",
  "serde_json",

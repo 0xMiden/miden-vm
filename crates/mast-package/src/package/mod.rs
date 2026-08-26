@@ -1275,12 +1275,28 @@ impl Package {
         mut self,
         section: &EventHandlerSection,
     ) -> Result<Self, EventHandlerSectionError> {
+        self.attach_event_handlers(section)?;
+        Ok(self)
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package in place.
+    ///
+    /// The same operation as [`Self::with_event_handlers`], for callers that hold the package by
+    /// mutable reference. On error the package is unchanged.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when the
+    /// section fails [`EventHandlerSection::validate`].
+    pub fn attach_event_handlers(
+        &mut self,
+        section: &EventHandlerSection,
+    ) -> Result<(), EventHandlerSectionError> {
         if self.sections.iter().any(|existing| existing.id == SectionId::EVENT_HANDLERS) {
             return Err(EventHandlerSectionError::AlreadyPresent);
         }
         section.validate()?;
         self.sections.push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
-        Ok(self)
+        Ok(())
     }
 
     /// Extract the embedded kernel package from this package.

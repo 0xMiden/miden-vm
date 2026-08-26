@@ -78,19 +78,16 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
         };
 
         let section = self.section(&source, manifest_path)?;
-        // `with_event_handlers` consumes the package, and the hook lends it, so the attachment
-        // goes through a clone. It refuses a package that already has the section, which keeps a
-        // second producer of the section visible instead of silently replacing the first.
-        let attached = package.clone().with_event_handlers(&section).map_err(|error| {
+        // The attachment refuses a package that already has the section, which keeps a second
+        // producer of the section visible instead of silently replacing the first.
+        package.attach_event_handlers(&section).map_err(|error| {
             Report::msg(format!(
                 "{}: cannot attach the Wasm handlers of '{}' to package '{}': {error}",
                 config::label(manifest_path),
                 source.path().display(),
                 package.name,
             ))
-        })?;
-        *package = attached;
-        Ok(())
+        })
     }
 }
 
@@ -98,7 +95,8 @@ impl PackagePostProcessor for WasmEventHandlerProcessor {
 fn derive(source: &HandlerSource, manifest_path: &Path) -> Result<EventHandlerSection, Report> {
     let path = source.path();
     let wasm = match source {
-        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir)?,
+        HandlerSource::GuestCrate(crate_dir) => guest::build(crate_dir)
+            .map_err(|error| config::error(manifest_path, format!("{error:#}")))?,
         HandlerSource::Module(module) => std::fs::read(module).map_err(|error| {
             config::error(
                 manifest_path,

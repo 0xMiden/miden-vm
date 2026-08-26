@@ -5,10 +5,11 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_vm::{HashFunction, Prover, internal::InputFile};
+use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{get_masm_program, get_masp_package, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -122,7 +123,19 @@ impl ProveCmd {
         let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
         // Use a single match expression to load the program.
         let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, None, None, host),
+            "masp" => {
+                let package = get_masp_package(&self.program_file)?;
+                let program = package.try_into_program()?;
+                let mut host = host;
+                // Register the package's Wasm event handlers, if it carries any.
+                let handlers = host_library_from_package(&package, WasmHandlerLimits::default())
+                    .into_diagnostic()
+                    .wrap_err("Failed to load the package's Wasm event handlers")?;
+                host.load_library(handlers)
+                    .into_diagnostic()
+                    .wrap_err("Failed to register the package's Wasm event handlers")?;
+                (program, None, None, host)
+            },
             "masm" => {
                 let (program, package_debug_info, entrypoint_source_node, source_manager) =
                     get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
