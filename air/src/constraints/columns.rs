@@ -40,7 +40,7 @@ pub struct CoreCols<T> {
     pub stack: StackCols<T>,
 }
 
-/// Number of columns in the core trace (49), derived from the struct layout.
+/// Number of columns in the core trace (48), derived from the struct layout.
 pub const NUM_CORE_COLS: usize = size_of::<CoreCols<u8>>();
 
 impl<T> Borrow<CoreCols<T>> for [T] {
@@ -265,7 +265,7 @@ pub const NUM_ACE_EVAL_COLS: usize = size_of::<AceEvalCols<u8>>();
 pub const NUM_KERNEL_ROM_COLS: usize = size_of::<KernelRomCols<u8>>();
 
 const _: () = assert!(NUM_SYSTEM_COLS == 6);
-const _: () = assert!(NUM_DECODER_COLS == 24);
+const _: () = assert!(NUM_DECODER_COLS == 23);
 const _: () = assert!(NUM_STACK_COLS == 19);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
 const _: () = assert!(NUM_AEAD_STREAM_COLS == 20);
@@ -330,8 +330,9 @@ mod tests {
         assert_eq!(CORE_COL_MAP.decoder.in_span, DECODER_OFFSET + 16);
         assert_eq!(CORE_COL_MAP.decoder.group_count, DECODER_OFFSET + 17);
         assert_eq!(CORE_COL_MAP.decoder.op_index, DECODER_OFFSET + 18);
-        assert_eq!(CORE_COL_MAP.decoder.batch_flags[0], DECODER_OFFSET + 19);
-        assert_eq!(CORE_COL_MAP.decoder.extra[0], DECODER_OFFSET + 22);
+        assert_eq!(CORE_COL_MAP.decoder.full_batch, DECODER_OFFSET + 19);
+        assert_eq!(CORE_COL_MAP.decoder.batch_size_code, DECODER_OFFSET + 20);
+        assert_eq!(CORE_COL_MAP.decoder.extra[0], DECODER_OFFSET + 21);
     }
 
     #[test]

@@ -17,6 +17,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
+        decoder::batch::OpBatchSelectors,
         lookup::{
             main_air::{MainBusContext, MainLookupBuilder},
             messages::{BlockHashMsg, OpGroupMsg},
@@ -68,9 +69,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let f_push = op_flags.push();
 
     // Op-group batch-size selectors.
-    let c0: LB::Expr = dec.batch_flags[0].into();
-    let c1: LB::Expr = dec.batch_flags[1].into();
-    let c2: LB::Expr = dec.batch_flags[2].into();
+    let batch_selectors = OpBatchSelectors::new(dec.full_batch.into(), dec.batch_size_code.into());
 
     let gc: LB::Expr = dec.group_count.into();
 
@@ -180,12 +179,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
 
                     // =================== OP GROUP TABLE ===================
 
-                    // g8: c0 triggers a 7-add batch (groups 1..=7). Groups 1..=3 come from `h_0`
-                    // and groups 4..=7 from `h_1`.
+                    // g8: `full_batch` triggers a 7-add batch (groups 1..=7). Groups 1..=3 come
+                    // from `h_0` and groups 4..=7 from `h_1`.
                     let gc8 = gc.clone();
                     g.batch(
                         "g8_batch",
-                        c0.clone(),
+                        batch_selectors.groups_8,
                         move |b| {
                             let batch_id: LB::Expr = addr_next.into();
                             for i in 1u16..=3 {
@@ -208,12 +207,11 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                         Deg { v: 7, u: 8 }, // (V, U) = (6 + 1, 7 + 1)
                     );
 
-                    // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3 from
-                    // `h_0`).
+                    // g4: `size(size + 1) / 2` triggers a 3-add batch (groups 1..=3 from `h_0`).
                     let gc4 = gc.clone();
                     g.batch(
                         "g4_batch",
-                        c0.not() * c1.clone() * c2.not(),
+                        batch_selectors.groups_4,
                         move |b| {
                             let batch_id: LB::Expr = addr_next.into();
                             for i in 1u16..=3 {
@@ -221,25 +219,24 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g4_group",
                                     OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value),
-                                    Deg { v: 3, u: 4 },
+                                    Deg { v: 2, u: 3 },
                                 );
                             }
                         },
-                        Deg { v: 5, u: 6 }, // (V, U) = (2 + 3, 3 + 3)
+                        Deg { v: 4, u: 5 }, // (V, U) = (2 + 2, 3 + 2)
                     );
 
-                    // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1 (from `h_0[1]`).
+                    // g2: `size(size - 1) / 2` is a single add for group 1 (from `h_0[1]`).
                     let gc2 = gc.clone();
-                    let f_g2 = c0.not() * c1.not() * c2;
                     g.add(
                         "g2",
-                        f_g2,
+                        batch_selectors.groups_2,
                         move || {
                             let batch_id: LB::Expr = addr_next.into();
                             let group_value = h_0[1].into();
                             OpGroupMsg::new(&batch_id, gc2, 1, group_value)
                         },
-                        Deg { v: 3, u: 4 },
+                        Deg { v: 2, u: 3 },
                     );
 
                     // Removal: `in_span · (gc - gc_next)`-gated muxed removal whose group_value is
