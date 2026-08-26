@@ -228,6 +228,8 @@ fn byte_range(
     elem_size: usize,
     count: u32,
 ) -> Result<core::ops::Range<usize>, wasmi::Error> {
+    // With a `u32` count and an element size of at most 8 bytes, the length peaks at 2^35 and
+    // neither check can fire. Both stay as defense in depth for a future wider count.
     let len = (count as u64)
         .checked_mul(elem_size as u64)
         .ok_or_else(|| trap("pointer range length overflows"))?;
@@ -631,7 +633,10 @@ fn adv_map_value_read(
     if len > cap as usize {
         return Ok(Status::CapacityTooSmall.as_raw());
     }
-    charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT)?;
+    // The value copy, plus the second map probe: the `&ProcessorState` borrow conflicts with
+    // `mem.data_mut`, so the read resolves the entry again (see the standing borrow-split
+    // decision), and the guest pays for both probes.
+    charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let values = state(&caller)?
         .advice_provider()
         .get_mapped_values(&key)

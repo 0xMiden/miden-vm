@@ -14,8 +14,9 @@ use crate::{
     guest,
 };
 
-/// Attaches the Wasm handler module a project manifest declares to every package the project
-/// assembler builds.
+/// Attaches the Wasm handler module a project manifest declares to every package of the project
+/// under assembly (its library and executable targets). Source dependencies are never
+/// post-processed.
 ///
 /// The processor reads `[package.metadata.wasm-event-handlers]` (see the [crate] documentation
 /// for the schema). It builds the guest crate, or reads the prebuilt module, derives the

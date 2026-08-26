@@ -28,6 +28,16 @@ const RECORD_VERSION: u8 = 1;
 /// [`RECORD_VERSION`].
 const MANIFEST_SECTION_NAME: &str = "miden:event-manifest";
 
+/// The largest event name the package format accepts, in bytes.
+///
+/// Keep it in sync with `miden_mast_package::MAX_NAME_BYTES`; see [`RECORD_VERSION`].
+const MAX_NAME_BYTES: usize = 255;
+
+/// The name the module must give to its exported linear memory.
+///
+/// Keep it in sync with `miden_event_handler_abi::MEMORY_EXPORT`; see [`RECORD_VERSION`].
+const MEMORY_EXPORT: &str = "memory";
+
 /// Declares a function as a Wasm event handler for the given event name.
 ///
 /// The function must have the exact signature `fn name()`. Report errors with the SDK's `fail`
@@ -82,6 +92,23 @@ fn validate(event_name: &LitStr, func: &ItemFn) -> Result<(), syn2::Error> {
             "the 'sys::' event namespace is reserved for system events",
         ));
     }
+    if event.len() > MAX_NAME_BYTES {
+        return Err(syn2::Error::new(
+            event_name.span(),
+            format!("event name cannot be longer than {MAX_NAME_BYTES} bytes"),
+        ));
+    }
+    // The export name is the event name, and the loader needs the linear memory under
+    // `MEMORY_EXPORT`, so this name would make the module fail to load with an opaque error.
+    if event == MEMORY_EXPORT {
+        return Err(syn2::Error::new(
+            event_name.span(),
+            format!(
+                "event name cannot be '{MEMORY_EXPORT}': the module exports its linear memory \
+                 under that name"
+            ),
+        ));
+    }
 
     let sig = &func.sig;
     let signature_error = |msg: &str| Err(syn2::Error::new(sig.span(), msg));
@@ -107,4 +134,50 @@ fn manifest_record(event: &str, export: &str) -> Vec<u8> {
         record.extend(name.as_bytes());
     }
     record
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs the name and signature checks against a handler with the plain `fn name()` shape.
+    fn check(event: &str) -> Result<(), syn2::Error> {
+        let func: ItemFn = syn2::parse_str("fn handler() {}").expect("the fixture fn parses");
+        // The span comes from the fixture, so the test names no `proc_macro2` dependency.
+        let literal = LitStr::new(event, func.sig.ident.span());
+        validate(&literal, &func)
+    }
+
+    #[test]
+    fn a_plain_event_name_is_accepted() {
+        check("test::wasm::a").expect("a plain name passes");
+        check(&"e".repeat(MAX_NAME_BYTES)).expect("a name at the cap passes");
+    }
+
+    #[test]
+    fn an_empty_event_name_is_rejected() {
+        let err = check("").expect_err("an empty name fails");
+        assert!(err.to_string().contains("cannot be empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_reserved_event_name_is_rejected() {
+        let err = check("sys::map_value_to_stack").expect_err("a reserved name fails");
+        assert!(err.to_string().contains("reserved"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn an_over_long_event_name_is_rejected() {
+        let err = check(&"e".repeat(MAX_NAME_BYTES + 1)).expect_err("an over-long name fails");
+        assert!(err.to_string().contains("longer than"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn the_memory_export_name_is_rejected() {
+        let err = check(MEMORY_EXPORT).expect_err("the memory export name fails");
+        assert!(err.to_string().contains("linear memory"), "unexpected error: {err}");
+    }
 }

@@ -2,8 +2,9 @@
 
 A `PackagePostProcessor` plugin for the Miden project assembler. It reads the
 `[package.metadata.wasm-event-handlers]` table of a `miden-project.toml` manifest, produces the
-handler module the table names, and attaches the `event_handlers` section to every package the
-project assembles.
+handler module the table names, and attaches the `event_handlers` section to every package of the
+project under assembly (its library and executable targets). Source dependencies are never
+post-processed.
 
 The project assembler knows nothing about event handlers; register the processor to opt in:
 

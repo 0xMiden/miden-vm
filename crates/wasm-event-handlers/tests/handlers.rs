@@ -765,8 +765,9 @@ fn out_of_bounds_pointer_is_rejected() {
 }
 
 #[test]
-fn overflowing_pointer_arithmetic_is_rejected() {
-    // ptr = u32::MAX; ptr + len goes far past the guest memory and must not wrap.
+fn pointer_range_past_the_address_space_is_rejected() {
+    // ptr = u32::MAX, so ptr + len lands past the end of the 32-bit address space and far past
+    // the guest memory. The range check refuses it.
     let wat_src = fixture("(call $fail (i32.const -1) (i32.const 16))");
     let module = load(&wat_src);
     let err = run(&module, &processor()).expect_err("handler must trap");
@@ -1199,7 +1200,8 @@ fn duplicate_manifest_events_are_rejected() {
 
 #[test]
 fn reserved_event_names_are_rejected() {
-    let manifest = vec![(EventName::new("sys::custom"), "handler".to_string())];
+    // A real system event: no handler module may take over the name of a built-in event.
+    let manifest = vec![(EventName::new("sys::map_value_to_stack"), "handler".to_string())];
     let err = try_load("(module)", manifest).unwrap_err();
     assert!(
         matches!(err, WasmHandlerLoadError::InvalidManifest(_)),

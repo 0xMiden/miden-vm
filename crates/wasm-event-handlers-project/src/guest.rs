@@ -16,14 +16,17 @@ const TARGET: &str = "wasm32-unknown-unknown";
 const TARGET_HINT: &str =
     "if the target is missing, run `rustup target add wasm32-unknown-unknown`";
 
+/// The cargo target kind of the handler module.
+const CDYLIB_TARGET_KIND: &str = "cdylib";
+
 /// Builds the Rust guest crate at `crate_dir` and returns the bytes of the Wasm module it
 /// produces.
 ///
-/// The crate must produce exactly one `.wasm` artifact, which a `[lib]` with
-/// `crate-type = ["cdylib"]` gives. The build is a release build for
-/// `wasm32-unknown-unknown` and writes into a dedicated directory under the guest crate, so it
-/// never shares a target directory, and therefore never shares a build lock, with the build that
-/// runs the project assembler.
+/// The crate must produce exactly one `.wasm` artifact from a `cdylib` target, which a `[lib]`
+/// with `crate-type = ["cdylib"]` gives. Other targets of the crate, such as a binary, are
+/// ignored. The build is a release build for `wasm32-unknown-unknown` and writes into a dedicated
+/// directory under the guest crate, so it never shares a target directory, and therefore never
+/// shares a build lock, with the build that runs the project assembler.
 ///
 /// # Errors
 /// Returns an error when `cargo` is not available, when the build fails (the message carries the
@@ -102,11 +105,14 @@ fn cargo() -> OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"))
 }
 
-/// Collects the Wasm artifacts a cargo JSON message stream reports.
+/// Collects the Wasm artifacts of the `cdylib` targets a cargo JSON message stream reports.
 ///
 /// The artifact paths come from cargo's `compiler-artifact` messages rather than from the crate
 /// name, because the crate name is not the file name: cargo replaces `-` with `_`, and a manifest
 /// can rename the library target.
+///
+/// Only the `cdylib` targets count. A guest crate can hold a second Wasm-producing target, such
+/// as a `src/main.rs` binary, and that target is not the handler module.
 fn wasm_artifacts(stdout: &[u8]) -> Vec<PathBuf> {
     let mut artifacts = Vec::new();
     for line in stdout.split(|byte| *byte == b'\n') {
@@ -114,6 +120,16 @@ fn wasm_artifacts(stdout: &[u8]) -> Vec<PathBuf> {
             continue;
         };
         if message.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact") {
+            continue;
+        }
+        let is_cdylib = message
+            .get("target")
+            .and_then(|target| target.get("kind"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|kinds| {
+                kinds.iter().any(|kind| kind.as_str() == Some(CDYLIB_TARGET_KIND))
+            });
+        if !is_cdylib {
             continue;
         }
         let Some(filenames) = message.get("filenames").and_then(serde_json::Value::as_array) else {
@@ -139,10 +155,20 @@ mod tests {
 
     #[test]
     fn artifacts_come_from_the_compiler_artifact_messages() {
-        let stdout = br#"{"reason":"compiler-artifact","filenames":["/out/libdep.rlib"]}
-{"reason":"build-script-executed","filenames":["/out/ignored.wasm"]}
-{"reason":"compiler-artifact","filenames":["/out/guest.wasm","/out/guest.d"]}
+        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["lib"]},"filenames":["/out/libdep.rlib"]}
+{"reason":"build-script-executed","target":{"kind":["custom-build"]},"filenames":["/out/ignored.wasm"]}
+{"reason":"compiler-artifact","target":{"kind":["cdylib"]},"filenames":["/out/guest.wasm","/out/guest.d"]}
 not json
+"#;
+        assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
+    }
+
+    #[test]
+    fn only_the_cdylib_artifacts_count() {
+        // A guest crate with a `src/main.rs` also produces a `.wasm` binary; only the cdylib is
+        // the handler module.
+        let stdout = br#"{"reason":"compiler-artifact","target":{"kind":["bin"]},"filenames":["/out/guest-bin.wasm"]}
+{"reason":"compiler-artifact","target":{"kind":["cdylib"]},"filenames":["/out/guest.wasm"]}
 "#;
         assert_eq!(wasm_artifacts(stdout), vec![PathBuf::from("/out/guest.wasm")]);
     }

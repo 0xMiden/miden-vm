@@ -97,7 +97,8 @@ impl EventHandlerSection {
     /// manifest passes [`validate_manifest_entries`], which also bounds the handler count.
     ///
     /// Attaching, decoding, and deriving a section apply this check. The format decode does not:
-    /// it applies only the caps it needs before it allocates.
+    /// it applies only the caps it needs before it allocates, plus the rule that refuses an empty
+    /// event or export name.
     ///
     /// # Errors
     /// Returns an error when the section breaks one of the rules above.
