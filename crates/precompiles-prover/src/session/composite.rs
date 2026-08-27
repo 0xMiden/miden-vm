@@ -18,13 +18,29 @@ pub(crate) fn byte_pair_and8_trace(
 
 #[cfg(test)]
 mod tests {
-    use miden_air::and8_lookup::columns::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS};
-    use miden_lifted_air::ConstraintDegrees;
+    use std::vec;
+
+    use miden_air::{
+        MidenAir,
+        and8_lookup::columns::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
+    };
+    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+    use miden_crypto::stark::air::ConstraintDegrees;
+    use miden_lifted_air::{BaseAir, LiftedAir};
 
     use super::*;
-    use crate::primitives::byte_pair_lut::{
-        BytePairLutRequires, BytePairOp, COL_MULT_XOR, generate_trace,
+    use crate::{
+        composite::extract_band,
+        logup::NUM_RANDOMNESS,
+        primitives::byte_pair_lut::{
+            BytePairLutRequires, BytePairOp, COL_MULT_XOR, NUM_AUX_COLS as BPL_AUX_COLS,
+            NUM_MAIN_COLS as BPL_MAIN_COLS, generate_trace,
+        },
+        session::ChipletAir,
     };
+
+    const BPL_VALUE_OFFSET: usize = 0;
+    const AND8_VALUE_OFFSET: usize = 1;
 
     fn test_challenges() -> [QuadFelt; NUM_RANDOMNESS] {
         [
@@ -56,7 +72,7 @@ mod tests {
 
     #[test]
     fn byte_pair_and8_shape_and_degree_match_design() {
-        let air = BytePairAnd8Air;
+        let air = ChipletAir::BytePairAnd8;
 
         assert_eq!(air.width(), 13);
         assert_eq!(air.preprocessed_width(), 15);
@@ -71,7 +87,7 @@ mod tests {
 
     #[test]
     fn embedded_and8_auxiliary_band_matches_standalone_and_is_component_local() {
-        let air = BytePairAnd8Air;
+        let air = ChipletAir::BytePairAnd8;
         let challenges = test_challenges();
         let main = composite_main_fixture();
         let and8_main = extract_band(&main, BPL_MAIN_COLS..air.width());
