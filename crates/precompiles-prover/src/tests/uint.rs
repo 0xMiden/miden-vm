@@ -2,26 +2,32 @@
 //! `UintVal` bus (3b-1), and `Range16` limb checks balanced against the
 //! byte-pair LUT (3b-2).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, vec::Vec};
 
-use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
+use miden_air::lookup::{
+    Challenges, LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+    debug::{ValidateLayout, ValidateLookupAir},
+};
 use miden_core::{
     Felt,
-    field::QuadFelt,
+    field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::LiftedAir;
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
-    math::{U256, from_limbs16, to_limbs16, to_limbs32},
+    composite::extract_band,
+    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{
         CARRY_HI_BEGIN, CARRY_LO_BEGIN, COL_PTR, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
         UintStoreAir,
-        mul::trace::UintMulRequires,
+        mul::{NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, UintMulAir, trace::UintMulRequires},
         store_mul::{
+            AUX_WIDTH as STORE_MUL_AUX_WIDTH, NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS,
             NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
             trace::generate_trace as store_mul_trace,
         },
@@ -90,13 +96,68 @@ fn fold_balance<A>(
     A: LiftedAir<Felt, QuadFelt> + Sync,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
-    let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let fractions = build_lookup_fractions(air, lookup_main, None, &periodic, challenges);
+    let fractions = lookup_fractions(air, main, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
+}
+
+fn lookup_fractions<A>(
+    air: &A,
+    main: &RowMajorMatrix<Felt>,
+    challenges: &Challenges<QuadFelt>,
+) -> LookupFractions<Felt, QuadFelt>
+where
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    let periodic = air.periodic_columns();
+    let combined = crate::tests::combined_lookup_main(air, main);
+    let lookup_main = combined.as_ref().unwrap_or(main);
+    build_lookup_fractions(air, lookup_main, None, &periodic, challenges)
+}
+
+/// Cross-multiply every row-local lookup column from the prover's raw fractions.
+fn lookup_column_folds(
+    fractions: &LookupFractions<Felt, QuadFelt>,
+) -> Vec<Vec<(QuadFelt, QuadFelt)>> {
+    let num_columns = fractions.num_columns();
+    let mut cursor = 0;
+    let mut rows = Vec::with_capacity(fractions.num_rows());
+
+    for row_counts in fractions.counts().chunks(num_columns) {
+        let mut row = Vec::with_capacity(num_columns);
+        for &count in row_counts {
+            let mut numerator = QuadFelt::ZERO;
+            let mut denominator = QuadFelt::ONE;
+            for &(multiplicity, encoded) in &fractions.fractions()[cursor..cursor + count] {
+                let multiplicity = QuadFelt::new([multiplicity, Felt::ZERO]);
+                numerator = numerator * encoded + multiplicity * denominator;
+                denominator *= encoded;
+            }
+            cursor += count;
+            row.push((numerator, denominator));
+        }
+        rows.push(row);
+    }
+
+    assert_eq!(cursor, fractions.fractions().len());
+    rows
+}
+
+fn add_rational_folds(
+    (left_v, left_u): (QuadFelt, QuadFelt),
+    (right_v, right_u): (QuadFelt, QuadFelt),
+) -> (QuadFelt, QuadFelt) {
+    (left_v * right_u + right_v * left_u, left_u * right_u)
+}
+
+fn assert_same_rational_fold(
+    actual: (QuadFelt, QuadFelt),
+    expected: (QuadFelt, QuadFelt),
+    context: &str,
+) {
+    assert_eq!(actual.0 * expected.1, expected.0 * actual.1, "{context}");
 }
 
 #[test]
@@ -297,11 +358,149 @@ fn uint_store_empty_pads_to_one_block() {
 }
 
 #[test]
-fn log_quotient_degree_matches_design_target() {
-    // Flattened to lqd 1: every fraction is a degree-2 multiplicity,
-    // paired ≤ 2 per column (the folded closing check on the `bound` row
-    // adds no new multiplication chain, mirroring `UintMulAir`'s `c` row).
-    assert_eq!(crate::tests::log_quotient_degree(&UintStoreAir), 1);
+fn uint_store_shape_and_degree_match_design() {
+    let air = UintStoreAir;
+
+    assert_eq!(air.width(), 18);
+    assert_eq!(air.aux_width(), 12);
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 3, ext: 3 }
+    );
+    // Flattened to lqd 1: ordinary two-fraction columns fold to degree `(2, 2)`,
+    // while the anchor is degree `(2, 1)`. The folded closing check on the `bound`
+    // row adds no new multiplication chain, mirroring `UintMulAir`'s `c` row.
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
+
+    let layout = ValidateLayout {
+        preprocessed_width: air.preprocessed_width(),
+        trace_width: air.width(),
+        num_public_values: NUM_PUBLIC_VALUES,
+        num_periodic_columns: air.periodic_columns().len(),
+        permutation_width: air.aux_width(),
+        num_permutation_challenges: NUM_RANDOMNESS,
+        num_permutation_values: NUM_LOGUP_VALUES,
+    };
+    ValidateLookupAir::validate(&air, layout)
+        .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
+}
+
+#[test]
+fn uint_store_mul_shape_and_degree_match_design() {
+    let air = UintStoreMulAir;
+
+    assert_eq!(air.width(), 44);
+    assert_eq!(air.aux_width(), 27);
+    assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 24);
+    let mut expected_shape = [2usize; 24];
+    expected_shape[0] = 1;
+    let actual_shape =
+        <UintStoreMulAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air);
+    assert_eq!(actual_shape, expected_shape);
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 3, ext: 3 }
+    );
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
+
+    let layout = ValidateLayout {
+        preprocessed_width: air.preprocessed_width(),
+        trace_width: air.width(),
+        num_public_values: NUM_PUBLIC_VALUES,
+        num_periodic_columns: air.periodic_columns().len(),
+        permutation_width: STORE_MUL_AUX_WIDTH,
+        num_permutation_challenges: NUM_RANDOMNESS,
+        num_permutation_values: NUM_LOGUP_VALUES,
+    };
+    ValidateLookupAir::validate(&air, layout)
+        .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
+}
+
+#[test]
+fn uint_store_mul_lookup_matches_its_standalone_components() {
+    let mut rng = StdRng::seed_from_u64(0x51_0a_27);
+    let bound = random_modulus(&mut rng);
+    let a = random_uint_below(&mut rng, bound);
+    let b = random_uint_below(&mut rng, bound);
+    let c = random_uint_below(&mut rng, bound);
+
+    let mut store = UintStoreRequires::new();
+    let fp = store.pin_modulus(1, bound);
+    let a_ptr = store.intern_pinned(2, a, fp);
+    let b_ptr = store.intern_pinned(3, b, fp);
+    let c_ptr = store.intern_pinned(4, c, fp);
+    let r = mac_reduce(1, a, b, 1, c, bound);
+    let r_ptr = store.intern(r, fp);
+
+    let mut mul = UintMulRequires::new();
+    mul.record(1, a_ptr, b_ptr, 1, c_ptr, r_ptr, fp, 1);
+
+    let mut bpl = BytePairLutRequires::new();
+    let composite_main = store_mul_trace(store, mul, &mut bpl);
+    crate::tests::check_local(UintStoreMulAir, &composite_main);
+    let store_main = extract_band(&composite_main, 0..NUM_MAIN_COLS);
+    let mul_main = extract_band(&composite_main, NUM_MAIN_COLS..NUM_MAIN_COLS + MUL_NUM_MAIN_COLS);
+
+    let [alpha, beta] = [rand_qf(&mut rng), rand_qf(&mut rng)];
+    let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+
+    // Compare the two repacked columns against the exact rational sums of their standalone source
+    // columns. This checks every row and does not erase interactions that happen to balance.
+    const STORE_RAW_PROVIDE_COL: usize = 10;
+    const MUL_PROVIDE_COL: usize = 0;
+    const MUL_BOUND_RAW_COL: usize = 2;
+    const MUL_TAIL_RANGE16_COL: usize = 12;
+    const COMPOSITE_PROVIDES_COL: usize = 10;
+    const COMPOSITE_BOUND_RANGE16_COL: usize = 21;
+
+    let composite_folds =
+        lookup_column_folds(&lookup_fractions(&UintStoreMulAir, &composite_main, &challenges));
+    let store_folds =
+        lookup_column_folds(&lookup_fractions(&UintStoreAir, &store_main, &challenges));
+    let mul_folds = lookup_column_folds(&lookup_fractions(&UintMulAir, &mul_main, &challenges));
+
+    for row in 0..composite_main.height() {
+        assert_same_rational_fold(
+            composite_folds[row][COMPOSITE_PROVIDES_COL],
+            add_rational_folds(
+                store_folds[row][STORE_RAW_PROVIDE_COL],
+                mul_folds[row][MUL_PROVIDE_COL],
+            ),
+            "packed store/mul provide column must preserve both source fractions",
+        );
+        assert_same_rational_fold(
+            composite_folds[row][COMPOSITE_BOUND_RANGE16_COL],
+            add_rational_folds(
+                mul_folds[row][MUL_BOUND_RAW_COL],
+                mul_folds[row][MUL_TAIL_RANGE16_COL],
+            ),
+            "packed bound/Range16 column must preserve both source fractions",
+        );
+    }
+
+    for (name, folds, column) in [
+        ("store raw provide", &store_folds, STORE_RAW_PROVIDE_COL),
+        ("mul provide", &mul_folds, MUL_PROVIDE_COL),
+        ("mul bound raw consume", &mul_folds, MUL_BOUND_RAW_COL),
+        ("mul tail Range16", &mul_folds, MUL_TAIL_RANGE16_COL),
+    ] {
+        assert!(
+            folds.iter().any(|row| row[column].0 != QuadFelt::ZERO),
+            "fixture must activate {name}",
+        );
+    }
+
+    let mut composite_net = HashMap::new();
+    fold_balance(&UintStoreMulAir, &composite_main, &challenges, &mut composite_net);
+    composite_net.retain(|_, multiplicity| *multiplicity != Felt::ZERO);
+
+    let mut standalone_net = HashMap::new();
+    fold_balance(&UintStoreAir, &store_main, &challenges, &mut standalone_net);
+    fold_balance(&UintMulAir, &mul_main, &challenges, &mut standalone_net);
+    standalone_net.retain(|_, multiplicity| *multiplicity != Felt::ZERO);
+
+    assert!(!standalone_net.is_empty(), "fixture must exercise externally supplied lookups");
+    assert_eq!(composite_net, standalone_net);
 }
 
 #[test]
