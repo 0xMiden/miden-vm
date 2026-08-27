@@ -8,7 +8,7 @@ use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -33,6 +33,14 @@ pub struct ProveCmd {
     /// Maximum number of cycles a program is allowed to consume
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
+
+    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    #[arg(
+        long = "max-prover-memory",
+        default_value_t = Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+        value_parser = parse_byte_size
+    )]
+    max_prover_memory: u64,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -163,6 +171,7 @@ impl ProveCmd {
         let stack_outputs = *witness.claim().stack_outputs();
         let proof = Prover::new()
             .with_hash_fn(hash_fn)
+            .with_max_prover_memory_bytes(self.max_prover_memory)
             .prove_full(witness)
             .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 

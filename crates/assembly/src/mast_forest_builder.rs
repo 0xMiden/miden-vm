@@ -169,9 +169,10 @@ impl<'a> StaticLibrary<'a> {
         Self {
             mast,
             debug_info,
-            // Direct forest-backed static libraries do not have a package digest, so their source
-            // identity is the full forest commitment. This keeps provenance hints scoped to the
-            // same roots, external dependencies, and advice as package-backed static libraries.
+            // Direct forest-backed static libraries do not have a package commitment, so their
+            // source identity is the full forest commitment. This keeps provenance
+            // hints scoped to the same roots, external dependencies, and advice as
+            // package-backed static libraries.
             source_library_commitment: mast.commitment(),
             alternate_source_library_commitment: None,
         }
@@ -183,7 +184,7 @@ impl<'a> StaticLibrary<'a> {
     ) -> Result<Self, ManifestValidationError> {
         Ok(Self::from_mast_forest(library.mast().as_ref(), debug_info)
             .with_source_library_commitment(library.commitment())
-            .with_alternate_source_library_commitment(library.interface_digest()?))
+            .with_alternate_source_library_commitment(library.interface_commitment()?))
     }
 
     fn with_source_library_commitment(mut self, source_library_commitment: Word) -> Self {
@@ -1149,10 +1150,19 @@ impl MastForestBuilder {
     ) -> Result<(), Report> {
         use miden_assembly_syntax::ast::types::Type;
 
+        let source_name = procedure.source_name_fully_qualified(source_manager)?;
         if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
             let source_ref = Some(procedure.body_source_ref());
             let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
-            let name_idx = self.debug_info.add_string(procedure.path().as_str());
+            let linkage_name = procedure.path().as_str();
+            let name_idx = self
+                .debug_info
+                .add_string(source_name.as_ref().map_or(linkage_name, |name| name.as_str()));
+            let linkage_name_idx = if source_name.is_some() {
+                Some(self.debug_info.add_string(linkage_name))
+            } else {
+                None
+            };
             let type_idx = if let Some(signature) = procedure.signature() {
                 Some(self.debug_info.register_debug_type(
                     Some(name_idx),
@@ -1162,7 +1172,7 @@ impl MastForestBuilder {
             } else {
                 None
             };
-            let func_info = FunctionInfo::new(
+            let mut func_info = FunctionInfo::new(
                 source_ref,
                 name_idx,
                 file_idx,
@@ -1170,11 +1180,12 @@ impl MastForestBuilder {
                 file_line_col.column,
                 procedure.mast_root(),
             );
-            let func_info = if let Some(type_idx) = type_idx {
-                func_info.with_type(type_idx)
-            } else {
-                func_info
-            };
+            if let Some(linkage_name_idx) = linkage_name_idx {
+                func_info = func_info.with_linkage_name(linkage_name_idx);
+            }
+            if let Some(type_idx) = type_idx {
+                func_info = func_info.with_type(type_idx);
+            }
             self.debug_info.add_function(func_info);
         }
 

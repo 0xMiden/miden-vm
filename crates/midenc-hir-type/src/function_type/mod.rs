@@ -13,7 +13,6 @@ use super::Type;
 /// Function types are reference types, i.e. they are always implicitly a handle/pointer to a
 /// function, not a function value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FunctionType {
     /// The calling convention/ABI of the function represented by this type
     pub abi: CallConv,
@@ -22,6 +21,7 @@ pub struct FunctionType {
     /// The result types of this function
     pub results: SmallVec<[Type; 1]>,
 }
+
 impl FunctionType {
     /// Create a new function type with the given calling/convention ABI
     pub fn new<P: IntoIterator<Item = Type>, R: IntoIterator<Item = Type>>(
@@ -44,7 +44,7 @@ impl FunctionType {
 
     /// The calling convention/ABI represented by this function type
     pub fn calling_convention(&self) -> CallConv {
-        self.abi
+        self.abi.clone()
     }
 
     /// The number of parameters expected by the function

@@ -47,11 +47,13 @@ fn assert_valid_type_alignments(ty: &Type) {
     match ty {
         Type::Ptr(pointer) => assert_valid_type_alignments(pointer.pointee()),
         Type::Struct(structure) => {
+            let structure = structure.get();
             for field in structure.fields() {
                 assert_valid_type_alignments(&field.ty);
             }
         },
         Type::Enum(enumeration) => {
+            let enumeration = enumeration.get();
             assert_valid_type_alignments(enumeration.discriminant());
             for variant in enumeration.variants() {
                 if let Some(value) = variant.value.as_ref() {
@@ -106,10 +108,8 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let mut framing_reader = SliceReader::new(data);
-    let declared_payload_len = framing_reader
-        .read_u8()
-        .and_then(|_| framing_reader.read_usize())
-        .ok();
+    let declared_payload_len =
+        framing_reader.read_u8().and_then(|_| framing_reader.read_usize()).ok();
     let mut reader = SliceReader::new(data);
     let debug_info = PackageDebugInfo::read_from(&mut reader);
     if declared_payload_len.is_some_and(|len| len > MAX_DEBUG_INFO_PAYLOAD_SIZE) {

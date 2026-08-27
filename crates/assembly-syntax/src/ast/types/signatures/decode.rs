@@ -29,17 +29,18 @@ pub(super) fn decode_type<'a>(
 ) -> Result<(String, &'a [Felt]), TypedError> {
     match ty {
         Type::Struct(struct_ty) => {
+            let struct_ty = struct_ty.get();
             // A codec decides the output for its own type. If it says the value is bad, the
             // error goes to the caller. We do not try the field by field way below, because that
             // would make a bad value look good.
-            if let Some(codec) = codec_for_struct(codecs, struct_ty) {
+            if let Some(codec) = codec_for_struct(codecs, &struct_ty) {
                 let n = felt_count(ty).ok_or(TypedError::UnsupportedType("struct"))?;
                 let (chunk, rest) = take_felts(felts, n, ty)?;
                 return Ok((codec.decode(chunk)?, rest));
             }
 
             // A struct with mixed field names has no shape, so we cannot tell how it was written.
-            let (name, tuple) = match struct_shape(struct_ty) {
+            let (name, tuple) = match struct_shape(&struct_ty) {
                 Some(StructShape::Tuple { name }) => (name, true),
                 Some(StructShape::Record { name }) => (name, false),
                 None => {

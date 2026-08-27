@@ -76,7 +76,6 @@ impl Type {
             | Self::Ptr(_)
             | Self::I16
             | Self::U16
-            | Self::List(_)
             | Self::Function(_)
             | Self::Enum(_)) => {
                 let len = ty.size_in_bytes();
@@ -160,7 +159,7 @@ impl Type {
                     }
                 },
             },
-            Self::Struct(struct_ty) => match &*struct_ty {
+            Self::Struct(struct_ty) => match &*struct_ty.get() {
                 StructType { repr: TypeRepr::Transparent, fields, .. } => {
                     let underlying = fields
                         .into_iter()
@@ -384,10 +383,18 @@ impl Type {
                     }
                 },
             },
+            Type::List(pointee_ty) => {
+                // The layout of a `List<T>` is `(len, ptr<T>)`
+                let list_repr_ty = Type::from(StructType::new([
+                    Type::U32,
+                    Type::Ptr(Arc::new(PointerType::new(pointee_ty.as_ref().clone()))),
+                ]));
+                list_repr_ty.split(n)
+            },
             // These types either have no size, or are 1 byte in size, so must have
             // been handled above when checking if the size of the type is <= the
             // requested split size
-            Self::Unknown | Self::Never | Self::I1 | Self::U8 | Self::I8 => {
+            Self::Unknown | Self::Never | Self::Variadic | Self::I1 | Self::U8 | Self::I8 => {
                 unreachable!()
             },
         }
@@ -397,14 +404,14 @@ impl Type {
     pub fn min_alignment(&self) -> usize {
         match self {
             // These types don't have a meaningful alignment, so choose byte-aligned
-            Self::Unknown | Self::Never => 1,
+            Self::Unknown | Self::Never | Self::Variadic => 1,
             // Felts must be naturally aligned to a 32-bit boundary (4 bytes)
             Self::Felt => 4,
             // 256-bit and 128-bit integers must be word-aligned
             Self::U256 | Self::I128 | Self::U128 => 16,
             // 64-bit integers and floats must be element-aligned
             Self::I64 | Self::U64 | Self::F64 => 4,
-            // 32-bit integers and pointers must be element-aligned
+            // 32-bit integers and pointers (raw or fat) must be element-aligned
             Self::I32 | Self::U32 | Self::Ptr(_) | Self::Function(..) | Self::List(_) => 4,
             // 16-bit integers can be naturally aligned
             Self::I16 | Self::U16 => 2,
@@ -423,7 +430,7 @@ impl Type {
     pub fn size_in_bits(&self) -> usize {
         match self {
             // These types have no representation in memory
-            Self::Unknown | Self::Never => 0,
+            Self::Unknown | Self::Never | Self::Variadic => 0,
             // Booleans are represented as i1
             Self::I1 => 1,
             // Integers are naturally sized
@@ -438,12 +445,12 @@ impl Type {
             Self::I64 | Self::U64 | Self::F64 => 64,
             Self::I128 | Self::U128 => 128,
             Self::U256 => 256,
-            // Raw pointers  are 32-bits, the same size as the native integer width, u32
+            // Raw pointers are 32-bits, the same size as the native integer width, u32
             Self::Ptr(_) | Self::Function(_) => 32,
-            // Lists are fat pointers containing a pointer and a length.
+            // Fat pointers are 64-bits, (32-bit metadata + raw pointer)
             Self::List(_) => 64,
             // Packed structs have no alignment padding between fields
-            Self::Struct(struct_ty) => struct_ty.size as usize * 8,
+            Self::Struct(struct_ty) => struct_ty.size() * 8,
             Self::Enum(enum_ty) => enum_ty.size_in_bits(),
             Self::Array(array_ty) => array_ty.size_in_bits(),
         }
@@ -518,9 +525,47 @@ impl Type {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use smallvec::smallvec;
 
     use crate::*;
+
+    #[test]
+    fn self_recursive_struct_through_a_pointer_has_a_finite_layout() {
+        // struct Node { value: u32, next: *Node }
+        //
+        // The recursion crosses a pointer, so `Node` has a statically computable layout:
+        // a 4-byte u32 followed by a 4-byte pointer.
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::new(
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+        let mut built = builder.build().expect("Node should build");
+        let node = built.remove("Node").expect("Node should be present");
+
+        assert_eq!(node.size_in_bytes(), 8);
+        assert_eq!(node.min_alignment(), 4);
+        assert!(!node.is_zst());
+        assert!(node.is_struct());
+    }
+
+    #[test]
+    #[should_panic(expected = "expected no more than 255 fields")]
+    fn struct_type_rejects_more_than_255_fields() {
+        // 256 fields is representable by `StructField::index` (a u8 holds 0..=255), but the
+        // wire format encodes the field count as a u8, so 256 would serialize as 0. The
+        // constructor must reject it rather than build a struct that cannot round-trip.
+        let fields = core::iter::repeat_n(Type::U8, 256).collect::<Vec<_>>();
+        let _ = StructType::new(fields);
+    }
 
     #[test]
     fn struct_type_test() {

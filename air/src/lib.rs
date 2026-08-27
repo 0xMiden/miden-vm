@@ -29,6 +29,7 @@ pub mod ace;
 pub mod config;
 mod constraints;
 pub mod lookup;
+pub mod memory;
 mod proof_order;
 pub mod security;
 pub mod trace;
@@ -89,6 +90,7 @@ mod export {
             LiftedAirBuilder, MultiAir, PermutationAirBuilder, ProverStatement, Statement,
         },
         debug,
+        pcs::PcsParams,
     };
 }
 

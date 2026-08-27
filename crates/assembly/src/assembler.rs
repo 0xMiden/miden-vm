@@ -680,7 +680,8 @@ impl Assembler {
                     signature.clone(),
                     module_kind.is_kernel(),
                     self.source_manager.clone(),
-                );
+                )
+                .with_attributes(attributes.clone());
 
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
@@ -1242,6 +1243,7 @@ impl Assembler {
                         self.source_manager.clone(),
                     )
                     .with_span(proc.span())
+                    .with_attributes(proc.attributes().clone())
                     .with_num_locals(num_locals)?;
 
                     // Compile this procedure

@@ -465,6 +465,7 @@ const TYPE_TAG_STRUCT: u8 = 3;
 const TYPE_TAG_FUNCTION: u8 = 4;
 const TYPE_TAG_UNKNOWN: u8 = 5;
 const TYPE_TAG_ENUM: u8 = 6;
+const TYPE_TAG_VARIADIC: u8 = 7;
 
 impl Serializable for DebugTypeInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -522,6 +523,9 @@ impl Serializable for DebugTypeInfo {
             },
             Self::Unknown => {
                 target.write_u8(TYPE_TAG_UNKNOWN);
+            },
+            Self::Variadic => {
+                target.write_u8(TYPE_TAG_VARIADIC);
             },
         }
     }
@@ -582,6 +586,7 @@ impl Deserializable for DebugTypeInfo {
                 })
             },
             TYPE_TAG_UNKNOWN => Ok(Self::Unknown),
+            TYPE_TAG_VARIADIC => Ok(Self::Variadic),
             _ => Err(DeserializationError::InvalidValue(alloc::format!("invalid type tag: {tag}"))),
         }
     }

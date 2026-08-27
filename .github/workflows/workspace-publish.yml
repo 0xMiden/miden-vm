@@ -22,9 +22,9 @@ on:
         default: ""
         type: string
       allow_existing:
-        description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
+        description: "Exclude crate versions that already exist on crates.io."
         required: false
-        default: false
+        default: true
         type: boolean
       skip_package_version_gate:
         description: "Skip the package version gate. Use only for manual release recovery after maintainers verify the release plan."
@@ -252,7 +252,7 @@ jobs:
           mode: "publish"
           verify-main-head: "true"
           packages: ${{ github.event.inputs.packages || '' }}
-          allow_existing: ${{ github.event.inputs.allow_existing || 'false' }}
+          allow_existing: ${{ github.event.inputs.allow_existing || 'true' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 

@@ -80,6 +80,11 @@ pub enum ExecutionError {
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
+    /// This means the modelled peak prover memory for the trace exceeds the configured budget.
+    #[error(
+        "estimated prover memory of {estimated_bytes} bytes exceeds the budget of {budget_bytes} bytes"
+    )]
+    ProverMemoryExceeded { estimated_bytes: u64, budget_bytes: u64 },
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
