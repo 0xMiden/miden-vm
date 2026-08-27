@@ -110,3 +110,73 @@ pub fn get_masm_program(
 
     Ok((program, debug_info, entrypoint_source_node, source_manager))
 }
+
+/// Parses a byte-size string into a byte count.
+///
+/// A bare integer is interpreted as bytes. A trailing `K`/`M`/`G` suffix scales it by
+/// 1000/1000²/1000³; a trailing `Ki`/`Mi`/`Gi` suffix scales it by 1024/1024²/1024³.
+pub fn parse_byte_size(input: &str) -> Result<u64, String> {
+    const KI: u64 = 1024;
+    const MI: u64 = KI * 1024;
+    const GI: u64 = MI * 1024;
+    const K: u64 = 1000;
+    const M: u64 = K * 1000;
+    const G: u64 = M * 1000;
+
+    let trimmed = input.trim();
+    let (digits, multiplier) = [("Ki", KI), ("Mi", MI), ("Gi", GI), ("K", K), ("M", M), ("G", G)]
+        .into_iter()
+        .find_map(|(suffix, multiplier)| {
+            trimmed.strip_suffix(suffix).map(|digits| (digits, multiplier))
+        })
+        .unwrap_or((trimmed, 1));
+
+    let value: u64 = digits.trim().parse().map_err(|_| {
+        format!(
+            "`{input}` is not a valid byte size (expected a bare integer or a K/M/G/Ki/Mi/Gi suffix, e.g. `512M`, `32Gi`)"
+        )
+    })?;
+
+    value
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("`{input}` overflows a 64-bit byte count"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_byte_size_accepts_bare_integers() {
+        assert_eq!(parse_byte_size("0").unwrap(), 0);
+        assert_eq!(parse_byte_size("12345").unwrap(), 12345);
+    }
+
+    #[test]
+    fn parse_byte_size_accepts_decimal_suffixes() {
+        assert_eq!(parse_byte_size("1K").unwrap(), 1_000);
+        assert_eq!(parse_byte_size("512M").unwrap(), 512_000_000);
+        assert_eq!(parse_byte_size("32G").unwrap(), 32_000_000_000);
+    }
+
+    #[test]
+    fn parse_byte_size_accepts_binary_suffixes() {
+        assert_eq!(parse_byte_size("1Ki").unwrap(), 1024);
+        assert_eq!(parse_byte_size("1Mi").unwrap(), 1024 * 1024);
+        assert_eq!(parse_byte_size("64Gi").unwrap(), 64 << 30);
+    }
+
+    #[test]
+    fn parse_byte_size_rejects_garbage() {
+        assert!(parse_byte_size("").is_err());
+        assert!(parse_byte_size("G").is_err());
+        assert!(parse_byte_size("12X").is_err());
+        assert!(parse_byte_size("12.5M").is_err());
+    }
+
+    #[test]
+    fn parse_byte_size_rejects_overflow() {
+        // The digits alone fit in a u64, but multiplying by the suffix overflows.
+        assert!(parse_byte_size("18446744073709551615G").is_err());
+    }
+}

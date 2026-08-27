@@ -507,3 +507,286 @@ mod prover_api_lifecycle {
         assert!(two_outcome.is_complete());
     }
 }
+
+mod execution_witness_serialization {
+    use std::sync::Arc;
+
+    use miden_assembly::{Assembler, DefaultSourceManager};
+    #[cfg(feature = "arbitrary")]
+    use miden_core::Felt;
+    use miden_core::{
+        Word,
+        mast::{
+            BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
+        },
+        operations::Operation,
+        proof::ExecutionProof,
+    };
+    use miden_processor::{
+        DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
+        trace::build_trace,
+    };
+    use miden_prover::{
+        HashFunction, Prover,
+        serde::{Deserializable, Serializable},
+    };
+    #[cfg(feature = "arbitrary")]
+    use miden_utils_testing::proptest::prelude::*;
+    use miden_verifier::Verifier;
+    use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
+
+    fn default_source_manager_host() -> DefaultHost {
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
+    }
+
+    fn create_simple_library() -> HostLibrary {
+        let mut mast_forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        mast_forest.make_root(swap_block);
+        HostLibrary::from(Arc::new(mast_forest))
+    }
+
+    fn external_lib_proc_digest() -> Word {
+        let mut forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.get_node_by_id(swap_block).unwrap().digest()
+    }
+
+    fn external_program() -> Program {
+        let mut program = MastForest::new();
+        let basic_block = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut program)
+            .unwrap();
+        let external_node = ExternalNodeBuilder::new(external_lib_proc_digest())
+            .add_to_forest(&mut program)
+            .unwrap();
+        let root = JoinNodeBuilder::new([basic_block, external_node])
+            .add_to_forest(&mut program)
+            .unwrap();
+        program.make_root(root);
+        Program::new(Arc::new(program), root)
+    }
+
+    fn stack_neutral_program_source(operations: &[u8]) -> String {
+        let mut source = String::from("begin push.1 drop");
+        for operation in operations {
+            source.push_str(match operation {
+                0 => " push.1 drop",
+                1 => " push.1 push.2 add drop",
+                2 => " push.1 dup drop drop",
+                _ => " push.1 push.2 swap drop drop",
+            });
+        }
+        source.push_str(" end");
+        source
+    }
+
+    fn execute_witness(source: &str, stack_inputs: StackInputs) -> ExecutionWitness {
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = default_source_manager_host();
+        FastProcessor::new(stack_inputs)
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness")
+    }
+
+    fn write_execution_witness_fuzz_seed(
+        corpus_dir: &std::path::Path,
+        name: &str,
+        witness: ExecutionWitness,
+    ) {
+        let bytes = witness.to_bytes();
+        let budget = bytes.len().saturating_mul(4);
+        ExecutionWitness::read_from_bytes_with_budget(&bytes, budget)
+            .expect("witness seed should decode within the fuzzing budget");
+        std::fs::write(corpus_dir.join(name), bytes).expect("witness seed should be writable");
+    }
+
+    #[test]
+    #[ignore = "generates corpus files rather than asserting behavior"]
+    fn generate_execution_witness_fuzz_seeds() {
+        let corpus_dir =
+            std::path::Path::new("../tools/miden-core-fuzz/corpus/execution_witness_deserialize");
+        std::fs::create_dir_all(corpus_dir).expect("fuzz corpus directory should be writable");
+
+        let ordinary =
+            execute_witness(&stack_neutral_program_source(&[0, 1, 2, 3]), StackInputs::default());
+        write_execution_witness_fuzz_seed(corpus_dir, "ordinary.bin", ordinary);
+
+        let deferred = execute_witness("begin log_deferred end", StackInputs::default());
+        write_execution_witness_fuzz_seed(corpus_dir, "deferred.bin", deferred);
+    }
+
+    #[cfg(feature = "arbitrary")]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn proptest_execution_witness_round_trip_preserves_trace(
+            inputs in prop::collection::vec(any::<u32>(), 0..=16),
+            operations in prop::collection::vec(0_u8..4, 0..=16),
+        ) {
+            let source = stack_neutral_program_source(&operations);
+            let stack = inputs.iter().copied().map(Felt::from_u32).collect::<Vec<_>>();
+            let stack_inputs = StackInputs::new(&stack).expect("generated stack should be valid");
+            let witness = execute_witness(&source, stack_inputs);
+
+            let expected_claim = witness.claim();
+            let witness_bytes = witness.to_bytes();
+            let witness_budget = witness_bytes
+                .len()
+                .checked_mul(4)
+                .expect("generated witness budget should fit usize");
+            let restored = ExecutionWitness::read_from_bytes_with_budget(
+                &witness_bytes,
+                witness_budget,
+            )
+            .expect("generated witness should round trip");
+
+            prop_assert_eq!(restored.claim(), expected_claim);
+            prop_assert_eq!(restored.to_bytes(), witness_bytes);
+
+            let (original_vm, _) = witness.into_parts();
+            let (restored_vm, _) = restored.into_parts();
+            let original_trace =
+                build_trace(original_vm).expect("original generated witness should build a trace");
+            let restored_trace =
+                build_trace(restored_vm).expect("restored generated witness should build a trace");
+            prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+            prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
+            prop_assert_eq!(
+                restored_trace.trace_len_summary(),
+                original_trace.trace_len_summary()
+            );
+            prop_assert_eq!(
+                restored_trace.public_inputs().to_air_inputs(),
+                original_trace.public_inputs().to_air_inputs()
+            );
+        }
+    }
+
+    #[test]
+    fn test_execution_witness_round_trip_proves_external_library_program() {
+        std::thread::Builder::new()
+            .name("execution-witness-round-trip".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(execution_witness_round_trip_proves_external_library_program)
+            .expect("failed to spawn round-trip test thread")
+            .join()
+            .expect("round-trip test thread panicked");
+    }
+
+    fn execution_witness_round_trip_proves_external_library_program() {
+        let program = external_program();
+        let stack_inputs = StackInputs::default();
+        let advice_inputs = AdviceInputs::default();
+        let mut host = default_source_manager_host();
+        host.load_library(create_simple_library())
+            .expect("failed to load test library into host");
+        let witness =
+            FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+                .expect("invalid advice inputs")
+                .execute_for_proving_sync(&program, &mut host)
+                .expect("execution should produce a witness");
+
+        let claim = witness.claim();
+        let witness_bytes = witness.to_bytes();
+        let (restored_vm, _) = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("witness round trip")
+            .into_parts();
+        assert!(
+            restored_vm.mast_forest_count() > 1,
+            "expected dynamic library execution to serialize multiple MAST forests"
+        );
+
+        let (vm, _) = witness.into_parts();
+        let original_trace = build_trace(vm).expect("original witness builds trace");
+        let restored_trace = build_trace(restored_vm).expect("restored witness builds trace");
+        assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+        assert_eq!(restored_trace.program_info(), original_trace.program_info());
+        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
+        assert_eq!(
+            restored_trace.public_inputs().to_air_inputs(),
+            original_trace.public_inputs().to_air_inputs()
+        );
+
+        let witness_budget =
+            witness_bytes.len().checked_mul(4).expect("test input budget overflow");
+        let restored_witness =
+            ExecutionWitness::read_from_bytes_with_budget(&witness_bytes, witness_budget)
+                .expect("execution witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(restored_witness)
+            .expect("restored execution witness should prove");
+
+        let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+        assert!(outcome.is_complete());
+    }
+
+    #[test]
+    fn test_execution_witness_round_trip_preserves_deferred_wire() {
+        std::thread::Builder::new()
+            .name("partial-deferred-wire".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(execution_witness_round_trip_preserves_deferred_wire)
+            .expect("failed to spawn partial-wire test thread")
+            .join()
+            .expect("partial-wire test thread panicked");
+    }
+
+    fn execution_witness_round_trip_preserves_deferred_wire() {
+        let source = "begin log_deferred end";
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = default_source_manager_host();
+        let witness = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness");
+
+        let witness_bytes = witness.to_bytes();
+        let inspected =
+            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
+        let (_, precompile) = inspected.into_parts();
+        let precompile = precompile.expect("deferred execution should carry a precompile witness");
+        let expected_deferred_root = precompile.state().root();
+        let expected_wire = precompile
+            .state()
+            .to_wire()
+            .expect("deferred state should serialize to canonical wire");
+
+        let proving =
+            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(proving)
+            .expect("wire-backed partial proof should be produced from the restored witness");
+
+        assert!(!proof.is_complete());
+        let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
+            panic!("partial proving should keep the deferred proof wire-backed");
+        };
+        assert_eq!(wire, &expected_wire);
+        let claim = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("witness round trip")
+            .claim();
+        let outcome =
+            Verifier::new().verify(&claim, &proof).expect("deferred VM proof should verify");
+        assert_eq!(outcome.outstanding_precompile_root(), Some(expected_deferred_root));
+
+        let hydrated = precompile_witness_from_wire(wire)
+            .expect("transported wire should hydrate under the standard registry");
+        assert_eq!(
+            hydrated.state().to_wire().expect("hydrated state should serialize to wire"),
+            expected_wire
+        );
+    }
+}

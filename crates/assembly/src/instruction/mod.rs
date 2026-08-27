@@ -12,7 +12,7 @@ use miden_core::{
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastNodeRef, push_value_ops,
+    mast_forest_builder::MastNodeUse, push_value_ops,
 };
 
 mod crypto_ops;
@@ -32,7 +32,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         // Determine whether this instruction can create a new node
         let can_create_node = matches!(
             instruction.inner(),
@@ -82,7 +82,7 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
         node_asm_op: Option<AssemblyOp>,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         use Operation::*;
 
         let span = instruction.span();
@@ -542,6 +542,7 @@ impl Assembler {
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Exec,
@@ -549,10 +550,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         None,
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::Call(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Call,
@@ -560,10 +563,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("call instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::SysCall(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::SysCall,
@@ -571,25 +576,36 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("syscall instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::DynExec => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dynexec(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dynexec instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::DynCall => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dyncall(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dyncall instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             Instruction::DebugVar(debug_var_info) => {
                 block_builder.push_debug_var(debug_var_info.clone())?;
+            },
+            Instruction::DebugInlineCall(inline_call) => {
+                block_builder.push_debug_inline_call(inline_call, proc_ctx.source_manager());
+            },
+            Instruction::DebugInlineCallClear => {
+                block_builder.clear_debug_inline_calls();
             },
 
             // ----- emit instruction -------------------------------------------------------------

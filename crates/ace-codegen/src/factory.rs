@@ -291,13 +291,13 @@ where
 
 /// Absorb whole rate blocks into a Poseidon2 sponge state.
 fn absorb_rate_blocks(state: &mut [Felt; Poseidon2::STATE_WIDTH], elements: &[Felt]) {
-    // `chunks_exact` would silently drop a trailing partial block, yielding a wrong digest;
-    // assert rather than debug_assert so a miscount cannot survive a release build.
+    // Ignoring a trailing partial block would yield a wrong digest; assert rather than
+    // debug_assert so a miscount cannot survive a release build.
     assert!(
         elements.len().is_multiple_of(RATE_WIDTH),
         "sponge absorption requires whole rate blocks"
     );
-    for block in elements.chunks_exact(RATE_WIDTH) {
+    for block in elements.as_chunks::<RATE_WIDTH>().0 {
         state[Poseidon2::RATE_RANGE].copy_from_slice(block);
         Poseidon2::apply_permutation(state);
     }

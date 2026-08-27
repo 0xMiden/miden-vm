@@ -266,6 +266,27 @@ test-wasm-simd: ## Runs the packed Goldilocks/Poseidon2 vs scalar tests under WA
 	RUSTFLAGS="-C target-feature=+simd128" \
 	cargo test -p miden-field -p miden-crypto --no-default-features --lib --target wasm32-wasip1 -- packed
 
+# wasm32-wasip1 refuses to spawn at runtime, so this runs the compact fallback for real. Only the
+# span test is skipped -- it asserts a Rayon worker ran, which cannot hold where threads are
+# unavailable -- so equality tests added later are covered here without touching this target. A
+# passing run is not enough to trust: libtest exits 0 when a filter selects nothing, so a zero-test
+# run would otherwise leave this green while guarding nothing.
+.PHONY: test-wasm-threadless
+test-wasm-threadless: ## Runs the overlapped trace-build tests on a threadless wasm target (requires wasmtime)
+	@dir=$$(mktemp -d) || exit 1; \
+	trap 'rm -rf "$$dir"' EXIT INT TERM; \
+	{ CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime run --dir=." \
+		cargo test -p miden-processor --test streamed_hasher --target wasm32-wasip1 \
+		-- --skip overlap_builder_thread_enters_the_instrument_span 2>&1; \
+	  echo $$? >"$$dir/status"; } | tee "$$dir/log"; \
+	status=$$(cat "$$dir/status" 2>/dev/null); \
+	case "$$status" in ''|*[!0-9]*) status=1;; esac; \
+	if [ "$$status" -eq 0 ] && ! grep -q "^test result: ok\. [1-9][0-9]* passed" "$$dir/log"; then \
+		echo "no test passed on the threadless target; the filter selected nothing, or everything it selected was ignored" >&2; \
+		status=1; \
+	fi; \
+	exit "$$status"
+
 .PHONY: check-fuzz
 check-fuzz: ## Checks standalone fuzz workspaces
 	cd tools/miden-core-fuzz && cargo check --locked
@@ -420,6 +441,7 @@ fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run execution_witness_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run deferred_state_wire_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run deferred_state_wire_serde_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
 	cargo +nightly fuzz run package_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
@@ -440,5 +462,6 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing
-	cargo test -p miden-core --features serde generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-vm --test miden-cli generate_execution_witness_fuzz_seeds -- --ignored --nocapture

@@ -13,10 +13,6 @@ edition.workspace = true
 default = ["std"]
 std = ["miden-core/std", "miden-precompiles/std"]
 
-[dependencies]
-miden-core.workspace = true
-miden-precompiles.workspace = true
-
 [lib]
 bench = false
 doctest = false
@@ -25,3 +21,8 @@ doctest = false
 name = "miden-core-lib-codegen"
 path = "src/main.rs"
 required-features = ["std"]
+
+[dependencies]
+miden-core.workspace = true
+miden-precompiles.workspace = true
+tempfile = { workspace = true, features = ["getrandom"] }

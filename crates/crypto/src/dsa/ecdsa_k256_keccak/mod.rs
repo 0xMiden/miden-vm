@@ -267,6 +267,24 @@ impl PublicKey {
     /// message.
     pub fn recover_from(message: Word, signature: &Signature) -> Result<Self, PublicKeyError> {
         let message_digest = hash_message(message);
+        Self::recover_from_prehash(message_digest, signature)
+    }
+
+    /// Recovers the public key associated with a signature over a pre-hashed message.
+    ///
+    /// # Security
+    ///
+    /// `message_digest` must be produced by a cryptographically secure hash of the intended
+    /// message. If an attacker can choose it as arbitrary algebraic data, they can construct a
+    /// signature that recovers a target public key without knowing the corresponding secret key.
+    ///
+    /// Recovery returns a key consistent with the supplied digest and signature; it does not by
+    /// itself authenticate an identity. Before authorizing an action, callers must compare the
+    /// recovered key with an expected key from trusted state.
+    pub fn recover_from_prehash(
+        message_digest: [u8; 32],
+        signature: &Signature,
+    ) -> Result<Self, PublicKeyError> {
         let signature_data = ecdsa::Signature::from_scalars(*signature.r(), *signature.s())
             .map_err(|_| PublicKeyError::RecoveryFailed)?;
 
@@ -312,7 +330,7 @@ pub enum PublicKeyError {
 ///
 /// ## Serialization Formats
 ///
-/// This implementation supports 2 serialization formats:
+/// This implementation supports two serialization formats:
 ///
 /// ### Custom Format (65 bytes):
 /// - Bytes 0-31: r component (32 bytes, big-endian)

@@ -300,7 +300,7 @@ impl LocalPackageRegistry {
         let Ok(loaded) = MastPackage::read_from_bytes_trusted(&bytes) else {
             return false;
         };
-        let actual_version = Version::new(loaded.version.clone(), loaded.digest());
+        let actual_version = Version::new(loaded.version.clone(), loaded.dependency_commitment());
         loaded.name == *package && actual_version == *version
     }
 
@@ -347,7 +347,7 @@ impl LocalPackageRegistry {
             }
         })?;
 
-        let actual_version = Version::new(loaded.version.clone(), loaded.digest());
+        let actual_version = Version::new(loaded.version.clone(), loaded.dependency_commitment());
         if loaded.name != *package || actual_version != *version {
             return Err(LocalRegistryError::ArtifactMismatch {
                 path,
@@ -435,8 +435,10 @@ impl LocalPackageRegistry {
         match fs::read(legacy_path) {
             Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
                 Ok(existing_package) => {
-                    let existing_version =
-                        Version::new(existing_package.version.clone(), existing_package.digest());
+                    let existing_version = Version::new(
+                        existing_package.version.clone(),
+                        existing_package.dependency_commitment(),
+                    );
                     if existing_package.name == package.name && existing_version == *version {
                         if Self::matches_after_trusted_package_read(&existing_package, package) {
                             write_file_atomically(artifact_path, &existing_bytes)
@@ -590,7 +592,7 @@ impl LocalPackageRegistry {
         package: Arc<MastPackage>,
         bytes: Vec<u8>,
     ) -> Result<PublishedPackage, LocalRegistryError> {
-        let digest = package.digest();
+        let digest = package.dependency_commitment();
         let version = Version::new(package.version.clone(), digest);
         let (record, _dependencies) = Self::record_for_package(&package, version.clone());
         let artifact_path = self.artifact_path_for_package(&package.name, &package.version, digest);
@@ -640,7 +642,7 @@ impl LocalPackageRegistry {
         package: Arc<MastPackage>,
         bytes: Vec<u8>,
     ) -> Result<PublishedPackage, LocalRegistryError> {
-        let digest = package.digest();
+        let digest = package.dependency_commitment();
         let version = Version::new(package.version.clone(), digest);
         let (record, dependencies) = Self::record_for_package(&package, version.clone());
 
@@ -986,8 +988,11 @@ mod tests {
         registry.publish(&dep_path).expect("failed to publish dependency");
 
         let package_path = tempdir.path().join("pkg.masp");
-        let package =
-            build_package("pkg", "2.0.0", [("dep", "1.0.0", TargetType::Library, dep.digest())]);
+        let package = build_package(
+            "pkg",
+            "2.0.0",
+            [("dep", "1.0.0", TargetType::Library, dep.dependency_commitment())],
+        );
         package.write_to_file(&package_path).unwrap();
 
         let published = registry.publish(&package_path).expect("failed to publish package");
@@ -1004,7 +1009,7 @@ mod tests {
         assert_eq!(shown.dependencies.keys().next().unwrap(), &PackageId::from("dep"));
         assert_eq!(
             shown.dependencies.values().next().unwrap().to_string(),
-            format!("1.0.0#{}", dep.digest())
+            format!("1.0.0#{}", dep.dependency_commitment())
         );
     }
 
@@ -1101,7 +1106,7 @@ mod tests {
         conflicting_package
             .sections
             .push(Section::new(SectionId::custom("cache-test").unwrap(), Vec::from([1, 2, 3])));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(Arc::from(conflicting_package))
@@ -1129,7 +1134,7 @@ mod tests {
             SectionId::custom("stale-cache-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = stale_registry
             .cache_package(conflicting_package.into())
@@ -1159,7 +1164,7 @@ mod tests {
             SectionId::custom("cache-repair-race-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let error = second_registry
             .cache_package(conflicting_package.into())
             .expect_err("cache repair should check the artifact under the index lock");
@@ -1185,7 +1190,7 @@ mod tests {
             SectionId::custom("legacy-cache-repair-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(conflicting_package.into())
@@ -1217,7 +1222,7 @@ mod tests {
             SectionId::custom("legacy-cache-corrupt-qualified-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
 
         let error = registry
             .cache_package(conflicting_package.into())
@@ -1295,7 +1300,7 @@ mod tests {
         conflicting_package
             .sections
             .push(Section::new(SectionId::custom("publish-test").unwrap(), Vec::from([1, 2, 3])));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
         conflicting_package.write_to_file(&conflicting_path).unwrap();
 
@@ -1325,7 +1330,7 @@ mod tests {
             SectionId::custom("stale-publish-test").unwrap(),
             Vec::from([1, 2, 3]),
         ));
-        assert_eq!(Some(conflicting_package.digest()), published.version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), published.version.digest);
         let conflicting_path = tempdir.path().join("pkg-conflicting.masp");
         conflicting_package.write_to_file(&conflicting_path).unwrap();
 
@@ -1375,8 +1380,11 @@ mod tests {
         let package = build_package("pkg", "1.0.0", []);
         let package_path = tempdir.path().join("pkg.masp");
         package.write_to_file(&package_path).unwrap();
-        let artifact_path =
-            registry.artifact_path_for_package(&package.name, &package.version, package.digest());
+        let artifact_path = registry.artifact_path_for_package(
+            &package.name,
+            &package.version,
+            package.dependency_commitment(),
+        );
         fs::create_dir(&artifact_path).unwrap();
 
         let error = registry
@@ -1465,7 +1473,7 @@ mod tests {
         let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
         assert_eq!(loaded.name, package.name);
         assert_eq!(loaded.version, package.version);
-        assert_eq!(loaded.digest(), package.digest());
+        assert_eq!(loaded.commitment(), package.commitment());
         assert_eq!(loaded.description, package.description);
         assert_eq!(loaded.kind, package.kind);
         assert_eq!(loaded.mast_forest(), package.mast_forest());
@@ -1480,7 +1488,8 @@ mod tests {
 
         let first = build_package("first", "1.0.0", []);
         let second = build_package("second", "1.0.0", []);
-        assert_eq!(first.digest(), second.digest());
+        assert_eq!(first.mast_forest_commitment(), second.mast_forest_commitment());
+        assert_ne!(first.commitment(), second.commitment());
 
         let first_path = tempdir.path().join("first.masp");
         let second_path = tempdir.path().join("second.masp");
@@ -1507,7 +1516,8 @@ mod tests {
 
         let first = build_package("first", "1.0.0", []);
         let second = build_package("second", "1.0.0", []);
-        assert_eq!(first.digest(), second.digest());
+        assert_eq!(first.mast_forest_commitment(), second.mast_forest_commitment());
+        assert_ne!(first.commitment(), second.commitment());
 
         let first_path = tempdir.path().join("first.masp");
         let second_path = tempdir.path().join("second.masp");

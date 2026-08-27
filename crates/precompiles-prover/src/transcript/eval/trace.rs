@@ -60,6 +60,7 @@ use miden_precompiles::CurvePrecompile;
 use crate::{
     ec::{
         EcRequire,
+        msm::trace::{EcExprPtr, EcMsmRequires},
         trace::{EcGroupPtr, EcPointPtr},
     },
     logup::build_logup_aux_trace,
@@ -79,8 +80,7 @@ use crate::{
         nodes::{EcOpId, UintOpId},
         poseidon2::{
             P2Cap, P2Digest,
-            math::STATE_WIDTH,
-            trace::{PermSeqId, Poseidon2Requires, apply_permutation},
+            trace::{PermSeqId, Poseidon2Requires},
         },
     },
     uint::{
@@ -280,12 +280,12 @@ enum UintKey {
 /// `group_ptr` + coord hashes (the group rides the cap not the children, so
 /// identical coords on distinct groups stay distinct; ∞ uses the zero coord
 /// hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim by its
-/// `expr_ptr` (one node per expression; its hash chains the whole term run).
+/// `(expr_ptr, claim hash)` (one node per structural claim; its hash chains the whole term run).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EcKey {
     Create(u32, P2Digest, P2Digest),
     Op(EcOpId, P2Digest, P2Digest),
-    Msm(u32),
+    Msm(u32, P2Digest),
 }
 
 /// `*Requires`-pattern accumulator for the eval chip, built from explicit
@@ -752,27 +752,46 @@ impl TranscriptEvalRequires {
     /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
-    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `expr`. Returns
-    /// the value's shared-use [`EcNode`].
+    /// `MsmExpr` over the bus (laid by the AIR). Dedups by `(expr, h_claim)` and bumps the MSM
+    /// resolve use count only for a new row. Returns the value's shared-use [`EcNode`].
     pub fn record_ec_msm(
         &mut self,
-        expr: u32,
-        group: u32,
-        val: EcPointPtr,
-        bound: u32,
+        expr: EcExprPtr,
         terms: &[(EcNode, UintNode)],
+        msm: &mut EcMsmRequires,
         p2: &mut Poseidon2Requires,
     ) -> EcNode {
-        if let Some(&node) = self.ec_dedup.get(&EcKey::Msm(expr)) {
-            return node;
-        }
         assert!(!terms.is_empty(), "an MSM claim needs at least one term");
+        let group = msm.group(expr);
+        let bound = msm.sbound(expr);
+        let val = msm.value(expr);
+        let chiplet = msm.terms(expr);
+
+        // Fully-merged claim: one pair per chiplet term, distinct bases, each
+        // pair a real term of `expr`. With distinct bases + matching count +
+        // each-pair-a-term, the pairs *are* the chiplet's term set — so the
+        // seam's set match is well-defined and the root tracks the term set,
+        // not an unmerged split.
+        assert_eq!(
+            terms.len(),
+            chiplet.len(),
+            "ec_msm needs exactly one (base, scalar) pair per claim term",
+        );
+        for i in 0..terms.len() {
+            for j in (i + 1)..terms.len() {
+                assert_ne!(terms[i].0.point, terms[j].0.point, "duplicate base in ec_msm claim");
+            }
+            assert!(
+                chiplet.iter().any(|&(b, s)| b == terms[i].0.point && s == terms[i].1.ptr),
+                "(base, scalar) pair is not a term of this MSM expression",
+            );
+        }
+
         let blocks: Vec<_> = terms
             .iter()
             .map(|(base, scalar)| {
                 assert_eq!(
-                    scalar.bound_ptr.addr(),
-                    bound,
+                    scalar.bound_ptr, bound,
                     "term scalar must be stored under the claim's scalar bound",
                 );
                 (base.hash.as_array(), scalar.hash.as_array())
@@ -780,23 +799,19 @@ impl TranscriptEvalRequires {
             .collect();
 
         let initial_cap = P2Cap::ec_msm_iv();
-        let absorption = p2.require_absorption(initial_cap, blocks.iter().copied());
-        let _ = p2.require_digest(absorption.digest);
-        let h_claim = absorption.digest;
+        let prepared = Poseidon2Requires::prepare_absorption(initial_cap, blocks);
+        let h_claim = prepared.digest();
+        let key = EcKey::Msm(expr.addr(), h_claim);
+        if let Some(&node) = self.ec_dedup.get(&key) {
+            return node;
+        }
+
+        let (absorption, digests) = p2.require_prepared_absorption(prepared);
+        let _ = p2.require_digest(h_claim);
 
         let mut absorbs = Vec::with_capacity(terms.len());
-        let mut cap = initial_cap.as_array();
         let span_head = absorption.head().seq();
-        for (idx, ((base, scalar), &(rate0, rate1))) in terms.iter().zip(blocks.iter()).enumerate()
-        {
-            let mut state = [Felt::ZERO; STATE_WIDTH];
-            state[0..4].copy_from_slice(&rate0);
-            state[4..8].copy_from_slice(&rate1);
-            state[8..12].copy_from_slice(&cap);
-            let state_out = apply_permutation(state);
-            let digest = P2Digest([state_out[0], state_out[1], state_out[2], state_out[3]]);
-            cap = [state_out[8], state_out[9], state_out[10], state_out[11]];
-
+        for (idx, ((base, scalar), digest)) in terms.iter().zip(digests).enumerate() {
             absorbs.push(MsmAbsorb {
                 base_hash: base.hash,
                 scalar_hash: scalar.hash,
@@ -808,7 +823,6 @@ impl TranscriptEvalRequires {
             self.consume_ec(base);
             self.consume_uint(scalar);
         }
-        debug_assert_eq!(absorbs.last().expect("non-empty MSM").digest, h_claim);
         let id = self.next_id;
         self.next_id += 1;
         self.nodes.push(EvalNode {
@@ -816,15 +830,16 @@ impl TranscriptEvalRequires {
             absorbed: None, // per-row perms / digests live in `absorbs`
             kind: NodeKind::EcMsm {
                 absorbs,
-                expr,
-                group,
+                expr: expr.addr(),
+                group: group.addr(),
                 val: val.addr(),
-                bound,
+                bound: bound.addr(),
             },
         });
         self.node_consumers.insert(id, 0);
         let node = EcNode { id, hash: h_claim, point: val };
-        self.ec_dedup.insert(EcKey::Msm(expr), node);
+        self.ec_dedup.insert(key, node);
+        msm.consume_claim(expr, 1);
         node
     }
 

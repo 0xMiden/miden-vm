@@ -4,9 +4,9 @@
 //!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
 //!      snapshots in this run).
 //!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
-//!      load every scenario it contains and: solve for per-snippet iteration counts, emit the
-//!      resulting MASM program, check it lands in the scenario's padded-trace bracket, and run four
-//!      Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
+//!      load its canonical Falcon/ECDSA P2ID scenarios and: solve for per-snippet iteration counts,
+//!      emit the resulting MASM program, check it lands in the scenario's padded-trace bracket, and
+//!      run four Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
 //!
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
@@ -36,7 +36,7 @@ use miden_vm::{
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
-    snapshot::{TraceShape, TraceSnapshot},
+    snapshot::{POSEIDON2_AUTH_SCENARIOS, TraceShape, TraceSnapshot},
     snippets::{SNIPPETS, memory_max_iters, u32arith_max_iters},
     solver::{Plan, emit, solve},
     verifier::VerificationReport,
@@ -181,8 +181,14 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} memory={:6.3} range={:6.3}",
-            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.memory, cost.range,
+            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3} range={:6.3}",
+            snippet.name,
+            cost.core,
+            cost.hasher,
+            cost.bitwise,
+            cost.chiplets,
+            cost.memory,
+            cost.range,
         );
     }
 
@@ -197,6 +203,9 @@ fn synthetic_bench(c: &mut Criterion) {
             .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
         scenarios.sort_by_key(|(_, snap)| snap.trace.chiplets_rows);
         for (scenario_key, snapshot) in scenarios {
+            if !POSEIDON2_AUTH_SCENARIOS.contains(&scenario_key.as_str()) {
+                continue;
+            }
             let scenario_slug = slugify(&scenario_key);
             if let Some(filter) = &scenario_filter
                 && !scenario_slug.contains(filter.as_str())
@@ -235,9 +244,10 @@ fn bench_one_scenario(
 ) {
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
     println!(
-        "    trace:   core={} chiplets={} range={} (padded_total={})",
+        "    trace:   core={} chiplets={} poseidon2={} range={} (padded_total={})",
         snapshot.trace.core_rows,
         snapshot.trace.chiplets_rows,
+        snapshot.trace.poseidon2_permutation_rows,
         snapshot.trace.range_rows,
         snapshot.trace.padded_total(),
     );
@@ -251,7 +261,7 @@ fn bench_one_scenario(
     );
     if snapshot.shape.substituted_rows() > 0 {
         println!(
-            "    note:    {} rows (ace={} + kernel_rom={}) folded into memory target",
+            "    note:    {} rows (ace={} + kernel_rom={}) combined with advisory memory rows",
             snapshot.shape.substituted_rows(),
             snapshot.shape.ace_rows,
             snapshot.shape.kernel_rom_rows,
@@ -418,6 +428,7 @@ fn assert_counters_fit(plan: &Plan) {
 struct MarginalRates {
     core: f64,
     chiplets: f64,
+    poseidon2: f64,
     range: f64,
 }
 
@@ -443,6 +454,9 @@ fn measure_marginal(
     MarginalRates {
         core: (shape.totals.core_rows as f64 - base_shape.totals.core_rows as f64) / d,
         chiplets: (shape.totals.chiplets_rows as f64 - base_shape.totals.chiplets_rows as f64) / d,
+        poseidon2: (shape.totals.poseidon2_permutation_rows as f64
+            - base_shape.totals.poseidon2_permutation_rows as f64)
+            / d,
         range: (shape.totals.range_rows as f64 - base_shape.totals.range_rows as f64) / d,
     }
 }
@@ -514,6 +528,23 @@ fn range_correction_pass(plan: &mut Plan, target: &TraceShape) {
             Some((add_u32arith, sub_hasher, sub_pad)) => {
                 let sub_hasher = sub_hasher.min(plan.iters("hasher"));
                 let sub_pad = sub_pad.min(plan.iters("decoder_pad"));
+                let projected_poseidon2 = actual.totals.poseidon2_permutation_rows as f64
+                    + u32arith.poseidon2 * add_u32arith as f64
+                    - hasher.poseidon2 * sub_hasher as f64
+                    - decoder_pad.poseidon2 * sub_pad as f64;
+                let mut projected_totals = actual.totals;
+                projected_totals.poseidon2_permutation_rows =
+                    projected_poseidon2.max(0.0).round() as u64;
+                if projected_totals.padded_poseidon2_permutation()
+                    != target.totals.padded_poseidon2_permutation()
+                {
+                    println!(
+                        "    correction skipped: projected Poseidon2 rows ({}) would leave target bracket ({})",
+                        projected_totals.poseidon2_permutation_rows,
+                        target.totals.padded_poseidon2_permutation(),
+                    );
+                    return;
+                }
                 println!(
                     "    applying: +u32arith {add_u32arith}  -hasher {sub_hasher}  -decoder_pad {sub_pad}"
                 );

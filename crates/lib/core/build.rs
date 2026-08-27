@@ -16,10 +16,8 @@ use miden_assembly::{
 // ================================================================================================
 
 const ASM_DIR_PATH: &str = "asm";
-const PRECOMPILES_ASM_DIR_PATH: &str = "precompiles/asm";
-const ASL_DIR_PATH: &str = "assets";
+const PKG_OUT_DIR: &str = "assets";
 const DOC_DIR_PATH: &str = "docs";
-const BUILD_PROJECTS_DIR: &str = "masm-projects";
 
 // MARKDOWN RENDERER
 // ================================================================================================
@@ -206,85 +204,14 @@ fn reexport_target_docs(
 // PRE-PROCESSING
 // ================================================================================================
 
-fn prepare_project(
-    build_dir: &Path,
-    project_name: &str,
-    namespace: &str,
-    source_dir: &Path,
-    dependencies: &str,
-) -> Result<PathBuf, Report> {
-    let project_dir = build_dir.join(BUILD_PROJECTS_DIR).join(project_name);
-    match fs::remove_dir_all(&project_dir) {
-        Ok(()) => {},
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {},
-        Err(err) => {
-            return Err(Report::msg(format!(
-                "failed to clear MASM project directory `{}`: {err}",
-                project_dir.display()
-            )));
-        },
-    }
-
-    fs::create_dir_all(&project_dir).into_diagnostic()?;
-    fs::write(
-        project_dir.join("miden-project.toml"),
-        format!(
-            r#"[package]
-name = "{project_name}"
-version = "{}"
-
-[lib]
-namespace = "{namespace}"
-path = "mod.masm"
-
-{dependencies}
-[profile.release]
-# Always produce debug information, as it can be stripped later by the VM
-debug = true
-# Use workspace-relative file paths in debug info for portability
-trim_paths = true
-"#,
-            env!("CARGO_PKG_VERSION")
-        ),
-    )
-    .into_diagnostic()?;
-
-    copy_masm_tree(source_dir, &project_dir)?;
-
-    Ok(project_dir)
-}
-
-fn copy_masm_tree(source_dir: &Path, target_dir: &Path) -> Result<(), Report> {
-    fs::create_dir_all(target_dir).into_diagnostic()?;
-
-    for entry in fs::read_dir(source_dir).into_diagnostic()? {
-        let entry = entry.into_diagnostic()?;
-        let source_path = entry.path();
-        let target_path = target_dir.join(entry.file_name());
-        let file_type = entry.file_type().into_diagnostic()?;
-
-        if file_type.is_dir() {
-            copy_masm_tree(&source_path, &target_path)?;
-        } else if file_type.is_file()
-            && source_path.extension().and_then(|extension| extension.to_str()) == Some("masm")
-        {
-            fs::copy(&source_path, &target_path).into_diagnostic()?;
-        }
-    }
-
-    Ok(())
-}
-
 /// Assemble the core and precompiles sources as separate packages and serialize both into the
 /// `assets` folder.
 fn main() -> Result<(), Report> {
     use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
-    use miden_package_registry::PackageCache;
 
     // re-build the `[OUT_DIR]/assets/core.masp` file iff core-library MASM sources,
     // generated core-library MASM, or the builder changed:
     println!("cargo:rerun-if-changed=asm");
-    println!("cargo:rerun-if-changed={PRECOMPILES_ASM_DIR_PATH}");
     println!("cargo:rerun-if-changed=codegen");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
     // NOTE: path is relative to the package root (crates/lib/core/), so we need
@@ -304,41 +231,18 @@ fn main() -> Result<(), Report> {
     // dependency against the exact embedded artifact.
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
-    let precompiles_asm_dir = Path::new(manifest_dir).join(PRECOMPILES_ASM_DIR_PATH);
+    let precompiles_asm_dir = asm_dir.join("precompiles");
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let precompiles_project = prepare_project(
-        &build_dir,
-        "miden-precompiles",
-        "miden::precompiles",
-        &precompiles_asm_dir,
-        "",
-    )?;
-    miden_core_lib_codegen::masm::write_math_masm(&precompiles_project).map_err(Report::msg)?;
+    miden_core_lib_codegen::masm::write_math_masm(&precompiles_asm_dir).map_err(Report::msg)?;
 
-    let assembler = Assembler::default();
     let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
-    let mut project_assembler = assembler
-        .clone()
-        .for_project_at_path(precompiles_project.join("miden-project.toml"), &mut registry)?;
-    let precompiles_package =
-        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
-    precompiles_package
-        .write_masp_file(build_dir.join(ASL_DIR_PATH))
-        .into_diagnostic()?;
-    registry.cache_package(precompiles_package).into_diagnostic()?;
-
-    let core_dependencies = format!(
-        "[dependencies]\nmiden-precompiles = {{ version = \"{}\", linkage = \"dynamic\" }}\n",
-        env!("CARGO_PKG_VERSION")
-    );
-    let core_project =
-        prepare_project(&build_dir, "miden-core", "miden::core", &asm_dir, &core_dependencies)?;
+    let assembler = Assembler::default();
     let mut project_assembler =
-        assembler.for_project_at_path(core_project.join("miden-project.toml"), &mut registry)?;
+        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
     let core_package =
         project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
 
-    core_package.write_masp_file(build_dir.join(ASL_DIR_PATH)).into_diagnostic()?;
+    core_package.write_masp_file(build_dir.join(PKG_OUT_DIR)).into_diagnostic()?;
 
     // Generate documentation
     if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {

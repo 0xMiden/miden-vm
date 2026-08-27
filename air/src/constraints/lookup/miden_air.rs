@@ -65,10 +65,18 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 
 /// Emit boundary corrections for Chiplets lookup columns.
 pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let kernel_digests: Vec<[B::F; 4]> = boundary
         .var_len_public_inputs()
         .first()
-        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
+        .map(|felts| {
+            felts
+                .as_chunks::<WORD_SIZE>()
+                .0
+                .iter()
+                .map(|d| [d[0], d[1], d[2], d[3]])
+                .collect()
+        })
         .unwrap_or_default();
 
     // Kernel ROM init: one contribution per kernel procedure digest.

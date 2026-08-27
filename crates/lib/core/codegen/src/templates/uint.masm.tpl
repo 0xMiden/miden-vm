@@ -2,7 +2,7 @@
 # Source template: {{TEMPLATE_PATH}}
 # Regenerate with: {{REGENERATE_COMMAND}}
 
-use miden::precompiles
+use miden::core::precompiles
 
 # {{TITLE}} {{DOMAIN_KIND}} PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
@@ -41,7 +41,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [VALUE_DIGEST, ptr+8, ...]
 #!
-#! `ptr` must address eight consecutive u32-range felts and be double-word aligned for the
+#! `ptr` must address eight consecutive u32-range felts and be word-aligned for the
 #! `mem_stream` used by the deferred data registration helper.
 pub proc load_mem_stream
     push.VALUE_TAG
@@ -64,7 +64,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [VALUE_DIGEST, ...]
 #!
-#! `ptr` must address eight consecutive u32-range felts and be double-word aligned for
+#! `ptr` must address eight consecutive u32-range felts and be word-aligned for
 #! `load_mem_stream`.
 pub proc load_mem
     exec.load_mem_stream

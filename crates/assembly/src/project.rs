@@ -581,7 +581,7 @@ where
                             RegisteredSourcePackage::IndexedButUnreadable(expected) => {
                                 let actual = PackageVersion::new(
                                     package.package.version.clone(),
-                                    package.package.digest(),
+                                    package.package.dependency_commitment(),
                                 );
                                 if actual != expected {
                                     return Err(Report::msg(format!(
@@ -785,7 +785,7 @@ where
     }
 
     fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> bool {
-        let version = PackageVersion::new(package.version.clone(), package.digest());
+        let version = PackageVersion::new(package.version.clone(), package.dependency_commitment());
         let Some(record) = self.store.get_by_semver(&package.name, &package.version) else {
             return true;
         };
@@ -962,7 +962,7 @@ fn load_selected_preassembled_package(
         )));
     }
 
-    let actual = PackageVersion::new(package.version.clone(), package.digest());
+    let actual = PackageVersion::new(package.version.clone(), package.dependency_commitment());
     if &actual != selected {
         return Err(Report::msg(format!(
             "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph selection '{}'",

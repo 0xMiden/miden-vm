@@ -4,7 +4,6 @@ use super::Type;
 
 /// A pointer to an object in memory
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PointerType {
     /// The address space used by pointers of this type.
     pub addrspace: AddressSpace,
@@ -67,7 +66,6 @@ pub enum InvalidAddressSpaceError {
 
 /// The address space a pointer address is evaluated in.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AddressSpace {
     /// The pointer address is evaluated as a byte address.
     ///

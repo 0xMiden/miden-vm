@@ -76,7 +76,7 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [6, 0, 0];
+const VERSION: [u8; 3] = [7, 0, 0];
 
 /// Byte-read budget multiplier for package deserialization from a byte slice.
 ///
@@ -250,7 +250,7 @@ impl Package {
         let mut package = Self {
             name,
             version,
-            digest: Default::default(),
+            mast_forest_commitment: Default::default(),
             description,
             kind,
             mast,
@@ -269,7 +269,7 @@ impl Package {
 
         if validate_manifest {
             package
-                .compute_interface_digest()
+                .compute_interface_commitment()
                 .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         }
         package.recompute_mast_commitment();

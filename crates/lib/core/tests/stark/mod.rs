@@ -927,8 +927,11 @@ fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize
             .fold(QuadFelt::ZERO, |acc, m| acc * beta + QuadFelt::from(Felt::new_unchecked(*m)))
     };
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let kernel_corr = kernel_digest_felts
-        .chunks_exact(WORD_SIZE)
+        .as_chunks::<WORD_SIZE>()
+        .0
+        .iter()
         .map(|digest| alpha + gamma + msg(digest))
         .fold(QuadFelt::ZERO, |acc, term| {
             acc + term.try_inverse().expect("zero kernel ROM denominator")

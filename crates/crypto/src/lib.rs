@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 #[macro_use]
 extern crate alloc;
@@ -82,7 +83,7 @@ pub mod stark {
 
     // Upstream Plonky3: dft
     pub mod dft {
-        pub use p3_dft::{NaiveDft, Radix2DitParallel, TwoAdicSubgroupDft};
+        pub use p3_dft::{Radix2DFTSmallBatch, Radix2DitParallel, TwoAdicSubgroupDft};
     }
 
     // Upstream Plonky3: matrix

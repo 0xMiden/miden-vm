@@ -11,8 +11,9 @@ mod signing_key {
 
     use crate::{
         dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
-        hash::poseidon2::Poseidon2,
+        hash::{keccak::Keccak256, poseidon2::Poseidon2},
         rand::test_utils::seeded_rng,
+        utils::hex_to_bytes,
     };
 
     #[test]
@@ -91,6 +92,29 @@ mod signing_key {
         .into();
         let recovered_pk = PublicKey::recover_from(message, &signature).unwrap();
         assert!(public_key != recovered_pk);
+    }
+
+    #[test]
+    fn test_public_key_recovery_matches_ethereum_consensus_vector() {
+        // Ethereum execution-spec test `CallEcrecover0`:
+        // https://github.com/ethereum/execution-spec-tests/blob/62035359cc4bd2d326844188f2003d29f6be1d97/tests/static/state_tests/stPreCompiledContracts2/CallEcrecover0Filler.json
+        let digest = hex_to_bytes::<32>(
+            "0x18c547e4f7b0f325ad1e56f57e26c745b09a3e503d86e00e5255ff7f715d3d1c",
+        )
+        .unwrap();
+        let signature_bytes = hex_to_bytes::<64>(concat!(
+            "0x73b1693892219d736caba55bdb67216e485557ea6b6af75f37096c9aa6a5a75f",
+            "eeb940b1d03b21e36b0e47e79769f095fe2ab855bd91e3a38756b7d75a9c4549",
+        ))
+        .unwrap();
+        let signature = Signature::from_sec1_bytes_and_recovery_id(signature_bytes, 1).unwrap();
+        let public_key = PublicKey::recover_from_prehash(digest, &signature).unwrap();
+        let uncompressed = public_key.as_affine().to_sec1_point(false);
+        let address_digest = Keccak256::hash(&uncompressed.as_bytes()[1..]);
+        let expected_address =
+            hex_to_bytes::<20>("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
+
+        assert_eq!(&address_digest.as_bytes()[12..], expected_address);
     }
 
     #[test]

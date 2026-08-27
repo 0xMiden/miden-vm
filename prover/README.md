@@ -61,9 +61,9 @@ Transport, hydration, structural validity, and fixed limits are specified in the
 ### Synchronous execution and proving
 
 The FastProcessor-backed `prove_sync(&Prover, ...)` function is the direct synchronous path for
-executing and fully proving a program. It preserves the optimized overlapped execution/trace-build
-path from PR #3407 when enabled in `ExecutionOptions`; proof-generation policy remains configured on
-`Prover`.
+executing and fully proving a program. When enabled in `ExecutionOptions`, it overlaps execution
+with hasher trace construction when a Rayon worker is available. A caller with no separate Rayon
+worker uses compact buffered replay. Proof generation remains configured on `Prover`.
 
 ## STARK Backend
 
@@ -74,16 +74,17 @@ verifier, ensuring consistency across the system.
 ### Hash Function Selection
 
 Different hash functions offer different tradeoffs:
-- **BLAKE3/Keccak**: Fast proving but not efficient for recursion
-- **RPO256/Poseidon2/RPX256**: Slower proving but efficient for recursive verification in Miden VM
+
+BLAKE3 and Keccak provide faster proving, but they are not efficient for recursion. RPO256,
+Poseidon2, and RPX256 prove more slowly but support efficient recursive verification in Miden VM.
 
 ## Crate features
 Miden prover can be compiled with the following features:
 
-* `std` - enabled by default and relies on the Rust standard library.
-* `concurrent` - implies `std` and also enables multi-threaded proof generation.
-* `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
-    * Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
+The `std` feature is enabled by default and relies on the Rust standard library. The `concurrent`
+feature implies `std` and also enables multi-threaded proof generation. A `no_std` build does not
+rely on the Rust standard library and can compile to WebAssembly. Only the
+`wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 
 To compile with `no_std`, disable default features via `--no-default-features` flag.
 

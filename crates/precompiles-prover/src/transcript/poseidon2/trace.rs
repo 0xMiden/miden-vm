@@ -143,6 +143,32 @@ pub fn apply_permutation(state_in: [Felt; STATE_WIDTH]) -> [Felt; STATE_WIDTH] {
     state
 }
 
+/// A multi-block absorption computed once before its caller checks a higher-level intern table.
+#[derive(Debug)]
+pub(crate) struct PreparedAbsorption {
+    cap: P2Cap,
+    blocks: Vec<([Felt; 4], [Felt; 4])>,
+    digests: Vec<P2Digest>,
+}
+
+impl PreparedAbsorption {
+    fn new(cap: P2Cap, blocks: Vec<([Felt; 4], [Felt; 4])>) -> Self {
+        assert!(!blocks.is_empty(), "absorption needs at least one block");
+        let mut current_cap = cap.as_array();
+        let mut digests = Vec::with_capacity(blocks.len());
+        for &(rate0, rate1) in &blocks {
+            let state_out = apply_permutation(state_from_chunks(rate0, rate1, current_cap));
+            digests.push(P2Digest(chunk_from_state(&state_out, 0)));
+            current_cap = chunk_from_state(&state_out, 8);
+        }
+        Self { cap, blocks, digests }
+    }
+
+    pub(crate) fn digest(&self) -> P2Digest {
+        *self.digests.last().expect("prepared absorption is non-empty")
+    }
+}
+
 /// Run the absorption oracle on `(cap, blocks)`: returns the digest =
 /// `state[0..4]` after the last block's permutation. Capacity is
 /// threaded across blocks (cycle K+1's `state[8..12]` = cycle K's
@@ -211,6 +237,27 @@ impl Poseidon2Requires {
         absorb_oracle(cap, blocks)
     }
 
+    /// Prepare a multi-block absorption for a caller that must inspect its digest before deciding
+    /// whether to record it.
+    pub(crate) fn prepare_absorption(
+        cap: P2Cap,
+        blocks: Vec<([Felt; 4], [Felt; 4])>,
+    ) -> PreparedAbsorption {
+        PreparedAbsorption::new(cap, blocks)
+    }
+
+    /// Record an absorption that was prepared by [`Self::prepare_absorption`] without running the
+    /// permutation oracle again. Returns each cycle's digest with the normal absorption output.
+    pub(crate) fn require_prepared_absorption(
+        &mut self,
+        prepared: PreparedAbsorption,
+    ) -> (AbsorptionOutput, Vec<P2Digest>) {
+        let PreparedAbsorption { cap, blocks, digests } = prepared;
+        let digest = *digests.last().expect("prepared absorption is non-empty");
+        let output = self.require_absorption_with_digest(cap, blocks, digest);
+        (output, digests)
+    }
+
     /// Register an absorption `(cap, blocks)`. Interns by digest: a hit
     /// bumps the open span's `in_mult` and returns its range; a miss
     /// lays a fresh span. Returns the digest + range. (`in_mult` is a
@@ -224,6 +271,15 @@ impl Poseidon2Requires {
         assert!(!blocks.is_empty(), "absorption needs at least one block");
         let digest = absorb_oracle(cap, &blocks);
 
+        self.require_absorption_with_digest(cap, blocks, digest)
+    }
+
+    fn require_absorption_with_digest(
+        &mut self,
+        cap: P2Cap,
+        blocks: Vec<([Felt; 4], [Felt; 4])>,
+        digest: P2Digest,
+    ) -> AbsorptionOutput {
         if let Some(&idx) = self.by_digest.get(&digest) {
             let rec = &mut self.absorptions[idx];
             rec.in_mult += 1;

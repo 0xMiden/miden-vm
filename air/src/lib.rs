@@ -29,6 +29,7 @@ pub mod ace;
 pub mod config;
 mod constraints;
 pub mod lookup;
+pub mod memory;
 mod proof_order;
 pub mod trace;
 
@@ -88,6 +89,7 @@ mod export {
             MultiAir, PermutationAirBuilder, ProverStatement, Statement,
         },
         debug,
+        pcs::PcsParams,
     };
 }
 
