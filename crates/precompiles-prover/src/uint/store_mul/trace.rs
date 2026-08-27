@@ -81,7 +81,7 @@ pub(crate) fn build_aux(
     let beta = challenges[1];
 
     // STORE's own register math (mirrors `uint::trace::build_aux`
-    // exactly, reading cols 0..10).
+    // exactly, reading cols 0..18).
     let mut bp8 = [QuadFelt::ZERO; 8];
     bp8[0] = QuadFelt::ONE;
     for i in 1..8 {
