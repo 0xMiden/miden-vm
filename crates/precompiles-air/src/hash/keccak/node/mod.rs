@@ -162,7 +162,7 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 /// Nine aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
-/// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
+/// - col 0: `KeccakSponge` provide alone — the centered running-sum column.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
 /// - col 2: `EidosOut(H_input_chunks)` + the chunks-chain initial CV.
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
@@ -380,7 +380,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: KeccakSponge request alone — the gated running-sum anchor.
+        // col 0: KeccakSponge request alone — the centered running-sum column.
         frac_col!(
             builder,
             "handshake-and-chunks-digest",

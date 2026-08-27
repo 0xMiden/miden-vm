@@ -79,7 +79,7 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 
 /// Four aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
-/// - col 0: `lane0` alone — the gated running-sum anchor.
+/// - col 0: `lane0` alone — the centered running-sum column.
 /// - col 1: `lane1` + `lane2` (Memory64).
 /// - col 2: `lane3` (Memory64) + one Eidos message block.
 /// - col 3: `emit` alone (ChunkChain, no partner left to pair).
@@ -245,7 +245,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: lane0 alone — the gated running-sum anchor.
+        // col 0: lane0 alone — the centered running-sum column.
         frac_col!(
             builder,
             "memory64",
