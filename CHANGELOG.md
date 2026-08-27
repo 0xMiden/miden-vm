@@ -1,4 +1,15 @@
 # Changelog
+
+## v0.31.0 (TBD)
+
+#### Features
+
+- [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
+
+#### Changes
+
+#### Fixes
+
 ## v0.30.0 (2026-08-26)
 
 #### Features
@@ -15,7 +26,6 @@
 - Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
 - Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
 - Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
-- [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
 - Added the `@source_name("...")` procedure attribute for preserving source-level function names in package debug information while recording distinct assembler procedure paths as linkage names ([#3716](https://github.com/0xMiden/miden-vm/pull/3716)).
 - Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
 - Added trusted binary serialization of execution witnesses (VM witness plus optional singleton precompile witness) for remote proving, with a wire format version tag and bounded, trusted deserialization ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
