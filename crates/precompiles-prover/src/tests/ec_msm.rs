@@ -1,5 +1,5 @@
 //! EcMsm chiplet end-to-end tests — building MSM expressions through the
-//! [`Session`] and closing the full 15-chiplet bus.
+//! [`Session`] and closing the full ten-chiplet bus.
 //!
 //! Two flavours. The chiplet-only checks drive an *unused* final op
 //! (combine or neg): its operands are consumed (their `MsmTerm` / `MsmExpr`
@@ -13,11 +13,14 @@
 use std::{format, string::String};
 
 use k256::{ProjectivePoint, elliptic_curve::sec1::ToSec1Point};
-use miden_core::{Felt, utils::Matrix};
+use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
+use miden_core::{Felt, field::QuadFelt, utils::Matrix};
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 
 use crate::{
     ec::msm::EcMsmAir,
+    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
         EcNode, Session,
@@ -72,7 +75,7 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
     let _c = s.msm_combine(ga, qb);
 
     // The EC create nodes must be consumed; fold tautologies so the eval
-    // bindings close (the real consumer is the future resolve seam).
+    // bindings close (the real consumer is the resolve seam exercised below).
     let claim_g = s.ec_is(&g_pt, &g_pt);
     let claim_q = s.ec_is(&q_pt, &q_pt);
     let root = s.assert_and_fold([claim_g, claim_q]);
@@ -80,10 +83,30 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 }
 
 #[test]
-fn log_quotient_degree_matches_design_target() {
-    // The 13-column packing puts at most two degree-2 fractions, or one degree-3 fraction, in each
-    // column. Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
-    assert_eq!(crate::tests::log_quotient_degree(&EcMsmAir), 1);
+fn shape_and_degree_match_design() {
+    let air = EcMsmAir;
+
+    assert_eq!(air.width(), 46);
+    assert_eq!(air.aux_width(), 14);
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 3, ext: 3 }
+    );
+    assert_eq!(crate::tests::log_quotient_degree(&air), 1);
+
+    ValidateLookupAir::validate(
+        &air,
+        ValidateLayout {
+            preprocessed_width: air.preprocessed_width(),
+            trace_width: air.width(),
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: air.periodic_columns().len(),
+            permutation_width: air.aux_width(),
+            num_permutation_challenges: NUM_RANDOMNESS,
+            num_permutation_values: NUM_LOGUP_VALUES,
+        },
+    )
+    .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -144,8 +167,9 @@ fn msm_scalar_bound_n_proves() {
         .expect("MSM under scalar bound n ≠ p must verify");
 }
 
-/// `⟨G×1⟩` negated to `⟨G×−1⟩` (value `−G` via the cancel `EcGroupAdd`,
-/// scalar `−1` via the `is_c_zero` `UintAdd`). The neg is unused (mult 0):
+/// `⟨G×1⟩` negated to `⟨G×−1⟩` (value `−G` via its shared x-coordinate
+/// and y-flip `UintAdd`; scalar `−1` via a second `is_c_zero` `UintAdd`). The neg is unused
+/// (mult 0):
 /// it consumes its operand and routes the value/group/ordering/scalar
 /// demand, closing the bus.
 fn msm_intro_neg_traces() -> crate::session::SessionTraces {
