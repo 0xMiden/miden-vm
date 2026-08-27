@@ -10,7 +10,7 @@ Custom [event](./assembly/events.md) handlers can ship as untrusted WebAssembly 
 ## Model
 
 - A handler module is a core Wasm module. Each handler is an exported function with the signature `() -> ()`.
-- The package's `event_handlers` section carries the module bytes, the ABI version, and a manifest that maps event names to export names. The section is part of the package's content digest: two packages that differ only in handler code have different identities.
+- The package's `event_handlers` section carries the module bytes, the ABI version, and a manifest that maps event names to export names. The section is part of the package's dependency commitment: two packages that differ only in handler code have different identities.
 - When the VM emits an event with a registered Wasm handler, the host runs the export in a fresh instance. Handlers are stateless across calls.
 - The handler reads VM state through host functions and buffers advice mutations through host calls. The host applies the mutations only when the handler returns without a trap. A trap — including an explicit `fail` — discards them all.
 
