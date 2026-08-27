@@ -231,8 +231,7 @@ const PCOL_BOUND: usize = 3;
 // fractions each, col 0 a single degree-2 fraction), then the
 // Schwartz–Zippel `id` register (excluded from σ via num_logup_cols).
 /// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
-/// can concatenate this chiplet's column shape onto mul's own instead of
-/// hand-duplicating the derived column count.
+/// can derive its independently repacked LogUp width.
 pub(crate) const NUM_LOGUP_COLS: usize = 1 // the merged UintVal provide
     + 1 // the merged UintVal consume + the ptr-gap Range16
     + NUM_CELLS.div_ceil(2) // Range16 on every cell position, two per column
@@ -498,9 +497,8 @@ where
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 1, u: 1 };
-        // Flattened columns hold ≤ 2 fractions (degree-3 numerator over a
-        // degree-2 denominator product); col 0 a single degree-2 fraction.
-        let pair_deg = Deg { v: 3, u: 2 };
+        // Each ordinary column holds at most two linear-multiplicity fractions.
+        let pair_deg = Deg { v: 2, u: 2 };
         let rc_deg = Deg { v: 1, u: 1 };
 
         // col 0: the merged UintVal provide (running sum, single
