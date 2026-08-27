@@ -166,8 +166,11 @@ fn lower_while_op(
         span,
         message: "expected a block body for `while`".to_string(),
     })?;
-    let body =
-        lower_required_block(context, &body, "expected a non-empty `while` block", nesting_depth)?;
+    // An empty `while.true` body is accepted: it can be sound (e.g.
+    // `push.0.1 while.true end` enters, does nothing and exits), and proving
+    // the unsound cases needs dataflow analysis that does not belong in the
+    // assembler (see #3094). Diagnosing the risky cases is left to tooling.
+    let body = lower_block(context, &body, nesting_depth)?;
     Ok(ast::Op::While { span, body })
 }
 
@@ -209,8 +212,10 @@ fn lower_repeat_op(
         span,
         message: "expected a block body for `repeat`".to_string(),
     })?;
-    let body =
-        lower_required_block(context, &body, "expected a non-empty `repeat` block", nesting_depth)?;
+    // An empty `repeat.N` body is allowed and sound: it expands to `N`
+    // repetitions of nothing, producing no MAST. It is dead code rather than an
+    // error, so assembly must not fail here (see #3094).
+    let body = lower_block(context, &body, nesting_depth)?;
     Ok(ast::Op::Repeat { span, count, body })
 }
 

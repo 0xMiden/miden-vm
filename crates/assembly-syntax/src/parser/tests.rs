@@ -1127,8 +1127,11 @@ end
     assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid instruction"));
 }
 
+/// An empty `while.true` body parses. It can be sound (`push.0.1 while.true end`
+/// enters, does nothing and exits); proving the unsound cases needs dataflow
+/// analysis that does not belong in the parser — see #3094.
 #[test]
-fn parser_rejects_empty_while_blocks() {
+fn parser_accepts_empty_while_blocks() {
     let source = test_source_file(
         "\
 begin
@@ -1138,9 +1141,23 @@ end
 ",
     );
 
-    let err = parse_forms(source).expect_err("expected empty while block error");
+    parse_forms(source).expect("empty while block should parse");
+}
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("expected a non-empty `while` block"));
+/// An empty `repeat.N` body parses: it expands to `N` repetitions of nothing,
+/// which is dead code to lint rather than an error — see #3094.
+#[test]
+fn parser_accepts_empty_repeat_blocks() {
+    let source = test_source_file(
+        "\
+begin
+    repeat.5
+    end
+end
+",
+    );
+
+    parse_forms(source).expect("empty repeat block should parse");
 }
 
 #[test]

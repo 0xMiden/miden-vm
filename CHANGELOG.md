@@ -25,6 +25,7 @@
 
 #### Changes
 
+- Empty `while.true` and `repeat.N` bodies now assemble instead of being rejected, per the policy in [#3094](https://github.com/0xMiden/miden-vm/issues/3094): an empty `repeat` expands to no MAST, and an empty `while` can be sound, so neither is an assembly-time error ([#3694](https://github.com/0xMiden/miden-vm/pull/3694)).
 - Replaced the synchronous streamed hasher's dedicated thread with Rayon's in-place scope while
   retaining compact buffered replay when no worker can overlap execution ([#3726](https://github.com/0xMiden/miden-vm/pull/3726)).
 - Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).

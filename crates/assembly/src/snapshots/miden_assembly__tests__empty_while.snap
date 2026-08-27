@@ -1,0 +1,17 @@
+---
+source: crates/assembly/src/tests.rs
+assertion_line: 163
+expression: program
+---
+begin
+    join
+        basic_block push(2147483648) push(4294967294) mstore drop noop end
+        if.true
+            loop
+                basic_block noop end
+            end
+        else
+            basic_block noop end
+        end
+    end
+end
