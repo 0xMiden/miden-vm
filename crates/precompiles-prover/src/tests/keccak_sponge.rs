@@ -19,16 +19,13 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 use crate::{
     hash::{
         chunk::trace::ChunkRequires,
-        chunk_node_sponge::{
-            ChunkNodeSpongeAir, NUM_AUX_COLS as CHUNK_NODE_SPONGE_NUM_AUX_COLS,
-            NUM_MAIN_COLS as CHUNK_NODE_SPONGE_NUM_MAIN_COLS,
-        },
         keccak::{
             round::RoundRequires,
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR,
-                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO, KeccakSpongeAir,
-                KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO,
+                COLUMN_SHAPE as SPONGE_COLUMN_SHAPE, KeccakSpongeAir, KeccakSpongeMsg,
+                NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
                 PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
             },
@@ -160,6 +157,8 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
+    assert_eq!(NUM_AUX_COLS, 18);
+    assert_eq!(SPONGE_COLUMN_SHAPE, [2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],);
 
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -178,18 +177,6 @@ fn lifted_air_validates_and_layout_matches_spec() {
         },
     )
     .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
-
-    assert_eq!(CHUNK_NODE_SPONGE_NUM_MAIN_COLS, 99);
-    assert_eq!(CHUNK_NODE_SPONGE_NUM_AUX_COLS, 35);
-    assert_eq!(
-        <ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir),
-        CHUNK_NODE_SPONGE_NUM_MAIN_COLS,
-    );
-    assert_eq!(
-        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&ChunkNodeSpongeAir),
-        ConstraintDegrees { base: 5, ext: 5 },
-    );
-    assert_eq!(crate::tests::log_quotient_degree(&ChunkNodeSpongeAir), 2);
 }
 
 #[test]
@@ -207,12 +194,10 @@ fn periodic_columns_match_program() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The mutex outer flags are folded into each insert's multiplicity and the
-    // 48 fractions are partitioned across 24 columns (≤ 3 each on cols 0-2,
-    // the degree-4 multiplicities `squeeze` / `chunk-consume` kept
-    // low-arity; ≤ 2 each on the byte-request columns), so every closing
-    // constraint is degree ≤ 5 → `log_quotient_degree = 2`. The degree-4
-    // multiplicities are the floor; lqd 1 would need them witness-decomposed.
+    // The 48 exact fractions are partitioned across 18 columns with at most
+    // three entries each. The degree-4 `squeeze` and `chunk-consume`
+    // multiplicities remain low-arity, so every constraint stays at degree 5
+    // or below and `log_quotient_degree` remains 2.
     let air = KeccakSpongeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }

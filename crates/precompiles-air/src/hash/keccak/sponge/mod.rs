@@ -2,12 +2,7 @@
 //!
 //! Sponge AIR over the [round chiplet's](super::round) 25-round /
 //! 3200-IP permutation cycle. One row per state lane, period 32 →
-//! α = 100. See the design notes for the design.
-//!
-//! Status: incremental landing — currently exposes the
-//! [`KeccakSpongeMsg`] tuple, the period-32 program, and the AIR
-//! struct + witness column layout. Local constraints, lookups, and
-//! trace generation follow in subsequent commits.
+//! α = 100.
 
 pub mod message;
 pub mod program;
@@ -46,8 +41,6 @@ use crate::{
 // - Byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte little-endian
 //   decomposition. Their u32 halves are reconstructed linearly where needed.
 //
-// See the design notes §"Columns" for the definitions.
-
 // Structural columns.
 // --------------------------------------------------------------------
 
@@ -138,35 +131,26 @@ pub const NUM_MAIN_COLS: usize = 57;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Aux columns. Columns 0–2 are FLATTENED to lqd 2 (the mutex outer flags
-/// folded into each insert's multiplicity — sound: the one-hot flags are
-/// binary, the same precondition the mutex-group fold already relies on):
+/// Aux columns. The lookup fractions are flattened directly into 18
+/// product-closed columns:
 ///
 /// - col 0 (running σ): Memory64 `new-state` + `prev-perm` (the two lowest-degree fractions; the
 ///   gated last-row close adds +1, so it lands at degree 5).
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
-/// - cols 3–22: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
+/// - cols 3–16: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
 ///   `xor-padding` + `xor-state`, the verbatim `xor-state`, and the lane-16 0x80 `xor` directly
-///   against the byte-lane columns — no intermediate chiplet, two fractions per column.
-/// - col 23: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
+///   against the byte-lane columns — no intermediate chiplet, at most three fractions per column.
+/// - col 17: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
-/// Max per-LogUp-column constraint deg = 5 → `log_quotient_degree = 2`. The
-/// degree-4 multiplicities (`squeeze`, `chunk-consume`) are the floor; dropping
-/// to lqd 1 would need them witness-decomposed. Width disregarded. See
-/// the design notes §"Aux columns and σ exposure".
-pub const NUM_AUX_COLS: usize = 24;
+/// The maximum LogUp constraint degree is five, giving `log_quotient_degree = 2`. Reducing it
+/// further would require witness-decomposing the degree-four `squeeze` and `chunk-consume`
+/// multiplicities.
+pub const NUM_AUX_COLS: usize = 18;
 
-// The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
-// contract in [`crate::logup`]. The sponge's σ aggregates its net
-// contribution across all three buses (Memory64, BytePairLut, KeccakSponge)
-// into one residue — bus-prefix-distinguished encodings + Schwartz-Zippel
-// on random α enforce per-bus balance; the single-σ count is the shared
-// shape, not a sponge-specific choice. The shared public values
-// ([`NUM_PUBLIC_VALUES`]) are the transcript root alone — declared but
-// not read here; the natural last-row closing needs no `inv_n` height
-// input.
+// One accumulator combines the Memory64, BytePairLut, and KeccakSponge interactions. Encoded bus
+// prefixes keep the three relations distinct under the shared LogUp challenges.
 
 // PERIODIC COLUMN INDICES (re-exported from `program`)
 // ================================================================================================
@@ -189,10 +173,6 @@ pub use program::{
 /// [`BytePairLut`](crate::primitives::byte_pair_lut), with the
 /// per-invocation request consumed from the
 /// [`KeccakSponge`](crate::relations::BusId::KeccakSponge) bus.
-///
-/// Trace generation lands in a subsequent commit. The verifier-side
-/// machinery (column layout, periodic program, constraints, lookups)
-/// is complete here.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeccakSpongeAir;
 
@@ -427,8 +407,7 @@ where
     // `bytes_left` decrement chain --------------------------
     // Both branches are gated by `act`: on dead rows `bytes_left` is
     // unconstrained, so the all-dead (zero-invocation) trace is
-    // admissible — the only valid empty-transcript trace (see
-    // the design notes §`bytes_left` decrement chain).
+    // admissible — the only valid empty-transcript trace.
     // On active rows the chain is identical, so it still forbids the
     // `act = 1 ∧ is_first_block = 0` cyclic-fixed-point forgery via the
     // `M · 136 ≢ 0 mod p` argument (`act` doesn't weaken it — the forgery
@@ -553,22 +532,18 @@ where
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column insert counts (FLATTENED to lqd 2): the 13 flag-folded
-/// fractions split ≤ 3 per column (col 0 two low-degree fractions; the
-/// degree-4 `squeeze` alone, the degree-4 `chunk-consume` paired) so every
-/// closing constraint is degree ≤ 5. The chunk-consume fires on rate rows
-/// and, on the last block, the extra rows [26,29) that mop up overshoot
-/// lanes (gated by `p_extra · b_sum`).
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = build_column_shape();
-
-const fn build_column_shape() -> [usize; NUM_AUX_COLS] {
-    let mut shape = [2usize; NUM_AUX_COLS];
-    shape[0] = 2;
-    shape[1] = 3;
-    shape[2] = 1;
-    shape[NUM_AUX_COLS - 1] = 2;
-    shape
-}
+/// Exact per-column insert counts. The 40 byte-table fractions occupy
+/// eight pad triples, two verbatim triples plus a pair, and two lane-16
+/// triples plus a pair. The degree-4 `squeeze` remains alone and the
+/// degree-4 `chunk-consume` remains paired, keeping every constraint at
+/// degree 5 or below.
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [
+    2, 3, 1, // Memory64 state, rc/lane-16, squeeze.
+    3, 3, 3, 3, 3, 3, 3, 3, // Pad bytes.
+    3, 3, 2, // Verbatim bytes.
+    3, 3, 2, // Lane-16 bytes.
+    2, // KeccakSponge request + chunk consume.
+];
 
 impl<LB> LookupAir<LB> for KeccakSpongeAir
 where
@@ -655,8 +630,7 @@ where
         }
     }
 
-    // Derived signals (see the design notes
-    // §"Derived multiplicity signals").
+    // Derived multiplicity signals.
     let is_intra: LB::Expr = LB::Expr::ONE - is_first_block.clone();
     let is_first_row_of_invocation: LB::Expr = p_first * is_first_block;
     let is_pad: LB::Expr = is_zero_next.clone() - is_zero;
@@ -692,13 +666,13 @@ where
     let andnot_tag = LB::Expr::from(Felt::from(BytePairOp::AndNot.tag()));
     let xor_tag = LB::Expr::from(Felt::from(BytePairOp::Xor.tag()));
 
-    let interaction_deg = Deg { v: 1, u: 1 };
-    // FLATTENED to lqd 2: the mutex outer flags are folded into each
-    // insert's multiplicity (sound — the one-hot flags are binary on the
-    // rows where they fire, the precondition the mutex fold already
-    // relied on), and the 13 fractions are partitioned ≤ 3 per column
-    // so every closing constraint is degree ≤ 5. Column-degree hints are
-    // ignored on the constraint path.
+    let new_state_deg = Deg { v: 2, u: 1 };
+    let selected_interaction_deg = Deg { v: 3, u: 1 };
+    let squeeze_interaction_deg = Deg { v: 4, u: 1 };
+    let chunk_interaction_deg = Deg { v: 4, u: 1 };
+    // Direct product batching keeps each original fraction intact. Group
+    // and column hints are exact and validated symbolically in tests; the
+    // entry hints document each multiplicity/denominator degree.
     let pair_deg = Deg { v: 4, u: 2 };
     let triple_deg = Deg { v: 5, u: 3 };
     let solo_deg = Deg { v: 4, u: 1 };
@@ -718,7 +692,7 @@ where
                 lo: state_new_lo.clone(),
                 hi: state_new_hi.clone(),
             },
-            interaction_deg
+            new_state_deg
         ),
         (
             "prev-perm",
@@ -728,7 +702,7 @@ where
                 lo: state_prev_lo.clone(),
                 hi: state_prev_hi.clone(),
             },
-            interaction_deg
+            selected_interaction_deg
         ),
     );
     // col 1: Memory64 state-lane rc + lane-16 0x80 consume / provide.
@@ -744,7 +718,7 @@ where
                 lo: rc_lo.clone(),
                 hi: rc_hi.clone()
             },
-            interaction_deg
+            selected_interaction_deg
         ),
         (
             "lane16-consume",
@@ -754,7 +728,7 @@ where
                 lo: state_prev_lo.clone(),
                 hi: state_prev_hi.clone(),
             },
-            interaction_deg
+            selected_interaction_deg
         ),
         (
             "lane16-provide",
@@ -764,7 +738,7 @@ where
                 lo: state_new_lo.clone(),
                 hi: state_new_hi.clone(),
             },
-            interaction_deg
+            selected_interaction_deg
         ),
     );
     // col 2: Memory64 squeeze — a degree-4 multiplicity, alone (closing 4).
@@ -780,120 +754,67 @@ where
                 lo: state_out_lo.clone(),
                 hi: state_out_hi.clone()
             },
-            interaction_deg
+            squeeze_interaction_deg
         ),
     );
 
-    // cols 3..15: pad-row `BytePairLut` requests, split into three
-    // four-column groups: `andnot` (mask, chunk) → cleared,
-    // `xor-padding` (cleared, padding_mask) → padded, and `xor-state`
-    // (state_prev, padded) → state_new. Each group checks eight bytes,
-    // two per column.
+    // cols 3..11: one three-fraction batch per pad byte. Each batch
+    // verifies `andnot` (mask, chunk) -> cleared, `xor-padding`
+    // (cleared, padding_mask) -> padded, and `xor-state`
+    // (state_prev, padded) -> state_new.
     let pad_mult = p_rate_block.clone() * is_pad * act.clone();
-    for pair in 0..4 {
-        let i0 = pair * 2;
-        let i1 = i0 + 1;
+    for i in 0..8 {
         frac_col!(
             builder,
             "byte-pair-lut",
-            pair_deg,
+            triple_deg,
             (
                 "andnot",
                 pad_mult.clone(),
                 BytePairLutMsg {
                     op: andnot_tag.clone(),
-                    a: andnot_mask_bytes[i0].clone(),
-                    b: chunk_bytes[i0].into(),
-                    c: cleared_bytes[i0].into()
+                    a: andnot_mask_bytes[i].clone(),
+                    b: chunk_bytes[i].into(),
+                    c: cleared_bytes[i].into()
                 },
-                interaction_deg
-            ),
-            (
-                "andnot",
-                pad_mult.clone(),
-                BytePairLutMsg {
-                    op: andnot_tag.clone(),
-                    a: andnot_mask_bytes[i1].clone(),
-                    b: chunk_bytes[i1].into(),
-                    c: cleared_bytes[i1].into()
-                },
-                interaction_deg
-            ),
-        );
-    }
-    for pair in 0..4 {
-        let i0 = pair * 2;
-        let i1 = i0 + 1;
-        frac_col!(
-            builder,
-            "byte-pair-lut",
-            pair_deg,
-            (
-                "xor-padding",
-                pad_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: cleared_bytes[i0].into(),
-                    b: padding_mask_bytes[i0].clone(),
-                    c: padded_bytes[i0].into()
-                },
-                interaction_deg
+                selected_interaction_deg
             ),
             (
                 "xor-padding",
                 pad_mult.clone(),
                 BytePairLutMsg {
                     op: xor_tag.clone(),
-                    a: cleared_bytes[i1].into(),
-                    b: padding_mask_bytes[i1].clone(),
-                    c: padded_bytes[i1].into()
+                    a: cleared_bytes[i].into(),
+                    b: padding_mask_bytes[i].clone(),
+                    c: padded_bytes[i].into()
                 },
-                interaction_deg
-            ),
-        );
-    }
-    for pair in 0..4 {
-        let i0 = pair * 2;
-        let i1 = i0 + 1;
-        frac_col!(
-            builder,
-            "byte-pair-lut",
-            pair_deg,
-            (
-                "xor-state",
-                pad_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i0].into(),
-                    b: padded_bytes[i0].into(),
-                    c: state_new_bytes[i0].into()
-                },
-                interaction_deg
+                selected_interaction_deg
             ),
             (
                 "xor-state",
                 pad_mult.clone(),
                 BytePairLutMsg {
                     op: xor_tag.clone(),
-                    a: state_prev_bytes[i1].into(),
-                    b: padded_bytes[i1].into(),
-                    c: state_new_bytes[i1].into()
+                    a: state_prev_bytes[i].into(),
+                    b: padded_bytes[i].into(),
+                    c: state_new_bytes[i].into()
                 },
-                interaction_deg
+                selected_interaction_deg
             ),
         );
     }
 
-    // cols 15..19: verbatim `xor-state` (state_prev, chunk) →
-    // state_new, 8 bytes.
+    // cols 11..14: verbatim `xor-state` (state_prev, chunk) ->
+    // state_new, grouped 3/3/2.
     let verbatim_mult = p_rate_block.clone() * is_verbatim * act.clone();
-    for pair in 0..4 {
-        let i0 = pair * 2;
+    for triple in 0..2 {
+        let i0 = triple * 3;
         let i1 = i0 + 1;
+        let i2 = i0 + 2;
         frac_col!(
             builder,
             "byte-pair-lut",
-            pair_deg,
+            triple_deg,
             (
                 "xor-state-verbatim",
                 verbatim_mult.clone(),
@@ -903,7 +824,7 @@ where
                     b: chunk_bytes[i0].into(),
                     c: state_new_bytes[i0].into()
                 },
-                interaction_deg
+                selected_interaction_deg
             ),
             (
                 "xor-state-verbatim",
@@ -914,22 +835,61 @@ where
                     b: chunk_bytes[i1].into(),
                     c: state_new_bytes[i1].into()
                 },
-                interaction_deg
+                selected_interaction_deg
+            ),
+            (
+                "xor-state-verbatim",
+                verbatim_mult.clone(),
+                BytePairLutMsg {
+                    op: xor_tag.clone(),
+                    a: state_prev_bytes[i2].into(),
+                    b: chunk_bytes[i2].into(),
+                    c: state_new_bytes[i2].into()
+                },
+                selected_interaction_deg
             ),
         );
     }
+    frac_col!(
+        builder,
+        "byte-pair-lut",
+        pair_deg,
+        (
+            "xor-state-verbatim",
+            verbatim_mult.clone(),
+            BytePairLutMsg {
+                op: xor_tag.clone(),
+                a: state_prev_bytes[6].into(),
+                b: chunk_bytes[6].into(),
+                c: state_new_bytes[6].into()
+            },
+            selected_interaction_deg
+        ),
+        (
+            "xor-state-verbatim",
+            verbatim_mult,
+            BytePairLutMsg {
+                op: xor_tag.clone(),
+                a: state_prev_bytes[7].into(),
+                b: chunk_bytes[7].into(),
+                c: state_new_bytes[7].into()
+            },
+            selected_interaction_deg
+        ),
+    );
 
-    // cols 19..23: lane-16 `xor-lane16` (state_prev, PAD_CONST) →
-    // state_new, 8 bytes. `PAD_CONST_BYTES` is a plain constant (not
-    // selector-dependent), so the `b` field is a literal per byte.
+    // cols 14..17: lane-16 `xor-lane16` (state_prev, PAD_CONST) ->
+    // state_new, grouped 3/3/2. `PAD_CONST_BYTES` is a plain constant
+    // (not selector-dependent), so the `b` field is a literal per byte.
     let lane16_mult = p_pad_0x80.clone() * b_sum.clone() * act.clone();
-    for pair in 0..4 {
-        let i0 = pair * 2;
+    for triple in 0..2 {
+        let i0 = triple * 3;
         let i1 = i0 + 1;
+        let i2 = i0 + 2;
         frac_col!(
             builder,
             "byte-pair-lut",
-            pair_deg,
+            triple_deg,
             (
                 "xor-lane16",
                 lane16_mult.clone(),
@@ -939,7 +899,7 @@ where
                     b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i0])),
                     c: state_new_bytes[i0].into()
                 },
-                interaction_deg
+                selected_interaction_deg
             ),
             (
                 "xor-lane16",
@@ -950,12 +910,50 @@ where
                     b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i1])),
                     c: state_new_bytes[i1].into()
                 },
-                interaction_deg
+                selected_interaction_deg
+            ),
+            (
+                "xor-lane16",
+                lane16_mult.clone(),
+                BytePairLutMsg {
+                    op: xor_tag.clone(),
+                    a: state_prev_bytes[i2].into(),
+                    b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i2])),
+                    c: state_new_bytes[i2].into()
+                },
+                selected_interaction_deg
             ),
         );
     }
+    frac_col!(
+        builder,
+        "byte-pair-lut",
+        pair_deg,
+        (
+            "xor-lane16",
+            lane16_mult.clone(),
+            BytePairLutMsg {
+                op: xor_tag.clone(),
+                a: state_prev_bytes[6].into(),
+                b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[6])),
+                c: state_new_bytes[6].into()
+            },
+            selected_interaction_deg
+        ),
+        (
+            "xor-lane16",
+            lane16_mult,
+            BytePairLutMsg {
+                op: xor_tag.clone(),
+                a: state_prev_bytes[7].into(),
+                b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[7])),
+                c: state_new_bytes[7].into()
+            },
+            selected_interaction_deg
+        ),
+    );
 
-    // col 23: the KeccakSponge request + the chunk consume (a degree-4
+    // col 17: the KeccakSponge request + the chunk consume (a degree-4
     // multiplicity, paired → closing 5). Two independent inserts on
     // different buses, bus-prefix-distinguished encodings keeping the
     // contributions algebraically distinct.
@@ -971,7 +969,7 @@ where
                 chunk_ptr: chunk_ptr.clone(),
                 len_bytes: bytes_left.clone(),
             },
-            interaction_deg
+            selected_interaction_deg
         ),
         (
             "chunk-consume",
@@ -983,7 +981,7 @@ where
                 lo: chunk_lo.clone(),
                 hi: chunk_hi.clone()
             },
-            interaction_deg
+            chunk_interaction_deg
         ),
     );
 }

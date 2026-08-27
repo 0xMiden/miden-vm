@@ -1,8 +1,9 @@
 //! Composite AIR for the chunk, Keccak-node, and Keccak-sponge chiplets.
 //!
 //! The three components share a row range in disjoint column bands. Their
-//! constraints and LogUp interactions delegate to the same offset-aware
-//! evaluators used by the standalone component AIRs.
+//! base constraints delegate to offset-aware component evaluators. The
+//! Sponge lookup evaluator is shared with its standalone AIR; the chunk and
+//! node lookup fractions are repacked without changing their messages.
 
 use alloc::vec::Vec;
 
