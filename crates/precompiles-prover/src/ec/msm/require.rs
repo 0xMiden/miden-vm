@@ -1,7 +1,7 @@
-//! EcMsm recording layer — building MSM expressions (`intro` / `combine` /
-//! `neg`) is *chiplet mechanism*: it walks term lists, merges scalars via
-//! `UintAdd`, and records value group-ops via `EcGroupAdd`. That belongs
-//! here, beside the chiplet, not in the DAG-only
+//! EcMsm recording layer — building MSM expressions (`intro` /
+//! `intro_endo` / `combine` / `neg`) is *chiplet mechanism*: it walks term
+//! lists and authenticates scalar and point relations through the uint and
+//! EC buses. That belongs here, beside the chiplet, not in the DAG-only
 //! [`Session`](crate::session), which just delegates (`msm_intro` etc.).
 //!
 //! Each function borrows the MSM accumulator
