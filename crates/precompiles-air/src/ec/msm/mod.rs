@@ -261,7 +261,7 @@ pub const COL_LAMBDA_PTR: usize = 39;
 /// a 1-row run recording the term `⟨P × λ⟩` with value `φ(P)` — GLV's
 /// endomorphism leaf, mirroring plain `intro`'s `⟨P × 1⟩` / `val = P` but
 /// with the value relation `x_φ = β·x_P`, `y_φ = y_P` in place of a ptr
-/// equality (see [`msm::require::intro_endo`](crate::ec::msm::require::intro_endo)).
+/// equality (see `msm::require::intro_endo` in the prover crate).
 pub const COL_IS_INTRO_ENDO: usize = 40;
 /// `P`'s x ptr (from the `EcPoint(base)` consume).
 pub const COL_ENDO_BASE_X: usize = 41;
