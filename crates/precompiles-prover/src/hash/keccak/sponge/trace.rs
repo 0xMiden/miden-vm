@@ -14,7 +14,7 @@
 //! invocation (CR-dedup invariant).
 //!
 //! [`generate_trace`] takes a `&SpongeRequires` and walks records in
-//! allocation order, stamping the 27-column trace; trailing rows up
+//! allocation order, stamping the 57-column trace; trailing rows up
 //! to the next power of two are inactive (`act = 0`).
 
 use alloc::vec::Vec;
@@ -30,11 +30,9 @@ use crate::{
             round::{NUM_ROUNDS, RoundRequires},
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
-                COL_CHUNK_LO, COL_CHUNK_PTR, COL_CLEARED_LO, COL_IS_CHUNK_AVAIL,
-                COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO, COL_PADDED_LO, COL_SPONGE_SEQ_ID,
-                COL_STATE_NEW_LO, COL_STATE_OUT_LO, COL_STATE_PREV_LO, KeccakSpongeAir,
-                NUM_MAIN_COLS, PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE,
-                STATE_PREV_BYTES_RANGE,
+                COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, KeccakSpongeAir, NUM_MAIN_COLS,
+                PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
@@ -434,9 +432,7 @@ pub(crate) fn generate_trace_padded_to(
             let overshoot = chunks_in_block - rate_avail;
 
             for slot in 0..SPONGE_PERIOD {
-                // Scattered row: per-lane lo/hi pairs land at non-adjacent
-                // columns by branch (see `fill_state_lane_row`), so fill a
-                // stack scratch by `COL_*` index, then extend.
+                // Fill a row scratch by column index, then append it to the trace.
                 let mut r = [Felt::ZERO; NUM_MAIN_COLS];
 
                 r[COL_SPONGE_SEQ_ID] = Felt::new(row as u64).expect("row index fits");
@@ -463,7 +459,7 @@ pub(crate) fn generate_trace_padded_to(
                 }
 
                 let chunk_lane = if consume { tape.next().unwrap_or(0) } else { 0 };
-                write_u64_with_bytes(&mut r, COL_CHUNK_LO, CHUNK_BYTES_RANGE.start, chunk_lane);
+                write_u64_bytes(&mut r, CHUNK_BYTES_RANGE.start, chunk_lane);
 
                 fill_state_lane_row(
                     &mut r,
@@ -557,7 +553,7 @@ fn fill_state_lane_row(
 
     if is_rate_slot {
         let state_prev = state_at_block_start[slot];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let (state_new, cleared, padded) = if is_last_block && slot == layout.pad_lane_idx {
             // Pad row.
             let cleared = !andnot_mask(layout.byte_offset) & chunk_lane;
@@ -570,9 +566,9 @@ fn fill_state_lane_row(
             // Verbatim XORin.
             (state_prev ^ chunk_lane, 0, 0)
         };
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
-        write_u64_with_bytes(r, COL_CLEARED_LO, CLEARED_BYTES_RANGE.start, cleared);
-        write_u64_with_bytes(r, COL_PADDED_LO, PADDED_BYTES_RANGE.start, padded);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
+        write_u64_bytes(r, CLEARED_BYTES_RANGE.start, cleared);
+        write_u64_bytes(r, PADDED_BYTES_RANGE.start, padded);
         if is_last_block {
             // Squeeze provides the perm-`last`'s output for
             // non-digest lanes (slots [4, 17) of the last block).
@@ -584,8 +580,8 @@ fn fill_state_lane_row(
     } else if is_capacity_slot {
         // Capacity passthrough: state_new = state_prev.
         let state_prev = state_at_block_start[slot];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_prev);
         if is_last_block {
             write_u64(r, COL_STATE_OUT_LO, perm_out_last_block[slot]);
         }
@@ -600,13 +596,13 @@ fn fill_state_lane_row(
         // `is_last_block_period`, but trace generation fills the
         // values uniformly for layout consistency.
         let state_prev = post_xorin_this_block[LANE_16];
-        write_u64_with_bytes(r, COL_STATE_PREV_LO, STATE_PREV_BYTES_RANGE.start, state_prev);
+        write_u64_bytes(r, STATE_PREV_BYTES_RANGE.start, state_prev);
         let state_new = if is_last_block {
             state_prev ^ PAD_CONST
         } else {
             state_prev
         };
-        write_u64_with_bytes(r, COL_STATE_NEW_LO, STATE_NEW_BYTES_RANGE.start, state_new);
+        write_u64_bytes(r, STATE_NEW_BYTES_RANGE.start, state_new);
     }
     // Slots 26..32 (NOP slack): all column values left at zero.
 }
@@ -617,12 +613,8 @@ fn write_u64(row: &mut [Felt], col_lo: usize, value: u64) {
     row[col_lo + 1] = hi;
 }
 
-/// Like [`write_u64`], but also fills `value`'s 8-byte little-endian
-/// shadow decomposition starting at `bytes_start` (see `sponge`'s
-/// "Byte-shadow columns" — the `eval` side links the two
-/// representations with an ungated local constraint).
-fn write_u64_with_bytes(row: &mut [Felt], col_lo: usize, bytes_start: usize, value: u64) {
-    write_u64(row, col_lo, value);
+/// Fill `value`'s 8-byte little-endian representation starting at `bytes_start`.
+fn write_u64_bytes(row: &mut [Felt], bytes_start: usize, value: u64) {
     for (i, b) in value.to_le_bytes().into_iter().enumerate() {
         row[bytes_start + i] = Felt::from(b);
     }
