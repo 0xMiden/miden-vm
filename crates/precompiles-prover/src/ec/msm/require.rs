@@ -191,9 +191,9 @@ pub fn combine_terms_preserving(
 
 /// Negate an MSM expression: every term's scalar negated (the base kept),
 /// the value negated. Each term's `out = −s` is an `is_c_zero` `UintAdd`
-/// (`s + out ≡ 0`); the value is the cancel `EcGroupAdd` `val_a + val = ∞`
-/// (so `val = −val_a`, the ∞ result slot pinned by `EcRequire::neg`). The
-/// operand's use count is bumped. Returns the negated expression handle.
+/// (`s + out ≡ 0`); the value shares `val_a`'s x-coordinate and uses an
+/// `is_c_zero` `UintAdd` to negate its y-coordinate. The operand's use count
+/// is bumped. Returns the negated expression handle.
 pub fn neg(
     msm: &mut EcMsmRequires,
     ec: &mut EcStores,
@@ -253,7 +253,7 @@ pub fn neg(
 /// Term lists are read in their stored (`idx`) order; the AIR re-checks
 /// each row, so faithfulness rests on the prover's discipline of laying
 /// operands in a consistent base order (equal bases must align to merge) —
-/// it is *completeness*, not soundness (see the design notes).
+/// it is *completeness*, not soundness.
 pub fn merge_terms(
     a_terms: &[(EcPointPtr, UintPtr)],
     b_terms: &[(EcPointPtr, UintPtr)],
