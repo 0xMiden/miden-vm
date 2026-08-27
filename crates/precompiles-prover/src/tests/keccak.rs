@@ -6,28 +6,29 @@
 
 use std::{vec, vec::Vec};
 
-use miden_air::lookup::debug::{
-    ValidateLayout, ValidateLookupAir, trace::collect_column_oracle_folds,
+use miden_air::lookup::{
+    LookupAir, LookupFractions, ProverLookupBuilder, build_lookup_fractions,
+    debug::{ValidateLayout, ValidateLookupAir},
 };
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
+use miden_crypto::stark::air::ConstraintDegrees;
+use miden_lifted_air::{BaseAir, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::keccak::{
         reference::{KECCAK_RC, keccak_f1600, keccak_round},
         round::{
-            A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, COLUMN_SHAPE, KeccakRoundAir, NUM_AUX_COLS,
-            NUM_LANES, NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_LIMBS_RANGE,
-            extract_output, extract_outputs, generate_trace_from_states, lane_base,
-            program::SLOT_D_ROL_BEGIN,
+            A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, KeccakRoundAir, NUM_AUX_COLS, NUM_LANES,
+            NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_LIMBS_RANGE, extract_output,
+            extract_outputs, generate_trace_from_states, lane_base, program::SLOT_D_ROL_BEGIN,
         },
     },
-    logup::{Challenges, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
     tests::bus_balance::session_stack_residual,
@@ -39,6 +40,26 @@ fn lookup_challenges() -> Challenges<QuadFelt> {
         QuadFelt::from_u64(103),
         MAX_MESSAGE_WIDTH,
         NUM_BUS_IDS,
+    )
+}
+
+fn fractions_at(
+    fractions: &LookupFractions<Felt, QuadFelt>,
+    row: usize,
+    column: usize,
+) -> &[(Felt, QuadFelt)] {
+    let count_idx = row * fractions.num_columns() + column;
+    let start = fractions.counts()[..count_idx].iter().sum::<usize>();
+    let end = start + fractions.counts()[count_idx];
+    &fractions.fractions()[start..end]
+}
+
+fn fold_fractions(fractions: &[(Felt, QuadFelt)]) -> (QuadFelt, QuadFelt) {
+    fractions.iter().fold(
+        (QuadFelt::ZERO, QuadFelt::ONE),
+        |(numerator, denominator), &(multiplicity, encoded)| {
+            (numerator * encoded + denominator * multiplicity, denominator * encoded)
+        },
     )
 }
 
@@ -237,7 +258,10 @@ fn keccak_round_shape_and_degree_match_design() {
 
     assert_eq!(air.width(), 68);
     assert_eq!(air.aux_width(), 12);
-    assert_eq!(COLUMN_SHAPE, [1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4]);
+    assert_eq!(
+        <KeccakRoundAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
+        &[1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4],
+    );
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 4, ext: 5 }
@@ -251,7 +275,7 @@ fn keccak_round_shape_and_degree_match_design() {
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: NUM_AUX_COLS,
         num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_SIGMA_VALUES,
+        num_permutation_values: NUM_LOGUP_VALUES,
     };
     ValidateLookupAir::validate(&air, layout)
         .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));
@@ -267,15 +291,11 @@ fn pure_rol_raw_b_is_load_bearing_in_every_byte_and_lane() {
         main.values[row * NUM_MAIN_COLS..(row + 1) * NUM_MAIN_COLS].to_vec(),
         NUM_MAIN_COLS,
     );
-    let periodic: Vec<Vec<Felt>> = air
-        .periodic_columns()
-        .into_iter()
-        .map(|column| vec![column[row % column.len()]])
-        .collect();
-    let public_values = [Felt::ZERO; NUM_PUBLIC_VALUES];
+    let periodic_columns = air.periodic_columns();
+    let periodic: Vec<Vec<Felt>> =
+        periodic_columns.iter().map(|column| vec![column[row % column.len()]]).collect();
     let challenges = lookup_challenges();
-    let baseline =
-        collect_column_oracle_folds(&air, &one_row, &periodic, &public_values, &challenges);
+    let baseline = build_lookup_fractions(&air, &one_row, None, &periodic, &challenges);
 
     for lane in 0..NUM_LANES {
         let lane_base = lane_base(lane);
@@ -287,29 +307,29 @@ fn pure_rol_raw_b_is_load_bearing_in_every_byte_and_lane() {
 
             let mut attacked = one_row.clone();
             attacked.values[cell] = Felt::ONE;
-            let attacked_folds = collect_column_oracle_folds(
-                &air,
-                &attacked,
-                &periodic,
-                &public_values,
-                &challenges,
-            );
+            let attacked_fractions =
+                build_lookup_fractions(&air, &attacked, None, &periodic, &challenges);
             let target_col = lane * (NUM_AUX_COLS / NUM_LANES) + 2 + byte / 4;
             let source_col = lane * (NUM_AUX_COLS / NUM_LANES) + 1;
 
             for col in 0..NUM_AUX_COLS {
+                let attacked_fold = fold_fractions(fractions_at(&attacked_fractions, 0, col));
+                let baseline_fold = fold_fractions(fractions_at(&baseline, 0, col));
                 if col == target_col {
-                    let (attacked_v, attacked_u) = attacked_folds[0][col];
-                    let (baseline_v, baseline_u) = baseline[0][col];
+                    let (attacked_v, attacked_u) = attacked_fold;
+                    let (baseline_v, baseline_u) = baseline_fold;
                     assert_ne!(attacked_v * baseline_u, baseline_v * attacked_u);
-                } else if col == source_col {
-                    // `src_b` has zero multiplicity on a pure-ROL row, so changing its
-                    // denominator must not change the represented rational sum.
-                    let (attacked_v, attacked_u) = attacked_folds[0][col];
-                    let (baseline_v, baseline_u) = baseline[0][col];
-                    assert_eq!(attacked_v * baseline_u, baseline_v * attacked_u);
                 } else {
-                    assert_eq!(attacked_folds[0][col], baseline[0][col]);
+                    assert_eq!(attacked_fold, baseline_fold);
+                    if col == source_col {
+                        // `src_b` has zero multiplicity on a pure-ROL row, so the
+                        // production collector omits it and only the unchanged `src_a`
+                        // fraction remains in this column.
+                        assert_eq!(
+                            fractions_at(&attacked_fractions, 0, col),
+                            fractions_at(&baseline, 0, col),
+                        );
+                    }
                 }
             }
         }

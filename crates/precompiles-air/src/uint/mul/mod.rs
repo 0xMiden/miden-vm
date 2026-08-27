@@ -313,9 +313,8 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
 const NUM_RAW_CONSUMES: usize = 3; // a, b, bound
 const NUM_RAW_CONSUME_COLS: usize = NUM_RAW_CONSUMES.div_ceil(2);
 const NUM_RANGE16_COLS: usize = NUM_CELLS.div_ceil(2);
-/// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
-/// can concatenate this chiplet's column shape onto the store's own
-/// instead of hand-duplicating the derived column count.
+/// Reused by [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir) to derive its
+/// independently repacked LogUp width.
 pub(crate) const NUM_LOGUP_COLS: usize = 1 // the UintMul provide
     + NUM_RAW_CONSUME_COLS // the three merged raw UintLimbs consumes (a, b, bound)
     + NUM_RANGE16_COLS // Range16 on every cell position
@@ -340,7 +339,7 @@ const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
     }
     shape
 }
-pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 
 /// The γ sign offset `2³¹` (carries are committed as `γ + 2³¹`).
 pub const GAMMA_OFFSET: u32 = 1 << 31;
