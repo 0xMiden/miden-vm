@@ -393,9 +393,9 @@ impl Session {
         self.eval.record_ec_msm(expr, terms, &mut self.msm, &mut self.eidos)
     }
 
-    /// Number of MSM expressions laid so far (intros + combines + negs) — a
-    /// chain-cost diagnostic, e.g. to compare addition-chain
-    /// [`strategies`]. Not a DAG quantity.
+    /// Number of MSM expressions laid so far (intros + endomorphism intros +
+    /// combines + negs) — a chain-cost diagnostic, e.g. to compare
+    /// addition-chain [`strategies`]. Not a DAG quantity.
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }

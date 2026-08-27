@@ -19,7 +19,10 @@ use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use miden_precompiles::{CurveId, CurvePoint, phi_generator};
 
 use crate::{
-    ec::msm::EcMsmAir,
+    ec::msm::{
+        COL_A_DIFF_HI, COL_A_DIFF_LO, COL_A_EXPR, COL_BASE, COL_BASE_A, COL_EXPR_PTR, COL_IS_INTRO,
+        COL_IS_NEG, COL_LAMBDA_PTR, COL_NEG_MINTED, COL_SCALAR, EcMsmAir,
+    },
     logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     math::{U256, from_hex, from_limbs32, to_limbs32},
     session::{
@@ -86,7 +89,7 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 fn shape_and_degree_match_design() {
     let air = EcMsmAir;
 
-    assert_eq!(air.width(), 46);
+    assert_eq!(air.width(), 41);
     assert_eq!(air.aux_width(), 14);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
@@ -107,6 +110,52 @@ fn shape_and_degree_match_design() {
         },
     )
     .unwrap_or_else(|err| panic!("EcMsmAir lookup validation failed: {err}"));
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn overlapping_stored_families_rejected_by_derived_intro_endo_selector() {
+    let traces = msm_two_intro_traces();
+    let mut main = traces.mains().into_iter().last().expect("EcMsm trace exists").clone();
+    let width = EcMsmAir.width();
+    let row = (0..main.height())
+        .find(|&row| {
+            let offset = row * width;
+            main.values[offset + COL_IS_INTRO] == Felt::ONE
+                && main.values[offset + COL_EXPR_PTR] == Felt::ONE
+        })
+        .expect("the first intro row exists");
+    let offset = row * width;
+
+    // Overlay a neg selector on the boundary intro row. Supply the native neg
+    // witnesses and the residual intro_endo scalar witness so every other
+    // local equation still holds. The residual selector is then -1, which its
+    // Boolean legality constraint must reject.
+    main.values[offset + COL_IS_NEG] = Felt::ONE;
+    main.values[offset + COL_BASE_A] = main.values[offset + COL_BASE];
+    main.values[offset + COL_A_EXPR] = Felt::ZERO;
+    main.values[offset + COL_A_DIFF_LO] = Felt::ZERO;
+    main.values[offset + COL_A_DIFF_HI] = Felt::ZERO;
+    main.values[offset + COL_LAMBDA_PTR] = main.values[offset + COL_SCALAR];
+
+    crate::tests::check_local(EcMsmAir, &main);
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn shared_mint_flag_rejected_on_intro() {
+    let traces = msm_two_intro_traces();
+    let mut main = traces.mains().into_iter().last().expect("EcMsm trace exists").clone();
+    let width = EcMsmAir.width();
+    let row = (0..main.height())
+        .find(|&row| main.values[row * width + COL_IS_INTRO] == Felt::ONE)
+        .expect("an intro row exists");
+
+    // The shared mint cell is Boolean, but may be nonzero only for neg or
+    // intro_endo. On an intro row no other native constraint reads this cell.
+    main.values[row * width + COL_NEG_MINTED] = Felt::ONE;
+
+    crate::tests::check_local(EcMsmAir, &main);
 }
 
 #[test]
