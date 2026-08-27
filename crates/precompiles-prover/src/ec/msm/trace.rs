@@ -1,11 +1,12 @@
 //! [`EcMsmAir`] trace generation, the recording accumulator, and the
 //! LogUp aux builder.
 //!
-//! Each expression lays a run of term rows (`intro`: one; `combine`: one
-//! per output term). The variable block is the run sharing `expr_ptr`,
-//! with the allocator `expr_ptr' = expr_ptr + is_boundary` threaded by the
-//! AIR. Pad rows continue the allocator with `is_boundary = 0` (so
-//! `expr_ptr` freezes and the cursors simply count up), touching no bus.
+//! Each expression lays a run of term rows (`intro`, `intro_zero`, and `intro_endo`: one;
+//! `combine` and `neg`: one per output term). The variable block is the run
+//! sharing `expr_ptr`, with the allocator `expr_ptr' = expr_ptr +
+//! is_boundary` threaded by the AIR. Pad rows continue the allocator with
+//! `is_boundary = 0` (so `expr_ptr` freezes and the cursors simply count
+//! up), touching no bus.
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
@@ -16,10 +17,9 @@ use super::{
     COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
     COL_CLAIM_MULT, COL_ENDO_BASE_X, COL_ENDO_MINTED, COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR,
     COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_COMBINE, COL_IS_INTRO,
-    COL_IS_INTRO_ENDO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT,
-    COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR,
-    COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir,
-    NUM_MAIN_COLS,
+    COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
+    COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
+    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir, NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
@@ -102,8 +102,9 @@ struct ExprRecord {
     group: u32,
     sbound: u32,
     val: u32,
-    // combine/neg expression-level cells (0 for intro). `b_expr` / `val_b`
-    // are combine-only; `pai` is neg-only.
+    // Operation-level cells. `a_expr`/`val_a` are used by combine and neg;
+    // `b_expr`/`val_b` are combine-only. The curve-parameter ptrs are also
+    // used by intro_endo.
     a_expr: u32,
     b_expr: u32,
     val_a: u32,
@@ -140,7 +141,8 @@ struct ExprRecord {
 }
 
 /// Relation identity of a recorded expression — the dedup key. An `intro`
-/// is its base point; a `combine` / `neg` its operand expression ptr(s).
+/// or `intro_endo` is its base point; a `combine` / `neg` its operand
+/// expression ptr(s).
 /// Mirrors [`EcAddRequires`](crate::ec::add::trace)'s `(group, p, q)` dedup:
 /// two requests of the *same* derivation collapse onto one expression. The
 /// strict pointer order (operand `<` result) keeps this sound — a dedup hit
@@ -592,8 +594,9 @@ impl EcMsmRequires {
         self.exprs[expr.0 as usize - 1].claim_mult += mult;
     }
 
-    /// Count of recorded expressions (intros + combines + negs) — the
-    /// chain-cost diagnostic for comparing addition-chain strategies.
+    /// Count of recorded expressions (intros + endomorphism intros +
+    /// combines + negs) — the chain-cost diagnostic for comparing
+    /// addition-chain strategies.
     pub fn expr_count(&self) -> usize {
         self.exprs.len()
     }
@@ -661,7 +664,6 @@ pub fn generate_trace(
             set(COL_MULT, e.mult);
             set(COL_CLAIM_MULT, e.claim_mult);
             set(COL_IS_INTRO, is_intro as u32);
-            set(COL_IS_INTRO_ENDO, is_intro_endo as u32);
             set(COL_IS_COMBINE, is_combine as u32);
             set(COL_IS_NEG, is_neg as u32);
             set(COL_IS_INTRO_ZERO, is_intro_zero as u32);
@@ -726,10 +728,10 @@ pub fn generate_trace(
                     bpl.require_range16((a_diff >> 16) as u16);
                 }
             } else if is_intro_endo {
-                // The value relation's coordinate cells + the boundary's
-                // `EcGroup` pin (authenticating beta/lambda against the
-                // real group) — the UintMul and EcOnCurveCert demand were
-                // already routed by `require::intro_endo`.
+                // The value relation reuses the negation witness slots. The
+                // boundary's `EcGroup` pin authenticates beta/lambda against
+                // the real group; `require::intro_endo` already routed the
+                // UintMul and EcOnCurveCert demand.
                 set(COL_A_PTR, e.a_ptr);
                 set(COL_B_PTR, e.b_ptr);
                 set(COL_BOUND_PTR, e.bound_ptr);
