@@ -698,8 +698,8 @@ pub fn generate_trace(
                 }
             } else if is_neg {
                 // Unary walk over A: cursor i, the consumed term cells, the
-                // operand value, group params, and the ∞ result slot. Only
-                // the a-side ordering half (b-side is combine-only).
+                // operand value, and group params. Only the a-side ordering
+                // half is populated (the b-side is combine-only).
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
                 set(COL_BASE_A, rv.base_a);

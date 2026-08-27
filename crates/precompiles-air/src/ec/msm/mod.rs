@@ -21,7 +21,7 @@
 //! `b_expr < expr` on every combine — grounds the induction against
 //! circular derivations) and on `scalar_bound = #E` (the full curve order
 //! annihilates every point, so the merge's `mod n` wrap is harmless —
-//! cofactor-agnostic). See the design notes.
+//! cofactor-agnostic).
 //!
 //! `intro`, `combine`, and `neg` build the expression; the eval `EcMsm`
 //! absorb seam resolves a claim in-circuit, consuming the positionless
@@ -179,18 +179,19 @@ pub const COL_VAL: usize = 8;
 /// consumers of a claim — combine-operand vs DAG-resolve — bill separate
 /// provides.)
 pub const COL_MULT: usize = 9;
-/// Op-family one-hot (constant within a run): `is_intro + is_combine =
-/// act`.
+/// The first two op-family flags. Together with [`COL_IS_NEG`] and
+/// [`COL_IS_INTRO_ENDO`], they form a one-hot encoding of every active row.
 pub const COL_IS_INTRO: usize = 10;
 pub const COL_IS_COMBINE: usize = 11;
 
-// --- combine-only columns (0 on intro / pad rows) ---------------------
-/// Operand A / B expression ptrs (constant within a combine run).
+// --- operation witness columns ---------------------------------------
+/// Operand A / B expression ptrs. Combine uses both; neg uses A only.
 pub const COL_A_EXPR: usize = 12;
 pub const COL_B_EXPR: usize = 13;
-/// Merge-walk cursors into A / B (threaded within the run; 0 at run
-/// start). The boundary's `i + take_a + take_both` is `k_a` (and likewise
-/// `k_b`), tying the operand-head consume to its term count.
+/// Walk cursors into A / B (threaded within the run; 0 at run start).
+/// Combine uses both; neg uses A only. At the boundary, `i + take_a +
+/// take_both + is_neg` is `k_a`; B similarly uses `j + take_b + take_both`.
+/// These identities tie each operand-head consume to its term count.
 pub const COL_I: usize = 14;
 pub const COL_J: usize = 15;
 /// Per-row take one-hot: `take_a + take_b + take_both = is_combine`.
@@ -198,39 +199,39 @@ pub const COL_TAKE_A: usize = 16;
 pub const COL_TAKE_B: usize = 17;
 pub const COL_TAKE_BOTH: usize = 18;
 /// Operand term cells consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j,
-/// …)` (gated by the take flags).
+/// …)`. Combine uses both sides; neg uses A only.
 pub const COL_BASE_A: usize = 19;
 pub const COL_S_A: usize = 20;
 pub const COL_BASE_B: usize = 21;
 pub const COL_S_B: usize = 22;
-/// Operand values (constant within a run; the boundary's `EcGroupAdd`
-/// asserts `val = val_a + val_b`).
+/// Operand values. Combine uses both; neg uses A only. On a combine
+/// boundary, `EcGroupAdd` asserts `val = val_a + val_b`.
 pub const COL_VAL_A: usize = 23;
 pub const COL_VAL_B: usize = 24;
-/// Group curve params, carried only to close the boundary's `EcGroup`
-/// consume that pins `sbound` to the group (constant within a run).
+/// Group curve parameters used by combine, neg, and intro_endo to close the
+/// boundary's `EcGroup` consume and pin `sbound` to the group.
 pub const COL_A_PTR: usize = 25;
 pub const COL_B_PTR: usize = 26;
 pub const COL_BOUND_PTR: usize = 27;
 /// Ordering witnesses (boundary): `expr − a_expr − 1 = a_diff_lo + 2¹⁶·
 /// a_diff_hi ≥ 0`, each half range-checked — enforces `a_expr < expr`
-/// (and `b_expr < expr`), the well-founded order.
+/// for combine and neg (and `b_expr < expr` for combine), the well-founded
+/// order.
 pub const COL_A_DIFF_LO: usize = 28;
 pub const COL_A_DIFF_HI: usize = 29;
 pub const COL_B_DIFF_LO: usize = 30;
 pub const COL_B_DIFF_HI: usize = 31;
 
-// --- neg-only columns (0 on intro / combine / pad rows) ---------------
+// --- negation witness and shared resolve multiplicity -----------------
 /// Op-family flag for `neg` — the third one-hot member (`is_intro +
-/// is_combine + is_neg = act`). A `neg` is a **unary** walk over operand A:
+/// is_intro_endo + is_combine + is_neg = act`). A `neg` is a **unary** walk over operand A:
 /// one output term per A term, the base copied and the scalar negated (the
-/// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), the value negated via the
-/// cancel `EcGroupAdd(group, val_a, val, ∞)`.
+/// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), with the value's shared
+/// x-coordinate and negated y-coordinate authenticated on the boundary.
 pub const COL_IS_NEG: usize = 32;
 /// Neg-value cell (boundary only): the **shared x ptr** of the cheap value
 /// negation `R = (x_a, −y_a)` — both the `EcPoint(val_a)` and `EcPoint(R)`
-/// consumes carry it, so they pin `x_R = x_a` for free. (Reuses the slot the
-/// old cancel-`EcGroupAdd` ∞ result used.)
+/// consumes carry it, so they pin `x_R = x_a` for free.
 pub const COL_NEG_X: usize = 33;
 /// **Resolve** use count — how often this expression is resolved at the
 /// eval `EcMsm` seam. Drives the `MsmClaimTerm` provide (every term row)
@@ -248,10 +249,9 @@ pub const COL_NEG_YR: usize = 36;
 /// the `EcOnCurveCert(group, R)` provide that vouches R's (trio-free)
 /// membership — R on-curve because `val_a` is.
 pub const COL_NEG_MINTED: usize = 37;
-/// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
-/// boundary's `EcGroup` consume; the none-sentinel 0 for a group with no
-/// endomorphism). Combine/neg-boundary-only, like [`COL_A_PTR`] /
-/// [`COL_B_PTR`] / [`COL_BOUND_PTR`].
+/// The group's GLV endomorphism `β`/`λ` ptrs, used by combine, neg, and
+/// intro_endo to close the boundary's `EcGroup` consume. Both are the
+/// none-sentinel 0 for a group without an endomorphism.
 pub const COL_BETA_PTR: usize = 38;
 pub const COL_LAMBDA_PTR: usize = 39;
 
@@ -300,14 +300,13 @@ pub const COL_ENDO_MINTED: usize = 44;
 pub const COL_IS_INTRO_ZERO: usize = 45;
 pub const NUM_MAIN_COLS: usize = 46;
 
-// Aux: 15 columns, flattened via `frac_col!` over the 27 fractions so
+// Aux: 14 columns, flattened via `frac_col!` over the 27 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
-// 1 (folding the intermediate 12-column flatten and the follow-on
-// singleton-pack into one step):
-//  col 0:  MsmTerm provide — alone, the gated running-sum anchor.
+// 1:
+//  col 0:  MsmTerm provide, alone as the centered running-sum anchor.
 //  col 1:  MsmExpr provide + MsmClaimTerm provide.
-//  col 2:  EcOnCurveCert provide (neg value R) + literal-1 UintVal (intro, one full-value message).
-//  col 3:  MsmTerm consume A — alone, now that the literal-1 UintVal merged into col 2.
+//  col 2:  merged EcOnCurveCert provide (neg/intro_endo value) + literal-1 UintVal.
+//  col 3:  MsmTerm consume A + UintMul (intro_endo's x_φ = β·x_P).
 //  col 4:  MsmTerm consume B + UintAdd (take_both merge).
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
@@ -317,12 +316,11 @@ pub const NUM_MAIN_COLS: usize = 46;
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
 //  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
-//  col 12: UintMul (intro_endo's x_φ = β·x_P) + EcOnCurveCert provide (intro_endo value).
-//  col 13: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
-//  col 14: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
-const NUM_LOGUP_COLS: usize = 15;
-const AUX_WIDTH: usize = 15;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+//  col 12: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
+//  col 13: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
+const NUM_LOGUP_COLS: usize = 14;
+const AUX_WIDTH: usize = NUM_LOGUP_COLS;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -674,14 +672,15 @@ where
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
-        let single_deg = Deg { v: 1, u: 2 };
+        let anchor_deg = Deg { v: 1, u: 1 };
+        let linear_pair_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: the MsmTerm provide, alone — the gated running-sum anchor.
+        // col 0: the MsmTerm provide, alone as the centered accumulator anchor.
         frac_col!(
             builder,
             "ec-msm-provide",
-            single_deg,
+            anchor_deg,
             (
                 "provide-msmterm",
                 neg_mult.clone(),
@@ -724,19 +723,17 @@ where
                 one_deg
             ),
         );
-        // col 2 (paired, lqd-1): neg's value `R = −val_a` is a trio-free
-        // cert point — vouch its on-curve membership here (R is on-curve
-        // because val_a is), once, when this neg freshly mints R
-        // (`neg_minted` on the boundary) — paired with intro's literal-1
-        // UintVal, now sent as one full-value message instead of a
-        // lo/hi pair.
+        // col 2 (paired, lqd-1): neg and intro_endo mint the same typed
+        // `EcOnCurveCert(group_ptr, val)` tuple. Sum their signed
+        // multiplicities into one fraction, then pair it with intro's
+        // literal-1 UintVal.
         frac_col!(
             builder,
             "ec-msm-provide",
             pair_deg,
             (
-                "provide-oncurvecert-neg",
-                LB::Expr::ZERO - neg_minted.clone() * is_boundary.clone(),
+                "provide-oncurvecert-neg-or-endo",
+                LB::Expr::ZERO - neg_minted.clone() * is_boundary.clone() - endo_minted.clone(),
                 EcOnCurveCertMsg {
                     group_ptr: group_ptr.clone(),
                     r_ptr: val.clone()
@@ -763,12 +760,12 @@ where
                 one_deg
             ),
         );
-        // col 3: the combine term walk's operand-A consume, alone now
-        // that the literal-1 UintVal it was paired with merged into col 2.
+        // col 3 (paired, lqd-1): the combine/neg term walk's operand-A
+        // consume, paired with intro_endo's x_φ = β·x_P certificate.
         frac_col!(
             builder,
             "ec-msm-walk",
-            single_deg,
+            pair_deg,
             (
                 "consume-term-a",
                 adv_i.clone(),
@@ -780,6 +777,21 @@ where
                 },
                 one_deg
             ),
+            (
+                "consume-uintmul-endo",
+                bnd_endo.clone(),
+                UintMulMsg {
+                    kappa_a: LB::Expr::ONE,
+                    kappa_c: LB::Expr::ZERO,
+                    a_ptr: beta_ptr.clone(),
+                    b_ptr: endo_base_x.clone(),
+                    c_ptr: bound_ptr.clone(),
+                    r_ptr: endo_val_x.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    is_sub: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
         );
         // col 4 (paired, lqd-1): the combine term walk's operand-B consume,
         // paired with the take_both scalar merge `s_a + s_b ≡ scalar (mod
@@ -787,7 +799,7 @@ where
         frac_col!(
             builder,
             "ec-msm-walk",
-            pair_deg,
+            linear_pair_deg,
             (
                 "consume-term-b",
                 adv_j.clone(),
@@ -998,41 +1010,7 @@ where
                 two_deg
             ),
         );
-        // col 12 (paired, lqd-1): the value relation's only genuinely new
-        // certificate — `x_φ = β·x_P` — paired with the on-curve cert
-        // provide for a freshly-minted `φ(P)` (φ(P) on-curve because P is,
-        // same closure-cert idiom `neg` uses for its value).
-        frac_col!(
-            builder,
-            "ec-msm-endo",
-            pair_deg,
-            (
-                "consume-uintmul-endo",
-                bnd_endo,
-                UintMulMsg {
-                    kappa_a: LB::Expr::ONE,
-                    kappa_c: LB::Expr::ZERO,
-                    a_ptr: beta_ptr,
-                    b_ptr: endo_base_x.clone(),
-                    c_ptr: bound_ptr.clone(),
-                    r_ptr: endo_val_x,
-                    bound_ptr,
-                    is_sub: LB::Expr::ZERO,
-                },
-                two_deg
-            ),
-            (
-                "provide-oncurvecert-endo",
-                LB::Expr::ZERO - endo_minted,
-                EcOnCurveCertMsg {
-                    group_ptr: group_ptr.clone(),
-                    r_ptr: val.clone()
-                },
-                two_deg
-            ),
-        );
-
-        // col 13 (paired, lqd-1): intro_zero's own two ties — the literal-0
+        // col 12 (paired, lqd-1): intro_zero's own two ties — the literal-0
         // scalar `UintVal`, mirroring intro's literal-1 (col 2), and the
         // `EcPoint(val, is_pai = 1)` consume tying `val` to `group_ptr`'s
         // canonical PAI row (unlike plain intro's `val = base` native
@@ -1074,7 +1052,7 @@ where
                 two_deg
             ),
         );
-        // col 14: intro_zero's own base-membership tie — unlike `val`,
+        // col 13: intro_zero's own base-membership tie — unlike `val`,
         // `base` must be a genuine finite point of `group_ptr` (`is_pai =
         // 0`), not a literal PAI, so this reuses the coordinate cells
         // `intro_endo` uses for the analogous tie on its own base (see
@@ -1083,7 +1061,7 @@ where
         frac_col!(
             builder,
             "ec-msm-intro-zero",
-            single_deg,
+            two_deg,
             (
                 "consume-ecpoint-intro-zero-base",
                 bnd_intro_zero,
