@@ -247,7 +247,7 @@ impl PackageCache for NoPackageStore {
     type Error = NoPackageStoreError;
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
-        Ok(Version::new(package.version.clone(), package.digest()))
+        Ok(Version::new(package.version.clone(), package.dependency_commitment()))
     }
 }
 
@@ -315,7 +315,7 @@ mod tests {
             )
             .expect("test package should be valid"),
         );
-        let expected = Version::new(package.version.clone(), package.digest());
+        let expected = Version::new(package.version.clone(), package.dependency_commitment());
 
         let mut store = NoPackageStore;
         let cached = store

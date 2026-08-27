@@ -123,6 +123,10 @@ with `Verifier::verify`.
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
 one synchronous call while preserving optimized overlapped execution and trace construction.
 
+`prove_sync()` overlaps execution with hasher-chiplet trace construction when a Rayon worker is
+available. A caller with no separate Rayon worker uses compact buffered replay, including on
+targets such as `wasm32-unknown-unknown`.
+
 #### Proof generation example
 
 Here is a simple example of executing a program which pushes two numbers onto the stack and computes their sum:
@@ -166,8 +170,8 @@ assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 
 To verify program execution, use `Verifier::new().verify(&claim, &proof)`. The verifier borrows:
 
-- `claim: &ExecutionClaim` - the program information and public stack inputs and outputs;
-- `proof: &ExecutionProof` - deferred or complete execution proof artifacts.
+- `claim: &ExecutionClaim`. The program information and public stack inputs and outputs.
+- `proof: &ExecutionProof`. The deferred or complete execution proof artifacts.
 
 Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the `stack_inputs` is expected to be the value at the top of the stack.
 

@@ -20,6 +20,12 @@
 /// coordinates are bound by that commitment, but `r` and `s` are not committed to a particular
 /// signature encoding. Unlike the `miden-crypto` Rust verifier, the MASM verifier intentionally
 /// accepts high-s values.
+///
+/// These helpers encode only the advice witness consumed by the verification procedures. The
+/// recovery procedures instead read a word-aligned native EVM recovery witness from memory as
+/// `R_LE_U32[8] || S_LE_U32[8] || V`, where `V` is 27 or 28. Callers must convert external EVM
+/// wire signatures, whose scalar components are fixed-width big-endian byte strings, into that
+/// native memory layout.
 pub mod ecdsa_k256_keccak {
     extern crate alloc;
 

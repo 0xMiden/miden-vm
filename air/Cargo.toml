@@ -33,6 +33,7 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 p3-field.workspace = true
+p3-security.workspace = true
 proptest = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true

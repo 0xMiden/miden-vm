@@ -24,7 +24,7 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 2;
+pub const DEBUG_INFO_VERSION: u8 = 3;
 
 /// Maximum encoded payload size accepted for package-owned debug information.
 ///
@@ -950,7 +950,7 @@ fn validate_debug_type_info(
     types: &IndexVec<DebugTypeIdx, DebugTypeInfo>,
 ) -> Result<(), DebugInfoTableRemapError> {
     match ty {
-        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => {},
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown | DebugTypeInfo::Variadic => {},
         DebugTypeInfo::Pointer { pointee_type_idx } => {
             validate_type_idx(*pointee_type_idx, types)?;
         },
@@ -1077,6 +1077,7 @@ fn remap_debug_type_info(
                 .collect::<Result<_, DebugInfoTableRemapError>>()?,
         },
         DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
+        DebugTypeInfo::Variadic => DebugTypeInfo::Variadic,
     })
 }
 

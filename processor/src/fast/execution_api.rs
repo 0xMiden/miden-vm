@@ -138,25 +138,47 @@ impl FastProcessor {
         .await
     }
 
-    /// Executes the program and builds its execution trace, overlapping the two: the hasher
-    /// chiplet — the dominant serial part of trace building — is built on a second thread from a
+    /// Executes the program and builds its execution trace, overlapping the two when a Rayon worker
+    /// is available. The hasher chiplet — the dominant serial part of trace building — consumes a
     /// live stream of requests while execution is still running, hiding its cost behind the
-    /// (inherently sequential) execution itself.
+    /// (inherently sequential) execution itself. When the caller is Rayon's only worker, this uses
+    /// compact buffered replay and builds the trace after execution.
+    ///
+    /// `max_prover_memory_bytes` bounds the trace the same way
+    /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
+    /// call, so it needs its own copy of the derived row cap.
     ///
     /// Produces the same trace as [`Self::execute_for_proving_sync`] followed by
-    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace`]. The optional precompile
-    /// witness is returned separately because [`crate::trace::VmTrace`] retains only its
-    /// authenticated root.
+    /// [`ExecutionWitness::into_parts`] and [`crate::trace::build_trace_with_budget`]. The optional
+    /// precompile witness is returned separately because [`crate::trace::VmTrace`] retains only
+    /// its authenticated root.
     #[cfg(feature = "std")]
     #[instrument(name = "execute_and_build_trace_sync", skip_all)]
     pub fn execute_and_build_trace_sync(
         self,
         program: &Program,
         host: &mut impl SyncHost,
+        max_prover_memory_bytes: u64,
     ) -> Result<(crate::trace::VmTrace, Option<PrecompileWitness>), ExecutionError> {
-        use crate::trace::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+        use miden_air::{config, memory};
+
+        use crate::trace::{
+            MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_budget,
+            build_trace_with_prebuilt_hasher,
+        };
+
+        if Self::rayon_has_no_parallel_worker() {
+            let (vm_witness, precompiles_witness) =
+                self.execute_for_proving_sync(program, host)?.into_parts();
+            let trace = build_trace_with_budget(vm_witness, max_prover_memory_bytes)?;
+            return Ok((trace, precompiles_witness));
+        }
 
         let stack_inputs = self.initial_stack_inputs();
+        let max_trace_len = MAX_TRACE_LEN.min(memory::max_any_height_for_budget(
+            max_prover_memory_bytes,
+            &config::pcs_params(),
+        ));
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut tracer = ExecutionTracer::new_with_streamed_hasher(
             self.options.core_trace_fragment_size(),
@@ -164,52 +186,60 @@ impl FastProcessor {
             sender,
         );
 
-        std::thread::scope(|scope| {
-            // Only the receiver crosses threads; execution (and the host) stay on this one.
-            // Spans are thread-local, so the builder thread re-enters this function's span
-            // to keep its work attributed under it in profiling traces.
+        let mut hasher = None;
+        let hasher_slot = &mut hasher;
+        // Keep `tracer` owned by the scope body. If execution unwinds, dropping the body closes the
+        // stream before Rayon waits for the builder, so the builder cannot remain blocked on input.
+        let execution_output = rayon::in_place_scope(move |scope| {
+            // Execution and the host remain on the calling thread. An idle Rayon worker can steal
+            // only the builder task.
             let span = tracing::Span::current();
-            let hasher = scope.spawn(move || {
+            scope.spawn(move |_| {
                 let _span = span.entered();
-                build_hasher_chiplet(receiver.into_iter().map(Ok), MAX_TRACE_LEN)
+                let result = build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len);
+                *hasher_slot = Some(result);
             });
 
-            // Liveness invariant: both match arms consume `tracer` by value, so the scope
-            // closure captures it by move and any unwind (including a panic in execution)
-            // drops the stream's sender, unblocking the builder before the scope's join.
             let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer);
 
-            let (mut vm_witness, precompiles_witness) = match execution_output {
+            match execution_output {
                 Ok(output) => {
-                    Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
-                        .into_parts()
+                    let (mut vm_witness, precompiles_witness) =
+                        Self::execution_witness_from_parts(program, stack_inputs, output, tracer)
+                            .into_parts();
+                    // End the stream before this scope waits for the builder.
+                    drop(vm_witness.take_hasher_replay());
+                    Ok((vm_witness, precompiles_witness))
                 },
                 Err(err) => {
-                    // Dropping the tracer drops the stream's sender; the builder then sees
-                    // end-of-input and finishes, letting the scope join it cleanly. The
-                    // execution error is the root cause, so the builder's outcome is only
-                    // logged, not propagated.
+                    // Dropping the tracer closes the stream and lets the builder finish. The
+                    // execution error remains the root cause even if the partial replay also
+                    // failed.
                     drop(tracer);
-                    match hasher.join() {
-                        Ok(Err(builder_err)) => {
-                            tracing::debug!(%builder_err, "hasher builder also failed");
-                        },
-                        Ok(Ok(_)) => (),
-                        Err(panic) => std::panic::resume_unwind(panic),
-                    }
-                    return Err(err);
+                    Err(err)
                 },
-            };
-            // End the stream before joining the builder.
-            drop(vm_witness.take_hasher_replay());
-            let hasher = match hasher.join() {
-                Ok(result) => result?,
-                Err(panic) => std::panic::resume_unwind(panic),
-            };
+            }
+        });
 
-            let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher)?;
-            Ok((trace, precompiles_witness))
-        })
+        let hasher = hasher.expect("hasher builder did not run");
+        let (vm_witness, precompiles_witness) = match execution_output {
+            Ok(output) => output,
+            Err(err) => {
+                if let Err(builder_err) = hasher {
+                    tracing::debug!(%builder_err, "hasher builder also failed");
+                }
+                return Err(err);
+            },
+        };
+
+        let trace = build_trace_with_prebuilt_hasher(vm_witness, hasher?, max_prover_memory_bytes)?;
+        Ok((trace, precompiles_witness))
+    }
+
+    #[cfg(feature = "std")]
+    fn rayon_has_no_parallel_worker() -> bool {
+        // `current_num_threads` initializes Rayon's global fallback before the thread-index check.
+        rayon::current_num_threads() == 1 && rayon::current_thread_index().is_some()
     }
 
     /// Executes the given program synchronously and returns its complete post-execution witness.
@@ -1491,5 +1521,19 @@ impl FastProcessor {
             )
             .await;
         Self::stack_result_from_flow(flow)
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::FastProcessor;
+
+    #[test]
+    fn sole_rayon_worker_requires_buffered_trace_building() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap()
+            .install(|| assert!(FastProcessor::rayon_has_no_parallel_worker()));
     }
 }

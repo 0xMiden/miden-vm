@@ -52,7 +52,7 @@ const COMPRESSION_INPUTS: usize = 2;
 // ================================================================================================
 
 /// Log2 of the FRI blowup factor (blowup = 8).
-const LOG_BLOWUP: u8 = 3;
+pub(crate) const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
@@ -135,20 +135,20 @@ pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(8001155700388371521),
-    Felt::new_unchecked(10401107199630226870),
-    Felt::new_unchecked(16097540092429316788),
-    Felt::new_unchecked(5987438047465362013),
+    Felt::new_unchecked(8509919582315365814),
+    Felt::new_unchecked(12865978328275266043),
+    Felt::new_unchecked(12073117316737140237),
+    Felt::new_unchecked(5647109555087128169),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(4203939832410250299),
-    Felt::new_unchecked(12914527915593930096),
-    Felt::new_unchecked(3268125648964005028),
-    Felt::new_unchecked(5037431390707430717),
+    Felt::new_unchecked(8563712008625779037),
+    Felt::new_unchecked(2346635758357605862),
+    Felt::new_unchecked(17725435322360039753),
+    Felt::new_unchecked(12106900609136090006),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -267,9 +267,9 @@ pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObse
 /// Sponge state width in field elements.
 const SPONGE_WIDTH: usize = 12;
 /// Sponge rate (absorbable elements per permutation).
-const SPONGE_RATE: usize = 8;
+pub(crate) const SPONGE_RATE: usize = 8;
 /// Sponge digest width in field elements.
-const DIGEST_WIDTH: usize = 4;
+pub(crate) const DIGEST_WIDTH: usize = 4;
 /// Range of capacity slots within the sponge state array.
 const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
 

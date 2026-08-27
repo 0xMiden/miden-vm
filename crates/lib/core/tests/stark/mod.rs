@@ -365,9 +365,10 @@ fn request_consumer_source() -> String {
     format!(
         "
         use miden::core::sys
-        use miden::core::stark::utils
+        use miden::core::stark::constants
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
+        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -392,13 +393,17 @@ fn request_consumer_source() -> String {
             # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 
             # 4) Grade the returned parameters and assert the consumer's acceptance
-            #    threshold (>= 96 conjectured bits).
+            #    threshold (>= 96 conjectured bits). The grade also depends on the proof's
+            #    largest AIR trace height, which the verifier left in its own memory.
             swapw
             # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
-            exec.utils::conjectured_security_level
-            # => [conjectured_level, deep_pow_bits, folding_pow_bits, D]
+            exec.constants::get_trace_length_log movdn.4
+            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
+            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_height,
+            #     num_kernel_procedures, D]
+            exec.vm::compute_conjectured_security_level
+            # => [conjectured_level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
-            drop drop
             # => [D]
             exec.sys::truncate_stack
         end
@@ -485,9 +490,10 @@ fn stark_verifier_e2f4_request_multi_proof() {
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::stark::utils
+        use miden::core::stark::constants
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
+        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -502,9 +508,11 @@ fn stark_verifier_e2f4_request_multi_proof() {
             procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
             exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
-            swapw exec.utils::conjectured_security_level # => [level, deep_pow, fold_pow, D]
+            swapw exec.constants::get_trace_length_log movdn.4
+            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
+            exec.vm::compute_conjectured_security_level  # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
-            drop drop                                    # => [D]
+            # => [D]
         end
 
         begin

@@ -221,13 +221,34 @@ impl fmt::Display for TypedProcInfo {
 /// and we show its last part. We walk the types that hold other types so a struct inside one gets
 /// the same treatment, and we print them the way [`Type`] itself does, so a signature reads like
 /// the source it came from.
-fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
+/// `printing` holds the recursive definitions whose bodies are being written out.
+///
+/// A named recursive struct stops at its name below, but an anonymous one has no name to stop at,
+/// so without this its body is unfolded forever.
+fn format_type_inner(
+    ty: &Type,
+    codecs: &[Box<dyn WitScalarCodec>],
+    printing: &mut Vec<midenc_hir_type::RecTypeRef>,
+) -> String {
     match ty {
         Type::Struct(struct_ty) => {
             // A codec reads one token for the whole struct, not one per field, the same way
             // `token_count` and `decode_type` treat it. So the signature shows the codec's name
             // for it, not a field list that would wrongly ask the user for one token per field.
-            if let Some(codec) = codec_for_struct(codecs, struct_ty) {
+            if let Some(rec) = struct_ty.as_recursive() {
+                if printing.contains(rec) {
+                    // Back at a definition already being written out. A named one never gets
+                    // here, because its name is its whole rendering below.
+                    return rec.name().map_or_else(|| "_".to_string(), |name| name.to_string());
+                }
+                printing.push(rec.clone());
+            }
+            let is_recursive = struct_ty.is_recursive();
+            let struct_ty = struct_ty.get();
+            if let Some(codec) = codec_for_struct(codecs, &struct_ty) {
+                if is_recursive {
+                    printing.pop();
+                }
                 return codec.wit_name().to_string();
             }
 
@@ -235,15 +256,17 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
             // A struct with mixed field names has no shape, and `Display` cannot show an error, so
             // the signature says so instead of looking correct. `decode_type` is where it becomes
             // an error.
-            match struct_shape(struct_ty) {
+            let rendered = match struct_shape(&struct_ty) {
                 // A struct with a name is its name. Its fields are not part of the signature.
                 Some(
                     StructShape::Tuple { name: Some(name) }
                     | StructShape::Record { name: Some(name) },
                 ) => name,
                 Some(StructShape::Tuple { name: None }) => {
-                    let fields: Vec<String> =
-                        fields.iter().map(|field| format_type(&field.ty, codecs)).collect();
+                    let fields: Vec<String> = fields
+                        .iter()
+                        .map(|field| format_type_inner(&field.ty, codecs, printing))
+                        .collect();
                     format!("({})", fields.join(", "))
                 },
                 // A record has a name on every field, so `?` only shows up for a struct whose
@@ -255,7 +278,7 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
                         .enumerate()
                         .map(|(i, field)| {
                             let name = field_name(field, i).unwrap_or("?");
-                            format!("{name}: {}", format_type(&field.ty, codecs))
+                            format!("{name}: {}", format_type_inner(&field.ty, codecs, printing))
                         })
                         .collect();
                     let body = rendered.join(", ");
@@ -266,16 +289,26 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
                         None => format!("{{ {body} }}"),
                     }
                 },
+            };
+            if is_recursive {
+                printing.pop();
             }
+            rendered
         },
         Type::Array(array_ty) => {
-            format!("[{}; {}]", format_type(&array_ty.ty, codecs), array_ty.len)
+            format!("[{}; {}]", format_type_inner(&array_ty.ty, codecs, printing), array_ty.len)
         },
-        Type::List(element_ty) => format!("list<{}>", format_type(element_ty, codecs)),
+        Type::List(element_ty) => {
+            format!("list<{}>", format_type_inner(element_ty, codecs, printing))
+        },
         Type::Ptr(ptr_ty) => {
-            format!("ptr<{}, {}>", ptr_ty.addrspace, format_type(&ptr_ty.pointee, codecs))
+            format!(
+                "ptr<{}, {}>",
+                ptr_ty.addrspace,
+                format_type_inner(&ptr_ty.pointee, codecs, printing)
+            )
         },
-        Type::Function(sig) => format_signature("fn", sig, codecs),
+        Type::Function(sig) => format_signature_inner("fn", sig, codecs, printing),
         primitive => primitive.to_string(),
     }
 }
@@ -283,8 +316,19 @@ fn format_type(ty: &Type, codecs: &[Box<dyn WitScalarCodec>]) -> String {
 /// Prints `name(a, b) -> c`. With no results there is no arrow. With more than one result they
 /// go in a tuple.
 fn format_signature(name: &str, sig: &FunctionType, codecs: &[Box<dyn WitScalarCodec>]) -> String {
-    let params: Vec<String> = sig.params.iter().map(|ty| format_type(ty, codecs)).collect();
-    let results: Vec<String> = sig.results.iter().map(|ty| format_type(ty, codecs)).collect();
+    format_signature_inner(name, sig, codecs, &mut Vec::new())
+}
+
+fn format_signature_inner(
+    name: &str,
+    sig: &FunctionType,
+    codecs: &[Box<dyn WitScalarCodec>],
+    printing: &mut Vec<midenc_hir_type::RecTypeRef>,
+) -> String {
+    let params: Vec<String> =
+        sig.params.iter().map(|ty| format_type_inner(ty, codecs, printing)).collect();
+    let results: Vec<String> =
+        sig.results.iter().map(|ty| format_type_inner(ty, codecs, printing)).collect();
 
     let ret = match results.as_slice() {
         [] => String::new(),

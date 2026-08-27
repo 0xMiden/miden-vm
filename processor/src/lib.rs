@@ -30,6 +30,7 @@ mod tracer;
 use miden_core::{
     deferred::{Digest, Node, PrecompileError},
     mast::ExecutableMastForest,
+    serde::{Deserializable, Serializable},
 };
 
 use crate::{
@@ -343,6 +344,24 @@ impl From<ContextId> for u64 {
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
         Felt::from_u32(context_id.0)
+    }
+}
+
+impl Serializable for ContextId {
+    fn write_into<W: serde::ByteWriter>(&self, target: &mut W) {
+        Serializable::write_into(&self.0, target);
+    }
+}
+
+impl Deserializable for ContextId {
+    fn read_from<R: serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, serde::DeserializationError> {
+        Ok(Self(<u32 as Deserializable>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        <u32 as Deserializable>::min_serialized_size()
     }
 }
 

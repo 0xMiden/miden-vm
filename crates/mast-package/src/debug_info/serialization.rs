@@ -465,6 +465,7 @@ const TYPE_TAG_STRUCT: u8 = 3;
 const TYPE_TAG_FUNCTION: u8 = 4;
 const TYPE_TAG_UNKNOWN: u8 = 5;
 const TYPE_TAG_ENUM: u8 = 6;
+const TYPE_TAG_VARIADIC: u8 = 7;
 
 impl Serializable for DebugTypeInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -522,6 +523,9 @@ impl Serializable for DebugTypeInfo {
             },
             Self::Unknown => {
                 target.write_u8(TYPE_TAG_UNKNOWN);
+            },
+            Self::Variadic => {
+                target.write_u8(TYPE_TAG_VARIADIC);
             },
         }
     }
@@ -582,6 +586,7 @@ impl Deserializable for DebugTypeInfo {
                 })
             },
             TYPE_TAG_UNKNOWN => Ok(Self::Unknown),
+            TYPE_TAG_VARIADIC => Ok(Self::Variadic),
             _ => Err(DeserializationError::InvalidValue(alloc::format!("invalid type tag: {tag}"))),
         }
     }
@@ -1227,7 +1232,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_function_v2_wire_bytes_are_stable() {
+    fn debug_function_v3_wire_bytes_are_stable() {
         const EXPECTED_ROW: [u8; size_of::<WireDebugFunctionInfo>()] = [
             1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
             0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 0, 13,
@@ -1254,7 +1259,7 @@ mod tests {
         let debug_info = builder.build();
 
         let bytes = debug_info.to_bytes();
-        assert_eq!(bytes[0], 2);
+        assert_eq!(bytes[0], 3);
         assert!(
             bytes.windows(EXPECTED_ROW.len()).any(|window| window == EXPECTED_ROW),
             "serialized debug info did not contain the expected function row",
@@ -1527,14 +1532,14 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_info_v1_is_rejected() {
-        let bytes = [1];
+    fn test_debug_info_v2_is_rejected() {
+        let bytes = [2];
         let mut reader = miden_core::serde::SliceReader::new(&bytes);
         let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
         let DeserializationError::InvalidValue(message) = error else {
             panic!("expected InvalidValue error");
         };
-        assert!(message.contains("unsupported debug_info version: 1"));
+        assert!(message.contains("unsupported debug_info version: 2"));
     }
 
     #[test]

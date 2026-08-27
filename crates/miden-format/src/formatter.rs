@@ -1764,8 +1764,8 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp | DoWhileOp
         | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
         | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
-        | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow | Semicolon
-        | Slash | SlashSlash | Star => match previous_kind {
+        | Colon | DotDotDot | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow
+        | Semicolon | Slash | SlashSlash | Star => match previous_kind {
             Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
             DotDot => false,
             Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,

@@ -104,6 +104,11 @@ pub(super) fn lower_advice_map_decl(
     FragmentParser::parse(context, advice_map, |parser| parser.parse_advice_map_decl(span))
 }
 
+/// Whether a type expression is the variadic marker `...`.
+fn is_variadic_type_expr(ty: &ast::TypeExpr) -> bool {
+    matches!(ty, ast::TypeExpr::Primitive(t) if matches!(t.inner(), Type::Variadic))
+}
+
 /// Small recursive-descent/Pratt parser used to re-parse fragment-local CST token streams.
 struct FragmentParser<'a, 'b> {
     context: &'a mut LoweringContext<'b>,
@@ -395,11 +400,44 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             Vec::new()
         };
 
+        Self::check_variadic_position(&args, "parameter")?;
+        Self::check_variadic_position(&results, "result")?;
+
         Ok(ast::FunctionType::new(ast::types::CallConv::Fast, args, results)
             .with_span(join_spans(self.token_span(&lparen), end_span)))
     }
 
+    /// A variadic type parameter stands for zero or more values of arbitrary type, so it only
+    /// has a meaning in trailing position, and only once per list: anything after it could never
+    /// be reached, and a second one would have no boundary with the first.
+    fn check_variadic_position(types: &[ast::TypeExpr], list: &str) -> Result<(), ParsingError> {
+        let mut variadics = types.iter().enumerate().filter(|(_, ty)| is_variadic_type_expr(ty));
+        let Some((first, _)) = variadics.next() else {
+            return Ok(());
+        };
+
+        // Report the second `...` itself, rather than whatever happens to follow the first.
+        if let Some((_, extra)) = variadics.next() {
+            return Err(ParsingError::InvalidSyntax {
+                span: extra.span(),
+                message: alloc::format!("only one variadic {list} is allowed"),
+            });
+        }
+
+        match types.get(first + 1) {
+            None => Ok(()),
+            Some(next) => Err(ParsingError::InvalidSyntax {
+                span: next.span(),
+                message: alloc::format!("a variadic {list} must come last"),
+            }),
+        }
+    }
+
     fn parse_function_param_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok(self.parse_variadic_type());
+        }
+
         if !matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
             || self.peek_kind(1) != Some(SyntaxKind::Colon)
         {
@@ -411,7 +449,19 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         self.parse_type_expr()
     }
 
+    /// Consumes a `...` token, which is only reachable from parameter or result position.
+    fn parse_variadic_type(&mut self) -> ast::TypeExpr {
+        let token = self.current().expect("caller checked for `...`");
+        let span = self.token_span(&token);
+        self.bump();
+        ast::TypeExpr::Primitive(Span::new(span, Type::Variadic))
+    }
+
     fn parse_function_result_types(&mut self) -> Result<Vec<ast::TypeExpr>, ParsingError> {
+        // An unparenthesised result list may itself be just `...`, i.e. `-> ...`.
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok(vec![self.parse_variadic_type()]);
+        }
         if self.at_kind(SyntaxKind::LParen) {
             self.bump();
             let results = self.parse_comma_delimited_allow_trailing(
@@ -426,6 +476,9 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
     }
 
     fn parse_maybe_named_result_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        if self.at_kind(SyntaxKind::DotDotDot) {
+            return Ok(self.parse_variadic_type());
+        }
         if matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
             && self.peek_kind(1) == Some(SyntaxKind::Colon)
         {
@@ -753,7 +806,6 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             return match name_text {
                 "packed" => Ok(Span::new(name_span, TypeRepr::packed(1))),
                 "transparent" => Ok(Span::new(name_span, TypeRepr::Transparent)),
-                "bigendian" => Ok(Span::new(name_span, TypeRepr::BigEndian)),
                 "align" => Err(ParsingError::InvalidStructRepr {
                     span: join_spans(self.token_span(&at), name_span),
                     message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),
@@ -1393,7 +1445,10 @@ mod tests {
         lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
         lower_type_expr_from_alias_body,
     };
-    use crate::{ast, parser::cst::context::LoweringContext};
+    use crate::{
+        ast,
+        parser::{ParsingError, cst::context::LoweringContext},
+    };
 
     #[test]
     fn lowers_procedure_signatures_from_cst_tokens() {
@@ -1450,6 +1505,108 @@ end
                 ],
             )
         );
+    }
+
+    /// Lower the signature of the single procedure in `source`.
+    fn lower_signature(source: &str) -> Result<ast::FunctionType, ParsingError> {
+        let source = test_source_file(source);
+        let parse = parse_source_file(source);
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let procedure = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::Procedure(procedure) => Some(procedure),
+                _ => None,
+            })
+            .expect("procedure");
+        let signature = procedure.signature().expect("signature");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(parse, &mut interned);
+        lower_function_type_from_signature(&mut context, &signature)
+    }
+
+    fn variadic() -> ast::TypeExpr {
+        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Variadic))
+    }
+
+    fn felt() -> ast::TypeExpr {
+        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(ast::types::Type::Felt))
+    }
+
+    #[test]
+    fn lowers_variadic_type_parameters_in_trailing_position() {
+        // The forms documented as valid on `Type::Variadic`.
+        let cases: &[(&str, &[ast::TypeExpr], &[ast::TypeExpr])] = &[
+            ("pub proc f(...)\n    nop\nend\n", &[variadic()], &[]),
+            ("pub proc f() -> ...\n    nop\nend\n", &[], &[variadic()]),
+            ("pub proc f(...) -> ...\n    nop\nend\n", &[variadic()], &[variadic()]),
+            ("pub proc f(a: felt, ...)\n    nop\nend\n", &[felt(), variadic()], &[]),
+            ("pub proc f() -> (a: felt, ...)\n    nop\nend\n", &[], &[felt(), variadic()]),
+            (
+                "pub proc f(a: felt, ...) -> (b: felt, ...)\n    nop\nend\n",
+                &[felt(), variadic()],
+                &[felt(), variadic()],
+            ),
+        ];
+
+        for (source, params, results) in cases {
+            let signature =
+                lower_signature(source).unwrap_or_else(|err| panic!("{source:?}: {err}"));
+            assert_eq!(
+                signature,
+                ast::FunctionType::new(
+                    ast::types::CallConv::Fast,
+                    params.to_vec(),
+                    results.to_vec(),
+                ),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_variadic_type_parameters_out_of_trailing_position() {
+        // The forms documented as invalid on `Type::Variadic`.
+        let cases = [
+            "pub proc f(..., ...)\n    nop\nend\n",
+            "pub proc f() -> (..., ...)\n    nop\nend\n",
+            "pub proc f(..., a: felt)\n    nop\nend\n",
+            "pub proc f(a: felt, ..., b: felt)\n    nop\nend\n",
+            "pub proc f() -> (..., a: felt)\n    nop\nend\n",
+            // Both rules are violated at once; the "only one" rule takes precedence.
+            "pub proc f(a: felt, ..., b: felt, ...)\n    nop\nend\n",
+        ];
+
+        for source in cases {
+            let err = lower_signature(source)
+                .expect_err(&alloc::format!("{source:?} should be rejected"));
+            let rendered = alloc::format!("{err:?}");
+            assert!(rendered.contains("variadic"), "{source:?}: unexpected error: {rendered}");
+        }
+    }
+
+    #[test]
+    fn rejects_variadic_outside_a_function_signature() {
+        // `...` denotes a variadic parameter list, and has no meaning as an ordinary type.
+        let source = test_source_file("type Bad = struct { field: ... }\n");
+        let parse = parse_source_file(source);
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let alias = source_file.items().find_map(|item| match item {
+            CstItem::TypeDecl(decl) => decl.body(),
+            _ => None,
+        });
+
+        if let Some(body) = alias {
+            let mut interned = BTreeSet::default();
+            let mut context = LoweringContext::new(parse, &mut interned);
+            assert!(
+                lower_type_expr_from_alias_body(&mut context, &body).is_err(),
+                "`...` should not be accepted as an ordinary type"
+            );
+        }
     }
 
     #[test]

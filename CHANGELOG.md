@@ -1,17 +1,51 @@
 # Changelog
-## v0.30.0 (Unreleased)
+
+## v0.31.0 (TBD)
+
+#### Features
+
+- [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
+
+#### Changes
+
+#### Fixes
+
+- [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
+
+## v0.30.0 (2026-08-26)
 
 #### Features
 
 - [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
+- [BREAKING] Replaced source-specific and opaque debug variable locations with explicit unavailable
+  locations, tagged Miden frame bases, and bounded structured Miden-runtime expressions. This bumps
+  the package debug-info wire format to version 3.
+- [BREAKING] Added `miden::core::crypto::dsa::ecdsa_k256_keccak::{recover, recover_bytes}` for word-aligned native EVM recovery witnesses `R_LE_U32[8] || S_LE_U32[8] || V` (`V` = 27 or 28). They accept high-s and return `QX_LE_U32[8] || QY_LE_U32[8]`. Callers convert external big-endian EVM wire signatures and authenticate the returned key. Also added `PublicKey::recover_from_prehash` in `miden-crypto`. The accompanying refactor changes the MAST root of the existing `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` export. Consumers that pin this root must update it ([#3682](https://github.com/0xMiden/miden-vm/pull/3682)).
 - [BREAKING] Added `trace`, `trace.CONST`, and `trace.event("...")` assembly as syntactic sugar for emitting optional read-only trace events. This adds variants `Trace` and `TraceImm` to the public enum `miden_assembly_syntax::ast::Instruction` ([#3478](https://github.com/0xMiden/miden-vm/pull/3478)).
 - Added `Mmr::nodes_from(start)`, returning the MMR's nodes at indices `start..` in insertion (postorder) order ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
 - [BREAKING] Added `Mmr::from_nodes_unchecked(forest, nodes)`, constructing an MMR from its complete postorder node array without recomputing hashes ([#3585](https://github.com/0xMiden/miden-vm/pull/3585)).
+- Added `AdviceInputs::new` constructor and `From<AdviceMap>` impl, complementing the existing builder-style accessors for assembling advice inputs from their parts ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added the `ProgramExecutor` trait to `miden-processor`, with `FastProcessor` as the default implementation, so alternative execution engines can be plugged in without changing the surrounding executor wiring ([#3540](https://github.com/0xMiden/miden-vm/pull/3540)).
+- Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
+- Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
+- Added the `@source_name("...")` procedure attribute for preserving source-level function names in package debug information while recording distinct assembler procedure paths as linkage names ([#3716](https://github.com/0xMiden/miden-vm/pull/3716)).
+- Added trusted trace proving input serialization for remote proving ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
+- Added trusted binary serialization of execution witnesses (VM witness plus optional singleton precompile witness) for remote proving, with a wire format version tag and bounded, trusted deserialization ([#3314](https://github.com/0xMiden/miden-vm/pull/3314)).
+- `midenc_hir_type` now supports self-recursive and mutually recursive struct and enum types, e.g. `struct Node { next: *Node }`. Recursion must cross a pointer, list, or function, so that every layout stays finite; more precisely, every cycle in the type reference graph must cross one of those. A recursive `Type` carries its whole definition group by `Arc`, so it remains self-contained: no interning table, definition registry, or context object is needed to interpret one, and descending through a backedge yields a type equal to the definition it points at.
+- Miden Assembly signatures can now declare a variadic type parameter with `...`, in either argument or result position, e.g. `pub proc log(prefix: felt, ...)` or `pub proc f() -> (count: u32, ...)`. It must come last in its list and may appear at most once, matching the rules documented on `midenc_hir_type::Type::Variadic`, and it is only accepted in a signature, not as an ordinary type.
+- Recursive struct and enum types can now be declared in Miden Assembly, e.g. `type Node = struct { value: u32, next: ptr<Node, addrspace(byte)> }`, including mutually recursive declarations. Recursion must cross a pointer type.
+- Added property and fuzz coverage for `ExecutionWitness` serialization, plus round-trip tests for external-library programs and wire-backed deferred proofs ([#3315](https://github.com/0xMiden/miden-vm/pull/3315)).
 
 #### Changes
 
+- Replaced the synchronous streamed hasher's dedicated thread with Rayon's in-place scope while
+  retaining compact buffered replay when no worker can overlap execution ([#3726](https://github.com/0xMiden/miden-vm/pull/3726)).
+- Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).
+- Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
+- [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact, and full package commitments. Dependency records now use the full package commitment ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
+- [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact, dependency, and full package commitments. Dependency commitments exclude optional debug data and opaque custom sections ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
   slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).
 - [BREAKING] Added structural and hash-consistency validation to serde deserialization for `MerkleTree`, `Mmr`, `MmrPeaks`, `MmrPath`, `PartialMerkleTree`, and `SimpleSmt`. `Mmr` binary deserialization now applies the same validation, and `PartialMerkleTree::with_leaves` rejects depth-zero leaves ([#3645](https://github.com/0xMiden/miden-vm/pull/3645)).
@@ -36,6 +70,7 @@
 - [BREAKING] Moved the secp256k1 GLV endomorphism scalar decomposition from the ECDSA verifier's MASM/advice ABI into the precompiles prover's addition-chain strategy: `ecdsa_k256_keccak::verify` logs a plain `u1*G + u2*Q` claim, and the deferred prover satisfies it with a GLV-decomposed chain, certified in-circuit ([#3426](https://github.com/0xMiden/miden-vm/pull/3426)).
 - Made `Mmr::clone()` cheap by storing MMR nodes in chunked, `Arc`-shared storage. Clones share all chunk storage with the original; appending after a clone copies at most one 32 KiB chunk. Public API and serialization formats are unchanged. ([#3562](https://github.com/0xMiden/miden-vm/pull/3562)).
 - The `miden-precompiles` package has been merged into `miden-core`, users should remove any references to `miden-precompiles` and use `miden-core` instead.
+- [BREAKING] Replaced the prover's trace-row cap with a memory budget ([#3706](https://github.com/0xMiden/miden-vm/issues/3706)).
 
 #### Features
 
@@ -61,11 +96,24 @@
   `ExecutionOptions::with_max_deferred_elements` APIs were removed
   ([#3437](https://github.com/0xMiden/miden-vm/pull/3437)).
 - [BREAKING] Changed `HORNERBASE` and `HORNEREXT` to read the evaluation point from an aligned, zero-padded word: `[alpha0, alpha1, 0, 0]`. This reduces the memory-chiplet trace for `HORNERBASE` from two rows to one and gives both operations the same memory layout ([#3570](https://github.com/0xMiden/miden-vm/pull/3570)).
+- [BREAKING] Use faster DFT algorithm for `PeriodicLde` ([#3713](https://github.com/0xMiden/miden-vm/pull/3713)).
+- [BREAKING] `midenc_hir_type::CallConv` has gained a new variant `Extern`, for language frontends to use for representing their own internal calling conventions.
+- [BREAKING] `midenc_hir_type::Type` has gained a new variant: `Variadic`, for use in representing function signatures that have variadic parameter or result lists.
+- The `List` variant of `midenc_hir_type::Type` has had its representation defined as a fat pointer, i.e. `{ len: u32, ptr: *T }`, and so it is now supported in APIs that previously would panic due to the representation being unspecified. `List` is now emitted into debug info as an array with no fixed element count, which is what debug type recovery expects, so lists round-trip through package debug info; previously they were emitted as a synthetic `{ ptr, len }` struct and recovered as an ordinary struct. Structs with a `List`-typed field are now recoverable at all, where recovery previously failed outright because a list was treated as having no computable size.
+- [BREAKING] `midenc_hir_type::StructType` now rejects structs with more than 255 fields. 256 fields were previously constructible, but the field count is encoded as a `u8`, so such a struct silently serialized as having zero fields.
+- [BREAKING] `midenc_hir_type::Type::Struct` and `Type::Enum` now carry `StructRef` and `EnumRef` rather than `Arc<StructType>` and `Arc<EnumType>`. Pattern matching on `Type::Struct(..)`/`Type::Enum(..)` is unchanged and correctly selects recursive types too, but reading an aggregate's contents now goes through `StructRef::get`/`EnumRef::get`, which return `Cow` and unfold the recursive case.
+- [BREAKING] `miden_assembly_syntax::ast::TypeResolver::get_type` and `get_local_type` now return a `TypeTemplate` rather than a `Type`, and the trait gains a `finalize` method. A declaration cannot be resolved to a concrete type until the whole recursive group it belongs to is known, so resolution produces templates and materializes them at the outermost boundary. `TypeExpr::resolve_type` is replaced by `TypeExpr::resolve_template`; use `TypeResolver::resolve` to obtain a `Type`.
+- Fixed a stack overflow when assembling a module containing a cyclic type declaration. `type A = B` with `type B = A`, or a type defined in terms of itself, previously aborted the process, because resolving a type reference re-entered declaration resolution with a fresh nesting budget. A cycle between type aliases alone is now reported as a `recursive type definition` diagnostic, while a cycle that passes through an aggregate whose field goes via a pointer is finite and resolves. Resolved type declarations are also cached now, where the cache was previously populated but never consulted.
+- [BREAKING] The MAST package format version is now 7. Package type serialization gained a tag for recursive aggregates, which encodes a definition group and the index of the selected definition; existing type tags keep their meanings. The reader accepts exactly one version, so version 6 packages are rejected.
 
 #### Fixes
 
+- Fixed deferred MSM session lowering so structurally distinct claims with the same canonical
+  expression retain their own hashes, while exact repeats reuse one balanced eval row
+  ([#3689](https://github.com/0xMiden/miden-vm/issues/3689)).
+- Added u32 checks before sorted array pointers from advice are used in arithmetic or memory access, and corrected the `sys::drop_stack_top` MASM signature ([#3711](https://github.com/0xMiden/miden-vm/pull/3711)).
 - [BREAKING] Fixed stack overflows when parsing deeply nested MASM control flow by rejecting nesting beyond 256 levels ([#3674](https://github.com/0xMiden/miden-vm/pull/3674)).
-- [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
+- [BREAKING] Constrained the stack overflow pointer on every VM transition, preventing forged traces from consuming overflow rows out of order ([#3684](https://github.com/0xMiden/miden-vm/pull/3684)).
 - [BREAKING] Fixed `U32DIV` AIR constraints by directly range-checking the quotient and remainder ([#3604](https://github.com/0xMiden/miden-vm/pull/3604)).
 - [BREAKING] Constrained `MPVERIFY` and `MRUPDATE` depths to `[1, 64]` and canonicalized reconstructed Merkle-path indices, preventing depth-64 paths from authenticating different leaves at the same field-valued index. Execution rejects out-of-range depths with the new public `OperationError::MerkleDepthOutOfRange` variant ([#3671](https://github.com/0xMiden/miden-vm/pull/3671)).
 - Fixed `crypto_stream` rejecting double-word memory ranges ending exactly at `2^32`, even though
@@ -76,10 +124,23 @@
 - Fixed `miden-vm prove` so unsupported program extensions are rejected before inferred input files are loaded ([#3587](https://github.com/0xMiden/miden-vm/issues/3587)).
 - Rejected MAST basic block payloads whose batch metadata does not cover every serialized operation, instead of silently dropping the trailing operations during deserialization ([#3594](https://github.com/0xMiden/miden-vm/issues/3594)).
 - Hashed the local registry `index.toml` with ASCII trim on load, matching the write-path staleness check, so a leading NBSP or vertical tab no longer makes every write fail with `WriteToStaleIndex` ([#3651](https://github.com/0xMiden/miden-vm/issues/3651)).
-#### Features
 
-- Added `LinkMode::Analysis` and `Linker::link_analysis`, which commit resolved modules and call edges and report a static recursion cycle as a nonfatal diagnostic (`LinkAnalysis`) instead of rejecting it. Strict linking is unchanged: it still rejects cycles before MAST is built and rolls back on failure ([#3535](https://github.com/0xMiden/miden-vm/pull/3535)).
-- Added `AdviceMutation::extend_advice_stack_with`, which takes an `IntoIterator<Item = Felt>` so that small host replies no longer have to build an `AdviceStack` first ([#3543](https://github.com/0xMiden/miden-vm/pull/3543)).
+## v0.29.4 (2026-08-26)
+
+#### Fixes
+
+- Fixed `FastProcessor::execute_and_build_trace_sync` aborting on targets that build a full `std`
+  but cannot spawn threads, such as `wasm32-unknown-unknown`. The failed spawn panicked under
+  `panic=abort`, trapping the module, which left an in-browser prove hung with no error instead of
+  failed. Rayon now schedules the streamed trace builder. Targets without a separate worker use
+  compact buffered replay ([#3722](https://github.com/0xMiden/miden-vm/pull/3722)).
+
+## v0.29.3 (2026-08-25)
+
+#### Fixes
+
+- Fixed `miden-vm bundle --release` to remove package debug information from library and kernel artifacts while preserving their MAST digests ([#3719](https://github.com/0xMiden/miden-vm/issues/3719)).
+- Fixed `miden-vm bundle --version` to store the requested version in library and kernel packages and reject invalid semantic versions ([#3659](https://github.com/0xMiden/miden-vm/issues/3659)).
 
 ## v0.29.2 (2026-08-20)
 
@@ -90,11 +151,11 @@
 #### Fixes
 
 - Fixed `Felt`'s `Debug` impl on the `miden` target by formatting the canonical `u64` value instead of the `f32` backing type. The `Debug` output format changed from `Felt { inner: .. }` to `Felt(..)` ([#3693](https://github.com/0xMiden/miden-vm/pull/3693)).
-## v0.30.0 (Unreleased)
+## v0.29.2 (Unreleased)
 
 #### Changes
 
-- [BREAKING] Added inline call-chain metadata to package source maps so debuggers can reconstruct inlined stack frames, and preserved source-node context during stepped execution. This extends public assembly instruction and processor continuation enums, so downstream exhaustive matches must handle the new debug metadata ([#3427](https://github.com/0xMiden/miden-vm/pull/3427)).
+- Added explicit unavailable and tagged Miden frame-base debug variable locations, plus a structured Miden-runtime expression fallback for compound locations. This replaces private compiler/debugger expression encodings for new packages and bumps the package debug-info wire format to version 3.
 
 ## v0.29.1 (2026-08-11)
 
@@ -653,8 +714,8 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 - Optimized batch inversion to use per-chunk scratch space ([#933](https://github.com/0xMiden/crypto/pull/933)).
 - [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results ([#924](https://github.com/0xMiden/crypto/pull/924)).
 - Optimized field operations for `Goldilocks` ([#926](https://github.com/0xMiden/crypto/pull/926)).
-- [BREAKING] Moved per-instance log trace heights from `AirInstance` into `StarkProof`; `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally ([#956](https://github.com/0xMiden/crypto/pull/956)). Consumers on the temporary `(log_trace_height, proof)` serialization path must drop the wrapper and stop pre-observing the height, or it will be bound twice. `StarkProof` no longer exposes per-instance heights directly — parse the proof with `StarkTranscript::from_proof` to read them; `num_traces()` is available for the count.
-- [BREAKING] `prove_multi` / `verify_multi` no longer require instances in ascending trace-height order; the prover sorts internally and the proof carries an `air_order` permutation ([#941](https://github.com/0xMiden/crypto/issues/941)). `InstanceShapes::from_trace_heights` now sorts internally and embeds the AIR ordering. `InstanceShapes::observe` renamed to `observe_heights`. The `NotAscending` error variant is removed; `InvalidAirOrder` and `AirOrderLengthMismatch` are added. `AirWitness` now derives `Clone + Copy`. Callers must bind AIR configurations and `air_order` into the Fiat-Shamir challenger — see the prover module-level docs.
+- [BREAKING] Moved per-instance log trace heights from `AirInstance` into `StarkProof`. `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally ([#956](https://github.com/0xMiden/crypto/pull/956)). Consumers on the temporary `(log_trace_height, proof)` serialization path must drop the wrapper and stop pre-observing the height, or it will be bound twice. `StarkProof` no longer exposes per-instance heights directly. Parse the proof with `StarkTranscript::from_proof` to read them. `num_traces()` is available for the count.
+- [BREAKING] `prove_multi` / `verify_multi` no longer require instances in ascending trace-height order. The prover sorts internally and the proof carries an `air_order` permutation ([#941](https://github.com/0xMiden/crypto/issues/941)). `InstanceShapes::from_trace_heights` now sorts internally and embeds the AIR ordering. `InstanceShapes::observe` renamed to `observe_heights`. The `NotAscending` error variant is removed. `InvalidAirOrder` and `AirOrderLengthMismatch` are added. `AirWitness` now derives `Clone + Copy`. Callers must bind AIR configurations and `air_order` into the Fiat-Shamir challenger. See the prover module-level docs.
 - [BREAKING] Split the `SecretKey` type for both ECDSA-k256 and EdDSA-25519 into `SigningKey` and `KeyExchangeKey` to help enforce better practices around key reuse. `SecretKey` is no longer available in the public API; all usages should be moved to one of the new key types ([#965](https://github.com/0xMiden/crypto/pull/965)).
 - Reduce repeated history scans in historical `LargeSmtForest::open()` queries ([#971](https://github.com/0xMiden/crypto/pull/971)).
 
@@ -1921,9 +1982,9 @@ The following entries come from the standalone `midenc-hir-type` changelog befor
 
 #### Stdlib
 
-- Added new module: `std::collections::smt` (only `smt::get` available).
-- Added new module: `std::collections::mmr`.
-- Added new module: `std::collections::smt64`.
+- Added the `std::collections::smt` module, with only `smt::get` available.
+- Added the `std::collections::mmr` module.
+- Added the `std::collections::smt64` module.
 - Added several convenience procedures to `std::mem` module.
 - [BREAKING] Added procedures to compute 1-to-1 hashes in `std::crypto::hashes` module and renamed existing procedures to remove ambiguity.
 - Greatly optimized recursive STARK verifier (reduced number of cycles by 6x - 8x).

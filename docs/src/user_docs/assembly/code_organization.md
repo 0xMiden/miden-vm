@@ -13,7 +13,7 @@ Miden assembly programs are organized into procedures. Procedures, in turn, can 
 ### Procedures
 A *procedure* can be used to encapsulate a frequently-used sequence of instructions which can later be invoked via a label. A procedure is introduced using the `proc` keyword. Procedure definitions consist of the following parts, in the order they appear:
 
-* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes that modify the procedure itself. Currently, the only built-in attribute is `@locals(N)`, which specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
+* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes interpreted by the assembler. For example, `@locals(N)` specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
 * An optional visibility modifier, i.e. `pub` if the procedure is to be exported from the containing module.
 * The `proc` keyword
 * The procedure name/label
@@ -92,6 +92,8 @@ Procedure attributes (also called annotations) provide a mechanism to attach arb
 The set of built-in attributes is listed below:
 
 - `@locals(N)`, specifies that the assembler should allocate `N` elements of procedure local storage, which can then be accessed using procedure-local memory operations, e.g. `loc_load`
+- `@source_name(..)`, reserved for internal use by the Miden compiler.
+
 
 #### Attribute syntax
 

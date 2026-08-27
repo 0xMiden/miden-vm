@@ -51,15 +51,19 @@ pub fn rewrite_symbol(
             resolver.cache.constants.insert(gid, value);
         },
         SymbolItem::Type(item) => {
+            use ast::TypeResolver;
+
             let mut resolver = Resolver {
                 resolver,
                 cache,
                 current_module: gid.module,
             };
-            let ty = item
-                .ty()
-                .resolve_type(&mut resolver)?
-                .expect("type or error to have been raised");
+            // Resolve through the declaration rather than its inner expression, so that a
+            // reference back to this declaration is recognised as recursion rather than
+            // re-expanded.
+            let ty =
+                resolver.get_type(item.span(), gid)?.expect("type or error to have been raised");
+            let ty = resolver.finalize(item.span(), ty)?;
             resolver.cache.types.insert(gid, ty);
         },
     }

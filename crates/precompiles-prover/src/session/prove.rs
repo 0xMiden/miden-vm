@@ -335,9 +335,14 @@ impl SessionTraces {
 
 /// Verify a core serialized STARK proof envelope against a public root.
 ///
-/// `Ok(())` iff the verifier accepts, including the `Σ σ = 0`
-/// cross-chiplet identity via `eval_external`.
-pub(crate) fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(), VerifyError> {
+/// Returns the proof's largest chiplet log trace height and its LMCS's column alignment iff the
+/// verifier accepts, including the `Σ σ = 0` cross-chiplet identity via `eval_external`. Both feed
+/// the security estimate: the lookup and out-of-domain rounds degrade with the height, and the
+/// DEEP round's term count depends on the alignment.
+pub(crate) fn verify_stark(
+    proof: &StarkProof,
+    public_root: P2Digest,
+) -> Result<(u32, usize), VerifyError> {
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
         return Err(VerifyError::ProofTooLarge {
             size: proof.bytes().len(),
@@ -380,7 +385,7 @@ fn verify_stark_with_config<SC>(
     preprocessed: &Preprocessed<Felt, SC::Lmcs>,
     proof_bytes: &[u8],
     public_root: P2Digest,
-) -> Result<(), VerifyError>
+) -> Result<(u32, usize), VerifyError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as LmcsTrait>::Commitment: DeserializeOwned,
@@ -401,7 +406,9 @@ where
 
     VerifierInstance::new(config, &statement, Some(preprocessed.commitment()))?
         .verify(&proof, challenger)?;
-    Ok(())
+
+    let log_max_height = u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
+    Ok((log_max_height, config.lmcs().alignment()))
 }
 
 /// Why precompile STARK verification rejected a proof.

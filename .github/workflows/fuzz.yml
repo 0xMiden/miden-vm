@@ -36,6 +36,7 @@ jobs:
           - advice_inputs_deserialize
           - operation_deserialize
           - execution_proof_deserialize
+          - execution_witness_deserialize
           - deferred_state_wire_deserialize
           - deferred_state_wire_serde_deserialize
           - package_deserialize
@@ -61,7 +62,8 @@ jobs:
           GENERATED_CORPUS_TARGETS: >-
             mast_forest_deserialize program_deserialize kernel_deserialize
             stack_io_deserialize advice_inputs_deserialize operation_deserialize
-            execution_proof_deserialize deferred_state_wire_deserialize
+            execution_proof_deserialize execution_witness_deserialize
+            deferred_state_wire_deserialize
             deferred_state_wire_serde_deserialize package_deserialize package_semantic_deserialize
         run: |
           if [[ " $GENERATED_CORPUS_TARGETS " == *" $TARGET "* ]]; then

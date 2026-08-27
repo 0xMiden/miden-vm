@@ -152,9 +152,11 @@ async fn run_settlement_in_masm(
 fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Program {
     let source = "
         use miden::core::sys
+        use miden::core::stark::constants
         use miden::core::stark::utils
         use miden::core::sys::pvm
         use miden::core::sys::vm
+        use miden::core::sys::vm::layout
 
         begin
             dupw
@@ -162,11 +164,14 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
             adv.push_mapval dropw
             exec.vm::verify_vm_proof
 
-            # Accept the MVM proof while retaining its authenticated deferred root.
+            # Accept the MVM proof while retaining its authenticated deferred root. The computed
+            # security level also depends on the proof's largest AIR trace height and kernel
+            # procedure count, which the verifier left in its own memory.
             swapw
-            exec.utils::conjectured_security_level
+            exec.constants::get_trace_length_log movdn.4
+            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
+            exec.vm::compute_conjectured_security_level
             u32lt.96 assertz
-            drop drop
 
             # Execution awaits the host here. request_proof installs the returned package on the
             # advice stack; the response remains untrusted until verify_proof passes.

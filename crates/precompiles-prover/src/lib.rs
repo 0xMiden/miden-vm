@@ -32,6 +32,7 @@ pub mod masm_verifier;
 pub(crate) mod math;
 pub(crate) mod primitives;
 pub(crate) mod relations;
+pub mod security;
 pub(crate) mod session;
 pub(crate) mod stark_config;
 pub(crate) mod transcript;
@@ -54,9 +55,21 @@ pub fn prove_deferred_state(
     Ok(traces.prove_stark(hash_fn)?)
 }
 
-/// Verifies a precompile STARK against an explicit deferred root.
-pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<(), VerifyError> {
-    session::verify_stark(proof, transcript::poseidon2::P2Digest::from(public_root))
+/// Verifies a precompile STARK against an explicit deferred root, and returns its conjectured
+/// security level in bits.
+///
+/// The level depends on the proof's largest chiplet trace height, its commitment scheme's column
+/// alignment (which varies by hash function), and its PCS parameters, so it is computed from the
+/// verified proof rather than fixed by the parameter preset.
+pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<u32, VerifyError> {
+    let (log_max_height, alignment) =
+        session::verify_stark(proof, transcript::poseidon2::P2Digest::from(public_root))?;
+
+    Ok(security::conjectured_security_level_for_alignment(
+        &stark_config::precompile_pcs_params(),
+        log_max_height,
+        alignment,
+    ))
 }
 
 /// Errors produced while proving deferred precompile claims from VM deferred state.

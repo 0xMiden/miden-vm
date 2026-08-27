@@ -145,8 +145,8 @@ pub struct MastForest {
 /// - [`MastForest::advice_commitment`] identifies the stored advice map only.
 /// - [`MastForest::commitment`] identifies the stored dense forest data: public roots, external
 ///   dependencies, and advice. Direct forest-backed static libraries use this value as their source
-///   identity. Package-backed static libraries use the package digest, which is derived from this
-///   forest commitment.
+///   identity. Package-backed static libraries use the package commitment, which is derived from
+///   this forest commitment.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct MastForestCommitment {
     /// Commitment to the forest's roots, external dependencies, and advice map.

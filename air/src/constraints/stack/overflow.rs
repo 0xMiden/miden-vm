@@ -24,6 +24,8 @@
 //!
 //! 3. **Overflow index** (degree 7, 8):
 //!    - On right shift: b1' = clk (record when item was pushed)
+//!    - On CALL/SYSCALL/DYNCALL: b1' = 0 (start with an empty overflow table)
+//!    - On operations which do not modify or restore the overflow table: b1' = b1
 //!    - On left shift with depth = 16: stack[15]' = 0 (no item to restore)
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -146,9 +148,11 @@ fn enforce_stack_depth_constraints<AB>(
 
 /// Enforces overflow bookkeeping index constraints.
 ///
-/// Two constraints:
+/// Overflow pointer constraints:
 /// 1. On right shift: b1' = clk (record the clock cycle when item was pushed to overflow)
-/// 2. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
+/// 2. On CALL/SYSCALL/DYNCALL: b1' = 0 (start the new context with no overflow)
+/// 3. On operations which do not modify or restore the overflow table: b1' = b1
+/// 4. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
 fn enforce_overflow_index_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
@@ -157,12 +161,37 @@ fn enforce_overflow_index_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
+    let overflow_addr = local.stack.b1;
     let overflow_addr_next = next.stack.b1;
     let clk = local.system.clk;
     let last_stack_item_next = next.stack.get(15);
 
     // On right shift, the overflow address should be set to current clk
     builder.when(op_flags.right_shift()).assert_eq(overflow_addr_next, clk);
+
+    // A new call context starts with an empty overflow table.
+    let context_start = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
+    builder
+        .when_transition()
+        .when(context_start.clone())
+        .assert_zero(overflow_addr_next);
+
+    // END restores the caller's overflow address through the block stack lookup. The call and
+    // syscall end flags are mutually exclusive: the block-stack relation has one Full removal to
+    // match the corresponding CALL or SYSCALL addition (see block_stack_and_range_logcap). Thus,
+    // their sum is boolean on valid traces. A right shift creates a new overflow record, while a
+    // left shift with non-empty overflow restores the previous address through the overflow table
+    // lookup. All other transitions preserve b1.
+    let end_flags = local.decoder.end_block_flags();
+    let context_end = op_flags.end() * (end_flags.is_call.into() + end_flags.is_syscall.into());
+    let updates_overflow_addr = context_start
+        + context_end
+        + op_flags.right_shift()
+        + op_flags.left_shift() * op_flags.overflow();
+    builder
+        .when_transition()
+        .when(AB::Expr::ONE - updates_overflow_addr)
+        .assert_eq(overflow_addr_next, overflow_addr);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     builder
@@ -234,5 +263,52 @@ mod tests {
             evaluations.iter().any(|value| *value != QuadFelt::ZERO),
             "FRIE2F4 must zero s15 when no overflow item can be restored"
         );
+    }
+
+    #[test]
+    fn overflow_address_transitions() {
+        for (opcode, next_depth, next_overflow_addr, transition) in [
+            (opcodes::NOOP, 17, 11, "preserve"),
+            (opcodes::CALL, 16, 0, "reset"),
+            (opcodes::DYNCALL, 16, 0, "reset"),
+            (opcodes::SYSCALL, 16, 0, "reset"),
+            (opcodes::END, 17, 11, "preserve"),
+        ] {
+            let mut local = generate_test_row(opcode.into());
+            local.stack.b0 = Felt::new_unchecked(17);
+            local.stack.b1 = Felt::new_unchecked(11);
+            local.stack.h0 = ONE;
+
+            let mut next = generate_test_row(0);
+            next.stack.b0 = Felt::new_unchecked(next_depth);
+            next.stack.b1 = Felt::new_unchecked(next_overflow_addr);
+
+            let evaluations = eval_stack_overflow(&local, &next);
+            assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+            next.stack.b1 = ONE;
+            let evaluations = eval_stack_overflow(&local, &next);
+            assert!(
+                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                "opcode {opcode} must {transition} the overflow address"
+            );
+        }
+    }
+
+    #[test]
+    fn call_end_allows_overflow_address_restoration() {
+        let mut local = generate_test_row(opcodes::END.into());
+        local.decoder.hasher_state[6] = ONE;
+        local.stack.b0 = Felt::new_unchecked(17);
+        local.stack.b1 = Felt::new_unchecked(11);
+        local.stack.h0 = ONE;
+
+        let mut next = generate_test_row(0);
+        next.stack.b0 = Felt::new_unchecked(23);
+        next.stack.b1 = Felt::new_unchecked(7);
+        next.stack.h0 = ONE;
+
+        let evaluations = eval_stack_overflow(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
     }
 }

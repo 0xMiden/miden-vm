@@ -782,7 +782,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             MastPackage::read_from_bytes(&bytes).map_err(|error| Report::msg(error.to_string()))?;
         self.ensure_dependency_name(expected_name, &package.name, Some(&path))?;
         let semver = package.version.clone();
-        let selected = Version::new(semver, package.digest());
+        let selected = Version::new(semver, package.dependency_commitment());
         if let Some(requirement) = requirement {
             self.ensure_version_satisfies(expected_name, requirement, selected.clone())?;
         }
@@ -1594,7 +1594,7 @@ mod tests {
     fn preassembled_path_dependency_accepts_exact_published_requirement() {
         let tempdir = TempDir::new().unwrap();
         let package = build_registry_test_package("dep", "1.0.0");
-        let digest = package.digest();
+        let digest = package.dependency_commitment();
         let package_path = tempdir.path().join("dep.masp");
         fs::write(&package_path, package.to_bytes()).unwrap();
 
@@ -1640,7 +1640,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let runtime_package = build_registry_test_package("runtime", "1.0.0");
         let runtime_version =
-            Version::new(runtime_package.version.clone(), runtime_package.digest());
+            Version::new(runtime_package.version.clone(), runtime_package.dependency_commitment());
         let dep_package = MastPackage::generate(
             "dep".into(),
             "1.0.0".parse().unwrap(),
@@ -1649,7 +1649,7 @@ mod tests {
                 name: PackageId::from("runtime"),
                 version: runtime_version.version.clone(),
                 kind: TargetType::Library,
-                digest: runtime_package.digest(),
+                digest: runtime_package.dependency_commitment(),
             }],
         );
         let dep_package_path = tempdir.path().join("dep.masp");
@@ -1708,7 +1708,8 @@ mod tests {
             TargetType::Kernel,
             [],
         );
-        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
+        let kernel_version =
+            Version::new(kernel_package.version.clone(), kernel_package.dependency_commitment());
         let dep_package = MastPackage::generate(
             "dep".into(),
             "1.0.0".parse().unwrap(),
@@ -1717,7 +1718,7 @@ mod tests {
                 name: PackageId::from("kernelpkg"),
                 version: kernel_version.version.clone(),
                 kind: TargetType::Kernel,
-                digest: kernel_package.digest(),
+                digest: kernel_package.dependency_commitment(),
             }],
         );
 
@@ -1749,7 +1750,7 @@ mod tests {
     fn preassembled_path_dependency_validates_digest_requirement_against_artifact_digest() {
         let tempdir = TempDir::new().unwrap();
         let package = build_registry_test_package("dep", "1.0.0");
-        let digest = package.digest();
+        let digest = package.dependency_commitment();
         let package_path = tempdir.path().join("dep.masp");
         fs::write(&package_path, package.to_bytes()).unwrap();
 
