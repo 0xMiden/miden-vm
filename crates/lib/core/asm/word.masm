@@ -116,41 +116,41 @@ pub proc gt(rhs: word, lhs: word) -> i1
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
-    # => [is_lhs_less, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+    # => [is_lhs_greater, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4
         movup.3 movup.3
-        # => [l_x, r_x, is_lhs_less, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
 
         # check r_x == l_x; if so, we continue
         dup dup.2 eq
-        # => [is_felt_eq, l_x, r_x, is_lhs_less, continue, <remaining_felts>]
+        # => [is_felt_eq, l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
 
         movdn.3
-        # => [l_x, r_x, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
 
         # check r_x < l_x
         lt
-        # => [is_felt_lt, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+        # => [is_felt_lt, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
 
         dup.3 and
-        # => [is_felt_lt_if_continue, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+        # => [is_felt_lt_if_continue, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
 
         or movdn.2
-        # => [is_felt_eq, continue, is_lhs_less, <remaining_felts>]
+        # => [is_felt_eq, continue, is_lhs_greater, <remaining_felts>]
 
         # keeps continue at 1 if the felts are equal
         # sets continue to 0 if the felts are not equal
         and
-        # => [continue, is_lhs_less, <remaining_felts>]
+        # => [continue, is_lhs_greater, <remaining_felts>]
 
         swap
-        # => [is_lhs_less, continue, <remaining_felts>]
+        # => [is_lhs_greater, continue, <remaining_felts>]
     end
-    # => [is_lhs_less, continue]
+    # => [is_lhs_greater, continue]
 
     swap drop
-    # => [is_lhs_less]
+    # => [is_lhs_greater]
 end
 
 #! Returns true if LHS is greater than or equal to RHS.
@@ -182,41 +182,41 @@ pub proc lt(rhs: word, lhs: word) -> i1
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
-    # => [is_lhs_greater, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+    # => [is_lhs_less, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4
         movup.3 movup.3
-        # => [l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_less, continue, <remaining_felts>]
 
         # check r_x == l_x; if so, we continue
         dup dup.2 eq
-        # => [is_felt_eq, l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
+        # => [is_felt_eq, l_x, r_x, is_lhs_less, continue, <remaining_felts>]
 
         movdn.3
-        # => [l_x, r_x, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
 
         # check r_x > l_x
         gt
-        # => [is_felt_gt, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+        # => [is_felt_gt, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
 
         dup.3 and
-        # => [is_felt_gt_if_continue, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+        # => [is_felt_gt_if_continue, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
 
         or movdn.2
-        # => [is_felt_eq, continue, is_lhs_greater, <remaining_felts>]
+        # => [is_felt_eq, continue, is_lhs_less, <remaining_felts>]
 
         # keeps continue at 1 if the felts are equal
         # sets continue to 0 if the felts are not equal
         and
-        # => [continue, is_lhs_greater, <remaining_felts>]
+        # => [continue, is_lhs_less, <remaining_felts>]
 
         swap
-        # => [is_lhs_greater, continue, <remaining_felts>]
+        # => [is_lhs_less, continue, <remaining_felts>]
     end
-    # => [is_lhs_greater, continue]
+    # => [is_lhs_less, continue]
 
     swap drop
-    # => [is_lhs_greater]
+    # => [is_lhs_less]
 end
 
 #! Returns true if LHS is less than or equal to RHS, false otherwise.
