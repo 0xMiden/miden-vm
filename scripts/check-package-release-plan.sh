@@ -20,6 +20,25 @@ trap 'rm -rf "$RELEASE_PLAN_TMPDIR"' EXIT
 metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
 workspace_root="$(printf '%s' "$metadata_json" | jq -r '.workspace_root')"
 selected_packages=()
+allow_existing=true
+check_semver=true
+package_arguments=()
+
+for argument in "$@"; do
+    case "$argument" in
+        --allow-existing=*) allow_existing="${argument#*=}" ;;
+        --skip-semver) check_semver=false ;;
+        *) package_arguments+=("$argument") ;;
+    esac
+done
+
+case "$allow_existing" in
+    true | false) ;;
+    *)
+        echo "ERROR: --allow-existing must be true or false" >&2
+        exit 2
+        ;;
+esac
 
 add_packages() {
     local item word
@@ -33,7 +52,9 @@ add_packages() {
     done
 }
 
-add_packages "$@"
+if [[ "${#package_arguments[@]}" -gt 0 ]]; then
+    add_packages "${package_arguments[@]}"
+fi
 selected_package_count="${#selected_packages[@]}"
 
 publishable_package_names="$(
@@ -92,7 +113,9 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     fi
 
     if crate_version_exists "$package" "$local_version"; then
-        if package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
+        if [[ "$allow_existing" == "false" ]]; then
+            version_errors+=("$package v$local_version already exists on crates.io")
+        elif package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
             already_published+=("$package v$local_version (latest published: $latest_version)")
         else
             archive_status=$?
@@ -108,6 +131,11 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     cmp="$(version_cmp "$local_version" "$latest_version")"
     if [[ "$cmp" -le 0 ]]; then
         version_errors+=("$package v$local_version is not newer than latest published v$latest_version")
+        continue
+    fi
+
+    if [[ "$check_semver" == "false" ]]; then
+        would_publish+=("$package v$local_version (latest published: $latest_version)")
         continue
     fi
 
