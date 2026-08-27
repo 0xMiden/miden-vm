@@ -112,8 +112,8 @@ pub fn lane_base(lane: usize) -> usize {
 
 /// Flattened running-sum layout, repeated per lane: each lane's 6-column band holds
 /// 19 fractions, the band's col 0 a single fraction. The flattening does not
-/// bring this AIR to `log_quotient_degree = 1`; the four-fraction columns and the gated
-/// memory64 destination closure both reach degree 5:
+/// bring this AIR to `log_quotient_degree = 1`: the four-fraction columns reach degree 5, while
+/// the Memory64 destination column reaches degree 4.
 /// - band col 0: memory64 dst provide.
 /// - band col 1: memory64 `src_a` + `src_b` requires.
 /// - band cols 2–3: 8 `BytePairLut` byte requires verifying `r = a OP b` (or `r = a` on pure-ROL
