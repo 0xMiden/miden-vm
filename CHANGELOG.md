@@ -9,7 +9,7 @@
 
 #### Changes
 
-- Clarified that empty `begin`/`while`/`repeat` blocks are rejected with a structured diagnostic (consistent with empty `if`), and enabled the previously-ignored tests to assert it ([#3694](https://github.com/0xMiden/miden-vm/pull/3694)).
+- Empty `while.true` and `repeat.N` bodies now assemble instead of being rejected, per the policy in [#3094](https://github.com/0xMiden/miden-vm/issues/3094): an empty `repeat` expands to no MAST, and an empty `while` can be sound, so neither is an assembly-time error ([#3694](https://github.com/0xMiden/miden-vm/pull/3694)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
 - [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word

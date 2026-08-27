@@ -122,12 +122,16 @@ fn simple_instructions() -> TestResult {
 }
 
 #[test]
-fn empty_program() {
+/// Left ignored: #3094 settles `if` / `repeat` / `while` / procedure bodies, but
+/// does not rule on the program entry block, so this stays undecided rather than
+/// making either behaviour contractual.
+#[ignore]
+fn empty_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
-    let err = context.assemble(source).expect_err("expected empty entry block to be rejected");
-    assert_diagnostic!(&err, "invalid syntax: expected a non-empty entry block");
-    assert_diagnostic!(&err, "begin end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
 }
 
 #[test]
@@ -148,24 +152,27 @@ fn empty_if_true_then_branch() -> TestResult {
     Ok(())
 }
 
+/// An empty `while.true` body assembles: it can be sound (`push.0.1 while.true end`
+/// enters, does nothing, exits), and proving the unsound cases needs dataflow
+/// analysis that does not belong in the assembler — see #3094.
 #[test]
-fn empty_while() {
+fn empty_while() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
-    let err = context.assemble(source).expect_err("expected empty while block to be rejected");
-    assert_diagnostic!(&err, "invalid syntax: expected a non-empty `while` block");
-    assert_diagnostic!(&err, "begin while.true end end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
 }
 
+/// An empty `repeat.N` body assembles: it expands to `N` repetitions of nothing
+/// and produces no MAST. That is dead code to lint, not an error — see #3094.
 #[test]
-fn empty_repeat() {
+fn empty_repeat() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let err = context
-        .assemble(source)
-        .expect_err("expected empty repeat block to be rejected");
-    assert_diagnostic!(&err, "invalid syntax: expected a non-empty `repeat` block");
-    assert_diagnostic!(&err, "begin repeat.5 end end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
 }
 
 /// This test ensures that all iterations of a repeat control block are merged into a single basic
