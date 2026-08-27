@@ -8,22 +8,28 @@
 
 use std::{vec, vec::Vec};
 
+use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     hash::{
         chunk::trace::ChunkRequires,
+        chunk_node_sponge::{
+            ChunkNodeSpongeAir, NUM_AUX_COLS as CHUNK_NODE_SPONGE_NUM_AUX_COLS,
+            NUM_MAIN_COLS as CHUNK_NODE_SPONGE_NUM_MAIN_COLS,
+        },
         keccak::{
             round::RoundRequires,
             sponge::{
-                COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR, COL_PADDED_HI,
-                COL_SPONGE_SEQ_ID, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS,
-                NUM_MAIN_COLS, NUM_PERIODIC_COLS, SPONGE_PERIOD,
+                CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO, KeccakSpongeAir,
+                KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
+                PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
             },
         },
@@ -108,14 +114,13 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_partitions_67_indices() {
-    // The 67 main witness columns are partitioned into:
+fn main_column_layout_partitions_57_indices() {
+    // The 57 main witness columns are partitioned into:
     //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block, chunk_ptr (indices 0..4).
     //   - padding-state machine (10): is_zero_p, is_chunk_avail, b_0..b_7 (indices 5..14).
-    //   - per-row lane values (12): chunk, state_prev, state_new, state_out, cleared, padded — all
-    //     u32-lo/hi (indices 15..26).
-    //   - byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
-    //     little-endian decomposition (indices 27..66).
+    //   - squeeze value (2): state_out as u32 lo/hi (indices 15..16).
+    //   - byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
+    //     little-endian decomposition (indices 17..56).
     //
     // The boundary checks below pin the split so that any future column
     // shuffling fails fast.
@@ -128,10 +133,15 @@ fn main_column_layout_partitions_67_indices() {
     // The b_j run is 8 consecutive indices.
     assert_eq!(NUM_B_SELECTORS, 8);
     assert_eq!(COL_B_RANGE, COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS));
-    // Lane-value block ends at PADDED_HI = 26, the byte-shadow block's start.
-    assert_eq!(COL_PADDED_HI, 26);
+    assert_eq!(COL_STATE_OUT_LO, 15);
+    assert_eq!(COL_STATE_OUT_HI, 16);
+    assert_eq!(CHUNK_BYTES_RANGE, 17..25);
+    assert_eq!(STATE_PREV_BYTES_RANGE, 25..33);
+    assert_eq!(STATE_NEW_BYTES_RANGE, 33..41);
+    assert_eq!(CLEARED_BYTES_RANGE, 41..49);
+    assert_eq!(PADDED_BYTES_RANGE, 49..57);
     // Total matches the spec.
-    assert_eq!(NUM_MAIN_COLS, 67);
+    assert_eq!(NUM_MAIN_COLS, 57);
     // `BaseAir::width()` agrees.
     assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
 }
@@ -150,6 +160,36 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
+
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 5, ext: 5 },
+    );
+    ValidateLookupAir::validate(
+        &air,
+        ValidateLayout {
+            preprocessed_width: air.preprocessed_width(),
+            trace_width: air.width(),
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: air.periodic_columns().len(),
+            permutation_width: NUM_AUX_COLS,
+            num_permutation_challenges: NUM_RANDOMNESS,
+            num_permutation_values: NUM_SIGMA_VALUES,
+        },
+    )
+    .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
+
+    assert_eq!(CHUNK_NODE_SPONGE_NUM_MAIN_COLS, 99);
+    assert_eq!(CHUNK_NODE_SPONGE_NUM_AUX_COLS, 35);
+    assert_eq!(
+        <ChunkNodeSpongeAir as BaseAir<Felt>>::width(&ChunkNodeSpongeAir),
+        CHUNK_NODE_SPONGE_NUM_MAIN_COLS,
+    );
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&ChunkNodeSpongeAir),
+        ConstraintDegrees { base: 5, ext: 5 },
+    );
+    assert_eq!(crate::tests::log_quotient_degree(&ChunkNodeSpongeAir), 2);
 }
 
 #[test]
@@ -400,11 +440,10 @@ fn corruption_nonzero_chunk_on_chunks_unavailable_breaks_zero_fill() {
     // Single-byte invocation: chunk-tape segment is 1 chunk = 4 lanes,
     // sponge consumes them at slots 0..3 (slot 0 = pad row, slots 1..3
     // = garbage-tail). Slots 4..16 of the period have
-    // `is_chunk_avail = 0` and the zero-fill constraint pins
-    // `chunk_lo = chunk_hi = 0` there. Writing a non-zero value into
-    // `chunk_lo` at row 5 violates Z1.
+    // `is_chunk_avail = 0` and the zero-fill constraint pins the reconstructed
+    // chunk halves to zero there. Writing a non-zero byte at row 5 violates it.
     corrupt_and_check(0xc0_2e, Invocation { input: vec![0xab] }, |main| {
-        main.values[5 * NUM_MAIN_COLS + COL_CHUNK_LO] = Felt::from(1u8);
+        main.values[5 * NUM_MAIN_COLS + CHUNK_BYTES_RANGE.start] = Felt::from(1u8);
     });
 }
 

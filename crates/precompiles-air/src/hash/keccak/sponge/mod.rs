@@ -38,15 +38,13 @@ use crate::{
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 //
-// 67 main witness columns split into four groups:
+// 57 main witness columns split into four groups:
 //
 // - Structural (5):    sponge_seq_id, act, bytes_left, is_first_block_of_invocation, chunk_ptr.
 // - Padding state (10): is_zero_p, is_chunk_avail, b_0..b_7.
-// - Per-row lane (12): chunk, state_prev, state_new, state_out, cleared, padded — each as u32
-//   lo/hi.
-// - Byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte little-endian
-//   decomposition, linked to its lo/hi halves above and verified against the `BytePairLut` chiplet
-//   directly.
+// - Squeeze value (2): state_out as u32 lo/hi.
+// - Byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte little-endian
+//   decomposition. Their u32 halves are reconstructed linearly where needed.
 //
 // See the design notes §"Columns" for the definitions.
 
@@ -110,59 +108,32 @@ pub const NUM_B_SELECTORS: usize = 8;
 /// `COL_B_RANGE = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS)`.
 pub const COL_B_RANGE: Range<usize> = COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS);
 
-// Per-row lane-value columns.
+// Squeeze-value columns.
 // --------------------------------------------------------------------
 
-/// Chunk lane value at this row. Bus-pinned by the chunk-bus require
-/// (Memory64 at `CHUNK_ADDR_BASE + chunk_ptr`) when
-/// `is_chunk_avail = 1`; unconstrained otherwise.
-pub const COL_CHUNK_LO: usize = 15;
-pub const COL_CHUNK_HI: usize = 16;
-/// Prev-perm output lane value (consumed from Memory64) on state-lane
-/// rows. On the lane-16 0x80 row (`p_idx = 25`) holds the
-/// *intermediate* (pre-`0x80`) lane-16 value.
-pub const COL_STATE_PREV_LO: usize = 17;
-pub const COL_STATE_PREV_HI: usize = 18;
-/// New lane value (provided to Memory64) on state-lane rows = perm-n
-/// round-0 input. On the lane-16 0x80 row holds the *final*
-/// (post-`0x80`) lane-16 value.
-pub const COL_STATE_NEW_LO: usize = 19;
-pub const COL_STATE_NEW_HI: usize = 20;
 /// Perm-n's last-perm output for lane `p_idx`, consumed from Memory64
 /// by the squeeze on last-block state-lane rows. Bus-pinned by the
 /// round chiplet's perm-n output provide (at IP `n·3200 + 3072 + p_idx`,
 /// mult 2). Unconstrained when the squeeze gate is off.
-pub const COL_STATE_OUT_LO: usize = 21;
-pub const COL_STATE_OUT_HI: usize = 22;
-/// Pad-row intermediate: `cleared = AndNot(andnot_mask, chunk_lane)`.
-/// Committed on all rate XORin rows for layout uniformity but
-/// algebraically meaningful only on the pad row.
-pub const COL_CLEARED_LO: usize = 23;
-pub const COL_CLEARED_HI: usize = 24;
-/// Pad-row intermediate: `padded = cleared XOR padding_mask`. Same
-/// uniform-commit pattern as `cleared`.
-pub const COL_PADDED_LO: usize = 25;
-pub const COL_PADDED_HI: usize = 26;
+pub const COL_STATE_OUT_LO: usize = 15;
+pub const COL_STATE_OUT_HI: usize = 16;
 
-// Byte-decomposed shadow columns.
+// Byte-decomposed lane columns.
 // --------------------------------------------------------------------
 //
-// `chunk`, `state_prev`, `state_new`, `cleared`, `padded` each also carry
-// an 8-byte little-endian decomposition, linked to their `_lo`/`_hi`
-// halves above by an ungated local constraint (`eval`'s "byte-shadow
-// linking" block). The bytes are what the `BytePairLut` requires below
-// verify each pad/absorb XOR/ANDNOT against directly — no intermediate
-// chiplet or chain trick, every row commits its own bytes.
-pub const CHUNK_BYTES_RANGE: Range<usize> = 27..35;
-pub const STATE_PREV_BYTES_RANGE: Range<usize> = 35..43;
-pub const STATE_NEW_BYTES_RANGE: Range<usize> = 43..51;
-pub const CLEARED_BYTES_RANGE: Range<usize> = 51..59;
-pub const PADDED_BYTES_RANGE: Range<usize> = 59..67;
+// `chunk`, `state_prev`, `state_new`, `cleared`, and `padded` are stored as
+// 8-byte little-endian decompositions. The `BytePairLut` requests verify
+// each pad/absorb XOR/ANDNOT directly, while [`halves_le`] reconstructs
+// the u32 halves used by Memory64 and the local state constraints.
+pub const CHUNK_BYTES_RANGE: Range<usize> = 17..25;
+pub const STATE_PREV_BYTES_RANGE: Range<usize> = 25..33;
+pub const STATE_NEW_BYTES_RANGE: Range<usize> = 33..41;
+pub const CLEARED_BYTES_RANGE: Range<usize> = 41..49;
+pub const PADDED_BYTES_RANGE: Range<usize> = 49..57;
 
-/// Total number of main witness columns (5 structural + 10 padding-
-/// state-machine + 12 per-row lane values, halves + 40 byte-shadow
-/// columns for the same five values).
-pub const NUM_MAIN_COLS: usize = 67;
+/// Total number of main witness columns (5 structural + 10 padding-state + 2 squeeze-value + 40
+/// byte-lane columns).
+pub const NUM_MAIN_COLS: usize = 57;
 
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
@@ -177,7 +148,7 @@ pub const NUM_MAIN_COLS: usize = 67;
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
 /// - cols 3–22: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
 ///   `xor-padding` + `xor-state`, the verbatim `xor-state`, and the lane-16 0x80 `xor` directly
-///   against the byte-shadow columns — no intermediate chiplet, two fractions per column.
+///   against the byte-lane columns — no intermediate chiplet, two fractions per column.
 /// - col 23: the KeccakSponge request + the chunk consume (the second degree-4 multiplicity, paired
 ///   → degree 5).
 ///
@@ -364,7 +335,7 @@ where
 {
     // Phase 1: local row constraints.
     let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-    // Next-row window: the same 67 columns at row r+1. Cyclic at
+    // Next-row window: the same 57 columns at row r+1. Cyclic at
     // row N-1 (`when_transition` gates out the wrap explicitly
     // where needed; other transition constraints rely on
     // `p_last`/`p_rate_block` factors making the wrap vacuous).
@@ -393,10 +364,13 @@ where
     let is_zero_next: AB::Expr = next[COL_IS_ZERO].into();
     let is_chunk_avail: AB::Expr = local[COL_IS_CHUNK_AVAIL].into();
     let is_chunk_avail_next: AB::Expr = next[COL_IS_CHUNK_AVAIL].into();
-    let state_prev_lo: AB::Expr = local[COL_STATE_PREV_LO].into();
-    let state_prev_hi: AB::Expr = local[COL_STATE_PREV_HI].into();
-    let state_new_lo: AB::Expr = local[COL_STATE_NEW_LO].into();
-    let state_new_hi: AB::Expr = local[COL_STATE_NEW_HI].into();
+    let chunk_bytes: [AB::Var; 8] = array::from_fn(|i| local[CHUNK_BYTES_RANGE.start + i]);
+    let state_prev_bytes: [AB::Var; 8] =
+        array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
+    let state_new_bytes: [AB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
+    let [chunk_lo, chunk_hi]: [AB::Expr; 2] = halves_le(&chunk_bytes, 256);
+    let [state_prev_lo, state_prev_hi]: [AB::Expr; 2] = halves_le(&state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [AB::Expr; 2] = halves_le(&state_new_bytes, 256);
 
     // Σ b_j (= `is_last_block_period`) and Σ j·b_j (= byte_offset).
     let mut b_sum = AB::Expr::ZERO;
@@ -507,10 +481,8 @@ where
     // check at the transcript chiplet. Ungated — pinning chunk
     // to 0 on non-rate / dead rows is benign since those rows
     // never consume the chunk columns elsewhere.
-    let chunk_lo_local: AB::Expr = local[COL_CHUNK_LO].into();
-    let chunk_hi_local: AB::Expr = local[COL_CHUNK_HI].into();
-    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo_local);
-    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi_local);
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_lo);
+    builder.assert_zero((AB::Expr::ONE - is_chunk_avail.clone()) * chunk_hi);
 
     // Padding state machine ---------------------------------
     // Binarity.
@@ -575,37 +547,7 @@ where
     builder.assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
     // Capacity rows: identity passthrough.
     builder.assert_zero(p_capacity.clone() * (state_new_lo.clone() - state_prev_lo.clone()));
-    builder.assert_zero(p_capacity * (state_new_hi.clone() - state_prev_hi.clone()));
-
-    // Byte-shadow linking (ungated) --------------------------
-    // Every `_lo`/`_hi` pair below also has an 8-byte little-endian
-    // shadow (used by the `BytePairLut` requires in Phase 2, which
-    // range-check and byte-verify the pad/absorb XOR/ANDNOT ops
-    // directly). Without this link the byte columns would be a
-    // second, independent free witness disconnected from the halves
-    // every other bus message (Memory64 prev-perm consume, new-state
-    // provide, chunk consume) actually reads — pinning them together
-    // is what makes a `BytePairLut`-verified byte result also the
-    // value committed elsewhere. Ungated: both sides are otherwise
-    // free witness on rows where the value is unused, so an honest
-    // prover always satisfies this by construction.
-    let chunk_lo: AB::Expr = local[COL_CHUNK_LO].into();
-    let chunk_hi: AB::Expr = local[COL_CHUNK_HI].into();
-    let cleared_lo: AB::Expr = local[COL_CLEARED_LO].into();
-    let cleared_hi: AB::Expr = local[COL_CLEARED_HI].into();
-    let padded_lo: AB::Expr = local[COL_PADDED_LO].into();
-    let padded_hi: AB::Expr = local[COL_PADDED_HI].into();
-    let link = |builder: &mut AB, range: Range<usize>, lo: AB::Expr, hi: AB::Expr| {
-        let bytes: [AB::Var; 8] = array::from_fn(|i| local[range.start + i]);
-        let [lo_from_bytes, hi_from_bytes]: [AB::Expr; 2] = halves_le(&bytes, 256);
-        builder.assert_zero(lo_from_bytes - lo);
-        builder.assert_zero(hi_from_bytes - hi);
-    };
-    link(builder, CHUNK_BYTES_RANGE, chunk_lo, chunk_hi);
-    link(builder, STATE_PREV_BYTES_RANGE, state_prev_lo, state_prev_hi);
-    link(builder, STATE_NEW_BYTES_RANGE, state_new_lo, state_new_hi);
-    link(builder, CLEARED_BYTES_RANGE, cleared_lo, cleared_hi);
-    link(builder, PADDED_BYTES_RANGE, padded_lo, padded_hi);
+    builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
 }
 
 // LOOKUP AIR
@@ -681,12 +623,6 @@ where
     let is_chunk_avail: LB::Expr = local[COL_IS_CHUNK_AVAIL].into();
     let is_zero: LB::Expr = local[COL_IS_ZERO].into();
     let is_zero_next: LB::Expr = next[COL_IS_ZERO].into();
-    let chunk_lo: LB::Expr = local[COL_CHUNK_LO].into();
-    let chunk_hi: LB::Expr = local[COL_CHUNK_HI].into();
-    let state_prev_lo: LB::Expr = local[COL_STATE_PREV_LO].into();
-    let state_prev_hi: LB::Expr = local[COL_STATE_PREV_HI].into();
-    let state_new_lo: LB::Expr = local[COL_STATE_NEW_LO].into();
-    let state_new_hi: LB::Expr = local[COL_STATE_NEW_HI].into();
     let state_out_lo: LB::Expr = local[COL_STATE_OUT_LO].into();
     let state_out_hi: LB::Expr = local[COL_STATE_OUT_HI].into();
     let cleared_bytes: [LB::Var; 8] = array::from_fn(|i| local[CLEARED_BYTES_RANGE.start + i]);
@@ -695,6 +631,9 @@ where
     let state_prev_bytes: [LB::Var; 8] =
         array::from_fn(|i| local[STATE_PREV_BYTES_RANGE.start + i]);
     let state_new_bytes: [LB::Var; 8] = array::from_fn(|i| local[STATE_NEW_BYTES_RANGE.start + i]);
+    let [chunk_lo, chunk_hi]: [LB::Expr; 2] = halves_le(&chunk_bytes, 256);
+    let [state_prev_lo, state_prev_hi]: [LB::Expr; 2] = halves_le(&state_prev_bytes, 256);
+    let [state_new_lo, state_new_hi]: [LB::Expr; 2] = halves_le(&state_new_bytes, 256);
 
     // Σ b_j (= `is_last_block_period`); `andnot_mask` and
     // `padding_mask`, byte-decomposed, as `Σ_j b_j · MASK_BYTE[i][j]`
