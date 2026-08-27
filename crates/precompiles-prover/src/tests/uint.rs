@@ -25,6 +25,7 @@ use crate::{
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    tests::{add_rational_folds, assert_same_rational_fold},
     uint::{
         CARRY_HI_BEGIN, CARRY_LO_BEGIN, COL_PTR, NUM_MAIN_COLS, PERIOD, TERM_CELL_GAP,
         UintStoreAir,
@@ -106,21 +107,6 @@ fn fold_balance<A>(
     for u in report.unmatched {
         *net.entry(u.denom).or_insert(Felt::ZERO) += u.net_multiplicity;
     }
-}
-
-fn add_rational_folds(
-    (left_v, left_u): (QuadFelt, QuadFelt),
-    (right_v, right_u): (QuadFelt, QuadFelt),
-) -> (QuadFelt, QuadFelt) {
-    (left_v * right_u + right_v * left_u, left_u * right_u)
-}
-
-fn assert_same_rational_fold(
-    actual: (QuadFelt, QuadFelt),
-    expected: (QuadFelt, QuadFelt),
-    context: &str,
-) {
-    assert_eq!(actual.0 * expected.1, expected.0 * actual.1, "{context}");
 }
 
 #[test]
