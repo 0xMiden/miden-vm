@@ -10,6 +10,7 @@
 
 #### Fixes
 
+- Added a default limit of 65,536 work units for deferred precompile translation. The prover rejects shared DAGs that would exceed the limit. Callers can set the limit through `Prover::with_max_precompile_expansion_work` or `prove_deferred_state_with_budget` ([#3731](https://github.com/0xMiden/miden-vm/pull/3731)).
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 
 ## v0.30.0 (2026-08-26)
