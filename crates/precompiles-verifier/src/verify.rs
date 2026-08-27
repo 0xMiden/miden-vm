@@ -39,10 +39,7 @@ pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<
     ))
 }
 
-fn verify_stark(
-    proof: &StarkProof,
-    public_root: P2Digest,
-) -> Result<(u32, usize), VerifyError> {
+fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(u32, usize), VerifyError> {
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
         return Err(VerifyError::ProofTooLarge {
             size: proof.bytes().len(),

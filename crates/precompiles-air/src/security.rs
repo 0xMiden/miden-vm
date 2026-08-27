@@ -10,19 +10,20 @@
 use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
-    field::{BasedVectorSpace, ExtensionField, QuadFelt},
+    field::{BasedVectorSpace, QuadFelt},
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
 use p3_security::{
     budget::{
         AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-        report::{LOOKUP_LABEL, QUERY_LABEL},
+        report::LOOKUP_LABEL,
     },
     fixed,
 };
 
 use crate::{
+    ChipletAir,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
@@ -31,7 +32,6 @@ use crate::{
     relations::MAX_MESSAGE_WIDTH,
     transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
-    ChipletAir,
 };
 
 /// Number of out-of-domain points opened per committed column.
@@ -264,6 +264,8 @@ pub fn conjectured_security_level_for_alignment(
 
 #[cfg(test)]
 mod tests {
+    use p3_security::budget::report::QUERY_LABEL;
+
     use super::*;
     use crate::stark_config::precompile_pcs_params;
 
