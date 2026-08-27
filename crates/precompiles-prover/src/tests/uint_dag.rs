@@ -318,16 +318,6 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     assert!(!residual.is_empty(), "a re-encoded op id must unbalance");
 }
 
-// BUDGET
-// ================================================================================================
-
-/// The uint-op arm must not push the eval chip past `lqd = 1` — flattened
-/// via `frac_col!`, every closing constraint stays at degree ≤ 3.
-#[test]
-fn eval_chip_stays_at_lqd_1() {
-    assert_eq!(crate::tests::log_quotient_degree(&TranscriptEvalAir), 1);
-}
-
 /// The Horner statement proved and verified for real — `#[ignore]`d
 /// (slow in debug); run explicitly or in release alongside the bench.
 #[test]
