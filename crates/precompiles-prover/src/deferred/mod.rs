@@ -2,4 +2,7 @@
 mod session;
 
 #[allow(unused_imports)]
-pub(crate) use session::{DeferredSession, DeferredSessionError, session_from_deferred_state};
+pub(crate) use session::{
+    DeferredSession, DeferredSessionError, session_from_deferred_state,
+    session_from_deferred_state_with_budget,
+};

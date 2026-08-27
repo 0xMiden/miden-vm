@@ -1,13 +1,184 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::deferred::{DeferredState, Node};
-use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
+use miden_core::{
+    Felt,
+    deferred::{
+        DeferredState, MAX_PRECOMPILE_ROOTS, Node, PrecompileRegistry, PrecompileWitness,
+        TRUE_DIGEST,
+    },
+};
+use miden_precompiles::{
+    CurveId, CurvePoint, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
+};
 
-use crate::deferred::{DeferredSession, session_from_deferred_state};
+use crate::{
+    DEFAULT_MAX_DEFERRED_EXPANSION_WORK, MAX_DEFERRED_TRANSLATION_DEPTH,
+    deferred::{
+        DeferredSession, DeferredSessionError, session_from_deferred_state,
+        session_from_deferred_state_with_budget,
+    },
+    hash::keccak::sponge::trace::keccak_oracle,
+};
 
 fn state() -> DeferredState {
     DeferredState::new(Arc::new(miden_precompiles::registry()))
         .expect("precompile init must succeed")
+}
+
+fn shared_and_state(depth: u32) -> DeferredState {
+    let mut state = DeferredState::new(Arc::new(PrecompileRegistry::new()))
+        .expect("empty registry must initialize");
+    for _ in 0..depth {
+        let root = state.root();
+        state.log_statement(root).expect("current root must log as a true statement");
+    }
+    state
+}
+
+fn linear_and_state(depth: u32) -> DeferredState {
+    let mut state = DeferredState::new(Arc::new(PrecompileRegistry::new()))
+        .expect("empty registry must initialize");
+    for _ in 0..depth {
+        state.log_statement(TRUE_DIGEST).expect("TRUE must log as a true statement");
+    }
+    state
+}
+
+fn shared_uint_state(depth: u32) -> DeferredState {
+    let mut state = state();
+    let value = UintPrecompile::value_node(UintDomain::U256, limbs(1));
+    let mut value = state.register(value).expect("value must register");
+    for _ in 0..depth {
+        let sum = Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), value, value)
+            .expect("tag is uint-owned");
+        value = state.register(sum).expect("sum must register");
+    }
+    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), value, value)
+        .expect("tag is uint-owned");
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).expect("equality must log");
+    state
+}
+
+fn linear_uint_state(depth: u32) -> DeferredState {
+    let mut state = state();
+    let one = UintPrecompile::value_node(UintDomain::U256, limbs(1));
+    let one = state.register(one).expect("value must register");
+    let mut value = one;
+    for _ in 0..depth {
+        let sum = Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), value, one)
+            .expect("tag is uint-owned");
+        value = state.register(sum).expect("sum must register");
+    }
+    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), value, value)
+        .expect("tag is uint-owned");
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).expect("equality must log");
+    state
+}
+
+fn keccak_state(input: &[u8]) -> DeferredState {
+    let registry =
+        Arc::new(PrecompileRegistry::new().with_precompile(Keccak256Precompile::default()));
+    let mut state = DeferredState::new(registry).expect("Keccak registry must initialize");
+    let input_digest = state
+        .register(Node::chunks_from_bytes(input))
+        .expect("input chunks must register");
+    let expected = vec![keccak_oracle(input).to_u32s().map(Felt::from_u32)];
+    let expected_digest = state
+        .register(Node::chunks(expected).expect("digest chunks are nonempty"))
+        .expect("expected digest must register");
+    let assertion = state
+        .register(Keccak256Precompile::assert_node(
+            input.len().try_into().expect("test input length fits u32"),
+            input_digest,
+            expected_digest,
+        ))
+        .expect("matching Keccak assertion must register");
+    state.log_statement(assertion).expect("matching assertion must log");
+    state
+}
+
+#[test]
+fn deferred_session_truthy_expansion_budget_has_an_exact_boundary() {
+    let state = shared_and_state(5);
+
+    session_from_deferred_state_with_budget(&state, 63)
+        .expect("a depth-five shared AND has exactly 63 truthy occurrences");
+    assert!(matches!(
+        session_from_deferred_state_with_budget(&state, 62),
+        Err(DeferredSessionError::TranslationBudgetExceeded { max: 62 })
+    ));
+}
+
+#[test]
+fn deferred_session_expansion_budget_includes_shared_uint_dependencies() {
+    let state = shared_uint_state(5);
+
+    session_from_deferred_state_with_budget(&state, 129)
+        .expect("the shared uint expression has exactly 129 translation occurrences");
+    assert!(matches!(
+        session_from_deferred_state_with_budget(&state, 128),
+        Err(DeferredSessionError::TranslationBudgetExceeded { max: 128 })
+    ));
+}
+
+#[test]
+fn deferred_session_expansion_budget_charges_keccak_input_chunks() {
+    let state = keccak_state(&[42; 64]);
+
+    session_from_deferred_state_with_budget(&state, 5)
+        .expect("the root, TRUE leaf, assertion, and two input chunks cost five units");
+    assert!(matches!(
+        session_from_deferred_state_with_budget(&state, 4),
+        Err(DeferredSessionError::TranslationBudgetExceeded { max: 4 })
+    ));
+}
+
+#[test]
+fn deferred_session_accepts_supported_merged_root_depth() {
+    let witnesses = (0..MAX_PRECOMPILE_ROOTS)
+        .map(|_| {
+            PrecompileWitness::new(linear_and_state(1))
+                .expect("one logged statement must form a witness")
+        })
+        .collect();
+    let merged = PrecompileWitness::merge(witnesses).expect("root count is supported");
+
+    session_from_deferred_state(merged.state()).expect("supported root merges must lower");
+}
+
+#[test]
+fn deferred_session_rejects_translation_depth_above_the_safe_limit() {
+    session_from_deferred_state(&linear_uint_state(MAX_DEFERRED_TRANSLATION_DEPTH as u32 - 2))
+        .expect("the exact translation depth limit must be accepted");
+    assert!(matches!(
+        session_from_deferred_state(&linear_uint_state(MAX_DEFERRED_TRANSLATION_DEPTH as u32 - 1)),
+        Err(DeferredSessionError::TranslationDepthExceeded { max: MAX_DEFERRED_TRANSLATION_DEPTH })
+    ));
+}
+
+#[test]
+fn deferred_session_truthy_expansion_count_rejects_overflow() {
+    let state = shared_and_state(usize::BITS);
+
+    assert!(matches!(
+        session_from_deferred_state_with_budget(&state, usize::MAX),
+        Err(DeferredSessionError::TranslationCountOverflow)
+    ));
+}
+
+#[test]
+fn deferred_session_rejects_truthy_expansion_above_the_default_budget() {
+    let depth = DEFAULT_MAX_DEFERRED_EXPANSION_WORK.ilog2();
+    let state = shared_and_state(depth);
+
+    assert!(matches!(
+        session_from_deferred_state(&state),
+        Err(DeferredSessionError::TranslationBudgetExceeded {
+            max: DEFAULT_MAX_DEFERRED_EXPANSION_WORK,
+        })
+    ));
 }
 
 fn limbs(value: u32) -> [u32; 8] {

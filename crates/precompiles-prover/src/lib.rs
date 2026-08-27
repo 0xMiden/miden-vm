@@ -19,6 +19,25 @@ pub use miden_core::{
 };
 pub use session::VerifyError;
 
+/// Default maximum amount of recursive translation work for one deferred root.
+///
+/// Deferred state is a content-addressed DAG, so its unique-node storage budget does not bound the
+/// number or cost of paths that the precompile prover must lower. One work unit represents a node
+/// translation or one 32-byte Keccak input chunk. Callers that accept untrusted deferred witnesses
+/// should select a limit appropriate for their worker policy with
+/// [`prove_deferred_state_with_budget`].
+///
+/// The default admits the maximum supported merged-root count while rejecting compact DAGs that
+/// would expand beyond 65,536 units of translation work.
+pub const DEFAULT_MAX_DEFERRED_EXPANSION_WORK: usize = 1 << 16;
+
+/// Hard safety ceiling for recursive deferred translation.
+///
+/// Translation currently follows truthy, uint, and EC dependencies recursively. Preflight rejects
+/// deeper inputs before entering that recursion so untrusted witnesses cannot exhaust the thread
+/// stack.
+pub const MAX_DEFERRED_TRANSLATION_DEPTH: usize = 256;
+
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace;
 pub(crate) mod ace_registry;
@@ -44,9 +63,22 @@ pub fn prove_deferred_state(
     state: &DeferredState,
     hash_fn: HashFunction,
 ) -> Result<StarkProof, ProveDeferredStateError> {
+    prove_deferred_state_with_budget(state, hash_fn, DEFAULT_MAX_DEFERRED_EXPANSION_WORK)
+}
+
+/// Proves the precompile claims in `state` while limiting recursive translation expansion.
+///
+/// Truthy, uint, and EC dependencies are counted with checked arithmetic before session rows are
+/// constructed. A shared child is charged once per occurrence in the expanded translation tree,
+/// matching the current lowering behavior.
+pub fn prove_deferred_state_with_budget(
+    state: &DeferredState,
+    hash_fn: HashFunction,
+    max_expansion_work: usize,
+) -> Result<StarkProof, ProveDeferredStateError> {
     let deferred = {
         let _span = tracing::info_span!("build_session").entered();
-        deferred::session_from_deferred_state(state)?
+        deferred::session_from_deferred_state_with_budget(state, max_expansion_work)?
     };
     let traces = {
         let _span = tracing::info_span!("build_trace").entered();

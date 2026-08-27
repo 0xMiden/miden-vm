@@ -19,6 +19,7 @@ use crate::{config, prove_stark};
 pub struct Prover {
     hash_fn: HashFunction,
     max_prover_memory_bytes: u64,
+    max_precompile_expansion_work: usize,
 }
 
 impl Prover {
@@ -29,11 +30,16 @@ impl Prover {
     /// not cover the precompile prover's memory footprint.
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
+    /// Default maximum amount of recursive translation work for one deferred precompile root.
+    pub const DEFAULT_MAX_PRECOMPILE_EXPANSION_WORK: usize =
+        miden_precompiles_prover::DEFAULT_MAX_DEFERRED_EXPANSION_WORK;
+
     /// Creates a prover with the canonical proof-generation configuration.
     pub const fn new() -> Self {
         Self {
             hash_fn: HashFunction::Blake3_256,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            max_precompile_expansion_work: Self::DEFAULT_MAX_PRECOMPILE_EXPANSION_WORK,
         }
     }
 
@@ -56,6 +62,21 @@ impl Prover {
     /// over a VM execution trace.
     pub const fn max_prover_memory_bytes(&self) -> u64 {
         self.max_prover_memory_bytes
+    }
+
+    /// Sets the maximum amount of recursive translation work for one deferred precompile root.
+    #[must_use]
+    pub const fn with_max_precompile_expansion_work(
+        mut self,
+        max_precompile_expansion_work: usize,
+    ) -> Self {
+        self.max_precompile_expansion_work = max_precompile_expansion_work;
+        self
+    }
+
+    /// Returns the maximum amount of recursive translation work for one deferred precompile root.
+    pub const fn max_precompile_expansion_work(&self) -> usize {
+        self.max_precompile_expansion_work
     }
 
     /// Proves only the VM portion of an execution witness.
@@ -105,8 +126,12 @@ impl Prover {
         &self,
         witness: &PrecompileWitness,
     ) -> Result<PrecompileProof, ProverError> {
-        let proof = miden_precompiles_prover::prove_deferred_state(witness.state(), self.hash_fn)
-            .map_err(ProverError::PrecompileProofGeneration)?;
+        let proof = miden_precompiles_prover::prove_deferred_state_with_budget(
+            witness.state(),
+            self.hash_fn,
+            self.max_precompile_expansion_work,
+        )
+        .map_err(ProverError::PrecompileProofGeneration)?;
         Ok(PrecompileProof { proof, roots: witness.roots().to_vec() })
     }
 
@@ -291,6 +316,8 @@ impl ProverError {
 
 #[cfg(test)]
 mod tests {
+    use miden_core::deferred::{DeferredState, PrecompileWitness};
+
     use super::*;
 
     #[test]
@@ -306,8 +333,37 @@ mod tests {
     fn prover_uses_canonical_memory_budget_and_allows_override() {
         let prover = Prover::new();
         assert_eq!(prover.max_prover_memory_bytes(), Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES);
+        assert_eq!(
+            prover.max_precompile_expansion_work(),
+            Prover::DEFAULT_MAX_PRECOMPILE_EXPANSION_WORK
+        );
 
-        let prover = prover.with_max_prover_memory_bytes(1 << 20);
+        let prover = prover
+            .with_max_prover_memory_bytes(1 << 20)
+            .with_max_precompile_expansion_work(63);
         assert_eq!(prover.max_prover_memory_bytes(), 1 << 20);
+        assert_eq!(prover.max_precompile_expansion_work(), 63);
+    }
+
+    #[test]
+    fn prover_rejects_precompile_expansion_above_its_budget() {
+        let mut state = DeferredState::default();
+        for _ in 0..5 {
+            let root = state.root();
+            state.log_statement(root).expect("current root must log as a true statement");
+        }
+        let witness = PrecompileWitness::new(state).expect("nonempty state must form a witness");
+
+        let error = Prover::new()
+            .with_max_precompile_expansion_work(62)
+            .prove_precompile(&witness)
+            .expect_err("a depth-five shared AND expands to 63 nodes");
+
+        assert!(matches!(
+            error,
+            ProverError::PrecompileProofGeneration(
+                miden_precompiles_prover::ProveDeferredStateError::Translation(message)
+            ) if message.contains("exceeds the limit of 62 work units")
+        ));
     }
 }

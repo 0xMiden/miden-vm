@@ -1,5 +1,6 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    vec,
     vec::Vec,
 };
 
@@ -10,6 +11,7 @@ use miden_precompiles::{
 };
 
 use crate::{
+    DEFAULT_MAX_DEFERRED_EXPANSION_WORK, MAX_DEFERRED_TRANSLATION_DEPTH,
     ec::trace::EcPointPtr,
     math::{U256, from_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
@@ -49,11 +51,29 @@ pub(crate) enum DeferredSessionError {
 
     #[error("deferred MSM node {digest:?} has no nonzero scalar")]
     UnsupportedMsmAllZeroScalars { digest: Digest },
+
+    #[error("deferred translation expansion exceeds the limit of {max} work units")]
+    TranslationBudgetExceeded { max: usize },
+
+    #[error("deferred translation expansion node count overflowed usize")]
+    TranslationCountOverflow,
+
+    #[error("deferred translation depth exceeds the limit of {max}")]
+    TranslationDepthExceeded { max: usize },
 }
 
 pub(crate) fn session_from_deferred_state(
     state: &DeferredState,
 ) -> Result<DeferredSession, DeferredSessionError> {
+    session_from_deferred_state_with_budget(state, DEFAULT_MAX_DEFERRED_EXPANSION_WORK)
+}
+
+pub(crate) fn session_from_deferred_state_with_budget(
+    state: &DeferredState,
+    max_expansion_work: usize,
+) -> Result<DeferredSession, DeferredSessionError> {
+    validate_translation_expansion(state, max_expansion_work)?;
+
     let mut builder = DeferredSessionBuilder {
         state,
         session: Session::new(),
@@ -69,6 +89,280 @@ pub(crate) fn session_from_deferred_state(
     }
 
     Ok(DeferredSession { session: builder.session, root })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TranslationKind {
+    Truthy,
+    Uint,
+    Ec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TranslationKey {
+    kind: TranslationKind,
+    digest: Digest,
+}
+
+impl TranslationKey {
+    const fn new(kind: TranslationKind, digest: Digest) -> Self {
+        Self { kind, digest }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TranslationMetrics {
+    work: usize,
+    depth: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TranslationChild {
+    key: TranslationKey,
+    recursive: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TranslationNode {
+    work: usize,
+    children: Vec<TranslationChild>,
+}
+
+impl TranslationNode {
+    fn leaf() -> Self {
+        Self { work: 1, children: Vec::new() }
+    }
+
+    fn with_children(children: Vec<TranslationChild>) -> Self {
+        Self { work: 1, children }
+    }
+}
+
+#[derive(Debug)]
+enum ExpansionFrame {
+    Visit(TranslationKey),
+    Complete {
+        key: TranslationKey,
+        node: TranslationNode,
+    },
+}
+
+/// Counts root-reachable translation calls without constructing any session rows.
+///
+/// Metrics are memoized by translation kind and digest, but a parent's count includes each child
+/// occurrence. Thus a shared child is fully charged for every recursive visit while the preflight
+/// itself remains linear in the number of unique typed nodes.
+fn validate_translation_expansion(
+    state: &DeferredState,
+    max_work: usize,
+) -> Result<(), DeferredSessionError> {
+    let mut metrics = BTreeMap::<TranslationKey, TranslationMetrics>::new();
+    let mut visiting = BTreeSet::<TranslationKey>::new();
+    let mut stack = Vec::new();
+    stack.push(ExpansionFrame::Visit(TranslationKey::new(
+        TranslationKind::Truthy,
+        state.root(),
+    )));
+
+    while let Some(frame) = stack.pop() {
+        match frame {
+            ExpansionFrame::Visit(key) => {
+                if metrics.contains_key(&key) {
+                    continue;
+                }
+                if !visiting.insert(key) {
+                    return Err(DeferredSessionError::MalformedNode(key.digest));
+                }
+
+                let node = translation_node(state, key)?;
+                if node.children.is_empty() {
+                    validate_translation_metrics(
+                        TranslationMetrics { work: node.work, depth: 1 },
+                        max_work,
+                    )?;
+                    metrics.insert(key, TranslationMetrics { work: node.work, depth: 1 });
+                    visiting.remove(&key);
+                } else {
+                    let children = node.children.clone();
+                    stack.push(ExpansionFrame::Complete { key, node });
+                    for child in children.iter().rev() {
+                        stack.push(ExpansionFrame::Visit(child.key));
+                    }
+                }
+            },
+            ExpansionFrame::Complete { key, node } => {
+                let mut combined = TranslationMetrics { work: node.work, depth: 1 };
+                for child in node.children {
+                    let child_metrics = metrics[&child.key];
+                    combined.work = combined
+                        .work
+                        .checked_add(child_metrics.work)
+                        .ok_or(DeferredSessionError::TranslationCountOverflow)?;
+                    combined.depth = combined.depth.max(
+                        child_metrics
+                            .depth
+                            .checked_add(usize::from(child.recursive))
+                            .ok_or(DeferredSessionError::TranslationCountOverflow)?,
+                    );
+                }
+                validate_translation_metrics(combined, max_work)?;
+                metrics.insert(key, combined);
+                visiting.remove(&key);
+            },
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_translation_metrics(
+    metrics: TranslationMetrics,
+    max_work: usize,
+) -> Result<(), DeferredSessionError> {
+    if metrics.work > max_work {
+        return Err(DeferredSessionError::TranslationBudgetExceeded { max: max_work });
+    }
+    if metrics.depth > MAX_DEFERRED_TRANSLATION_DEPTH {
+        return Err(DeferredSessionError::TranslationDepthExceeded {
+            max: MAX_DEFERRED_TRANSLATION_DEPTH,
+        });
+    }
+    Ok(())
+}
+
+fn translation_node(
+    state: &DeferredState,
+    key: TranslationKey,
+) -> Result<TranslationNode, DeferredSessionError> {
+    let node = state
+        .get_node(&key.digest)
+        .ok_or(DeferredSessionError::MissingNode(key.digest))?;
+
+    match key.kind {
+        TranslationKind::Truthy => {
+            if key.digest == TRUE_DIGEST {
+                return Ok(TranslationNode::leaf());
+            }
+            if node.tag() == Tag::AND {
+                let (lhs, rhs) = node
+                    .payload()
+                    .as_join()
+                    .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?;
+                return Ok(TranslationNode::with_children(vec![
+                    translation_child(TranslationKind::Truthy, lhs, false),
+                    translation_child(TranslationKind::Truthy, rhs, false),
+                ]));
+            }
+            if let Some(assertion) = Keccak256Precompile::decode_assert_node(node)
+                .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?
+            {
+                let input_chunks = usize::try_from(n_chunks(assertion.n_bytes).get())
+                    .map_err(|_| DeferredSessionError::TranslationCountOverflow)?;
+                let work = input_chunks
+                    .checked_add(1)
+                    .ok_or(DeferredSessionError::TranslationCountOverflow)?;
+                return Ok(TranslationNode { work, children: Vec::new() });
+            }
+            match UintPrecompile::decode_node(node)
+                .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?
+            {
+                Some(UintNodeRef::Eq { lhs, rhs }) => {
+                    return Ok(TranslationNode::with_children(vec![
+                        translation_child(TranslationKind::Uint, lhs, true),
+                        translation_child(TranslationKind::Uint, rhs, true),
+                    ]));
+                },
+                Some(_) => {
+                    return Err(DeferredSessionError::TypeMismatch {
+                        digest: key.digest,
+                        expected: "truthy deferred node",
+                    });
+                },
+                None => {},
+            }
+            match CurvePrecompile::decode_node(node)
+                .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?
+            {
+                Some(CurveNodeRef::Eq { lhs, rhs }) => Ok(TranslationNode::with_children(vec![
+                    translation_child(TranslationKind::Ec, lhs, true),
+                    translation_child(TranslationKind::Ec, rhs, true),
+                ])),
+                Some(_) | None => Err(DeferredSessionError::TypeMismatch {
+                    digest: key.digest,
+                    expected: "truthy deferred node",
+                }),
+            }
+        },
+        TranslationKind::Uint => {
+            match UintPrecompile::decode_node(node)
+                .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?
+            {
+                Some(UintNodeRef::Value { .. }) => Ok(TranslationNode::leaf()),
+                Some(
+                    UintNodeRef::Add { lhs, rhs }
+                    | UintNodeRef::Sub { lhs, rhs }
+                    | UintNodeRef::Mul { lhs, rhs },
+                ) => Ok(TranslationNode::with_children(vec![
+                    translation_child(TranslationKind::Uint, lhs, true),
+                    translation_child(TranslationKind::Uint, rhs, true),
+                ])),
+                Some(UintNodeRef::Eq { .. }) | None => Err(DeferredSessionError::TypeMismatch {
+                    digest: key.digest,
+                    expected: "uint value",
+                }),
+            }
+        },
+        TranslationKind::Ec => {
+            match CurvePrecompile::decode_node(node)
+                .map_err(|_| DeferredSessionError::MalformedNode(key.digest))?
+            {
+                Some(CurveNodeRef::Value { x, y, .. }) => {
+                    match (x == TRUE_DIGEST, y == TRUE_DIGEST) {
+                        (true, true) => Ok(TranslationNode::leaf()),
+                        (false, false) => Ok(TranslationNode::with_children(vec![
+                            translation_child(TranslationKind::Uint, x, true),
+                            translation_child(TranslationKind::Uint, y, true),
+                        ])),
+                        (true, false) | (false, true) => {
+                            Err(DeferredSessionError::MalformedNode(key.digest))
+                        },
+                    }
+                },
+                Some(CurveNodeRef::Add { lhs, rhs } | CurveNodeRef::Sub { lhs, rhs }) => {
+                    Ok(TranslationNode::with_children(vec![
+                        translation_child(TranslationKind::Ec, lhs, true),
+                        translation_child(TranslationKind::Ec, rhs, true),
+                    ]))
+                },
+                Some(CurveNodeRef::Msm { pairs }) => Ok(TranslationNode::with_children(
+                    pairs
+                        .into_iter()
+                        .flat_map(|(point, scalar)| {
+                            [
+                                translation_child(TranslationKind::Ec, point, true),
+                                translation_child(TranslationKind::Uint, scalar, true),
+                            ]
+                        })
+                        .collect(),
+                )),
+                Some(CurveNodeRef::Eq { .. }) | None => Err(DeferredSessionError::TypeMismatch {
+                    digest: key.digest,
+                    expected: "curve value",
+                }),
+            }
+        },
+    }
+}
+
+const fn translation_child(
+    kind: TranslationKind,
+    digest: Digest,
+    recursive: bool,
+) -> TranslationChild {
+    TranslationChild {
+        key: TranslationKey::new(kind, digest),
+        recursive,
+    }
 }
 
 // TODO: Add translator-level value caches if repeated traversal becomes measurable. Truthy
@@ -102,24 +396,54 @@ struct TranslatedEc {
     curve: CurveId,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TruthyFrame {
+    Visit(Digest),
+    CompleteAnd(Digest),
+}
+
 impl<'a> DeferredSessionBuilder<'a> {
     fn translate_truthy(&mut self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
-        self.require_truthy_metadata(digest)?;
+        let mut frames = Vec::new();
+        let mut values = Vec::new();
+        frames.push(TruthyFrame::Visit(digest));
 
-        if digest == TRUE_DIGEST {
-            return Ok(self.session.zero());
+        while let Some(frame) = frames.pop() {
+            match frame {
+                TruthyFrame::Visit(digest) => {
+                    self.require_truthy_metadata(digest)?;
+                    if digest == TRUE_DIGEST {
+                        values.push(self.session.zero());
+                        continue;
+                    }
+
+                    if self.node_tag(digest)? == Tag::AND {
+                        let (lhs, rhs) = self.join_payload(digest)?;
+                        frames.push(TruthyFrame::CompleteAnd(digest));
+                        frames.push(TruthyFrame::Visit(rhs));
+                        frames.push(TruthyFrame::Visit(lhs));
+                    } else {
+                        values.push(self.translate_truthy_leaf(digest)?);
+                    }
+                },
+                TruthyFrame::CompleteAnd(digest) => {
+                    let rhs = values.pop().ok_or(DeferredSessionError::MalformedNode(digest))?;
+                    let lhs = values.pop().ok_or(DeferredSessionError::MalformedNode(digest))?;
+                    let node = self.session.assert_and(lhs, rhs);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(node);
+                },
+            }
         }
 
-        let tag = self.node_tag(digest)?;
-        if tag == Tag::AND {
-            let (lhs, rhs) = self.join_payload(digest)?;
-            let lhs = self.translate_truthy(lhs)?;
-            let rhs = self.translate_truthy(rhs)?;
-            let node = self.session.assert_and(lhs, rhs);
-            debug_assert_eq!(node.hash(), P2Digest::from(digest));
-            return Ok(node);
+        if values.len() == 1 {
+            Ok(values.pop().expect("length checked above"))
+        } else {
+            Err(DeferredSessionError::MalformedNode(digest))
         }
+    }
 
+    fn translate_truthy_leaf(&mut self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
         if let Some(assertion) = Keccak256Precompile::decode_assert_node(self.node(digest)?)
             .map_err(|_| DeferredSessionError::MalformedNode(digest))?
         {
