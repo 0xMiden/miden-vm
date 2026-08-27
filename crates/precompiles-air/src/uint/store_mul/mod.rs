@@ -11,14 +11,11 @@
 //! real, no mode selector, no cross-gating. Each side keeps its own
 //! constraint degree (`lqd = 1`); nothing here raises it.
 //!
-//! Exactly one running-sum column is committed per AIR, so column 0 is
-//! store's own anchor fraction, unchanged; mul's own anchor fraction
-//! becomes an ordinary (non-anchor) column instead of folding into
-//! store's — both still close into the one shared σ via the standard
-//! `acc_next[0] = Σ acc[i]` recurrence, and neither pays the degree cost
-//! of physically sharing column 0. Every other LogUp column and both
-//! sides' `id` / `S` registers stay independent (separate columns), since
-//! store and mul are simultaneously live, not mutually exclusive.
+//! Exactly one centered running-sum column is committed per AIR. Column 0 remains store's anchor;
+//! mul's anchor is repacked into an ordinary two-fraction column. The four singleton fractions
+//! other than the retained store anchor are paired across two columns, and every fraction closes
+//! into the same centered residue without raising the constraint degree. Both sides' `id` / `S`
+//! registers remain independent because store and mul are simultaneously live.
 //!
 //! The shared height is `max` of what each side natively needs
 //! (independently `next_power_of_two`-padded, own padding mechanism —
@@ -46,13 +43,11 @@ use crate::{
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::{
-        COLUMN_SHAPE as STORE_COLUMN_SHAPE, NUM_LOGUP_COLS as STORE_NUM_LOGUP_COLS, UintLimbsMsg,
-        UintValMsg,
+        NUM_LOGUP_COLS as STORE_NUM_LOGUP_COLS, UintLimbsMsg, UintValMsg,
         mul::{
             COL_A_PTR as M_COL_A_PTR, COL_ACT as M_COL_ACT, COL_B_PTR as M_COL_B_PTR,
             COL_BORROW as M_COL_BORROW, COL_BOUND_PTR as M_COL_BOUND_PTR,
-            COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR,
-            COLUMN_SHAPE as MUL_COLUMN_SHAPE, GAMMA_OFFSET, GAMMA_SLOTS,
+            COL_KAPPA_A as M_COL_KAPPA_A, COL_R_PTR as M_COL_R_PTR, GAMMA_OFFSET, GAMMA_SLOTS,
             NUM_CELLS as MUL_NUM_CELLS, NUM_GAMMA, NUM_LOGUP_COLS as MUL_NUM_LOGUP_COLS,
             NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, NUM_Q_LIMBS, PERIOD as MUL_PERIOD, ROW_A, ROW_B,
             ROW_C, ROW_P, ROW_Q, ROW_R, S_KEEP, TERM_CELL_C_PTR, TERM_CELL_IS_SUB,
@@ -105,36 +100,29 @@ const PCOL_MUL_S_KEEP: usize = MUL_PERIOD;
 const PCOL_STORE_ROLE_BASE: usize = MUL_PERIOD + 1;
 const NUM_PERIODIC: usize = MUL_PERIOD + 1 + STORE_PERIOD;
 
-// Aux layout: col 0 = the shared running sum (store's own anchor
-// fraction + mul's own anchor fraction, both unconditionally live —
-// exactly one running-sum column is committed per AIR); the rest is a
-// straight concatenation of store's own column shape (cols 1..8) and
-// mul's own column shape (cols 8..; mul's own col 0, its anchor,
-// becomes an ordinary column here rather than folding into store's).
-// Registers stay independent (store and mul are simultaneously live,
-// not mutually exclusive, so their `id` accumulators cannot share a
-// column).
-pub const NUM_LOGUP_COLS: usize = STORE_NUM_LOGUP_COLS + MUL_NUM_LOGUP_COLS;
+// Aux layout: col 0 is store's anchor fraction and the centered running sum. The remaining 46
+// fractions are paired into 23 ordinary columns, including the two repacked columns that absorb
+// the four singleton fractions other than the retained store anchor. Registers stay independent
+// because store and mul are simultaneously live, so their `id` accumulators cannot share a column.
+const REPACKED_COLUMN_SAVINGS: usize = 2;
+pub const NUM_LOGUP_COLS: usize =
+    STORE_NUM_LOGUP_COLS + MUL_NUM_LOGUP_COLS - REPACKED_COLUMN_SAVINGS;
 pub const STORE_REG_ID: usize = NUM_LOGUP_COLS;
 pub const MUL_REG_ID: usize = NUM_LOGUP_COLS + 1;
 pub const MUL_REG_S: usize = NUM_LOGUP_COLS + 2;
 pub const AUX_WIDTH: usize = NUM_LOGUP_COLS + 3;
 
+const _: () = assert!(
+    MUL_NUM_CELLS % 2 == 1,
+    "the final mul Range16 interaction must be a singleton tail"
+);
+
 const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
-    let mut shape = [0usize; NUM_LOGUP_COLS];
-    let mut i = 0;
-    while i < STORE_NUM_LOGUP_COLS {
-        shape[i] = STORE_COLUMN_SHAPE[i];
-        i += 1;
-    }
-    let mut j = 0;
-    while j < MUL_NUM_LOGUP_COLS {
-        shape[STORE_NUM_LOGUP_COLS + j] = MUL_COLUMN_SHAPE[j];
-        j += 1;
-    }
+    let mut shape = [2usize; NUM_LOGUP_COLS];
+    shape[0] = 1;
     shape
 }
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
+pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 
 // AIR
 // ================================================================================================
@@ -194,7 +182,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // ---- STORE (verbatim from `UintStoreAir::eval`, cols 0..10) ----
+        // ---- STORE (verbatim from `UintStoreAir::eval`, cols 0..18) ----
         {
             let local: [AB::Var; STORE_NUM_MAIN_COLS] = current_main(builder.main(), 0);
             let next: [AB::Var; STORE_NUM_MAIN_COLS] = next_main(builder.main(), 0);
@@ -504,6 +492,7 @@ where
 
         let provide_deg = Deg { v: 2, u: 1 };
         let consume_deg = Deg { v: 1, u: 1 };
+        let store_pair_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
         let raw: [LB::Expr; 16] =
             array::from_fn(|j| if j < 8 { local_s[j].into() } else { next_s[j - 8].into() });
@@ -592,13 +581,13 @@ where
                                     consume_deg,
                                 );
                             },
-                            pair_deg,
+                            store_pair_deg,
                         );
                     },
-                    pair_deg,
+                    store_pair_deg,
                 );
             },
-            pair_deg,
+            store_pair_deg,
         );
         let store_cell_gate = |cell: usize| -> LB::Expr {
             if cell < 8 {
@@ -632,19 +621,21 @@ where
                                         );
                                     }
                                 },
-                                pair_deg,
+                                store_pair_deg,
                             );
                         },
-                        pair_deg,
+                        store_pair_deg,
                     );
                 },
-                pair_deg,
+                store_pair_deg,
             );
         }
+        // Pair store's non-anchor raw provide with mul's relocated anchor provide. They retain
+        // their distinct typed buses; only their rational fractions share an auxiliary column.
         builder.next_column(
             |col| {
                 col.group(
-                    "uintlimbs",
+                    "store+mul-provides",
                     |g| {
                         g.batch(
                             "f",
@@ -660,29 +651,6 @@ where
                                     },
                                     provide_deg,
                                 );
-                            },
-                            provide_deg,
-                        );
-                    },
-                    provide_deg,
-                );
-            },
-            provide_deg,
-        );
-
-        // col 8: mul's original col 0 (the `UintMul` provide) — placed
-        // here as an ordinary (non-anchor) column, since it still folds
-        // into the shared σ via the standard `acc_next[0] = Σ acc[i]`
-        // recurrence without needing to physically sit at column 0.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "uintmul",
-                    |g| {
-                        g.batch(
-                            "f",
-                            LB::Expr::ONE,
-                            |b| {
                                 b.insert(
                                     "provide-uintmul",
                                     neg_mult.clone() * sel[ROW_C].clone(),
@@ -699,73 +667,52 @@ where
                                     mul_provide_deg,
                                 );
                             },
-                            mul_provide_deg,
+                            pair_deg,
                         );
                     },
-                    mul_provide_deg,
+                    pair_deg,
                 );
             },
-            mul_provide_deg,
+            pair_deg,
         );
 
-        // cols 9..: mul's own remaining columns, unchanged in shape.
-        let raw_consumes: Vec<(LB::Expr, LB::Expr, [LB::Expr; 16])> =
-            [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone()), (ROW_P, mul_bound_ptr.clone())]
-                .into_iter()
-                .map(|(row, ptr)| {
-                    let mult = sel[row].clone() * mul_act.clone();
-                    let limbs: [LB::Expr; 16] = array::from_fn(|i| {
-                        if i < 8 {
-                            raw_m_lo[i].clone()
-                        } else {
-                            raw_m_hi[i - 8].clone()
-                        }
-                    });
-                    (mult, ptr, limbs)
-                })
-                .collect();
-        for group in raw_consumes
-            .chunks(2)
-            .map(
-                <[(
-                    <LB as LookupBuilder>::Expr,
-                    <LB as LookupBuilder>::Expr,
-                    [<LB as LookupBuilder>::Expr; 16],
-                )]>::to_vec,
-            )
-            .collect::<Vec<_>>()
-        {
-            builder.next_column(
-                |col| {
-                    col.group(
-                        "uintlimbs",
-                        |g| {
-                            g.batch(
-                                "f",
-                                LB::Expr::ONE,
-                                |b| {
-                                    for (mult, ptr, limbs) in group {
-                                        b.insert(
-                                            "consume-uintlimbs",
-                                            mult,
-                                            UintLimbsMsg {
-                                                ptr,
-                                                bound_ptr: mul_bound_ptr.clone(),
-                                                limbs,
-                                            },
-                                            mul_consume_deg,
-                                        );
-                                    }
-                                },
-                                pair_deg,
-                            );
-                        },
-                        pair_deg,
-                    );
-                },
-                pair_deg,
-            );
-        }
+        let mul_raw_limbs: [LB::Expr; 16] = array::from_fn(|i| {
+            if i < 8 {
+                raw_m_lo[i].clone()
+            } else {
+                raw_m_hi[i - 8].clone()
+            }
+        });
+        builder.next_column(
+            |col| {
+                col.group(
+                    "uintlimbs",
+                    |g| {
+                        g.batch(
+                            "f",
+                            LB::Expr::ONE,
+                            |b| {
+                                for (row, ptr) in [(ROW_A, a_ptr.clone()), (ROW_B, b_ptr.clone())] {
+                                    b.insert(
+                                        "consume-uintlimbs",
+                                        sel[row].clone() * mul_act.clone(),
+                                        UintLimbsMsg {
+                                            ptr,
+                                            bound_ptr: mul_bound_ptr.clone(),
+                                            limbs: mul_raw_limbs.clone(),
+                                        },
+                                        mul_consume_deg,
+                                    );
+                                }
+                            },
+                            pair_deg,
+                        );
+                    },
+                    pair_deg,
+                );
+            },
+            pair_deg,
+        );
 
         let mul_raw16_gate = |cell: usize| -> LB::Expr {
             if cell < NUM_Q_LIMBS {
@@ -781,14 +728,8 @@ where
                 .fold(LB::Expr::ZERO, |acc, &(row, _)| acc + sel[row].clone())
         };
         let cell_gate = |cell: usize| -> LB::Expr { mul_raw16_gate(cell) + mul_gamma_gate(cell) };
-        let cell_specs: Vec<(LB::Expr, usize)> = (0..MUL_NUM_CELLS)
-            .map(|cell| (cell_gate(cell) * mul_act.clone(), cell))
-            .collect();
-        for group in cell_specs
-            .chunks(2)
-            .map(<[(<LB as LookupBuilder>::Expr, usize)]>::to_vec)
-            .collect::<Vec<_>>()
-        {
+        for pair in 0..MUL_NUM_CELLS / 2 {
+            let cells = [2 * pair, 2 * pair + 1];
             builder.next_column(
                 |col| {
                     col.group(
@@ -798,10 +739,10 @@ where
                                 "f",
                                 LB::Expr::ONE,
                                 |b| {
-                                    for (mult, cell) in group {
+                                    for cell in cells {
                                         b.insert(
                                             "range16-cell",
-                                            mult,
+                                            cell_gate(cell) * mul_act.clone(),
                                             Range16Msg { w: local_m[cell].into() },
                                             mul_rc_deg,
                                         );
@@ -816,6 +757,44 @@ where
                 pair_deg,
             );
         }
+
+        // Pair mul's two remaining singleton tails: the bound's raw UintLimbs consume and the
+        // final cell-position Range16 check. Their bus domains remain independent.
+        let tail_cell = MUL_NUM_CELLS - 1;
+        builder.next_column(
+            |col| {
+                col.group(
+                    "bound+range16",
+                    |g| {
+                        g.batch(
+                            "f",
+                            LB::Expr::ONE,
+                            |b| {
+                                b.insert(
+                                    "consume-bound-limbs",
+                                    sel[ROW_P].clone() * mul_act.clone(),
+                                    UintLimbsMsg {
+                                        ptr: mul_bound_ptr.clone(),
+                                        bound_ptr: mul_bound_ptr.clone(),
+                                        limbs: mul_raw_limbs,
+                                    },
+                                    mul_consume_deg,
+                                );
+                                b.insert(
+                                    "range16-cell",
+                                    cell_gate(tail_cell) * mul_act.clone(),
+                                    Range16Msg { w: local_m[tail_cell].into() },
+                                    mul_rc_deg,
+                                );
+                            },
+                            pair_deg,
+                        );
+                    },
+                    pair_deg,
+                );
+            },
+            pair_deg,
+        );
 
         builder.next_column(
             |col| {
