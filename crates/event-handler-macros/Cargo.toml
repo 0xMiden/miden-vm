@@ -23,5 +23,6 @@ syn2.workspace = true
 # The tests pin the wire constants this crate repeats against the crates that own them. These are
 # dev-dependencies only, so a consumer of the macro still builds no extra crate for the host.
 [dev-dependencies]
+miden-core.workspace = true
 miden-event-handler-abi.workspace = true
 miden-mast-package.workspace = true

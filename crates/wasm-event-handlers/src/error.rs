@@ -6,10 +6,11 @@ use alloc::string::String;
 #[derive(Debug, thiserror::Error)]
 pub enum WasmHandlerLoadError {
     /// The module declares an ABI version this crate does not support. Version bumps are
-    /// additive, so hosts accept every declared version from `1` up to their own.
+    /// additive, so hosts accept every declared version from the ABI floor up to their own.
     #[error(
         "handler module declares ABI version {declared}, but this host supports versions \
-         1 through {supported}"
+         {min} through {supported}",
+        min = miden_mast_package::MIN_ABI_VERSION
     )]
     AbiVersionMismatch {
         /// The version the module declares.

@@ -92,8 +92,8 @@ fn validate(event_name: &LitStr, func: &ItemFn) -> Result<(), syn2::Error> {
     if event.is_empty() {
         return Err(syn2::Error::new(event_name.span(), "event name cannot be empty"));
     }
-    // A proc-macro crate cannot depend on `miden-core`, so the prefix is repeated here. Keep it
-    // in sync with `miden_core::events::EventName::RESERVED_NAMESPACE`.
+    // A proc-macro crate cannot depend on `miden-core`, so the prefix is repeated here. The
+    // sync test pins it to `miden_core::events::EventName::RESERVED_NAMESPACE`.
     if event.starts_with("sys::") {
         return Err(syn2::Error::new(
             event_name.span(),
@@ -215,5 +215,6 @@ mod tests {
         assert_eq!(MANIFEST_SECTION_NAME, miden_event_handler_abi::MANIFEST_SECTION_NAME);
         assert_eq!(MAX_NAME_BYTES, miden_mast_package::MAX_NAME_BYTES);
         assert_eq!(MEMORY_EXPORT, miden_event_handler_abi::MEMORY_EXPORT);
+        assert_eq!("sys::", miden_core::events::EventName::RESERVED_NAMESPACE);
     }
 }
