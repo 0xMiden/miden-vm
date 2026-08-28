@@ -33,7 +33,7 @@ fn double() {
 
 Handler code works with `Felt`, `Word` and `MerkleNode`, which the SDK re-exports as `sdk::Felt`, `sdk::Word` and `sdk::MerkleNode`, so a handler crate needs no direct `miden-field` dependency. These are also the types the host imports take: the wire encoding of a field element is the canonical `u64` residue that `Felt` already holds off-chain, so there is no conversion layer. The wrappers only canonicalize the elements they send, because guest arithmetic can leave a lazy residue that the host rejects.
 
-The attribute macro exports the function under the event name and embeds a manifest record in the `miden:event-manifest` custom section. Package tooling derives the section manifest from those records (`miden_wasm_event_handlers::section_from_module`), so no hand-written manifest is needed. Derivation sorts the manifest by event name and removes the `miden:event-manifest` sections from the module it embeds, so neither the record order nor the duplicated records reach the package. The module bytes themselves stay link-order dependent: the linker also decides the order of the code and data sections, so two builds of the same source can still give two package identities. A `no_std` handler crate also needs the SDK's `panic-handler` feature, which forwards panic messages to the host, and its `bump-allocator` feature, which installs a global allocator; enable both in the final handler crate.
+The attribute macro rejects an invalid event name at compile time: the name must not be empty, must not start with the reserved `sys::` namespace, must stay inside 255 UTF-8 bytes, and must not be `memory` (the name of the required linear-memory export). The macro exports the function under the event name and embeds a manifest record in the `miden:event-manifest` custom section. Package tooling derives the section manifest from those records (`miden_wasm_event_handlers::section_from_module`), so no hand-written manifest is needed. Derivation sorts the manifest by event name and removes the `miden:event-manifest` sections from the module it embeds, so neither the record order nor the duplicated records reach the package. The module bytes themselves stay link-order dependent: the linker also decides the order of the code and data sections, so two builds of the same source can still give two package identities. A `no_std` handler crate also needs the SDK's `panic-handler` feature, which forwards panic messages to the host, and its `bump-allocator` feature, which installs a global allocator; enable both in the final handler crate.
 
 A handler module must not contain SIMD instructions: the runner executes a deterministic, non-SIMD instruction set, and the loader rejects a module that uses `simd128`. Compile handler crates with `-C target-feature=-simd128`, because a toolchain or a workspace `.cargo/config.toml` can turn `simd128` on for `wasm32-unknown-unknown` (this repository does). The test fixtures show the override in `crates/wasm-event-handlers/tests/fixtures/.cargo/config.toml`.
 
@@ -43,15 +43,16 @@ A Miden project declares its handler module in `miden-project.toml`. The project
 
 ```toml
 [package.metadata.wasm-event-handlers]
-crate = "handlers"          # a Rust guest crate directory, XOR:
-module = "handlers.wasm"    # a prebuilt core-Wasm module
+crate = "handlers"   # the Rust guest crate directory; built and embedded by the project build
+# Alternatively, set `module = "handlers.wasm"` instead to embed a prebuilt core-Wasm module.
+# Exactly one of the two keys must be set.
 ```
 
-Set exactly one of the two keys. Both keys, no key, an unknown key, or a value that is not a string stop the build with an error that names the manifest and the key. Both paths are relative to the directory of the `miden-project.toml` file. A package declares at most one handler module, and the section attaches to every target the package builds — the library target and each executable target alike.
+Set exactly one of the two keys. Both keys, no key, an unknown key, or a value that is not a string stop the build with an error that names the manifest and the key. Both paths are relative to the directory of the `miden-project.toml` file. A package declares at most one handler module.
 
 Every package of the project therefore carries the same, full handler set. A host registers the handlers of **one** package of a project: a host that loads the handlers of a second package of the same project fails with a duplicate-handler error, because both packages declare the same events. The failure is deliberate — a silent second registration would hide which package answers an event.
 
-Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build, it writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag. The guest crate must produce exactly one Wasm module; give it a library target with `crate-type = ["cdylib"]`.
+Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build of only the crate's library target — binaries and examples of the guest crate are not built — so give the crate a `[lib]` with `crate-type = ["cdylib"]`. It writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag.
 
 The build pins those flags through `RUSTFLAGS`, which keeps the module the same whatever the environment of the caller holds. By cargo precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own `.cargo/config.toml`, so a guest crate must not depend on flags it sets there; state what the crate needs in the crate itself.
 
@@ -127,7 +128,7 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `sha512(data, len, out)` | SHA-512 digest of `len` bytes (64 bytes out). |
 | `blake3(data, len, out)` | BLAKE3 digest of `len` bytes (32 bytes out). |
 
-**Failure.** `fail(msg_ptr, msg_len)` records an error message and traps. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `Uninit`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
+**Failure.** `fail(msg_ptr, msg_len)` records an error message and traps; the host reads at most `MAX_FAIL_MSG_BYTES` (4,096) bytes of the message and truncates the rest. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `Uninit`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
 
 ## Limits and validation
 
