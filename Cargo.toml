@@ -109,7 +109,6 @@ miden-precompiles       = { path = "./crates/precompiles", version = "1.0.0-rc.1
 miden-processor         = { path = "./processor", version = "1.0.0-rc.1", default-features = false }
 miden-wasm-event-handlers = { path = "./crates/wasm-event-handlers", version = "1.0.0-rc.1", default-features = false }
 miden-event-handler-macros = { path = "./crates/event-handler-macros", version = "1.0.0-rc.1", default-features = false }
-miden-event-handler-sdk = { path = "./crates/event-handler-sdk", version = "1.0.0-rc.1", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "1.0.0-rc.1", default-features = false }
 miden-prover            = { path = "./prover", version = "1.0.0-rc.1", default-features = false }

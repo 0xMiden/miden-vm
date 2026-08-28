@@ -1,9 +1,6 @@
 [package]
 name = "miden-wasm-event-handlers-project"
-version = "0.30.0"
-# Publishing is deferred to the release train: the 0.30 APIs this crate needs from its
-# workspace dependencies are not on crates.io yet.
-publish = false
+version = "0.31.0"
 description = "Project assembler plugin that embeds Wasm event handlers into a Miden package"
 documentation = "https://docs.rs/miden-wasm-event-handlers-project"
 readme = "README.md"

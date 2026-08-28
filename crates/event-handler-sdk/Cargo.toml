@@ -1,9 +1,6 @@
 [package]
 name = "miden-event-handler-sdk"
-version = "0.30.0"
-# Publishing is deferred to the release train: the 0.30 APIs this crate needs from its
-# workspace dependencies are not on crates.io yet.
-publish = false
+version = "0.31.0"
 description = "Guest SDK for writing Wasm-compiled Miden VM event handlers in Rust"
 documentation = "https://docs.rs/miden-event-handler-sdk"
 readme = "README.md"
