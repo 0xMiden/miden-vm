@@ -34,14 +34,14 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-abi"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-field",
 ]
 
 [[package]]
 name = "miden-event-handler-macros"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "miden-event-handler-sdk"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-event-handler-abi",
  "miden-event-handler-macros",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
