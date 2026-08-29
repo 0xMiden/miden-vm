@@ -102,7 +102,7 @@ mod tests {
         );
         assert_eq!(bpl_mutated_values[AND8_VALUE_OFFSET], composite_values[AND8_VALUE_OFFSET]);
 
-        let mut and8_mutation = main.clone();
+        let mut and8_mutation = main;
         let and8_row = (1usize << 8) | 0xf0;
         and8_mutation.values[and8_row * air.width() + BPL_MAIN_COLS + NUM_AND8_LOOKUP_COLS - 1] +=
             Felt::ONE;

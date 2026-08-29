@@ -1068,7 +1068,7 @@ fn and8_pair_batches_reject_opposite_multiplicity_deltas_across_domains() {
     // Each attack preserves the untagged sum of the two multiplicities. Distinct bus prefixes
     // and payloads must nevertheless keep both denominators independently binding.
     let attack_rows = [257, 1025, 4097, 16385, AND8_TABLE_ROWS - 1];
-    let mut attacked_and8_matrix = honest_and8_matrix.clone();
+    let mut attacked_and8_matrix = honest_and8_matrix;
     let main_width = attacked_and8_matrix.width();
     for (pair, &row) in AND8_PAIRED_MAIN_COLUMNS.iter().zip(&attack_rows) {
         attacked_and8_matrix.values[row * main_width + pair.0] += Felt::ONE;

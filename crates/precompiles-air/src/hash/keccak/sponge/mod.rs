@@ -525,7 +525,7 @@ where
     );
     builder.assert_zero(p_rate_block * is_zero * (state_new_hi.clone() - state_prev_hi.clone()));
     // Capacity rows: identity passthrough.
-    builder.assert_zero(p_capacity.clone() * (state_new_lo.clone() - state_prev_lo.clone()));
+    builder.assert_zero(p_capacity.clone() * (state_new_lo - state_prev_lo));
     builder.assert_zero(p_capacity * (state_new_hi - state_prev_hi));
 }
 
