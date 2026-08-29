@@ -7,6 +7,8 @@
 - Fixed `PartialMmr::from_parts()` and deserialization so they reject tracked leaves without complete authentication paths ([#3809](https://github.com/0xMiden/miden-vm/pull/3809)).
 - Fixed `PartialMmr::track()` panicking when a leaf position did not belong to the tree selected by its authentication path ([#3804](https://github.com/0xMiden/miden-vm/pull/3804)).
 - Fixed 46 `\begin{cases}...\end{cases}` blocks in the assembly instruction reference and stack design docs that were missing the `\\` row separator between cases, which broke KaTeX rendering ([#3650](https://github.com/0xMiden/miden-vm/issues/3650)).
+- Fixed `prove` writing the default outputs file next to the program rather than next to the proof, so a proof written with `--proof` could not be verified without passing `-o` by hand ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
+- `prove` now rejects a `--proof` and outputs path that compare equal, instead of silently replacing the proof with the outputs ([#3760](https://github.com/0xMiden/miden-vm/pull/3760)).
 
 ## v0.32.1 (2026-09-09)
 
