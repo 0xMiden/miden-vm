@@ -9,7 +9,7 @@ use miden_core::{
     },
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
-use miden_crypto::hash::eidos::domains::LMCS_LEAF;
+use miden_crypto::hash::eidos::{BLOCK_LEN as EIDOS_RATE, domains::LMCS_LEAF};
 
 use super::pvm_layout_const;
 use crate::helpers::{masm_push_word, read_memory_felt};
@@ -70,8 +70,8 @@ fn add_path(
 
 /// Mirrors the Eidos LMCS leaf hasher. All four PVM commitment-group widths are LMCS-aligned.
 fn lmcs_leaf(row: &[Felt]) -> Word {
-    assert_eq!(row.len() % 8, 0, "synthetic LMCS row must be block-aligned");
-    row.as_chunks::<8>()
+    assert_eq!(row.len() % EIDOS_RATE, 0, "synthetic LMCS row must be block-aligned");
+    row.as_chunks::<EIDOS_RATE>()
         .0
         .iter()
         .fold(Eidos::init_chaining_word(LMCS_LEAF, row.len() as u32), |cv, block| {
