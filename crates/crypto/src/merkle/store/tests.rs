@@ -990,3 +990,11 @@ fn deserialize_rejects_truncated_payload() {
     let result = MerkleStore::read_from_bytes(&bytes);
     assert!(matches!(result, Err(DeserializationError::UnexpectedEOF)));
 }
+
+#[test]
+fn test_empty_merkle_store_operations() {
+    let store = MerkleStore::new();
+
+    // MerkleStore varsayılan boş alt ağaç köklerini içerir
+    assert!(!store.nodes.is_empty(), "Yeni oluşturulan MerkleStore varsayılan kökleri içermelidir");
+}
