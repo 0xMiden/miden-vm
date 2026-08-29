@@ -104,6 +104,19 @@ impl ProveCmd {
             return Err(Report::msg("The provided file must have a .masm or .masp extension"));
         }
 
+        // Prevent outputs from overwriting the proof; compare ASCII case-insensitively for
+        // common case-insensitive filesystems.
+        let proof_path = self.resolved_proof_path();
+        let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
+        if output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()) {
+            return Err(Report::msg(format!(
+                "The outputs file `{}` would overwrite the proof file `{}`. Choose a different \
+                 --proof or --output path.",
+                output_path.display(),
+                proof_path.display()
+            )));
+        }
+
         // load libraries from files
         let libraries = Libraries::new(&self.library_paths)?;
 
@@ -189,7 +202,7 @@ impl ProveCmd {
             let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
 
             // write all outputs to default location if none was provided
-            let default_output_path = self.program_file.with_extension("outputs");
+            let default_output_path = self.default_output_path();
             OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
 
             // print stack outputs to screen.
@@ -197,5 +210,84 @@ impl ProveCmd {
         }
 
         Ok(())
+    }
+
+    /// Resolves the proof path the same way as ProofFile::write.
+    fn resolved_proof_path(&self) -> PathBuf {
+        self.proof_file
+            .clone()
+            .unwrap_or_else(|| self.program_file.with_extension("proof"))
+    }
+
+    /// Derives verify's default outputs path from the resolved proof path.
+    fn default_output_path(&self) -> PathBuf {
+        self.resolved_proof_path().with_extension("outputs")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prove_cmd(program_file: &str, proof_file: Option<&str>) -> ProveCmd {
+        ProveCmd {
+            program_file: PathBuf::from(program_file),
+            expected_cycles: 64,
+            input_file: None,
+            library_paths: Vec::new(),
+            max_cycles: ExecutionOptions::MAX_CYCLES,
+            max_prover_memory: Prover::DEFAULT_MAX_PROVER_MEMORY_BYTES,
+            num_outputs: 16,
+            output_file: None,
+            proof_file: proof_file.map(PathBuf::from),
+            hasher: "blake3-256".to_string(),
+            security: "96bits".to_string(),
+            kernel_file: None,
+        }
+    }
+
+    #[test]
+    fn default_output_path_follows_the_program_when_no_proof_is_given() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", None).default_output_path(),
+            PathBuf::from("dir/program.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_follows_a_custom_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.proof")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_handles_an_extensionless_proof_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_collides_with_a_proof_path_that_is_already_an_outputs_path() {
+        assert_eq!(
+            prove_cmd("dir/program.masm", Some("out/custom.outputs")).default_output_path(),
+            PathBuf::from("out/custom.outputs")
+        );
+    }
+
+    #[test]
+    fn default_output_path_differs_only_in_case_from_an_uppercase_outputs_proof_path() {
+        let cmd = prove_cmd("dir/program.masm", Some("out/custom.OUTPUTS"));
+        let proof_path = cmd.resolved_proof_path();
+        let output_path = cmd.default_output_path();
+
+        assert_ne!(output_path, proof_path, "the paths differ literally");
+        assert!(
+            output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()),
+            "but they name the same file on a case-insensitive filesystem"
+        );
     }
 }
