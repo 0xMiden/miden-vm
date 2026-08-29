@@ -52,7 +52,7 @@ const COMPRESSION_INPUTS: usize = 2;
 // ================================================================================================
 
 /// Log2 of the FRI blowup factor (blowup = 8).
-const LOG_BLOWUP: u8 = 3;
+pub(crate) const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
@@ -75,7 +75,7 @@ const QUERY_POW_BITS: usize = 17;
 /// this configuration's blowup (8) and challenge field (~128 bits):
 /// `floor(-log2(rho + eta) * 2^16)` with `rho = 1/8` and the random-words cutoff
 /// `eta = log2(e/rho) * rho / 128` (<https://eprint.iacr.org/2025/2010>, section 1.5), i.e.
-/// ~2.9508 bits per query. Must match the constant in `crates/lib/core/asm/sys/vm/mod.masm`
+/// ~2.9508 bits per query. Must match the constant in `crates/lib/core/asm/stark/utils.masm`
 /// (enforced by cross-tests).
 pub const CONJECTURED_BITS_PER_QUERY_FP: u64 = 193_382;
 
@@ -87,7 +87,7 @@ pub const MAX_SECURITY_LEVEL: u32 = 128;
 /// query count and query-phase grinding bits, under this configuration's fixed blowup and
 /// challenge field.
 ///
-/// The computation is integer fixed-point — `min((num_queries * C) >> 16 + query_pow, 128)` —
+/// The computation is integer fixed-point — `min(((num_queries * C) >> 16) + query_pow, 128)` —
 /// so the MASM mirror can match it bit-for-bit; the constant is floored, so the result never
 /// exceeds the real-valued formula (conservative by at most one bit). `num_queries` is a FRI
 /// query count (the verifier bounds it to `<= 150`), so the product fits comfortably in a `u32`.
@@ -135,20 +135,20 @@ pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(6707657866347869898),
-    Felt::new_unchecked(15003255403457090401),
-    Felt::new_unchecked(3161728420253440800),
-    Felt::new_unchecked(3925668149141025919),
+    Felt::new_unchecked(8509919582315365814),
+    Felt::new_unchecked(12865978328275266043),
+    Felt::new_unchecked(12073117316737140237),
+    Felt::new_unchecked(5647109555087128169),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(15494055359749385108),
-    Felt::new_unchecked(10378068431877225902),
-    Felt::new_unchecked(8906024671689956466),
-    Felt::new_unchecked(8201729358988149119),
+    Felt::new_unchecked(8563712008625779037),
+    Felt::new_unchecked(2346635758357605862),
+    Felt::new_unchecked(17725435322360039753),
+    Felt::new_unchecked(12106900609136090006),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -267,9 +267,9 @@ pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObse
 /// Sponge state width in field elements.
 const SPONGE_WIDTH: usize = 12;
 /// Sponge rate (absorbable elements per permutation).
-const SPONGE_RATE: usize = 8;
+pub(crate) const SPONGE_RATE: usize = 8;
 /// Sponge digest width in field elements.
-const DIGEST_WIDTH: usize = 4;
+pub(crate) const DIGEST_WIDTH: usize = 4;
 /// Range of capacity slots within the sponge state array.
 const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
 

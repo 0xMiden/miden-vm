@@ -23,6 +23,8 @@ use miden::core::stark::random_coin
 #!
 #! Q^z(alpha) and Q^gz(alpha) is then stored, as a word, at OOD_FIXED_TERM_HORNER_EVALS_PTR
 #!
+#! Precondition: the relation context contains the OOD evaluation base address.
+#!
 #! Inputs:  []
 #! Outputs: []
 pub proc load_and_horner_eval_ood_frames
@@ -52,7 +54,7 @@ pub proc load_and_horner_eval_ood_frames
     ###    region to which we save the OOD.
     push.0.0
     exec.constants::deep_rand_alpha_nd_ptr
-    exec.constants::ood_evaluations_ptr
+    exec.constants::get_ood_evaluations_address
     # => [ood_evaluations_ptr, deep_rand_alpha_ptr, 0, 0, Y]
     # => [U, Y]
 
@@ -118,8 +120,8 @@ end
 #! into the hasher state and simultaneously computing a random linear combination using Horner
 #! evaluation.
 #!
-#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
+#! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
 proc process_row_ood_evaluations
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

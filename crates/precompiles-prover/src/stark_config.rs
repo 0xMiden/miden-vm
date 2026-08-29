@@ -62,15 +62,15 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 /// PCS parameters for the precompile chiplet stack.
 ///
 /// Mirrors `miden_air::config::pcs_params` in every parameter, including
-/// `log_blowup = 3`. It exists as its own function to decouple the
-/// precompile stack's PCS config from the core VM's, since the two need not
-/// evolve together: every chiplet AIR in
+/// `log_blowup = 3`. It exists as its own function so the Rust prover and
+/// verifier bind the actual PVM parameters into their transcript rather than
+/// relying on the core VM's defaults. Every chiplet AIR in
 /// [`ChipletAir`](crate::session::ChipletAir) closes at a `log_quotient_degree`
 /// well under the core VM's degree-8 constraints (see the
 /// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), so `log_blowup` could be
-/// lowered independently of the core VM in the future. That has not been done
-/// here, and doing so would need a dedicated security review of the
-/// resulting FRI parameters before use outside benchmarking.
+/// lowered in principle. The MASM verifier compiles the current PCS geometry,
+/// so changing it requires a coordinated MASM update and a dedicated security
+/// review; it is not an independently mutable runtime configuration.
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
         3,  // log_blowup (must be >= log_quotient_degree)

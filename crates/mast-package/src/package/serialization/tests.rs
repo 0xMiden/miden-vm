@@ -210,24 +210,21 @@ fn executable_package_entrypoint_roundtrips() {
 }
 
 #[test]
-fn package_checked_deserialization_discards_untrusted_debug_sections() {
+fn package_checked_deserialization_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let bytes = package.to_bytes();
 
     let deserialized = Package::read_from_bytes(&bytes).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
     let debug_info_id = SectionId::DEBUG_INFO.as_str().as_bytes();
     assert!(
-        !deserialized
+        deserialized
             .to_bytes()
             .windows(debug_info_id.len())
             .any(|window| window == debug_info_id),
-        "discarded debug sections should not be reserialized"
+        "validated debug sections should be reserialized"
     );
 }
 
@@ -242,20 +239,9 @@ fn package_trusted_deserialization_preserves_trusted_debug_sections() {
     assert!(deserialized.debug_info().unwrap().is_some());
 }
 
-#[test]
-fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
-    let package = build_package_with_debug_info();
-    let bytes = package.to_bytes();
-
-    let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
-
-    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
-    assert!(deserialized.debug_info().unwrap().is_some());
-}
-
 #[cfg(feature = "std")]
 #[test]
-fn package_deserialize_from_file_discards_untrusted_debug_sections() {
+fn package_deserialize_from_file_preserves_validated_debug_sections() {
     let package = build_package_with_debug_info();
     let path = std::env::temp_dir().join(format!(
         "miden-package-deserialize-{}-{}.masp",
@@ -267,11 +253,8 @@ fn package_deserialize_from_file_discards_untrusted_debug_sections() {
     let deserialized = Package::deserialize_from_file(&path).unwrap();
     fs::remove_file(&path).unwrap();
 
-    assert!(
-        !deserialized.sections.iter().any(|section| section.id.is_debug()),
-        "untrusted package file reads should discard debug sections"
-    );
-    assert!(deserialized.debug_info().unwrap().is_none());
+    assert!(deserialized.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
+    assert!(deserialized.debug_info().unwrap().is_some());
 }
 
 #[cfg(feature = "std")]
@@ -293,32 +276,47 @@ fn package_deserialize_from_file_trusted_preserves_trusted_debug_sections() {
 }
 
 #[test]
-fn package_content_digest_changes_when_identity_fields_change() {
+fn artifact_and_package_commitments_change_with_header_fields() {
     let package = build_package();
-    let digest = package.content_digest();
+    let code_commitment = package.code_commitment();
+    let dependency_commitment = package.dependency_commitment();
+    let artifacts_commitment = package.artifacts_commitment();
+    let package_commitment = package.commitment();
 
     let renamed = Package {
         name: PackageId::from("renamed_pkg"),
         ..package.clone()
     };
-    assert_ne!(digest, renamed.content_digest());
+    assert_eq!(code_commitment, renamed.code_commitment());
+    assert_ne!(dependency_commitment, renamed.dependency_commitment());
+    assert_ne!(artifacts_commitment, renamed.artifacts_commitment());
+    assert_ne!(package_commitment, renamed.commitment());
 
     let versioned = Package {
         version: crate::Version::new(1, 2, 3),
         ..package.clone()
     };
-    assert_ne!(digest, versioned.content_digest());
+    assert_eq!(code_commitment, versioned.code_commitment());
+    assert_ne!(dependency_commitment, versioned.dependency_commitment());
+    assert_ne!(artifacts_commitment, versioned.artifacts_commitment());
+    assert_ne!(package_commitment, versioned.commitment());
 
     let executable = Package { kind: TargetType::Executable, ..package };
-    assert_ne!(digest, executable.content_digest());
+    assert_eq!(code_commitment, executable.code_commitment());
+    assert_ne!(dependency_commitment, executable.dependency_commitment());
+    assert_ne!(artifacts_commitment, executable.artifacts_commitment());
+    assert_ne!(package_commitment, executable.commitment());
 }
 
 #[test]
-fn package_content_digest_changes_when_manifest_changes() {
+fn artifact_and_package_commitments_change_with_manifest() {
     let package = build_package();
-    let digest = package.content_digest();
+    let interface_commitment = package.interface_commitment().unwrap();
+    let dependency_commitment = package.dependency_commitment();
+    let artifacts_commitment = package.artifacts_commitment();
+    let package_commitment = package.commitment();
 
-    let mut with_dependency = package;
+    let mut with_dependency = package.clone();
     with_dependency
         .manifest
         .add_dependency(Dependency {
@@ -328,46 +326,99 @@ fn package_content_digest_changes_when_manifest_changes() {
             digest: Word::from([1_u32, 2, 3, 4]),
         })
         .expect("test dependency should be unique");
-    assert_ne!(digest, with_dependency.content_digest());
+    assert_eq!(interface_commitment, with_dependency.interface_commitment().unwrap());
+    assert_eq!(package.code_commitment(), with_dependency.code_commitment());
+    assert_ne!(dependency_commitment, with_dependency.dependency_commitment());
+    assert_ne!(artifacts_commitment, with_dependency.artifacts_commitment());
+    assert_ne!(package_commitment, with_dependency.commitment());
 }
 
 #[test]
-fn package_content_digest_changes_when_account_component_metadata_changes() {
+fn artifact_and_package_commitments_change_with_sections() {
     let package = build_package();
-    let digest = package.content_digest();
+    let artifacts_commitment = package.artifacts_commitment();
+    let dependency_commitment = package.dependency_commitment();
+    let package_commitment = package.commitment();
 
     let with_metadata = Package {
         sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3, 4])],
         ..package.clone()
     };
-    assert_ne!(digest, with_metadata.content_digest());
-
-    let with_different_metadata = Package {
-        sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 3, 2, 1])],
-        ..package
-    };
-    assert_ne!(with_metadata.content_digest(), with_different_metadata.content_digest());
-}
-
-#[test]
-fn package_content_digest_ignores_description_and_opaque_custom_sections_for_now() {
-    let package = build_package();
-    let digest = package.content_digest();
+    assert_ne!(artifacts_commitment, with_metadata.artifacts_commitment());
+    assert_ne!(dependency_commitment, with_metadata.dependency_commitment());
+    assert_ne!(package_commitment, with_metadata.commitment());
 
     let described = Package {
         description: Some(String::from("human-facing package description")),
         ..package.clone()
     };
-    assert_eq!(digest, described.content_digest());
+    assert_ne!(artifacts_commitment, described.artifacts_commitment());
+    assert_eq!(dependency_commitment, described.dependency_commitment());
+    assert_ne!(package_commitment, described.commitment());
 
-    let with_section = Package {
+    let with_opaque_section = Package {
         sections: vec![Section::new(
             SectionId::custom("opaque").expect("valid custom section id"),
             vec![1, 2, 3, 4],
         )],
         ..package
     };
-    assert_eq!(digest, with_section.content_digest());
+    assert_ne!(artifacts_commitment, with_opaque_section.artifacts_commitment());
+    assert_eq!(dependency_commitment, with_opaque_section.dependency_commitment());
+    assert_ne!(package_commitment, with_opaque_section.commitment());
+}
+
+#[test]
+fn dependency_commitment_ignores_optional_debug_info() {
+    let package = build_package_with_debug_info();
+    let stripped = package.clone().without_debug_info().expect("debug stripping should succeed");
+
+    assert_eq!(package.dependency_commitment(), stripped.dependency_commitment());
+    assert_ne!(package.commitment(), stripped.commitment());
+}
+
+#[test]
+fn interface_and_code_commitments_change_with_exports() {
+    let mut builder = DenseMastForestBuilder::new();
+    let first_node_id = builder
+        .push_node(BasicBlockNodeBuilder::new(vec![Operation::Add]))
+        .expect("first basic block should be valid");
+    let second_node_id = builder
+        .push_node(BasicBlockNodeBuilder::new(vec![Operation::Mul]))
+        .expect("second basic block should be valid");
+    builder.mark_root(first_node_id);
+    builder.mark_root(second_node_id);
+    let (forest, remapping) = builder.build_with_id_map().expect("forest should be valid");
+    let first_node_id = remapping.get(first_node_id).expect("first root should be retained");
+    let second_node_id = remapping.get(second_node_id).expect("second root should be retained");
+    let forest = Arc::new(forest);
+    let package_with_export = |node_id| {
+        Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Library,
+            Arc::clone(&forest),
+            [PackageExport::Procedure(ProcedureExport::new(
+                absolute_path("test::proc"),
+                Some(node_id),
+                forest[node_id].digest(),
+                None,
+            ))],
+            None,
+        )
+        .expect("package with one export should be valid")
+    };
+    let package = package_with_export(first_node_id);
+    let different_export = package_with_export(second_node_id);
+
+    assert_eq!(package.mast_forest_commitment(), different_export.mast_forest_commitment());
+    assert_ne!(
+        package.interface_commitment().unwrap(),
+        different_export.interface_commitment().unwrap()
+    );
+    assert_ne!(package.code_commitment(), different_export.code_commitment());
+    assert_ne!(package.artifacts_commitment(), different_export.artifacts_commitment());
+    assert_ne!(package.commitment(), different_export.commitment());
 }
 
 #[test]
@@ -445,7 +496,7 @@ fn package_rejects_non_root_export() {
     let package = Package {
         name: PackageId::from("test_pkg"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -678,7 +729,7 @@ fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -702,7 +753,7 @@ fn regression_package_deserialisation_rejects_spoofed_mast_node_digests() {
 }
 
 #[test]
-fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
+fn trusted_package_deserialisation_accepts_spoofed_mast_hashes() {
     // Build mast for:
     //
     // pub proc p
@@ -723,7 +774,7 @@ fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
     let package = Package {
         name: PackageId::from("lib"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Library,
         mast: Arc::new(forest),
@@ -732,14 +783,21 @@ fn unchecked_package_deserialisation_rejects_spoofed_mast_node_digests() {
         debug_sections_trusted: true,
     };
 
-    let (bytes, _spoofed_digest) =
+    let (bytes, spoofed_digest) =
         build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-library-digest");
-    let err = Package::read_from_bytes_unchecked(&bytes)
-        .expect_err("expected package deserialization to reject inconsistent node digests");
+    let trusted = Package::read_from_bytes_trusted(&bytes)
+        .expect("trusted package deserialization should not recompute MAST hashes");
+    assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
+
+    let err = Package::read_from_bytes(&bytes)
+        .expect_err("untrusted package deserialization should reject spoofed MAST hashes");
     assert!(
-        err.to_string()
-            .contains("declared node id and digest do not correspond to a procedure root"),
-        "expected package manifest validation failure, got: {err}"
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
     );
 }
 
@@ -765,7 +823,7 @@ fn regression_kernel_package_deserialisation_rejects_spoofed_mast_node_digests()
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -811,7 +869,7 @@ fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -844,7 +902,7 @@ fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
 }
 
 #[test]
-fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() {
+fn trusted_kernel_package_deserialisation_accepts_spoofed_mast_hashes() {
     // Build mast for:
     //
     // pub proc k1
@@ -865,7 +923,7 @@ fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() 
     let package = Package {
         name: PackageId::from("kernel"),
         version: crate::Version::new(0, 0, 0),
-        digest,
+        mast_forest_commitment: forest.commitment(),
         description: None,
         kind: TargetType::Kernel,
         mast: Arc::new(forest),
@@ -874,16 +932,11 @@ fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() 
         debug_sections_trusted: true,
     };
 
-    let (bytes, _spoofed_digest) =
+    let (bytes, spoofed_digest) =
         build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
-    let err = Package::read_from_bytes_unchecked(&bytes).expect_err(
-        "expected unchecked kernel deserialization to reject inconsistent node digests",
-    );
-    assert!(
-        err.to_string()
-            .contains("declared node id and digest do not correspond to a procedure root"),
-        "expected package manifest validation failure, got: {err}"
-    );
+    let trusted = Package::read_from_bytes_trusted(&bytes)
+        .expect("trusted kernel deserialization should not recompute MAST hashes");
+    assert_eq!(trusted.mast_forest()[node_id].digest(), spoofed_digest);
 }
 
 fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {

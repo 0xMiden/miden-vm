@@ -29,8 +29,11 @@ pub(crate) const CONST_EF_ALIGN: usize = 2;
 /// Instruction stream padding unit in base felts (adv_pipe block size), so that
 /// the constants+ops stream can be read in aligned chunks.
 pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
-/// Largest node id the chiplet's `lhs + rhs * 2^30 + tag * 2^60` packing can hold.
-const MAX_NODE_ID: u64 = (1 << 30) - 1;
+/// Maximum number of circuit nodes accepted by the ACE runtime.
+///
+/// Packed node ids occupy 30 bits, but `eval_circuit` requires the total number of READ and EVAL
+/// nodes to be strictly less than `2^30`.
+const MAX_NUM_ACE_NODES: usize = (1 << 30) - 1;
 
 /// Encoded ACE circuit ready for chiplet consumption.
 ///
@@ -160,10 +163,10 @@ impl StreamGeometry {
                     .to_string(),
             });
         }
-        if self.input_start as u64 > MAX_NODE_ID {
+        if self.num_nodes() > MAX_NUM_ACE_NODES {
             return Err(AceError::InvalidInputLayout {
                 message: format!(
-                    "ACE circuit has {} nodes, exceeds 2^30-node limit",
+                    "ACE circuit has {} nodes, must be less than 2^30",
                     self.num_nodes()
                 ),
             });

@@ -50,11 +50,6 @@ use dense_order::{
 };
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "serde")]
-use crate::serde::SliceReader;
 
 mod dense_order;
 mod node;
@@ -126,7 +121,7 @@ mod tests;
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
@@ -150,8 +145,8 @@ pub struct MastForest {
 /// - [`MastForest::advice_commitment`] identifies the stored advice map only.
 /// - [`MastForest::commitment`] identifies the stored dense forest data: public roots, external
 ///   dependencies, and advice. Direct forest-backed static libraries use this value as their source
-///   identity. Package-backed static libraries use the package digest, which is derived from this
-///   forest commitment.
+///   identity. Package-backed static libraries use the package commitment, which is derived from
+///   this forest commitment.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct MastForestCommitment {
     /// Commitment to the forest's roots, external dependencies, and advice map.
@@ -929,8 +924,6 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -1109,26 +1102,3 @@ pub enum MastForestError {
 }
 
 // Custom serde implementation for MastForest delegates to the binary serialization format.
-#[cfg(feature = "serde")]
-impl Serialize for MastForest {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let bytes = Serializable::to_bytes(self);
-        serializer.serialize_bytes(&bytes)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for MastForest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize bytes, then use miden-crypto Deserializable
-        let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = SliceReader::new(&bytes);
-        Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
-    }
-}

@@ -11,7 +11,10 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{FileLineCol, Position, Selection, SourceId, SourceSpan, Uri};
+use super::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, FileLineCol, Position, Selection,
+    Serializable, SourceId, SourceSpan, Uri,
+};
 
 // SOURCE LANGUAGE
 // ================================================================================================
@@ -637,6 +640,9 @@ impl SourceContent {
 
     /// Get the [ByteIndex] corresponding to the given line and column indices.
     ///
+    /// Columns count Unicode scalars. The content-end position is valid; positions inside a
+    /// trailing terminator are not. LSP callers must convert UTF-16 columns first.
+    ///
     /// Returns `None` if the line or column indices are out of bounds.
     pub fn line_column_to_offset(
         &self,
@@ -649,12 +655,20 @@ impl SourceContent {
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        if line_src.len() < column_index {
-            return None;
-        }
-        let (pre, _) = line_src.split_at(column_index);
-        let start = line_span.start;
-        Some(start + ByteOffset::from_str_len(pre))
+
+        let content = line_src
+            .strip_suffix("\r\n")
+            .or_else(|| line_src.strip_suffix('\n'))
+            .unwrap_or(line_src);
+
+        // Include the end-of-content position as the final boundary.
+        let byte_len = content
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(core::iter::once(content.len()))
+            .nth(column_index)?;
+
+        Some(line_span.start + ByteOffset(byte_len as i64))
     }
 
     /// Get a [FileLineCol] corresponding to the line/column in this file at which `byte_index`
@@ -803,8 +817,23 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 )]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct ByteIndex(pub u32);
+
+impl Serializable for ByteIndex {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for ByteIndex {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        u32::read_from(source).map(Self)
+    }
+}
 
 impl ByteIndex {
     /// Create a [ByteIndex] from a raw `u32` index
@@ -985,8 +1014,23 @@ macro_rules! declare_dual_number_and_index_type {
         )]
         #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
         #[cfg_attr(feature = "serde", serde(transparent))]
-        #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+        #[cfg_attr(
+            all(feature = "arbitrary", test),
+            miden_test_serialization_macros::serialization_test
+        )]
         pub struct $index_name(pub u32);
+
+        impl Serializable for $index_name {
+            fn write_into<W: ByteWriter>(&self, target: &mut W) {
+                self.0.write_into(target);
+            }
+        }
+
+        impl Deserializable for $index_name {
+            fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+                u32::read_from(source).map(Self)
+            }
+        }
 
         impl $index_name {
             #[doc = concat!("Convert to a [", stringify!($number_name), "]")]
@@ -1121,7 +1165,7 @@ macro_rules! declare_dual_number_and_index_type {
         #[cfg_attr(feature = "serde", serde(transparent))]
         #[cfg_attr(
             all(feature = "arbitrary", test),
-            miden_test_serde_macros::serde_test(binary_serde(true))
+            miden_test_serialization_macros::serialization_test
         )]
         pub struct $number_name(NonZeroU32);
 
@@ -1268,10 +1312,6 @@ declare_dual_number_and_index_type!(Column, "column");
 
 // SERIALIZATION FOR LINE/COLUMN NUMBERS
 // ================================================================================================
-
-use miden_crypto::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-};
 
 impl Serializable for LineNumber {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -1516,5 +1556,78 @@ end
                 .expect("invalid byte range"),
             "line4\n".as_bytes()
         );
+    }
+
+    #[test]
+    fn source_content_line_column_to_offset_multibyte_utf8() {
+        // "héllo\n": h(1 byte) é(2 bytes) l l o(1 byte each) \n(1 byte).
+        const CONTENT: &str = "héllo\n";
+        let content = SourceContent::new("text", "test.txt", CONTENT);
+
+        let expected = [(0, 0u32), (1, 1), (2, 3), (3, 4), (4, 5), (5, 6)];
+        for (column, expected_byte) in expected {
+            let offset = content
+                .line_column_to_offset(LineIndex(0), ColumnIndex(column))
+                .unwrap_or_else(|| panic!("column {column} should be in bounds"));
+            assert_eq!(offset.to_u32(), expected_byte, "wrong byte offset for column {column}");
+        }
+
+        for (column, _) in expected {
+            let offset = content.line_column_to_offset(LineIndex(0), ColumnIndex(column)).unwrap();
+            let loc = content.location(offset).unwrap();
+            assert_eq!(
+                ColumnIndex::from(loc.column).to_u32(),
+                column,
+                "round-trip mismatch at column {column}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_content_line_column_to_offset_rejects_line_terminator() {
+        let lf = SourceContent::new("text", "test.txt", "ab\ncd");
+        assert!(lf.line_column_to_offset(LineIndex(0), ColumnIndex(2)).is_some());
+        assert!(lf.line_column_to_offset(LineIndex(0), ColumnIndex(3)).is_none());
+
+        let crlf = SourceContent::new("text", "test.txt", "ab\r\ncd");
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(2)).is_some());
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(3)).is_none());
+        assert!(crlf.line_column_to_offset(LineIndex(0), ColumnIndex(4)).is_none());
+    }
+
+    #[test]
+    fn source_content_line_column_to_offset_astral_character() {
+        // U+1F600 is 1 Unicode scalar value / char, 2 UTF-16 code units, 4 bytes in UTF-8.
+        const CONTENT: &str = "\u{1F600}x";
+        let content = SourceContent::new("text", "test.txt", CONTENT);
+
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(0)).unwrap().to_u32(),
+            0
+        );
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(1)).unwrap().to_u32(),
+            4
+        );
+        assert_eq!(
+            content.line_column_to_offset(LineIndex(0), ColumnIndex(2)).unwrap().to_u32(),
+            5
+        );
+    }
+
+    #[test]
+    fn source_content_update_rejects_same_line_selection_spanning_line_terminator() {
+        let mut content = SourceContent::new("text", "test.txt", "a\nb");
+        assert_eq!(content.line_count(), 2);
+
+        let selection = Selection::new(Position::new(0, 1), Position::new(0, 2));
+        let result = content.update(String::new(), Some(selection), 1);
+
+        assert!(
+            result.is_err(),
+            "expected the same-line selection spanning the line terminator to be rejected, got: \
+             {result:?}"
+        );
+        assert_eq!(content.line_count(), 2);
     }
 }

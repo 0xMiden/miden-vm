@@ -88,6 +88,15 @@ where
         self.log_trace_heights.len()
     }
 
+    /// Per-AIR log₂ trace heights, in instance order.
+    ///
+    /// Bound into the Fiat-Shamir transcript during verification, so a verified proof's heights
+    /// are the ones it was produced with. Security terms that scale with trace length read them
+    /// from here.
+    pub fn log_trace_heights(&self) -> &[u8] {
+        &self.log_trace_heights
+    }
+
     /// Number of base-field elements in the transcript.
     pub fn num_field_elements(&self) -> usize {
         self.transcript.fields().len()

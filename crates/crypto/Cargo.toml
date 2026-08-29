@@ -10,7 +10,7 @@ name                   = "miden-crypto"
 readme.workspace       = true
 repository.workspace   = true
 rust-version.workspace = true
-version = "0.30.0"
+version = "0.31.0"
 
 [[bin]]
 bench             = false
@@ -86,7 +86,7 @@ default           = ["concurrent", "std"]
 executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
 internal          = ["concurrent"]
-persistent-forest = ["rocksdb", "serde"]
+persistent-forest = ["rocksdb"]
 rocksdb           = ["concurrent", "dep:rocksdb"]
 serde             = ["dep:serde", "serde?/alloc"]
 std               = ["blake3/std", "miden-serde-utils/std", "once_cell/std", "rand/std", "rand/thread_rng", "serde?/std"]
@@ -158,7 +158,3 @@ workspace = true
 [[test]]
 name              = "rocksdb_large_smt"
 required-features = ["concurrent", "rocksdb"]
-
-[[test]]
-name              = "merkle_serde"
-required-features = ["serde"]

@@ -371,18 +371,18 @@ fn exp_bits_length_fail() {
 
     #[cfg(feature = "testing")]
     {
-        //---------------------- exp containing more than 64 bits -------------------------------------
+        //---------------------- exp containing more than 63 bits -------------------------------------
 
         let base = 9;
         let pow = 1021; // pow is a 10 bit number
-        let test = build_op_test!(build_asm_op(65), &[pow, base]);
+        let test = build_op_test!(build_asm_op(64), &[pow, base]);
 
         assert_assembler_diagnostic!(
             test,
             "invalid literal: expected value to be a valid bit size, e.g. 0..63",
             regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
             "12 |",
-            "13 | begin exp.u65 exec.truncate_stack end",
+            "13 | begin exp.u64 exec.truncate_stack end",
             "   :            ^^",
             "   `----"
         );
@@ -399,6 +399,44 @@ fn exp_small_pow() {
 
     let test = build_op_test!(build_asm_op(pow), &[base]);
     test.expect_stack(&[expected.as_canonical_u64()]);
+}
+
+#[test]
+fn bare_exp_accepts_63_bit_boundaries() {
+    let asm_op = "exp";
+    let base = 7_u64;
+
+    for pow in [0, 1, (u32::MAX as u64) - 1, u32::MAX as u64, 1_u64 << 32, (1_u64 << 63) - 1] {
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
+        let test = build_op_test!(asm_op, &[pow, base]);
+        test.expect_stack(&[expected.as_canonical_u64()]);
+    }
+}
+
+#[test]
+fn bare_exp_rejects_64_bit_exponents() {
+    let asm_op = "exp";
+    let base = 7_u64;
+
+    for pow in [1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let test = build_op_test!(asm_op, &[pow, base]);
+        expect_exec_error_matches!(
+            test,
+            ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+            if err_code == ZERO && err_msg.is_none()
+        );
+    }
+}
+
+#[test]
+fn exp_imm_accepts_full_field_range() {
+    let base = 7_u64;
+
+    for pow in [1_u64 << 63, Felt::ORDER_U64 - 2, Felt::ORDER_U64 - 1] {
+        let expected = Felt::new_unchecked(base).exp_u64(pow);
+        let test = build_op_test!(format!("exp.{pow}"), &[base]);
+        test.expect_stack(&[expected.as_canonical_u64()]);
+    }
 }
 
 #[test]
@@ -869,7 +907,7 @@ proptest! {
     }
 
     #[test]
-    fn exp_proptest(a in any::<u64>(), b in any::<u64>()) {
+    fn bare_exp_proptest(a in any::<u64>(), b in 0_u64..(1 << 63)) {
         // --- exp with no parameter --------------------------------------------------------------
         let asm_op = "exp";
         let base = a;
@@ -878,7 +916,10 @@ proptest! {
 
         let test = build_op_test!(asm_op, &[pow, base]);
         test.prop_expect_stack(&[expected.as_canonical_u64()])?;
+    }
 
+    #[test]
+    fn exp_imm_proptest(a in any::<u64>(), b in 0_u64..Felt::ORDER_U64) {
         // --- exp with parameter containing pow --------------------------------------------------
         let build_asm_op = |param: u64| format!("exp.{param}");
         let base = a;

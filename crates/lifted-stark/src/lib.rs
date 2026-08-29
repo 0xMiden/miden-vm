@@ -81,7 +81,9 @@ pub use debug::check_constraints;
 // `domain` and `order` are internal modules. Their error types surface through the public
 // `ProverError` / `VerifierError`, and quotient-degree derivation is part of the relation
 // configuration contract, so these items need public paths of their own.
-pub use domain::{DomainError, log_quotient_degree};
+pub use domain::{
+    DomainError, QuotientRecompositionInputs, log_quotient_degree, quotient_recomposition_inputs,
+};
 pub use order::ShapeError;
 pub use preprocessed::{Preprocessed, PreprocessedValidationError};
 pub use prover::{ProverError, ProverInstance};
@@ -103,6 +105,7 @@ pub mod air {
         AirBuilder,
         AirBuilderWithContext,
         BaseAir,
+        ConstraintCounts,
         ConstraintDegrees,
         ExtensionBuilder,
         FilteredAirBuilder,
@@ -139,9 +142,9 @@ pub mod hasher {
     };
 }
 
-/// Testing infrastructure: configurations, fixtures, and example AIRs.
+/// Shared test support and FRI vector generation.
 ///
-/// Available when the `testing` feature is enabled or during `cargo test`.
-/// Integration tests should use `cargo test --features testing`.
+/// Available during `cargo test`; external consumers must enable the `testing` feature. That
+/// feature also exposes hash configurations and example AIRs.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

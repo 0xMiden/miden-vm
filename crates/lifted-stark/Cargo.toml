@@ -7,7 +7,7 @@ name                   = "miden-lifted-stark"
 readme                 = "README.md"
 repository.workspace   = true
 rust-version.workspace = true
-version = "0.30.0"
+version = "0.31.0"
 
 [lib]
 doctest = false
@@ -54,6 +54,7 @@ p3-symmetric.workspace   = true
 
 # Third-party
 criterion.workspace          = true
+proptest.workspace           = true
 tracing-subscriber.workspace = true
 
 [features]

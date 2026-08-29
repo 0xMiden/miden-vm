@@ -4,7 +4,10 @@ use core::{
     ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
 };
 
-use miden_core::Felt;
+use miden_core::{
+    Felt,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // ROW INDEX
 // ================================================================================================
@@ -106,6 +109,22 @@ impl From<u32> for RowIndex {
 }
 
 impl miden_utils_indexing::Idx for RowIndex {}
+
+impl Serializable for RowIndex {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for RowIndex {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self(u32::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        u32::min_serialized_size()
+    }
+}
 
 /// Converts an i32 value into a [`RowIndex`].
 ///
@@ -294,6 +313,8 @@ impl RangeBounds<RowIndex> for RowIndex {
 mod tests {
     use alloc::collections::BTreeMap;
 
+    use miden_core::serde::{Deserializable, Serializable};
+
     #[test]
     fn row_index_conversions() {
         use super::RowIndex;
@@ -355,5 +376,14 @@ mod tests {
     #[test]
     fn row_index_display() {
         assert_eq!(format!("{}", super::RowIndex(5)), "5");
+    }
+
+    #[test]
+    fn row_index_serialization_roundtrip() {
+        let original = super::RowIndex(u32::MAX);
+        let bytes = original.to_bytes();
+
+        assert_eq!(bytes, u32::MAX.to_bytes());
+        assert_eq!(super::RowIndex::read_from_bytes(&bytes).unwrap(), original);
     }
 }

@@ -32,7 +32,6 @@ const EMPTY_DIGEST: Word = EMPTY_WORD;
 ///
 /// The root of the tree is recomputed on each new leaf update.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct PartialMerkleTree {
     max_depth: u8,
     nodes: BTreeMap<NodeIndex, Word>,
@@ -111,20 +110,13 @@ impl PartialMerkleTree {
         // add data to the leaves and nodes maps and also fill layers map, where the key is the
         // depth of the node and value is its index.
         for (node_index, hash) in entries {
+            Self::check_depth(node_index.depth())?;
             leaves.insert(node_index);
             nodes.insert(node_index, hash);
             layers
                 .entry(node_index.depth())
                 .and_modify(|layer_vec| layer_vec.push(node_index.position()))
                 .or_insert(vec![node_index.position()]);
-        }
-
-        // make sure the depth of the last layer is 64 or smaller
-        if let Some(last_layer) = layers.last_entry() {
-            let last_layer_depth = *last_layer.key();
-            if last_layer_depth > 64 {
-                return Err(MerkleError::TooManyEntries(last_layer_depth));
-            }
         }
 
         // Get maximum depth

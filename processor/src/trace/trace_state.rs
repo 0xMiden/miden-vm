@@ -2,9 +2,15 @@ use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HasherState, RATE_LEN, STATE_WIDTH},
+    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, RATE_LEN, STATE_WIDTH},
 };
-use miden_core::mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch};
+use miden_core::{
+    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
+};
 
 use crate::{
     ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
@@ -19,6 +25,11 @@ use crate::{
     trace::chiplets::CircuitEvaluation,
     utils::Idx,
 };
+
+mod serde;
+
+#[cfg(test)]
+mod serialization_tests;
 
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
@@ -40,7 +51,12 @@ use crate::{
 /// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
 ///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
 ///    [`miden_core::mast::DynNode`]).
-#[derive(Debug)]
+///
+/// Note: the binary wire format is deliberately lossy because the embedded
+/// [`ContinuationStack`](crate::continuation_stack::ContinuationStack) drops its debug metadata
+/// (`package_debug_info` and `source_node_ids`), so the exact-equality round-trip test generated
+/// by `serde_test` does not apply to this type.
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
@@ -56,7 +72,7 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -106,7 +122,7 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -155,7 +171,7 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -281,7 +297,7 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -296,7 +312,7 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -323,7 +339,7 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -425,7 +441,7 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -439,7 +455,7 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -458,7 +474,7 @@ pub struct ExecutionContextSystemInfo {
 /// trace replay that owns this data. This avoids holding a strong `Arc<MastForest>` reference per
 /// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -477,6 +493,10 @@ impl MastForestResolutionReplay {
             .pop_front()
             .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
     }
+
+    pub(crate) fn iter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.mast_forest_resolutions.iter().map(|(_node_id, forest_id)| *forest_id)
+    }
 }
 
 // MEMORY REPLAY
@@ -493,7 +513,7 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -563,7 +583,7 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -655,7 +675,7 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -746,14 +766,14 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
 }
 
 /// Replay data for bitwise operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BitwiseReplay {
     u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
 }
@@ -792,7 +812,7 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -821,7 +841,7 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -858,12 +878,26 @@ impl IntoIterator for AceReplay {
 // RANGE CHECKER REPLAY
 // ================================================================================================
 
+/// Values requested from the 16-bit range-check table by a single operation.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RangeCheckReplayValues {
+    Two([u16; 2]),
+    Four([u16; 4]),
+}
+
+impl AsRef<[u16]> for RangeCheckReplayValues {
+    fn as_ref(&self) -> &[u16] {
+        match self {
+            Self::Two(values) => values,
+            Self::Four(values) => values,
+        }
+    }
+}
+
 /// Replay data for range checking operations.
-///
-/// This currently only records
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeCheckerReplay {
-    range_checks_u32_ops: VecDeque<[u16; 4]>,
+    range_checks: VecDeque<RangeCheckReplayValues>,
 }
 
 impl RangeCheckerReplay {
@@ -872,24 +906,41 @@ impl RangeCheckerReplay {
 
     /// Records the set of range checks which result from a u32 operation.
     pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
-        self.range_checks_u32_ops.push_back(u16_limbs);
+        self.range_checks.push_back(RangeCheckReplayValues::Four(u16_limbs));
+    }
+
+    /// Records the two range checks which enforce that a Merkle depth is in `[1, 64]`.
+    pub fn record_merkle_depth(&mut self, depth: Felt) {
+        let depth =
+            u16::try_from(depth.as_canonical_u64()).expect("Merkle depth must fit in 16 bits");
+        let scaled_depth = depth
+            .checked_sub(1)
+            .and_then(|depth_minus_one| depth_minus_one.checked_mul(MERKLE_DEPTH_RANGE_SCALE))
+            .expect("Merkle depth must be in the range 1..=64");
+
+        self.range_checks.push_back(RangeCheckReplayValues::Two([depth, scaled_depth]));
+    }
+
+    /// Records the two 16-bit limbs of `divisor - remainder - 1` for U32DIV.
+    pub fn record_u32div_remainder_diff(&mut self, u16_limbs: [u16; 2]) {
+        self.range_checks.push_back(RangeCheckReplayValues::Two(u16_limbs));
     }
 }
 
 impl IntoIterator for RangeCheckerReplay {
-    type Item = [u16; 4];
-    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
+    type Item = RangeCheckReplayValues;
+    type IntoIter = <VecDeque<RangeCheckReplayValues> as IntoIterator>::IntoIter;
 
-    /// Returns an iterator over all recorded range checks resulting from u32 operations.
+    /// Returns an iterator over all range checks recorded during execution.
     fn into_iter(self) -> Self::IntoIter {
-        self.range_checks_u32_ops.into_iter()
+        self.range_checks.into_iter()
     }
 }
 
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -919,7 +970,7 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
@@ -1026,7 +1077,7 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
@@ -1094,6 +1145,20 @@ enum HasherOpSink {
     #[cfg(feature = "std")]
     Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
 }
+
+impl PartialEq for HasherRequestReplay {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.sink, &other.sink) {
+            (HasherOpSink::Buffered(lhs), HasherOpSink::Buffered(rhs)) => lhs == rhs,
+            #[cfg(feature = "std")]
+            (HasherOpSink::Streamed(_), HasherOpSink::Streamed(_)) => true,
+            #[cfg(feature = "std")]
+            _ => false,
+        }
+    }
+}
+
+impl Eq for HasherRequestReplay {}
 
 impl Default for HasherOpSink {
     fn default() -> Self {
@@ -1209,6 +1274,31 @@ impl HasherRequestReplay {
         self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
 
+    /// Returns the forest IDs referenced by buffered basic-block hash requests.
+    ///
+    /// Trace replay deserialization uses these IDs to validate that every request points into the
+    /// replay's finalized MAST forest store. Streamed requests have already been delivered to the
+    /// concurrent trace builder, so they yield no IDs here.
+    pub(crate) fn iter_hash_basic_block_forest_ids(
+        &self,
+    ) -> impl Iterator<Item = MastForestId> + '_ {
+        self.buffered_ops()
+            .into_iter()
+            .flat_map(|ops| ops.iter())
+            .filter_map(|op| match op {
+                HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
+                _ => None,
+            })
+    }
+
+    fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
+        match &self.sink {
+            HasherOpSink::Buffered(ops) => Some(ops),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => None,
+        }
+    }
+
     /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
     /// forest store.
     ///
@@ -1269,7 +1359,7 @@ impl HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the

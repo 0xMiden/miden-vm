@@ -15,7 +15,6 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// Indexing into this type starts at the deepest part of the path and gets shallower. That is,
 /// the node at index `0` is deeper than the node at index `self.len() - 1`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MerklePath {
     nodes: Vec<Word>,
 }
@@ -247,25 +246,6 @@ impl Serializable for MerklePath {
         assert!(self.nodes.len() <= u8::MAX.into(), "MerklePath may have at most 255 items");
         target.write_u8(self.nodes.len() as u8);
         target.write_many(&self.nodes);
-    }
-}
-
-/// Bounds the node sequence while reading it, then constructs the path through
-/// [`MerklePath::new`]. The helper preserves the field layout produced by `Serialize`.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MerklePath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "MerklePath")]
-        struct Raw {
-            nodes: super::BoundedVec<Word, { u8::MAX as usize }>,
-        }
-
-        let raw = Raw::deserialize(deserializer)?;
-        Ok(MerklePath::new(raw.nodes.0))
     }
 }
 

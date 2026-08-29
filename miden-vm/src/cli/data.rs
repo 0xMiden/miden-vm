@@ -16,8 +16,6 @@ use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
-#[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{field::Empty, instrument};
 
@@ -29,21 +27,8 @@ use tracing::{field::Empty, instrument};
 
 /// Output file struct
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct OutputFile {
     pub stack: Vec<String>,
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for OutputFile {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        proptest::collection::vec(any::<u64>().prop_map(|value| value.to_string()), 0..32)
-            .prop_map(|stack| Self { stack })
-            .boxed()
-    }
 }
 
 /// Helper methods to interact with the output file

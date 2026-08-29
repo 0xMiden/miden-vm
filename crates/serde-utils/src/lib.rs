@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use alloc::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     format,
     string::String,
     sync::Arc,
@@ -515,6 +515,7 @@ pub trait Deserializable: Sized {
     /// Returns an error if:
     /// * The `source` does not contain enough bytes to deserialize `Self`.
     /// * Bytes read from the `source` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError>;
 
     /// Returns the minimum serialized size for one instance of this type.
@@ -549,6 +550,7 @@ pub trait Deserializable: Sized {
     /// # Security
     /// This method is for trusted input. It does not bound allocations or reject trailing bytes.
     /// Use [`Deserializable::read_from_bytes_with_budget`] for attacker-controlled bytes.
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from(&mut SliceReader::new(bytes))
     }
@@ -564,6 +566,7 @@ pub trait Deserializable: Sized {
     /// * The budget is exhausted before deserialization completes.
     /// * The `bytes` do not contain enough information to deserialize `Self`.
     /// * The `bytes` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,
@@ -795,6 +798,38 @@ impl<T: Deserializable> Deserializable for Vec<T> {
     }
 }
 
+impl<T: Serializable> Serializable for VecDeque<T> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.len());
+        for item in self {
+            item.write_into(target);
+        }
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let mut size = self.len().get_size_hint();
+        for item in self {
+            size += item.get_size_hint();
+        }
+        size
+    }
+}
+
+impl<T: Deserializable> Deserializable for VecDeque<T> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let len = source.read_usize()?;
+        source.read_many_iter(len)?.collect()
+    }
+
+    /// Returns 1 (the minimum vint length prefix size).
+    ///
+    /// See the note on the `Vec` impl above: budget enforcement during the actual reads provides
+    /// the real protection against oversized length prefixes.
+    fn min_serialized_size() -> usize {
+        1
+    }
+}
+
 impl<K: Deserializable + Ord, V: Deserializable> Deserializable for BTreeMap<K, V> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let len = source.read_usize()?;
@@ -857,8 +892,39 @@ impl Deserializable for Arc<str> {
     }
 }
 
-// GOLDILOCKS FIELD ELEMENT IMPLEMENTATIONS
+// PLONKY3 FIELD IMPLEMENTATIONS
 // ================================================================================================
+
+impl<F, const D: usize> Serializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let coefficients =
+            <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self);
+        target.write_many(coefficients);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self)
+            .iter()
+            .map(Serializable::get_size_hint)
+            .sum()
+    }
+}
+
+impl<F, const D: usize> Deserializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::new(<[F; D]>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        D.saturating_mul(F::min_serialized_size())
+    }
+}
 
 impl Serializable for p3_goldilocks::Goldilocks {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -886,7 +952,10 @@ impl Deserializable for p3_goldilocks::Goldilocks {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{collections::VecDeque, sync::Arc};
+
+    use p3_field::extension::BinomialExtensionField;
+    use p3_goldilocks::Goldilocks;
 
     use super::*;
 
@@ -904,6 +973,32 @@ mod tests {
         let bytes = original.to_bytes();
         let deserialized = String::read_from_bytes(&bytes).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn vec_deque_roundtrip_and_vec_compatibility() {
+        let original = VecDeque::from([1u32, 2, 3]);
+        let bytes = original.to_bytes();
+
+        assert_eq!(VecDeque::<u32>::read_from_bytes(&bytes).unwrap(), original);
+        assert_eq!(Vec::<u32>::read_from_bytes(&bytes).unwrap(), Vec::from([1, 2, 3]));
+        assert_eq!(
+            VecDeque::<u32>::read_from_bytes(&Vec::from([1u32, 2, 3]).to_bytes()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn binomial_extension_field_roundtrip() {
+        let coefficients = [Goldilocks::new(1), Goldilocks::new(2)];
+        let original = BinomialExtensionField::<Goldilocks, 2>::new(coefficients);
+        let bytes = original.to_bytes();
+
+        assert_eq!(bytes, coefficients.to_bytes());
+        assert_eq!(
+            BinomialExtensionField::<Goldilocks, 2>::read_from_bytes(&bytes).unwrap(),
+            original
+        );
     }
 
     #[test]

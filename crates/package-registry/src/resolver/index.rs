@@ -131,7 +131,7 @@ impl PackageCache for InMemoryPackageRegistry {
     type Error = InMemoryPackageStoreError;
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
-        let version = Version::new(package.version.clone(), package.digest());
+        let version = Version::new(package.version.clone(), package.dependency_commitment());
         let dependencies = package.manifest.dependencies().map(|dependency| {
             let dependency_version = Version::new(dependency.version.clone(), dependency.digest);
             (dependency.name.clone(), VersionRequirement::Exact(dependency_version))
@@ -173,7 +173,7 @@ impl PackageCache for InMemoryPackageRegistry {
 
 impl PackageStore for InMemoryPackageRegistry {
     fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
-        let version = Version::new(package.version.clone(), package.digest());
+        let version = Version::new(package.version.clone(), package.dependency_commitment());
         if self.is_semver_available(&package.name, &package.version) {
             return Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
                 package: package.name.clone(),
@@ -311,7 +311,7 @@ mod tests {
         Arc::make_mut(&mut conflicting_package)
             .sections
             .push(Section::new(SectionId::custom("cache-test").unwrap(), Vec::from([1, 2, 3])));
-        assert_eq!(Some(conflicting_package.digest()), version.digest);
+        assert_eq!(Some(conflicting_package.dependency_commitment()), version.digest);
 
         let error = registry
             .cache_package(conflicting_package)

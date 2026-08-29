@@ -5,14 +5,14 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor,
-    trace::{VmTrace, build_trace},
+    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
 };
 use miden_vm::internal::InputFile;
 use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -37,6 +37,14 @@ pub struct RunCmd {
     /// Maximum number of cycles a program is allowed to consume
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
+
+    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    #[arg(
+        long = "max-prover-memory",
+        default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
+        value_parser = parse_byte_size
+    )]
+    max_prover_memory: u64,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -153,7 +161,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
         .execute_for_proving_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
-    let trace = build_trace(vm_witness).wrap_err("Failed to build trace")?;
+    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
@@ -225,7 +234,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
             .wrap_err("Failed to execute program")?,
     };
     let (vm_witness, _) = execution_witness.into_parts();
-    let trace = build_trace(vm_witness).wrap_err("Failed to build trace")?;
+    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }

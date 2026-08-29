@@ -66,8 +66,8 @@ const MAX_U32_SHIFT_VALUE: u8 = 31;
 /// The maximum number of bits by which a u32 value can be rotated in a bitwise operation.
 const MAX_U32_ROTATE_VALUE: u8 = 31;
 
-/// The maximum number of bits allowed for the exponent parameter for exponentiation instructions.
-const MAX_EXP_BITS: u8 = 64;
+/// The maximum number of bits accepted by dynamic exponentiation instructions.
+const MAX_DYNAMIC_EXP_BITS: u8 = 63;
 
 // HELPERS
 // ================================================================================================

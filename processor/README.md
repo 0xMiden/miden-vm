@@ -8,11 +8,9 @@ The processor provides multiple APIs depending on your use case:
 The `ProgramExecutor` trait provides a pluggable ordinary-execution interface returning
 `ExecutionOutput`, with `FastProcessor` as its default implementation:
 
-* `program: &Program` - a reference to a Miden program to be executed.
-* `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
-* `advice_inputs: AdviceInputs` - the private inputs used to build the advice provider with which to execute the program.
-* `host: &mut impl Host` - an instance of a host which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
-* `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
+Pass the program as `&Program`, its public inputs as `StackInputs`, and its private inputs as
+`AdviceInputs`. The `Host` supplies non-deterministic inputs and receives messages from the VM.
+`ExecutionOptions` sets limits such as the maximum allowed number of cycles.
 
 The async trait method returns `Result<ExecutionOutput, ExecutionError>`, containing the final stack
 state, advice provider, memory, and deferred state on success.
@@ -20,15 +18,19 @@ state, advice provider, memory, and deferred state on success.
 ### Low-level API
 For more control over execution and trace generation, you can use `FastProcessor` directly:
 
-* `FastProcessor::execute()` - Executes a program without any trace generation overhead. Returns `ExecutionOutput` containing the final stack state and other execution results.
-* `FastProcessor::execute_for_proving()` / `FastProcessor::execute_for_proving_sync()` -
-  Executes a program while collecting the complete post-execution `ExecutionWitness`.
-* `build_trace()` - Takes the `VmWitness` produced by `ExecutionWitness::into_parts()` and
-  constructs the full `VmTrace`. When the `concurrent` feature is enabled, trace building is
-  parallelized.
-* `FastProcessor::execute_and_build_trace_sync()` - With the `std` feature, preserves the optimized
-  synchronous path that overlaps execution with hasher trace construction and returns
-  `(VmTrace, Option<PrecompileWitness>)`.
+`FastProcessor::execute()` runs a program without trace generation overhead and returns an
+`ExecutionOutput` with the final stack state and other execution results.
+
+`FastProcessor::execute_for_proving()` and `FastProcessor::execute_for_proving_sync()` run a
+program while collecting the complete post-execution `ExecutionWitness`. Pass the `VmWitness`
+from `ExecutionWitness::into_parts()` to `build_trace()` to construct the full `VmTrace`. Trace
+building is parallel when the `concurrent` feature is enabled.
+
+With the `std` feature, `FastProcessor::execute_and_build_trace_sync()` preserves the optimized
+synchronous path that overlaps execution with hasher trace construction. It returns
+`(VmTrace, Option<PrecompileWitness>)`. Execution stays on the calling thread while Rayon may run
+the hasher builder on a worker. A caller with no separate Rayon worker uses compact buffered replay
+and builds the trace after execution.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.
@@ -62,10 +64,9 @@ A much more in-depth description of Miden VM design is available [here](https://
 ## Crate features
 Miden processor can be compiled with the following features:
 
-* `std` - enabled by default and relies on the Rust standard library.
-* `concurrent` - enables concurrency across certain parts of execution
-* `testing` - Enables APIs that can be helpful for testing
-* `bus-debugger` - Used to debug our buses. Slows down the processor considerably.
+The `std` feature is enabled by default and relies on the Rust standard library. The `concurrent`
+feature enables concurrency across parts of execution. The `testing` feature enables APIs used in
+tests. The `bus-debugger` feature helps debug the buses, but it slows down the processor.
 
 To compile with `no_std`, disable default features via `--no-default-features` flag, in which case only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

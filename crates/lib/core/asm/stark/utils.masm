@@ -1,5 +1,68 @@
 use miden::core::stark::constants
 
+# Fixed-point (16 fractional bits) conjectured security bits per FRI query for the shared
+# log_blowup = 3 Goldilocks/QuadFelt PCS, per the random-words formula
+# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
+# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
+const CONJECTURED_BITS_PER_QUERY_FP = 193382
+
+# Number of fractional bits in CONJECTURED_BITS_PER_QUERY_FP.
+const CONJECTURED_SECURITY_FP_SHIFT = 16
+
+# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
+const MAX_SECURITY_LEVEL = 128
+
+# Largest AIR count whose complete proof-order tag range fits in u32. The factorial table in
+# `derive_order_tag_from_heights` reserves one felt per supported AIR.
+const MAX_ORDER_AIRS = 12
+
+# Factorials used by the Lehmer order-tag weights. MAX_ORDER_AIRS=12 requires 0! through 11!;
+# each value fits in u32.
+const FACTORIAL_0 = 1
+const FACTORIAL_1 = 1
+const FACTORIAL_2 = 2
+const FACTORIAL_3 = 6
+const FACTORIAL_4 = 24
+const FACTORIAL_5 = 120
+const FACTORIAL_6 = 720
+const FACTORIAL_7 = 5040
+const FACTORIAL_8 = 40320
+const FACTORIAL_9 = 362880
+const FACTORIAL_10 = 3628800
+const FACTORIAL_11 = 39916800
+
+#! Loads the proof's security parameters from advice into the generic verifier context.
+#!
+#! Advice order: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
+#! Inputs:  [...]
+#! Outputs: [...]
+pub proc load_security_params
+    adv_push exec.constants::set_number_queries
+    adv_push exec.constants::set_query_pow_bits
+    adv_push exec.constants::set_deep_pow_bits
+    adv_push exec.constants::set_folding_pow_bits
+end
+
+#! Computes the conjectured security level (in bits) attained by the given proof parameters.
+#!
+#! Evaluates `min(((num_queries * 193382) >> 16) + query_pow_bits, 128)`. The fixed-point
+#! coefficient is specific to the shared log_blowup = 3 Goldilocks/QuadFelt PCS. This procedure
+#! holds no policy: the caller applies its own acceptance threshold. A relation using a different
+#! PCS configuration must supply its own estimator.
+#!
+#! PRECONDITION: `num_queries <= 150`, so `num_queries * 193382` fits in a u32 (the `u32shr`
+#! below requires that). Parameters returned by the generic verifier satisfy this bound.
+#!
+#! Inputs:  [num_queries, query_pow_bits, ...]
+#! Outputs: [level, ...]
+pub proc conjectured_security_level
+    push.CONJECTURED_BITS_PER_QUERY_FP mul
+    u32shr.CONJECTURED_SECURITY_FP_SHIFT
+    add
+    push.MAX_SECURITY_LEVEL u32min
+    # => [level, ...]
+end
+
 #! Compute the LDE domain generator from the log2 of its size.
 #!
 #! Input: [log2(domain_size), ..]
@@ -139,4 +202,126 @@ pub proc store_dynamically_executed_procedures
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_le dropw
     exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_le dropw
     # => [...]
+end
+
+#! Derives the Lehmer proof-order tag of a height-sorted relation.
+#!
+#! The proof order sorts the relation's AIRs by ascending log height, with the canonical
+#! instance order breaking ties (a stable sort). For each canonical AIR k with log height h_k
+#! read from `heights_ptr + k`:
+#!
+#!   inv_k   = #{m < k : h_m > h_k}
+#!   pos_k   = #{m < k : h_m <= h_k} + #{m > k : h_m < h_k}
+#!   tag    += inv_k * (num_airs - 1 - pos_k)!
+#!
+#! Splitting the scan at k makes the stable tie-break explicit and needs one height comparison per
+#! other AIR. The loops are `while`-based so this procedure can serve any relation (repeat bounds
+#! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
+#! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
+#!
+#! This procedure uses `tmp1..tmp3` as a twelve-entry factorial table and clobbers
+#! their previous contents.
+#!
+#! Precondition: `num_airs >= 2`. The procedure rejects counts above `MAX_ORDER_AIRS = 12`, the
+#! largest count whose complete tag range fits in u32. The AIR count is relation metadata, never
+#! prover data. Height comparisons reject out-of-range values.
+#!
+#! Input:  [num_airs, heights_ptr]
+#! Output: [tag]
+pub proc derive_order_tag_from_heights
+    dup u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported order-tag range"
+
+    # Store 0! through 11! in tmp1..tmp3. The complete table is fixed by MAX_ORDER_AIRS and avoids
+    # rebuilding the same weights for every proof. These scratch words are not live here.
+    push.FACTORIAL_3.FACTORIAL_2.FACTORIAL_1.FACTORIAL_0
+    exec.constants::tmp1 mem_storew_le dropw
+    push.FACTORIAL_7.FACTORIAL_6.FACTORIAL_5.FACTORIAL_4
+    exec.constants::tmp2 mem_storew_le dropw
+    push.FACTORIAL_11.FACTORIAL_10.FACTORIAL_9.FACTORIAL_8
+    exec.constants::tmp3 mem_storew_le dropw
+    # => [num_airs, heights_ptr]
+
+    push.0.0
+    # => [k = 0, tag = 0, num_airs, heights_ptr]
+
+    dup.2 dup.1 u32gt
+    while.true
+        # => [k, tag, num_airs, heights_ptr]
+        dup.3 dup.1 add mem_load
+        # => [h_k, k, tag, num_airs, heights_ptr]
+
+        push.0.0
+        # => [m = 0, inv = 0, h_k, k, tag, num_airs, heights_ptr]
+
+        # Count earlier AIRs that follow k after sorting.
+        dup.3 dup.1 u32gt
+        while.true
+            # => [m, inv, h_k, k, tag, num_airs, heights_ptr]
+            dup.6 dup.1 add mem_load
+            # => [h_m, m, inv, h_k, k, tag, num_airs, heights_ptr]
+
+            dup dup.4 u32gt
+            movup.3 add movdn.2
+            # => [h_m, m, inv', h_k, k, tag, num_airs, heights_ptr]
+
+            drop add.1
+            dup.3 dup.1 u32gt
+        end
+        drop
+        # => [inv, h_k, k, tag, num_airs, heights_ptr]
+
+        # Earlier AIRs precede k exactly when they are not inversions.
+        dup.2 dup.1 sub
+        swap
+        # => [inv, pos = k - inv, h_k, k, tag, num_airs, heights_ptr]
+
+        # Later AIRs precede k exactly when h_m < h_k. Ties stay in instance order.
+        dup.3 add.1
+        # => [m = k + 1, inv, pos, h_k, k, tag, num_airs, heights_ptr]
+
+        dup.6 dup.1 u32gt
+        while.true
+            dup.7 dup.1 add mem_load
+            # => [h_m, m, inv, pos, h_k, k, tag, num_airs, heights_ptr]
+
+            dup dup.5 u32lt
+            movup.4 add movdn.3
+            # => [h_m, m, inv, pos', h_k, k, tag, num_airs, heights_ptr]
+
+            drop add.1
+            dup.6 dup.1 u32gt
+        end
+        drop
+        # => [inv, pos, h_k, k, tag, num_airs, heights_ptr]
+
+        # tag += inv * (num_airs - 1 - pos)!
+        swap
+        dup.5 sub.1 swap sub
+        exec.constants::tmp1 add mem_load
+        mul
+        movup.3 add movdn.2
+        # => [h_k, k, tag', num_airs, heights_ptr]
+
+        drop add.1
+        dup.2 dup.1 u32gt
+    end
+    drop
+    # => [tag, num_airs, heights_ptr]
+    swap drop swap drop
+    # => [tag]
+end
+
+#! Computes x! for small x.
+#!
+#! Input:  [x]
+#! Output: [x!]
+pub proc factorial
+    push.1 swap
+    dup neq.0
+    while.true
+        dup movup.2 mul
+        swap sub.1
+        dup neq.0
+    end
+    drop
 end

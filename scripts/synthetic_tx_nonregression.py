@@ -15,6 +15,14 @@ from typing import Any
 
 DEFAULT_MIN_REGRESSION_MS = 5.0
 
+# CI collects both worktrees with this script. Normalize Falcon names emitted by a pre-rename
+# baseline so its fresh measurements intersect the current explicit names.
+LEGACY_FALCON_SCENARIO_ALIASES = {
+    "consume-single-p2id-note": "consume-single-p2id-note-with-falcon-signing",
+    "consume-two-p2id-notes": "consume-two-p2id-notes-with-falcon-signing",
+    "create-single-p2id-note": "create-single-p2id-note-with-falcon-signing",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -118,6 +126,8 @@ def collect_criterion_metrics(repo_root: Path, *, estimate: str = "mean") -> dic
 
     for estimates_path in sorted(criterion_root.glob("**/new/estimates.json")):
         producer, scenario, axis = parse_criterion_estimate_path(criterion_root, estimates_path)
+        if producer == "bench-tx":
+            scenario = LEGACY_FALCON_SCENARIO_ALIASES.get(scenario, scenario)
         name = f"{producer}/{scenario}/{axis}"
         estimate_data = json.loads(estimates_path.read_text(encoding="utf-8"))[estimate]
         metrics[name] = {
@@ -454,7 +464,12 @@ class Tests(unittest.TestCase):
             )
             try:
                 metrics = collect_criterion_metrics(root)
-                self.assertEqual(metrics["bench-tx/consume-single-p2id-note/prove"]["estimate_ms"], 1.5)
+                self.assertEqual(
+                    metrics["bench-tx/consume-single-p2id-note-with-falcon-signing/prove"][
+                        "estimate_ms"
+                    ],
+                    1.5,
+                )
             finally:
                 subprocess.run(["rm", "-rf", str(root)], check=False)
 
@@ -482,7 +497,12 @@ class Tests(unittest.TestCase):
             )
             try:
                 metrics = collect_criterion_metrics(root)
-                self.assertEqual(metrics["bench-tx/create-single-p2id-note/prove"]["estimate_ms"], 1.5)
+                self.assertEqual(
+                    metrics["bench-tx/create-single-p2id-note-with-falcon-signing/prove"][
+                        "estimate_ms"
+                    ],
+                    1.5,
+                )
             finally:
                 subprocess.run(["rm", "-rf", str(root)], check=False)
 

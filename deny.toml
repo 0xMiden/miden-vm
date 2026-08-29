@@ -76,6 +76,9 @@ skip-tree = [
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
     { name = "syn", version = "=2.0.119" },
+    # Allow p3-security's 0.7.0-rc.1 dependency tree (p3-air/field/matrix/maybe-rayon/util) to
+    # duplicate the workspace's 0.6.3 p3 crates until the workspace-wide Plonky3 bump
+    { name = "p3-security", version = "=0.7.0-rc.1" },
 ]
 
 # Sources configuration

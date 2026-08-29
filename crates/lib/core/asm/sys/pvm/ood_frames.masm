@@ -1,0 +1,29 @@
+use miden::core::crypto::hashes::poseidon2
+
+# Number of eight-felt advice blocks in one aligned PVM OOD row. Pinned against the generated
+# InputLayout by `pvm_ood_hook_matches_the_codegen_row_span`.
+const OOD_ROW_DOUBLE_WORDS = 192
+
+#! Processes one PVM row of out-of-domain evaluations.
+#!
+#! The row is the LMCS-aligned wire sequence used by the lifted PCS, in commitment-group order:
+#!
+#! - 8 preprocessed extension-field slots;
+#! - 440 main extension-field slots across ten AIRs in proof order;
+#! - 312 auxiliary-coordinate extension-field slots across ten AIRs in proof order;
+#! - 8 quotient extension-field slots (four quadratic-extension chunks).
+#!
+#! This is 768 extension-field values = 1,536 felts = 192 `adv_pipe` blocks. Each block is stored,
+#! folded into the DEEP fixed term with `horner_eval_ext`, length-tagged as an eight-felt absorb,
+#! and permuted into the transcript.
+#!
+#! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
+pub proc process_row_ood_evaluations
+    repeat.OOD_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_ext
+        movup.8 add.8 movdn.8
+        exec.poseidon2::permute
+    end
+end

@@ -319,6 +319,7 @@ impl FastProcessor {
             continuation_stack,
             kernel: program.kernel().clone(),
             package_debug_info,
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -336,6 +337,7 @@ impl FastProcessor {
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
             package_debug_info: None,
+            inline_call_contexts: Vec::new(),
         })
     }
 

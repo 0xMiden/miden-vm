@@ -159,7 +159,7 @@ fn controller_row_mut(matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut Con
     matrix.values[start..start + CONTROLLER_WIDTH].borrow_mut()
 }
 
-fn assert_trace_constraints_reject(
+pub(super) fn assert_trace_constraints_reject(
     trace: &VmTrace,
     core_matrix: RowMajorMatrix<Felt>,
     chip_matrix: RowMajorMatrix<Felt>,
@@ -267,6 +267,13 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         &poseidon2_folds,
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::Poseidon2Permutation),
     );
+}
+
+#[test]
+fn u32div_trace_satisfies_air() {
+    let operations = vec![Operation::U32div, Operation::Drop, Operation::Drop, Operation::U32div];
+    let trace = build_trace_from_ops(operations, &[0x0008_000b, 0x003b_0051, 3, 0x0003_0004]);
+    trace.check_constraints();
 }
 
 #[test]

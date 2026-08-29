@@ -6,7 +6,7 @@ use miden_assembly_syntax::{
 use miden_core::{events::SystemEvent, field::Field, operations::Operation::*};
 
 use super::BasicBlockBuilder;
-use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
+use crate::{MAX_DYNAMIC_EXP_BITS, ONE, ProcedureContext, ZERO};
 
 /// Field element representing TWO in the base field of the VM.
 const TWO: Felt = Felt::new_unchecked(2);
@@ -146,38 +146,28 @@ pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
 /// Appends a sequence of operations to compute b^e where e is the value at the top of the stack
 /// and b is the value second from the top of the stack.
 ///
-/// num_pow_bits parameter is expected to contain the number of bits needed to encode value e. If
-/// this assumption is not satisfied, the operation will fail at runtime.
+/// `num_pow_bits` is the number of exponent bits to process. The operation fails at runtime if `e`
+/// does not fit in that many bits.
 ///
 /// VM cycles: 9 + num_pow_bits
 ///
 /// # Errors
-/// Returns an error if num_pow_bits is greater than 64.
+/// Returns an error if `num_pow_bits` is greater than [`MAX_DYNAMIC_EXP_BITS`].
 pub fn exp(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
     num_pow_bits: u8,
     span: SourceSpan,
 ) -> Result<(), Report> {
-    if num_pow_bits > MAX_EXP_BITS {
+    if num_pow_bits > MAX_DYNAMIC_EXP_BITS {
         return Err(RelatedLabel::error("invalid argument")
             .with_labeled_span(span, "this instruction argument is out of range")
-            .with_help(format!("value must be in the range 0..={MAX_EXP_BITS}"))
+            .with_help(format!("value must be in the range 0..={MAX_DYNAMIC_EXP_BITS}"))
             .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
             .into());
     }
 
-    // arranging the stack to prepare it for expacc instruction.
-    span_builder.push_ops([Pad, Incr, MovUp2, Pad]);
-
-    // calling expacc instruction n times.
-    span_builder.push_op_many(Expacc, num_pow_bits as usize);
-
-    // drop the top two elements exp_lsb and base value of the last iteration.
-    span_builder.push_ops([Drop, Drop]);
-
-    // taking `b` to the top and asserting if it's equal to ZERO after all the right shifts.
-    span_builder.push_ops([Swap, Eqz, Assert(ZERO)]);
+    append_exp(span_builder, num_pow_bits);
     Ok(())
 }
 
@@ -194,24 +184,31 @@ pub fn exp(
 /// - pow = 7: 12 cycles
 /// - pow > 7: 11 + Floor(log2(pow)) — one `Push` plus `exp`'s 9 + num_pow_bits, where num_pow_bits
 ///   is the bit length of pow
-pub fn exp_imm(
-    span_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
-    pow: Felt,
-    span: SourceSpan,
-) -> Result<(), Report> {
-    if pow.as_canonical_u64() <= 7 {
-        perform_exp_for_small_power(span_builder, pow.as_canonical_u64());
-        Ok(())
+pub fn exp_imm(span_builder: &mut BasicBlockBuilder, pow: Felt) {
+    let pow_u64 = pow.as_canonical_u64();
+    if pow_u64 <= 7 {
+        perform_exp_for_small_power(span_builder, pow_u64);
     } else {
-        // compute the bits length of the exponent
-        let num_pow_bits = (64 - pow.as_canonical_u64().leading_zeros()) as u8;
-
-        // pushing the exponent onto the stack.
+        let num_pow_bits = (u64::BITS - pow_u64.leading_zeros()) as u8;
         span_builder.push_op(Push(pow));
-
-        exp(span_builder, proc_ctx, num_pow_bits, span)
+        append_exp(span_builder, num_pow_bits);
     }
+}
+
+/// Appends the common `EXPACC` lowering that processes `num_pow_bits` exponent bits.
+/// The caller is responsible for validating or deriving the bit length.
+fn append_exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) {
+    // Prepare [0, base, 1, exponent, ...].
+    span_builder.push_ops([Pad, Incr, MovUp2, Pad]);
+
+    // Process one exponent bit per EXPACC operation.
+    span_builder.push_op_many(Expacc, num_pow_bits as usize);
+
+    // Remove the final exponent bit and base accumulator.
+    span_builder.push_ops([Drop, Drop]);
+
+    // Assert that no exponent bits remain.
+    span_builder.push_ops([Swap, Eqz, Assert(ZERO)]);
 }
 
 /// If the immediate value of the `exp` instruction is less than 8, then, it is be cheaper to

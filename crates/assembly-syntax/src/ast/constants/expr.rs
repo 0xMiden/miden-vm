@@ -5,8 +5,6 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, Path,
@@ -141,6 +139,22 @@ impl ConstantExpr {
 
         references.into_iter().collect()
     }
+
+    fn render_operand(&self, parent_precedence: u8, is_rhs: bool) -> crate::prettier::Document {
+        use crate::prettier::{PrettyPrint, const_text};
+
+        let rendered = self.render();
+        let Self::BinaryOp { op, .. } = self else {
+            return rendered;
+        };
+
+        let precedence = op.precedence();
+        if precedence < parent_precedence || (is_rhs && precedence == parent_precedence) {
+            const_text("(") + rendered + const_text(")")
+        } else {
+            rendered
+        }
+    }
 }
 
 impl Eq for ConstantExpr {}
@@ -221,8 +235,14 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
                     + const_text(")"),
             ),
             Self::BinaryOp { op, lhs, rhs, .. } => {
-                let single_line = lhs.render() + display(op) + rhs.render();
-                let multi_line = lhs.render() + nl() + (display(op)) + rhs.render();
+                let precedence = op.precedence();
+                let single_line = lhs.render_operand(precedence, false)
+                    + display(op)
+                    + rhs.render_operand(precedence, true);
+                let multi_line = lhs.render_operand(precedence, false)
+                    + nl()
+                    + display(op)
+                    + rhs.render_operand(precedence, true);
                 single_line | multi_line
             },
         }
@@ -275,10 +295,9 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 /// Represents the set of binary arithmetic operators supported in Miden Assembly syntax.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum ConstantOp {
     Add,
@@ -296,6 +315,13 @@ impl ConstantOp {
             Self::Mul => "Mul",
             Self::Div => "Div",
             Self::IntDiv => "IntDiv",
+        }
+    }
+
+    pub(crate) const fn precedence(self) -> u8 {
+        match self {
+            Self::Add | Self::Sub => 1,
+            Self::Mul | Self::Div | Self::IntDiv => 2,
         }
     }
 }
@@ -380,10 +406,9 @@ impl proptest::arbitrary::Arbitrary for ConstantOp {
 /// Represents the type of the final value to which some string value should be converted.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum HashKind {
     /// Reduce a string to a word using Blake3 hash function

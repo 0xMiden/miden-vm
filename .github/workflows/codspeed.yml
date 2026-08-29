@@ -52,7 +52,7 @@ jobs:
           rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Install cargo-codspeed
         shell: bash
@@ -67,7 +67,7 @@ jobs:
           cargo codspeed build --measurement-mode walltime --profile optimized -p ${{ matrix.package }} --bench ${{ matrix.bench }}
 
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@0ca9cbbf4623b599a6c3ed4fc8a922942705d9f1 # v5.0.2
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: walltime
           run: |

@@ -23,8 +23,6 @@ pub use miden_assembly_syntax::{
 pub use miden_core::Word;
 use miden_mast_package::Package as MastPackage;
 pub use miden_mast_package::PackageId;
-#[cfg(feature = "arbitrary")]
-use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +42,6 @@ pub type PackageRequirements = BTreeMap<PackageId, VersionRequirement>;
 /// Metadata tracked for a specific canonical package version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct PackageRecord {
     /// The exact published version associated with this package
     version: Version,
@@ -96,32 +93,6 @@ impl PackageRecord {
     /// Returns the dependency metadata for this package.
     pub fn dependencies(&self) -> &PackageRequirements {
         &self.dependencies
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for PackageRecord {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let description = proptest::option::of(
-            proptest::collection::vec(proptest::char::range('a', 'z'), 1..32)
-                .prop_map(|chars| Arc::<str>::from(chars.into_iter().collect::<String>())),
-        );
-        let dependencies =
-            proptest::collection::vec((any::<PackageId>(), any::<VersionRequirement>()), 0..4)
-                .prop_map(|entries| entries.into_iter().collect::<BTreeMap<_, _>>());
-
-        (any::<Version>(), description, dependencies)
-            .prop_map(|(version, description, dependencies)| {
-                let mut record = Self::new(version, dependencies);
-                if let Some(description) = description {
-                    record = record.with_description(description);
-                }
-                record
-            })
-            .boxed()
     }
 }
 
@@ -276,7 +247,7 @@ impl PackageCache for NoPackageStore {
     type Error = NoPackageStoreError;
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
-        Ok(Version::new(package.version.clone(), package.digest()))
+        Ok(Version::new(package.version.clone(), package.dependency_commitment()))
     }
 }
 
@@ -344,7 +315,7 @@ mod tests {
             )
             .expect("test package should be valid"),
         );
-        let expected = Version::new(package.version.clone(), package.digest());
+        let expected = Version::new(package.version.clone(), package.dependency_commitment());
 
         let mut store = NoPackageStore;
         let cached = store

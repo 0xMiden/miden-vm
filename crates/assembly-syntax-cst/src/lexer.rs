@@ -249,7 +249,13 @@ impl<'input> Iterator for Lexer<'input> {
                 self.advance_char();
                 let kind = if self.current_char() == Some('.') {
                     self.advance_char();
-                    SyntaxKind::DotDot
+                    // `...` denotes a variadic type parameter in a procedure signature.
+                    if self.current_char() == Some('.') {
+                        self.advance_char();
+                        SyntaxKind::DotDotDot
+                    } else {
+                        SyntaxKind::DotDot
+                    }
                 } else {
                     SyntaxKind::Dot
                 };

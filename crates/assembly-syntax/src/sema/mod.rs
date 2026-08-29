@@ -31,7 +31,6 @@ use crate::{ast::*, parser::WordValue};
 /// * Documentation comments are attached to items they decorate
 /// * Import table is constructed
 /// * Symbol resolution is performed:
-///   * Constants referenced by name are replaced with the value of that constant.
 ///   * Calls to imported procedures are resolved concretely
 /// * Semantic analysis is performed on the module to validate it
 pub fn analyze(
@@ -245,22 +244,13 @@ pub fn analyze(
         }
     }
 
-    // Simplify all constant declarations
-    analyzer.simplify_constants();
-    for item in module.items_mut() {
-        let Item::Constant(constant) = item else {
-            continue;
-        };
-        constant.value = analyzer
-            .get_constant(&constant.name)
-            .expect("semantic analysis tracks all module constants")
-            .clone();
-    }
+    // Evaluate constant declarations for validation, but preserve their source expressions.
+    analyzer.evaluate_constants();
 
     // Define enums now that all constant declarations have been discovered
     for mut ty in enums {
         for variant in ty.variants_mut() {
-            variant.discriminant = analyzer.get_constant(&variant.name).unwrap().clone();
+            variant.discriminant = analyzer.get_evaluated_constant(&variant.name).unwrap();
         }
 
         if let Err(err) = module.define_enum(ty) {
@@ -456,24 +446,26 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                     procedure.set_syscall(true);
                 }
 
-                // Evaluate all named immediates to their concrete values
+                // Evaluate a clone so semantic checks do not change the parsed procedure.
                 log::debug!(target: "const-eval", "visiting procedure {}", procedure.name());
-                {
+                let evaluated = {
+                    let mut evaluated = procedure.clone();
                     let mut visitor = ConstEvalVisitor::new(analyzer);
-                    let _ = visitor.visit_mut_procedure(&mut procedure);
+                    let _ = visitor.visit_mut_procedure(&mut evaluated);
                     if let Err(errs) = visitor.into_result() {
                         for err in errs {
                             log::error!(target: "const-eval", "error found in procedure {}: {err}", procedure.name());
                             analyzer.error(err);
                         }
                     }
-                }
+                    evaluated
+                };
 
                 // Ensure repeat counts are within acceptable bounds.
                 log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = VerifyRepeatCounts::new(analyzer);
-                    let _ = visitor.visit_procedure(&procedure);
+                    let _ = visitor.visit_procedure(&evaluated);
                 }
 
                 // Next, verify invoke targets:

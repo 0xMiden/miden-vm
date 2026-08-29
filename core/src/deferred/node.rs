@@ -4,8 +4,6 @@ use alloc::{sync::Arc, vec::Vec};
 use core::mem::size_of;
 
 use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use super::DeferredError;
 use crate::{
@@ -36,7 +34,6 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 /// decoded only by the owning [`super::Precompile`]. The canonical layout is
 /// `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Tag {
     id: Felt,
     args: [Felt; 3],
@@ -366,8 +363,11 @@ impl Node {
         let mut felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(Self::DATA_CHUNK_FELT_LEN).max(1);
         felts.resize(n_chunks * Self::DATA_CHUNK_FELT_LEN, ZERO);
+        #[allow(clippy::chunks_exact_to_as_chunks)]
         let chunks = felts
-            .chunks_exact(Self::DATA_CHUNK_FELT_LEN)
+            .as_chunks::<{ Self::DATA_CHUNK_FELT_LEN }>()
+            .0
+            .iter()
             .map(|chunk| core::array::from_fn(|i| chunk[i]))
             .collect::<Vec<_>>();
         Self::chunks(chunks).expect("chunks_from_bytes always creates at least one chunk")

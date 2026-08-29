@@ -1,22 +1,27 @@
 //! Cross-checks the ACE READ section produced by the MASM recursive verifier.
 //!
-//! The check extracts the flat ACE input vector from memory, verifies basic invariants, and
-//! evaluates the same ACE circuit in Rust.
+//! The check extracts the flat ACE input vector from memory, verifies its structural and selector
+//! invariants, and evaluates the same ACE circuit in Rust.
 
 use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
 use miden_air::{MIDEN_AIR_COUNT, ProofOrder, ace::build_multi_air_ace_circuit_for_order};
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+    field::{PrimeCharacteristicRing, QuadFelt, TwoAdicField},
 };
 use miden_crypto::field::Field;
-use miden_processor::{ContextId, ExecutionOutput};
+use miden_processor::ExecutionOutput;
 
-// MASM CONSTANTS (must match crates/lib/core/asm/stark/constants.masm)
+use crate::helpers::read_memory_felt;
+
+// MASM MEMORY LAYOUT
 // ================================================================================================
 
-const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
-const ORDER_TAG_PTR: u32 = 3223322764;
+const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
+const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322638;
+const ORDER_TAG_PTR: u32 = 3223322639;
+const Z_PTR: u32 = 3223322652;
+const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322736;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
 const OOD_EVALUATIONS_PTR: u32 = 3225419784;
 const AUX_BUS_BOUNDARY_PTR: u32 = 3225420328;
@@ -61,13 +66,7 @@ fn ace_read_pointers_match_masm_layout() {
 /// Each pair of consecutive base felts forms one extension field element.
 /// The returned vector has `layout.total_inputs` entries.
 fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<QuadFelt> {
-    let ctx = ContextId::root();
-
-    let pi_ptr = output
-        .memory
-        .read_element(ctx, Felt::from_u32(PUBLIC_INPUTS_ADDRESS_PTR))
-        .expect("PUBLIC_INPUTS_ADDRESS_PTR not found in memory")
-        .as_canonical_u64() as u32;
+    let pi_ptr = read_memory_felt(output, PUBLIC_INPUTS_ADDRESS_PTR).as_canonical_u64() as u32;
 
     assert!(
         pi_ptr < AUX_RAND_ELEM_PTR,
@@ -77,25 +76,20 @@ fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<Qua
     (0..layout.total_inputs)
         .map(|i| {
             let addr = pi_ptr + (i as u32) * 2;
-            let c0 = output.memory.read_element(ctx, Felt::from_u32(addr)).expect("read c0");
-            let c1 = output.memory.read_element(ctx, Felt::from_u32(addr + 1)).expect("read c1");
+            let c0 = read_memory_felt(output, addr);
+            let c1 = read_memory_felt(output, addr + 1);
             QuadFelt::new([c0, c1])
         })
         .collect()
 }
 
 fn extract_order(output: &ExecutionOutput) -> ProofOrder {
-    let ctx = ContextId::root();
-    let tag = output
-        .memory
-        .read_element(ctx, Felt::from_u32(ORDER_TAG_PTR))
-        .expect("ORDER_TAG_PTR not found in memory")
-        .as_canonical_u64();
+    let tag = read_memory_felt(output, ORDER_TAG_PTR).as_canonical_u64();
     ProofOrder::from_tag(tag as u32)
         .unwrap_or_else(|| panic!("invalid order tag in recursive verifier memory: {tag}"))
 }
 
-// SANITY CHECKS
+// INPUT CHECKS
 // ================================================================================================
 
 /// Assert critical Fiat-Shamir-derived values are non-zero.
@@ -130,6 +124,46 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
     );
 }
 
+/// Reconstruct every per-AIR selector from `z` and the recorded trace heights.
+///
+/// This oracle does not share the MASM inversion schedule, so swapped or incorrectly reconstructed
+/// inverses fail before the circuit cross-evaluation.
+fn assert_air_selectors_match_trace_metadata(
+    output: &ExecutionOutput,
+    inputs: &[QuadFelt],
+    layout: &InputLayout,
+) {
+    let get = |key: InputKey| -> QuadFelt { inputs[layout.index(key).expect("missing key")] };
+    let read = |addr| read_memory_felt(output, addr);
+    let z = QuadFelt::new([read(Z_PTR + 2), read(Z_PTR + 3)]);
+    let max_log = read(TRACE_LENGTH_LOG_PTR).as_canonical_u64() as u32;
+
+    for air in 0..MIDEN_AIR_COUNT {
+        let log_height = read(AIR_TRACE_LENGTH_LOGS_PTR + air as u32).as_canonical_u64() as u32;
+        assert!(log_height <= max_log, "AIR {air} height exceeds the maximum height");
+        let z_lift = (log_height..max_log).fold(z, |value, _| value * value);
+        let vanishing = z_lift.exp_u64(1_u64 << log_height) - QuadFelt::ONE;
+        let generator_inv = Felt::two_adic_generator(log_height as usize).inverse();
+        let transition = z_lift - QuadFelt::from(generator_inv);
+
+        assert_eq!(
+            get(InputKey::IsFirstAir(air)),
+            vanishing / (z_lift - QuadFelt::ONE),
+            "AIR {air} first-row selector mismatch"
+        );
+        assert_eq!(
+            get(InputKey::IsLastAir(air)),
+            vanishing / transition,
+            "AIR {air} last-row selector mismatch"
+        );
+        assert_eq!(
+            get(InputKey::IsTransitionAir(air)),
+            transition,
+            "AIR {air} transition selector mismatch"
+        );
+    }
+}
+
 // CROSS-EVALUATION
 // ================================================================================================
 
@@ -150,6 +184,7 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) -> ProofOrder {
     assert_eq!(inputs.len(), layout.total_inputs, "extracted input count mismatch");
 
     sanity_check_ace_inputs(&inputs, layout);
+    assert_air_selectors_match_trace_metadata(output, &inputs, layout);
 
     let result = circuit.eval(&inputs).expect("ACE eval failed");
     assert!(

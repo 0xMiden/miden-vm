@@ -36,6 +36,7 @@ jobs:
           - advice_inputs_deserialize
           - operation_deserialize
           - execution_proof_deserialize
+          - execution_witness_deserialize
           - deferred_state_wire_deserialize
           - deferred_state_wire_serde_deserialize
           - package_deserialize
@@ -52,7 +53,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Generate fuzz seed corpus
@@ -61,7 +62,8 @@ jobs:
           GENERATED_CORPUS_TARGETS: >-
             mast_forest_deserialize program_deserialize kernel_deserialize
             stack_io_deserialize advice_inputs_deserialize operation_deserialize
-            execution_proof_deserialize deferred_state_wire_deserialize
+            execution_proof_deserialize execution_witness_deserialize
+            deferred_state_wire_deserialize
             deferred_state_wire_serde_deserialize package_deserialize package_semantic_deserialize
         run: |
           if [[ " $GENERATED_CORPUS_TARGETS " == *" $TARGET "* ]]; then
@@ -121,7 +123,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
@@ -165,7 +167,7 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 #[macro_use]
 extern crate alloc;
@@ -65,8 +66,9 @@ pub mod stark {
 
     // Top-level types from lifted-stark
     pub use miden_lifted_stark::{
-        GenericStarkConfig, Preprocessed, PreprocessedValidationError, ProverInstance, StarkConfig,
-        VerifierInstance,
+        GenericStarkConfig, Preprocessed, PreprocessedValidationError, ProverInstance,
+        QuotientRecompositionInputs, StarkConfig, VerifierInstance, log_quotient_degree,
+        quotient_recomposition_inputs,
     };
     // Lifted-stark sub-modules (re-exported as-is)
     pub use miden_lifted_stark::{air, debug, hasher, lmcs, pcs, proof, prover, verifier};
@@ -81,7 +83,7 @@ pub mod stark {
 
     // Upstream Plonky3: dft
     pub mod dft {
-        pub use p3_dft::{NaiveDft, Radix2DitParallel, TwoAdicSubgroupDft};
+        pub use p3_dft::{Radix2DFTSmallBatch, Radix2DitParallel, TwoAdicSubgroupDft};
     }
 
     // Upstream Plonky3: matrix

@@ -1,7 +1,7 @@
 //! On-chain implementation of [`crate::Felt`].
 
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Default)]
 /// A `Felt` represented as an on-chain felt.
 pub struct Felt {
     /// The backing type is `f32` which will be treated as a felt by the compiler.
@@ -357,6 +357,12 @@ impl core::fmt::Display for Felt {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(&self.as_canonical_u64(), f)
+    }
+}
+
+impl core::fmt::Debug for Felt {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Felt").field(&self.as_canonical_u64()).finish()
     }
 }
 

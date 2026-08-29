@@ -1,6 +1,6 @@
 [package]
 name = "miden-debug-types"
-version = "0.30.0"
+version = "0.31.0"
 description = "Core source-level debugging information types used throughout the Miden toolchain"
 documentation = "https://docs.rs/miden-debug-types"
 readme = "README.md"
@@ -49,6 +49,6 @@ thiserror.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

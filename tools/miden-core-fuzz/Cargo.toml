@@ -13,15 +13,14 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-serde_json = "1.0"
 
 [dependencies.miden-core]
 path = "../../core"
-features = ["std", "serde"]
+features = ["std"]
 
 [dependencies.miden-assembly-syntax]
 path = "../../crates/assembly-syntax"
-features = ["std", "serde"]
+features = ["std"]
 
 [dependencies.miden-assembly]
 path = "../../crates/assembly"
@@ -31,9 +30,13 @@ features = ["std"]
 path = "../../crates/mast-package"
 features = ["std"]
 
+[dependencies.miden-processor]
+path = "../../processor"
+features = ["std"]
+
 [dependencies.miden-package-registry]
 path = "../../crates/package-registry"
-features = ["std", "serde", "resolver"]
+features = ["std", "resolver"]
 
 [dependencies.miden-project]
 path = "../../crates/project"
@@ -94,13 +97,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "program_serde_deserialize"
-path = "fuzz_targets/program_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "kernel_deserialize"
 path = "fuzz_targets/kernel_deserialize.rs"
 test = false
@@ -108,22 +104,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "kernel_serde_deserialize"
-path = "fuzz_targets/kernel_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "stack_io_deserialize"
 path = "fuzz_targets/stack_io_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "advice_map_serde_deserialize"
-path = "fuzz_targets/advice_map_serde_deserialize.rs"
 test = false
 doc = false
 bench = false
@@ -143,13 +125,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "operation_serde_deserialize"
-path = "fuzz_targets/operation_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "execution_proof_deserialize"
 path = "fuzz_targets/execution_proof_deserialize.rs"
 test = false
@@ -157,8 +132,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "execution_proof_serde_deserialize"
-path = "fuzz_targets/execution_proof_serde_deserialize.rs"
+name = "execution_witness_deserialize"
+path = "fuzz_targets/execution_witness_deserialize.rs"
 test = false
 doc = false
 bench = false
@@ -171,14 +146,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "deferred_state_wire_serde_deserialize"
-path = "fuzz_targets/deferred_state_wire_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-
-[[bin]]
 name = "package_deserialize"
 path = "fuzz_targets/package_deserialize.rs"
 test = false
@@ -188,13 +155,6 @@ bench = false
 [[bin]]
 name = "package_semantic_deserialize"
 path = "fuzz_targets/package_semantic_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "mast_forest_serde_deserialize"
-path = "fuzz_targets/mast_forest_serde_deserialize.rs"
 test = false
 doc = false
 bench = false

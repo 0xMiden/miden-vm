@@ -1,9 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     MastForestContributor, MastNodeContext, MastNodeExt, fingerprint_with_child_fingerprints,
 };
@@ -27,8 +24,6 @@ use crate::{
 /// If the top of the stack is neither `0` nor `1` when the condition is checked, the execution
 /// fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
@@ -135,36 +130,6 @@ impl MastNodeExt for LoopNode {
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         LoopNodeBuilder::new(self.body).with_digest(self.digest)
     }
-}
-
-// ARBITRARY IMPLEMENTATION
-// ================================================================================================
-
-#[cfg(all(feature = "arbitrary", test))]
-impl proptest::prelude::Arbitrary for LoopNode {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::*;
-
-        use crate::Felt;
-
-        // Generate one MastNodeId value and digest for the body
-        (any::<MastNodeId>(), any::<[u64; 4]>())
-            .prop_map(|(body, digest_array)| {
-                // Generate a random digest
-                let digest = Word::from(digest_array.map(Felt::new_unchecked));
-                // Construct directly to avoid MastForest validation for arbitrary data
-                LoopNode {
-                    body,
-                    digest,
-                }
-            })
-            .no_shrink()  // Pure random values, no meaningful shrinking pattern
-            .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 // ------------------------------------------------------------------------------------------------

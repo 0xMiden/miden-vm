@@ -25,6 +25,8 @@ pub mod parser;
 pub mod sema;
 pub mod testing;
 
+pub use miden_assembly_syntax_cst::MAX_CONTROL_FLOW_NESTING;
+
 #[doc(hidden)]
 pub use self::{
     ast::{Path, PathBuf, PathComponent, PathError},

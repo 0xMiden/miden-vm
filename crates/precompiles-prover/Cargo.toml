@@ -43,6 +43,7 @@ miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
 miden-precompiles.workspace = true
 miden-serde-utils.workspace = true
+p3-security.workspace = true
 ruint.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true

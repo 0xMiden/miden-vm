@@ -7,7 +7,7 @@ use miden_lifted_air::MultiAir;
 
 use super::*;
 use crate::{
-    ace::PVM_REGISTRY_LAYOUT,
+    ace::{PVM_REGISTRY_LAYOUT, structured_orders},
     session::{ChipletMultiAir, NUM_CHIPLETS},
 };
 
@@ -130,4 +130,76 @@ fn padding_subtrees_share_one_vector() {
         "every fully padded subtree must resolve to the shared vector"
     );
     assert_eq!(first_padding[0], padding_leaf(), "the shared vector holds padding leaves");
+}
+
+/// From-scratch segment oracle over the structured sample: hash the ASSEMBLED stream's
+/// two segments with plain `hash_elements` (no resumed sponge state) and pin them
+/// against the factory's commitments, plus common-section byte-identity against the
+/// canonical order. The factory serves ONE cached common digest to every order, so the
+/// encode-vs-assembled dual paths are definitionally blind to order-dependent bytes
+/// escaping into the common section; this is the oracle that sees them — the PVM
+/// counterpart of the Miden VM's segment test in air/tests/ace_codegen.rs.
+#[test]
+fn assembled_segments_match_from_scratch_hashing_for_structured_orders() {
+    use miden_core::crypto::hash::Poseidon2;
+
+    let factory = factory();
+    let canonical: Vec<usize> = (0..NUM_CHIPLETS).collect();
+    let canonical_circuit = factory.circuit_for_order(&canonical).expect("canonical circuit");
+    let canonical_common =
+        canonical_circuit.encoded.instructions()[canonical_circuit.shuffle_prefix_len..].to_vec();
+
+    for order in structured_orders() {
+        let circuit = factory.circuit_for_order(&order).expect("assembled circuit");
+        let instructions = circuit.encoded.instructions();
+        let (prefix, common) = instructions.split_at(circuit.shuffle_prefix_len);
+        assert_eq!(
+            Poseidon2::hash_elements(prefix),
+            circuit.shuffle_commitment,
+            "resumed prefix digest diverges from from-scratch hashing for {order:?}"
+        );
+        assert_eq!(
+            Poseidon2::hash_elements(common),
+            circuit.common_commitment,
+            "cached common digest diverges from from-scratch hashing for {order:?}"
+        );
+        assert_eq!(
+            common,
+            canonical_common.as_slice(),
+            "common section is not order-invariant for {order:?}"
+        );
+    }
+}
+
+/// The concurrent serve path splits a subtree into LEAF_CHUNK ranges; a range that
+/// straddles the realizable/padding boundary must fill its suffix with padding leaves.
+/// For the deployed geometry the boundary (768 = 12 * 64) lands exactly on a chunk
+/// edge, so this exercises the straddling logic no production chunking reaches.
+#[cfg(feature = "concurrent")]
+#[test]
+fn concurrent_leaf_range_handles_a_straddling_boundary() {
+    use miden_ace_codegen::{PackedLeafScratch, order_from_tag, padding_leaf};
+
+    let factory = factory();
+    let boundary_subtree = PVM_ORDER_COUNT / PVM_REGISTRY_LAYOUT.leaves_per_subtree();
+    let start = boundary_subtree * PVM_REGISTRY_LAYOUT.leaves_per_subtree();
+    let realizable = PVM_ORDER_COUNT - start;
+
+    // A window straddling the boundary: some realizable offsets, some padding.
+    let offsets: Vec<usize> = (realizable - 4..realizable + 4).collect();
+    let mut scratch = PackedLeafScratch::new();
+    let leaves = subtree_leaf_range(factory, start, &offsets, &mut scratch);
+
+    assert_eq!(leaves.len(), offsets.len());
+    let mut buffer = ShuffleEncodeBuffer::new();
+    for (leaf, &offset) in leaves.iter().zip(&offsets) {
+        match order_from_tag((start + offset) as u32, NUM_CHIPLETS) {
+            Some(order) => assert_eq!(
+                *leaf,
+                factory.leaf_for_order(&order, &mut buffer).expect("scalar leaf"),
+                "realizable offset {offset} diverges"
+            ),
+            None => assert_eq!(*leaf, padding_leaf(), "padding offset {offset} diverges"),
+        }
+    }
 }

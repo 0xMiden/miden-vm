@@ -18,9 +18,6 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::{
     DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType,
     PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
@@ -73,7 +70,6 @@ fn reserve_wire_payload(
 /// reference `TRUE_INDEX` or an earlier entry. Pair-list pairs store structural child references in
 /// payload order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub(crate) enum WireEntry {
     /// Raw data payload interpreted by the tag's precompile.
     ///
@@ -95,7 +91,6 @@ pub(crate) enum WireEntry {
 /// the last entry. Accepted wire must be topologically ordered, root-last, duplicate-free,
 /// canonical, and semantically valid under the installed [`PrecompileRegistry`] when rehydrated.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct DeferredStateWire {
     entries: Vec<WireEntry>,
 }
@@ -817,25 +812,6 @@ mod tests {
             },
         ]));
         assert_wire_round_trips(DeferredStateWire::default());
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_wire_round_trips_without_changing_the_representation() {
-        let wire = wire(alloc::vec![
-            WireEntry::Data {
-                tag: tag(1),
-                chunks: alloc::vec![felts(10)]
-            },
-            WireEntry::Join { tag: tag(2), lhs: 1, rhs: TRUE_INDEX },
-            WireEntry::PairList {
-                tag: tag(3),
-                pairs: alloc::vec![(1, TRUE_INDEX)],
-            },
-        ]);
-        let encoded = serde_json::to_vec(&wire).unwrap();
-
-        assert_eq!(serde_json::from_slice::<DeferredStateWire>(&encoded).unwrap(), wire);
     }
 
     #[test]

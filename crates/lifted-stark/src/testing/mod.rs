@@ -1,16 +1,17 @@
-//! Unified testing infrastructure for the lifted STARK crate.
+//! Test fixtures and FRI vector generation.
 //!
-//! Provides three complete configuration variants, each containing everything
-//! needed to test at any level (LMCS, PCS, or full STARK):
+//! The `testing` feature also exposes example AIRs and four hash configurations:
 //!
 //! - `configs::goldilocks_poseidon2`
 //! - `configs::goldilocks_keccak`
+//! - `configs::goldilocks_blake3`
 //! - `configs::goldilocks_blake3_192`
-//!
-//! Also provides shared fixtures, matrix generation utilities, and test helpers.
 
+#[cfg(feature = "testing")]
 pub mod airs;
+#[cfg(any(test, feature = "testing"))]
 pub mod configs;
+pub mod fri_vectors;
 pub mod params;
 
 #[cfg(test)]
@@ -27,9 +28,7 @@ mod test_tiny_air;
 // Re-export commonly used params at the module level for convenience.
 use alloc::vec::Vec;
 
-// Re-exports for integration benches (which consume `miden_lifted_stark` as an
-// external crate via the `testing` feature). Gated so production callers don't
-// see this surface.
+// Re-exports used by external integration tests and benches.
 pub use miden_lifted_air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
 use p3_field::{Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -130,6 +129,7 @@ pub fn total_elements<F: Field>(matrix_groups: &[Vec<RowMajorMatrix<F>>]) -> u64
 /// `Felt`, `Sponge`, `Compress`, `Challenger`, `test_challenger`
 ///
 /// Also requires `Lmcs` to be defined as a type alias in the invoking module.
+#[cfg(any(test, feature = "testing"))]
 macro_rules! define_lmcs_test_helpers {
     () => {
         use $crate::lmcs::Lmcs as LmcsTrait;
@@ -168,4 +168,5 @@ macro_rules! define_lmcs_test_helpers {
     };
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use define_lmcs_test_helpers;

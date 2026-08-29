@@ -239,8 +239,6 @@ newtype_id!(
     ///
     /// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
     /// where a type index is expected).
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(transparent))]
     pub struct DebugSourceNodeId;
 );
 
@@ -425,16 +423,18 @@ pub struct SourceNode<Exec: Idx, Src: Idx> {
     pub asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variable metadata for operations attached to this node
     pub debug_vars: Vec<DebugSourceVar>,
-    /// Inline-call metadata for operations attached to this node
+    /// Inline-call metadata for operations attached to this node.
+    ///
+    /// A zero-width external occurrence may carry rows at its start index. Those rows describe the
+    /// inline chain inherited by the resolved target rather than an operation on the external
+    /// node.
     pub inline_calls: Vec<DebugSourceInlineCall>,
 }
 
 impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
     pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops
-            .iter()
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        let insertion_index = self.asm_ops.partition_point(|row| row.op_idx <= op_idx);
+        insertion_index.checked_sub(1).and_then(|index| self.asm_ops.get(index))
     }
 
     pub fn debug_vars_for_operation(
@@ -450,27 +450,26 @@ impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
         debug_info: &DebugInfo<Exec, Src>,
     ) -> impl Iterator<Item = DebugVarInfo> {
         let mut type_cache = FxHashMap::<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>::default();
-        self.debug_vars_for_operation(op_idx).map(move |source_var| {
-            let name = debug_info[source_var.name_idx].clone();
+        self.debug_vars_for_operation(op_idx).filter_map(move |source_var| {
+            let name = debug_info.get_string(source_var.name_idx)?;
             let mut info = DebugVarInfo::new(name, source_var.value_location.clone());
             if let Some(arg_idx) = source_var.arg_idx {
                 info.set_arg_index(arg_idx.get())
             }
             if let Some(loc) = source_var.location_idx {
-                info.set_location(debug_info.get_location(loc).unwrap())
+                info.set_location(debug_info.get_location(loc)?)
             }
             if let Some(tid) = source_var.type_id {
                 if let Some((ty, declared_ty)) = type_cache.get(&tid) {
                     info.set_ty(ty.clone(), declared_ty.clone());
-                } else if let Some(type_info) = debug_info.get_type(tid)
-                    && let Some((ty, declared_type)) =
-                        type_info.recover_registered_type(debug_info, &mut type_cache)
+                } else if let Some((ty, declared_type)) =
+                    recover_type_at(tid, debug_info, &mut type_cache)
                 {
                     type_cache.insert(tid, (ty.clone(), declared_type.clone()));
                     info.set_ty(ty, declared_type);
                 }
             }
-            info
+            Some(info)
         })
     }
 }
@@ -529,11 +528,15 @@ impl DebugSourceAsmOp {
         }
     }
 
-    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> AssemblyOp {
-        let location = self.location_idx.into_option().and_then(|loc| debug_info.get_location(loc));
-        let context_name = debug_info[self.context_name_idx].clone();
-        let op = debug_info[self.op_name_idx].clone();
-        AssemblyOp::new(location, context_name, self.num_cycles, op)
+    pub fn to_assembly_op(&self, debug_info: &PackageDebugInfo) -> Option<AssemblyOp> {
+        let location = self
+            .location_idx
+            .try_into_option()
+            .ok()?
+            .and_then(|loc| debug_info.get_location(loc));
+        let context_name = debug_info.get_string(self.context_name_idx)?;
+        let op = debug_info.get_string(self.op_name_idx)?;
+        Some(AssemblyOp::new(location, context_name, self.num_cycles, op))
     }
 }
 
@@ -658,6 +661,11 @@ pub enum DebugTypeInfo {
         /// Variants of the enum.
         variants: Vec<DebugVariantInfo>,
     },
+    /// Represents a variable number (zero or more) of types in function argument or result position
+    ///
+    /// Variadic type parameters are always in trailing position, but may be preceded by
+    /// non-variadic type parameters
+    Variadic,
     /// An unknown or opaque type
     Unknown,
 }
@@ -785,6 +793,445 @@ pub struct DebugVariantInfo {
     pub discriminant: u128,
 }
 
+/// The deepest chain of type rows recovery will follow.
+///
+/// A decoded debug type graph is bounded only by its byte budget, so a small package can describe
+/// a chain of many thousands of rows. Recovery walks a row's children as it goes, so without a
+/// bound such a graph exhausts the stack. This matches the nesting the package type codec itself
+/// permits, so no type that arrived through it can exceed this.
+const MAX_DEBUG_TYPE_DEPTH: usize = 128;
+
+/// Recovers the type at `root`, including recursive types.
+///
+/// Recovery must start from an index rather than a row: a debug type graph records recursion as a
+/// cycle of indices, so without knowing the root's own index there is no way to tell that a child
+/// points back at it.
+///
+/// The reachable subgraph is partitioned into strongly connected components, which are recovered
+/// in dependency order. A component containing an aggregate is rebuilt through
+/// `RecursiveTypeBuilder`, which enforces the same guardedness rule as any other construction
+/// path, so a cycle that crosses no pointer, list, or function is rejected here too.
+pub fn recover_type_at<Exec: Idx, Src: Idx>(
+    root: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<(Type, Option<Arc<TypeExpr>>)> {
+    if let Some(recovered) = cached_types.get(&root) {
+        return Some(recovered.clone());
+    }
+
+    for component in reachable_components(root, debug_info)? {
+        recover_component(&component, debug_info, cached_types)?;
+    }
+
+    cached_types.get(&root).cloned()
+}
+
+/// The type table indices directly referenced by a row.
+fn row_children(ty: &DebugTypeInfo) -> Vec<DebugTypeIdx> {
+    match ty {
+        DebugTypeInfo::Pointer { pointee_type_idx } => alloc::vec![*pointee_type_idx],
+        DebugTypeInfo::Array { element_type_idx, .. } => alloc::vec![*element_type_idx],
+        DebugTypeInfo::Struct { fields, .. } => fields.iter().map(|f| f.type_idx).collect(),
+        DebugTypeInfo::Enum { discriminant_type_idx, variants, .. } => {
+            let mut children = alloc::vec![*discriminant_type_idx];
+            children.extend(variants.iter().filter_map(|v| v.type_idx));
+            children
+        },
+        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+            let mut children = Vec::new();
+            children.extend(return_type_idx.iter().copied());
+            children.extend(param_type_indices.iter().copied());
+            children
+        },
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Variadic | DebugTypeInfo::Unknown => {
+            Vec::new()
+        },
+    }
+}
+
+/// Strongly connected components of the subgraph reachable from `root`, dependencies first.
+fn reachable_components<Exec: Idx, Src: Idx>(
+    root: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+) -> Option<Vec<Vec<DebugTypeIdx>>> {
+    #[derive(Clone, Copy)]
+    struct State {
+        index: usize,
+        lowlink: usize,
+        on_stack: bool,
+    }
+
+    let mut state = FxHashMap::<DebugTypeIdx, State>::default();
+    let mut stack = Vec::new();
+    let mut components = Vec::new();
+    let mut next_index = 0usize;
+
+    // Each frame keeps its own child list. Recomputing it per edge would allocate and copy all of
+    // a node's children once per child, which is quadratic in a row's fanout and reachable from
+    // untrusted debug data.
+    let mut call_stack = alloc::vec![(root, 0usize, row_children(debug_info.get_type(root)?))];
+    state.insert(root, State { index: 0, lowlink: 0, on_stack: true });
+    next_index += 1;
+    stack.push(root);
+
+    while let Some(frame) = call_stack.last_mut() {
+        let node = frame.0;
+        let successor = if frame.1 < frame.2.len() {
+            let successor = frame.2[frame.1];
+            frame.1 += 1;
+            Some(successor)
+        } else {
+            None
+        };
+        if let Some(successor) = successor {
+            match state.get(&successor).copied() {
+                None => {
+                    let children = row_children(debug_info.get_type(successor)?);
+                    state.insert(
+                        successor,
+                        State {
+                            index: next_index,
+                            lowlink: next_index,
+                            on_stack: true,
+                        },
+                    );
+                    next_index += 1;
+                    stack.push(successor);
+                    call_stack.push((successor, 0, children));
+                },
+                Some(successor_state) if successor_state.on_stack => {
+                    let node_state = state.get_mut(&node).expect("visited");
+                    node_state.lowlink = node_state.lowlink.min(successor_state.index);
+                },
+                Some(_) => {},
+            }
+            continue;
+        }
+
+        call_stack.pop();
+        let node_state = *state.get(&node).expect("visited");
+        if node_state.lowlink == node_state.index {
+            let mut component = Vec::new();
+            while let Some(member) = stack.pop() {
+                state.get_mut(&member).expect("visited").on_stack = false;
+                component.push(member);
+                if member == node {
+                    break;
+                }
+            }
+            components.push(component);
+        }
+        if let Some(parent) = call_stack.last() {
+            let child_lowlink = node_state.lowlink;
+            let parent_state = state.get_mut(&parent.0).expect("visited");
+            parent_state.lowlink = parent_state.lowlink.min(child_lowlink);
+        }
+    }
+
+    Some(components)
+}
+
+/// Whether a recovered aggregate lays out exactly as its debug row records.
+fn layout_matches_row(ty: &Type, row: &DebugTypeInfo) -> bool {
+    match (ty, row) {
+        (Type::Struct(recovered), DebugTypeInfo::Struct { size, fields, .. }) => {
+            let recovered = recovered.get();
+            u32::try_from(recovered.size()).is_ok_and(|recovered_size| recovered_size == *size)
+                && recovered.fields().len() == fields.len()
+                && recovered
+                    .fields()
+                    .iter()
+                    .zip(fields)
+                    .all(|(recovered, row)| recovered.offset == row.offset)
+        },
+        (Type::Enum(recovered), DebugTypeInfo::Enum { size, variants, .. }) => {
+            let recovered = recovered.get();
+            u32::try_from(recovered.size_in_bytes())
+                .is_ok_and(|recovered_size| recovered_size == *size)
+                && recovered.variants().len() == variants.len()
+                && recovered.variant_offsets().zip(variants).all(|((offset, variant), row)| {
+                    variant.value.is_none() == row.payload_offset.is_none()
+                        && row.payload_offset.is_none_or(|expected| offset == expected)
+                })
+        },
+        _ => false,
+    }
+}
+
+fn is_aggregate_row(ty: &DebugTypeInfo) -> bool {
+    matches!(ty, DebugTypeInfo::Struct { .. } | DebugTypeInfo::Enum { .. })
+}
+
+/// Recover one strongly connected component, populating `cached_types` for each of its members.
+fn recover_component<Exec: Idx, Src: Idx>(
+    component: &[DebugTypeIdx],
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<()> {
+    let is_cyclic = component.len() > 1
+        || row_children(debug_info.get_type(component[0])?).contains(&component[0]);
+
+    if !is_cyclic {
+        // An ordinary type: every child is outside the component and already recovered.
+        let index = component[0];
+        if cached_types.contains_key(&index) {
+            return Some(());
+        }
+        let mut resolving = FxHashSet::default();
+        let recovered = debug_info.get_type(index)?.recover_registered_type_inner(
+            debug_info,
+            cached_types,
+            &mut resolving,
+        )?;
+        cached_types.insert(index, recovered);
+        return Some(());
+    }
+
+    recover_recursive_component(component, debug_info, cached_types)
+}
+
+fn recover_recursive_component<Exec: Idx, Src: Idx>(
+    component: &[DebugTypeIdx],
+    debug_info: &DebugInfo<Exec, Src>,
+    cached_types: &mut FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+) -> Option<()> {
+    use miden_assembly_syntax::ast::types::RecursiveTypeBuilder;
+
+    // Only aggregates can be recursive definitions. Any other row in the component is part of
+    // some aggregate's body. A component with no aggregate at all is a degenerate cycle, such as
+    // a pointer row that points at itself, which denotes no type.
+    let mut definitions = Vec::new();
+    for index in component {
+        if is_aggregate_row(debug_info.get_type(*index)?) {
+            definitions.push(*index);
+        }
+    }
+    if definitions.is_empty() {
+        return None;
+    }
+
+    // Names are the group's ordering key and must be distinct within it. Debug rows carry a name,
+    // but it may be absent, anonymous, or shared, so fall back to the table index, which is
+    // unique by construction.
+    let mut names = FxHashMap::<DebugTypeIdx, Arc<str>>::default();
+    let mut seen = alloc::collections::BTreeSet::<Arc<str>>::new();
+    for index in &definitions {
+        let declared = match debug_info.get_type(*index)? {
+            DebugTypeInfo::Struct { name_idx, .. } | DebugTypeInfo::Enum { name_idx, .. } => {
+                debug_info.get_string(*name_idx)
+            },
+            _ => None,
+        };
+        let name = match declared {
+            Some(name) if name.as_ref() != "<anon>" && !seen.contains(&name) => name,
+            _ => Arc::from(alloc::format!("#{}", index.to_usize())),
+        };
+        if !seen.insert(name.clone()) {
+            return None;
+        }
+        names.insert(*index, name);
+    }
+
+    let mut builder = RecursiveTypeBuilder::new();
+    for index in &definitions {
+        match debug_info.get_type(*index)? {
+            DebugTypeInfo::Struct { .. } => {
+                let template = struct_template(*index, debug_info, &names, cached_types, 0)?;
+                builder.define_struct(names[index].clone(), template);
+            },
+            DebugTypeInfo::Enum { .. } => {
+                let template = enum_template(*index, debug_info, &names, cached_types, 0)?;
+                builder.define_enum(names[index].clone(), template);
+            },
+            _ => return None,
+        }
+    }
+
+    // The builder rejects unguarded recursion, which is what makes a cycle crossing no barrier,
+    // or crossing only fixed-length arrays, fail here rather than producing an infinite type.
+    let built = builder.build().ok()?;
+    for index in &definitions {
+        let ty = built.get(&names[index])?.clone();
+        // The rebuilt type must describe the same memory the row does. `DebugTypeInfo` records no
+        // representation, so a row written from a packed or over-aligned aggregate rebuilds with
+        // the default layout, and its fields land at different offsets. Recovering it anyway
+        // would hand back a type that disagrees with the record it came from.
+        if !layout_matches_row(&ty, debug_info.get_type(*index)?) {
+            return None;
+        }
+        cached_types.insert(*index, (ty, None));
+    }
+
+    // The component also holds the rows the cycle passes *through* -- the pointer, list, or
+    // function that breaks it, and any aggregate nested beneath one. A debug variable may name
+    // any of those, so recover them too. Their children are either cached aggregates or other
+    // rows of this component, so the ordinary path terminates now that the aggregates are known.
+    for index in component {
+        if cached_types.contains_key(index) {
+            continue;
+        }
+        let mut resolving = FxHashSet::default();
+        let recovered = debug_info.get_type(*index)?.recover_registered_type_inner(
+            debug_info,
+            cached_types,
+            &mut resolving,
+        )?;
+        cached_types.insert(*index, recovered);
+    }
+
+    Some(())
+}
+
+/// Build a struct definition template from a debug row, mapping references back into the group to
+/// named back-references and everything else to already-recovered types.
+fn struct_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
+) -> Option<miden_assembly_syntax::ast::types::StructTemplate> {
+    use miden_assembly_syntax::ast::types::{FieldTemplate, StructTemplate, TypeRepr};
+
+    let DebugTypeInfo::Struct { name_idx, fields, .. } = debug_info.get_type(index)? else {
+        return None;
+    };
+    let name = debug_info.get_string(*name_idx);
+    let mut field_templates = Vec::with_capacity(fields.len());
+    for field in fields {
+        field_templates.push(FieldTemplate {
+            name: debug_info.get_string(field.name_idx),
+            ty: type_template(field.type_idx, debug_info, names, cached_types, depth)?,
+        });
+    }
+    // `DebugTypeInfo::Struct` does not record the representation, so recovery is limited to the
+    // default one, exactly as it already is for non-recursive structs.
+    Some(StructTemplate {
+        name: name.filter(|n| n.as_ref() != "<anon>"),
+        repr: TypeRepr::Default,
+        fields: field_templates,
+    })
+}
+
+fn enum_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
+) -> Option<miden_assembly_syntax::ast::types::EnumTemplate> {
+    use miden_assembly_syntax::ast::types::{EnumTemplate, VariantTemplate};
+
+    let DebugTypeInfo::Enum {
+        name_idx,
+        discriminant_type_idx,
+        variants,
+        ..
+    } = debug_info.get_type(index)?
+    else {
+        return None;
+    };
+    let name = debug_info.get_string(*name_idx)?;
+    // The discriminant is an integer primitive, so it is never part of the recursion.
+    let (discriminant, _) = cached_types.get(discriminant_type_idx)?.clone();
+    let mut variant_templates = Vec::with_capacity(variants.len());
+    for variant in variants {
+        variant_templates.push(VariantTemplate {
+            name: debug_info.get_string(variant.name_idx)?,
+            value: match variant.type_idx {
+                Some(ty) => Some(type_template(ty, debug_info, names, cached_types, depth)?),
+                None => None,
+            },
+            discriminant_value: Some(variant.discriminant),
+        });
+    }
+    Some(EnumTemplate {
+        name,
+        discriminant,
+        variants: variant_templates,
+    })
+}
+
+fn type_template<Exec: Idx, Src: Idx>(
+    index: DebugTypeIdx,
+    debug_info: &DebugInfo<Exec, Src>,
+    names: &FxHashMap<DebugTypeIdx, Arc<str>>,
+    cached_types: &FxHashMap<DebugTypeIdx, (Type, Option<Arc<TypeExpr>>)>,
+    depth: usize,
+) -> Option<miden_assembly_syntax::ast::types::TypeTemplate> {
+    use miden_assembly_syntax::ast::types::TypeTemplate;
+
+    // The rows between a definition and its back-reference are walked here, and a decoded graph
+    // can chain arbitrarily many of them together.
+    if depth >= MAX_DEBUG_TYPE_DEPTH {
+        return None;
+    }
+    let depth = depth + 1;
+
+    // A reference back to a group member becomes a back-reference by name.
+    if let Some(name) = names.get(&index) {
+        return Some(TypeTemplate::rec(name.clone()));
+    }
+
+    // Anything already recovered is outside the group and is embedded as an ordinary type.
+    if let Some((ty, _)) = cached_types.get(&index) {
+        return Some(TypeTemplate::Type(ty.clone()));
+    }
+
+    // Otherwise this row is part of the group's body: structure on the path to a back-reference.
+    Some(match debug_info.get_type(index)? {
+        DebugTypeInfo::Pointer { pointee_type_idx } => TypeTemplate::ptr(type_template(
+            *pointee_type_idx,
+            debug_info,
+            names,
+            cached_types,
+            depth,
+        )?),
+        DebugTypeInfo::Array { element_type_idx, count } => {
+            let element = type_template(*element_type_idx, debug_info, names, cached_types, depth)?;
+            match count {
+                Some(count) => TypeTemplate::array(element, usize::try_from(*count).ok()?),
+                None => TypeTemplate::list(element),
+            }
+        },
+        DebugTypeInfo::Struct { .. } => TypeTemplate::Struct(alloc::boxed::Box::new(
+            struct_template(index, debug_info, names, cached_types, depth)?,
+        )),
+        DebugTypeInfo::Enum { .. } => TypeTemplate::Enum(alloc::boxed::Box::new(enum_template(
+            index,
+            debug_info,
+            names,
+            cached_types,
+            depth,
+        )?)),
+        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+            use miden_assembly_syntax::ast::types::CallConv;
+
+            let mut params = Vec::with_capacity(param_type_indices.len());
+            for param in param_type_indices {
+                params.push(type_template(*param, debug_info, names, cached_types, depth)?);
+            }
+            let mut results = Vec::new();
+            if let Some(result) = return_type_idx {
+                // A void return is recorded as a primitive, and recovers as an empty result list.
+                if !matches!(
+                    debug_info.get_type(*result)?,
+                    DebugTypeInfo::Primitive(DebugPrimitiveType::Void)
+                ) {
+                    results.push(type_template(*result, debug_info, names, cached_types, depth)?);
+                }
+            }
+            TypeTemplate::function(CallConv::Fast, params, results)
+        },
+        // A primitive reached here was not recovered as part of an earlier component, which
+        // means the graph is malformed.
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Variadic | DebugTypeInfo::Unknown => {
+            return None;
+        },
+    })
+}
+
 impl DebugTypeInfo {
     /// Recovers the structural and source-level types represented by this debug type.
     ///
@@ -846,7 +1293,9 @@ impl DebugTypeInfo {
                 }
             },
             Self::Struct { name_idx, size, fields } => {
-                if fields.len() > usize::from(u8::MAX) + 1 {
+                // `StructType` admits at most 255 fields, since the wire format encodes the
+                // count as a u8. Admitting 256 here would reach its constructor and panic.
+                if fields.len() > usize::from(u8::MAX) {
                     return None;
                 }
 
@@ -895,7 +1344,7 @@ impl DebugTypeInfo {
                 } else {
                     ast::types::StructType::named(name.clone(), structural_fields)
                 };
-                let ty = Type::Struct(Arc::new(structural_ty));
+                let ty = Type::from(structural_ty);
 
                 let declared_name = if is_anonymous {
                     Some(None)
@@ -996,8 +1445,9 @@ impl DebugTypeInfo {
                 if enum_ty.size_in_bytes() != *size as usize {
                     return None;
                 }
-                Some((Type::Enum(Arc::new(enum_ty)), None))
+                Some((Type::from(Arc::new(enum_ty)), None))
             },
+            Self::Variadic => Some((Type::Variadic, None)),
             Self::Unknown => Some((Type::Unknown, None)),
         }
     }
@@ -1010,6 +1460,10 @@ impl DebugTypeInfo {
     ) -> Option<(Type, Option<Arc<TypeExpr>>)> {
         if let Some(recovered) = cached_types.get(&type_idx) {
             return Some(recovered.clone());
+        }
+        // `resolving` holds one entry per level currently in flight, so its size is the depth.
+        if resolving.len() >= MAX_DEBUG_TYPE_DEPTH {
+            return None;
         }
         if !resolving.insert(type_idx) {
             return None;
@@ -1063,7 +1517,7 @@ fn checked_type_size_in_bytes(ty: &Type) -> Option<usize> {
 
 fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
     match ty {
-        Type::Unknown | Type::Never => Some(0),
+        Type::Unknown | Type::Never | Type::Variadic => Some(0),
         Type::I1 => Some(1),
         Type::I8 | Type::U8 => Some(8),
         Type::I16 | Type::U16 => Some(16),
@@ -1083,7 +1537,8 @@ fn checked_type_size_in_bits(ty: &Type) -> Option<usize> {
                 padded_element_size.checked_mul(count - 1)?.checked_add(element_size)
             },
         },
-        Type::List(_) => None,
+        // A list is a fat pointer: a 32-bit length followed by a 32-bit pointer.
+        Type::List(_) => Some(64),
     }
 }
 
@@ -1184,9 +1639,14 @@ pub struct FunctionInfo<N: Idx> {
     pub source_node: OptionalIndex<N>,
     /// Type signature of this function (index into type table, optional)
     pub type_idx: OptionalIndex<DebugTypeIdx>,
-    /// Linkage name / mangled name (index into string table, optional)
+    /// Assembler/linker-visible name (index into string table, optional).
+    ///
+    /// Set when the name known to the linker differs from the name as written in the source code
+    /// (which is tracked by name_idx).
     pub linkage_name_idx: OptionalIndex<DebugStringIdx>,
-    /// Name of the function (index into string table)
+    /// Name of the function (index into string table).
+    ///
+    /// When `linkage_name_idx` is unset, this is also the assembler/linker-visible name.
     pub name_idx: DebugStringIdx,
     /// File containing this function (index into file table)
     pub file_idx: DebugFileIdx,
@@ -1367,16 +1827,334 @@ mod tests {
         assert!(dynamic_declared.is_none());
     }
 
+    fn recursive_node_type() -> Type {
+        use miden_assembly_syntax::ast::types::{
+            RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate,
+        };
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder.define_struct(
+            "Node",
+            StructTemplate::named(
+                "Node",
+                TypeRepr::Default,
+                [
+                    ("value", TypeTemplate::from(Type::U32)),
+                    ("next", TypeTemplate::ptr(TypeTemplate::rec("Node"))),
+                ],
+            ),
+        );
+        builder.build().expect("Node should build").remove("Node").expect("Node")
+    }
+
+    #[test]
+    fn register_and_recover_a_self_recursive_struct() {
+        let node = recursive_node_type();
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let node_idx = builder
+            .register_debug_type(None, None, &node)
+            .expect("a recursive struct should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = recover_type_at(node_idx, debug_info.as_ref(), &mut cache)
+            .expect("a recursive struct should be recoverable");
+
+        // The debug format stores one name per aggregate row, so it cannot carry both a
+        // definition's binding key and its declared name. Recovery therefore reproduces the
+        // type's shape rather than its exact identity, in the same way it already cannot
+        // reproduce `TypeRepr`. What must survive is the recursion itself.
+        let Type::Struct(recovered_ref) = &recovered else {
+            panic!("expected a struct")
+        };
+        assert!(recovered_ref.is_recursive());
+        assert_eq!(recovered_ref.name().as_deref(), Some("Node"));
+        assert_eq!(recovered_ref.size(), node.size_in_bytes());
+
+        let body = recovered_ref.get();
+        assert_eq!(body.fields().len(), 2);
+        assert_eq!(body.fields()[0].ty, Type::U32);
+        let Type::Ptr(next) = &body.fields()[1].ty else {
+            panic!("expected a pointer")
+        };
+        // Descending through the backedge lands back on the recovered type.
+        assert_eq!(next.pointee(), &recovered);
+    }
+
+    #[test]
+    fn register_and_recover_mutually_recursive_structs() {
+        use miden_assembly_syntax::ast::types::{
+            RecursiveTypeBuilder, StructTemplate, TypeRepr, TypeTemplate,
+        };
+
+        let mut builder = RecursiveTypeBuilder::new();
+        builder
+            .define_struct(
+                "A",
+                StructTemplate::named(
+                    "A",
+                    TypeRepr::Default,
+                    [("b", TypeTemplate::ptr(TypeTemplate::rec("B")))],
+                ),
+            )
+            .define_struct(
+                "B",
+                StructTemplate::named(
+                    "B",
+                    TypeRepr::Default,
+                    [("a", TypeTemplate::ptr(TypeTemplate::rec("A")))],
+                ),
+            );
+        let built = builder.build().expect("should build");
+        let a = built.get("A").expect("A").clone();
+
+        let mut debug_builder = PackageDebugInfoBuilder::default();
+        let a_idx = debug_builder
+            .register_debug_type(None, None, &a)
+            .expect("a mutual group should be registerable");
+        let debug_info = debug_builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = recover_type_at(a_idx, debug_info.as_ref(), &mut cache)
+            .expect("a mutual group should be recoverable");
+
+        // A -> b -> B -> a must come back around to A.
+        let Type::Struct(a_ref) = &recovered else {
+            panic!("expected a struct")
+        };
+        assert!(a_ref.is_recursive());
+        assert_eq!(a_ref.name().as_deref(), Some("A"));
+
+        let a_body = a_ref.get();
+        let Type::Ptr(to_b) = &a_body.fields()[0].ty else {
+            panic!("expected a pointer")
+        };
+        let Type::Struct(b_ref) = to_b.pointee() else {
+            panic!("expected a struct")
+        };
+        assert_eq!(b_ref.name().as_deref(), Some("B"));
+
+        let b_body = b_ref.get();
+        let Type::Ptr(to_a) = &b_body.fields()[0].ty else {
+            panic!("expected a pointer")
+        };
+        assert_eq!(to_a.pointee(), &recovered);
+    }
+
+    #[test]
+    fn recovery_rejects_a_cycle_that_crosses_no_barrier() {
+        // A struct whose field points straight back at the struct denotes an infinitely sized
+        // type. Emission cannot produce this, but a corrupt or hostile package can.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Bad");
+        let field_name = builder.add_string("self");
+        let reserved = builder.add_type(DebugTypeInfo::Unknown);
+        builder.replace_type_for_test(
+            reserved,
+            DebugTypeInfo::Struct {
+                name_idx,
+                size: 0,
+                fields: vec![DebugFieldInfo {
+                    name_idx: field_name,
+                    type_idx: reserved,
+                    offset: 0,
+                }],
+            },
+        );
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(reserved, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_rejects_a_cycle_with_no_aggregate() {
+        // A pointer row that points at itself denotes no type at all.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let reserved = builder.add_type(DebugTypeInfo::Unknown);
+        builder
+            .replace_type_for_test(reserved, DebugTypeInfo::Pointer { pointee_type_idx: reserved });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(reserved, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_from_a_row_inside_the_cycle_succeeds() {
+        // A debug variable's type_id can name any row, including the pointer that closes a
+        // recursive cycle. Recovering from there must work, not just from the aggregate.
+        let node = recursive_node_type();
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let node_idx = builder.register_debug_type(None, None, &node).expect("registerable");
+        let debug_info = builder.build();
+
+        let DebugTypeInfo::Struct { fields, .. } = &debug_info[node_idx] else {
+            panic!("expected a struct row");
+        };
+        let pointer_idx = fields[1].type_idx;
+        assert!(
+            matches!(debug_info[pointer_idx], DebugTypeInfo::Pointer { .. }),
+            "expected the `next` field to be a pointer row"
+        );
+
+        let mut cache = FxHashMap::default();
+        let (recovered, _) = recover_type_at(pointer_idx, debug_info.as_ref(), &mut cache)
+            .expect("a row inside the cycle should be recoverable");
+        assert!(recovered.is_pointer());
+    }
+
+    #[test]
+    fn recovery_rejects_a_struct_row_with_too_many_fields() {
+        // `StructType` admits at most 255 fields, so a row carrying 256 must be rejected rather
+        // than reaching the constructor and panicking.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Big");
+        let u8_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let fields = (0..256)
+            .map(|i| DebugFieldInfo {
+                name_idx: builder.add_string(alloc::format!("f{i}")),
+                type_idx: u8_idx,
+                offset: i,
+            })
+            .collect::<Vec<_>>();
+        let big = builder.add_type(DebugTypeInfo::Struct { name_idx, size: 256, fields });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(big, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn recovery_handles_a_long_decoded_pointer_chain_without_aborting() {
+        // A metered decode accepts a graph like this, so recovery has to survive it: a struct
+        // whose field starts a long pointer chain that loops back to the struct.
+        const POINTER_COUNT: u32 = 100_000;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_name = builder.add_string("Node");
+        let field_name = builder.add_string("next");
+        let root = DebugTypeIdx::from(0);
+        let first_pointer = DebugTypeIdx::from(1);
+        assert_eq!(
+            builder.add_type(DebugTypeInfo::Struct {
+                name_idx: struct_name,
+                size: 4,
+                fields: vec![DebugFieldInfo {
+                    name_idx: field_name,
+                    type_idx: first_pointer,
+                    offset: 0,
+                }],
+            }),
+            root
+        );
+        for index in 1..=POINTER_COUNT {
+            let target = if index == POINTER_COUNT {
+                root
+            } else {
+                DebugTypeIdx::from(index + 1)
+            };
+            assert_eq!(
+                builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: target }),
+                DebugTypeIdx::from(index)
+            );
+        }
+
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        // Either a recovered type or a clean refusal is fine; aborting is not.
+        let _ = recover_type_at(root, debug_info.as_ref(), &mut cache);
+    }
+
+    #[test]
+    fn recovery_rejects_a_recursive_row_whose_layout_does_not_match() {
+        // A packed row: size 9 with fields at 0/1/5. Recovery rebuilds the type with the default
+        // representation, which lays those fields out at 0/4/8 with size 12, so the recovered
+        // type does not describe the same memory the row does.
+        let mut builder = PackageDebugInfoBuilder::default();
+        let name_idx = builder.add_string("Packed");
+        let u8_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8));
+        let u32_idx = builder.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let root = builder.add_type(DebugTypeInfo::Unknown);
+        let pointer = builder.add_type(DebugTypeInfo::Pointer { pointee_type_idx: root });
+        let a = builder.add_string("a");
+        let b = builder.add_string("b");
+        let next = builder.add_string("next");
+        let fields = vec![
+            DebugFieldInfo { name_idx: a, type_idx: u8_idx, offset: 0 },
+            DebugFieldInfo {
+                name_idx: b,
+                type_idx: u32_idx,
+                offset: 1,
+            },
+            DebugFieldInfo {
+                name_idx: next,
+                type_idx: pointer,
+                offset: 5,
+            },
+        ];
+        builder.replace_type_for_test(root, DebugTypeInfo::Struct { name_idx, size: 9, fields });
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        assert!(recover_type_at(root, debug_info.as_ref(), &mut cache).is_none());
+    }
+
+    #[test]
+    fn register_and_recover_list_round_trips() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let list_ty = Type::List(Arc::new(Type::U16));
+        let list_idx = builder
+            .register_debug_type(None, None, &list_ty)
+            .expect("list should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = debug_info[list_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("list should be recoverable");
+
+        assert_eq!(recovered, list_ty);
+    }
+
+    #[test]
+    fn register_and_recover_struct_containing_a_list_field() {
+        use miden_assembly_syntax::ast::types::StructType;
+
+        let mut builder = PackageDebugInfoBuilder::default();
+        let struct_ty = Type::from(Arc::new(StructType::named(
+            Arc::from("holder"),
+            [
+                (Arc::from("count"), Type::U32),
+                (Arc::from("items"), Type::List(Arc::new(Type::U8))),
+            ],
+        )));
+        let struct_idx = builder
+            .register_debug_type(None, None, &struct_ty)
+            .expect("struct should be registerable");
+        let debug_info = builder.build();
+        let mut cache = FxHashMap::default();
+
+        let (recovered, _) = debug_info[struct_idx]
+            .recover_registered_type(debug_info.as_ref(), &mut cache)
+            .expect("struct containing a list should be recoverable");
+
+        assert_eq!(recovered, struct_ty);
+    }
+
     #[test]
     fn recover_registered_struct_and_enum_round_trip() {
         use miden_assembly_syntax::ast::types::{ArrayType, EnumType, StructType, Variant};
 
         let array = Type::Array(Arc::new(ArrayType::new(Type::U8, 2)));
-        let struct_ty = Type::Struct(Arc::new(StructType::named(
+        let struct_ty = Type::from(Arc::new(StructType::named(
             Arc::from("pair"),
             [(Arc::from("left"), Type::U32), (Arc::from("right"), array)],
         )));
-        let enum_ty = Type::Enum(Arc::new(
+        let enum_ty = Type::from(Arc::new(
             EnumType::new(
                 Arc::from("option_u32"),
                 Type::U8,

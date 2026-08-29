@@ -59,11 +59,11 @@ impl RangeChecker {
         self.lookups.entry(value).and_modify(|v| *v += 1).or_insert(1);
     }
 
-    /// Adds range check lookups from the stack or memory to this [RangeChecker] instance.
+    /// Adds a batch of range-check lookups to this [RangeChecker] instance.
     pub fn add_range_checks(&mut self, values: &[u16]) {
-        // range checks requests only come from memory or from the stack, which always request 2 or
-        // 4 lookups respectively.
-        debug_assert!(values.len() == 2 || values.len() == 4);
+        // Callers provide two Merkle-depth, U32DIV, or memory-delta values; four u32 helper
+        // values; or five Merkle-index witness values.
+        debug_assert!(matches!(values.len(), 2 | 4 | 5));
 
         for value in values.iter() {
             // add the specified value to the trace of this range checker's lookups.
@@ -111,9 +111,8 @@ impl RangeChecker {
             prev_value = value;
         }
 
-        // Pad the trace with an extra row of 0 lookups for u16::MAX so that when b_range is
-        // built there is space for the inclusion of u16::MAX range check lookups before the
-        // trace ends.
+        // Preserve the trailing zero-multiplicity u16::MAX row in the range-table layout. It
+        // contributes zero to the RangeCheck sum, and its zero delta is permitted by the range AIR.
         write_trace_row(sink, &mut step, 0, (u16::MAX).into());
         step
     }
@@ -123,8 +122,7 @@ impl RangeChecker {
 
     /// Returns the number of rows needed to support all 16-bit lookups requested by the VM.
     pub fn get_number_range_checker_rows(&self) -> usize {
-        // pad the trace length by one, to account for an extra row of the u16::MAX value at the end
-        // of the trace, required for building the `b_range` column.
+        // Account for the trailing zero-multiplicity u16::MAX row emitted by `emit_table_rows`.
         let mut num_rows = 1;
 
         let mut prev_value = 0u16;

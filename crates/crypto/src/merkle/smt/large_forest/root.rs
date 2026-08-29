@@ -1,6 +1,5 @@
 //! This module contains utility types for working with roots and trees as part of the forest.
 
-#[cfg(feature = "serde")]
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
@@ -29,7 +28,6 @@ pub type VersionId = u64;
 /// This is an arbitrary, user-provided identifier that is used to disambiguate cases where trees in
 /// distinct lineages are otherwise identical and have the same root.
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LineageId([u8; 32]);
 
 impl LineageId {
@@ -58,7 +56,6 @@ impl core::fmt::Display for LineageId {
     }
 }
 
-#[cfg(feature = "serde")]
 impl Serializable for LineageId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_bytes(&self.0)
@@ -69,7 +66,6 @@ impl Serializable for LineageId {
     }
 }
 
-#[cfg(feature = "serde")]
 impl Deserializable for LineageId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self(source.read_array()?))

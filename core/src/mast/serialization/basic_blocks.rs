@@ -302,6 +302,16 @@ impl BasicBlockDataDecoder<'_> {
             global_op_offset = batch_ops_end;
         }
 
+        // The encoder always emits batches which exactly cover the operations vector, so any
+        // leftover operations mean the batch metadata does not describe this payload.
+        if global_op_offset != operations.len() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "batch metadata covers {} operations, but {} were serialized",
+                global_op_offset,
+                operations.len()
+            )));
+        }
+
         Ok(op_batches)
     }
 }
@@ -417,6 +427,26 @@ mod tests {
             ),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn decode_operations_rejects_operations_not_covered_by_batches() {
+        let mut bytes = Vec::new();
+
+        // three operations on the wire
+        vec![Operation::Add, Operation::Mul, Operation::Noop].write_into(&mut bytes);
+
+        // but the batch metadata describes a single batch holding only the first one
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x01, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("batch metadata covers 1 operations, but 3 were serialized"));
     }
 
     #[test]

@@ -21,7 +21,6 @@ mod tests;
 // ================================================================================================
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct StoreNode {
     left: Word,
     right: Word,
@@ -91,7 +90,6 @@ pub struct StoreNode {
 /// assert_eq!(store.num_internal_nodes() - 255, 10);
 /// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MerkleStore {
     nodes: Map<Word, StoreNode>,
 }

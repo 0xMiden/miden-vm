@@ -437,9 +437,11 @@ fn test_op_u32div_by_zero() {
         StackInputs::new(&[Felt::new_unchecked(0), Felt::new_unchecked(10)]).unwrap(),
     );
     let mut tracer = NoopTracer;
+    let stack_before = processor.stack_top().to_vec();
 
-    let result = op_u32div(&mut processor, &mut tracer);
-    assert!(result.is_err());
+    let err = op_u32div(&mut processor, &mut tracer).unwrap_err();
+    assert!(matches!(err, OperationError::DivideByZero));
+    assert_eq!(processor.stack_top(), stack_before);
 }
 
 // BITWISE OPERATIONS

@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::boxed::Box;
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
     Felt,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST, fold_deferred_root},
@@ -20,8 +20,6 @@ use miden_crypto::stark::{
 use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::{SerdeCompat, wincode};
-
-const STARK_SECURITY_LEVEL: u32 = 96;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -130,9 +128,7 @@ impl Verifier {
             .copied()
             .reduce(fold_deferred_root)
             .expect("precompile roots were checked to be non-empty");
-        miden_precompiles_prover::verify_deferred(&proof.proof, aggregate_root)?;
-
-        Ok(STARK_SECURITY_LEVEL)
+        Ok(miden_precompiles_prover::verify_deferred(&proof.proof, aggregate_root)?)
     }
 
     fn validate_precompile(
@@ -194,6 +190,12 @@ impl Verifier {
         Ok(())
     }
 
+    /// Verifies the Miden VM STARK proof and returns its conjectured security level in bits.
+    ///
+    /// The level depends on the proof's largest AIR trace height, its commitment scheme's column
+    /// alignment (which varies by hash function), and its kernel procedure count (bound through
+    /// the kernel witness) as well as its PCS parameters, so it is computed from the verified
+    /// proof and claim rather than fixed by the parameter preset.
     fn verify_vm(&self, claim: &ExecutionClaim, proof: &VmProof) -> Result<u32, VerificationError> {
         let program_root = claim.program_root();
         let pub_inputs = PublicInputs::new(
@@ -207,6 +209,7 @@ impl Verifier {
         let stark = &proof.proof;
         let proof_bytes = stark.bytes();
         let params = config::pcs_params();
+        let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
         match stark.hash_fn() {
             HashFunction::Blake3_256 => {
                 let config = config::blake3_256_config(params, config::RELATION_DIGEST);
@@ -229,14 +232,22 @@ impl Verifier {
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
         }
-        .map_err(|error| {
-            VerificationError::StarkVerificationError(program_root, Box::new(error))
-        })?;
-
-        Ok(STARK_SECURITY_LEVEL)
+        .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
+        .map(|(log_max_height, alignment)| {
+            security::conjectured_security_level_for_alignment(
+                params.num_queries() as u32,
+                params.query_pow_bits() as u32,
+                params.deep_pow_bits() as u32,
+                params.folding_pow_bits() as u32,
+                log_max_height,
+                num_kernel_procedures,
+                alignment,
+            )
+        })
     }
 
-    /// Verifies a multi-AIR STARK proof for the Miden VM statement.
+    /// Verifies a multi-AIR STARK proof for the Miden VM statement, returning the proof's largest
+    /// AIR log height and the LMCS's column alignment for grading.
     ///
     /// Pre-seeds the challenger with protocol parameters, AIR public values, and statement
     /// `aux_inputs` (program hash, final deferred root, and kernel-procedure digests). Then
@@ -247,7 +258,7 @@ impl Verifier {
         public_values: &[Felt],
         aux_inputs: &[Felt],
         proof_bytes: &[u8],
-    ) -> Result<(), StarkVerificationError>
+    ) -> Result<(u32, usize), StarkVerificationError>
     where
         SC: StarkConfig<Felt, QuadFelt>,
         <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
@@ -283,7 +294,10 @@ impl Verifier {
         VerifierInstance::new(config, &statement, None)
             .expect("Miden AIRs declare no preprocessed columns")
             .verify(&proof, challenger)?;
-        Ok(())
+
+        let log_max_height =
+            u32::from(proof.log_trace_heights().iter().copied().max().unwrap_or(0));
+        Ok((log_max_height, config.lmcs().alignment()))
     }
 }
 

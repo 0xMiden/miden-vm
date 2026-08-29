@@ -40,7 +40,7 @@ use crate::{
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(u8)]
 pub enum ModuleKind {

@@ -84,7 +84,7 @@ end
 #! Verifies one FRI query.
 #!
 #! This procedure is specialized to the case when the remainder polynomial, used in the final check,
-#! is expected to have degree at most 64.
+#! is expected to have degree less than 64.
 #! This procedure is exactly the same as `verify_query_128` except for the remainder polynomial check,
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
@@ -140,7 +140,7 @@ end
 #! Verifies one FRI query.
 #!
 #! This procedure is specialized to the case when the remainder polynomial, used in the final check,
-#! is expected to have degree at most 128.
+#! is expected to have degree less than 128.
 #! This procedure is exactly the same as `verify_query_64` except for the remainder polynomial check,
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
@@ -206,7 +206,7 @@ end
 #!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
 #!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
-#!   layer_ptr + 1 points to the first [alpha0, alpha1, t_depth, d_size] where d_size is the size
+#!   layer_ptr + 4 points to the first [d_size, t_depth, alpha0, alpha1] where d_size is the size
 #!   of initial domain divided by 4, t_depth is the depth of the Merkle tree commitment to the
 #!   first layer and (alpha0, alpha1) is the first challenge used in folding the first layer.
 #!   Both t_depth and d_size are expected to be smaller than 2^32. Otherwise, the result of
@@ -220,8 +220,8 @@ end
 #!   [query_ptr ... layer_ptr ... rem_ptr ...]
 #!
 #! This means for example that:
-#! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
-#! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
+#! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
+#! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
 proc verify_64
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
@@ -280,7 +280,7 @@ end
 #!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
 #!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
-#!   layer_ptr + 1 points to the first [alpha0, alpha1, t_depth, d_size] where d_size is the size
+#!   layer_ptr + 4 points to the first [d_size, t_depth, alpha0, alpha1] where d_size is the size
 #!   of initial domain divided by 4, t_depth is the depth of the Merkle tree commitment to the
 #!   first layer and (alpha0, alpha1) is the first challenge used in folding the first layer.
 #!   Both t_depth and d_size are expected to be smaller than 2^32. Otherwise, the result of
@@ -294,8 +294,8 @@ end
 #!   [query_ptr ... layer_ptr ... rem_ptr ...]
 #!
 #! This means for example that:
-#! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
-#! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
+#! 1. rem_ptr - 4 points to the last [d_size, t_depth, alpha0, alpha1] word.
+#! 2. layer_ptr - 4 points to the last (poe, p, e0, e1) word.
 proc verify_128
 
     # Store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries.
@@ -347,7 +347,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 pub proc verify
-    # Get domain generator and pointer to the remainder codeword.
+    # Get domain generator and pointer to the remainder polynomial.
     exec.constants::get_lde_domain_generator
     exec.constants::get_remainder_poly_address
     # => [remainder_poly_ptr, g, ...]

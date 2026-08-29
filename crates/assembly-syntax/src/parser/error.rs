@@ -170,6 +170,13 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
+    #[error("control-flow nesting depth exceeded")]
+    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    ControlFlowNestingDepthExceeded {
+        #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
         #[label]
@@ -308,9 +315,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help(
-        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
-    ))]
+    #[diagnostic(help("expected one of: '@packed', '@packed(N)', '@transparent', or '@align(N)'"))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,

@@ -1,6 +1,9 @@
 use alloc::{boxed::Box, sync::Arc};
 
-use miden_assembly_syntax::Report;
+use miden_assembly_syntax::{
+    Report,
+    ast::types::{EnumRef, RecTypeRef, StructRef},
+};
 use miden_core::mast::MastNodeId;
 use miden_debug_types::{Location, Uri};
 use miden_utils_indexing::{Idx, IndexedVecError};
@@ -42,6 +45,12 @@ pub struct DebugInfoBuilder<Exec: Idx, Src: Idx> {
     location_indices: FxHashMap<DebugLoc, DebugLocIdx>,
     /// Provides uniquing of locations stored in the locations table of the underlying `DebugInfo`
     type_indices: FxHashMap<DebugTypeInfo, DebugTypeIdx>,
+    /// Recursive aggregates whose rows are reserved but not yet finalized.
+    ///
+    /// A recursive aggregate's row must exist before its body is registered, so that the
+    /// backedge has an index to point at. Lookups here are cheap: `RecTypeRef` hashes by its
+    /// group's cached hash and compares by pointer first.
+    reserved_recursive_types: FxHashMap<RecTypeRef, DebugTypeIdx>,
     /// The debug info being built
     debug_info: Box<DebugInfo<Exec, Src>>,
 }
@@ -64,6 +73,7 @@ impl<Exec: Idx, Src: Idx> Default for DebugInfoBuilder<Exec, Src> {
             string_indices: Default::default(),
             location_indices: Default::default(),
             type_indices: Default::default(),
+            reserved_recursive_types: Default::default(),
             debug_info: Default::default(),
         }
     }
@@ -75,6 +85,7 @@ impl<Exec: Idx + Clone, Src: Idx + Clone> Clone for DebugInfoBuilder<Exec, Src> 
             string_indices: self.string_indices.clone(),
             location_indices: self.location_indices.clone(),
             type_indices: self.type_indices.clone(),
+            reserved_recursive_types: self.reserved_recursive_types.clone(),
             debug_info: self.debug_info.clone(),
         }
     }
@@ -169,6 +180,7 @@ impl<Exec: Idx, Src: Idx> From<Box<DebugInfo<Exec, Src>>> for DebugInfoBuilder<E
             string_indices,
             location_indices,
             type_indices,
+            reserved_recursive_types: Default::default(),
             debug_info,
         }
     }
@@ -320,6 +332,27 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
         }
     }
 
+    /// Reserves a row for a type whose body has not been registered yet.
+    ///
+    /// The row is deliberately kept out of the uniquing map: it holds a placeholder, and uniquing
+    /// against a placeholder would let an unrelated type collapse onto it. Only
+    /// [`Self::finish_reserved_type`] makes the row visible to uniquing.
+    fn reserve_type(&mut self) -> DebugTypeIdx {
+        self.debug_info.types.push(DebugTypeInfo::Unknown).expect("too many types")
+    }
+
+    /// Fills in a row reserved by [`Self::reserve_type`], and makes it available for uniquing.
+    fn finish_reserved_type(&mut self, index: DebugTypeIdx, ty: DebugTypeInfo) {
+        self.debug_info.types[index] = ty.clone();
+        self.type_indices.entry(ty).or_insert(index);
+    }
+
+    /// Overwrite a row, for tests that need to build a cyclic type table by hand.
+    #[cfg(test)]
+    pub(crate) fn replace_type_for_test(&mut self, index: DebugTypeIdx, ty: DebugTypeInfo) {
+        self.debug_info.types[index] = ty;
+    }
+
     /// Appends a type without uniquing it, while keeping the builder's type cache coherent.
     ///
     /// This is used when importing a complete type table: all output indices must be reserved
@@ -335,17 +368,27 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 // ================================================================================================
 
 impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
-    /// Look up the index of a function info record by it's [`miden_assembly_syntax::Path`].
+    /// Look up the index of a function info record by its [`miden_assembly_syntax::Path`].
+    ///
+    /// The path is matched against both the linkage name and the source name of each function.
+    /// Linkage name matches take precedence over source name matches.
     pub fn get_function_index_by_path(
         &self,
         path: &miden_assembly_syntax::Path,
     ) -> Option<DebugFunctionIdx> {
         let path = path.as_str();
-        self.debug_info
-            .functions
-            .iter()
-            .position(|f| self.debug_info[f.name_idx].as_ref() == path)
-            .map(|pos| DebugFunctionIdx::from(pos as u32))
+        let mut name_match = None;
+        for (pos, f) in self.debug_info.functions.iter().enumerate() {
+            if let Some(linkage_name_idx) = f.linkage_name_idx.into_option()
+                && self.debug_info[linkage_name_idx].as_ref() == path
+            {
+                return Some(DebugFunctionIdx::from(pos as u32));
+            }
+            if name_match.is_none() && self.debug_info[f.name_idx].as_ref() == path {
+                name_match = Some(pos);
+            }
+        }
+        name_match.map(|pos| DebugFunctionIdx::from(pos as u32))
     }
 
     /// Adds a function to the function table.
@@ -397,9 +440,10 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
 
 impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     /// Add `node` to the set of sources nodes in the debug info source graph
-    pub fn add_node(&mut self, node: SourceNode<Exec, Src>) -> Result<Src, IndexedVecError> {
+    pub fn add_node(&mut self, mut node: SourceNode<Exec, Src>) -> Result<Src, IndexedVecError> {
         assert!(node.op_end >= node.op_start);
         assert!(node.children.iter().copied().all(|n| self.debug_info.source_node(n).is_some()));
+        node.asm_ops.sort_unstable_by_key(|row| row.op_idx);
         self.debug_info.nodes.push(node)
     }
 
@@ -423,6 +467,87 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
     ///
     /// The declared name and type expression can be optionally provided to give additional useful
     /// context to the debug info type produced, e.g. type name, field names, etc.
+    /// Build the debug record for a struct, registering its field types.
+    ///
+    /// This is separate from [`Self::register_debug_type`] so a recursive aggregate can fill in a
+    /// row that was reserved before its body was walked, rather than appending a second row.
+    fn struct_debug_type(
+        &mut self,
+        declared_name: Option<DebugStringIdx>,
+        declared_ty: Option<&miden_assembly_syntax::ast::TypeExpr>,
+        struct_ty: &miden_assembly_syntax::ast::types::StructType,
+    ) -> Result<DebugTypeInfo, Report> {
+        use miden_assembly_syntax::ast::TypeExpr;
+
+        let declared_field_tys = declared_ty.and_then(|t| match t {
+            TypeExpr::Struct(t) => Some(&t.fields),
+            _ => None,
+        });
+        let mut fields = vec![];
+        for (i, field) in struct_ty.fields().iter().enumerate() {
+            let decl = declared_field_tys.and_then(|fields| fields.get(i));
+            let field_name =
+                decl.map(|decl| decl.name.clone().into_inner()).or_else(|| field.name.clone());
+            let declared_ty = decl.map(|decl| &decl.ty);
+            let field_type_name = declared_type_name(declared_ty);
+            let field_type_name = field_type_name.map(|name| self.add_string(name));
+            let type_idx = self.register_debug_type(field_type_name, declared_ty, &field.ty)?;
+            let name_idx = self.add_string(field_name.unwrap_or_else(|| format!("{i}").into()));
+            fields.push(DebugFieldInfo { name_idx, type_idx, offset: field.offset });
+        }
+        let struct_name =
+            declared_name.or_else(|| struct_ty.name().map(|name| self.add_string(name)));
+        let name_idx = struct_name.unwrap_or_else(|| self.add_string("<anon>"));
+        let size = u32::try_from(struct_ty.size()).map_err(|_| {
+            if let Some(declared_name) = struct_name.as_ref() {
+                Report::msg(format!(
+                    "invalid struct type '{}': struct is too large",
+                    self.get_string(*declared_name).unwrap()
+                ))
+            } else {
+                Report::msg("invalid struct type: struct is too large")
+            }
+        })?;
+        Ok(DebugTypeInfo::Struct { name_idx, size, fields })
+    }
+
+    /// Build the debug record for an enum, registering its discriminant and payload types.
+    fn enum_debug_type(
+        &mut self,
+        enum_ty: &miden_assembly_syntax::ast::types::EnumType,
+    ) -> Result<DebugTypeInfo, Report> {
+        let discrim_ty = self.register_debug_type(None, None, enum_ty.discriminant())?;
+        let name_idx = self.add_string(enum_ty.name().clone());
+        let size = u32::try_from(enum_ty.size_in_bytes()).map_err(|_| {
+            Report::msg(format!("invalid enum type '{}': enum is too large", enum_ty.name()))
+        })?;
+        let variants = enum_ty
+            .variant_offsets()
+            .zip(enum_ty.discriminant_values())
+            .map(|((payload_offset, variant), discriminant)| {
+                let name_idx = self.add_string(variant.name.clone());
+                let type_idx = variant
+                    .value
+                    .as_ref()
+                    .map(|ty| self.register_debug_type(None, None, ty))
+                    .transpose()?;
+                let payload_offset = variant.value.as_ref().map(|_| payload_offset);
+                Ok(DebugVariantInfo {
+                    name_idx,
+                    type_idx,
+                    payload_offset,
+                    discriminant,
+                })
+            })
+            .collect::<Result<_, Report>>()?;
+        Ok(DebugTypeInfo::Enum {
+            name_idx,
+            size,
+            discriminant_type_idx: discrim_ty,
+            variants,
+        })
+    }
+
     pub fn register_debug_type(
         &mut self,
         declared_name: Option<DebugStringIdx>,
@@ -450,6 +575,7 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
             Type::U256 => self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U256)),
             Type::Unknown => self.add_type(DebugTypeInfo::Unknown),
             Type::Never => self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void)),
+            Type::Variadic => self.add_type(DebugTypeInfo::Variadic),
             Type::Ptr(ptr) => {
                 let pointee_name = declared_ty.and_then(|t| match t {
                     TypeExpr::Ptr(p) => match p.pointee.as_ref() {
@@ -486,110 +612,49 @@ impl<Exec: Idx, Src: Idx> DebugInfoBuilder<Exec, Src> {
                     .map_err(|_| Report::msg("array type is too large"))?;
                 self.add_type(DebugTypeInfo::Array { element_type_idx, count: Some(count) })
             },
-            Type::List(ty) => {
-                let pointee_name = declared_ty.and_then(|t| match t {
-                    TypeExpr::Ptr(p) => match p.pointee.as_ref() {
-                        TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
-                        _ => None,
+            Type::List(element_ty) => {
+                // A list is emitted as an array with no fixed element count, which is what
+                // recovery expects. Emitting the fat pointer's `{ len, ptr }` layout as a
+                // synthetic struct instead would not round-trip, as such a record is
+                // indistinguishable from an ordinary struct on the way back.
+                //
+                // `TypeExpr` cannot express a list, so there is never a declared type or name
+                // to propagate here.
+                let element_type_idx = self.register_debug_type(None, None, element_ty)?;
+                self.add_type(DebugTypeInfo::Array { element_type_idx, count: None })
+            },
+            // A recursive aggregate must have a row before its body is registered, so that the
+            // backedge has somewhere to point. Reserve first, register the body -- which will
+            // find the reservation when it reaches the backedge -- then fill the row in.
+            Type::Struct(StructRef::Rec(rec)) | Type::Enum(EnumRef::Rec(rec)) => {
+                if let Some(reserved) = self.reserved_recursive_types.get(rec) {
+                    return Ok(*reserved);
+                }
+
+                let reserved = self.reserve_type();
+                self.reserved_recursive_types.insert(rec.clone(), reserved);
+
+                let body = match ty {
+                    Type::Struct(ty) => {
+                        self.struct_debug_type(declared_name, declared_ty, &ty.get())
                     },
-                    _ => None,
-                });
-                let pointee_name = pointee_name.map(|name| self.add_string(name));
-                let pointee_decl = declared_ty.and_then(|t| match t {
-                    TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
-                    _ => None,
-                });
-                let pointee_ty = self.register_debug_type(pointee_name, pointee_decl, ty)?;
-                let usize_ty = self.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
-                let pointer_ty =
-                    self.add_type(DebugTypeInfo::Pointer { pointee_type_idx: pointee_ty });
-                let name_idx =
-                    declared_name.unwrap_or_else(|| self.add_string(format!("list<{ty}>")));
-                let ptr = DebugFieldInfo {
-                    name_idx: self.add_string("ptr"),
-                    type_idx: pointer_ty,
-                    offset: 0,
+                    Type::Enum(ty) => self.enum_debug_type(&ty.get()),
+                    _ => unreachable!("matched a recursive struct or enum above"),
                 };
-                let len = DebugFieldInfo {
-                    name_idx: self.add_string("len"),
-                    type_idx: usize_ty,
-                    offset: 4,
-                };
-                self.add_type(DebugTypeInfo::Struct {
-                    name_idx,
-                    size: 8,
-                    fields: vec![ptr, len],
-                })
+
+                self.reserved_recursive_types.remove(rec);
+                // On failure the row keeps the placeholder it was reserved with, so nothing
+                // half-built is reachable.
+                self.finish_reserved_type(reserved, body?);
+                reserved
             },
             Type::Struct(struct_ty) => {
-                let declared_field_tys = declared_ty.and_then(|t| match t {
-                    TypeExpr::Struct(t) => Some(&t.fields),
-                    _ => None,
-                });
-                let mut fields = vec![];
-                for (i, field) in struct_ty.fields().iter().enumerate() {
-                    let decl = declared_field_tys.and_then(|fields| fields.get(i));
-                    let field_name = decl
-                        .map(|decl| decl.name.clone().into_inner())
-                        .or_else(|| field.name.clone());
-                    let declared_ty = decl.map(|decl| &decl.ty);
-                    let field_type_name = declared_type_name(declared_ty);
-                    let field_type_name = field_type_name.map(|name| self.add_string(name));
-                    let type_idx =
-                        self.register_debug_type(field_type_name, declared_ty, &field.ty)?;
-                    let name_idx =
-                        self.add_string(field_name.unwrap_or_else(|| format!("{i}").into()));
-                    fields.push(DebugFieldInfo { name_idx, type_idx, offset: field.offset });
-                }
-                let struct_name =
-                    declared_name.or_else(|| struct_ty.name().map(|name| self.add_string(name)));
-                let name_idx = struct_name.unwrap_or_else(|| self.add_string("<anon>"));
-                let size = u32::try_from(struct_ty.size()).map_err(|_| {
-                    if let Some(declared_name) = struct_name.as_ref() {
-                        Report::msg(format!(
-                            "invalid struct type '{}': struct is too large",
-                            self.get_string(*declared_name).unwrap()
-                        ))
-                    } else {
-                        Report::msg("invalid struct type: struct is too large")
-                    }
-                })?;
-                self.add_type(DebugTypeInfo::Struct { name_idx, size, fields })
+                let info = self.struct_debug_type(declared_name, declared_ty, &struct_ty.get())?;
+                self.add_type(info)
             },
             Type::Enum(enum_ty) => {
-                let discrim_ty = self.register_debug_type(None, None, enum_ty.discriminant())?;
-                let name_idx = self.add_string(enum_ty.name().clone());
-                let size = u32::try_from(enum_ty.size_in_bytes()).map_err(|_| {
-                    Report::msg(format!(
-                        "invalid enum type '{}': enum is too large",
-                        enum_ty.name()
-                    ))
-                })?;
-                let variants = enum_ty
-                    .variant_offsets()
-                    .zip(enum_ty.discriminant_values())
-                    .map(|((payload_offset, variant), discriminant)| {
-                        let name_idx = self.add_string(variant.name.clone());
-                        let type_idx = variant
-                            .value
-                            .as_ref()
-                            .map(|ty| self.register_debug_type(None, None, ty))
-                            .transpose()?;
-                        let payload_offset = variant.value.as_ref().map(|_| payload_offset);
-                        Ok(DebugVariantInfo {
-                            name_idx,
-                            type_idx,
-                            payload_offset,
-                            discriminant,
-                        })
-                    })
-                    .collect::<Result<_, Report>>()?;
-                self.add_type(DebugTypeInfo::Enum {
-                    name_idx,
-                    size,
-                    discriminant_type_idx: discrim_ty,
-                    variants,
-                })
+                let info = self.enum_debug_type(&enum_ty.get())?;
+                self.add_type(info)
             },
             Type::Function(fty) => {
                 let return_type_index = match fty.results() {
@@ -648,9 +713,12 @@ fn declared_type_name(
 mod tests {
     use alloc::sync::Arc;
 
-    use miden_assembly_syntax::ast::types::{
-        CallConv, EnumType, FunctionType, StructType, Type, Variant,
+    use miden_assembly_syntax::{
+        Path,
+        ast::types::{CallConv, EnumType, FunctionType, StructType, Type, Variant},
     };
+    use miden_core::Word;
+    use miden_debug_types::{ColumnNumber, LineNumber, Uri};
     use miden_utils_indexing::Idx;
 
     use super::*;
@@ -667,7 +735,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
+        let ty = Type::from(Arc::new(enum_ty));
 
         let type_idx = builder.register_debug_type(None, None, &ty).unwrap();
 
@@ -709,7 +777,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
+        let ty = Type::from(Arc::new(enum_ty));
 
         let type_idx = builder.register_debug_type(None, None, &ty).unwrap();
 
@@ -726,11 +794,11 @@ mod tests {
 
     #[test]
     fn function_debug_types_preserve_resolved_struct_metadata() {
-        let felt_wrapper = Type::Struct(Arc::new(StructType::named(
+        let felt_wrapper = Type::from(Arc::new(StructType::named(
             "felt-wrapper".into(),
             [(Arc::from("inner"), Type::Felt)],
         )));
-        let account_id = Type::Struct(Arc::new(StructType::named(
+        let account_id = Type::from(Arc::new(StructType::named(
             "account-id".into(),
             [(Arc::from("prefix"), felt_wrapper.clone()), (Arc::from("suffix"), felt_wrapper)],
         )));
@@ -806,5 +874,84 @@ mod tests {
         assert_eq!(idx3.to_usize(), 0); // Should return same index
         assert_eq!(builder.string_indices.len(), 2);
         assert_eq!(builder.debug_info.strings.len(), 2);
+    }
+
+    fn add_test_function(
+        builder: &mut PackageDebugInfoBuilder,
+        name: &str,
+        linkage_name: Option<&str>,
+    ) -> DebugFunctionIdx {
+        let file_idx = builder.add_file(Uri::new("test.masm"), None);
+        let line = LineNumber::new(1).unwrap();
+        let column = ColumnNumber::new(1).unwrap();
+        let name_idx = builder.add_string(name);
+        let func = FunctionInfo::new(None, name_idx, file_idx, line, column, Word::default());
+        let func = match linkage_name {
+            Some(linkage_name) => {
+                let linkage_name_idx = builder.add_string(linkage_name);
+                func.with_linkage_name(linkage_name_idx)
+            },
+            None => func,
+        };
+        builder.add_function(func)
+    }
+
+    #[test]
+    fn function_path_lookup_no_match() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        add_test_function(&mut builder, "::module::plain", None);
+        add_test_function(&mut builder, "duplicate", Some("::module::linked"));
+
+        assert_eq!(builder.get_function_index_by_path(Path::new("::module::missing")), None);
+    }
+
+    #[test]
+    fn function_path_lookup_matches_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let plain_function_idx = add_test_function(&mut builder, "::module::plain", None);
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::plain")),
+            Some(plain_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_matches_linkage_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let linked_function_idx =
+            add_test_function(&mut builder, "duplicate", Some("::module::linked"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::linked")),
+            Some(linked_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_matches_source_name_of_linked_function() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        let linked_function_idx =
+            add_test_function(&mut builder, "::module::source", Some("::module::linked"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::source")),
+            Some(linked_function_idx),
+        );
+    }
+
+    #[test]
+    fn function_path_lookup_prefers_linkage_name() {
+        let mut builder = PackageDebugInfoBuilder::default();
+        // The name-matching function comes first in the table, but the linkage name match must
+        // still take precedence.
+        add_test_function(&mut builder, "::module::shared", None);
+        let linked_function_idx =
+            add_test_function(&mut builder, "duplicate", Some("::module::shared"));
+
+        assert_eq!(
+            builder.get_function_index_by_path(Path::new("::module::shared")),
+            Some(linked_function_idx),
+        );
     }
 }

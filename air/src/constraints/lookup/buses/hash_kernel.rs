@@ -3,11 +3,9 @@
 //!
 //! Combines three tables on a single LogUp column:
 //!
-//! 1. Sibling table (`BusId::SiblingTable`). Merkle update siblings. On hasher controller input
-//!    rows with `s0 = 1, s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old
-//!    path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects which
-//!    half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add,
-//!    two remove).
+//! 1. Merkle controller inputs. Update rows emit exactly one sibling interaction, selected by the
+//!    update kind and direction bit. Level-0 rows batch that sibling (when present) with the two
+//!    top-limb canonical-index range checks from the reused capacity lanes.
 //! 2. ACE memory reads (chiplet-responses column). On ACE chiplet rows, the block selector
 //!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
 //!    Both are removed from the chiplets bus.
@@ -34,10 +32,9 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::columns::ControllerCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
+            messages::{MemoryMsg, RangeMsg, SiblingFromRatesMsg},
         },
         utils::BoolNot,
     },
@@ -48,16 +45,15 @@ use crate::{
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
 /// Three row-type-disjoint interaction sets, mutually exclusive via the chiplet tri-state:
-/// - Sibling table on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
-///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
-///   one of the four is active per row. Max: 1 fraction.
+/// - Merkle controller input rows: one sibling-table fraction on update rows, plus two top-limb
+///   canonical-index range checks on level 0. Max: 3 fractions.
 /// - ACE memory reads on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are mutually
 ///   exclusive via `block_sel`. Max: 1 fraction.
 /// - Memory-side range checks on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
 ///   `d1`, `w0`, `w1`, `4·w1`) is active under the outer batch flag. Max: 5 fractions.
 ///
-/// Row-type disjointness means only one set fires per row, so the per-row max is
-/// `max(1, 1, 5) = 5`.
+/// Row-type disjointness means only one set fires per row, so the per-row max remains
+/// `max(3, 1, 5) = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the hash-kernel virtual table bus.
@@ -77,11 +73,23 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ctrl = local.controller();
     let ctrl_next = next.controller();
 
-    // MU/MV controller-row flags for sibling-table participation. Both require input rows
-    // (`s0 = 1, s1 = 1`); `s2` distinguishes MU (`s2 = 1`) from MV (`s2 = 0`) at each Merkle
-    // path step.
+    // MRUPDATE sibling-table interactions. `s2` selects the sign: MV adds the old-path sibling
+    // with +1, while MU removes the new-path sibling with -1.
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let (f_mv_all, f_mu_all) = merkle_update_sibling_flags(controller_flag, ctrl);
+    let hs0: LB::Expr = ctrl.s0.into();
+    let hs1: LB::Expr = ctrl.s1.into();
+    let hs2: LB::Expr = ctrl.s2.into();
+    let is_boundary: LB::Expr = ctrl.is_boundary.into();
+    let later_level = is_boundary.not();
+    let f_update_all = controller_flag.clone() * hs0.clone() * hs1.clone();
+    let f_update_later_levels = f_update_all * later_level;
+    // Keep the input selector explicit. The two update branches still merge exactly:
+    //   controller * s0 * s1 * (1 - s2) * is_boundary
+    //     + controller * s0 * s1 * s2 * is_boundary
+    //     = controller * s0 * s1 * is_boundary.
+    let f_update_level0 = controller_flag.clone() * hs0.clone() * hs1.clone() * is_boundary.clone();
+    let f_mp_level0 = controller_flag * hs0 * hs1.not() * hs2.clone() * is_boundary;
+    let update_multiplicity = LB::Expr::ONE - hs2.double();
 
     // Hasher state is split by convention into `rate_0 (4), rate_1 (4), cap (4)`.
     // Sibling messages only use the rate halves.
@@ -89,13 +97,12 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
     let mrupdate_id = ctrl.mrupdate_id;
     let node_index = ctrl.node_index;
+    let slack_3 = ctrl.capacity()[3];
 
-    // Direction bit `b = node_index - 2 * node_index_next`. The bit / one_minus_bit combine
-    // multiplicatively into the sibling flags below. They are computed once and cloned into
-    // each `g.add` / `g.remove` flag argument.
+    // Direction bit `b = node_index - 2 * node_index_next`. The sibling message uses this
+    // constrained bit to select the rate half carrying the sibling.
     let node_index_next: LB::Expr = ctrl_next.node_index.into();
     let bit: LB::Expr = node_index.into() - node_index_next.double();
-    let one_minus_bit: LB::Expr = bit.not();
 
     // --- ACE memory-read setup ---
 
@@ -132,38 +139,78 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
             col.group(
                 "sibling_ace_memory",
                 |g| {
-                    // --- SIBLING TABLE ---
-                    // MV adds (old path), MU removes (new path); each splits on the Merkle
-                    // direction bit into a BitZero (sibling at rate_1) and BitOne (sibling
-                    // at rate_0) branch. Four mutually exclusive interactions total.
-                    for (op_name, is_add, f_all, bit_tag, bit_gate) in [
-                        (
-                            "sibling_mv_b0",
-                            true,
-                            f_mv_all.clone(),
-                            SiblingBit::Zero,
-                            one_minus_bit.clone(),
-                        ),
-                        ("sibling_mv_b1", true, f_mv_all, SiblingBit::One, bit.clone()),
-                        ("sibling_mu_b0", false, f_mu_all.clone(), SiblingBit::Zero, one_minus_bit),
-                        ("sibling_mu_b1", false, f_mu_all, SiblingBit::One, bit),
-                    ] {
-                        let gate = f_all * bit_gate;
-                        let build = move || {
-                            let mrupdate_id: LB::Expr = mrupdate_id.into();
-                            let node_index: LB::Expr = node_index.into();
-                            let h = match bit_tag {
-                                SiblingBit::Zero => array::from_fn(|i| rate_1[i].into()),
-                                SiblingBit::One => array::from_fn(|i| rate_0[i].into()),
-                            };
-                            SiblingMsg { bit: bit_tag, mrupdate_id, node_index, h }
-                        };
-                        if is_add {
-                            g.add(op_name, gate, build, Deg { v: 5, u: 6 });
-                        } else {
-                            g.remove(op_name, gate, build, Deg { v: 5, u: 6 });
-                        }
-                    }
+                    // --- MERKLE UPDATE SIBLINGS + LEVEL-0 INDEX RANGE CHECKS ---
+                    //
+                    // A single signed interaction handles both MRUPDATE legs: boolean `s2 = 0`
+                    // gives multiplicity +1 for MV, while `s2 = 1` gives -1 for MU. The constrained
+                    // direction bit selects the sibling from the two rate halves.
+                    let later_level_bit = bit.clone();
+                    g.insert(
+                        "sibling_update",
+                        f_update_later_levels,
+                        update_multiplicity.clone(),
+                        move || SiblingFromRatesMsg {
+                            direction_bit: later_level_bit,
+                            mrupdate_id: mrupdate_id.into(),
+                            node_index: node_index.into(),
+                            rate_0: rate_0.map(Into::into),
+                            rate_1: rate_1.map(Into::into),
+                        },
+                        Deg { v: 5, u: 6 },
+                    );
+
+                    // At level 0, one batch carries the sibling interaction and both checks of the
+                    // top slack limb.
+                    g.batch(
+                        "sibling_update_level0",
+                        f_update_level0,
+                        move |b| {
+                            b.insert(
+                                "sibling_update",
+                                update_multiplicity,
+                                SiblingFromRatesMsg {
+                                    direction_bit: bit,
+                                    mrupdate_id: mrupdate_id.into(),
+                                    node_index: node_index.into(),
+                                    rate_0: rate_0.map(Into::into),
+                                    rate_1: rate_1.map(Into::into),
+                                },
+                                Deg { v: 5, u: 6 },
+                            );
+
+                            let slack_3: LB::Expr = slack_3.into();
+                            b.remove(
+                                "merkle_index_slack_3",
+                                RangeMsg { value: slack_3.clone() },
+                                Deg { v: 4, u: 5 },
+                            );
+                            b.remove(
+                                "merkle_index_slack_3_double",
+                                RangeMsg { value: slack_3.double() },
+                                Deg { v: 4, u: 5 },
+                            );
+                        },
+                        Deg { v: 7, u: 8 },
+                    );
+
+                    g.batch(
+                        "mpverify_level0_index_range",
+                        f_mp_level0,
+                        move |b| {
+                            let slack_3: LB::Expr = slack_3.into();
+                            b.remove(
+                                "merkle_index_slack_3",
+                                RangeMsg { value: slack_3.clone() },
+                                Deg { v: 5, u: 6 },
+                            );
+                            b.remove(
+                                "merkle_index_slack_3_double",
+                                RangeMsg { value: slack_3.double() },
+                                Deg { v: 5, u: 6 },
+                            );
+                        },
+                        Deg { v: 6, u: 7 },
+                    );
 
                     // --- ACE MEMORY READS (chiplet-responses column) ---
                     // Word read on READ rows.
@@ -248,18 +295,4 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
         },
         Deg { v: 7, u: 8 },
     );
-}
-
-fn merkle_update_sibling_flags<E, V>(controller_flag: E, ctrl: &ControllerCols<V>) -> (E, E)
-where
-    E: PrimeCharacteristicRing + Clone,
-    V: Copy + Into<E>,
-{
-    let hs0: E = ctrl.s0.into();
-    let hs1: E = ctrl.s1.into();
-    let hs2: E = ctrl.s2.into();
-
-    let f_mu_all = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all = controller_flag * hs0 * hs1 * hs2.not();
-    (f_mv_all, f_mu_all)
 }

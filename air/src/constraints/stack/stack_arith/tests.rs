@@ -125,6 +125,17 @@ fn set_u32_helpers(row: &mut CoreCols<Felt>, lo: u32, hi: u32) {
     row.decoder.hasher_state[6] = Felt::ZERO;
 }
 
+fn set_u32div_helpers(
+    row: &mut CoreCols<Felt>,
+    quotient: u32,
+    remainder: u32,
+    remainder_diff: u32,
+) {
+    set_u32_helpers(row, quotient, remainder);
+    row.decoder.hasher_state[6] = Felt::new_unchecked(remainder_diff as u64 & 0xffff);
+    row.decoder.hasher_state[7] = Felt::new_unchecked((remainder_diff as u64) >> 16);
+}
+
 fn eval_stack_arith(
     local: &CoreCols<Felt>,
     next: &CoreCols<Felt>,
@@ -331,15 +342,19 @@ fn stack_arith_u32div_constraints_allow_non_u32_sha256_shr_operand() {
     let divisor = Felt::new_unchecked(8);
     let quotient = Felt::new_unchecked(non_u32.as_canonical_u64() / divisor.as_canonical_u64());
     let remainder = Felt::new_unchecked(non_u32.as_canonical_u64() % divisor.as_canonical_u64());
-    let lo = (non_u32.as_canonical_u64() - quotient.as_canonical_u64()) as u32;
-    let hi = (divisor.as_canonical_u64() - remainder.as_canonical_u64() - 1) as u32;
+    let remainder_diff = divisor.as_canonical_u64() - remainder.as_canonical_u64() - 1;
 
     assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
 
     let mut local = generate_test_row(opcodes::U32DIV as usize);
     local.stack.top[0] = divisor;
     local.stack.top[1] = non_u32;
-    set_u32_helpers(&mut local, lo, hi);
+    set_u32div_helpers(
+        &mut local,
+        quotient.as_canonical_u64() as u32,
+        remainder.as_canonical_u64() as u32,
+        remainder_diff as u32,
+    );
 
     let mut next = generate_test_row(0);
     next.stack.top[0] = remainder;
@@ -353,5 +368,85 @@ fn stack_arith_u32div_constraints_allow_non_u32_sha256_shr_operand() {
         &next,
         &op_flags,
         "expected U32DIV constraints to accept a non-u32 operand with forged shr outputs",
+    );
+}
+
+/// The field equation admits `q = 1` and a remainder of the field modulus minus 12189 for
+/// `100 / 12289`, while the remainder difference still has a 32-bit representative. The direct
+/// remainder binding rejects the remainder outside the u32 range.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_non_u32_remainder() {
+    let non_u32_remainder = Felt::new_unchecked(Felt::ORDER_U64 - 12189);
+    assert!(non_u32_remainder.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(12289);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, 1, non_u32_remainder.as_canonical_u64() as u32, 24477);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = non_u32_remainder;
+    next.stack.top[1] = Felt::ONE;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the direct remainder binding to reject a remainder outside the u32 range",
+    );
+}
+
+/// For `100 / 3`, choosing `r = 0` makes the field equation admit a quotient outside the u32
+/// range. The direct quotient binding rejects it.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_non_u32_quotient() {
+    let quotient = ((100_u128 + 2 * Felt::ORDER_U64 as u128) / 3) as u64;
+    let quotient = Felt::new_unchecked(quotient);
+    assert!(quotient.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(3);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, quotient.as_canonical_u64() as u32, 0, 2);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ZERO;
+    next.stack.top[1] = quotient;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the direct quotient binding to reject a quotient outside the u32 range",
+    );
+}
+
+/// The identity `100 = 10 * 9 + 10` has 32-bit outputs but is not Euclidean division because the
+/// remainder equals the divisor. The remainder-difference binding rejects it.
+#[test]
+fn stack_arith_u32div_constraints_reject_a_remainder_equal_to_the_divisor() {
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = Felt::new_unchecked(10);
+    local.stack.top[1] = Felt::new_unchecked(100);
+    set_u32div_helpers(&mut local, 9, 10, 0);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::new_unchecked(10);
+    next.stack.top[1] = Felt::new_unchecked(9);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    assert_constraints_reject(
+        &local,
+        &next,
+        &op_flags,
+        "expected the remainder-difference binding to reject a remainder equal to the divisor",
     );
 }

@@ -24,15 +24,36 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 2;
+pub const DEBUG_INFO_VERSION: u8 = 3;
+
+/// Maximum encoded payload size accepted for package-owned debug information.
+///
+/// Decoding temporarily retains the encoded section, an aligned copy, and decoded table storage,
+/// so this cap bounds peak memory before any package-level validation can run.
+pub const MAX_DEBUG_INFO_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
+
+/// Maximum number of rows accepted in the variable-width debug string table.
+pub const MAX_DEBUG_INFO_STRING_ROWS: usize = 100_000;
+
+/// Maximum encoded byte length accepted for one debug string.
+pub const MAX_DEBUG_INFO_STRING_SIZE: usize = 4 * 1024;
+
+/// Maximum number of rows accepted in the variable-width debug type table.
+pub const MAX_DEBUG_INFO_TYPE_ROWS: usize = 1_000_000;
 
 // PACKAGE DEBUG INFO
 // ================================================================================================
 
-/// Trusted package-owned debug information decoded from well-known debug sections.
+/// Package-owned debug information decoded from the well-known debug section.
+///
+/// The [`miden_core::serde::Deserializable::read_from`] and
+/// [`miden_core::serde::Deserializable::read_from_bytes`] implementations apply fixed resource
+/// limits for potentially adversarial input. Tools that deliberately accept the resource cost of
+/// larger debug information can use [`PackageDebugInfo::read_from_unmetered`] or
+/// [`PackageDebugInfo::read_from_bytes_unmetered`].
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub type PackageDebugInfo = DebugInfo<MastNodeId, DebugSourceNodeId>;
 
@@ -307,7 +328,9 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
             let new_path_idx = if let Some(new_path_idx) = remapped_paths.get(&old_path_idx) {
                 *new_path_idx
             } else {
-                let path = self.strings[old_path_idx].clone();
+                let Some(path) = self.strings.get(old_path_idx).cloned() else {
+                    continue;
+                };
                 let new_path_idx = match trimmer(path.as_ref()) {
                     None => old_path_idx,
                     Some(new_path) => match string_indices.entry(new_path.clone()) {
@@ -345,8 +368,8 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
     /// Returns the deduplicated source locations referenced by assembly operation rows.
     pub fn get_location(&self, idx: DebugLocIdx) -> Option<Location> {
         let DebugLoc { file_idx, start, end } = self.locations.get(idx)?;
-        let file = &self.files[*file_idx];
-        let uri = self.strings[file.path_idx].clone();
+        let file = self.files.get(*file_idx)?;
+        let uri = self.strings.get(file.path_idx).cloned()?;
         Some(Location {
             uri: Uri::from(uri),
             start: *start,
@@ -364,7 +387,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         self.error_messages
             .iter()
             .find(|row| row.err_code == err_code)
-            .map(|row| self.strings[row.message].clone())
+            .and_then(|row| self.strings.get(row.message).cloned())
     }
 
     /// Returns source/debug occurrence nodes.
@@ -398,7 +421,7 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         exec_node: Exec,
     ) -> impl Iterator<Item = (Src, &SourceNode<Exec, Src>)> {
         self.roots.iter().copied().filter_map(move |source_node_id| {
-            let source_node = &self.nodes[source_node_id];
+            let source_node = self.nodes.get(source_node_id)?;
             if source_node.exec_node == exec_node {
                 Some((source_node_id, source_node))
             } else {
@@ -451,14 +474,12 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
 
     /// Returns the first assembly operation row for `source_node`, if present.
     pub fn first_asm_op_for_source_node(&self, source_node: Src) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_ops.first())
     }
 
     /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(&self, source_node: Src, op_idx: u32) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node)
-            .filter(|row| row.op_idx <= op_idx)
-            .max_by_key(|row| row.op_idx)
+        self.source_node(source_node).and_then(|node| node.asm_op_for_operation(op_idx))
     }
 
     /// Returns debug variable rows for a source/debug occurrence.
@@ -929,7 +950,7 @@ fn validate_debug_type_info(
     types: &IndexVec<DebugTypeIdx, DebugTypeInfo>,
 ) -> Result<(), DebugInfoTableRemapError> {
     match ty {
-        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => {},
+        DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown | DebugTypeInfo::Variadic => {},
         DebugTypeInfo::Pointer { pointee_type_idx } => {
             validate_type_idx(*pointee_type_idx, types)?;
         },
@@ -1056,6 +1077,7 @@ fn remap_debug_type_info(
                 .collect::<Result<_, DebugInfoTableRemapError>>()?,
         },
         DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
+        DebugTypeInfo::Variadic => DebugTypeInfo::Variadic,
     })
 }
 
