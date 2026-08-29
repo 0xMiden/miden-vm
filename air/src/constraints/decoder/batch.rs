@@ -56,7 +56,7 @@ pub(super) fn enforce<AB>(
 
     // Pin each committed value directly on rows where the encoding is inactive.
     {
-        let builder = &mut builder.when(span_or_respan.clone().not());
+        let builder = &mut builder.when(span_or_respan.not());
         builder.assert_zero(full_batch);
         builder.assert_zero(batch_size_code);
     }
