@@ -75,11 +75,8 @@ pub(crate) fn verify_deferred(proof: &SessionProof) -> Result<DeferredRoot, Veri
     Ok(proof.1)
 }
 
-/// A local-only [`MultiAir`] wrapper for per-chiplet
-/// [`check_constraints`]: its `eval_external` emits no cross-AIR
-/// assertion, so a single AIR's *local* constraints are checked without
-/// the stack-level Σσ=0 closure (per-AIR σ ≠ 0). Mirrors the pre-0.26
-/// per-AIR `check_constraints`.
+/// A local-only [`MultiAir`] wrapper that omits external assertions, allowing
+/// [`check_constraints`] to evaluate one chiplet's local constraints independently.
 struct LocalAir<A>(Vec<A>);
 
 impl<A> MultiAir<Felt, QuadFelt> for LocalAir<A>

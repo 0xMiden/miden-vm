@@ -389,8 +389,8 @@ pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    // Col 0: LogUp running sum over the UintVal provide / consume.
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreAir, main, challenges);
+    // Col 0: centered LogUp running sum over the UintVal provide and consume.
+    let (logup, normalized_sum) = build_logup_aux_trace(&UintStoreAir, main, challenges);
     let n = main.height();
     let beta = challenges[1];
 
@@ -457,5 +457,5 @@ pub(crate) fn build_aux(
         id += contrib;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
 }
