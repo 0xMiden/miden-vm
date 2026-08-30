@@ -25,4 +25,4 @@ pub(super) use algebra::universal_cv_word;
 pub(super) use lookup::{
     EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols, emit_lookup_columns,
 };
-pub(crate) use periodic::{NUM_PERIODIC_COLUMNS, get_periodic_column_values};
+pub(crate) use periodic::get_periodic_column_values;
