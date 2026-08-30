@@ -28,7 +28,7 @@ use crate::{
             },
         },
     },
-    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::trace::EidosRequires,
@@ -148,7 +148,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_SIGMA_VALUES);
+    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
 }
 
@@ -173,7 +173,6 @@ fn log_quotient_degree_matches_design_target() {
     // low-arity; ≤ 2 each on the byte-request columns), so every closing
     // constraint is degree ≤ 5 → `log_quotient_degree = 2`. The degree-4
     // multiplicities are the floor; lqd 1 would need them witness-decomposed.
-    // See the design notes §"Aux columns and σ exposure".
     let air = KeccakSpongeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }
@@ -442,17 +441,10 @@ fn corruption_seq_id_breaks_row_counter_transition() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_aux_cell_breaks_logup_recurrence() {
-    // Direct main-trace corruption is absorbed by
-    // `build_logup_aux_trace` (the aux just adapts to whatever the
-    // main says). To exercise the per-row σ/n recurrence emitted by
-    // `LookupAir::eval` (constraint of the form
-    // `u(r) · acc(r+1) = u(r) · acc(r) + v(r) − u(r) · σ · inv_n`),
-    // we wrap `KeccakSpongeAir` in an AIR that runs the standard aux
-    // build and then perturbs `aux[row 1, col 0]`. The constraint at
-    // row 0 (and again at row 1) then evaluates to a non-zero residue.
-    // `check_local` builds the aux trace through `LiftedAir::build_aux_trace`,
-    // so the corruption must live in that override (the 0.26 API no longer
-    // accepts a standalone `AuxBuilder` — the AIR owns the aux build).
+    // Rebuilding the auxiliary trace after main-trace corruption produces a consistent witness.
+    // Perturbing the built accumulator instead directly exercises the centered recurrence.
+    // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
+    // wrapper overrides that method to inject the corruption.
     use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
     use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
@@ -496,15 +488,16 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
             aux_inputs: &[Felt],
             challenges: &[QuadFelt],
         ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-            let (mut aux, sigma) = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
-                &KeccakSpongeAir,
-                main,
-                air_inputs,
-                aux_inputs,
-                challenges,
-            );
+            let (mut aux, normalized_sum) =
+                <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
+                    &KeccakSpongeAir,
+                    main,
+                    air_inputs,
+                    aux_inputs,
+                    challenges,
+                );
             aux.values[NUM_AUX_COLS] += QuadFelt::ONE;
-            (aux, sigma)
+            (aux, normalized_sum)
         }
 
         fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

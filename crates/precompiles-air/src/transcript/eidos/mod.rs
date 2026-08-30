@@ -47,7 +47,7 @@ use crate::{
     composite::{SubAirBuilder, concatenate_bands, extract_band},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+        LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -214,7 +214,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionNarrowAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -306,7 +306,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -485,8 +485,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
             AB::Expr::ONE - selectors.is_first_fused() - selectors.is_footer_row(FOOTER_ROWS - 1);
         builder.assert_zero_ext(aux1 * aux1_inactive);
 
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

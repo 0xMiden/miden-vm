@@ -75,7 +75,7 @@ pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreMulAir, main, challenges);
+    let (logup, normalized_sum) = build_logup_aux_trace(&UintStoreMulAir, main, challenges);
     let logup_width = logup.width();
     let n = main.height();
     let beta = challenges[1];
@@ -214,5 +214,5 @@ pub(crate) fn build_aux(
         mul_s = mul_s * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
 }

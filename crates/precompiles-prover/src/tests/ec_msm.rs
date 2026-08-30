@@ -81,11 +81,8 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 11 aux columns (col 0 the gated
-    // running-sum anchor alone, the rest each a pair of at-most-two
-    // fractions — folding both the flatten and the follow-on singleton
-    // pack into one step), so every closing constraint stays at degree
-    // ≤ 3 → log_quotient_degree = 1.
+    // The 13-column packing puts at most two degree-2 fractions, or one degree-3 fraction, in each
+    // column. Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcMsmAir), 1);
 }
 

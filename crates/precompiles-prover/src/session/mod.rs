@@ -574,10 +574,8 @@ impl SessionTraces {
         ]
     }
 
-    /// The VM's shared public inputs (0.26 `air_inputs`): the 4-felt
-    /// transcript root. All AIRs declare it (`num_public_values = 4`); only
-    /// the eval chip reads it (pinning its row-0 hash). The old `inv_n` slot
-    /// is gone — the natural last-row closing needs no per-AIR height input.
+    /// The VM's shared public inputs: the four-felt transcript root. All AIRs declare it
+    /// (`num_public_values = 4`); only the transcript-eval chip reads it and pins its row-0 hash.
     pub fn air_inputs(&self) -> Vec<Felt> {
         self.public_root.as_array().to_vec()
     }

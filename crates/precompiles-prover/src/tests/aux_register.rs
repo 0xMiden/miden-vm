@@ -1,16 +1,8 @@
-//! Spike: an extension-field "register" column in the aux trace, kept
-//! out of σ.
+//! Tests for an extension-field register that shares the auxiliary trace with LogUp columns.
 //!
-//! De-risks the vertical Schwartz–Zippel layout the field chiplet needs
-//! (the design notes). A β-dependent accumulator cannot live in
-//! the main trace — that's committed before β is Fiat-Shamir-sampled — so
-//! it must be an aux column. But the σ/n running-sum constraint folds in
-//! every aux column past col 0, which would pull the register into σ and
-//! break the cross-AIR balance. This validates the `num_logup_cols` bound
-//! added to [`CyclicConstraintLookupBuilder`]: aux col 1 carries a Horner
-//! accumulator `acc' = acc·β + x`, committed and AIR-constrained via
-//! `assert_zero_ext`, yet excluded from σ — which must come out **0**
-//! here, since the single LogUp column emits nothing.
+//! A beta-dependent accumulator must be committed after the Fiat-Shamir challenge is sampled, so
+//! it belongs in the auxiliary trace. [`CyclicConstraintLookupBuilder`] uses `num_logup_cols` to
+//! keep such registers out of the LogUp sum while preserving their AIR constraints.
 
 use std::{vec, vec::Vec};
 
@@ -25,8 +17,8 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_PUBLIC_VALUES,
-        NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES,
+        NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -35,8 +27,8 @@ use crate::{
 const COL_X: usize = 0;
 const NUM_MAIN_COLS: usize = 1;
 
-// Aux layout: col 0 = σ/n running sum (the one LogUp column, emitting
-// nothing); col 1 = the extension-field Horner register.
+// Aux layout: col 0 = centered running sum (the one LogUp column, emitting nothing); col 1 = the
+// extension-field Horner register.
 const NUM_LOGUP_COLS: usize = 1;
 const REGISTER_COL: usize = 1;
 const AUX_WIDTH: usize = 2;
@@ -45,9 +37,9 @@ const AUX_WIDTH: usize = 2;
 const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [0];
 
 #[derive(Debug, Default, Clone, Copy)]
-struct SpikeAir;
+struct AuxRegisterAir;
 
-impl BaseAir<Felt> for SpikeAir {
+impl BaseAir<Felt> for AuxRegisterAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
     }
@@ -57,7 +49,7 @@ impl BaseAir<Felt> for SpikeAir {
     }
 }
 
-impl LiftedAir<Felt, QuadFelt> for SpikeAir {
+impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
     fn num_randomness(&self) -> usize {
         NUM_RANDOMNESS
     }
@@ -67,7 +59,7 @@ impl LiftedAir<Felt, QuadFelt> for SpikeAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -77,8 +69,8 @@ impl LiftedAir<Felt, QuadFelt> for SpikeAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        // Col 0: the σ/n running sum from the (empty) LogUp column.
-        let (logup, sigma) = build_logup_aux_trace(&SpikeAir, main, challenges);
+        // Col 0: the centered running sum from the empty LogUp column.
+        let (logup, normalized_sum) = build_logup_aux_trace(&AuxRegisterAir, main, challenges);
         let n = main.height();
         let beta = challenges[1];
 
@@ -91,7 +83,7 @@ impl LiftedAir<Felt, QuadFelt> for SpikeAir {
             data.push(reg);
             reg = reg * beta + QuadFelt::from(main.values[r]);
         }
-        (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+        (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -110,14 +102,13 @@ impl LiftedAir<Felt, QuadFelt> for SpikeAir {
         let x_expr: AB::Expr = x_local.into();
         builder.when_transition().assert_zero_ext(acc_next - acc * beta - x_expr);
 
-        // Phase 2: LogUp over one empty column ⇒ σ = 0.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        // Phase 2: LogUp over one empty column, so the normalized sum is zero.
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }
 
-impl<LB> LookupAir<LB> for SpikeAir
+impl<LB> LookupAir<LB> for AuxRegisterAir
 where
     LB: LookupBuilder<F = Felt>,
 {
@@ -138,9 +129,7 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // One LogUp column that emits no bus tuples: its running sum stays
-        // 0, so σ = 0. The register at aux col 1 is excluded from this
-        // sum by the `num_logup_cols` bound.
+        // The register at auxiliary column 1 is excluded by the `num_logup_cols` bound.
         builder.next_column(|_col| {}, Deg { v: 1, u: 1 });
     }
 }
@@ -150,7 +139,7 @@ fn rand_qf(rng: &mut impl Rng) -> QuadFelt {
 }
 
 #[test]
-fn ext_register_verifies_and_stays_out_of_sigma() {
+fn ext_register_verifies_and_stays_out_of_the_logup_sum() {
     let mut rng = StdRng::seed_from_u64(0x5217e);
     let n = 16usize;
     let x: Vec<Felt> = (0..n).map(|_| Felt::from(rng.random::<u32>())).collect();
@@ -158,13 +147,10 @@ fn ext_register_verifies_and_stays_out_of_sigma() {
 
     let challenges: [QuadFelt; NUM_RANDOMNESS] = [rand_qf(&mut rng), rand_qf(&mut rng)];
 
-    // σ comes out 0: the register is committed + AIR-constrained but
-    // excluded from the running sum by the `num_logup_cols` bound. Without
-    // that bound the σ recurrence would fold the register in and this would
-    // be non-zero (and `check_local` below would fail).
-    let (_, sigma) = SpikeAir.build_aux_trace(&main, &[], &[], &challenges);
-    assert_eq!(sigma, vec![QuadFelt::ZERO], "register must not pollute σ");
+    // The register remains committed and constrained without contributing to the LogUp sum.
+    let (_, normalized_sum) = AuxRegisterAir.build_aux_trace(&main, &[], &[], &challenges);
+    assert_eq!(normalized_sum, vec![QuadFelt::ZERO], "register must not pollute the LogUp sum");
 
-    // The Horner recurrence and the σ recurrence both hold on the trace.
-    crate::tests::check_local(SpikeAir, &main);
+    // The Horner and centered LogUp recurrences both hold on the trace.
+    crate::tests::check_local(AuxRegisterAir, &main);
 }

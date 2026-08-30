@@ -41,7 +41,7 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -180,7 +180,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -439,8 +439,7 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreMulAir {
         }
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

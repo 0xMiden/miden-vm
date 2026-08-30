@@ -113,8 +113,8 @@ use crate::{
     ec::{EcGroupMsg, EcPointMsg},
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, frac_col,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, frac_col,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -316,7 +316,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -426,8 +426,7 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         }
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }
