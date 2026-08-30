@@ -6,9 +6,12 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_crypto::stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_air::BaseAir;
 
-use super::{EidosCompressionInterfaceAir, NUM_MAIN_COLS};
+use super::{
+    EidosCompressionAir, INTERFACE_OUTPUT_AUX_COL, NUM_AUX_COLS, NUM_MAIN_COLS,
+    enforce_interface_constraints,
+};
 
 struct ConstraintEvalBuilder {
     main: RowMajorMatrix<Felt>,
@@ -24,20 +27,17 @@ struct ConstraintEvalBuilder {
 
 impl ConstraintEvalBuilder {
     fn inactive_row_with_zero_challenges() -> Self {
-        let periodic_values = EidosCompressionInterfaceAir
-            .periodic_columns()
-            .iter()
-            .map(|column| column[1])
-            .collect();
-        let mut aux = vec![QuadFelt::ZERO; 4];
-        aux[1] = QuadFelt::ONE;
+        let periodic_values =
+            EidosCompressionAir.periodic_columns().iter().map(|column| column[1]).collect();
+        let mut aux = vec![QuadFelt::ZERO; 2 * NUM_AUX_COLS];
+        aux[INTERFACE_OUTPUT_AUX_COL] = QuadFelt::ONE;
 
         Self {
             main: RowMajorMatrix::new(vec![Felt::ZERO; 2 * NUM_MAIN_COLS], NUM_MAIN_COLS),
-            aux: RowMajorMatrix::new(aux, 2),
+            aux: RowMajorMatrix::new(aux, NUM_AUX_COLS),
             randomness: vec![QuadFelt::ZERO; 2],
             permutation_values: vec![QuadFelt::ZERO],
-            public_values: vec![Felt::ZERO; EidosCompressionInterfaceAir.num_public_values()],
+            public_values: vec![Felt::ZERO; EidosCompressionAir.num_public_values()],
             periodic_values,
             base_evaluations: Vec::new(),
             extension_evaluations: Vec::new(),
@@ -125,9 +125,9 @@ impl PermutationAirBuilder for ConstraintEvalBuilder {
 }
 
 #[test]
-fn aux_column_one_is_pinned_on_inactive_zero_denominator_rows() {
+fn interface_output_column_is_pinned_on_inactive_zero_denominator_rows() {
     let mut builder = ConstraintEvalBuilder::inactive_row_with_zero_challenges();
-    EidosCompressionInterfaceAir.eval(&mut builder);
+    enforce_interface_constraints(&mut builder);
 
     assert!(builder.base_evaluations.iter().all(|&value| value == Felt::ZERO));
     let nonzero: Vec<_> = builder

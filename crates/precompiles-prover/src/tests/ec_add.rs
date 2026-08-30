@@ -13,10 +13,7 @@
 use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, Scalar, elliptic_curve::sec1::ToSec1Point};
-use miden_air::{
-    lookup::Challenges,
-    trace::and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
-};
+use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -30,7 +27,6 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 // round-trip.
 use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
-    composite::extract_band,
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
@@ -47,7 +43,7 @@ use crate::{
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{ChipletAir, byte_pair_and8_trace},
+    session::ChipletAir,
     stark_config::{test_challenger, test_config},
     tests::bus_balance::fold_balance,
     uint::{
@@ -148,12 +144,7 @@ impl EcStack {
         let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
         let ec_points_groups = ec_points_groups_trace(self.ec);
         let bpl = bpl_trace(bpl);
-        let and8 = RowMajorMatrix::new(
-            vec![Felt::ZERO; AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS],
-            NUM_AND8_LOOKUP_COLS,
-        );
-        let byte_pair_and8 = byte_pair_and8_trace(bpl, and8);
-        EcStackTraces([byte_pair_and8, uint, add, ec_points_groups, ec_add])
+        EcStackTraces([bpl, uint, add, ec_points_groups, ec_add])
     }
 }
 
@@ -164,7 +155,7 @@ struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 /// The subset's AIRs as [`ChipletAir`] variants, in [`NUM_STACK`] order.
 fn stack_airs() -> [ChipletAir; NUM_STACK] {
     [
-        ChipletAir::BytePairAnd8,
+        ChipletAir::BytePairLut,
         ChipletAir::UintStoreMul,
         ChipletAir::UintAdd,
         ChipletAir::EcPointStoreGroups,
@@ -295,8 +286,7 @@ impl EcStackTraces {
 fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng) -> usize {
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    let bpl = extract_band(mains[0], 0..crate::primitives::byte_pair_lut::NUM_MAIN_COLS);
-    fold_balance(&BytePairLutAir, &bpl, &challenges, &mut net);
+    fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
     fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
     fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
     fold_balance(&EcPointStoreGroupsAir, mains[3], &challenges, &mut net);
@@ -817,12 +807,10 @@ fn forged_result_ptr_unbalances() {
 }
 
 // ============================================================================
-// Closure-certificate soundness (Phase 2). A fresh generic / double result
-// no longer pays the on-curve MAC trio — its point-store row consumes one
-// `EcOnCurveCert`, provided only by a genuine mint op (gated `mints`, with
-// the case guard `mints ⟹ generic ∨ double` and the strict ptr ordering
-// `r > p ∧ r > q`). These check the two forgeries the cert's well-foundedness
-// rests on, plus that the cert consume is load-bearing.
+// Closure-certificate soundness. A fresh generic or double result consumes one
+// `EcOnCurveCert`, which only a minting operation may provide. The `mints` gate requires a generic
+// or double case and strict pointer ordering `r > p ∧ r > q`. These tests cover the two relevant
+// forgery attempts and verify that the result consumes the certificate.
 // ============================================================================
 
 #[test]

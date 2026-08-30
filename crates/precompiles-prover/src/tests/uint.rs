@@ -31,9 +31,9 @@ use crate::{
         UintStoreAir,
         mul::{NUM_MAIN_COLS as MUL_NUM_MAIN_COLS, UintMulAir, trace::UintMulRequires},
         store_mul::{
-            AUX_WIDTH as STORE_MUL_AUX_WIDTH, COLUMN_SHAPE as STORE_MUL_COLUMN_SHAPE,
-            NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS, NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS,
-            UintStoreMulAir, trace::generate_trace as store_mul_trace,
+            AUX_WIDTH as STORE_MUL_AUX_WIDTH, NUM_LOGUP_COLS as STORE_MUL_NUM_LOGUP_COLS,
+            NUM_MAIN_COLS as STORE_MUL_NUM_MAIN_COLS, UintStoreMulAir,
+            trace::generate_trace as store_mul_trace,
         },
         trace::{UintStoreRequires, generate_trace},
     },
@@ -341,7 +341,7 @@ fn uint_store_mul_shape_and_degree_match_design() {
     assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 24);
     let mut expected_shape = [2usize; 24];
     expected_shape[0] = 1;
-    assert_eq!(STORE_MUL_COLUMN_SHAPE, expected_shape);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &expected_shape);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 3, ext: 3 }

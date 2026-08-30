@@ -15,7 +15,7 @@ use crate::{
     composite::extract_band,
     hash::{
         chunk::{self, ChunkAir, trace::ChunkRequires},
-        chunk_node::{self, COLUMN_SHAPE as CHUNK_NODE_COLUMN_SHAPE},
+        chunk_node,
         chunk_node_sponge::{
             ChunkNodeSpongeAir, NUM_AUX_COLS, NUM_MAIN_COLS, SPONGE_COL_OFFSET,
             trace::generate_trace,
@@ -36,7 +36,10 @@ use crate::{
 #[test]
 fn layout_and_lookup_shape_match_design() {
     assert_eq!(chunk_node::NUM_AUX_COLS, 6);
-    assert_eq!(CHUNK_NODE_COLUMN_SHAPE, [3; chunk_node::NUM_AUX_COLS]);
+    assert_eq!(
+        &crate::tests::lookup_column_shape(&ChunkNodeSpongeAir)[..chunk_node::NUM_AUX_COLS],
+        &[3; chunk_node::NUM_AUX_COLS],
+    );
     assert_eq!(NUM_MAIN_COLS, 99);
     assert_eq!(NUM_AUX_COLS, 24);
     assert_eq!(NUM_AUX_COLS, chunk_node::NUM_AUX_COLS + SPONGE_NUM_AUX_COLS);

@@ -2,30 +2,20 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
-use miden_air::{
-    MidenAir,
-    logup::{BusId as MidenBusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{
-        Challenges, LookupAir,
-        debug::{check_trace_balance, trace::DebugTraceBuilder},
-    },
+use miden_air::lookup::{
+    Challenges, LookupAir,
+    debug::{check_trace_balance, trace::DebugTraceBuilder},
 };
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::LiftedAir;
 
 use crate::{
-    composite::extract_band,
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::LookupMessage,
-    primitives::byte_pair_lut::{BytePairLutAir, NUM_MAIN_COLS as BPL_MAIN_COLS},
+    primitives::byte_pair_lut::BytePairLutAir,
     session::{ChipletAir, NUM_CHIPLETS, fixed_ecgroup_msgs, fixed_uintval_msgs},
-    transcript::{
-        eidos::{
-            COL_EIDOS_COMPRESSION_END, EidosCompressionInterfaceAir, EidosCompressionNarrowAir,
-        },
-        eval::TranscriptEvalAir,
-    },
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -86,12 +76,6 @@ pub(crate) fn session_stack_residual(
     challenges: &Challenges<QuadFelt>,
 ) -> Vec<(Felt, String)> {
     let mut net = HashMap::new();
-    let miden_challenges = Challenges::new(
-        challenges.alpha,
-        challenges.beta_powers[1],
-        MIDEN_MAX_MESSAGE_WIDTH,
-        MidenBusId::COUNT,
-    );
     for (idx, air) in ChipletAir::all().into_iter().enumerate() {
         let main = replacements
             .iter()
@@ -102,22 +86,10 @@ pub(crate) fn session_stack_residual(
                 fold_balance(&ChunkNodeSpongeAir, main, challenges, &mut net)
             },
             ChipletAir::EidosCompression => {
-                fold_balance(&EidosCompressionInterfaceAir, main, challenges, &mut net);
-                let eidos_compression = extract_band(main, 0..COL_EIDOS_COMPRESSION_END);
-                fold_balance(
-                    &EidosCompressionNarrowAir,
-                    &eidos_compression,
-                    &miden_challenges,
-                    &mut net,
-                );
+                fold_balance(&EidosCompressionAir, main, challenges, &mut net)
             },
             ChipletAir::KeccakRound => fold_balance(&KeccakRoundAir, main, challenges, &mut net),
-            ChipletAir::BytePairAnd8 => {
-                let bpl = extract_band(main, 0..BPL_MAIN_COLS);
-                let and8 = extract_band(main, BPL_MAIN_COLS..main.width);
-                fold_balance(&BytePairLutAir, &bpl, challenges, &mut net);
-                fold_balance(&MidenAir::And8Lookup, &and8, &miden_challenges, &mut net);
-            },
+            ChipletAir::BytePairLut => fold_balance(&BytePairLutAir, main, challenges, &mut net),
             ChipletAir::TranscriptEval => {
                 fold_balance(&TranscriptEvalAir, main, challenges, &mut net)
             },

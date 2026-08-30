@@ -10,50 +10,24 @@ use crate::relations::ProvideMult;
 // REQUIRES (IR)
 // ================================================================================================
 
-/// Per-relation multiplicities for a single `(a, b)` pair — one slot per
-/// relation contribution, mirroring the multiplicity columns in the trace.
+/// Per-relation multiplicities for one `(a, b)` pair, mirroring the main trace.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Multiplicities {
-    pub andnot: ProvideMult,
-    pub xor: ProvideMult,
-    pub range16: ProvideMult,
+struct Multiplicities {
+    logic: ProvideMult,
+    rot12: [ProvideMult; 4],
+    rot7: [ProvideMult; 4],
+    range16: ProvideMult,
 }
 
-impl Multiplicities {
-    pub fn op(&self, op: BytePairOp) -> u32 {
-        match op {
-            BytePairOp::AndNot => self.andnot,
-            BytePairOp::Xor => self.xor,
-        }
-    }
-
-    /// True if any of the three multiplicities is non-zero. A zero
-    /// `Multiplicities` corresponds to an `(a, b)` pair that no caller
-    /// has touched, and contributes no trace row.
-    pub fn is_nonzero(&self) -> bool {
-        self.andnot != 0 || self.xor != 0 || self.range16 != 0
-    }
-}
-
-/// Number of unique `(a, b)` byte pairs the LUT can hold:
-/// `256 × 256 = 2^16`. `BytePairLutRequires` allocates a flat
-/// multiplicity slot per pair.
+/// Number of unique byte pairs in the fixed table.
 const NUM_BYTE_PAIRS: usize = 1 << 16;
 
-/// Map `(a, b)` → flat index in [0, [`NUM_BYTE_PAIRS`]). High byte is
-/// `a`, low byte is `b`, so iterating in index order yields the rows
-/// in lex `(a, b)` order — exactly [`generate_trace`]'s emission order.
+/// Maps `(a, b)` to its lexicographic table row.
 const fn pair_idx(a: u8, b: u8) -> usize {
     ((a as usize) << 8) | (b as usize)
 }
 
-/// Accumulates the `(a, b)` pairs *required* of the byte-pair-LUT chiplet
-/// across both relations it provides ([`BytePairLutMsg`] and [`Range16Msg`]).
-///
-/// Backed by a flat `Vec<Multiplicities>` of length `NUM_BYTE_PAIRS`,
-/// indexed by `pair_idx`. Lookups and increments are O(1) array
-/// accesses; [`generate_trace`] walks the backing vector in order to
-/// emit one trace row per `(a, b)` lex index.
+/// Accumulates the relations required from the canonical byte-pair table.
 #[derive(Debug, Clone)]
 pub struct BytePairLutRequires {
     counts: Vec<Multiplicities>,
@@ -72,28 +46,55 @@ impl BytePairLutRequires {
         Self::default()
     }
 
-    /// Raise one require for the [`BytePairLutMsg`] relation on `(op, a, b)`;
-    /// returns `op(a, b)` for caller convenience.
+    /// Requires a bytewise logic result.
+    ///
+    /// AND, ANDNOT, and XOR consume the same canonical `(a, b, a & b)` relation, so their
+    /// multiplicities intentionally aggregate.
     pub fn require(&mut self, op: BytePairOp, a: u8, b: u8) -> u8 {
-        let mults = &mut self.counts[pair_idx(a, b)];
-        match op {
-            BytePairOp::AndNot => mults.andnot += 1,
-            BytePairOp::Xor => mults.xor += 1,
-        }
+        self.counts[pair_idx(a, b)].logic += 1;
         op.apply(a, b)
     }
 
-    /// Raise one require for the [`Range16Msg`] relation on a 16-bit value `w`.
-    /// The chiplet splits `w = a + 256·b` (LSB byte first) and bumps the
-    /// `range16` multiplicity on the matching row.
+    /// Requires one byte-position contribution to an Eidos rotation.
+    pub(crate) fn require_eidos_rotation(
+        &mut self,
+        rotation: EidosRotation,
+        byte: usize,
+        a: u8,
+        b: u8,
+    ) -> u32 {
+        assert!(byte < 4, "Eidos byte position must be in 0..4");
+        let multiplicities = &mut self.counts[pair_idx(a, b)];
+        match rotation {
+            EidosRotation::Rot12 => multiplicities.rot12[byte] += 1,
+            EidosRotation::Rot7 => multiplicities.rot7[byte] += 1,
+        }
+        eidos_rotation_contribution(rotation, byte, a, b)
+    }
+
+    /// Requires the [`Range16Msg`] relation for `w`.
     pub fn require_range16(&mut self, w: u16) {
         let a = (w & 0xff) as u8;
         let b = (w >> 8) as u8;
         self.counts[pair_idx(a, b)].range16 += 1;
     }
 
-    pub fn multiplicity(&self, op: BytePairOp, a: u8, b: u8) -> ProvideMult {
-        self.counts[pair_idx(a, b)].op(op)
+    pub fn multiplicity_logic(&self, a: u8, b: u8) -> ProvideMult {
+        self.counts[pair_idx(a, b)].logic
+    }
+
+    pub(crate) fn multiplicity_rotation(
+        &self,
+        rotation: EidosRotation,
+        byte: usize,
+        a: u8,
+        b: u8,
+    ) -> ProvideMult {
+        assert!(byte < 4, "Eidos byte position must be in 0..4");
+        match rotation {
+            EidosRotation::Rot12 => self.counts[pair_idx(a, b)].rot12[byte],
+            EidosRotation::Rot7 => self.counts[pair_idx(a, b)].rot7[byte],
+        }
     }
 
     pub fn multiplicity_range16(&self, w: u16) -> ProvideMult {
@@ -103,41 +104,28 @@ impl BytePairLutRequires {
     }
 }
 
-/// Verify a 64-bit `op(a, b)` byte-by-byte against 8 [`BytePairLutMsg`]
-/// requires (implicitly range-checking each byte), returning the result.
-/// Shared by every caller that commits 64-bit operands as bytes and needs
-/// their logic result range-checked without a chain trick or an
-/// intermediate chiplet — each caller commits its own `a`/`b`/result bytes
-/// and drives this same 8-request pattern to pin them.
+/// Verifies a 64-bit logic operation byte by byte and returns its result.
 pub fn require_logic64(bpl_req: &mut BytePairLutRequires, op: BytePairOp, a: u64, b: u64) -> u64 {
     let a_bytes = a.to_le_bytes();
     let b_bytes = b.to_le_bytes();
     for i in 0..8 {
         bpl_req.require(op, a_bytes[i], b_bytes[i]);
     }
-    match op {
-        BytePairOp::AndNot => (!a) & b,
-        BytePairOp::Xor => a ^ b,
-    }
+    op.apply_u64(a, b)
 }
 
 // TRACE GENERATION
 // ================================================================================================
 
-/// Witness main trace: the three multiplicity columns, fixed at
-/// [`TRACE_HEIGHT`] = `2^16` rows — one per `(a, b) ∈ [0, 256)²` in lex
-/// order (`idx = (a << 8) | b`). Row `r` lines up with row `r` of the
-/// preprocessed `preprocessed_table`, so the data and multiplicities
-/// share an index. Multiplicities are pulled from `requires` and are zero
-/// on untouched rows.
-///
-/// The data columns `a`, `b`, `c_andnot`, `c_xor` are not here — they are
-/// the verifier-known preprocessed table, so they cannot be forged.
+/// Builds the fixed-height witness multiplicity trace in byte-pair order.
 pub fn generate_trace(requires: BytePairLutRequires) -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(TRACE_HEIGHT * NUM_MAIN_COLS);
 
-    for mults in &requires.counts {
-        values.extend([Felt::from(mults.andnot), Felt::from(mults.xor), Felt::from(mults.range16)]);
+    for multiplicities in &requires.counts {
+        values.push(Felt::from(multiplicities.logic));
+        values.extend(multiplicities.rot12.map(Felt::from));
+        values.extend(multiplicities.rot7.map(Felt::from));
+        values.push(Felt::from(multiplicities.range16));
     }
 
     RowMajorMatrix::new(values, NUM_MAIN_COLS)

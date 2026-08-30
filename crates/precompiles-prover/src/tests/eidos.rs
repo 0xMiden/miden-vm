@@ -3,12 +3,7 @@
 use std::{vec, vec::Vec};
 
 use miden_air::{
-    BaseAir,
-    logup::{BusId as MidenBusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{
-        Challenges as MidenChallenges, build_lookup_fractions,
-        debug::{ValidateLayout, ValidateLookupAir, check_trace_balance, trace::BalanceReport},
-    },
+    lookup::debug::{ValidateLayout, ValidateLookupAir, check_trace_balance, trace::BalanceReport},
     trace::eidos_compression::{
         self as mvm_eidos_compression, TraceMode as MvmTraceMode,
         generate_felt_trace_block as generate_mvm_block,
@@ -21,20 +16,19 @@ use miden_core::{
     utils::RowMajorMatrix,
 };
 use miden_crypto::{hash::eidos::Eidos, stark::air::ConstraintDegrees};
-use miden_lifted_air::LiftedAir;
+use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
 
 use crate::{
-    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
+    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_lookup_fractions},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::Session,
     transcript::eidos::{
         COL_ABSORPTION_ID, COL_CHAIN_CONTEXT_BEGIN, COL_CV_IN_BEGIN, COL_EIDOS_COMPRESSION_END,
         COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_IS_GENERIC, COL_IS_HEAD, COL_IS_OUTPUT,
         COL_IS_PAYLOAD, COL_OUT_MULTIPLICITY, COL_REMAINING, EIDOS_DOMAIN_NODE, EidosChainContext,
-        EidosChainInputMsg, EidosCompressionAir, EidosCompressionInterfaceAir,
-        EidosCompressionNarrowAir, EidosDigest, EidosOutMsg, INTERNAL_CV_BUS_ID, NUM_AUX_COLS,
-        NUM_MAIN_COLS,
+        EidosChainInputMsg, EidosCompressionAir, EidosDigest, EidosOutMsg, INTERNAL_CV_BUS_ID,
+        NUM_AUX_COLS, NUM_MAIN_COLS,
         compression::{
             layout::{
                 BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_CYCLE_ID_COL,
@@ -46,7 +40,7 @@ use crate::{
                 rewrite_felt_footer_for_test,
             },
         },
-        trace::{EidosRequires, generate_traces},
+        trace::{EidosRequires, generate_trace},
     },
 };
 
@@ -106,34 +100,31 @@ fn two_cycle_matrix(
     RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS)
 }
 
-fn miden_lookup_challenges() -> MidenChallenges<QuadFelt> {
-    MidenChallenges::new(
-        QuadFelt::from_u64(101),
-        QuadFelt::from_u64(103),
-        MIDEN_MAX_MESSAGE_WIDTH,
-        MidenBusId::COUNT,
-    )
-}
-
-fn narrow_balance(
+fn parent_matrix_from_core(
     trace: &RowMajorMatrix<Felt>,
-    challenges: &MidenChallenges<QuadFelt>,
-) -> BalanceReport {
-    let air = EidosCompressionNarrowAir;
-    check_trace_balance(&air, trace, &air.periodic_columns(), &[], &[], challenges)
-}
-
-fn parent_matrix_from_core(trace: &RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
+    advertised_cvs: &[[u32; 8]],
+) -> RowMajorMatrix<Felt> {
     let mut values =
         Vec::with_capacity(trace.values.len() / NUM_EIDOS_COMPRESSION_COLS * NUM_MAIN_COLS);
-    for row in trace.values.as_chunks::<NUM_EIDOS_COMPRESSION_COLS>().0 {
+    for (row_idx, row) in
+        trace.values.as_chunks::<NUM_EIDOS_COMPRESSION_COLS>().0.iter().enumerate()
+    {
         values.extend_from_slice(row);
-        values.extend([Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS]);
+        let mut metadata = [Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS];
+        let cycle = row_idx / EIDOS_COMPRESSION_CYCLE_LEN;
+        if let Some(cv) = advertised_cvs.get(cycle) {
+            let cv_begin = COL_CV_IN_BEGIN - NUM_EIDOS_COMPRESSION_COLS;
+            for idx in 0..4 {
+                metadata[cv_begin + idx] = Felt::from(cv[2 * idx])
+                    + Felt::new_unchecked(1u64 << 32) * Felt::from(cv[2 * idx + 1]);
+            }
+        }
+        values.extend(metadata);
     }
     RowMajorMatrix::new(values, NUM_MAIN_COLS)
 }
 
-fn interface_lookup_challenges() -> Challenges<QuadFelt> {
+fn lookup_challenges() -> Challenges<QuadFelt> {
     Challenges::new(
         QuadFelt::from_u64(101),
         QuadFelt::from_u64(103),
@@ -142,16 +133,9 @@ fn interface_lookup_challenges() -> Challenges<QuadFelt> {
     )
 }
 
-fn interface_balance(trace: &RowMajorMatrix<Felt>) -> BalanceReport {
-    let air = EidosCompressionInterfaceAir;
-    check_trace_balance(
-        &air,
-        trace,
-        &air.periodic_columns(),
-        &[],
-        &[],
-        &interface_lookup_challenges(),
-    )
+fn lookup_balance(trace: &RowMajorMatrix<Felt>) -> BalanceReport {
+    let air = EidosCompressionAir;
+    check_trace_balance(&air, trace, &air.periodic_columns(), &[], &[], &lookup_challenges())
 }
 
 fn net_multiplicity(report: &BalanceReport, denominator: QuadFelt) -> Felt {
@@ -281,7 +265,7 @@ fn air_layout_matches_32_row_eidos_compression_spec() {
     assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, 2);
+    assert_eq!(layout.num_permutation_values, 1);
     assert_eq!(layout.num_periodic_columns, 14);
     assert_eq!(
         <EidosCompressionAir as BaseAir<Felt>>::periodic_columns(&EidosCompressionAir)
@@ -300,49 +284,43 @@ fn constraint_degree_remains_three() {
 }
 
 #[test]
-fn lookup_degree_annotations_match_the_two_family_layout() {
-    let common = |trace_width, permutation_width| ValidateLayout {
-        preprocessed_width: 0,
-        trace_width,
-        num_public_values: NUM_PUBLIC_VALUES,
-        num_periodic_columns: 14,
-        permutation_width,
-        num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: 1,
-    };
-
-    EidosCompressionNarrowAir
-        .validate(common(NUM_EIDOS_COMPRESSION_COLS, 18))
-        .unwrap_or_else(|error| {
-            panic!("PVM Eidos compression core lookup validation failed: {error}")
-        });
-    EidosCompressionInterfaceAir
-        .validate(common(NUM_MAIN_COLS, 2))
-        .unwrap_or_else(|error| {
-            panic!("PVM EidosCompression interface lookup validation failed: {error}")
-        });
+fn lookup_degree_annotations_match_the_unified_layout() {
+    EidosCompressionAir
+        .validate(ValidateLayout {
+            preprocessed_width: 0,
+            trace_width: NUM_MAIN_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: 14,
+            permutation_width: NUM_AUX_COLS,
+            num_permutation_challenges: NUM_RANDOMNESS,
+            num_permutation_values: 1,
+        })
+        .unwrap_or_else(|error| panic!("PVM Eidos compression lookup validation failed: {error}"));
 }
 
 #[test]
-fn lookup_interaction_liveness_matches_the_18_plus_2_design() {
+fn lookup_interaction_liveness_matches_the_unified_twenty_column_design() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(EidosChainContext::and(), [block(10)]);
     requires.require_digest(output.digest);
-    let compression = generate_traces(requires).compression;
-    let core = crate::composite::extract_band(&compression, 0..NUM_EIDOS_COMPRESSION_COLS);
+    let compression = generate_trace(requires);
 
-    let narrow = build_lookup_fractions(
-        &EidosCompressionNarrowAir,
-        &core,
+    let fractions = build_lookup_fractions(
+        &EidosCompressionAir,
+        &compression,
         None,
-        &EidosCompressionNarrowAir.periodic_columns(),
-        &miden_lookup_challenges(),
+        &EidosCompressionAir.periodic_columns(),
+        &lookup_challenges(),
     );
-    assert_eq!(narrow.shape(), &[2; 18]);
+    let mut expected_shape = [2; NUM_AUX_COLS];
+    expected_shape[18] = 1;
+    assert_eq!(fractions.shape(), &expected_shape);
+
     for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        let actual = &narrow.counts()[row * 18..(row + 1) * 18];
+        let actual = &fractions.counts()[row * NUM_AUX_COLS..(row + 1) * NUM_AUX_COLS];
+        let core = &actual[..18];
         if row < FOOTER_START {
-            assert_eq!(actual, &[2; 18], "fused row {row}");
+            assert_eq!(core, &[2; 18], "fused row {row}");
         } else {
             let mut expected = [0; 18];
             expected[..9].fill(2);
@@ -350,27 +328,16 @@ fn lookup_interaction_liveness_matches_the_18_plus_2_design() {
             expected[13] = 1;
             expected[14] = 2;
             expected[16..18].fill(2);
-            assert_eq!(actual, &expected, "footer row {row}");
-            assert_eq!(actual.iter().sum::<usize>(), 29);
+            assert_eq!(core, &expected, "footer row {row}");
+            assert_eq!(core.iter().sum::<usize>(), 29);
         }
-    }
 
-    let interface = build_lookup_fractions(
-        &EidosCompressionInterfaceAir,
-        &compression,
-        None,
-        &EidosCompressionInterfaceAir.periodic_columns(),
-        &interface_lookup_challenges(),
-    );
-    assert_eq!(interface.shape(), &[1, 2]);
-    for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
-        let actual = &interface.counts()[row * 2..(row + 1) * 2];
         let expected = match row {
             0 => [0, 1],
             31 => [1, 2],
             _ => [0, 0],
         };
-        assert_eq!(actual, expected, "interface row {row}");
+        assert_eq!(&actual[18..], &expected, "interface row {row}");
     }
 }
 
@@ -411,13 +378,13 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     assert_eq!(generic.digest, EidosDigest(expected_generic.into_elements()));
     assert_eq!(requires.total_cycles(), 6);
 
-    let traces = generate_traces(requires);
-    crate::tests::check_local(EidosCompressionAir, &traces.compression);
+    let compression = generate_trace(requires);
+    crate::tests::check_local(EidosCompressionAir, &compression);
 
     // Six real compressions occupy six full 32-row cycles, padded to eight cycles.
-    assert_eq!(traces.compression.values.len() / NUM_MAIN_COLS, 8 * 32);
+    assert_eq!(compression.values.len() / NUM_MAIN_COLS, 8 * 32);
     let row = |cycle: usize, c: usize| {
-        traces.compression.values[cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS + c]
+        compression.values[cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS + c]
     };
     assert_eq!(row(0, COL_IS_HEAD), Felt::ONE);
     assert_eq!(row(1, COL_REMAINING), Felt::from_u32(3));
@@ -432,9 +399,7 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     // consumers.
     let footer_digest = |cycle: usize| {
         let footer = cycle * EIDOS_COMPRESSION_CYCLE_LEN + EIDOS_COMPRESSION_CYCLE_LEN - 1;
-        core::array::from_fn(|i| {
-            traces.compression.values[footer * NUM_MAIN_COLS + footer_digest_col(i)]
-        })
+        core::array::from_fn(|i| compression.values[footer * NUM_MAIN_COLS + footer_digest_col(i)])
     };
     assert_eq!(footer_digest(0), and.digest.as_array());
     assert_eq!(footer_digest(3), chunks.digest.as_array());
@@ -445,8 +410,8 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
         for row in 1..EIDOS_COMPRESSION_CYCLE_LEN {
             let current = first + row * NUM_MAIN_COLS;
             assert_eq!(
-                &traces.compression.values[current + COL_ABSORPTION_ID..current + NUM_MAIN_COLS],
-                &traces.compression.values[first + COL_ABSORPTION_ID..first + NUM_MAIN_COLS],
+                &compression.values[current + COL_ABSORPTION_ID..current + NUM_MAIN_COLS],
+                &compression.values[first + COL_ABSORPTION_ID..first + NUM_MAIN_COLS],
                 "PVM metadata changed within physical Eidos compression cycle {cycle} at row {row}",
             );
         }
@@ -462,7 +427,7 @@ fn distinct_generic_absorptions_use_consecutive_physical_cycles() {
     assert_ne!(first.digest, second.digest);
     assert_eq!(requires.total_cycles(), 2);
 
-    let compression = generate_traces(requires).compression;
+    let compression = generate_trace(requires);
     let row = |cycle: usize, col: usize| {
         compression.values[cycle * EIDOS_COMPRESSION_CYCLE_LEN * NUM_MAIN_COLS + col]
     };
@@ -494,13 +459,12 @@ fn physical_cycle_id_rejects_two_cycle_cv_swap() {
 
     let forged_core = two_cycle_matrix(&forged_a, &forged_b);
     // Every core polynomial constraint still holds. Rejection comes specifically from the
-    // cycle-tagged atomic CV bridge in the PVM interface lookup family.
-    crate::tests::check_local(EidosCompressionNarrowAir, &forged_core);
-    let forged = parent_matrix_from_core(&forged_core);
-    let challenges = interface_lookup_challenges();
-    let report = interface_balance(&forged);
+    // cycle-tagged atomic CV relation in the unified PVM lookup argument.
+    let forged = parent_matrix_from_core(&forged_core, &[cv_a, cv_b]);
+    crate::tests::check_local(EidosCompressionAir, &forged);
+    let challenges = lookup_challenges();
+    let report = lookup_balance(&forged);
     assert!(report.mutex_violations.is_empty());
-    assert_eq!(report.unmatched.len(), 4);
     for (cycle_id, consumed, advertised) in [(0u64, cv_b, cv_a), (1, cv_a, cv_b)] {
         let encode = |cv: [u32; 8]| {
             let fields: [Felt; 9] = core::array::from_fn(|idx| {
@@ -531,16 +495,16 @@ fn physical_cycle_id_rejects_two_cycle_message_swap() {
     rewrite_felt_footer_for_test(&mut forged_a.rows, block_a, cv_a, forged_a.final_v, 0);
     rewrite_felt_footer_for_test(&mut forged_b.rows, block_b, cv_b, forged_b.final_v, 1);
 
-    let forged = two_cycle_matrix(&forged_a, &forged_b);
-    crate::tests::check_local(EidosCompressionNarrowAir, &forged);
-    let challenges = miden_lookup_challenges();
-    let report = narrow_balance(&forged, &challenges);
+    let forged = parent_matrix_from_core(&two_cycle_matrix(&forged_a, &forged_b), &[cv_a, cv_b]);
+    crate::tests::check_local(EidosCompressionAir, &forged);
+    let challenges = lookup_challenges();
+    let report = lookup_balance(&forged);
     let seven = Felt::from_u8(7);
     for (cycle_id, consumed, advertised) in [(0u64, block_b, block_a), (1, block_a, block_b)] {
         for word_index in 0..16 {
             let encode = |block: [u32; 16]| {
                 challenges.encode(
-                    MidenBusId::EidosCompressionMessageWord as usize,
+                    BusId::EidosWord as usize,
                     [
                         Felt::from_usize(word_index),
                         Felt::from(block[word_index]),
@@ -562,7 +526,8 @@ fn physical_cycle_id_is_pinned_to_zero() {
     let first = generate_felt_trace_block_with_cycle_id(block, cv, 1);
     let second = generate_felt_trace_block_with_cycle_id(block, cv, 2);
 
-    crate::tests::check_local(EidosCompressionNarrowAir, &two_cycle_matrix(&first, &second));
+    let trace = parent_matrix_from_core(&two_cycle_matrix(&first, &second), &[cv, cv]);
+    crate::tests::check_local(EidosCompressionAir, &trace);
 }
 
 #[test]
@@ -574,7 +539,8 @@ fn physical_cycle_id_is_constant_across_fused_rows() {
     let second = generate_felt_trace_block_with_cycle_id(block, cv, 1);
     first.rows[1][G_COMPRESSION_CYCLE_ID_COL] = Felt::ONE;
 
-    crate::tests::check_local(EidosCompressionNarrowAir, &two_cycle_matrix(&first, &second));
+    let trace = parent_matrix_from_core(&two_cycle_matrix(&first, &second), &[cv, cv]);
+    crate::tests::check_local(EidosCompressionAir, &trace);
 }
 
 #[test]
@@ -586,7 +552,8 @@ fn physical_cycle_id_bridges_fused_rows_to_footer() {
     let second = generate_felt_trace_block_with_cycle_id(block, cv, 2);
     rewrite_felt_footer_for_test(&mut first.rows, block, cv, first.final_v, 1);
 
-    crate::tests::check_local(EidosCompressionNarrowAir, &two_cycle_matrix(&first, &second));
+    let trace = parent_matrix_from_core(&two_cycle_matrix(&first, &second), &[cv, cv]);
+    crate::tests::check_local(EidosCompressionAir, &trace);
 }
 
 #[test]
@@ -597,7 +564,8 @@ fn physical_cycle_id_increments_between_cycles() {
     let first = generate_felt_trace_block_with_cycle_id(block, cv, 0);
     let second = generate_felt_trace_block_with_cycle_id(block, cv, 2);
 
-    crate::tests::check_local(EidosCompressionNarrowAir, &two_cycle_matrix(&first, &second));
+    let trace = parent_matrix_from_core(&two_cycle_matrix(&first, &second), &[cv, cv]);
+    crate::tests::check_local(EidosCompressionAir, &trace);
 }
 
 #[test]
@@ -668,7 +636,7 @@ fn padding_cycle_cannot_emit_unproved_payload() {
         .require_absorption(EidosChainContext::keccak256_assertion(8), [block(10), block(20)]);
     requires.require_digest(and.digest);
     requires.require_digest(generic.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
     // Three real cycles round to four. A padding cycle cannot impersonate a payload cycle.
     let padding_row = 3 * EIDOS_COMPRESSION_CYCLE_LEN;
     compression.values[padding_row * NUM_MAIN_COLS + COL_IS_PAYLOAD] = Felt::ONE;
@@ -684,7 +652,7 @@ fn input_multiplicity_is_zero_on_padding_cycles() {
         [block(10), block(20), block(30)],
     );
     requires.require_digest(generic.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
 
     // Three real cycles round to four; the padding cycle cannot provide an input message.
     for row in 3 * EIDOS_COMPRESSION_CYCLE_LEN..4 * EIDOS_COMPRESSION_CYCLE_LEN {
@@ -700,7 +668,7 @@ fn generic_context_reserved_lane_must_be_zero() {
     let generic =
         requires.require_absorption(EidosChainContext::keccak256_assertion(8), [block(10)]);
     requires.require_digest(generic.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
 
     for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
         compression.values[row * NUM_MAIN_COLS + COL_CHAIN_CONTEXT_BEGIN + 3] = Felt::ONE;
@@ -714,7 +682,7 @@ fn output_multiplicity_is_zero_off_output_cycles() {
     let mut requires = EidosRequires::new();
     let chunks = requires.require_absorption(EidosChainContext::chunk(), [block(1), block(11)]);
     requires.require_digest(chunks.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
 
     // Cycle 0 is a payload chain head but not the terminal output cycle.
     for row in 0..EIDOS_COMPRESSION_CYCLE_LEN {
@@ -729,7 +697,7 @@ fn continuation_payload_id_must_follow_the_chain() {
     let mut requires = EidosRequires::new();
     let chunks = requires.require_absorption(EidosChainContext::chunk(), [block(1), block(11)]);
     requires.require_digest(chunks.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
     for row in EIDOS_COMPRESSION_CYCLE_LEN..2 * EIDOS_COMPRESSION_CYCLE_LEN {
         compression.values[row * NUM_MAIN_COLS + COL_ABSORPTION_ID] += Felt::ONE;
     }
@@ -742,7 +710,7 @@ fn native_eidos_compression_core_witness_is_not_a_free_bridge_input() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(EidosChainContext::and(), [block(1)]);
     requires.require_digest(output.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
 
     let row = FOOTER_START + 1;
     compression.values[row * NUM_MAIN_COLS + footer_r_col(1, 0)] += Felt::ONE;
@@ -756,7 +724,7 @@ fn physical_eidos_compression_cycles_must_carry_the_previous_chaining_word() {
     let mut requires = EidosRequires::new();
     let output = requires.require_absorption(EidosChainContext::chunk(), [block(1), second_block]);
     requires.require_digest(output.digest);
-    let mut compression = generate_traces(requires).compression;
+    let mut compression = generate_trace(requires);
 
     // Replace the second compression with a separately valid native Eidos compression cycle using a
     // forged input CV, and keep its cycle-constant PVM metadata self-consistent. The only

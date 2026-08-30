@@ -15,12 +15,12 @@
 //!
 //! | BusId | Relation        | Provided by                     | Tuple shape                                                 |
 //! |-------|-----------------|---------------------------------|-------------------------------------------------------------|
-//! | 0     | `BytePairLut`   | `byte_pair_lut::BytePairLutAir` | `(op, a, b, c)`, `c = op(a, b)`                             |
+//! | 0     | `BytePairLut`   | `byte_pair_lut::BytePairLutAir` | `(a, b, h)`, where `h = a & b`; XOR and ANDNOT map to this canonical relation |
 //! | 1     | `Range16`       | `byte_pair_lut::BytePairLutAir` | `(w,)`, where `w ∈ [0, 2^16)`                               |
 //! | 4     | `Memory64`      | external (sponge / miniVM)      | `(addr, lo, hi)`, 64-bit cell — multiset, see `memory64`    |
 //! | 5     | `KeccakSponge`  | external (transcript chiplet)   | `(sponge_seq_id, chunk_ptr, len_bytes)`, per-invocation request — see `keccak::sponge` |
-//! | 6     | `EidosIn`   | native `EidosCompressionAir` | `(chain_step_id, domain, message[8], chain_context[4])` — atomic Eidos chaining input |
-//! | 7     | `EidosOut`  | native `EidosCompressionAir` | `(chain_step_id, d0, d1, d2, d3)` — terminal Eidos chaining word |
+//! | 6     | `EidosIn`       | native `EidosCompressionAir` | `(chain_step_id, domain, message[8], chain_context[4])` — atomic Eidos chaining input |
+//! | 7     | `EidosOut`      | native `EidosCompressionAir` | `(chain_step_id, d0, d1, d2, d3)` — terminal Eidos chaining word |
 //! | 8     | `Binding`       | transcript eval chips           | `(h0, h1, h2, h3, value_tag, ptr, bound_ptr)` — node hash ↦ typed value (self-referential) |
 //! | 9     | `ChunkChain`    | `hash::chunk_node_sponge::ChunkNodeSpongeAir` (chunk band) | `(chunk_seq_id_head, absorption_id_head)` — per-invocation chain head, in chunk's native namespace |
 //! | 10    | `UintVal`      | `uint::store_mul::UintStoreMulAir` (store band) | `(ptr, bound_ptr, c0..c7)` — complete 256-bit value as 8×32-bit recombined limbs |
@@ -34,7 +34,10 @@
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
 //! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
-//! | 21    | `EidosCv`      | native `EidosCompressionAir` | `(compression_cycle_id, cv0, ..., cv7)` — atomic internal bridge from the first fused row to footer 3 |
+//! | 21    | `EidosCv`       | native `EidosCompressionAir` | `(compression_cycle_id, cv0, ..., cv7)` — atomic internal bridge from the first fused row to footer 3 |
+//! | 22-25 | `EidosRot12Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, contribution)` — byte-position contribution to `rotr32(a xor b, 12)` |
+//! | 26-29 | `EidosRot7Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, contribution)` — byte-position contribution to `rotr32(a xor b, 7)` |
+//! | 30    | `EidosWord`    | native `EidosCompressionAir` | `(message_index, message_word, compression_cycle_id)` — scheduled message-word permutation |
 //!
 //! ## Adding a new relation
 //!
@@ -71,15 +74,44 @@ pub enum BusId {
     MsmExpr = 19,
     MsmClaimTerm = 20,
     EidosCv = 21,
+    EidosRot12Pos0 = 22,
+    EidosRot12Pos1 = 23,
+    EidosRot12Pos2 = 24,
+    EidosRot12Pos3 = 25,
+    EidosRot7Pos0 = 26,
+    EidosRot7Pos1 = 27,
+    EidosRot7Pos2 = 28,
+    EidosRot7Pos3 = 29,
+    EidosWord = 30,
 }
 
-/// Number of distinct buses currently registered. Sized so that
-/// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
-/// exactly one prefix per [`BusId`] variant (indices 0..=21; `Logic64`/
-/// `Rol64`'s old slots at 2/3 are retired gaps, harmless since ids only
-/// need uniqueness, not contiguity).
-pub const NUM_BUS_IDS: usize = 22;
-const _: () = assert!(NUM_BUS_IDS == BusId::EidosCv as usize + 1);
+/// Size of the indexed bus-prefix table. [`Challenges::new`](miden_air::lookup::Challenges::new)
+/// precomputes every prefix in `0..=30`; `Logic64` and `Rol64` previously occupied the retired
+/// slots at 2 and 3. Keeping those gaps preserves every surviving bus ID.
+pub const NUM_BUS_IDS: usize = 31;
+const _: () = assert!(NUM_BUS_IDS == BusId::EidosWord as usize + 1);
+
+/// PVM-native Eidos rotate-right-by-12 relation for one byte position.
+pub const fn eidos_rot12_bus(byte: usize) -> BusId {
+    match byte {
+        0 => BusId::EidosRot12Pos0,
+        1 => BusId::EidosRot12Pos1,
+        2 => BusId::EidosRot12Pos2,
+        3 => BusId::EidosRot12Pos3,
+        _ => panic!("Eidos byte position must be in 0..4"),
+    }
+}
+
+/// PVM-native Eidos rotate-right-by-7 relation for one byte position.
+pub const fn eidos_rot7_bus(byte: usize) -> BusId {
+    match byte {
+        0 => BusId::EidosRot7Pos0,
+        1 => BusId::EidosRot7Pos1,
+        2 => BusId::EidosRot7Pos2,
+        3 => BusId::EidosRot7Pos3,
+        _ => panic!("Eidos byte position must be in 0..4"),
+    }
+}
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held

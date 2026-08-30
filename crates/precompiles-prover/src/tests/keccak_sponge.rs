@@ -23,9 +23,8 @@ use crate::{
             round::RoundRequires,
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR,
-                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO,
-                COLUMN_SHAPE as SPONGE_COLUMN_SHAPE, KeccakSpongeAir, KeccakSpongeMsg,
-                NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO, KeccakSpongeAir,
+                KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
                 PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
             },
@@ -158,7 +157,10 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
     assert_eq!(NUM_AUX_COLS, 18);
-    assert_eq!(SPONGE_COLUMN_SHAPE, [2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],);
+    assert_eq!(
+        crate::tests::lookup_column_shape(&air),
+        &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],
+    );
 
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
