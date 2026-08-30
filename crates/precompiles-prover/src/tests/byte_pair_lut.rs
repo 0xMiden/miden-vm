@@ -188,22 +188,22 @@ fn trace_row_carries_results_and_multiplicities_at_lex_index() {
 #[test]
 fn air_quotient_degree_matches_constraint_plan() {
     // Flattened via `frac_col!`: column 0 carries only the AndNot
-    // self-provide alone (the gated running-sum anchor), and column 1
+    // self-provide alone, and column 1
     // batches the Xor + Range16 pair — each closing constraint stays at
     // degree ≤ 3 → log_quotient_degree = 1. Reading the operands from
     // preprocessed vs. witness columns doesn't change the degree.
     assert_eq!(crate::tests::log_quotient_degree(&BytePairLutAir), 1);
 }
 
-/// Prover-driven aux-trace build. Returns `(aux, sigma)`; `aux_values`
-/// is always `[sigma]` for BPL.
+/// Prover-driven aux-trace build. Returns `(aux, sigma_prime)`, where
+/// `sigma_prime = sigma / TRACE_HEIGHT`.
 fn build_aux(
     requires: BytePairLutRequires,
 ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<QuadFelt>, QuadFelt) {
     let main = generate_trace(requires);
     let flat = test_alpha_beta();
     let (aux, aux_values) = BytePairLutAir.build_aux_trace(&main, &[], &[], &flat);
-    assert_eq!(aux_values.len(), 1, "BPL exposes exactly one aux value (σ)");
+    assert_eq!(aux_values.len(), 1, "BPL exposes exactly one normalized LogUp value");
     (main, aux, aux_values[0])
 }
 
@@ -214,7 +214,7 @@ fn build_aux_trace_matches_main_height() {
     requires.require(BytePairOp::AndNot, 0x10, 0x20);
     requires.require_range16(0x4321);
 
-    let (main, aux, _sigma) = build_aux(requires);
+    let (main, aux, _sigma_prime) = build_aux(requires);
     let height = main.height();
 
     assert_eq!(aux.height(), height);
@@ -227,14 +227,13 @@ fn build_aux_trace_starts_at_zero() {
     requires.require(BytePairOp::Xor, 0x05, 0x03);
     requires.require(BytePairOp::AndNot, 0x10, 0x20);
 
-    let (_main, aux, _sigma) = build_aux(requires);
+    let (_main, aux, _sigma_prime) = build_aux(requires);
     assert_eq!(aux.values[0], QuadFelt::ZERO);
 }
 
 #[test]
-fn populate_aux_trace_exposed_residue_matches_full_sum() {
-    // σ should equal the chiplet's full residue —
-    // independently computed as −Σ enc⁻¹ over every individual lookup.
+fn committed_logup_value_is_the_normalized_full_sum() {
+    // Scaling the committed value by the trace height recovers the full LogUp sum.
     let bp_calls = [
         (BytePairOp::Xor, 0x05u8, 0x03u8),
         (BytePairOp::Xor, 0x05, 0x03),
@@ -252,9 +251,9 @@ fn populate_aux_trace_exposed_residue_matches_full_sum() {
     }
 
     let challenges = test_challenges();
-    let (_main, _aux, sigma) = build_aux(requires);
+    let (_main, _aux, sigma_prime) = build_aux(requires);
 
-    // One encoding per call; each contributes −1/enc to σ.
+    // One encoding per call; each contributes `-1 / enc` to the raw sum.
     let mut encs: Vec<QuadFelt> = Vec::new();
     for &(op, a, b) in &bp_calls {
         let c = op.apply(a, b);
@@ -270,15 +269,13 @@ fn populate_aux_trace_exposed_residue_matches_full_sum() {
         encs.push(challenges.encode(BusId::Range16 as usize, [w_felt]));
     }
     let invs = batch_multiplicative_inverse(&encs);
-    let expected_residue: QuadFelt = -invs.iter().copied().sum::<QuadFelt>();
+    let expected_sum: QuadFelt = -invs.iter().copied().sum::<QuadFelt>();
 
-    assert_eq!(sigma, expected_residue);
+    assert_eq!(QuadFelt::from_usize(TRACE_HEIGHT) * sigma_prime, expected_sum);
 }
 
 #[test]
 fn num_public_values_matches_shared_root() {
-    // 0.26 hands every AIR the same `air_inputs` slice — the 4-felt
-    // transcript root. The BPL table reads none of it but declares the
-    // shared count. (The old σ/n `inv_n` public input is gone.)
+    // The table does not read the transcript root but must declare the shared input count.
     assert_eq!(BytePairLutAir.num_public_values(), crate::logup::NUM_PUBLIC_VALUES);
 }

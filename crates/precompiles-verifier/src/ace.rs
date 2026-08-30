@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(
             derived.iter().sum::<usize>(),
             2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every chiplet sigma exactly once"
+            "the MASM hook must read every normalized LogUp value exactly once"
         );
     }
 

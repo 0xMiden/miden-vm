@@ -32,7 +32,7 @@ use crate::{
             sponge::trace::SpongeSeqId,
         },
     },
-    logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     transcript::eidos::trace::AbsorptionId,
 };
 
@@ -46,7 +46,7 @@ fn check_with_invocations(_seed: u64, invocations: &[KeccakNodeInvocation]) {
 
 /// Build a single-invocation example anchored at the row-0 origin. The
 /// concrete `d` / `h_input_chunks` values are arbitrary — `check_constraints`
-/// runs the AIR's local constraints + LogUp σ recurrence, both of
+/// runs the AIR's local constraints plus the centered LogUp recurrence, both of
 /// which are agnostic to the digest bytes (cross-chiplet content
 /// consistency lives at the integration-test layer).
 fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
@@ -124,16 +124,14 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_SIGMA_VALUES);
+    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, 0);
 }
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 9 aux columns (col 0 the gated
-    // running-sum anchor alone, the rest each a pair of at-most-two
-    // fractions), so every closing constraint stays at degree ≤ 3 →
-    // log_quotient_degree = 1.
+    // The 7-column packing leaves columns 0 and 2 as singletons and pairs the remaining fractions.
+    // Every closing constraint therefore stays at degree ≤ 3 → log_quotient_degree = 1.
     let air = KeccakNodeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);
 }
