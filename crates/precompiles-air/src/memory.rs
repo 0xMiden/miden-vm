@@ -6,7 +6,7 @@
 //! the quotient accumulator, every layer of the three per-proof LMCS digest trees (main, aux,
 //! quotient) alive at `open` time, the transient per-leaf hashing buffer held while whichever of
 //! those trees is under construction squeezes its leaf digests, and the process-cached
-//! BytePairLut preprocessed bundle. That bundle retains its raw `2^16 × 4` trace, its
+//! BytePairLut preprocessed bundle. That bundle retains its raw `2^16`-row trace, its
 //! blowup-factor LDE, its LMCS digest tree, and the same transient per-leaf hashing buffer for
 //! its own one-time construction. The estimate covers one proof and the preprocessed bundle for
 //! its selected hash configuration. It excludes bundles cached for other hash configurations and
@@ -93,13 +93,12 @@ pub fn prover_peak_bytes(
     // hashing state over that digest is unmodelled extra scratch.
     let extra_leaf_scratch_bytes = leaf_state_bytes(hash_fn).saturating_sub(DIGEST_BYTES);
 
-    // `Preprocessed` is cached for the process lifetime and retains the raw byte-pair/And8 table,
+    // `Preprocessed` is cached for the process lifetime and retains the raw byte-pair table,
     // its LDE, every layer of its LMCS tree, and the leaf-hashing scratch buffer held while that
     // tree's leaves are squeezed. A full binary tree has fewer than twice as many digests as
     // leaves, so `2 * LDE height * DIGEST_BYTES` is a conservative upper bound.
     let preprocessed_height = u64::try_from(TRACE_HEIGHT).ok()?;
-    // The byte-pair and And8 tables are committed as one preprocessed matrix.
-    let preprocessed_width = u64::try_from(ChipletAir::BytePairAnd8.preprocessed_width()).ok()?;
+    let preprocessed_width = u64::try_from(ChipletAir::BytePairLut.preprocessed_width()).ok()?;
     let preprocessed_trace_bytes = preprocessed_height
         .checked_mul(one_plus_blowup)?
         .checked_mul(preprocessed_width)?

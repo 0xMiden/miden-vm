@@ -159,9 +159,10 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
     assert_eq!(NUM_AUX_COLS, 18);
-    let column_shape =
-        <KeccakSpongeAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air);
-    assert_eq!(column_shape, [2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],);
+    assert_eq!(
+        crate::tests::lookup_column_shape(&air),
+        &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],
+    );
 
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),

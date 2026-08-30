@@ -258,10 +258,7 @@ fn keccak_round_shape_and_degree_match_design() {
 
     assert_eq!(air.width(), 68);
     assert_eq!(air.aux_width(), 12);
-    assert_eq!(
-        <KeccakRoundAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air),
-        &[1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4],
-    );
+    assert_eq!(crate::tests::lookup_column_shape(&air), &[1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4],);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 4, ext: 5 }

@@ -379,9 +379,7 @@ fn uint_store_mul_shape_and_degree_match_design() {
     assert_eq!(STORE_MUL_NUM_LOGUP_COLS, 24);
     let mut expected_shape = [2usize; 24];
     expected_shape[0] = 1;
-    let actual_shape =
-        <UintStoreMulAir as LookupAir<ProverLookupBuilder<'_, Felt, QuadFelt>>>::column_shape(&air);
-    assert_eq!(actual_shape, expected_shape);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &expected_shape);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 3, ext: 3 }
