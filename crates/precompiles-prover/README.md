@@ -25,7 +25,7 @@ src/
 ├── lib.rs              crate root
 ├── relations.rs        global relation-tag (bus-id) registry
 ├── math.rs             field and integer helpers
-├── logup/              LogUp encoding + natural last-row σ-closing adapter
+├── logup/              LogUp encoding + normalized cyclic accumulator integration
 ├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)
 ├── utils.rs            shared field-element helpers
 ├── session/            orchestration facade + addition-chain strategies

@@ -1,26 +1,15 @@
-//! Constraint-path adapter (natural last-row σ-closing).
+//! Constraint-path adapter for normalized cyclic LogUp running sums.
 //!
-//! Forked from miden-vm `air/src/lookup/constraint.rs` at commit
-//! `3176d1f`. The trait stack ([`LookupBuilder`], [`LookupColumn`],
-//! [`LookupGroup`], [`LookupBatch`]) is reused unchanged — only the
-//! column-finalization step in [`LookupBuilder::next_column`] differs:
-//! column 0 closes the running sum on the **last row** (`when_first` /
-//! `when_transition` / `when_last`, no `inv_n`, no reserved dead row),
-//! and the fraction-column closing drops the `when_last_row acc[i] = 0`
-//! constraint. See [`super`] for the design.
-//!
-//! The `Cyclic*` type names are legacy (from the earlier σ/n-cyclic
-//! form). The internal types ([`CyclicConstraintColumn`],
-//! [`CyclicConstraintGroup`], [`CyclicConstraintBatch`]) are verbatim
-//! copies of miden-vm's `Constraint*` helper structs — their fields are
-//! private upstream so we cannot reuse them, but the bodies are
-//! mechanical and don't depend on the closing form.
+//! The fraction algebra and centered recurrence match the Miden VM lookup implementation. This
+//! builder also presents preprocessed and main columns as one lookup window and limits the
+//! running-sum fold to the declared LogUp columns, excluding trailing auxiliary registers from
+//! the bus balance.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_lifted_air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_lifted_air::{BaseAir, ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
@@ -118,10 +107,9 @@ where
 
 /// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
 ///
-/// Column 0 is the sole running-sum accumulator; columns 1+ are
-/// fraction columns. All constraints are emitted inline during
-/// [`LookupBuilder::next_column`] using the natural last-row σ-closing
-/// form (see [`super`] for the design discussion).
+/// Column 0 is the sole centered running-sum accumulator; columns 1+ are fraction columns. All
+/// constraints are emitted inline during [`LookupBuilder::next_column`] using the normalized
+/// cyclic form described in [`super`].
 pub struct CyclicConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder + 'ab,
@@ -129,20 +117,10 @@ where
     ab: &'ab mut AB,
     challenges: Challenges<AB::ExprEF>,
     column_idx: usize,
-    /// Number of LogUp aux columns (= [`LookupAir::num_columns`]). The
-    /// col-0 running-sum recurrence folds in only `current[1..num_logup_cols]`,
-    /// so any *trailing* aux columns past the LogUp ones — e.g. a chiplet's
-    /// Schwartz–Zippel register columns — are committed and AIR-constrained
-    /// yet stay out of σ and the cross-AIR balance. For a chiplet with no
-    /// such extra columns this equals the full aux width, so the sum is the
-    /// usual `current[1..]` and σ is unchanged.
+    /// Number of LogUp auxiliary columns. The column-0 recurrence folds in only
+    /// `current[1..num_logup_cols]`, excluding any trailing auxiliary registers.
     num_logup_cols: usize,
-    /// Whether the AIR declares preprocessed columns (`preprocessed_width >
-    /// 0`). When set, [`main`](LookupBuilder::main) presents the combined
-    /// `[preprocessed ++ main]` window; otherwise it must NOT touch the
-    /// wrapped builder's preprocessed window (the `SymbolicAirBuilder`
-    /// builds a 0-row preprocessed window for no-preprocessed AIRs, which
-    /// panics on access).
+    /// Whether [`main`](LookupBuilder::main) must combine preprocessed and witness columns.
     has_preprocessed: bool,
 }
 
@@ -150,15 +128,12 @@ impl<'ab, AB> CyclicConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder,
 {
-    /// `has_preprocessed` must be `air.preprocessed_width() > 0` — passed
-    /// in (rather than read from `air`) because [`LookupAir`] does not
-    /// expose it, and probing the wrapped builder's preprocessed window is
-    /// unsafe for no-preprocessed AIRs (see [`Self::main`]).
-    pub fn new<A>(ab: &'ab mut AB, air: &A, has_preprocessed: bool) -> Self
+    pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
-        A: LookupAir<Self>,
+        A: BaseAir<AB::F> + LookupAir<Self>,
     {
         let num_logup_cols = air.num_columns();
+        let has_preprocessed = air.preprocessed_width() > 0;
         let (alpha, beta): (AB::ExprEF, AB::ExprEF) = {
             let r = ab.permutation_randomness();
             (r[0].into(), r[1].into())
@@ -239,28 +214,22 @@ where
         self.column_idx += 1;
 
         if col_idx == 0 {
-            // Running sum with the natural last-row closing — no σ/n drift,
-            // no reserved dead row. σ lives at `permutation_values()[0]`.
-            //   when_first:      acc[0] = 0
-            //   when_transition: D₀·(acc_next[0] − Σ_{i<L} acc[i]) − N₀ = 0
-            //   when_last:       D₀·(σ          − Σ_{i<L} acc[i]) − N₀ = 0
-            // The last-row form folds the final row's interactions into the
-            // committed σ, so a packed chiplet whose last row fires (e.g.
-            // the 2^16 byte-pair table) is fine. Its degree matches the
-            // transition's; 0.26's per-AIR quotient coset absorbs it.
-            let (acc, acc_next, sigma) = {
+            // Centered cyclic running sum. `sigma_prime = sigma / n` lives at
+            // `permutation_values()[0]`:
+            //   when_first: acc[0] = 0
+            //   every row:  D₀·(acc_next[0] − Σ_{i<L} acc[i] + sigma_prime) − N₀ = 0
+            // The permutation window wraps on the last row, so summing the recurrence proves
+            // `n * sigma_prime = sigma` while including last-row interactions.
+            let (acc, acc_next, sigma_prime) = {
                 let mp = self.ab.permutation();
                 let acc: AB::ExprEF = mp.current_slice()[0].into();
                 let acc_next: AB::ExprEF = mp.next_slice()[0].into();
-                let sigma: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
-                (acc, acc_next, sigma)
+                let sigma_prime: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
+                (acc, acc_next, sigma_prime)
             };
 
-            // all_curr_sum = Σ_{0≤i<num_logup_cols} acc[i]. Bounded to the
-            // LogUp columns so trailing register columns (a chiplet's
-            // Schwartz–Zippel accumulators) stay out of σ and the cross-AIR
-            // balance; for chiplets without them num_logup_cols == aux
-            // width, so this is the full `current[1..]`.
+            // Sum only the LogUp columns. Trailing auxiliary registers remain independently
+            // constrained and do not contribute to the cross-AIR bus balance.
             let num_logup_cols = self.num_logup_cols;
             let all_curr_sum = {
                 let mp = self.ab.permutation();
@@ -273,13 +242,9 @@ where
             };
 
             self.ab.when_first_row().assert_zero_ext(acc);
-            self.ab
-                .when_transition()
-                .assert_zero_ext(u.clone() * (acc_next - all_curr_sum.clone()) - v.clone());
-            self.ab.when_last_row().assert_zero_ext(u * (sigma - all_curr_sum) - v);
+            self.ab.assert_zero_ext(u * (acc_next - all_curr_sum + sigma_prime) - v);
         } else {
-            // Fraction column. Per-row equation D_i·acc[i] = N_i must
-            // hold on every row (no last-row exception); ungated.
+            // Fraction columns are constrained on every row, including the last.
             let acc_curr: AB::ExprEF = {
                 let mp = self.ab.permutation();
                 mp.current_slice()[col_idx].into()
@@ -297,9 +262,7 @@ where
 /// Per-column handle returned by
 /// [`CyclicConstraintLookupBuilder::next_column`].
 ///
-/// Verbatim copy of upstream `ConstraintColumn`'s body — the closing
-/// patch only affects column finalization in `next_column`, not the
-/// per-group composition.
+/// Holds one column's cross-multiplied `(V, U)` fraction accumulator.
 pub struct CyclicConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
@@ -372,8 +335,7 @@ where
 // CYCLIC CONSTRAINT GROUP
 // ================================================================================================
 
-/// Per-group handle for the constraint path. Verbatim copy of upstream
-/// `ConstraintGroup`'s body.
+/// Holds one group's cross-multiplied `(V, U)` fraction accumulator.
 pub struct CyclicConstraintGroup<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
@@ -479,8 +441,7 @@ where
 // CYCLIC CONSTRAINT BATCH
 // ================================================================================================
 
-/// Batch handle returned by [`LookupGroup::batch`]. Verbatim copy of
-/// upstream `ConstraintBatch`'s body.
+/// Batch handle returned by [`LookupGroup::batch`].
 pub struct CyclicConstraintBatch<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
