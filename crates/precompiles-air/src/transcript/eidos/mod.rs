@@ -8,12 +8,11 @@ pub mod compression;
 pub mod digest;
 pub mod messages;
 
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, vec::Vec};
 use core::{array, borrow::Borrow};
 
 use compression::{
     EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionCols,
-    NUM_PERIODIC_COLUMNS as EIDOS_COMPRESSION_PERIODIC_COLS,
     constraints::{enforce_footer_rows, enforce_fused_rows},
     emit_lookup_columns, get_periodic_column_values,
     layout::{
@@ -26,13 +25,6 @@ use compression::{
 };
 pub use digest::EidosDigest;
 pub use messages::{EidosBlockMsg, EidosInitMsg, EidosOutMsg};
-use miden_air::{
-    logup::{BusId as MidenBusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{
-        ConstraintLookupBuilder as MidenConstraintLookupBuilder, LookupAir,
-        build_logup_aux_trace as build_miden_aux_trace,
-    },
-};
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
@@ -42,10 +34,10 @@ use miden_crypto::hash::eidos::Eidos;
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 
 use crate::{
-    composite::{SubAirBuilder, concatenate_bands, extract_band},
     logup::{
-        ConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-        LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        build_logup_aux_trace,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
@@ -85,15 +77,19 @@ const EIDOS_COMPRESSION_AUX_COLS: usize = EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.
 /// Total PVM Eidos auxiliary width: 18 compression columns and three interface columns.
 pub const NUM_AUX_COLS: usize = PVM_AUX_COLS + EIDOS_COMPRESSION_AUX_COLS;
 const PVM_COLUMN_SHAPE: [usize; PVM_AUX_COLS] = [1, 1, 1];
+const INTERFACE_AUX_BEGIN: usize = EIDOS_COMPRESSION_AUX_COLS;
 
-const PVM_VALUE_OFFSET: usize = 0;
-const EIDOS_COMPRESSION_VALUE_OFFSET: usize = 1;
+const fn column_shape() -> [usize; NUM_AUX_COLS] {
+    let mut shape = [2; NUM_AUX_COLS];
+    let mut idx = 0;
+    while idx < PVM_AUX_COLS {
+        shape[INTERFACE_AUX_BEGIN + idx] = PVM_COLUMN_SHAPE[idx];
+        idx += 1;
+    }
+    shape
+}
 
-// The two lookup families deliberately share alpha/beta but use different bus-prefix exponents:
-// PVM prefixes sit at beta^18, while native Miden Eidos compression/And8 prefixes sit at beta^16.
-// This keeps their denominator polynomials domain-separated even though both BusId enums start at
-// zero. Equal widths would make cross-family bus-id collisions possible.
-const _: () = assert!(MAX_MESSAGE_WIDTH != MIDEN_MAX_MESSAGE_WIDTH);
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = column_shape();
 
 // PUBLIC AIR
 // ================================================================================================
@@ -126,60 +122,71 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        2
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let (pvm_aux, pvm_values) =
-            EidosCompressionInterfaceAir.build_aux_trace(main, air_inputs, aux_inputs, challenges);
-        let eidos_compression_main =
-            extract_band(main, COL_EIDOS_COMPRESSION_BEGIN..COL_EIDOS_COMPRESSION_END);
-        let (eidos_compression_aux, eidos_compression_values) = EidosCompressionNarrowAir
-            .build_aux_trace(&eidos_compression_main, air_inputs, aux_inputs, challenges);
-        assert_eq!(pvm_values.len(), 1);
-        assert_eq!(eidos_compression_values.len(), 1);
-
-        (
-            concatenate_bands(&pvm_aux, &eidos_compression_aux),
-            vec![pvm_values[0], eidos_compression_values[0]],
-        )
+        build_logup_aux_trace(self, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         {
-            let mut interface = SubAirBuilder::new(
-                builder,
-                0..NUM_MAIN_COLS,
-                0..0,
-                0..PVM_AUX_COLS,
-                PVM_VALUE_OFFSET..PVM_VALUE_OFFSET + 1,
-                0..EIDOS_COMPRESSION_PERIODIC_COLS,
-            );
-            <EidosCompressionInterfaceAir as LiftedAir<Felt, QuadFelt>>::eval(
-                &EidosCompressionInterfaceAir,
-                &mut interface,
-            );
+            let main = builder.main();
+            let local = &main.current_slice()[..NUM_EIDOS_COMPRESSION_COLS];
+            let next = &main.next_slice()[..NUM_EIDOS_COMPRESSION_COLS];
+            let periodic_values: Vec<AB::Expr> =
+                builder.periodic_values().iter().map(|value| (*value).into()).collect();
+            let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
+            enforce_fused_rows(builder, local, next, &selectors);
+            enforce_footer_rows(builder, local, next, &selectors);
         }
+
+        enforce_interface_constraints(builder);
+
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
+        <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
+    }
+}
+
+impl<LB> LookupAir<LB> for EidosCompressionAir
+where
+    LB: LookupBuilder<F = Felt>,
+{
+    fn column_shape(&self) -> &[usize] {
+        &COLUMN_SHAPE
+    }
+
+    fn max_message_width(&self) -> usize {
+        MAX_MESSAGE_WIDTH
+    }
+
+    fn num_bus_ids(&self) -> usize {
+        NUM_BUS_IDS
+    }
+
+    fn eval(&self, builder: &mut LB) {
         {
-            let mut compression = SubAirBuilder::new(
-                builder,
-                COL_EIDOS_COMPRESSION_BEGIN..COL_EIDOS_COMPRESSION_END,
-                0..0,
-                PVM_AUX_COLS..NUM_AUX_COLS,
-                EIDOS_COMPRESSION_VALUE_OFFSET..EIDOS_COMPRESSION_VALUE_OFFSET + 1,
-                0..EIDOS_COMPRESSION_PERIODIC_COLS,
-            );
-            <EidosCompressionNarrowAir as LiftedAir<Felt, QuadFelt>>::eval(
-                &EidosCompressionNarrowAir,
-                &mut compression,
-            );
+            let main = builder.main();
+            let local: &EidosCompressionCols<_> =
+                main.current_slice()[..NUM_EIDOS_COMPRESSION_COLS].borrow();
+            let next: &EidosCompressionCols<_> =
+                main.next_slice()[..NUM_EIDOS_COMPRESSION_COLS].borrow();
+            let periodic_values: Vec<LB::Expr> =
+                builder.periodic_values().iter().map(|value| (*value).into()).collect();
+            let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
+            emit_lookup_columns(builder, local, next, &selectors);
         }
+        <EidosCompressionInterfaceAir as LookupAir<LB>>::eval(
+            &EidosCompressionInterfaceAir,
+            builder,
+        );
     }
 }
 
@@ -226,7 +233,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionNarrowAir {
         _aux_inputs: &[Felt],
         challenges: &[QuadFelt],
     ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        build_miden_aux_trace(self, main, challenges)
+        build_logup_aux_trace(self, main, challenges)
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -241,7 +248,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionNarrowAir {
             enforce_footer_rows(builder, local, next, &selectors);
         }
 
-        let mut lb = MidenConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
     }
@@ -256,11 +263,11 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
+        MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {
-        MidenBusId::COUNT
+        NUM_BUS_IDS
     }
 
     fn eval(&self, builder: &mut LB) {
@@ -319,54 +326,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-        let periodic_values: Vec<AB::Expr> =
-            builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
-        let is_last = selectors.is_footer_row(3);
-        let not_last = AB::Expr::ONE - is_last.clone();
-
-        let is_absorb: AB::Expr = local[COL_IS_ABSORB].into();
-        let is_absorb_next: AB::Expr = next[COL_IS_ABSORB].into();
-        let compression_id: AB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
-        let chain_head_id: AB::Expr = local[COL_CHAIN_HEAD_ID].into();
-        let chain_head_id_next: AB::Expr = next[COL_CHAIN_HEAD_ID].into();
-
-        builder.assert_bool(local[COL_IS_ABSORB]);
-        builder.when_first_row().assert_zero(is_absorb);
-
-        // Every metadata column is constant throughout its physical 32-row compression cycle.
-        for col in COL_IN_MULTIPLICITY..NUM_MAIN_COLS {
-            builder.assert_zero(
-                not_last.clone() * (AB::Expr::from(next[col]) - AB::Expr::from(local[col])),
-            );
-        }
-
-        // A fresh chain starts at this physical compression. A continuation retains the head ID
-        // from the preceding cycle. This binds terminal outputs to one contiguous native chain
-        // without assigning any meaning to the caller's domain parameters.
-        builder.assert_zero(
-            selectors.is_first_fused()
-                * (AB::Expr::ONE - AB::Expr::from(local[COL_IS_ABSORB]))
-                * (chain_head_id.clone() - compression_id),
-        );
-        builder.when_transition().assert_zero(
-            is_last.clone() * is_absorb_next.clone() * (chain_head_id_next - chain_head_id),
-        );
-
-        // A continuation starts from the preceding compression output. The primitive core already
-        // constrains its physical cycle ID to be canonical and consecutive.
-        for i in 0..4 {
-            let next_cv = universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i)
-                + AB::Expr::from(Felt::new_unchecked(1u64 << 32))
-                    * universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i + 1);
-            builder.when_transition().assert_zero(
-                is_last.clone()
-                    * is_absorb_next.clone()
-                    * (next_cv - AB::Expr::from(local[footer_digest_col(i)])),
-            );
-        }
+        enforce_interface_constraints(builder);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -374,6 +334,59 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
     }
 }
 
+// PVM INTERFACE
+// ================================================================================================
+
+fn enforce_interface_constraints<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
+    let periodic_values: Vec<AB::Expr> =
+        builder.periodic_values().iter().map(|value| (*value).into()).collect();
+    let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
+    let is_last = selectors.is_footer_row(3);
+    let not_last = AB::Expr::ONE - is_last.clone();
+
+    let is_absorb: AB::Expr = local[COL_IS_ABSORB].into();
+    let is_absorb_next: AB::Expr = next[COL_IS_ABSORB].into();
+    let compression_id: AB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
+    let chain_head_id: AB::Expr = local[COL_CHAIN_HEAD_ID].into();
+    let chain_head_id_next: AB::Expr = next[COL_CHAIN_HEAD_ID].into();
+
+    builder.assert_bool(local[COL_IS_ABSORB]);
+    builder.when_first_row().assert_zero(is_absorb);
+
+    // Every metadata column is constant throughout its physical 32-row compression cycle.
+    for col in COL_IN_MULTIPLICITY..NUM_MAIN_COLS {
+        builder.assert_zero(
+            not_last.clone() * (AB::Expr::from(next[col]) - AB::Expr::from(local[col])),
+        );
+    }
+
+    // A fresh chain starts at this physical compression. A continuation retains the head ID
+    // from the preceding cycle. This binds terminal outputs to one contiguous native chain
+    // without assigning any meaning to the caller's domain parameters.
+    builder.assert_zero(
+        selectors.is_first_fused()
+            * (AB::Expr::ONE - AB::Expr::from(local[COL_IS_ABSORB]))
+            * (chain_head_id.clone() - compression_id),
+    );
+    builder.when_transition().assert_zero(
+        is_last.clone() * is_absorb_next.clone() * (chain_head_id_next - chain_head_id),
+    );
+
+    // A continuation starts from the preceding compression output. The primitive core already
+    // constrains its physical cycle ID to be canonical and consecutive.
+    for i in 0..4 {
+        let next_cv = universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i)
+            + AB::Expr::from(Felt::new_unchecked(1u64 << 32))
+                * universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i + 1);
+        builder.when_transition().assert_zero(
+            is_last.clone()
+                * is_absorb_next.clone()
+                * (next_cv - AB::Expr::from(local[footer_digest_col(i)])),
+        );
+    }
+}
 #[doc(hidden)]
 pub const INTERNAL_CV_BUS_ID: usize = BusId::EidosCv as usize;
 
