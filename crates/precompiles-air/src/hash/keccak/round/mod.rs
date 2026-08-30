@@ -32,7 +32,7 @@ pub use program::{NUM_PERIODIC_COLS, Op, ROUND_PERIOD, Slot, round_program, slot
 use crate::{
     hash::memory64::Memory64Msg,
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
         frac_col,
     },
@@ -287,8 +287,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -367,10 +368,6 @@ impl<LB> LookupAir<LB> for KeccakRoundAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

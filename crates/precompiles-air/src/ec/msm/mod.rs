@@ -45,7 +45,7 @@ use crate::{
         add::{EcGroupAddMsg, EcOnCurveCertMsg},
     },
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
         NUM_RANDOMNESS, frac_col,
     },
@@ -541,8 +541,9 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(bnd_b * (here_expr - b_expr - AB::Expr::ONE - b_lo - two16 * b_hi));
 
         // Phase 2: LogUp.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -553,10 +554,6 @@ impl<LB> LookupAir<LB> for EcMsmAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
