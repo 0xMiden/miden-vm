@@ -28,7 +28,7 @@ use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -187,7 +187,7 @@ pub const NUM_MAIN_COLS: usize = 67;
 /// the design notes §"Aux columns and σ exposure".
 pub const NUM_AUX_COLS: usize = 24;
 
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
+// The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]. The sponge's σ aggregates its net
 // contribution across all three buses (Memory64, BytePairLut, KeccakSponge)
 // into one residue — bus-prefix-distinguished encodings + Schwartz-Zippel
@@ -335,7 +335,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -352,8 +352,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         eval_main(builder, 0);
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

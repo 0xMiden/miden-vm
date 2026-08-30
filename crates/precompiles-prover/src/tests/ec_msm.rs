@@ -83,10 +83,7 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 15 aux columns (col 0 the gated
-    // running-sum anchor alone, with the remaining fractions grouped according to
-    // `COLUMN_SHAPE`), so every closing constraint stays at degree
-    // ≤ 3 → log_quotient_degree = 1.
+    // The 15-column packing keeps every centered LogUp constraint at degree at most three.
     assert_eq!(crate::tests::log_quotient_degree(&EcMsmAir), 1);
 }
 

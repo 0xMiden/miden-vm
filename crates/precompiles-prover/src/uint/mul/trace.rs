@@ -394,7 +394,7 @@ pub(crate) fn build_aux(
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
     // Cols 0–2: LogUp running sum + the two fraction columns.
-    let (logup, sigma) = build_logup_aux_trace(&UintMulAir, main, challenges);
+    let (logup, normalized_sum) = build_logup_aux_trace(&UintMulAir, main, challenges);
     let logup_width = logup.width();
     let n = main.height();
     let beta = challenges[1];
@@ -474,5 +474,5 @@ pub(crate) fn build_aux(
         s_reg = s_reg * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
 }
