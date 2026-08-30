@@ -25,7 +25,7 @@ use crate::{
         ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
-    primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
+    primitives::byte_pair_lut::BytePairLutMsg,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, halves_le, next_main},
 };
@@ -134,8 +134,8 @@ pub const NUM_MAIN_COLS: usize = 57;
 /// Aux columns. The lookup fractions are flattened directly into 18
 /// product-closed columns:
 ///
-/// - col 0 (running σ): Memory64 `new-state` + `prev-perm` (the two lowest-degree fractions; the
-///   gated last-row close adds +1, so it lands at degree 5).
+/// - col 0 (centered running sum): Memory64 `new-state` + `prev-perm` (the two lowest-degree
+///   fractions).
 /// - col 1: Memory64 `rc` + lane-16 0x80 consume / provide.
 /// - col 2: Memory64 `squeeze` (the degree-4 multiplicity, alone → degree 4).
 /// - cols 3–16: `BytePairLut` byte requires (8 bytes each) verifying the pad-row `andnot` +
@@ -660,9 +660,6 @@ where
     let mult_lane16_provide: LB::Expr =
         LB::Expr::ZERO - LB::Expr::from(Felt::from(2u8)) * act.clone() * b_sum.clone();
 
-    let andnot_tag = LB::Expr::from(Felt::from(BytePairOp::AndNot.tag()));
-    let xor_tag = LB::Expr::from(Felt::from(BytePairOp::Xor.tag()));
-
     let new_state_deg = Deg { v: 2, u: 1 };
     let selected_interaction_deg = Deg { v: 3, u: 1 };
     let squeeze_interaction_deg = Deg { v: 4, u: 1 };
@@ -675,8 +672,8 @@ where
     let solo_deg = Deg { v: 4, u: 1 };
     let mixed_deg = Deg { v: 5, u: 2 };
 
-    // col 0 (running sum): Memory64 state-lane new-state + prev-perm — the
-    // two lowest-degree fractions, so the gated last-row close stays ≤ 5.
+    // col 0 (centered running sum): Memory64 state-lane new-state + prev-perm. These are the two
+    // lowest-degree fractions; the cyclic closing constraint is ungated.
     frac_col!(
         builder,
         "memory64",
@@ -768,34 +765,31 @@ where
             (
                 "andnot",
                 pad_mult.clone(),
-                BytePairLutMsg {
-                    op: andnot_tag.clone(),
-                    a: andnot_mask_bytes[i].clone(),
-                    b: chunk_bytes[i].into(),
-                    c: cleared_bytes[i].into()
-                },
+                BytePairLutMsg::from_andnot(
+                    andnot_mask_bytes[i].clone(),
+                    chunk_bytes[i].into(),
+                    cleared_bytes[i].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-padding",
                 pad_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: cleared_bytes[i].into(),
-                    b: padding_mask_bytes[i].clone(),
-                    c: padded_bytes[i].into()
-                },
+                BytePairLutMsg::from_xor(
+                    cleared_bytes[i].into(),
+                    padding_mask_bytes[i].clone(),
+                    padded_bytes[i].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-state",
                 pad_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i].into(),
-                    b: padded_bytes[i].into(),
-                    c: state_new_bytes[i].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i].into(),
+                    padded_bytes[i].into(),
+                    state_new_bytes[i].into(),
+                ),
                 selected_interaction_deg
             ),
         );
@@ -815,34 +809,31 @@ where
             (
                 "xor-state-verbatim",
                 verbatim_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i0].into(),
-                    b: chunk_bytes[i0].into(),
-                    c: state_new_bytes[i0].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i0].into(),
+                    chunk_bytes[i0].into(),
+                    state_new_bytes[i0].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-state-verbatim",
                 verbatim_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i1].into(),
-                    b: chunk_bytes[i1].into(),
-                    c: state_new_bytes[i1].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i1].into(),
+                    chunk_bytes[i1].into(),
+                    state_new_bytes[i1].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-state-verbatim",
                 verbatim_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i2].into(),
-                    b: chunk_bytes[i2].into(),
-                    c: state_new_bytes[i2].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i2].into(),
+                    chunk_bytes[i2].into(),
+                    state_new_bytes[i2].into(),
+                ),
                 selected_interaction_deg
             ),
         );
@@ -854,23 +845,21 @@ where
         (
             "xor-state-verbatim",
             verbatim_mult.clone(),
-            BytePairLutMsg {
-                op: xor_tag.clone(),
-                a: state_prev_bytes[6].into(),
-                b: chunk_bytes[6].into(),
-                c: state_new_bytes[6].into()
-            },
+            BytePairLutMsg::from_xor(
+                state_prev_bytes[6].into(),
+                chunk_bytes[6].into(),
+                state_new_bytes[6].into(),
+            ),
             selected_interaction_deg
         ),
         (
             "xor-state-verbatim",
             verbatim_mult,
-            BytePairLutMsg {
-                op: xor_tag.clone(),
-                a: state_prev_bytes[7].into(),
-                b: chunk_bytes[7].into(),
-                c: state_new_bytes[7].into()
-            },
+            BytePairLutMsg::from_xor(
+                state_prev_bytes[7].into(),
+                chunk_bytes[7].into(),
+                state_new_bytes[7].into(),
+            ),
             selected_interaction_deg
         ),
     );
@@ -890,34 +879,31 @@ where
             (
                 "xor-lane16",
                 lane16_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i0].into(),
-                    b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i0])),
-                    c: state_new_bytes[i0].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i0].into(),
+                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i0])),
+                    state_new_bytes[i0].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-lane16",
                 lane16_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i1].into(),
-                    b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i1])),
-                    c: state_new_bytes[i1].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i1].into(),
+                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i1])),
+                    state_new_bytes[i1].into(),
+                ),
                 selected_interaction_deg
             ),
             (
                 "xor-lane16",
                 lane16_mult.clone(),
-                BytePairLutMsg {
-                    op: xor_tag.clone(),
-                    a: state_prev_bytes[i2].into(),
-                    b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[i2])),
-                    c: state_new_bytes[i2].into()
-                },
+                BytePairLutMsg::from_xor(
+                    state_prev_bytes[i2].into(),
+                    LB::Expr::from(Felt::from(PAD_CONST_BYTES[i2])),
+                    state_new_bytes[i2].into(),
+                ),
                 selected_interaction_deg
             ),
         );
@@ -929,23 +915,21 @@ where
         (
             "xor-lane16",
             lane16_mult.clone(),
-            BytePairLutMsg {
-                op: xor_tag.clone(),
-                a: state_prev_bytes[6].into(),
-                b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[6])),
-                c: state_new_bytes[6].into()
-            },
+            BytePairLutMsg::from_xor(
+                state_prev_bytes[6].into(),
+                LB::Expr::from(Felt::from(PAD_CONST_BYTES[6])),
+                state_new_bytes[6].into(),
+            ),
             selected_interaction_deg
         ),
         (
             "xor-lane16",
             lane16_mult,
-            BytePairLutMsg {
-                op: xor_tag.clone(),
-                a: state_prev_bytes[7].into(),
-                b: LB::Expr::from(Felt::from(PAD_CONST_BYTES[7])),
-                c: state_new_bytes[7].into()
-            },
+            BytePairLutMsg::from_xor(
+                state_prev_bytes[7].into(),
+                LB::Expr::from(Felt::from(PAD_CONST_BYTES[7])),
+                state_new_bytes[7].into(),
+            ),
             selected_interaction_deg
         ),
     );

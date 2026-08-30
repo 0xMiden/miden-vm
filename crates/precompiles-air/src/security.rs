@@ -9,10 +9,7 @@
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 pub use miden_air::security::ProofSecurityParameters;
-use miden_air::{
-    MidenAir,
-    security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT},
-};
+use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -35,10 +32,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
     stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    transcript::{
-        eidos::{EidosCompressionInterfaceAir, EidosCompressionNarrowAir},
-        eval::TranscriptEvalAir,
-    },
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -247,13 +241,9 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
 
     match air {
         ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::EidosCompression => {
-            shape_of(EidosCompressionInterfaceAir) + shape_of(EidosCompressionNarrowAir)
-        },
+        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
         ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairAnd8 => {
-            shape_of(BytePairLutAir) + MidenAir::And8Lookup.column_shape().iter().sum::<usize>()
-        },
+        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
         ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
         ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
         ChipletAir::UintAdd => shape_of(UintAddAir),

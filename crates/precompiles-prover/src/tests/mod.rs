@@ -30,11 +30,12 @@ mod vm_uint;
 
 use std::{vec, vec::Vec};
 
+use miden_air::lookup::{LookupAir, ProverLookupBuilder};
 use miden_core::{
     Felt,
     deferred::DeferredRoot,
     field::{PrimeCharacteristicRing, QuadFelt},
-    proof::{HashFunction, StarkProof},
+    proof::StarkProof,
     utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
@@ -138,6 +139,14 @@ where
     A: LiftedAir<Felt, QuadFelt>,
 {
     miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
+}
+
+/// Returns an AIR's LogUp column shape without exposing its backing constant.
+pub(crate) fn lookup_column_shape<A>(air: &A) -> &[usize]
+where
+    A: for<'a> LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
+{
+    LookupAir::<ProverLookupBuilder<'_, Felt, QuadFelt>>::column_shape(air)
 }
 
 /// Add two rational folds represented as `(numerator, denominator)` pairs.

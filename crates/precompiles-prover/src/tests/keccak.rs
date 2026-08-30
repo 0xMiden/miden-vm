@@ -21,10 +21,9 @@ use crate::{
     hash::keccak::{
         reference::{KECCAK_RC, keccak_f1600, keccak_round},
         round::{
-            A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, COLUMN_SHAPE, KeccakRoundAir, NUM_AUX_COLS,
-            NUM_LANES, NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_LIMBS_RANGE,
-            extract_output, extract_outputs, generate_trace_from_states, lane_base,
-            program::SLOT_D_ROL_BEGIN,
+            A_BYTES_RANGE, B_BYTES_RANGE, COL_ACT, KeccakRoundAir, NUM_AUX_COLS, NUM_LANES,
+            NUM_MAIN_COLS, NUM_ROUNDS, PERM_CYCLE, R_BYTES_RANGE, ROT_LIMBS_RANGE, extract_output,
+            extract_outputs, generate_trace_from_states, lane_base, program::SLOT_D_ROL_BEGIN,
         },
     },
     logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
@@ -237,7 +236,7 @@ fn keccak_round_shape_and_degree_match_design() {
 
     assert_eq!(air.width(), 68);
     assert_eq!(air.aux_width(), 12);
-    assert_eq!(COLUMN_SHAPE, [1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4]);
+    assert_eq!(crate::tests::lookup_column_shape(&air), &[1, 2, 4, 4, 4, 4, 1, 2, 4, 4, 4, 4],);
     assert_eq!(
         ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
         ConstraintDegrees { base: 4, ext: 5 }
