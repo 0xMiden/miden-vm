@@ -16,8 +16,8 @@ use crate::{
         keccak::sponge::{self, sponge_program},
     },
     logup::{
-        CyclicConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES,
-        NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
+        ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
@@ -88,8 +88,9 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
         chunk_node::eval_main(builder, 0);
         sponge::eval_main(builder, SPONGE_COL_OFFSET);
 
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -97,10 +98,6 @@ impl<LB> LookupAir<LB> for ChunkNodeSpongeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

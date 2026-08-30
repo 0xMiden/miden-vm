@@ -45,9 +45,8 @@ fn fold_balance<A>(
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let fractions = build_lookup_fractions(air, lookup_main, None, &periodic, challenges);
+    let preprocessed = air.preprocessed_trace();
+    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         *net.entry(denom).or_insert(Felt::ZERO) += multiplicity;
     }
