@@ -19,7 +19,7 @@ use crate::{
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
-    primitives::{byte_pair_and8::BytePairAnd8Air, byte_pair_lut},
+    primitives::byte_pair_lut::{self, BytePairLutAir},
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
@@ -35,7 +35,7 @@ pub enum ChipletAir {
     ChunkNodeSponge,
     EidosCompression,
     KeccakRound,
-    BytePairAnd8,
+    BytePairLut,
     TranscriptEval,
     UintStoreMul,
     UintAdd,
@@ -50,7 +50,7 @@ macro_rules! delegate {
             ChipletAir::ChunkNodeSponge => ChunkNodeSpongeAir.$method($($arg),*),
             ChipletAir::EidosCompression => EidosCompressionAir.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
-            ChipletAir::BytePairAnd8 => BytePairAnd8Air.$method($($arg),*),
+            ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
             ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
@@ -76,7 +76,7 @@ impl ChipletAir {
             ChipletAir::ChunkNodeSponge,
             ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairAnd8,
+            ChipletAir::BytePairLut,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,
@@ -88,12 +88,12 @@ impl ChipletAir {
 
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
-    /// `BytePairAnd8` commits its main and preprocessed traces at
+    /// `BytePairLut` commits its main and preprocessed traces at
     /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
     /// every other instance ranges above its derived minimum.
     pub fn fixed_log_height(&self) -> Option<u32> {
         match self {
-            ChipletAir::BytePairAnd8 => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
+            ChipletAir::BytePairLut => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
             _ => None,
         }
     }
@@ -141,7 +141,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
             ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
-            ChipletAir::BytePairAnd8 => eval_lifted(&BytePairAnd8Air, builder),
+            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
             ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
             ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
@@ -315,7 +315,7 @@ mod tests {
             .collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
-        // BytePairAnd8 is fixed at 2^16; every other entry satisfies its AIR's minimum height.
+        // BytePairLut is fixed at 2^16; every other entry satisfies its AIR's minimum height.
         let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
         let assertions = multi_air
             .eval_external(
@@ -442,7 +442,7 @@ mod tests {
             ChipletAir::ChunkNodeSponge,
             ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairAnd8,
+            ChipletAir::BytePairLut,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,

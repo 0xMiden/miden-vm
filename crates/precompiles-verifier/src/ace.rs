@@ -253,7 +253,7 @@ mod tests {
             ("ChunkNodeSponge", 2),
             ("EidosCompression", 1),
             ("KeccakRound", 2),
-            ("BytePairAnd8", 1),
+            ("BytePairLut", 1),
             ("TranscriptEval", 1),
             ("UintStoreMul", 1),
             ("UintAdd", 1),
@@ -368,8 +368,9 @@ mod tests {
         insta::assert_snapshot!(snapshot);
     }
 
-    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
-    /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
+    /// The PVM aux hook reads ten quadratic-extension residues, one per AIR, packed into five MASM
+    /// words. Pin the complete per-chiplet shape so a redistribution cannot preserve only the
+    /// total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
         const HOOK_PATH: &str =
@@ -384,7 +385,7 @@ mod tests {
             .collect();
         assert_eq!(
             derived,
-            alloc::vec![1, 2, 1, 2, 1, 1, 1, 1, 1, 1],
+            alloc::vec![1; NUM_CHIPLETS],
             "the PVM aux hook boundary shape drifted"
         );
         assert_eq!(
@@ -402,25 +403,6 @@ mod tests {
             u64::try_from(airs.len() - 1).expect("PVM AIR index must fit in u64"),
             "the reverse proof-order scan must start at the last AIR scratch slot"
         );
-        for (constant, target) in [
-            ("EIDOS_COMPRESSION_AIR_INDEX", ChipletAir::EidosCompression),
-            ("BYTE_PAIR_AND8_AIR_INDEX", ChipletAir::BytePairAnd8),
-        ] {
-            let expected = airs
-                .iter()
-                .position(|air| air == &target)
-                .expect("composite AIR must be in canonical order");
-            assert_eq!(
-                masm_const(RELATION_PATH, constant),
-                expected as u64,
-                "PVM context {constant} must match ChipletAir::all()"
-            );
-            assert_eq!(
-                masm_const(HOOK_PATH, constant),
-                expected as u64,
-                "PVM auxiliary hook {constant} must match ChipletAir::all()"
-            );
-        }
     }
 
     #[test]
