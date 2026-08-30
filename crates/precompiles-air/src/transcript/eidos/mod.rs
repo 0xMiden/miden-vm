@@ -46,7 +46,7 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowA
 use crate::{
     composite::{SubAirBuilder, concatenate_bands, extract_band},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        ConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
         LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -241,6 +241,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionNarrowAir {
 
         let mut lb = MidenConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -248,10 +249,6 @@ impl<LB> LookupAir<LB> for EidosCompressionNarrowAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        EIDOS_COMPRESSION_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
@@ -485,8 +482,9 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
             AB::Expr::ONE - selectors.is_first_fused() - selectors.is_footer_row(FOOTER_ROWS - 1);
         builder.assert_zero_ext(aux1 * aux1_inactive);
 
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -524,10 +522,6 @@ impl<LB> LookupAir<LB> for EidosCompressionInterfaceAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        PVM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &PVM_COLUMN_SHAPE
     }

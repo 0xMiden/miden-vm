@@ -78,6 +78,7 @@ where
     ab: &'ab mut AB,
     challenges: Challenges<AB::ExprEF>,
     column_idx: usize,
+    num_columns: usize,
 }
 
 impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
@@ -88,6 +89,8 @@ where
     where
         A: LookupAir<Self>,
     {
+        let num_columns = air.column_shape().len();
+        assert!(num_columns > 0, "a LogUp argument must declare at least one column");
         let (alpha, beta): (AB::ExprEF, AB::ExprEF) = {
             let r = ab.permutation_randomness();
             (r[0].into(), r[1].into())
@@ -95,7 +98,21 @@ where
         let challenges =
             Challenges::<AB::ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
 
-        Self { ab, challenges, column_idx: 0 }
+        Self {
+            ab,
+            challenges,
+            column_idx: 0,
+            num_columns,
+        }
+    }
+
+    /// Finish one symbolic lookup evaluation and validate its declared column shape.
+    pub fn finish(self) {
+        assert_eq!(
+            self.column_idx, self.num_columns,
+            "LookupAir::eval emitted {} columns, but column_shape declares {}",
+            self.column_idx, self.num_columns,
+        );
     }
 }
 
@@ -155,6 +172,11 @@ where
 
         // Pick up permutation column values now that the column borrow is released.
         let col_idx = self.column_idx;
+        assert!(
+            col_idx < self.num_columns,
+            "LookupAir::eval emitted more columns than column_shape declares ({})",
+            self.num_columns,
+        );
         self.column_idx += 1;
 
         if col_idx == 0 {
@@ -166,12 +188,19 @@ where
                 (acc, acc_next, sigma_prime)
             };
 
-            // sum_i acc[i] across all permutation columns.
+            // Sum the declared LogUp prefix only. Any trailing extension-field registers are
+            // independently constrained by the AIR and do not belong to this lookup argument.
             let all_curr_sum = {
                 let mp = self.ab.permutation();
                 let current = mp.current_slice();
+                assert!(
+                    current.len() >= self.num_columns,
+                    "auxiliary trace has {} columns, but LogUp declares {}",
+                    current.len(),
+                    self.num_columns,
+                );
                 let mut sum: AB::ExprEF = current[0].into();
-                for &aux_i in &current[1..] {
+                for &aux_i in &current[1..self.num_columns] {
                     sum += aux_i.into();
                 }
                 sum

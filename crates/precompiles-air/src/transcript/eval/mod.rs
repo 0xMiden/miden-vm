@@ -81,7 +81,7 @@ use crate::{
         msm::{MsmClaimTermMsg, MsmExprMsg},
     },
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -651,8 +651,9 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .assert_zero(continues * (group_next_const - group_local));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -663,10 +664,6 @@ impl<LB> LookupAir<LB> for TranscriptEvalAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

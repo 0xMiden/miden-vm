@@ -27,7 +27,7 @@ use crate::{
             program::SLOT_D_ROL_BEGIN,
         },
     },
-    logup::{Challenges, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{ChipletAir, Session},
     tests::bus_balance::session_stack_residual,
@@ -251,7 +251,7 @@ fn keccak_round_shape_and_degree_match_design() {
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: NUM_AUX_COLS,
         num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_SIGMA_VALUES,
+        num_permutation_values: NUM_LOGUP_VALUES,
     };
     ValidateLookupAir::validate(&air, layout)
         .unwrap_or_else(|err| panic!("KeccakRoundAir lookup validation failed: {err}"));

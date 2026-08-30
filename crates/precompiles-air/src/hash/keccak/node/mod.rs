@@ -47,7 +47,7 @@ use miden_precompiles::Keccak256Precompile;
 use crate::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -278,8 +278,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -290,10 +291,6 @@ impl<LB> LookupAir<LB> for KeccakNodeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

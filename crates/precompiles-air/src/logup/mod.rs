@@ -1,31 +1,9 @@
-//! PVM LogUp integration using normalized cyclic running sums.
+//! PVM relation definitions over the shared Miden LogUp framework.
 //!
-//! Reuses the Miden VM's closure-based lookup framework (`LookupAir`, `LookupBuilder`,
-//! `LookupColumn`, `LookupGroup`, `LookupBatch`, `LookupMessage`, `Challenges`,
-//! `LookupFractions`, `accumulate`) and follows the same centered accumulator convention as the
-//! Miden AIRs. The local constraint builder adds support for combined preprocessed/main windows
-//! and excludes trailing non-LogUp auxiliary registers from the running sum.
-//!
-//! ## Closing the running sum
-//!
-//! Let `t(r)` be the sum of every LogUp fraction assigned to row `r`,
-//! `sigma = sum_r t(r)`, and `sigma_prime = sigma / n` for an `n`-row trace. Column 0 is centered
-//! by `sigma_prime` and closes cyclically, including the last-to-first edge:
-//!
-//! ```text
-//! when_first:    acc[0] = 0
-//! every row:     D₀·(acc_next[0] − Σ_{i<L} acc[i] + sigma_prime) − N₀ = 0
-//! every row i>0: D_i·acc[i] − N_i = 0
-//! ```
-//!
-//! where `sigma_prime` lives at `permutation_values()[0]` and `L = num_logup_cols` bounds the sum
-//! to the LogUp columns. Trailing Schwartz-Zippel register columns are excluded. Summing the
-//! recurrence over the cyclic domain proves `n * sigma_prime = sigma`, including lookup activity
-//! on the last row. No padding row or per-AIR `inv_n` public input is required.
-//!
-//! [`build_logup_aux_trace`] runs the shared `build_lookup_fractions` and `accumulate` routines,
-//! returning the centered trace and committed `sigma_prime`. The cross-AIR closure reconstructs
-//! each raw sum by weighting every committed value by its trace length.
+//! Prover-side fraction collection, centered cyclic accumulation, constraint emission, and the
+//! preprocessed/main window contract come directly from [`miden_air::lookup`]. LogUp columns occupy
+//! the declared auxiliary prefix; chiplet-specific extension-field registers may follow that
+//! prefix without entering the bus balance.
 //!
 //! ## Encoding
 //!
@@ -44,9 +22,6 @@
 //! the flat `[α, β]` slice that `LiftedAir::build_aux_trace` is given —
 //! sized to [`MAX_MESSAGE_WIDTH`] / [`NUM_BUS_IDS`] so prover and
 //! verifier see identical prefixes.
-
-mod aux_builder;
-mod constraint;
 
 /// Emit one **flattened** LogUp column — a single batch of its fractions —
 /// inside a chiplet's `LookupAir::eval` (where the builder param is `LB` and
@@ -69,17 +44,12 @@ macro_rules! frac_col {
         );
     };
 }
-pub use aux_builder::build_logup_aux_trace;
-pub use constraint::{
-    CombinedWindow, CyclicConstraintBatch, CyclicConstraintColumn, CyclicConstraintGroup,
-    CyclicConstraintLookupBuilder, LookupMainWindow,
-};
 pub(crate) use frac_col;
 // Re-export miden-vm's framework so chiplets only need one `use`.
 pub use miden_air::lookup::{
-    BoundaryBuilder, Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder, accumulate,
-    build_lookup_fractions,
+    BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
+    LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
+    accumulate, build_logup_aux_trace, build_lookup_fractions,
 };
 use miden_core::field::QuadFelt;
 
@@ -120,7 +90,9 @@ pub const NUM_PUBLIC_VALUES: usize = 4;
 // COMMITTED LOGUP-VALUE CONTRACT
 // ================================================================================================
 
-/// Number of normalized LogUp values exposed by each non-composite chiplet: exactly one
-/// `sigma_prime = sigma / n`. Auxiliary column counts vary per chiplet; composite AIRs expose one
-/// normalized value per component.
+/// Number of centered LogUp residues exposed by every chiplet.
+///
+/// Auxiliary column counts vary, and some chiplets horizontally compose several logical
+/// components, but every physical AIR contributes to one shared accumulator and exposes exactly
+/// one `sigma_prime = sigma / n`.
 pub const NUM_LOGUP_VALUES: usize = 1;

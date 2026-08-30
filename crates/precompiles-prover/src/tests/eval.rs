@@ -16,7 +16,7 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     ec::EcPointMsg,
-    logup::{Challenges, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     tests::assert_same_rational_fold,
     transcript::{
@@ -64,7 +64,7 @@ fn shape_and_degree_match_design() {
             num_periodic_columns: air.periodic_columns().len(),
             permutation_width: air.aux_width(),
             num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_SIGMA_VALUES,
+            num_permutation_values: NUM_LOGUP_VALUES,
         },
     )
     .unwrap_or_else(|err| panic!("TranscriptEvalAir lookup validation failed: {err}"));

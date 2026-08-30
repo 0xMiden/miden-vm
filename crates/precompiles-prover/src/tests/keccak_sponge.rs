@@ -173,7 +173,7 @@ fn lifted_air_validates_and_layout_matches_spec() {
             num_periodic_columns: air.periodic_columns().len(),
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_SIGMA_VALUES,
+            num_permutation_values: NUM_LOGUP_VALUES,
         },
     )
     .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));

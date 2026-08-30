@@ -21,7 +21,7 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     composite::extract_band,
-    logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     math::{U256, from_limbs16, mac_reduce, to_limbs16, to_limbs32},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -101,9 +101,7 @@ fn fold_balance<A>(
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
+    let report = check_trace_balance(air, main, &periodic, &[], &[], challenges);
     for u in report.unmatched {
         *net.entry(u.denom).or_insert(Felt::ZERO) += u.net_multiplicity;
     }
@@ -328,7 +326,7 @@ fn uint_store_shape_and_degree_match_design() {
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: air.aux_width(),
         num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_SIGMA_VALUES,
+        num_permutation_values: NUM_LOGUP_VALUES,
     };
     ValidateLookupAir::validate(&air, layout)
         .unwrap_or_else(|err| panic!("UintStoreAir lookup validation failed: {err}"));
@@ -357,7 +355,7 @@ fn uint_store_mul_shape_and_degree_match_design() {
         num_periodic_columns: air.periodic_columns().len(),
         permutation_width: STORE_MUL_AUX_WIDTH,
         num_permutation_challenges: NUM_RANDOMNESS,
-        num_permutation_values: NUM_SIGMA_VALUES,
+        num_permutation_values: NUM_LOGUP_VALUES,
     };
     ValidateLookupAir::validate(&air, layout)
         .unwrap_or_else(|err| panic!("UintStoreMulAir lookup validation failed: {err}"));
