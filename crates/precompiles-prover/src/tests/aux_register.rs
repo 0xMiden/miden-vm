@@ -1,8 +1,8 @@
 //! Tests for an extension-field register that shares the auxiliary trace with LogUp columns.
 //!
 //! A beta-dependent accumulator must be committed after the Fiat-Shamir challenge is sampled, so
-//! it belongs in the auxiliary trace. [`CyclicConstraintLookupBuilder`] uses `num_logup_cols` to
-//! keep such registers out of the LogUp sum while preserving their AIR constraints.
+//! it belongs in the auxiliary trace. [`ConstraintLookupBuilder`] uses the declared lookup-column
+//! prefix to keep such registers out of the LogUp sum while preserving their AIR constraints.
 
 use std::{vec, vec::Vec};
 
@@ -17,7 +17,7 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBuilder, NUM_LOGUP_VALUES,
         NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -103,8 +103,9 @@ impl LiftedAir<Felt, QuadFelt> for AuxRegisterAir {
         builder.when_transition().assert_zero_ext(acc_next - acc * beta - x_expr);
 
         // Phase 2: LogUp over one empty column, so the normalized sum is zero.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -112,10 +113,6 @@ impl<LB> LookupAir<LB> for AuxRegisterAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -129,7 +126,7 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // The register at auxiliary column 1 is excluded by the `num_logup_cols` bound.
+        // Auxiliary column 1 follows the declared LogUp prefix and is excluded from its sum.
         builder.next_column(|_col| {}, Deg { v: 1, u: 1 });
     }
 }

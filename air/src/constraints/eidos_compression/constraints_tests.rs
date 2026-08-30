@@ -109,6 +109,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     let air = MidenAir::EidosCompression;
     let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
     LookupAir::eval(&air, &mut lookup_builder);
+    lookup_builder.finish();
 
     // Column zero emits its anchor and recurrence; every later column emits one constraint.
     assert_eq!(builder.extension_evaluations.len(), AUX_COLS + 1);

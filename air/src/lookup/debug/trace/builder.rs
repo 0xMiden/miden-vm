@@ -52,6 +52,14 @@ impl<'a> DebugTraceBuilder<'a> {
             column_idx: 0,
         }
     }
+
+    pub(super) fn finish(self, expected_columns: usize) {
+        assert_eq!(
+            self.column_idx, expected_columns,
+            "LookupAir::eval emitted {} columns, but column_shape declares {expected_columns}",
+            self.column_idx,
+        );
+    }
 }
 
 impl<'a> LookupBuilder for DebugTraceBuilder<'a> {

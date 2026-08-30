@@ -37,6 +37,7 @@ where
     /// Dense per-column fraction buffers shared across all rows.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
+    num_columns: usize,
 }
 
 impl<'a, F, EF> ProverLookupBuilder<'a, F, EF>
@@ -50,14 +51,14 @@ where
     /// - `periodic_values`: periodic columns at the current row.
     /// - `challenges`: precomputed LogUp challenges (shared across every row; the caller builds
     ///   this once outside the row loop and passes a shared reference here).
-    /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
-    ///   air.num_columns()`; the builder never calls `air.eval` itself).
+    /// - `air`: the lookup shape (used only to validate the fraction-buffer width; the builder
+    ///   never calls `air.eval` itself).
     /// - `fractions`: dense per-column fraction buffers, sized once via
     ///   [`LookupFractions::from_shape`] and re-used across every row of the same trace.
     ///
     /// # Panics
     ///
-    /// Panics in debug builds if `fractions.num_columns() != air.num_columns()`.
+    /// Panics in debug builds if the fraction-buffer width differs from `air.column_shape().len()`.
     pub fn new<A>(
         main: RowWindow<'a, F>,
         preprocessed: RowWindow<'a, F>,
@@ -69,11 +70,8 @@ where
     where
         A: LookupAir<Self>,
     {
-        debug_assert_eq!(
-            fractions.num_columns(),
-            air.num_columns(),
-            "fractions buffer must be pre-sized to air.num_columns()",
-        );
+        let num_columns = air.column_shape().len();
+        debug_assert_eq!(fractions.num_columns(), num_columns, "fraction-buffer width mismatch");
         Self {
             main,
             preprocessed,
@@ -81,7 +79,17 @@ where
             challenges,
             fractions,
             column_idx: 0,
+            num_columns,
         }
+    }
+
+    /// Validate that one concrete row emitted the declared number of columns.
+    fn finish(self) {
+        debug_assert_eq!(
+            self.column_idx, self.num_columns,
+            "LookupAir::eval emitted {} columns, but column_shape declares {}",
+            self.column_idx, self.num_columns,
+        );
     }
 }
 
@@ -101,6 +109,8 @@ where
 /// - `air`: the [`LookupAir`] to evaluate.
 /// - `main_trace`: row-major main execution trace. Row access is zero-copy via
 ///   `main_trace.values.borrow()`.
+/// - `preprocessed_trace`: verifier-known trace for AIRs that declare preprocessed columns. Its
+///   height must match `main_trace`; pass `None` when the AIR has no preprocessed columns.
 /// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.
 /// - `challenges`: precomputed LogUp challenges (shared across every row).
 ///
@@ -169,6 +179,7 @@ where
                 &mut chunk,
             );
             air.eval(&mut lb);
+            lb.finish();
         }
         chunk
     };
@@ -303,6 +314,11 @@ where
         _deg: Deg,
     ) -> R {
         let idx = self.column_idx;
+        debug_assert!(
+            idx < self.num_columns,
+            "LookupAir::eval emitted more columns than column_shape declares ({})",
+            self.num_columns,
+        );
         let vec = &mut self.fractions.fractions;
         let counts = &mut self.fractions.counts;
         let shape_col = self.fractions.shape[idx];
@@ -596,9 +612,6 @@ mod tests {
     where
         LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, ExprEF = QuadFelt>,
     {
-        fn num_columns(&self) -> usize {
-            2
-        }
         fn column_shape(&self) -> &[usize] {
             &SMOKE_SHAPE
         }
@@ -758,10 +771,6 @@ mod tests {
     where
         LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, Var = Felt, ExprEF = QuadFelt>,
     {
-        fn num_columns(&self) -> usize {
-            1
-        }
-
         fn column_shape(&self) -> &[usize] {
             &ROW_TAGGED_SHAPE
         }

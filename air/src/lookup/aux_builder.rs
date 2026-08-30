@@ -575,16 +575,13 @@ mod tests {
     }
 
     /// Minimal `LookupAir` used to drive `LookupFractions::from_shape` without pulling in the
-    /// real Miden air. Only `num_columns()` and `column_shape()` are exercised; the
-    /// other methods return sentinel values and `eval` is a no-op.
+    /// real Miden AIR. Only `column_shape()` is relevant; the other methods return sentinel values
+    /// and `eval` is a no-op.
     struct FakeAir {
         shape: [usize; 2],
     }
 
     impl<LB: LookupBuilder> LookupAir<LB> for FakeAir {
-        fn num_columns(&self) -> usize {
-            self.shape.len()
-        }
         fn column_shape(&self) -> &[usize] {
             &self.shape
         }

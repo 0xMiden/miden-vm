@@ -71,8 +71,8 @@
 //!
 //! ## Registers
 //!
-//! Two ext-field aux registers beyond the LogUp columns (σ-excluded via
-//! `num_logup_cols`):
+//! Two extension-field auxiliary registers follow the declared LogUp prefix and are excluded from
+//! its sum:
 //!
 //! - **`S`** (staging): builds `κₐ·a(β)` on the `a` row, holds through the `b` row (whose `id`
 //!   contribution `S·b(β)` lands the degree-2 product at constraint degree 3), resets, builds
@@ -103,7 +103,7 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
         NUM_RANDOMNESS,
     },
@@ -305,7 +305,7 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
 // Aux layout: col 0 = LogUp running sum (the UintMul provide), the raw
 // UintLimbs consumes, Range16 on every cell position, the two κ
 // Range16s, and the 4×32 UintVal consumes, then the Schwartz–Zippel
-// `id` and staging `S` registers (excluded from σ via num_logup_cols).
+// `id` and staging `S` registers (outside the declared LogUp prefix).
 // FLATTENED to lqd 1: every fraction is an act-gated degree-2
 // multiplicity, paired ≤ 2 per column (col 0 a single fraction; the
 // odd cell count leaves one Range16 column a singleton too) → every
@@ -564,8 +564,9 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // Phase 2: LogUp — the UintMul provide + Range16 + the
         // operand consumes.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -576,10 +577,6 @@ impl<LB> LookupAir<LB> for UintMulAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

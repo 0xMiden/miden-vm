@@ -48,9 +48,7 @@ fn fold_balance<A>(
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
+    let report = check_trace_balance(air, main, &periodic, &[], &[], challenges);
     for u in report.unmatched {
         *net.entry(u.denom).or_insert(Felt::ZERO) += u.net_multiplicity;
     }

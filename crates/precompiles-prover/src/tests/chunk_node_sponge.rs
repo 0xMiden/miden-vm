@@ -26,7 +26,7 @@ use crate::{
             sponge::{KeccakSpongeAir, NUM_AUX_COLS as SPONGE_NUM_AUX_COLS, trace::SpongeRequires},
         },
     },
-    logup::{Challenges, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     tests::{assert_same_rational_fold, log_quotient_degree, sum_rational_folds},
@@ -56,7 +56,7 @@ fn layout_and_lookup_shape_match_design() {
             num_periodic_columns: ChunkNodeSpongeAir.periodic_columns().len(),
             permutation_width: NUM_AUX_COLS,
             num_permutation_challenges: NUM_RANDOMNESS,
-            num_permutation_values: NUM_SIGMA_VALUES,
+            num_permutation_values: NUM_LOGUP_VALUES,
         },
     )
     .unwrap_or_else(|err| panic!("ChunkNodeSpongeAir lookup validation failed: {err}"));

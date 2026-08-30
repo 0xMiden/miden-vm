@@ -112,7 +112,7 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     ec::{EcGroupMsg, EcPointMsg},
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
         NUM_RANDOMNESS, frac_col,
     },
@@ -426,8 +426,9 @@ impl LiftedAir<Felt, QuadFelt> for EcGroupAddAir {
         }
 
         // Phase 2: LogUp.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -438,10 +439,6 @@ impl<LB> LookupAir<LB> for EcGroupAddAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
