@@ -33,7 +33,7 @@ use crate::{
     hash::memory64::Memory64Msg,
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, build_logup_aux_trace,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
         frac_col,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, Range16Msg},
@@ -124,7 +124,7 @@ pub fn lane_base(lane: usize) -> usize {
 /// it by the col-0 recurrence.
 pub const NUM_AUX_COLS: usize = 10 * NUM_LANES;
 
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
+// The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; col 0's recurrence aggregating both
 // columns' fractions into one residue is the shared shape, not a
 // round-specific choice. The shared public values ([`NUM_PUBLIC_VALUES`])
@@ -175,7 +175,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -285,8 +285,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakRoundAir {
         }
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }
