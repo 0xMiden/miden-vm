@@ -46,9 +46,8 @@ where
     for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
-    let combined = crate::tests::combined_lookup_main(air, main);
-    let lookup_main = combined.as_ref().unwrap_or(main);
-    build_lookup_fractions(air, lookup_main, None, &periodic, challenges)
+    let preprocessed = air.preprocessed_trace();
+    build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges)
 }
 
 /// Cross-multiply every row-local lookup column from the prover's raw fractions.

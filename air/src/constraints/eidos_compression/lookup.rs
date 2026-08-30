@@ -189,10 +189,6 @@ impl<LB> LookupAir<LB> for EidosCompressionLookupAir
 where
     LB: EidosCompressionLookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
-    }
-
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }

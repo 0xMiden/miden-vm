@@ -76,7 +76,8 @@ pub struct Deg {
 ///
 /// Implementors must not shortcut the per-column scoping: a [`super::LookupAir`]
 /// author that opens `n` columns must issue exactly `n` calls to
-/// [`LookupBuilder::next_column`], matching [`super::LookupAir::num_columns`].
+/// [`LookupBuilder::next_column`], matching the length of
+/// [`super::LookupAir::column_shape`].
 pub trait LookupBuilder: Sized {
     // --- base field stack (copied from AirBuilder) ---
 
