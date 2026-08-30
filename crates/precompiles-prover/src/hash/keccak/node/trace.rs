@@ -123,10 +123,8 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
     RowMajorMatrix::new(trace, NUM_MAIN_COLS)
 }
 
-/// Older entry-point used by the standalone keccak-node tests, which
-/// build [`KeccakNodeInvocation`]s by hand without the chunk / sponge /
-/// Eidos stack (the AIR's local constraints + LogUp σ recurrence are
-/// agnostic to where the digest bytes come from).
+/// Generates a trace from explicit invocations for standalone keccak-node tests. The local AIR
+/// constraints do not depend on which higher-level component supplied the digest bytes.
 pub fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
 ) -> RowMajorMatrix<Felt> {

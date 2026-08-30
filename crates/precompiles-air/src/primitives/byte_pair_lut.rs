@@ -46,8 +46,8 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 use crate::{
     logup::{
         Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, build_logup_aux_trace, frac_col,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
@@ -114,7 +114,7 @@ pub const PRE_C_XOR: usize = 3;
 /// multiplicities. `PRE_*` index the data; `NUM_PREPROCESSED_COLS +
 /// COL_MULT_*` index the multiplicities.
 pub const NUM_LOOKUP_COLS: usize = NUM_PREPROCESSED_COLS + NUM_MAIN_COLS;
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) and the shared
+// The single exposed σ ([`NUM_LOGUP_VALUES`]) and the shared
 // transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
 // VM-wide LogUp contract in [`crate::logup`]; the natural last-row
 // σ-closing needs no `inv_n`, and this chiplet declares the root but
@@ -263,7 +263,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         // correction per step); σ is committed separately as the
         // permutation value at `permutation_values()[0]`, and the
         // natural last-row σ-closing pins it to Σ delta_r.
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -285,8 +285,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
         // in our [`CyclicConstraintLookupBuilder`] and dispatches to the
         // [`LookupAir`] impl below. The adapter's `main()` presents the
         // combined `[preprocessed ++ main]` window the eval reads.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

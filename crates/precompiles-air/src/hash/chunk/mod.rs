@@ -28,7 +28,7 @@ use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::EidosChainInputMsg,
@@ -90,7 +90,7 @@ pub const NUM_AUX_COLS: usize = 4;
 /// Per-column fraction counts, matching the pairing above.
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
+// The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
 // contract in [`crate::logup`]; aggregating the Memory64 + EidosIn
 // residues into one σ is the shared shape, not a chunk-specific choice.
 // The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript
@@ -130,7 +130,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -189,8 +189,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
         builder.assert_zero(is_head * (AB::Expr::ONE - act));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

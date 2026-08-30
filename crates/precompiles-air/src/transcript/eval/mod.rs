@@ -82,7 +82,7 @@ use crate::{
     },
     logup::{
         CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
@@ -374,7 +374,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -653,8 +653,7 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .assert_zero(continues * (group_next_const - group_local));
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
     }
 }

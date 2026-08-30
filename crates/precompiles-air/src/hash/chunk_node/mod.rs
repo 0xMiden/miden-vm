@@ -10,12 +10,10 @@
 //! [`NODE_COL_OFFSET`]). No mode selector, no cross-gating — each side
 //! keeps its own constraint degree (`lqd = 1`).
 //!
-//! Exactly one running-sum column is committed per AIR, so column 0 is
-//! chunk's own anchor fraction, unchanged; keccak-node's own anchor
-//! fraction becomes an ordinary (non-anchor) column instead of folding
-//! into chunk's — both still close into the one shared σ via the
-//! standard `acc_next[0] = Σ acc[i]` recurrence, and neither pays the
-//! degree cost of physically sharing column 0.
+//! The composite concatenates both components' LogUp columns. Chunk's first column remains at
+//! composite column 0 and drives the centered accumulator; keccak-node's first column follows the
+//! chunk columns and is handled as an ordinary fraction column. Both components contribute to the
+//! same normalized sum.
 
 use core::array;
 
@@ -45,10 +43,9 @@ pub const NODE_COL_OFFSET: usize = chunk::NUM_MAIN_COLS;
 
 pub const NUM_MAIN_COLS: usize = chunk::NUM_MAIN_COLS + node::NUM_MAIN_COLS;
 
-/// Aux layout: col 0 = chunk's own anchor fraction (unchanged); cols
-/// 1..5 = chunk's original cols 1..4 unchanged; col 5 = keccak-node's
-/// original col 0 (its own anchor), now an ordinary column; cols 6..14
-/// = keccak-node's original cols 1..8 unchanged.
+/// Aux layout: columns `0..chunk::NUM_AUX_COLS` retain chunk's original order, followed by all of
+/// keccak-node's columns in their original order. Only composite column 0 drives the centered
+/// accumulator.
 pub const NUM_AUX_COLS: usize = chunk::NUM_AUX_COLS + node::NUM_AUX_COLS;
 
 const fn column_shape() -> [usize; NUM_AUX_COLS] {
