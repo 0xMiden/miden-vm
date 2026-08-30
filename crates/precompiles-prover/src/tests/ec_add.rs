@@ -26,8 +26,8 @@ use miden_lifted_air::{MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::{Preprocessed, ProverInstance, VerifierInstance};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-// `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
-// (ignored) prove round-trip.
+// The subset MultiAir closes its trace-length-weighted bus identity during the ignored prove
+// round-trip.
 use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
     composite::extract_band,
@@ -173,11 +173,10 @@ fn stack_airs() -> [ChipletAir; NUM_STACK] {
 }
 
 /// The subset as a [`MultiAir`] over the five [`stack_airs`] in
-/// [`NUM_STACK`] order, closing the same cross-AIR `Σ σ = 0` bus identity
-/// as the full [`ChipletMultiAir`](crate::session::ChipletMultiAir) — the
-/// subset is bus-closed, so the residue sum vanishes. Drives the
-/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip under
-/// 0.26's unified `ProverStatement` / `VerifierInstance` driver.
+/// [`NUM_STACK`] order, closing the same trace-length-weighted LogUp identity as the full
+/// [`ChipletMultiAir`](crate::session::ChipletMultiAir). The subset is bus-closed, so the raw
+/// residue sum reconstructed from its normalized values vanishes. Drives the
+/// [`prove_and_verify`](EcStackTraces::prove_and_verify) round-trip.
 #[derive(Clone, Debug)]
 struct EcStackMultiAir {
     airs: Vec<ChipletAir>,
@@ -204,12 +203,15 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        let and8_height = Felt::new_unchecked(1u64 << log_trace_heights[0]);
-        let mut sigma = aux_values[0][0] + aux_values[0][1] * and8_height;
-        for values in &aux_values[1..] {
-            sigma += values[0];
-        }
-        Ok(vec![sigma])
+        let weighted_sum = aux_values
+            .iter()
+            .zip(log_trace_heights)
+            .map(|(values, &log_height)| {
+                values.iter().copied().sum::<QuadFelt>()
+                    * Felt::new_unchecked(1_u64 << u32::from(log_height))
+            })
+            .sum::<QuadFelt>();
+        Ok(vec![weighted_sum])
     }
 }
 
@@ -623,8 +625,8 @@ fn empty_trace_holds() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 12 aux columns (col 0 the gated
-    // running-sum anchor alone, cols 8 and 11 each a lone leftover
+    // Flattened via `frac_col!` into 12 aux columns (col 0 carries the `EcGroupAdd` provide alone,
+    // cols 8 and 11 each carry a lone leftover
     // fraction, the rest each a pair), so every closing constraint stays
     // at degree ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcGroupAddAir), 1);
