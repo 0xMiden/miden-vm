@@ -22,7 +22,7 @@ pub use program::{NUM_PERIODIC_COLS, SPONGE_PERIOD, sponge_program};
 use crate::{
     hash::memory64::{CHUNK_ADDR_BASE, Memory64Msg},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
         LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     primitives::byte_pair_lut::{BytePairLutMsg, BytePairOp},
@@ -303,8 +303,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakSpongeAir {
         eval_main(builder, 0);
 
         // Phase 2: LogUp.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -549,10 +550,6 @@ impl<LB> LookupAir<LB> for KeccakSpongeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

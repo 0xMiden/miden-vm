@@ -140,29 +140,6 @@ where
     miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
 }
 
-/// The `[preprocessed ++ main]` matrix the lookup eval reads for a chiplet
-/// with preprocessed columns — mirrors `logup::CombinedWindow` (constraint
-/// side) and BytePairLut's prover-side combine. Returns `None` for chiplets
-/// without preprocessed columns, so balance-check helpers pass `main`
-/// straight to the prover-side fraction builder.
-pub(crate) fn combined_lookup_main<A>(
-    air: &A,
-    main: &RowMajorMatrix<Felt>,
-) -> Option<RowMajorMatrix<Felt>>
-where
-    A: BaseAir<Felt>,
-{
-    let pre = air.preprocessed_trace()?;
-    let (pre_w, main_w) = (pre.width, main.width);
-    let height = main.values.len() / main_w;
-    let mut values = Vec::with_capacity(height * (pre_w + main_w));
-    for r in 0..height {
-        values.extend_from_slice(&pre.values[r * pre_w..(r + 1) * pre_w]);
-        values.extend_from_slice(&main.values[r * main_w..(r + 1) * main_w]);
-    }
-    Some(RowMajorMatrix::new(values, pre_w + main_w))
-}
-
 /// Add two rational folds represented as `(numerator, denominator)` pairs.
 pub(crate) fn add_rational_folds(
     (left_v, left_u): (QuadFelt, QuadFelt),

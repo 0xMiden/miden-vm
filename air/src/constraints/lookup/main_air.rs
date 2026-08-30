@@ -128,10 +128,6 @@ impl<LB> LookupAir<LB> for MainLookupAir
 where
     LB: MainLookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        MAIN_COLUMN_SHAPE.len()
-    }
-
     fn column_shape(&self) -> &[usize] {
         &MAIN_COLUMN_SHAPE
     }
