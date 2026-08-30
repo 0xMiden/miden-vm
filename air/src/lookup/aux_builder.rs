@@ -51,24 +51,6 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
-    let preprocessed = air.preprocessed_trace();
-    build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
-}
-
-/// [`build_logup_aux_trace`] with the preprocessed window supplied by the caller. An AIR whose
-/// lookup reads its preprocessed columns from `main` itself passes `None`.
-pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
-    air: &A,
-    main: &RowMajorMatrix<F>,
-    preprocessed: Option<&RowMajorMatrix<F>>,
-    challenges: &[EF],
-) -> (RowMajorMatrix<EF>, Vec<EF>)
-where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
-{
     let _span = tracing::info_span!("build_aux_trace_logup").entered();
 
     debug_assert!(
@@ -83,6 +65,7 @@ where
     let beta = challenges[1];
     let lookup_challenges =
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
+    let preprocessed = air.preprocessed_trace();
     let periodic = air.periodic_columns();
     let num_cols = air.column_shape().len();
     assert!(num_cols > 0, "LogUp requires at least one accumulator column");
@@ -101,7 +84,7 @@ where
         let chunk = build_lookup_fraction_chunk(
             air,
             main,
-            preprocessed,
+            preprocessed.as_ref(),
             &periodic,
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
@@ -571,6 +554,52 @@ mod tests {
         lookup::{LookupAir, LookupBuilder},
     };
 
+    /// The chunked driver, over an AIR whose lookup reads a separate preprocessed window, matches
+    /// slow accumulation of the same fractions. The And8 lookup's 2^16-row trace spans many
+    /// accumulation chunks; a zero-multiplicity middle block and a live final row cover chunk
+    /// boundaries and the cyclic closing edge.
+    #[test]
+    fn chunked_driver_matches_slow_accumulation_with_preprocessed_window() {
+        use miden_crypto::stark::air::BaseAir;
+
+        use crate::{
+            MidenAir,
+            logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
+            lookup::build_lookup_fractions,
+        };
+
+        let air = MidenAir::AND8_LOOKUP;
+        let preprocessed = air.preprocessed_trace().expect("And8 lookup has a preprocessed table");
+        let num_rows = preprocessed.height();
+        let width = air.width();
+        let mut main = RowMajorMatrix::new(
+            (0..num_rows * width).map(|i| Felt::from_usize(i % 17 + 1)).collect(),
+            width,
+        );
+        main.values[512 * width..(num_rows - 1) * width].fill(Felt::ZERO);
+        let challenges = [QuadFelt::new([Felt::from_u32(7), Felt::ONE]), QuadFelt::from_u32(13)];
+        let lookup_challenges =
+            Challenges::new(challenges[0], challenges[1], MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
+        let fractions = build_lookup_fractions(
+            &air,
+            &main,
+            Some(&preprocessed),
+            &air.periodic_columns(),
+            &lookup_challenges,
+        );
+        let (expected, sigma_prime) = accumulate_slow(&fractions);
+        let (actual, aux_values) = build_logup_aux_trace(&air, &main, &challenges);
+
+        assert_eq!(aux_values, [sigma_prime]);
+        assert_eq!(actual.height(), num_rows);
+        assert_eq!(actual.width(), expected.len());
+        for (row_idx, row) in actual.values.chunks_exact(actual.width()).enumerate() {
+            for (column, &value) in row.iter().enumerate() {
+                assert_eq!(value, expected[column][row_idx], "row {row_idx}, column {column}");
+            }
+        }
+    }
+
     // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
     // We don't need cryptographic quality, just determinism.
     struct Lcg(u64);
@@ -650,16 +679,13 @@ mod tests {
     }
 
     /// Minimal `LookupAir` used to drive `LookupFractions::from_shape` without pulling in the
-    /// real Miden air. Only `num_columns()` and `column_shape()` are exercised; the
-    /// other methods return sentinel values and `eval` is a no-op.
+    /// real Miden AIR. Only `column_shape()` is relevant; the other methods return sentinel values
+    /// and `eval` is a no-op.
     struct FakeAir {
         shape: [usize; 2],
     }
 
     impl<LB: LookupBuilder> LookupAir<LB> for FakeAir {
-        fn num_columns(&self) -> usize {
-            self.shape.len()
-        }
         fn column_shape(&self) -> &[usize] {
             &self.shape
         }
