@@ -44,7 +44,7 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowA
 use crate::{
     composite::{SubAirBuilder, concatenate_bands, extract_band},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
+        ConstraintLookupBuilder, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
         LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_logup_aux_trace,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -243,6 +243,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionNarrowAir {
 
         let mut lb = MidenConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -250,10 +251,6 @@ impl<LB> LookupAir<LB> for EidosCompressionNarrowAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        EIDOS_COMPRESSION_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
@@ -371,8 +368,9 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
             );
         }
 
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -410,10 +408,6 @@ impl<LB> LookupAir<LB> for EidosCompressionInterfaceAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        PVM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &PVM_COLUMN_SHAPE
     }
@@ -595,7 +589,7 @@ mod tests {
         PVM_AUX_COLS, get_periodic_column_values, initial_cv_from_frame,
     };
     use crate::{
-        logup::{Challenges, CyclicConstraintLookupBuilder, LookupAir, LookupMessage},
+        logup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
         relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     };
 
@@ -742,14 +736,15 @@ mod tests {
         };
 
         let air = EidosCompressionInterfaceAir;
-        let mut lookup_builder = CyclicConstraintLookupBuilder::new(&mut builder, &air);
+        let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
         LookupAir::eval(&air, &mut lookup_builder);
+        lookup_builder.finish();
 
         // This all-zero row with alpha = beta = 0 makes both encoded interface denominators zero.
         // Because neither the first-fused nor footer-3 flag is active, each fraction constraint
         // must nevertheless reduce to `aux = 0`. Keeping the selectors in the flag argument is
         // what preserves the unit denominator on these inactive rows.
-        assert_eq!(builder.extension_evaluations.len(), PVM_AUX_COLS + 2);
+        assert_eq!(builder.extension_evaluations.len(), PVM_AUX_COLS + 1);
         assert_eq!(
             &builder.extension_evaluations[builder.extension_evaluations.len() - 2..],
             &[QuadFelt::ONE, QuadFelt::ONE],

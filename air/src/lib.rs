@@ -374,10 +374,7 @@ impl CoreAir {
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -473,10 +470,7 @@ impl ChipletsAir {
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -556,10 +550,7 @@ impl EidosCompressionAir {
         }
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -631,10 +622,7 @@ impl And8LookupAir {
     fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::And8Lookup);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -934,15 +922,6 @@ where
         + EidosCompressionLookupBuilder
         + And8LookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.lookup_num_columns(),
-            Self::Chiplets => ChipletsAir.lookup_num_columns(),
-            Self::EidosCompression => EidosCompressionAir.lookup_num_columns(),
-            Self::And8Lookup => And8LookupAir.lookup_num_columns(),
-        }
-    }
-
     fn column_shape(&self) -> &[usize] {
         MidenAir::column_shape(*self)
     }

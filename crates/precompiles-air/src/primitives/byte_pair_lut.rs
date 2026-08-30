@@ -13,9 +13,8 @@
 //! `c_xor` are **preprocessed** (verifier-known) columns; only three
 //! multiplicity columns (one per relation contribution: AndNot, Xor,
 //! Range16) are witness. All three contributions are accumulated into the
-//! chiplet's single LogUp aux column. The lookup eval reads the data and
-//! multiplicities together through a combined `[preprocessed ++ main]`
-//! window (`logup::CombinedWindow`).
+//! chiplet's single LogUp aux column. The lookup eval reads fixed data through
+//! [`LookupBuilder::preprocessed`] and multiplicities through [`LookupBuilder::main`].
 //!
 //! See [`logup`](crate::logup) and the design notes for the
 //! lookup-argument architecture.
@@ -45,7 +44,7 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
         NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
     },
@@ -86,10 +85,7 @@ impl BytePairOp {
 // Witness `main` carries only the three multiplicity columns. The data
 // columns `a`, `b`, `c_andnot`, `c_xor` are **preprocessed** — the fixed,
 // verifier-known [`preprocessed_table`] — so they are not witness and
-// cannot be forged. The lookup eval reads them via the combined
-// `[preprocessed ++ main]` window (see `logup::CombinedWindow`), where the
-// preprocessed columns come first (`PRE_*`) and the multiplicities follow
-// at `NUM_PREPROCESSED_COLS + COL_MULT_*`.
+// cannot be forged. The lookup eval reads the two windows independently.
 
 pub const COL_MULT_ANDNOT: usize = 0;
 pub const COL_MULT_XOR: usize = 1;
@@ -100,26 +96,17 @@ pub const NUM_AUX_COLS: usize = 2;
 /// `c_andnot`, `c_xor`. See `preprocessed_table`.
 pub const NUM_PREPROCESSED_COLS: usize = 4;
 
-/// Column indices into the preprocessed data table (see
-/// `preprocessed_table`). These are also the lookup eval's indices into
-/// the combined `[preprocessed ++ main]` window, which places the
-/// preprocessed columns first.
+/// Column indices into the preprocessed data table (see [`preprocessed_table`]).
 pub const PRE_A: usize = 0;
 pub const PRE_B: usize = 1;
 pub const PRE_C_ANDNOT: usize = 2;
 pub const PRE_C_XOR: usize = 3;
 
-/// Width of the combined `[preprocessed ++ main]` window the lookup eval
-/// reads: the 4 preprocessed data columns followed by the 3 witness
-/// multiplicities. `PRE_*` index the data; `NUM_PREPROCESSED_COLS +
-/// COL_MULT_*` index the multiplicities.
-pub const NUM_LOOKUP_COLS: usize = NUM_PREPROCESSED_COLS + NUM_MAIN_COLS;
 // The single exposed σ ([`NUM_LOGUP_VALUES`]) and the shared
 // transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
 // VM-wide LogUp contract in [`crate::logup`]; the natural last-row
 // σ-closing needs no `inv_n`, and this chiplet declares the root but
 // does not read it.
-
 /// Fixed trace height: every `(a, b) ∈ [0, 256)²` gets a row, in lex
 /// order (`idx = (a << 8) | b`). The preprocessed data table
 /// (`preprocessed_table`) is pinned to this lex enumeration on these
@@ -277,16 +264,10 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Phase 1: no non-LogUp constraints. The data columns `a`, `b`,
-        // `c_andnot`, `c_xor` are preprocessed (verifier-known), so they
-        // need no binding constraints — they cannot be forged.
-        //
-        // Phase 2: LogUp argument via the LogUp adapter. Wraps `builder`
-        // in our [`CyclicConstraintLookupBuilder`] and dispatches to the
-        // [`LookupAir`] impl below. The adapter's `main()` presents the
-        // combined `[preprocessed ++ main]` window the eval reads.
-        let mut lb = CyclicConstraintLookupBuilder::new(builder, self);
+        // The data columns are preprocessed, so this AIR only emits LogUp constraints.
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -302,10 +283,6 @@ impl<LB> LookupAir<LB> for BytePairLutAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -319,23 +296,22 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // The combined `[preprocessed ++ main]` window: `PRE_*` index the
-        // verifier-known data columns, `NUM_PREPROCESSED_COLS + COL_MULT_*`
-        // the witness multiplicities.
-        let local: [LB::Var; NUM_LOOKUP_COLS] = current_main(builder.main(), 0);
+        let preprocessed: [LB::Var; NUM_PREPROCESSED_COLS] =
+            current_main(builder.preprocessed().clone(), 0);
+        let main: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
-        let a_value: LB::Expr = local[PRE_A].into();
-        let b_value: LB::Expr = local[PRE_B].into();
-        let c_andnot: LB::Expr = local[PRE_C_ANDNOT].into();
-        let c_xor: LB::Expr = local[PRE_C_XOR].into();
+        let a_value: LB::Expr = preprocessed[PRE_A].into();
+        let b_value: LB::Expr = preprocessed[PRE_B].into();
+        let c_andnot: LB::Expr = preprocessed[PRE_C_ANDNOT].into();
+        let c_xor: LB::Expr = preprocessed[PRE_C_XOR].into();
         let andnot_op: LB::Expr = LB::Expr::from(Felt::from(BytePairOp::AndNot.tag()));
         let xor_op: LB::Expr = LB::Expr::from(Felt::from(BytePairOp::Xor.tag()));
         let two_56: LB::Expr = LB::Expr::from(Felt::from(256u16));
         let w: LB::Expr = a_value.clone() + two_56 * b_value.clone();
 
-        let mult_andnot: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_ANDNOT].into();
-        let mult_xor: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_XOR].into();
-        let mult_range16: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_RANGE16].into();
+        let mult_andnot: LB::Expr = main[COL_MULT_ANDNOT].into();
+        let mult_xor: LB::Expr = main[COL_MULT_XOR].into();
+        let mult_range16: LB::Expr = main[COL_MULT_RANGE16].into();
         // Provides ⇒ negative multiplicity contribution.
         let neg_andnot: LB::Expr = LB::Expr::ZERO - mult_andnot;
         let neg_xor: LB::Expr = LB::Expr::ZERO - mult_xor;
@@ -389,40 +365,12 @@ where
 /// Builds the chiplet's aux trace from the witness (multiplicity) main
 /// trace.
 ///
-/// The lookup fractions reference the preprocessed `(a, b, c)` data, which
-/// the constraint side reads through the combined `[preprocessed ++ main]`
-/// window (`logup::CombinedWindow`). The prover reproduces that combined
-/// view here — reconstruct the fixed [`preprocessed_table`], prepend its
-/// columns to the witness multiplicities, and drive the generic
-/// [`build_logup_aux_trace`] over the combined matrix, whose column order
-/// matches the eval's `PRE_*` / `NUM_PREPROCESSED_COLS + COL_MULT_*`
-/// indices.
+/// The shared prover driver obtains the fixed `(a, b, c)` data from
+/// [`BaseAir::preprocessed_trace`] and presents it separately from the witness multiplicities,
+/// matching the constraint path.
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let combined = combine_with_preprocessed(main);
-    build_logup_aux_trace(&BytePairLutAir, &combined, challenges)
-}
-
-/// Row-wise `[preprocessed ++ main]`: the fixed [`preprocessed_table`]
-/// columns followed by the witness multiplicity columns. Mirrors the
-/// constraint-side `logup::CombinedWindow` so prover and verifier read
-/// identical column indices.
-fn combine_with_preprocessed(main: &RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
-    let pre = preprocessed_table();
-    let height = main.values.len() / NUM_MAIN_COLS;
-    debug_assert_eq!(
-        pre.values.len() / NUM_PREPROCESSED_COLS,
-        height,
-        "preprocessed and main trace heights must match",
-    );
-    let mut values = Vec::with_capacity(height * NUM_LOOKUP_COLS);
-    for r in 0..height {
-        let pre_row = &pre.values[r * NUM_PREPROCESSED_COLS..(r + 1) * NUM_PREPROCESSED_COLS];
-        let main_row = &main.values[r * NUM_MAIN_COLS..(r + 1) * NUM_MAIN_COLS];
-        values.extend_from_slice(pre_row);
-        values.extend_from_slice(main_row);
-    }
-    RowMajorMatrix::new(values, NUM_LOOKUP_COLS)
+    build_logup_aux_trace(&BytePairLutAir, main, challenges)
 }
