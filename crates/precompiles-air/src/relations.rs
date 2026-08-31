@@ -15,8 +15,9 @@
 //!
 //! | BusId | Relation        | Provided by                     | Tuple shape                                                 |
 //! |-------|-----------------|---------------------------------|-------------------------------------------------------------|
-//! | 0     | `BytePairLut`   | `byte_pair_lut::BytePairLutAir` | `(a, b, h)`, where `h = a & b`; XOR and ANDNOT map to this canonical relation |
+//! | 0     | `BytePairLut`   | `byte_pair_lut::BytePairLutAir` | `(a, b, x)`, where `x = a xor b`; AND and ANDNOT map to this canonical relation |
 //! | 1     | `Range16`       | `byte_pair_lut::BytePairLutAir` | `(w,)`, where `w ∈ [0, 2^16)`                               |
+//! | 2,3   | reserved        | —                                |                                                             |
 //! | 4     | `Memory64`      | external (sponge / miniVM)      | `(addr, lo, hi)`, 64-bit cell — multiset, see `memory64`    |
 //! | 5     | `KeccakSponge`  | external (transcript chiplet)   | `(sponge_seq_id, chunk_ptr, len_bytes)`, per-invocation request — see `keccak::sponge` |
 //! | 6     | `EidosBlock`    | native `EidosCompressionAir` | `(compression_id, block[8])` — one message block |
@@ -30,14 +31,15 @@
 //! | 14    | `EcGroup`      | `ec::point_store_groups::EcPointStoreGroupsAir` (group band) | `(group_ptr, a_ptr, b_ptr, bound_ptr, scalar_bound_ptr)` — a short-Weierstrass group binding its curve context (params + base-field modulus + scalar-field modulus, the latter = `bound_ptr` while unconstrained) |
 //! | 15    | `EcPoint`      | `ec::point_store_groups::EcPointStoreGroupsAir` (point band) | `(point_ptr, group_ptr, x_ptr, y_ptr, is_pai)` — a stored on-curve point (or the group's ∞ when `is_pai`) |
 //! | 16    | `EcGroupAdd`   | `ec::add::EcGroupAddAir`      | `(group_ptr, p_ptr, q_ptr, r_ptr)` — asserts `R = P + Q` in the group |
-//! | 17    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`, `ec::msm::EcMsmAir` | `(group_ptr, r_ptr)` — an on-curve membership certificate for a fresh point `r`: provided by its minting op (a group-law add result, or an MSM `neg`'s value `−P`), consumed by `r`'s point-store row in place of the on-curve MAC trio |
+//! | 17    | `EcOnCurveCert` | `ec::add::EcGroupAddAir`, `ec::msm::EcMsmAir` | `(group_ptr, r_ptr)` — an on-curve membership certificate for a fresh point `r`: provided by its minting op (a group-law add result, an MSM `neg` value `−P`, or an MSM `intro_endo` value `φ(P)`), consumed by `r`'s point-store row in place of the on-curve MAC trio |
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
 //! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
 //! | 21    | `EidosCv`       | native `EidosCompressionAir` | `(compression_cycle_id, cv0, ..., cv7)` — atomic internal bridge from the first fused row to footer 3 |
 //! | 22    | `EidosInit`     | native `EidosCompressionAir` | `(compression_id, cv0, cv1, cv2, cv3)` — initial chaining value at a chain head |
-//! | 23-26 | `EidosRot12Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, contribution)` — byte-position contribution to `rotr32(a xor b, 12)` |
-//! | 27-30 | `EidosRot7Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, contribution)` — byte-position contribution to `rotr32(a xor b, 7)` |
+//! | 24,26 | `EidosRot12Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, z)` — normalized positions 1 and 3 of `rotr32(a xor b, 12)` |
+//! | 27,29,30 | `EidosRot7Pos*` | `byte_pair_lut::BytePairLutAir` | `(a, b, z)` — normalized positions 0, 2, and 3 of `rotr32(a xor b, 7)` |
+//! | 23,25,28 | reserved | — | These byte positions use the canonical relation at bus 0 |
 //! | 31    | `EidosWord`     | native `EidosCompressionAir` | `(message_index, message_word, compression_cycle_id)` — scheduled message-word permutation |
 //!
 //! ## Adding a new relation
@@ -57,6 +59,8 @@
 pub enum BusId {
     BytePairLut = 0,
     Range16 = 1,
+    Reserved2 = 2,
+    Reserved3 = 3,
     Memory64 = 4,
     KeccakSponge = 5,
     EidosBlock = 6,
@@ -76,12 +80,15 @@ pub enum BusId {
     MsmClaimTerm = 20,
     EidosCv = 21,
     EidosInit = 22,
-    EidosRot12Pos0 = 23,
+    /// Reserved because rot12 byte position 0 uses canonical XOR.
+    ReservedEidosRot12Pos0 = 23,
     EidosRot12Pos1 = 24,
-    EidosRot12Pos2 = 25,
+    /// Reserved because rot12 byte position 2 uses canonical XOR.
+    ReservedEidosRot12Pos2 = 25,
     EidosRot12Pos3 = 26,
     EidosRot7Pos0 = 27,
-    EidosRot7Pos1 = 28,
+    /// Reserved because rot7 byte position 1 uses canonical XOR.
+    ReservedEidosRot7Pos1 = 28,
     EidosRot7Pos2 = 29,
     EidosRot7Pos3 = 30,
     EidosWord = 31,
@@ -90,37 +97,50 @@ pub enum BusId {
 /// Number of bus-prefix slots, one greater than the maximum [`BusId`].
 ///
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes one prefix for each numeric
-/// ID in this range. IDs 2 and 3 are intentionally unused.
+/// ID in this range, including the reserved entries.
 pub const NUM_BUS_IDS: usize = 32;
 const _: () = assert!(NUM_BUS_IDS == BusId::EidosWord as usize + 1);
 
-/// PVM-native Eidos rotate-right-by-12 relation for one byte position.
-pub const fn eidos_rot12_bus(byte: usize) -> BusId {
-    match byte {
-        0 => BusId::EidosRot12Pos0,
-        1 => BusId::EidosRot12Pos1,
-        2 => BusId::EidosRot12Pos2,
-        3 => BusId::EidosRot12Pos3,
-        _ => panic!("Eidos byte position must be in 0..4"),
-    }
-}
-
-/// PVM-native Eidos rotate-right-by-7 relation for one byte position.
-pub const fn eidos_rot7_bus(byte: usize) -> BusId {
-    match byte {
-        0 => BusId::EidosRot7Pos0,
-        1 => BusId::EidosRot7Pos1,
-        2 => BusId::EidosRot7Pos2,
-        3 => BusId::EidosRot7Pos3,
-        _ => panic!("Eidos byte position must be in 0..4"),
-    }
-}
+// The numeric IDs are transcript domain separators. Pin every assigned and reserved slot so a
+// reorder cannot silently change relation encodings while leaving `NUM_BUS_IDS` unchanged.
+const _: () = assert!(BusId::BytePairLut as usize == 0);
+const _: () = assert!(BusId::Range16 as usize == 1);
+const _: () = assert!(BusId::Reserved2 as usize == 2);
+const _: () = assert!(BusId::Reserved3 as usize == 3);
+const _: () = assert!(BusId::Memory64 as usize == 4);
+const _: () = assert!(BusId::KeccakSponge as usize == 5);
+const _: () = assert!(BusId::EidosBlock as usize == 6);
+const _: () = assert!(BusId::EidosOut as usize == 7);
+const _: () = assert!(BusId::Binding as usize == 8);
+const _: () = assert!(BusId::ChunkChain as usize == 9);
+const _: () = assert!(BusId::UintVal as usize == 10);
+const _: () = assert!(BusId::UintAdd as usize == 11);
+const _: () = assert!(BusId::UintMul as usize == 12);
+const _: () = assert!(BusId::UintLimbs as usize == 13);
+const _: () = assert!(BusId::EcGroup as usize == 14);
+const _: () = assert!(BusId::EcPoint as usize == 15);
+const _: () = assert!(BusId::EcGroupAdd as usize == 16);
+const _: () = assert!(BusId::EcOnCurveCert as usize == 17);
+const _: () = assert!(BusId::MsmTerm as usize == 18);
+const _: () = assert!(BusId::MsmExpr as usize == 19);
+const _: () = assert!(BusId::MsmClaimTerm as usize == 20);
+const _: () = assert!(BusId::EidosCv as usize == 21);
+const _: () = assert!(BusId::EidosInit as usize == 22);
+const _: () = assert!(BusId::ReservedEidosRot12Pos0 as usize == 23);
+const _: () = assert!(BusId::EidosRot12Pos1 as usize == 24);
+const _: () = assert!(BusId::ReservedEidosRot12Pos2 as usize == 25);
+const _: () = assert!(BusId::EidosRot12Pos3 as usize == 26);
+const _: () = assert!(BusId::EidosRot7Pos0 as usize == 27);
+const _: () = assert!(BusId::ReservedEidosRot7Pos1 as usize == 28);
+const _: () = assert!(BusId::EidosRot7Pos2 as usize == 29);
+const _: () = assert!(BusId::EidosRot7Pos3 as usize == 30);
+const _: () = assert!(BusId::EidosWord as usize == 31);
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held
 /// by [`Challenges`](miden_air::lookup::Challenges).
 ///
-/// The widest payload is `UintLimbs`: `ptr`, `bound_ptr`, and one complete 16-limb value. The
+/// The widest payload is `UintLimbs`: `ptr`, `bound_ptr`, and one complete 16×16-bit value. The
 /// multiplication chiplet consumes this raw limb view. Message width affects only the precomputed
 /// powers of β; encoding remains linear.
 pub const MAX_MESSAGE_WIDTH: usize = 18;

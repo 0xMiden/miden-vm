@@ -38,6 +38,10 @@ pub const F_HIGH_ODD_SLOT_BASE: usize = 4;
 pub const F_OUTPUT_EVEN_SLOT_BASE: usize = 8;
 pub const F_OUTPUT_ODD_SLOT_BASE: usize = 12;
 pub const F_TOP_BIT_SLOT_BASE_COL: usize = 48;
+const _: () = assert!(F_TOP_BIT_SLOT_BASE_COL.is_multiple_of(BYTE_SLOT_WIDTH));
+pub(crate) const F_TOP_BIT_NARROW_SLOT: usize = F_TOP_BIT_SLOT_BASE_COL / BYTE_SLOT_WIDTH;
+/// Byte position of the fused rotation slot reused by the footer top-bit lookup.
+pub(crate) const F_TOP_BIT_LOOKUP_BYTE_POSITION: usize = F_TOP_BIT_NARROW_SLOT % BYTES_PER_WORD;
 pub const F_MSG_WORD_SLOTS: usize = 4;
 pub const F_RANGE_SLOTS: usize = 8;
 /// Logical narrow slots used by the eight footer range checks.

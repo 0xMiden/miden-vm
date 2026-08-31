@@ -141,7 +141,7 @@ mod tests {
     use crate::{config::pcs_params, trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT};
 
     /// Pinned bytes/row figures for the current AIR shape: Core, Chiplets, EidosCompression, and
-    /// And8 have 48/24/108/10 main columns, 4/4/20/5 extension-field auxiliary columns, and
+    /// And8 have 48/24/108/7 main columns, 4/4/20/4 extension-field auxiliary columns, and
     /// quotient degrees 8/8/2/2 respectively, with blowup 8. A width, auxiliary-width, or
     /// quotient-degree change must break this test loudly rather than silently drift the model.
     #[test]
@@ -157,13 +157,13 @@ mod tests {
                 MidenAir::And8Lookup,
             ]
         );
-        assert_eq!(AIRS.map(|air| air.width()), [48, 24, 108, 10]);
+        assert_eq!(AIRS.map(|air| air.width()), [48, 24, 108, 7]);
         assert_eq!(
             AIRS.map(|air| <MidenAir as LiftedAir<Felt, QuadFelt>>::aux_width(&air)),
-            [4, 4, 20, 5]
+            [4, 4, 20, 4]
         );
         assert_eq!(AIRS.map(|air| log_quotient_degree::<Felt, QuadFelt, _>(&air)), [3, 3, 1, 1]);
-        assert_eq!(AIRS.map(|air| BaseAir::<Felt>::preprocessed_width(&air)), [0, 0, 0, 11]);
+        assert_eq!(AIRS.map(|air| BaseAir::<Felt>::preprocessed_width(&air)), [0, 0, 0, 5]);
         assert_eq!(params.log_blowup(), 3);
         assert_eq!(AND8_LOOKUP_TRACE_HEIGHT, 1 << 16);
 
@@ -174,8 +174,8 @@ mod tests {
             Some(16520),
             "EidosCompression alone"
         );
-        assert_eq!(prover_peak_bytes(&[0, 0, 0, 1], &params), Some(5000), "And8Lookup alone");
-        assert_eq!(prover_peak_bytes(&[1, 1, 1, 1], &params), Some(26240), "all four at height 1");
+        assert_eq!(prover_peak_bytes(&[0, 0, 0, 1], &params), Some(4550), "And8Lookup alone");
+        assert_eq!(prover_peak_bytes(&[1, 1, 1, 1], &params), Some(25790), "all four at height 1");
     }
 
     #[test]

@@ -2,24 +2,31 @@
 //!
 //! Provides the PVM's canonical byte-pair and 16-bit range relations over one fixed table:
 //!
-//! - [`BytePairLutMsg`]: tuple `(a, b, h)` where `h = a & b`. XOR and ANDNOT consumers map their
-//!   result to `h` with affine identities, so all three logic operations use one relation.
-//! - [`EidosRotationMsg`]: tuple `(a, b, contribution)` on one of eight position-specific Eidos
-//!   rotation buses.
+//! - [`BytePairLutMsg`]: tuple `(a, b, x)` where `x = a xor b`. AND and ANDNOT consumers map their
+//!   result to `x` with affine identities, so all three logic operations use one relation.
+//! - five normalized Eidos rotation relations. Three non-wrapping positions reuse the canonical XOR
+//!   relation; the other positions use a row-family-independent normalization.
 //! - [`Range16Msg`]: tuple `(w,)` where `w ∈ [0, 2^16)`. Used by callers that need a 16-bit range
 //!   check on a packed 16-bit Felt without spending a bytewise-op slot. The chiplet splits `w = a +
 //!   256·b` (LSB byte first) and provides for the matching row.
 //!
-//! Fixed columns are `[a, b, h, W12(x), W7(x)]`, where `x = a xor b` and only the two wrapping
+//! Fixed columns are `[a, b, x, W12(x), W7(x)]`, where `x = a xor b` and only the two wrapping
 //! rotation contributions need dedicated fixed outputs. The other six contributions are affine in
-//! `x`. Ten witness columns carry independent multiplicities for the canonical logic relation,
-//! eight rotation relations, and Range16.
+//! `x`. Seven witness columns carry multiplicities for the canonical XOR relation, five normalized
+//! rotation relations, and Range16.
+//!
+//! `W12(x) = floor(x / 16) + 2^28 * (x mod 16)` and
+//! `W7(x) = floor(x / 128) + 2^25 * (x mod 128)`. For byte positions zero through three, lookup
+//! messages divide the physical contribution by `(2^20, 2, 2^4, 1)`, respectively.
 //!
 //! # Soundness
 //!
 //! The preprocessed table enumerates every `(a, b) ∈ [0, 256)²` in lexicographic order and fixes
 //! the deterministic outputs. It is verifier-known, so a prover can only choose relation
 //! multiplicities. Global lookup balance determines those multiplicities from consumers.
+
+#[doc(hidden)]
+pub mod eidos;
 
 use alloc::vec::Vec;
 
@@ -30,13 +37,14 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
+use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
 use crate::{
     logup::{
         Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
         LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
         NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
     },
-    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS, eidos_rot7_bus, eidos_rot12_bus},
+    relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
 };
 
@@ -70,54 +78,32 @@ impl BytePairOp {
     }
 }
 
-/// Eidos rotation family served by the canonical byte-pair table.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[doc(hidden)]
-pub enum EidosRotation {
-    Rot12,
-    Rot7,
-}
-
-/// Contribution of one XOR byte to the selected 32-bit Eidos rotation.
-#[doc(hidden)]
-pub const fn eidos_rotation_contribution(
-    rotation: EidosRotation,
-    byte: usize,
-    a: u8,
-    b: u8,
-) -> u32 {
-    assert!(byte < 4, "Eidos byte position must be in 0..4");
-    let word = ((a ^ b) as u32) << (8 * byte);
-    match rotation {
-        EidosRotation::Rot12 => word.rotate_right(12),
-        EidosRotation::Rot7 => word.rotate_right(7),
-    }
-}
-
 // COLUMN LAYOUT
 // ================================================================================================
 //
 // Witness `main` carries only multiplicities. Deterministic byte values and results live in the
 // verifier-known preprocessed table.
 
-pub const COL_MULT_LOGIC: usize = 0;
-pub const COL_MULT_ROT12_BEGIN: usize = COL_MULT_LOGIC + 1;
-pub const COL_MULT_ROT7_BEGIN: usize = COL_MULT_ROT12_BEGIN + 4;
-pub const COL_MULT_RANGE16: usize = COL_MULT_ROT7_BEGIN + 4;
+pub(crate) const COL_MULT_RANGE16: usize = eidos::NUM_RELATIONS;
 pub const NUM_MAIN_COLS: usize = COL_MULT_RANGE16 + 1;
-pub const NUM_AUX_COLS: usize = 5;
-/// Width of the preprocessed table `[a, b, h, W12(x), W7(x)]`.
+pub const NUM_AUX_COLS: usize = 4;
+/// Width of the preprocessed table `[a, b, x, W12(x), W7(x)]`.
 pub const NUM_PREPROCESSED_COLS: usize = 5;
 
 /// Column indices into the preprocessed data table (see [`preprocessed_table`]).
 pub const PRE_A: usize = 0;
 pub const PRE_B: usize = 1;
-pub const PRE_AND: usize = 2;
+pub const PRE_XOR: usize = 2;
 pub const PRE_WRAP12: usize = 3;
 pub const PRE_WRAP7: usize = 4;
 
 /// Multiplicative inverse of two in the Miden base field.
 const FELT_INV_TWO: Felt = Felt::new_unchecked(9_223_372_034_707_292_161);
+
+/// Recover `a & b` from `x = a xor b` using `(a + b - x) / 2`.
+pub(crate) fn and_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
+    (a + b - x) * FELT_INV_TWO
+}
 
 /// Recover `(!a) & b` from `x = a xor b` using `(x - a + b) / 2`.
 ///
@@ -130,27 +116,36 @@ pub(crate) fn andnot_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
 /// Fixed trace height: every `(a, b) ∈ [0, 256)²` gets a row, in lex
 /// order (`idx = (a << 8) | b`). The preprocessed data table
 /// (`preprocessed_table`) is pinned to this lex enumeration on these
-/// `2^16` rows; the ten witness multiplicity columns are committed in
+/// `2^16` rows; the seven witness multiplicity columns are committed in
 /// lockstep at the same height.
 pub const TRACE_HEIGHT: usize = 1 << 16;
+
 const NUM_BYTE_PAIRS: usize = TRACE_HEIGHT;
 
 // PREPROCESSED TABLE
 // ================================================================================================
 
-/// Fixed `[a, b, h, W12(x), W7(x)]` table, where `h = a & b` and `x = a xor b`.
+/// The fixed `2^16 × 5` data table committed once as preprocessed
+/// (verifier-known) columns: every `(a, b) ∈ [0, 256)²` in lex order
+/// (`idx = (a << 8) | b`) with `x = a xor b` and the two wrapping Eidos rotation
+/// contributions.
+///
+/// Column order matches [`PRE_A`], [`PRE_B`], [`PRE_XOR`], [`PRE_WRAP12`], and
+/// [`PRE_WRAP7`]. Because the table is fixed and verifier-committed, its byte-pair, rotation, and
+/// range-check relations are pinned to the correct values.
+#[doc(hidden)]
 pub fn preprocessed_table() -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(TRACE_HEIGHT * NUM_PREPROCESSED_COLS);
     for idx in 0..NUM_BYTE_PAIRS {
         let a = (idx >> 8) as u8;
         let b = (idx & 0xff) as u8;
-        let h = a & b;
+        let x = a ^ b;
         values.extend([
             Felt::from(a),
             Felt::from(b),
-            Felt::from(h),
-            Felt::from(eidos_rotation_contribution(EidosRotation::Rot12, 1, a, b)),
-            Felt::from(eidos_rotation_contribution(EidosRotation::Rot7, 0, a, b)),
+            Felt::from(x),
+            Felt::from(eidos::contribution(EidosRotation::Rot12, 1, a, b)),
+            Felt::from(eidos::contribution(EidosRotation::Rot7, 0, a, b)),
         ]);
     }
     RowMajorMatrix::new(values, NUM_PREPROCESSED_COLS)
@@ -159,33 +154,32 @@ pub fn preprocessed_table() -> RowMajorMatrix<Felt> {
 // MESSAGES
 // ================================================================================================
 
-/// Canonical byte-pair message `(a, b, h)`, where `h = a & b`.
+/// Canonical byte-pair message `(a, b, x)`, where `x = a xor b`.
 #[derive(Debug, Clone)]
 pub struct BytePairLutMsg<E> {
     a: E,
     b: E,
-    h: E,
+    x: E,
 }
 
-impl<E> BytePairLutMsg<E>
-where
-    E: Algebra<Felt>,
-{
+impl<E: Algebra<Felt>> BytePairLutMsg<E> {
     /// Construct from an ordinary AND result.
     pub fn from_and(a: E, b: E, h: E) -> Self {
-        Self { a, b, h }
+        let x = a.clone() + b.clone() - h.clone() - h;
+        Self { a, b, x }
     }
 
-    /// Construct from `x = a xor b` using `h = (a + b - x) / 2`.
-    pub fn from_xor(a: E, b: E, x: E) -> Self {
-        let h = (a.clone() + b.clone() - x) * FELT_INV_TWO;
-        Self { a, b, h }
-    }
-
-    /// Construct from `c = (!a) & b` using `h = b - c`.
+    /// Construct from `c = (!a) & b` using `x = a - b + 2c`.
     pub fn from_andnot(a: E, b: E, c: E) -> Self {
-        let h = b.clone() - c;
-        Self { a, b, h }
+        let x = a.clone() - b.clone() + c.clone() + c;
+        Self { a, b, x }
+    }
+}
+
+impl<E> BytePairLutMsg<E> {
+    /// Construct from `x = a xor b` directly.
+    pub fn from_xor(a: E, b: E, x: E) -> Self {
+        Self { a, b, x }
     }
 }
 
@@ -196,26 +190,23 @@ where
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges
-            .encode(BusId::BytePairLut as usize, [self.a.clone(), self.b.clone(), self.h.clone()])
+            .encode(BusId::BytePairLut as usize, [self.a.clone(), self.b.clone(), self.x.clone()])
     }
 }
 
-/// Position-specific Eidos rotation contribution over a byte pair.
+/// Normalized Eidos rotation relation over a byte pair.
 #[derive(Debug, Clone)]
-pub(crate) struct EidosRotationMsg<E> {
-    bus: BusId,
+struct EidosRotationMsg<E> {
+    relation: EidosRelation,
     a: E,
     b: E,
-    result: E,
+    value: E,
 }
 
 impl<E> EidosRotationMsg<E> {
-    fn new(rotation: EidosRotation, byte: usize, a: E, b: E, result: E) -> Self {
-        let bus = match rotation {
-            EidosRotation::Rot12 => eidos_rot12_bus(byte),
-            EidosRotation::Rot7 => eidos_rot7_bus(byte),
-        };
-        Self { bus, a, b, result }
+    fn from_normalized(relation: EidosRelation, a: E, b: E, value: E) -> Self {
+        assert!(relation != EidosRelation::CanonicalXor);
+        Self { relation, a, b, value }
     }
 }
 
@@ -225,7 +216,10 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(self.bus as usize, [self.a.clone(), self.b.clone(), self.result.clone()])
+        challenges.encode(
+            self.relation.bus() as usize,
+            [self.a.clone(), self.b.clone(), self.value.clone()],
+        )
     }
 }
 
@@ -312,8 +306,11 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
 // LOOKUP AIR
 // ================================================================================================
 
-/// Ten linear provider relations, paired into five degree-three LogUp columns.
-const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [2; NUM_AUX_COLS];
+/// One accumulator interaction followed by three two-interaction fraction columns.
+///
+/// Keeping the singleton in column zero leaves the centered cyclic recurrence at degree two; the
+/// remaining columns are degree three.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 
 impl<LB> LookupAir<LB> for BytePairLutAir
 where
@@ -338,32 +335,16 @@ where
 
         let a_value: LB::Expr = preprocessed[PRE_A].into();
         let b_value: LB::Expr = preprocessed[PRE_B].into();
-        let h: LB::Expr = preprocessed[PRE_AND].into();
+        let x: LB::Expr = preprocessed[PRE_XOR].into();
         let wrap12: LB::Expr = preprocessed[PRE_WRAP12].into();
         let wrap7: LB::Expr = preprocessed[PRE_WRAP7].into();
-        let x = a_value.clone() + b_value.clone() - LB::Expr::from_u8(2) * h.clone();
-        let rot12 = [
-            LB::Expr::from_u64(1 << 20) * x.clone(),
-            wrap12,
-            LB::Expr::from_u8(16) * x.clone(),
-            LB::Expr::from_u64(1 << 12) * x.clone(),
-        ];
-        let rot7 = [
-            wrap7,
-            LB::Expr::from_u8(2) * x.clone(),
-            LB::Expr::from_u64(1 << 9) * x.clone(),
-            LB::Expr::from_u64(1 << 17) * x,
-        ];
         let w = a_value.clone() + LB::Expr::from_u16(256) * b_value.clone();
 
-        let neg_logic = LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_LOGIC]);
-        let neg_rot12: [LB::Expr; 4] = core::array::from_fn(|byte| {
-            LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_ROT12_BEGIN + byte])
-        });
-        let neg_rot7: [LB::Expr; 4] = core::array::from_fn(|byte| {
-            LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_ROT7_BEGIN + byte])
-        });
+        let neg_relation: [LB::Expr; eidos::NUM_RELATIONS] =
+            core::array::from_fn(|relation| LB::Expr::ZERO - LB::Expr::from(main[relation]));
         let neg_range16 = LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_RANGE16]);
+
+        let relation_values = eidos::provider_values(x.clone(), wrap12, wrap7);
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let pair_deg = Deg { v: 2, u: 2 };
@@ -371,23 +352,11 @@ where
         frac_col!(
             builder,
             "byte-pair-table",
-            pair_deg,
+            interaction_deg,
             (
-                "logic",
-                neg_logic,
-                BytePairLutMsg::from_and(a_value.clone(), b_value.clone(), h),
-                interaction_deg
-            ),
-            (
-                "rot12-pos0",
-                neg_rot12[0].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot12,
-                    0,
-                    a_value.clone(),
-                    b_value.clone(),
-                    rot12[0].clone(),
-                ),
+                "canonical-xor",
+                neg_relation[EidosRelation::CanonicalXor.index()].clone(),
+                BytePairLutMsg::from_xor(a_value.clone(), b_value.clone(), x.clone()),
                 interaction_deg
             ),
         );
@@ -397,54 +366,23 @@ where
             pair_deg,
             (
                 "rot12-pos1",
-                neg_rot12[1].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot12,
-                    1,
+                neg_relation[EidosRelation::Rot12Pos1.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot12Pos1,
                     a_value.clone(),
                     b_value.clone(),
-                    rot12[1].clone(),
-                ),
-                interaction_deg
-            ),
-            (
-                "rot12-pos2",
-                neg_rot12[2].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot12,
-                    2,
-                    a_value.clone(),
-                    b_value.clone(),
-                    rot12[2].clone(),
-                ),
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "byte-pair-table",
-            pair_deg,
-            (
-                "rot12-pos3",
-                neg_rot12[3].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot12,
-                    3,
-                    a_value.clone(),
-                    b_value.clone(),
-                    rot12[3].clone(),
+                    relation_values[EidosRelation::Rot12Pos1.index()].clone(),
                 ),
                 interaction_deg
             ),
             (
                 "rot7-pos0",
-                neg_rot7[0].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot7,
-                    0,
+                neg_relation[EidosRelation::Rot7Pos0.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos0,
                     a_value.clone(),
                     b_value.clone(),
-                    rot7[0].clone(),
+                    relation_values[EidosRelation::Rot7Pos0.index()].clone(),
                 ),
                 interaction_deg
             ),
@@ -454,26 +392,24 @@ where
             "byte-pair-table",
             pair_deg,
             (
-                "rot7-pos1",
-                neg_rot7[1].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot7,
-                    1,
+                "rot7-pos2",
+                neg_relation[EidosRelation::Rot7Pos2.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos2,
                     a_value.clone(),
                     b_value.clone(),
-                    rot7[1].clone(),
+                    relation_values[EidosRelation::Rot7Pos2.index()].clone(),
                 ),
                 interaction_deg
             ),
             (
-                "rot7-pos2",
-                neg_rot7[2].clone(),
-                EidosRotationMsg::new(
-                    EidosRotation::Rot7,
-                    2,
+                "rot12-pos3",
+                neg_relation[EidosRelation::Rot12Pos3.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot12Pos3,
                     a_value.clone(),
                     b_value.clone(),
-                    rot7[2].clone(),
+                    relation_values[EidosRelation::Rot12Pos3.index()].clone(),
                 ),
                 interaction_deg
             ),
@@ -484,8 +420,13 @@ where
             pair_deg,
             (
                 "rot7-pos3",
-                neg_rot7[3].clone(),
-                EidosRotationMsg::new(EidosRotation::Rot7, 3, a_value, b_value, rot7[3].clone(),),
+                neg_relation[EidosRelation::Rot7Pos3.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos3,
+                    a_value,
+                    b_value,
+                    relation_values[EidosRelation::Rot7Pos3.index()].clone(),
+                ),
                 interaction_deg
             ),
             ("range16", neg_range16, Range16Msg { w }, interaction_deg),
@@ -504,4 +445,62 @@ pub(crate) fn build_aux(
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
     build_logup_aux_trace(&BytePairLutAir, main, challenges)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn affine_logic_reconstruction_matches_byte_operations() {
+        for (a, b) in [(0u8, 0u8), (1, 2), (5, 3), (0xab, 0xcd), (255, 255)] {
+            let a_felt = Felt::from(a);
+            let b_felt = Felt::from(b);
+            let x = Felt::from(a ^ b);
+
+            assert_eq!(and_result_from_xor(a_felt, b_felt, x), Felt::from(a & b));
+            assert_eq!(andnot_result_from_xor(a_felt, b_felt, x), Felt::from((!a) & b));
+        }
+    }
+
+    #[test]
+    fn andnot_reconstruction_commutes_with_packed_bytes() {
+        let a = 0xf0_12_34_56u32;
+        let b = 0xcc_ab_78_9au32;
+        let x = a ^ b;
+        assert_eq!(
+            andnot_result_from_xor(Felt::from(a), Felt::from(b), Felt::from(x)),
+            Felt::from((!a) & b),
+        );
+    }
+
+    #[test]
+    fn normalized_byte_pair_relations_are_domain_separated() {
+        let challenges = Challenges::new(
+            QuadFelt::from_u64(3),
+            QuadFelt::from_u64(5),
+            MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
+        let a = Felt::from_u8(19);
+        let b = Felt::from_u8(23);
+        let x = Felt::from_u8(29);
+
+        let encodings = [
+            BytePairLutMsg::from_xor(a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot12Pos1, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos0, a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos2, a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot12Pos3, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos3, a, b, x).encode(&challenges),
+        ];
+
+        for left in 0..encodings.len() {
+            for right in left + 1..encodings.len() {
+                assert_ne!(encodings[left], encodings[right]);
+            }
+        }
+    }
 }
