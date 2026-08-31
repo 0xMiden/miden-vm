@@ -7,11 +7,16 @@ import html
 import re
 import sys
 import tomllib
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MAPPINGS = Path(__file__).resolve().parent / "user-doc-cycle-mappings.toml"
 ASSEMBLY_FIXTURES = ROOT / "processor/src/tests/assembly-cycle-fixtures.toml"
+
+
+class MissingCycleTextError(ValueError):
+    """Raised when a procedure description has no cycle text."""
 
 
 def extract_cycles_from_description(description: str) -> str:
@@ -20,7 +25,7 @@ def extract_cycles_from_description(description: str) -> str:
         re.finditer(r"\bCycles(?:\s*\((estimate)\))?\s*:?\s*(.*)", description, re.DOTALL)
     )
     if not matches:
-        return ""
+        raise MissingCycleTextError("description has no cycle text")
 
     match = matches[-1]
     is_estimate = match.group(1) is not None
@@ -49,6 +54,7 @@ def extract_cycles_from_description(description: str) -> str:
     if is_estimate:
         return f"estimate {block}"
     return block
+
 
 def slice_section(content: str, section: str | None) -> str:
     if not section:
@@ -126,7 +132,7 @@ def check_core_lib_mappings() -> list[str]:
             user_content = user_path.read_text(encoding="utf-8")
             user_cycles = extract_user_procedure_cycles(user_content, section, procedure)
             generated_cycles = extract_generated_procedure_cycles(generated_path, procedure)
-        except KeyError as err:
+        except (KeyError, MissingCycleTextError) as err:
             errors.append(
                 f"{user_path}: {procedure}: {err} "
                 f"(generated: {generated_path}, procedure: {procedure})"
@@ -152,20 +158,59 @@ def _normalize_table_cell(cell: str) -> str:
     return text
 
 
-def extract_cycle_cell_from_row(row: str) -> str | None:
+def table_header_cells(content: str, row_start: int) -> list[str] | None:
+    """Return normalized header cells for the markdown table containing row_start."""
+    prefix = content[:row_start]
+    lines = prefix.splitlines()
+    for idx in range(len(lines) - 1, 0, -1):
+        line = lines[idx]
+        if line.startswith("|") and re.search(r"^\|\s*[-:]+", line):
+            header = lines[idx - 1]
+            if header.startswith("|"):
+                return [
+                    c.strip().lower()
+                    for c in header.strip().strip("|").split("|")
+                ]
+    return None
+
+
+def _normalize_cycle_cell_text(text: str) -> str:
+    text = text.lower()
+    if re.fullmatch(r"\d+(?: cycles?)?", text, re.IGNORECASE):
+        return text
+    if re.fullmatch(r"\d+(?: \d+)+", text):
+        return text
+    match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", text, re.IGNORECASE)
+    if match:
+        return re.sub(r"\s+", " ", match.group(1).lower())
+    return text
+
+
+def extract_cycle_cell_from_row(
+    row: str,
+    content: str | None = None,
+    row_start: int | None = None,
+) -> str | None:
     """Return the cycle cell text from a marked markdown table row.
 
-    Prefer a dedicated Cycles column (instruction_reference style). Fall back to
+    When the table has a Cycles column header, use that column. Otherwise fall back to
     an embedded `*(N cycles)*` fragment in the instruction cell (u32_operations).
     """
     cells = [c.strip() for c in row.strip().strip("|").split("|")]
+
+    header_cells = None
+    if content is not None and row_start is not None:
+        header_cells = table_header_cells(content, row_start)
+
+    if header_cells:
+        for idx, name in enumerate(header_cells):
+            if "cycle" in name and idx < len(cells):
+                text = _normalize_table_cell(cells[idx])
+                if text:
+                    return _normalize_cycle_cell_text(text)
+
     for cell in cells:
         text = _normalize_table_cell(cell)
-        if re.fullmatch(r"\d+(?: cycles?)?", text, re.IGNORECASE):
-            return text.lower()
-        if re.fullmatch(r"\d+(?: \d+)+", text):
-            return text.lower()
-    for cell in cells:
         match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", cell, re.IGNORECASE)
         if match:
             return re.sub(r"\s+", " ", match.group(1).lower())
@@ -193,7 +238,7 @@ def check_assembly_fixtures() -> list[str]:
         if row_end == -1:
             row_end = len(content)
         row = content[row_start:row_end]
-        actual = extract_cycle_cell_from_row(row)
+        actual = extract_cycle_cell_from_row(row, content, row_start)
         if actual is None:
             errors.append(
                 f"{doc_path}: marker {case_id!r} row has no cycle cell matching {expected!r}"
@@ -204,6 +249,8 @@ def check_assembly_fixtures() -> list[str]:
             )
 
     return errors
+
+
 def main() -> int:
     errors = check_core_lib_mappings()
     errors.extend(check_assembly_fixtures())
@@ -218,5 +265,29 @@ def main() -> int:
     return 0
 
 
+class CheckUserDocCyclesTests(unittest.TestCase):
+    def test_missing_cycle_text_raises(self) -> None:
+        with self.assertRaises(MissingCycleTextError):
+            extract_cycles_from_description("Inputs: [a, b] Outputs: [c]")
+
+    def test_cycle_cell_uses_cycles_column_not_operand(self) -> None:
+        content = (
+            "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| foo | `[2, 1, ...]` | `[3, ...]` | 38 | note mentions 38 |\n"
+        )
+        row_start = content.index("| foo")
+        row = content[row_start:content.find("\n", row_start)]
+        self.assertEqual(extract_cycle_cell_from_row(row, content, row_start), "38")
+
+    def test_cycle_cell_falls_back_to_embedded_cycles(self) -> None:
+        row = "| u32popcnt *(38 cycles)* | [a, ...] | [b, ...] | note |"
+        self.assertEqual(extract_cycle_cell_from_row(row), "38 cycles")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        unittest.main()
+    else:
+        sys.exit(main())

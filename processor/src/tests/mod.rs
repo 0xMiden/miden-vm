@@ -1576,23 +1576,11 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
 }
 
 fn measure_program_cycles(program: &str) -> u32 {
-    use miden_utils_testing::Test;
-
-    const TRUNCATE_STACK: &str = r"@locals(4)
-proc truncate_stack
-    loc_storew_be.0 dropw movupw.3
-    sdepth neq.16
-    while.true
-        dropw movupw.3
-        sdepth neq.16
-    end
-    loc_loadw_be.0
-end
-";
+    use miden_utils_testing::{Test, TRUNCATE_STACK_PROC};
 
     let body = program.trim();
     let source = format!(
-        "{TRUNCATE_STACK}begin
+        "{TRUNCATE_STACK_PROC}begin
 {body}
 exec.truncate_stack
 end"
