@@ -41,7 +41,6 @@ ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
-FAST_TEST_FEATURES       := concurrent,testing
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 MIDEN_STARK_TEST_PACKAGES := -p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
@@ -214,8 +213,9 @@ test-docs: ## Run documentation tests (cargo test - nextest doesn't support doct
 
 .PHONY: test-fast
 test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+	# Keep this feature set aligned with `test` so both targets reuse the same test binaries.
 	$(MAKE) core-test \
-		FEATURES="$(FAST_TEST_FEATURES)" \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
 		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
 
 .PHONY: test-skip-proptests

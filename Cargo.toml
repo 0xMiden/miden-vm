@@ -69,7 +69,8 @@ lto = true
 [profile.test-dev]
 inherits = "dev"
 opt-level = 1
-debug = true
+# Keep line-level information for backtraces without embedding full DWARF in every test binary.
+debug = 1
 debug-assertions = true
 overflow-checks = true
 
