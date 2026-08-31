@@ -18,8 +18,22 @@ $$
 r = 256a + b.
 $$
 
-The same row provides $a \mathbin{\&} b$ and the position-specific Eidos compression rotation
-contributions. For range checking, the row represents the 16-bit value $v = 256a + b$.
+The same row stores $x = a \mathbin{\mathsf{xor}} b$ and the two wrapping Eidos contributions
+$W_{12}(x)$ and $W_7(x)$. Ordinary AND requests are encoded on the canonical XOR relation with
+$x = a + b - 2(a \mathbin{\&} b)$; the remaining rotation values are derived affinely from the
+fixed columns. For range checking, the row represents the 16-bit value $v = 256a + b$.
+
+The wrapping columns are
+
+$$
+W_{12}(x) = \left\lfloor \frac{x}{16} \right\rfloor + 2^{28}(x \bmod 16),
+\qquad
+W_7(x) = \left\lfloor \frac{x}{128} \right\rfloor + 2^{25}(x \bmod 128).
+$$
+
+For physical byte positions zero through three, lookup messages divide the stored rotation
+contribution by the static scales $(2^{20}, 2, 2^4, 1)$. Because the scale depends only on the
+position, every normalized message remains affine in the trace.
 
 The main trace contains one dynamic range multiplicity $m_v$ for every fixed row. A request to
 range-check a field element $x$ removes a `RangeCheck(x)` message from the relation. The fixed
@@ -37,7 +51,7 @@ without adding bridge rows or extending a VM trace.
 
 ## Request sources
 
-Range-check requests currently come from:
+Range-check requests come from:
 
 - selected operand-stack [`u32` operations](./stack/u32_ops.md#range-checks), which request four
   checks for decoder helper values; `U32DIV` requests two additional checks for its remainder
@@ -110,12 +124,13 @@ $b_{\mathrm{range}}$ value be zero.
 
 ## Cost and topology
 
-The table height is always $2^{16}$ and is independent of VM program length. Its eleven
-preprocessed columns are commitment-cached, while its ten main columns contain only dynamic
-multiplicities. The ten table-side fractions are paired into five auxiliary LogUp columns: the
-byte-AND and range-check messages share one column, and each rotate-right-by-12 position shares a
-column with the corresponding rotate-right-by-7 position. Each pair retains two independently
-typed denominators, so the closing constraints have degree three without merging bus domains.
+The table height is always $2^{16}$ and is independent of VM program length. Its five
+preprocessed columns $[a,b,x,W_{12}(x),W_7(x)]$ are commitment-cached, while its seven main
+columns contain only dynamic multiplicities: canonical XOR, five dedicated normalized rotation
+relations, and range check. The seven table-side fractions use four auxiliary LogUp columns with
+shape `[1, 2, 2, 2]`: canonical XOR is a singleton, two columns pair rotation relations, and the
+last pairs one rotation relation with range check. Every interaction retains its typed
+denominator, so the closing constraints have degree three without merging bus domains.
 
 The table supplies both 16-bit range checks and the byte operations required by the native Eidos
 compression AIR.

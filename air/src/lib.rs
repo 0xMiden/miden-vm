@@ -1280,10 +1280,10 @@ mod tests {
     fn and8_lookup_shape_and_degree_match_design() {
         let air = MidenAir::AND8_LOOKUP;
 
-        assert_eq!(air.width(), 10);
-        assert_eq!(air.preprocessed_width(), 11);
-        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 5);
-        assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [2; 5]);
+        assert_eq!(air.width(), 7);
+        assert_eq!(air.preprocessed_width(), 5);
+        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
+        assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [1, 2, 2, 2],);
         assert_eq!(
             LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
             ConstraintDegrees { base: 0, ext: 3 }

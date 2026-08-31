@@ -9,6 +9,7 @@ use super::{
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
     selectors::EidosCompressionSelectors,
 };
+use crate::primitives::byte_pair_lut::{and_result_from_xor, eidos};
 
 /// Enforces all constraints which are active on the 28 fused Eidos compression rows of each cycle.
 pub(crate) fn enforce_fused_rows<AB>(
@@ -165,7 +166,7 @@ pub(crate) fn enforce_footer_rows<AB>(
             - AB::Expr::from_u64(F_TOP_BIT_MASK as u64),
     );
 
-    let top_bit = AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let top_bit = footer_top_bit::<AB>(local);
     builder
         .when(is_footer.clone())
         .assert_zero(top_bit.clone() * (top_bit - AB::Expr::from_u64(F_TOP_BIT_MASK as u64)));
@@ -311,7 +312,7 @@ fn enforce_footer_row_locals<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let gate = selectors.is_footer_row(footer);
-    let top_bit_masked = AB::Expr::from(local[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let top_bit = footer_top_bit::<AB>(local);
 
     builder
         .when(gate.clone())
@@ -320,7 +321,7 @@ fn enforce_footer_row_locals<AB>(
         .when(gate.clone())
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
 
-    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
+    let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit;
     let packed_output = pack_pair::<AB>(words.out_even.clone(), masked_odd);
     builder
         .when(gate)
@@ -342,6 +343,17 @@ fn enforce_canonical_pair<AB>(
     builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
     builder.assert_zero(z.clone() * h);
     builder.assert_zero(z * lo);
+}
+
+fn footer_top_bit<AB>(row: &[AB::Var]) -> AB::Expr
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let a = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL]);
+    let b = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 1]);
+    let scaled_x = AB::Expr::from(row[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    let x = eidos::normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, scaled_x);
+    and_result_from_xor(a, b, x)
 }
 
 fn input_word<AB>(row: &[AB::Var], lane_map: &LaneMap, word_idx: usize, d_rotation: u32) -> AB::Expr

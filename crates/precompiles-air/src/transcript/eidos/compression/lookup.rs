@@ -8,7 +8,8 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use super::{algebra::missing_rotation_result, layout::*, selectors::EidosCompressionSelectors};
 use crate::{
     logup::{Deg, LookupBuilder, LookupColumn, LookupGroup},
-    relations::{BusId, eidos_rot7_bus, eidos_rot12_bus},
+    primitives::byte_pair_lut::eidos::{self as eidos_lookup, Relation, Rotation},
+    relations::BusId,
 };
 
 /// Typed view of the PVM-owned Eidos compression main-trace columns.
@@ -54,7 +55,8 @@ pub(in crate::transcript::eidos) fn emit_lookup_columns<LB>(
                 col.group(
                     "eidos_compression",
                     |group| {
-                        // Each column pairs adjacent slots under their row-specific multiplicities.
+                        // Each column pairs adjacent slots under their row-specific
+                        // multiplicities.
                         let slot0 = 2 * aux_col;
                         let slot1 = slot0 + 1;
                         let slot0_multiplicity = slot_multiplicity::<LB>(slot0, selectors);
@@ -95,8 +97,6 @@ where
             fused - LB::Expr::from_u64(7) * footer
         },
         (NarrowSlotBus::MessageWord, None) => fused,
-        // The byte-pair table provides these relations with negative multiplicity, so Eidos
-        // consumes them with positive multiplicity.
         (_, Some(_)) => fused + footer,
         (_, None) => fused,
     }
@@ -123,9 +123,11 @@ where
             encoded += group.bus_prefix(BusId::BytePairLut as usize) * fused.clone();
         },
         NarrowSlotBus::Rotation(byte) => {
-            let byte = byte as usize;
-            encoded += group.bus_prefix(eidos_rot12_bus(byte) as usize) * selectors.is_ab();
-            encoded += group.bus_prefix(eidos_rot7_bus(byte) as usize) * selectors.is_cd();
+            let byte_position = byte as usize;
+            let rot12 = Relation::for_rotation(Rotation::Rot12, byte_position);
+            let rot7 = Relation::for_rotation(Rotation::Rot7, byte_position);
+            encoded += group.bus_prefix(rot12.bus() as usize) * selectors.is_ab();
+            encoded += group.bus_prefix(rot7.bus() as usize) * selectors.is_cd();
         },
         NarrowSlotBus::MessageWord => {
             let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
@@ -162,14 +164,14 @@ where
             LB::Expr::ZERO
         };
     encoded += group.bus_prefix(BusId::Range16 as usize) * (LB::Expr::ONE - activity);
-    let fields = slot_fields::<LB>(local, next, selectors, slot);
+    let fields = narrow_slot_fields::<LB>(local, next, selectors, slot);
     for (idx, field) in fields.into_iter().enumerate() {
         encoded += group.beta_powers()[idx].clone() * field;
     }
     encoded
 }
 
-fn slot_fields<LB>(
+fn narrow_slot_fields<LB>(
     local: &EidosCompressionCols<LB::Var>,
     next: &EidosCompressionCols<LB::Var>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
@@ -181,11 +183,15 @@ where
     match NARROW_SLOTS[slot].fields {
         NarrowSlotFields::StoredByte(stored_slot) => {
             let base = byte_slot_base(0, stored_slot as usize);
-            [
-                LB::Expr::from(local.columns[base]),
-                LB::Expr::from(local.columns[base + 1]),
-                LB::Expr::from(local.columns[base + 2]),
-            ]
+            let a = LB::Expr::from(local.columns[base]);
+            let b = LB::Expr::from(local.columns[base + 1]);
+            let stored = LB::Expr::from(local.columns[base + 2]);
+            let value = if slot <= 15 {
+                a.clone() + b.clone() - stored.clone() - stored
+            } else {
+                eidos_lookup::normalize(slot % BYTES_PER_WORD, stored)
+            };
+            [a, b, value]
         },
         NarrowSlotFields::MissingRotation => [
             LB::Expr::from(
@@ -194,9 +200,12 @@ where
             LB::Expr::from(
                 local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)],
             ),
-            missing_rotation_result(
-                |col| LB::Expr::from(local.columns[col]),
-                |col| LB::Expr::from(next.columns[col]),
+            eidos_lookup::normalize(
+                MISSING_ROTATION_BYTE,
+                missing_rotation_result(
+                    |col| LB::Expr::from(local.columns[col]),
+                    |col| LB::Expr::from(next.columns[col]),
+                ),
             ),
         ],
         NarrowSlotFields::MessageWord(g) => {

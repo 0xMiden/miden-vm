@@ -1,10 +1,7 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
 use miden_air::trace::{
-    and8_lookup::{
-        BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7,
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
-    },
+    and8_lookup::{BYTE_LOOKUP_COUNT_LEN, byte_pair_count_index},
     chiplets::hasher::{
         BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
         MR_UPDATE_NEW, MR_UPDATE_OLD, STATE_WIDTH, Selectors,
@@ -843,26 +840,10 @@ struct EidosCompressionLookupCounter<'a> {
 
 impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
     fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
-        let kind = match lookup {
-            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            EidosCompressionByteLookup::Rot12 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
-            },
-            EidosCompressionByteLookup::Rot7 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
-            },
-        };
-        count_byte_lookup(self.counts, kind, lhs, rhs, result);
+        debug_assert_eq!(lookup.expected_result(lhs, rhs), result, "invalid byte-pair witness");
+        let count_index = byte_pair_count_index(lookup.relation(), lhs, rhs);
+        self.counts[count_index] += 1;
     }
-}
-
-fn count_byte_lookup(counts: &mut [u64], kind: usize, lhs: u8, rhs: u8, result: u32) {
-    debug_assert_eq!(
-        byte_lookup_result(kind, lhs, rhs),
-        result,
-        "byte-pair witness does not match table row",
-    );
-    counts[kind * BYTE_PAIR_ROWS + ((lhs as usize) << 8) + rhs as usize] += 1;
 }
 
 // MERKLE PATH CONTEXT

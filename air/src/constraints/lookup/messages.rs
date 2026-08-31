@@ -18,6 +18,7 @@ use miden_core::{
 };
 
 use crate::{
+    constraints::and8_lookup::eidos::BytePairRelation,
     lookup::{Challenges, message::LookupMessage},
     trace::chiplets::hasher::{BLOCK_LEN, STATE_WIDTH},
 };
@@ -96,23 +97,23 @@ pub enum BusId {
     HasherCompressionLink = 23,
     /// Eidos compression internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
     EidosCompressionInputCv = 24,
-    /// Byte-pair lookup table: ordinary `[a, b, a & b]` for byte-sized operands.
+    /// Byte-pair lookup table: canonical `[a, b, a xor b]` for byte-sized operands.
     And8Lookup = 25,
-    /// Eidos compression rot12 contribution for byte position 0: `[a, b, contribution]`.
-    EidosCompressionRot12Pos0 = 26,
-    /// Eidos compression rot12 contribution for byte position 1: `[a, b, contribution]`.
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus26 = 26,
+    /// Normalized Eidos rot12 contribution for byte position 1: `[a, b, value]`.
     EidosCompressionRot12Pos1 = 27,
-    /// Eidos compression rot12 contribution for byte position 2: `[a, b, contribution]`.
-    EidosCompressionRot12Pos2 = 28,
-    /// Eidos compression rot12 contribution for byte position 3: `[a, b, contribution]`.
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus28 = 28,
+    /// Normalized Eidos rot12 contribution for byte position 3: `[a, b, value]`.
     EidosCompressionRot12Pos3 = 29,
-    /// Eidos compression rot7 contribution for byte position 0: `[a, b, contribution]`.
+    /// Normalized Eidos rot7 contribution for byte position 0: `[a, b, value]`.
     EidosCompressionRot7Pos0 = 30,
-    /// Eidos compression rot7 contribution for byte position 1: `[a, b, contribution]`.
-    EidosCompressionRot7Pos1 = 31,
-    /// Eidos compression rot7 contribution for byte position 2: `[a, b, contribution]`.
+    /// Reserved Eidos rotation bus; this position uses the canonical XOR relation.
+    ReservedEidosCompressionBus31 = 31,
+    /// Normalized Eidos rot7 contribution for byte position 2: `[a, b, value]`.
     EidosCompressionRot7Pos2 = 32,
-    /// Eidos compression rot7 contribution for byte position 3: `[a, b, contribution]`.
+    /// Normalized Eidos rot7 contribution for byte position 3: `[a, b, value]`.
     EidosCompressionRot7Pos3 = 33,
     /// Eidos compression internal chaining-value pair bus:
     /// `[4 * compression_cycle_id + pair_index, word_even, word_odd]`.
@@ -128,17 +129,14 @@ pub enum BusId {
 }
 
 impl BusId {
-    /// Last variant discriminant. Paired with the static assertion below, `COUNT` stays
-    /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
-    /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
-    /// discriminant isn't contiguous).
+    /// Number of bus-prefix slots through the highest assigned discriminant. Reserved slots remain
+    /// part of this prefix layout.
     pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
 }
 
-// Per-variant discriminant locks. `BusId::COUNT` only catches gaps. A *reorder* that
-// kept the high watermark would silently swap which `bus_prefix[i]` each variant resolves
-// to, breaking domain separation across every emitter and consumer. These per-variant
-// asserts pin the entire layout so any reorder fails at compile time.
+// Per-variant discriminant locks. `BusId::COUNT` records only the high watermark; a reorder below
+// it would silently swap which `bus_prefix[i]` each variant resolves to, breaking domain separation
+// across every emitter and consumer. These asserts pin every assigned and reserved ID.
 //
 // If a new bus is added: append it after the current tail and add a matching assert for the new
 // variant. Renumbering existing entries is a protocol change and requires regenerated bindings.
@@ -168,12 +166,12 @@ const _: () = assert!(BusId::AceWiring as usize == 22);
 const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
 const _: () = assert!(BusId::EidosCompressionInputCv as usize == 24);
 const _: () = assert!(BusId::And8Lookup as usize == 25);
-const _: () = assert!(BusId::EidosCompressionRot12Pos0 as usize == 26);
+const _: () = assert!(BusId::ReservedEidosCompressionBus26 as usize == 26);
 const _: () = assert!(BusId::EidosCompressionRot12Pos1 as usize == 27);
-const _: () = assert!(BusId::EidosCompressionRot12Pos2 as usize == 28);
+const _: () = assert!(BusId::ReservedEidosCompressionBus28 as usize == 28);
 const _: () = assert!(BusId::EidosCompressionRot12Pos3 as usize == 29);
 const _: () = assert!(BusId::EidosCompressionRot7Pos0 as usize == 30);
-const _: () = assert!(BusId::EidosCompressionRot7Pos1 as usize == 31);
+const _: () = assert!(BusId::ReservedEidosCompressionBus31 as usize == 31);
 const _: () = assert!(BusId::EidosCompressionRot7Pos2 as usize == 32);
 const _: () = assert!(BusId::EidosCompressionRot7Pos3 as usize == 33);
 const _: () = assert!(BusId::EidosCompressionInputWord as usize == 34);
@@ -583,62 +581,54 @@ pub struct HasherCompressionLinkMsg<E> {
 // BYTE-PAIR LOOKUP MESSAGE
 // ================================================================================================
 
-/// Byte-pair lookup message (3 elements): `[a, b, result]`.
-///
-/// Ordinary AND uses `result = a & b`. Eidos compression B/D rotation buses use
-/// `result` as the 32-bit contribution of this byte pair to the rotated word.
+/// Canonical byte-pair lookup message `[a, b, x]`, where `x = a xor b`.
 #[derive(Clone, Debug)]
-pub struct And8Msg<E> {
-    pub bus: BusId,
+pub struct BytePairLookupMsg<E> {
     pub a: E,
     pub b: E,
-    pub result: E,
+    pub x: E,
 }
 
-impl<E: PrimeCharacteristicRing> And8Msg<E> {
-    /// Ordinary `a & b` lookup.
-    pub fn new(a: E, b: E, result: E) -> Self {
-        Self { bus: BusId::And8Lookup, a, b, result }
-    }
-
-    /// Eidos compression rot12 contribution at byte position `pos`.
-    pub fn eidos_compression_rot12(pos: usize, a: E, b: E, result: E) -> Self {
-        Self {
-            bus: eidos_compression_rot12_bus(pos),
-            a,
-            b,
-            result,
-        }
-    }
-
-    /// Eidos compression rot7 contribution at byte position `pos`.
-    pub fn eidos_compression_rot7(pos: usize, a: E, b: E, result: E) -> Self {
-        Self {
-            bus: eidos_compression_rot7_bus(pos),
-            a,
-            b,
-            result,
-        }
+impl<E: PrimeCharacteristicRing> BytePairLookupMsg<E> {
+    /// Maps an ordinary AND witness onto the canonical XOR relation.
+    pub fn from_and(a: E, b: E, h: E) -> Self {
+        let x = a.clone() + b.clone() - h.double();
+        Self { a, b, x }
     }
 }
 
-pub const fn eidos_compression_rot12_bus(pos: usize) -> BusId {
-    match pos {
-        0 => BusId::EidosCompressionRot12Pos0,
-        1 => BusId::EidosCompressionRot12Pos1,
-        2 => BusId::EidosCompressionRot12Pos2,
-        3 => BusId::EidosCompressionRot12Pos3,
-        _ => panic!("EidosCompression rot12 byte position must be in 0..4"),
+impl<E> BytePairLookupMsg<E> {
+    /// Constructs the canonical relation directly from `x = a xor b`.
+    pub fn from_xor(a: E, b: E, x: E) -> Self {
+        Self { a, b, x }
     }
 }
 
-pub const fn eidos_compression_rot7_bus(pos: usize) -> BusId {
-    match pos {
-        0 => BusId::EidosCompressionRot7Pos0,
-        1 => BusId::EidosCompressionRot7Pos1,
-        2 => BusId::EidosCompressionRot7Pos2,
-        3 => BusId::EidosCompressionRot7Pos3,
-        _ => panic!("EidosCompression rot7 byte position must be in 0..4"),
+/// Dedicated normalized Eidos rotation message `[a, b, value]`.
+#[derive(Clone, Debug)]
+pub(crate) struct EidosRotationMsg<E> {
+    relation: BytePairRelation,
+    a: E,
+    b: E,
+    value: E,
+}
+
+impl<E> EidosRotationMsg<E> {
+    /// Constructs a provider message whose value is already normalized.
+    pub(crate) fn from_normalized(relation: BytePairRelation, a: E, b: E, value: E) -> Self {
+        assert!(relation != BytePairRelation::CanonicalXor);
+        Self { relation, a, b, value }
+    }
+}
+
+pub(crate) const fn byte_pair_relation_bus(relation: BytePairRelation) -> BusId {
+    match relation {
+        BytePairRelation::CanonicalXor => BusId::And8Lookup,
+        BytePairRelation::Rot12Pos1 => BusId::EidosCompressionRot12Pos1,
+        BytePairRelation::Rot7Pos0 => BusId::EidosCompressionRot7Pos0,
+        BytePairRelation::Rot7Pos2 => BusId::EidosCompressionRot7Pos2,
+        BytePairRelation::Rot12Pos3 => BusId::EidosCompressionRot12Pos3,
+        BytePairRelation::Rot7Pos3 => BusId::EidosCompressionRot7Pos3,
     }
 }
 
@@ -902,15 +892,29 @@ where
     }
 }
 
-// --- And8Msg -------------------------------------------------------------------------------------
+// --- BytePairLookupMsg ---------------------------------------------------------------------------
 
-impl<E, EF> LookupMessage<E, EF> for And8Msg<E>
+impl<E, EF> LookupMessage<E, EF> for BytePairLookupMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(self.bus as usize, [self.a.clone(), self.b.clone(), self.result.clone()])
+        challenges
+            .encode(BusId::And8Lookup as usize, [self.a.clone(), self.b.clone(), self.x.clone()])
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for EidosRotationMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            byte_pair_relation_bus(self.relation) as usize,
+            [self.a.clone(), self.b.clone(), self.value.clone()],
+        )
     }
 }
 // --- BlockStackMsg -------------------------------------------------------------------------------
@@ -1215,7 +1219,10 @@ where
 mod tests {
     use miden_core::{Felt, chiplets::eidos_compression, field::QuadFelt};
 
-    use super::{And8Msg, BusId, HasherMsg, HasherPayload, MIDEN_MAX_MESSAGE_WIDTH};
+    use super::{
+        BusId, BytePairLookupMsg, BytePairRelation, EidosRotationMsg, HasherMsg, HasherPayload,
+        MIDEN_MAX_MESSAGE_WIDTH,
+    };
     use crate::lookup::{Challenges, message::LookupMessage};
 
     #[test]
@@ -1232,7 +1239,7 @@ mod tests {
     }
 
     #[test]
-    fn eidos_compression_rotation_positions_are_domain_separated() {
+    fn normalized_byte_pair_relations_are_domain_separated() {
         let challenges = Challenges::<QuadFelt>::new(
             QuadFelt::new([Felt::new_unchecked(3), Felt::new_unchecked(5)]),
             QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
@@ -1242,13 +1249,26 @@ mod tests {
 
         let a = Felt::new_unchecked(19);
         let b = Felt::new_unchecked(23);
-        let result = Felt::new_unchecked(29);
+        let x = Felt::new_unchecked(29);
 
-        let rot12_pos0 = And8Msg::eidos_compression_rot12(0, a, b, result).encode(&challenges);
-        let rot12_pos1 = And8Msg::eidos_compression_rot12(1, a, b, result).encode(&challenges);
-        assert_ne!(rot12_pos0, rot12_pos1);
+        let encodings = [
+            BytePairLookupMsg::from_xor(a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot12Pos1, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos0, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos2, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot12Pos3, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(BytePairRelation::Rot7Pos3, a, b, x)
+                .encode(&challenges),
+        ];
 
-        let rot7_pos0 = And8Msg::eidos_compression_rot7(0, a, b, result).encode(&challenges);
-        assert_ne!(rot12_pos0, rot7_pos0);
+        for left in 0..encodings.len() {
+            for right in left + 1..encodings.len() {
+                assert_ne!(encodings[left], encodings[right]);
+            }
+        }
     }
 }
