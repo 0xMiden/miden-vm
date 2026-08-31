@@ -214,9 +214,9 @@ ruint = { version = "1.18", default-features = false }
 toml = { version = "1.0", default-features = false }
 tracing-forest = "0.3.1"
 walkdir = "2.5"
-wycheproof-ng-core = { version = "0.1.1", default-features = false }
-wycheproof-ng-dh = { version = "0.1.1", default-features = false }
-wycheproof-ng-eddsa = { version = "0.1.1", default-features = false }
+wycheproof-ng-core = { version = "0.2.0", default-features = false }
+wycheproof-ng-dh = { version = "0.2.0", default-features = false }
+wycheproof-ng-eddsa = { version = "0.2.0", default-features = false }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

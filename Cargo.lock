@@ -4615,7 +4615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys",
@@ -5281,9 +5281,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-core"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3355351b904d2992d55c80bfdf21b68c9b5fb7624838ef32f9db48728ae4030"
+checksum = "f13924807c25b13120af84edee4ed19157ca06d33ee0401deb97af29ce81f7ba"
 dependencies = [
  "data-encoding",
  "serde",
@@ -5292,9 +5292,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-dh"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb78b54d7f74ee65464269122785c4f873914625099a51259b7781888d2975a"
+checksum = "e204f2f9f01a3b93dfaa7cf63466bdc88beb629f8216b869ff7400cf0c53fddd"
 dependencies = [
  "serde",
  "serde_derive",
@@ -5304,9 +5304,9 @@ dependencies = [
 
 [[package]]
 name = "wycheproof-ng-eddsa"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18ba12e1709f96c150391bb52d76a5e857a31d9f07da5cefb70f38f2ca059445"
+checksum = "52552287bfe2f6804dfa0d44cfa7f63e77e52eb81f64e62092bfda3ed6ad781f"
 dependencies = [
  "serde",
  "serde_derive",
