@@ -1576,7 +1576,7 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
 }
 
 fn measure_program_cycles(program: &str) -> u32 {
-    use miden_utils_testing::{Test, TRUNCATE_STACK_PROC};
+    use miden_utils_testing::{TRUNCATE_STACK_PROC, Test};
 
     let body = program.trim();
     let source = format!(
