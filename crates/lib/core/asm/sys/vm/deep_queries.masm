@@ -148,7 +148,7 @@ proc process_preprocessed_segment
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the aligned preprocessed leaf. The AND8 table contributes one
-    # 11-column preprocessed matrix, padded to 16 base felts by LMCS.
+    # AND8 preprocessed matrix: 5 columns, padded to 8 base felts by LMCS.
     push.EIDOS_LMCS_INIT_CV_16
     swapw
     padw

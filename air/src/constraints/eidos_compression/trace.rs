@@ -13,7 +13,7 @@ use super::{
     model::{initial_working_state, low_output},
     schedule::fused_step_at,
 };
-use crate::constraints::and8_lookup::columns::eidos_compression_rotation_contribution;
+use crate::constraints::and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation};
 
 #[cfg(test)]
 pub type EidosCompressionRow = [u64; NUM_COLS];
@@ -84,9 +84,37 @@ pub enum EidosCompressionByteLookup {
     /// Ordinary bytewise AND.
     And8,
     /// Contribution of one byte to a 32-bit rotate-right-by-12 result.
-    Rot12 { byte: usize },
+    Rot12 { byte_position: usize },
     /// Contribution of one byte to a 32-bit rotate-right-by-7 result.
-    Rot7 { byte: usize },
+    Rot7 { byte_position: usize },
+}
+
+impl EidosCompressionByteLookup {
+    /// Relation whose multiplicity is incremented for this lookup.
+    pub fn relation(self) -> BytePairRelation {
+        match self {
+            Self::And8 => BytePairRelation::CanonicalXor,
+            Self::Rot12 { byte_position } => {
+                BytePairRelation::for_rotation(Rotation::Rot12, byte_position)
+            },
+            Self::Rot7 { byte_position } => {
+                BytePairRelation::for_rotation(Rotation::Rot7, byte_position)
+            },
+        }
+    }
+
+    /// Physical result carried by the compression trace for this lookup.
+    pub fn expected_result(self, lhs: u8, rhs: u8) -> u32 {
+        match self {
+            Self::And8 => u32::from(lhs & rhs),
+            Self::Rot12 { byte_position } => {
+                eidos_lookup::contribution(Rotation::Rot12, byte_position, lhs, rhs)
+            },
+            Self::Rot7 { byte_position } => {
+                eidos_lookup::contribution(Rotation::Rot7, byte_position, lhs, rhs)
+            },
+        }
+    }
 }
 
 /// Receives byte-table lookups generated alongside an Eidos compression trace.
@@ -531,10 +559,14 @@ where
 {
     let top_byte = odd_output.to_le_bytes()[3];
     let masked = top_byte & F_TOP_BIT_MASK;
+    // This footer tuple overlays rotation byte position zero. Store the position-scaled XOR so
+    // fused and footer rows share the same normalization in the lookup projection.
+    let x = Felt::from(top_byte ^ F_TOP_BIT_MASK);
+    let scaled_x = eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, x).as_canonical_u64();
     write_lookup_slot(
         row,
         F_TOP_BIT_SLOT_BASE_COL,
-        [top_byte as u64, F_TOP_BIT_MASK as u64, masked as u64],
+        [top_byte as u64, F_TOP_BIT_MASK as u64, scaled_x],
     );
     recorder.record(EidosCompressionByteLookup::And8, top_byte, F_TOP_BIT_MASK, masked as u32);
 }
@@ -648,22 +680,17 @@ fn write_second_half_slots<T, R>(
 {
     let b_bytes = b.to_le_bytes();
     let c_new_bytes = c_new.to_le_bytes();
+    let rotation = Rotation::from_bits(rotation);
     for byte in 0..BYTES_PER_WORD {
-        let result = eidos_compression_rotation_contribution(
-            byte,
-            b_bytes[byte],
-            c_new_bytes[byte],
-            rotation,
-        );
+        let result = eidos_lookup::contribution(rotation, byte, b_bytes[byte], c_new_bytes[byte]);
         row.set_u64(g_bd_rot_slot_col(g, byte, 0), b_bytes[byte] as u64);
         row.set_u64(g_bd_rot_slot_col(g, byte, 1), c_new_bytes[byte] as u64);
         if let Some(result_col) = g_bd_rot_result_col(g, byte) {
             row.set_u64(result_col, result as u64);
         }
         let lookup = match rotation {
-            12 => EidosCompressionByteLookup::Rot12 { byte },
-            7 => EidosCompressionByteLookup::Rot7 { byte },
-            _ => panic!("unsupported EidosCompression byte-rotation lookup"),
+            Rotation::Rot12 => EidosCompressionByteLookup::Rot12 { byte_position: byte },
+            Rotation::Rot7 => EidosCompressionByteLookup::Rot7 { byte_position: byte },
         };
         recorder.record(lookup, b_bytes[byte], c_new_bytes[byte], result);
     }

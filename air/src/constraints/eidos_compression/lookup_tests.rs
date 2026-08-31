@@ -8,6 +8,7 @@ use miden_core::{
 
 use super::{
     algebra::{cv_storage_coefficient, universal_cv_word},
+    constraints_tests::eval_main_row,
     layout::*,
     lookup::{
         EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupAir, EidosCompressionMode,
@@ -18,16 +19,18 @@ use super::{
     narrow::NARROW_SLOTS,
     periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values},
     schedule::fused_step_at,
-    trace::{EidosCompressionRow, TraceMode, generate_trace_block_with_cycle_id},
+    trace::{
+        EidosCompressionRow, TraceMode, generate_felt_trace_block_with_cycle_id,
+        generate_trace_block_with_cycle_id,
+    },
 };
 #[cfg(feature = "std")]
 use crate::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use crate::{
     constraints::{
-        and8_lookup::columns::eidos_compression_rotation_contribution,
+        and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation},
         lookup::messages::{
-            AeadEidosCompressionInputMsg, HasherCompressionLinkMsg, eidos_compression_rot7_bus,
-            eidos_compression_rot12_bus,
+            AeadEidosCompressionInputMsg, HasherCompressionLinkMsg, byte_pair_relation_bus,
         },
     },
     logup::BusId,
@@ -325,7 +328,7 @@ fn lookup_degree_annotations_match_air_expressions() {
 }
 
 #[test]
-fn compact_messages_and_derived_rotation_encode_the_original_relations() {
+fn compact_messages_and_derived_rotation_encode_expected_relations() {
     let cycle_id = 7;
     let challenges = lookup_challenges();
     let trace = generate_trace_block_with_cycle_id(
@@ -354,19 +357,17 @@ fn compact_messages_and_derived_rotation_encode_the_original_relations() {
             trace.rows[row][g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)] as u8;
         let rhs =
             trace.rows[row][g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)] as u8;
-        let result = eidos_compression_rotation_contribution(
-            MISSING_ROTATION_BYTE,
-            lhs,
-            rhs,
-            step.second_rotation,
+        let rotation = Rotation::from_bits(step.second_rotation);
+        let result = eidos_lookup::contribution(rotation, MISSING_ROTATION_BYTE, lhs, rhs);
+        let relation = BytePairRelation::for_rotation(rotation, MISSING_ROTATION_BYTE);
+        let expected = challenges.encode(
+            byte_pair_relation_bus(relation) as usize,
+            [
+                Felt::from_u8(lhs),
+                Felt::from_u8(rhs),
+                eidos_lookup::normalize(MISSING_ROTATION_BYTE, Felt::from_u32(result)),
+            ],
         );
-        let bus = match step.second_rotation {
-            12 => eidos_compression_rot12_bus(MISSING_ROTATION_BYTE),
-            7 => eidos_compression_rot7_bus(MISSING_ROTATION_BYTE),
-            _ => unreachable!(),
-        };
-        let expected = challenges
-            .encode(bus as usize, [Felt::from_u8(lhs), Felt::from_u8(rhs), Felt::from_u32(result)]);
         assert!(fractions_at(&fractions, row, 31 / 2).contains(&(-Felt::ONE, expected)));
     }
 
@@ -386,6 +387,52 @@ fn compact_messages_and_derived_rotation_encode_the_original_relations() {
             );
         }
     }
+}
+
+#[test]
+fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
+    let mut trace =
+        generate_felt_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
+    let honest = RowMajorMatrix::new(trace.rows.iter().flatten().copied().collect(), NUM_COLS);
+
+    let footer = BLOCK_PERIOD - 1;
+    let row = &mut trace.rows[footer];
+    let a = row[F_TOP_BIT_SLOT_BASE_COL];
+    let mask = Felt::from_u8(F_TOP_BIT_MASK);
+    let valid_h = Felt::from_u8((a.as_canonical_u64() as u8) & F_TOP_BIT_MASK);
+    let wrong_h = mask - valid_h;
+    let wrong_x = a + mask - wrong_h.double();
+    row[F_TOP_BIT_SLOT_BASE_COL + 2] =
+        eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, wrong_x);
+
+    // Keep the packed digest and its overlapping atomic-CV coordinate unchanged while selecting
+    // the other locally valid boolean branch.
+    let digest_delta = -Felt::from_u64(1 << 56) * (wrong_h - valid_h);
+    row[footer_interface_tail_col(FOOTER_ROWS - 1)] += digest_delta;
+    row[F_CV_STORAGE_COLS[0]] -= digest_delta / Felt::from_u16(1 << 8);
+
+    for row in 0..BLOCK_PERIOD {
+        assert!(
+            eval_main_row(&trace.rows, row).iter().all(|&value| value == Felt::ZERO),
+            "locally valid top-bit branch failed on row {row}",
+        );
+    }
+
+    let forged = RowMajorMatrix::new(trace.rows.iter().flatten().copied().collect(), NUM_COLS);
+    let honest_fractions = lookup_fractions(&honest);
+    let forged_fractions = lookup_fractions(&forged);
+    let challenges = lookup_challenges();
+    let correct_x = Felt::from_u8((a.as_canonical_u64() as u8) ^ F_TOP_BIT_MASK);
+    let encode = |x| challenges.encode(BusId::And8Lookup as usize, [a, mask, x]);
+    let column = F_TOP_BIT_NARROW_SLOT / 2;
+
+    assert!(
+        fractions_at(&honest_fractions, footer, column).contains(&(-Felt::ONE, encode(correct_x))),
+    );
+    assert!(
+        fractions_at(&forged_fractions, footer, column).contains(&(-Felt::ONE, encode(wrong_x))),
+    );
+    assert_ne!(lookup_sigma(&honest), lookup_sigma(&forged));
 }
 
 #[test]
@@ -558,8 +605,42 @@ fn derived_rotation_cannot_cancel_a_mutated_stored_contribution() {
     add_to_raw_cell(&mut rows[1][g_msg_word_col(0)], -Felt::ONE);
     let mutated = lookup_fractions(&felt_matrix_from_rows(&rows));
     assert_eq!(fractions_at(&mutated, 0, 31 / 2), fractions_at(&honest_fractions, 0, 31 / 2));
-    assert_ne!(fractions_at(&mutated, 0, 16 / 2), fractions_at(&honest_fractions, 0, 16 / 2));
+    assert_ne!(
+        fractions_at(&mutated, 0, F_TOP_BIT_NARROW_SLOT / 2),
+        fractions_at(&honest_fractions, 0, F_TOP_BIT_NARROW_SLOT / 2),
+    );
     assert_ne!(lookup_sigma(&felt_matrix_from_rows(&rows)), honest_sigma);
+}
+
+#[test]
+fn dedicated_rotation_bus_encodes_the_normalized_physical_contribution() {
+    let honest =
+        generate_trace_block_with_cycle_id(test_block(), test_h(), 0, TraceMode::Compression);
+    let mut rows = honest.rows;
+    let row = 0;
+    let g = 0;
+    let byte = 1;
+    let base = g_bd_rot_slot_col(g, byte, 0);
+    let a = Felt::new_unchecked(rows[row][base]);
+    let b = Felt::new_unchecked(rows[row][base + 1]);
+
+    add_to_raw_cell(&mut rows[row][base + 2], Felt::ONE);
+    let wrong_physical = Felt::new_unchecked(rows[row][base + 2]);
+    let fractions = lookup_fractions(&felt_matrix_from_rows(&rows));
+    let challenges = lookup_challenges();
+    let rotation = Rotation::from_bits(fused_step_at(row).expect("fused row").second_rotation);
+    let relation = BytePairRelation::for_rotation(rotation, byte);
+    let expected = challenges.encode(
+        byte_pair_relation_bus(relation) as usize,
+        [a, b, eidos_lookup::normalize(byte, wrong_physical)],
+    );
+
+    let narrow_slot = F_TOP_BIT_NARROW_SLOT + byte;
+    assert!(fractions_at(&fractions, row, narrow_slot / 2).contains(&(-Felt::ONE, expected)));
+    assert_ne!(
+        lookup_sigma(&felt_matrix_from_rows(&honest.rows)),
+        lookup_sigma(&felt_matrix_from_rows(&rows)),
+    );
 }
 
 #[test]
