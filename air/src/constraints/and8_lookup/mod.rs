@@ -1,15 +1,14 @@
 //! Byte-pair lookup table AIR.
 //!
-//! The fixed preprocessed trace enumerates one row per byte pair. The row serves
-//! ten lookup domains: ordinary `(a, b, a & b)`, one Eidos compression rotation-contribution
-//! domain for each `(rotation, byte-position)` pair, and `RangeCheck` for the
-//! 16-bit value `256 * a + b`. The dynamic main trace carries one multiplicity
-//! column per domain. The ten simultaneous table interactions are pair-batched
-//! into five degree-three LogUp auxiliary columns.
+//! The fixed preprocessed trace enumerates one row per byte pair. The row serves canonical XOR,
+//! five normalized Eidos rotation domains, and `RangeCheck` for `256 * a + b`. Ordinary AND and
+//! three non-wrapping rotations map affinely to canonical XOR. The seven simultaneous table
+//! interactions use four LogUp auxiliary columns with shape `[1, 2, 2, 2]`.
 
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub mod columns;
+pub(crate) mod eidos;
 
 /// Builds the fixed byte-pair table used by the AND8 lookup AIR.
 pub fn preprocessed_trace() -> RowMajorMatrix<Felt> {

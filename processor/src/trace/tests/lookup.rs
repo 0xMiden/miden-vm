@@ -23,9 +23,8 @@ use miden_air::{
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{
-            AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT,
-            BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12,
-            NUM_AND8_LOOKUP_COLS, RANGE_CHECK_LOOKUP_COL,
+            AND8_TABLE_ROWS, BYTE_PAIR_RELATION_COUNT, BytePairRelation, NUM_AND8_LOOKUP_COLS,
+            RANGE_CHECK_LOOKUP_COL,
         },
         eidos_compression::{
             EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
@@ -54,25 +53,11 @@ const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
 const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
 const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
     EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
-const AND8_PAIR_BATCH_COLUMNS: usize = 5;
-const AND8_PAIRED_MAIN_COLUMNS: [(usize, usize); AND8_PAIR_BATCH_COLUMNS] = [
-    (BYTE_LOOKUP_KIND_AND8, RANGE_CHECK_LOOKUP_COL),
-    (
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[0],
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[0],
-    ),
-    (
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[1],
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[1],
-    ),
-    (
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[2],
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[2],
-    ),
-    (
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[3],
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[3],
-    ),
+const AND8_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];
+const AND8_PAIRED_MAIN_COLUMNS: [(usize, usize); 3] = [
+    (BytePairRelation::Rot12Pos1 as usize, BytePairRelation::Rot7Pos0 as usize),
+    (BytePairRelation::Rot7Pos2 as usize, BytePairRelation::Rot12Pos3 as usize),
+    (BytePairRelation::Rot7Pos3 as usize, RANGE_CHECK_LOOKUP_COL),
 ];
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
@@ -217,7 +202,7 @@ fn and8_aux_constraints_hold(
 ) -> bool {
     let num_rows = column_folds.len();
     let width = aux.width();
-    if width != AND8_PAIR_BATCH_COLUMNS
+    if width != AND8_COLUMN_SHAPE.len()
         || aux.height() != num_rows
         || aux.values[0] != QuadFelt::ZERO
     {
@@ -361,6 +346,8 @@ fn lookup_constraints_close_for_fibonacci_span() {
 
 #[test]
 fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
+    const CANONICAL_REQUESTS_PER_BLOCK: u64 = 684;
+    const REQUESTS_PER_DEDICATED_ROTATION_RELATION: u64 = 56;
     const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
@@ -418,7 +405,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
     let mut actual_eidos_compression_byte_lookup_total = 0;
     for row in 0..AND8_TABLE_ROWS {
         let row_start = row * NUM_AND8_LOOKUP_COLS;
-        for col in 0..BYTE_LOOKUP_KIND_COUNT {
+        for col in 0..BYTE_PAIR_RELATION_COUNT {
             actual_eidos_compression_byte_lookup_total +=
                 and8_matrix.values[row_start + col].as_canonical_u64();
         }
@@ -427,6 +414,32 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
         actual_eidos_compression_byte_lookup_total, expected_eidos_compression_byte_lookup_total,
         "EidosCompression byte-lookup multiplicities do not match EidosCompression requests",
     );
+
+    // Each block has fourteen rows per rotation family. Canonical XOR aggregates 16 ordinary
+    // ANDs per fused row, rot12 positions 0/2, rot7 position 1, and 17 ANDs per footer row. Each
+    // dedicated rotation relation receives four requests on each of its fourteen active fused rows.
+    let relation_totals: [u64; BYTE_PAIR_RELATION_COUNT] = core::array::from_fn(|relation| {
+        (0..AND8_TABLE_ROWS)
+            .map(|row| and8_matrix.values[row * NUM_AND8_LOOKUP_COLS + relation].as_canonical_u64())
+            .sum()
+    });
+    assert_eq!(
+        relation_totals[BytePairRelation::CanonicalXor.index()],
+        block_count as u64 * CANONICAL_REQUESTS_PER_BLOCK,
+    );
+    for relation in [
+        BytePairRelation::Rot12Pos1,
+        BytePairRelation::Rot7Pos0,
+        BytePairRelation::Rot7Pos2,
+        BytePairRelation::Rot12Pos3,
+        BytePairRelation::Rot7Pos3,
+    ] {
+        assert_eq!(
+            relation_totals[relation.index()],
+            block_count as u64 * REQUESTS_PER_DEDICATED_ROTATION_RELATION,
+            "unexpected multiplicity total for {relation:?}",
+        );
+    }
 
     let padding_start = AND8_TABLE_ROWS * NUM_AND8_LOOKUP_COLS;
     let padding_byte_lookup_total: u64 =
@@ -882,7 +895,7 @@ fn build_lookup_fractions_run_for_mixed_bitwise_aead_stream() {
 }
 
 #[test]
-fn and8_pair_batches_bind_every_aux_column_through_the_cyclic_wrap() {
+fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
     let preprocessed = MidenAir::AND8_LOOKUP
@@ -903,7 +916,7 @@ fn and8_pair_batches_bind_every_aux_column_through_the_cyclic_wrap() {
         &[],
         &challenges,
     );
-    assert_eq!(fractions.shape(), &[2; AND8_PAIR_BATCH_COLUMNS]);
+    assert_eq!(fractions.shape(), &AND8_COLUMN_SHAPE);
 
     let (aux, sigma_prime) = accumulate(&fractions);
     let folds = lookup_column_folds(&fractions);
@@ -919,9 +932,9 @@ fn and8_pair_batches_bind_every_aux_column_through_the_cyclic_wrap() {
     );
 
     for row in [AND8_TABLE_ROWS / 2 + 37, final_row] {
-        for col in 0..AND8_PAIR_BATCH_COLUMNS {
+        for col in 0..AND8_COLUMN_SHAPE.len() {
             let mut tampered = aux.clone();
-            tampered.values[row * AND8_PAIR_BATCH_COLUMNS + col] += QuadFelt::ONE;
+            tampered.values[row * AND8_COLUMN_SHAPE.len() + col] += QuadFelt::ONE;
             assert!(
                 !and8_aux_column_constraint_holds_at(&tampered, sigma_prime, &folds, row, col,),
                 "And8 auxiliary mutation survived at row {row}, column {col}",
@@ -931,7 +944,7 @@ fn and8_pair_batches_bind_every_aux_column_through_the_cyclic_wrap() {
 }
 
 #[test]
-fn and8_pair_batches_reject_opposite_multiplicity_deltas_across_domains() {
+fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (core_matrix, chip_matrix, eidos_compression_matrix, honest_and8_matrix) =
         trace.main_trace().clone_air_matrices();
@@ -957,7 +970,7 @@ fn and8_pair_batches_reject_opposite_multiplicity_deltas_across_domains() {
 
     // Each attack preserves the untagged sum of the two multiplicities. Distinct bus prefixes
     // and payloads must nevertheless keep both denominators independently binding.
-    let attack_rows = [257, 1025, 4097, 16385, AND8_TABLE_ROWS - 1];
+    let attack_rows = [1025, 4097, AND8_TABLE_ROWS - 1];
     let mut attacked_and8_matrix = honest_and8_matrix;
     let main_width = attacked_and8_matrix.width();
     for (pair, &row) in AND8_PAIRED_MAIN_COLUMNS.iter().zip(&attack_rows) {
@@ -973,7 +986,8 @@ fn and8_pair_batches_reject_opposite_multiplicity_deltas_across_domains() {
         &challenges,
     );
     let attacked_folds = lookup_column_folds(&attacked_fractions);
-    for (col, &row) in attack_rows.iter().enumerate() {
+    for (pair_idx, &row) in attack_rows.iter().enumerate() {
+        let col = pair_idx + 1;
         assert!(
             !and8_aux_column_constraint_holds_at(
                 &honest_aux,
