@@ -19,7 +19,7 @@ pub mod debug;
 mod statement;
 mod util;
 
-pub use air::{ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
+pub use air::{ConstraintCounts, ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
 // Re-export upstream p3-air types so downstream crates never need to depend on p3-air
 // directly.

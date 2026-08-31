@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{format, sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -6,10 +6,14 @@ use miden_air::{
     MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::deferred::DeferredState;
+use miden_core::{
+    deferred::{DeferredState, DeferredStateWire, Digest, TRUE_DIGEST},
+    program::ExecutionClaim,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 use crate::{
-    Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput, field::QuadFelt, utils::RowMajorMatrix,
 };
 
@@ -31,80 +35,267 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use execution_tracer::TraceGenerationContext;
+pub(crate) use execution_tracer::TraceReplay;
 pub use miden_air::trace::RowIndex;
-pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
+pub use miden_core::deferred::PrecompileWitness;
+pub use parallel::{
+    CORE_TRACE_WIDTH, DEFAULT_MAX_PROVER_MEMORY_BYTES, build_trace, build_trace_with_budget,
+};
+// Re-exported for the streaming trace-build path
+// (`FastProcessor::execute_and_build_trace_sync`), which is std-only; the buffered path
+// uses `build_hasher_chiplet` and `MAX_TRACE_LEN` directly within `parallel`.
+#[cfg(feature = "std")]
+pub(crate) use parallel::{MAX_TRACE_LEN, build_hasher_chiplet, build_trace_with_prebuilt_hasher};
+#[cfg(feature = "std")]
+pub(crate) use trace_state::ResolvedHasherOp;
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
-/// Inputs required to build an execution trace from pre-executed data.
+/// Complete in-memory witness produced by a traced program execution.
+///
+/// The processor constructs its VM witness and optional singleton precompile witness from the same
+/// execution output, so they retain the same deferred root. The aggregate may contain private and
+/// potentially large prover data. Its binary form is trusted replay data: sparse MAST node and
+/// digest maps inside the trace replay are not checked against a source `MastForest` commitment;
+/// see <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
-pub struct TraceBuildInputs {
-    trace_output: TraceBuildOutput,
-    trace_generation_context: TraceGenerationContext,
-    program_info: ProgramInfo,
+pub struct ExecutionWitness {
+    vm: VmWitness,
+    precompile: Option<PrecompileWitness>,
 }
 
-#[derive(Debug)]
-pub(crate) struct TraceBuildOutput {
-    stack_outputs: StackOutputs,
-    deferred_state: DeferredState,
-}
-
-impl TraceBuildOutput {
-    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
+impl ExecutionWitness {
+    pub(crate) fn from_execution(
+        program_info: ProgramInfo,
+        stack_inputs: StackInputs,
+        execution_output: ExecutionOutput,
+        trace: TraceReplay,
+    ) -> Self {
         let ExecutionOutput {
-            stack,
+            stack: stack_outputs,
             advice: _,
             memory: _,
-            deferred_state,
+            deferred_state: precompiles,
         } = execution_output;
+        let precompile_root = precompiles.root();
+        let vm = VmWitness {
+            program_info,
+            stack_inputs,
+            stack_outputs,
+            trace,
+            precompile_root,
+        };
+        let precompile = (precompile_root != TRUE_DIGEST).then(|| {
+            PrecompileWitness::new(precompiles)
+                .expect("a non-TRUE execution root must produce a singleton precompile witness")
+        });
 
-        Self { stack_outputs: stack, deferred_state }
+        Self { vm, precompile }
+    }
+
+    /// Returns the public claim associated with this witness.
+    pub fn claim(&self) -> ExecutionClaim {
+        self.vm.claim()
+    }
+
+    /// Consumes this witness and returns its supported low-level proving components.
+    ///
+    /// The [`VmWitness`] can be passed to [`build_trace`]. The optional [`PrecompileWitness`] is
+    /// present only when execution authenticated deferred precompile work.
+    pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
+        (self.vm, self.precompile)
     }
 }
 
-impl TraceBuildInputs {
-    pub(crate) fn from_execution(
-        program: &Program,
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-    ) -> Self {
-        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
-        let program_info = program.to_info();
-        Self {
-            trace_output,
-            trace_generation_context,
-            program_info,
+/// Current wire format version for [`ExecutionWitness`] serialization.
+///
+/// The version is written as the first byte of every serialized witness. Deserialization only
+/// accepts this exact value, so a future format change only needs to add a new accepted version
+/// and keep the old readers where compatibility matters.
+const EXECUTION_WITNESS_WIRE_VERSION: u8 = 1;
+
+impl Serializable for ExecutionWitness {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        EXECUTION_WITNESS_WIRE_VERSION.write_into(target);
+        self.vm.write_into(target);
+        match &self.precompile {
+            Some(precompile) => {
+                target.write_u8(1);
+                write_precompile_witness(precompile, target);
+            },
+            None => target.write_u8(0),
         }
     }
+}
 
-    /// Returns the stack outputs captured for the execution being replayed.
-    pub fn stack_outputs(&self) -> &StackOutputs {
-        &self.trace_output.stack_outputs
+impl Deserializable for ExecutionWitness {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = u8::read_from(source)?;
+        if version != EXECUTION_WITNESS_WIRE_VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "unsupported execution witness wire version {version} (expected \
+                 {EXECUTION_WITNESS_WIRE_VERSION})"
+            )));
+        }
+        let vm = VmWitness::read_from(source)?;
+        let precompile = match source.read_u8()? {
+            0 => {
+                if vm.precompile_root != TRUE_DIGEST {
+                    return Err(DeserializationError::InvalidValue(
+                        "VM witness claims deferred work but no precompile witness is present"
+                            .into(),
+                    ));
+                }
+                None
+            },
+            1 => {
+                let witness = read_precompile_witness(source)?;
+                // `read_precompile_witness` only produces singleton witnesses, but do not index
+                // blindly: keep deserialization panic-free even if that invariant changes.
+                let [witness_root] = witness.roots() else {
+                    return Err(DeserializationError::InvalidValue(
+                        "expected a singleton precompile witness".into(),
+                    ));
+                };
+                if *witness_root != vm.precompile_root {
+                    return Err(DeserializationError::InvalidValue(
+                        "precompile witness root does not match the VM witness precompile root"
+                            .into(),
+                    ));
+                }
+                Some(witness)
+            },
+            tag => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "invalid precompile witness option tag {tag}"
+                )));
+            },
+        };
+        Ok(Self { vm, precompile })
+    }
+}
+
+/// Witness required to materialize and prove a VM execution trace.
+///
+/// This potentially large value contains private replay data and is consumed by trace-building and
+/// proving operations. Its binary form is trusted replay data: sparse MAST node and digest maps
+/// inside the trace replay are not checked against a source `MastForest` commitment; see
+/// <https://github.com/0xMiden/miden-vm/issues/3303>.
+#[derive(Debug)]
+pub struct VmWitness {
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    trace: TraceReplay,
+    precompile_root: Digest,
+}
+
+impl VmWitness {
+    /// Returns the public claim associated with this witness.
+    pub fn claim(&self) -> ExecutionClaim {
+        ExecutionClaim::from_program_info(
+            self.program_info.clone(),
+            self.stack_inputs,
+            self.stack_outputs,
+        )
     }
 
-    /// Returns the final deferred state captured for the execution being replayed.
-    pub fn deferred_state(&self) -> &DeferredState {
-        &self.trace_output.deferred_state
+    /// Takes the hasher replay out, leaving an empty buffered one.
+    ///
+    /// The streaming path uses this to drop the replay's channel sender once execution has
+    /// finished, so the concurrently running hasher builder sees its input stream end.
+    #[cfg(feature = "std")]
+    pub(crate) fn take_hasher_replay(&mut self) -> trace_state::HasherRequestReplay {
+        core::mem::take(&mut self.trace.hasher_for_chiplet)
     }
 
-    /// Returns the program info captured for the execution being replayed.
-    pub fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    /// Returns the trace replay context captured during execution.
-    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
-        &self.trace_generation_context
-    }
-
-    // Kept for tests that force invalid replay contexts without widening the public API.
+    /// Returns the replay data captured during execution.
     #[cfg(any(test, feature = "testing"))]
     #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
-        &mut self.trace_generation_context
+    pub(crate) fn trace_replay(&self) -> &TraceReplay {
+        &self.trace
     }
+
+    // Kept for tests that force invalid replay data without widening the public API.
+    #[cfg(any(test, feature = "testing"))]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
+    pub(crate) fn trace_replay_mut(&mut self) -> &mut TraceReplay {
+        &mut self.trace
+    }
+
+    /// Returns the number of sparse MAST forests captured in the replay.
+    ///
+    /// Available under the `testing` feature for external tests that check which replay data a
+    /// serialized witness preserves.
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub fn mast_forest_count(&self) -> usize {
+        self.trace.mast_forest_store.len()
+    }
+}
+
+impl Serializable for VmWitness {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.program_info.write_into(target);
+        self.stack_inputs.write_into(target);
+        self.stack_outputs.write_into(target);
+        self.trace.write_into(target);
+        self.precompile_root.write_into(target);
+    }
+}
+
+impl Deserializable for VmWitness {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            program_info: ProgramInfo::read_from(source)?,
+            stack_inputs: StackInputs::read_from(source)?,
+            stack_outputs: StackOutputs::read_from(source)?,
+            trace: TraceReplay::read_from(source)?,
+            precompile_root: Digest::read_from(source)?,
+        })
+    }
+}
+
+/// Writes a singleton precompile witness as its ordered roots followed by its canonical deferred
+/// wire.
+fn write_precompile_witness<W: ByteWriter>(witness: &PrecompileWitness, target: &mut W) {
+    let roots = witness.roots();
+    debug_assert_eq!(roots.len(), 1, "only singleton precompile witnesses are serializable");
+    target.write_usize(roots.len());
+    for root in roots {
+        root.write_into(target);
+    }
+    let deferred_wire = witness
+        .state()
+        .to_wire()
+        .expect("deferred state must serialize to canonical wire");
+    deferred_wire.write_into(target);
+}
+
+/// Reads a singleton precompile witness written by [`write_precompile_witness`].
+fn read_precompile_witness<R: ByteReader>(
+    source: &mut R,
+) -> Result<PrecompileWitness, DeserializationError> {
+    let roots = Vec::<Digest>::read_from(source)?;
+    if roots.len() != 1 {
+        return Err(DeserializationError::InvalidValue(
+            "expected a singleton precompile witness".into(),
+        ));
+    }
+    let deferred_wire = DeferredStateWire::read_from(source)?;
+    let deferred_state =
+        DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &deferred_wire).map_err(
+            |err| DeserializationError::InvalidValue(format!("invalid deferred state: {err}")),
+        )?;
+
+    let witness = PrecompileWitness::new(deferred_state).map_err(|err| {
+        DeserializationError::InvalidValue(format!("invalid precompile witness: {err}"))
+    })?;
+    if witness.roots() != roots.as_slice() {
+        return Err(DeserializationError::InvalidValue(
+            "precompile witness roots do not match its deferred state".into(),
+        ));
+    }
+    Ok(witness)
 }
 
 // VM EXECUTION TRACE
@@ -115,34 +306,36 @@ impl TraceBuildInputs {
 /// The trace consists of the following components:
 /// - Per-AIR trace matrices for Core, Chiplets, and Poseidon2Permutation.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state and final deferred state).
+/// - Information about the initial and final stack states and authenticated precompile root.
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
-pub struct ExecutionTrace {
+pub struct VmTrace {
     main_trace: MainTrace,
     program_info: ProgramInfo,
+    stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    deferred_state: DeferredState,
+    precompile_root: Digest,
     trace_len_summary: TraceLenSummary,
 }
 
-impl ExecutionTrace {
+impl VmTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     pub(crate) fn new_from_parts(
         program_info: ProgramInfo,
-        trace_output: TraceBuildOutput,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        precompile_root: Digest,
         main_trace: MainTrace,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
-        let TraceBuildOutput { stack_outputs, deferred_state } = trace_output;
-
         Self {
             main_trace,
             program_info,
+            stack_inputs,
             stack_outputs,
-            deferred_state,
+            precompile_root,
             trace_len_summary,
         }
     }
@@ -169,9 +362,9 @@ impl ExecutionTrace {
     pub fn public_inputs(&self) -> PublicInputs {
         PublicInputs::new(
             self.program_info.clone(),
-            self.init_stack_state(),
+            self.stack_inputs,
             self.stack_outputs,
-            self.deferred_state.root(),
+            self.precompile_root,
         )
     }
 
@@ -190,9 +383,9 @@ impl ExecutionTrace {
         &mut self.main_trace
     }
 
-    /// Returns the final deferred state generated during program execution.
-    pub fn deferred_state(&self) -> &DeferredState {
-        &self.deferred_state
+    /// Returns the authenticated root of the deferred precompile state.
+    pub fn precompile_root(&self) -> Digest {
+        self.precompile_root
     }
 
     /// Returns the owned stack outputs required for proof packaging.
@@ -202,12 +395,7 @@ impl ExecutionTrace {
 
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
-        let mut result = [ZERO; MIN_STACK_DEPTH];
-        let row = RowIndex::from(0_u32);
-        for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.stack_element(i, row);
-        }
-        result.into()
+        self.stack_inputs
     }
 
     /// Returns the final state of the top 16 stack registers.
@@ -302,5 +490,87 @@ impl ExecutionTrace {
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
         self.main_trace.get_column_range(range)
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use miden_assembly::Assembler;
+    use miden_core::deferred::TRUE_DIGEST;
+
+    use super::{Deserializable, ExecutionWitness, Serializable};
+    use crate::{DefaultHost, FastProcessor, StackInputs};
+
+    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+        let program = Assembler::default()
+            .assemble_program("program", "begin log_deferred end")
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = DefaultHost::default();
+        let witness = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness");
+        witness.to_bytes()
+    }
+
+    #[test]
+    fn witness_wire_rejects_unsupported_version() {
+        let mut bytes = deferred_witness_bytes();
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
+
+        // The first byte of the wire is the format version; any other value must be rejected
+        // before any payload is parsed.
+        bytes[0] = bytes[0].wrapping_add(1);
+        let err = ExecutionWitness::read_from_bytes(&bytes)
+            .expect_err("witness with an unknown wire version should be rejected");
+        assert!(
+            format!("{err:?}").contains("unsupported execution witness wire version"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn witness_wire_rejects_mismatched_precompile_root() {
+        let bytes = deferred_witness_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
+        let (vm, precompile) = restored.into_parts();
+        let precompile = precompile.expect("deferred execution should carry a precompile witness");
+        assert_ne!(vm.precompile_root, TRUE_DIGEST);
+
+        // Tamper only the VM-side precompile root and re-serialize: the two halves of the wire
+        // no longer describe the same execution, so deserialization must reject them.
+        let tampered = ExecutionWitness {
+            vm: super::VmWitness { precompile_root: TRUE_DIGEST, ..vm },
+            precompile: Some(precompile),
+        };
+        let err = ExecutionWitness::read_from_bytes(&tampered.to_bytes())
+            .expect_err("tampered witness should be rejected");
+        assert!(
+            format!("{err:?}")
+                .contains("precompile witness root does not match the VM witness precompile root"),
+            "unexpected error: {err:?}"
+        );
+
+        // Sanity: the untampered wire still round-trips.
+        assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
+    }
+
+    #[test]
+    fn witness_wire_rejects_missing_precompile_witness() {
+        let bytes = deferred_witness_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes).expect("witness round trip");
+        let (vm, precompile) = restored.into_parts();
+        assert!(precompile.is_some(), "deferred execution should carry a precompile witness");
+
+        // Drop only the precompile witness while the VM side still claims deferred work: the
+        // wire must not validate as a complete execution.
+        let stripped = ExecutionWitness { vm, precompile: None };
+        let err = ExecutionWitness::read_from_bytes(&stripped.to_bytes())
+            .expect_err("witness without its precompile half should be rejected");
+        assert!(
+            format!("{err:?}")
+                .contains("VM witness claims deferred work but no precompile witness is present"),
+            "unexpected error: {err:?}"
+        );
     }
 }

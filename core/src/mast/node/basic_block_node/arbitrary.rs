@@ -14,7 +14,7 @@ use crate::{
         CallNodeBuilder, DenseMastForestBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder,
     },
-    operations::{AssemblyOp, Operation},
+    operations::Operation,
     program::{KernelDescriptor, Program},
 };
 
@@ -509,39 +509,9 @@ impl Arbitrary for MastForest {
                         }
                     }
 
-                    forest.finish().expect("generated MAST forest should be valid")
+                    forest.build().expect("generated MAST forest should be valid")
                 },
             )
-            .boxed()
-    }
-}
-
-// ---------- Arbitrary implementations for missing types ----------
-
-impl Arbitrary for AssemblyOp {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (
-            any::<bool>(),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
-            prop::collection::vec(any::<char>(), 1..=20)
-                .prop_map(|chars| chars.into_iter().collect()),
-            any::<u8>(),
-        )
-            .prop_map(|(has_location, context_name, op, num_cycles)| {
-                use miden_debug_types::{ByteIndex, Location, Uri};
-
-                let location = if has_location {
-                    Some(Location::new(Uri::new("dummy.rs"), ByteIndex(0), ByteIndex(0)))
-                } else {
-                    None
-                };
-
-                AssemblyOp::new(location, context_name, num_cycles, op)
-            })
             .boxed()
     }
 }
@@ -603,7 +573,7 @@ impl Arbitrary for Program {
             let node_id = builder.push_node(node_builder).expect("Failed to add node");
             builder.mark_root(node_id);
             let (forest, remapping) =
-                builder.finish_with_id_map().expect("generated program forest should be valid");
+                builder.build_with_id_map().expect("generated program forest should be valid");
             let entrypoint = remapping.get(node_id).expect("entrypoint should be retained");
 
             Program::new(Arc::new(forest), entrypoint)

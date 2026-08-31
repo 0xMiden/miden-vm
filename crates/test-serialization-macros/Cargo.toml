@@ -1,0 +1,26 @@
+[package]
+name = "miden-test-serialization-macros"
+version = "0.31.0"
+description = "Proc macros for serialization round-trip testing in Miden VM"
+readme = "README.md"
+categories = ["development-tools::testing", "no-std"]
+keywords = ["miden", "serialization", "testing", "proc-macro"]
+publish = false
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+proptest-derive = { workspace = true }

@@ -7,8 +7,8 @@ use miden::core::crypto::hashes::poseidon2
 #! linear combination using Horner evaluation.
 #!
 #!
-#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
+#! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
 #!
 pub proc process_row_ood_evaluations
     # Per-row OOD layout matches the LMCS aligned wire format (alignment = 8 for

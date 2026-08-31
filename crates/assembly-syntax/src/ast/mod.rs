@@ -19,6 +19,7 @@ mod procedure;
 #[cfg(test)]
 mod tests;
 mod r#type;
+pub mod types;
 mod visibility;
 pub mod visit;
 
@@ -33,11 +34,14 @@ pub use self::{
     docstring::DocString,
     form::Form,
     ident::{CaseKindError, Ident, IdentError},
-    immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
+    immediate::{ErrorMsg, EventImmediate, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
     import::{
         Import, ImportDecl, ImportKind, ImportSpec, ItemImport, ItemImportGroup, ModuleImport,
     },
-    instruction::{Instruction, SystemEventNode},
+    instruction::{
+        DebugFrameBase, DebugInlineCallInfo, DebugLocationExpression, DebugLocationExpressionError,
+        DebugLocationExpressionOp, DebugVarInfo, DebugVarLocation, Instruction, SystemEventNode,
+    },
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     item::*,
     module::{Module, ModuleKind},

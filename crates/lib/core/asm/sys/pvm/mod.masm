@@ -1,0 +1,204 @@
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod layout
+pub mod ood_frames
+pub mod public_inputs
+
+use miden::core::stark::constants
+use miden::core::stark::utils
+use miden::core::stark::verifier
+
+# Fixed ChipletAir::all() cardinality and registry metadata.
+const NUM_CHIPLETS = 10
+
+# The host request used to obtain a PVM proof package for the deferred root on the operand stack.
+const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
+
+# Minimum log2 trace height for each ChipletAir::all() instance. These are derived from the
+# AIR's two-row floor, maximum periodic-column length, and fixed preprocessed-trace height.
+# BytePairLut (instance 3) commits at exactly its bound, so it is checked as an equality.
+const MIN_LOG_HEIGHT_0 = 5
+const MIN_LOG_HEIGHT_1 = 4
+const MIN_LOG_HEIGHT_2 = 7
+const FIXED_LOG_HEIGHT_3 = 16
+const MIN_LOG_HEIGHT_4 = 1
+const MIN_LOG_HEIGHT_5 = 3
+const MIN_LOG_HEIGHT_6 = 1
+const MIN_LOG_HEIGHT_7 = 1
+const MIN_LOG_HEIGHT_8 = 2
+const MIN_LOG_HEIGHT_9 = 1
+
+# PVM_RELATION_DIGEST = Poseidon2(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
+const RELATION_DIGEST_0 = 12765330256215748392
+const RELATION_DIGEST_1 = 11318082190661185302
+const RELATION_DIGEST_2 = 11045448100533503580
+const RELATION_DIGEST_3 = 1141539045039940094
+
+# Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
+const ACE_REGISTRY_ROOT_0 = 2842017067341903454
+const ACE_REGISTRY_ROOT_1 = 16707971856776838831
+const ACE_REGISTRY_ROOT_2 = 806847535208234121
+const ACE_REGISTRY_ROOT_3 = 14144940089702641586
+
+#! Loads the fixed PVM relation context.
+#!
+#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
+#! relation commitments, and fixed OOD/query-row addresses.
+#!
+#! Advice order: [h0, ..., h9].
+#! Inputs:  [...]
+#! Outputs: [...]
+pub proc load_air_context
+    # [next_height_ptr, max_height]
+    push.0
+    exec.constants::air_trace_length_logs_ptr
+
+    push.MIN_LOG_HEIGHT_0 exec.load_air_height
+    push.MIN_LOG_HEIGHT_1 exec.load_air_height
+    push.MIN_LOG_HEIGHT_2 exec.load_air_height
+    push.FIXED_LOG_HEIGHT_3 exec.load_fixed_air_height
+    push.MIN_LOG_HEIGHT_4 exec.load_air_height
+    push.MIN_LOG_HEIGHT_5 exec.load_air_height
+    push.MIN_LOG_HEIGHT_6 exec.load_air_height
+    push.MIN_LOG_HEIGHT_7 exec.load_air_height
+    push.MIN_LOG_HEIGHT_8 exec.load_air_height
+    push.MIN_LOG_HEIGHT_9 exec.load_air_height
+
+    drop
+    exec.constants::set_trace_length_log
+
+    exec.constants::air_trace_length_logs_ptr
+    push.NUM_CHIPLETS
+    exec.utils::derive_order_tag_from_heights
+    exec.constants::set_order_tag
+
+    exec.store_relation_digest
+    exec.store_ace_registry_root
+    exec.layout::preprocessed_current_ptr
+    exec.constants::set_ood_evaluations_address
+    exec.layout::current_trace_row_ptr
+    exec.constants::set_current_trace_row_address
+end
+
+#! Loads, validates, stores, and folds one instance's log height into the running maximum.
+#!
+#! Inputs:  [min_log_height, next_height_ptr, max_height]
+#! Outputs: [next_height_ptr + 1, max(max_height, height)]
+proc load_air_height
+    adv_push
+    exec.assert_shape_log
+    #=> [height, next_height_ptr, max_height]
+
+    dup dup.2 mem_store
+    movup.2 u32max
+    swap add.1
+end
+
+#! Loads, validates, stores, and folds one instance's log height, requiring it to equal the
+#! relation's fixed value.
+#!
+#! BytePairLut commits its traces at one fixed height and `deep_queries.masm` opens the setup
+#! tree at the matching fixed depth, so any other height would let the recursive and native
+#! verifiers disagree on proof shape.
+#!
+#! Inputs:  [fixed_log_height, next_height_ptr, max_height]
+#! Outputs: [next_height_ptr + 1, max(max_height, height)]
+proc load_fixed_air_height
+    adv_push
+    #=> [height, fixed_log_height, next_height_ptr, max_height]
+
+    dup.1 assert_eq.err="AIR log height must equal the relation's fixed height"
+    #=> [height, next_height_ptr, max_height]
+
+    dup dup.2 mem_store
+    movup.2 u32max
+    swap add.1
+end
+
+#! Validates one untrusted log height against its AIR-specific lower bound and the common u32
+#! exponentiation ceiling.
+#!
+#! Inputs:  [height, min_log_height, ...]
+#! Outputs: [height, ...]
+proc assert_shape_log
+    u32assert.err="AIR log height must be u32"
+    dup u32lt.30 assert.err="AIR log height above maximum"
+    dup.1 dup.1 u32lte assert.err="AIR log height below relation minimum"
+    swap drop
+end
+
+proc store_relation_digest
+    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
+    exec.constants::relation_digest_ptr mem_storew_le
+    dropw
+end
+
+proc store_ace_registry_root
+    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
+    exec.constants::ace_registry_root_ptr mem_storew_le
+    dropw
+end
+
+#! Requests and stages a PVM proof package for the deferred root.
+#!
+#! This procedure does not authenticate the root or enforce call order. The caller must first
+#! obtain `D` from a successful verifier or another trusted part of its own computation.
+#!
+#! The event exposes the PVM verifier root followed by `D` to the host. Async hosts may suspend
+#! execution while they obtain the proof and return advice-map and Merkle-store mutations. Once the
+#! host returns, this procedure fetches the proof stream by
+#! `sys::build_proof_request_key(verifier_root, D)` and
+#! stages it on the advice stack. The response remains untrusted until the caller invokes
+#! `pvm::verify_proof` against the unchanged root.
+#!
+#! The core library deliberately provides no default handler because the host must supply the
+#! deferred state or another witness source for `D`.
+#!
+#! Fails if the host has not populated the advice map under
+#! `build_proof_request_key(verifier_root, D)` by the time its event handler returns.
+#!
+#! Inputs:  [D]
+#! Outputs: [D]
+#!
+#! Invocation: exec
+pub proc request_proof
+    dupw
+    procref.::miden::core::sys::pvm::verify_proof
+    emit.PROOF_REQUEST_EVENT
+    exec.::miden::core::sys::build_proof_request_key
+    adv.push_mapval dropw
+end
+
+#! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the proof's
+#! transcript-bound security parameters.
+#!
+#! The deferred root is the relation's four public base-field values. The caller supplies it as
+#! the obligation being settled; all proof data and security/shape metadata are read from advice.
+#! Successful verification authenticates the root at the returned security parameters. The generic
+#! verifier enforces structural bounds and binds the supplied parameters into the Fiat-Shamir
+#! transcript. This procedure applies no acceptance policy: the caller grades the returned
+#! parameters under its own policy.
+#!
+#! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
+#! commitment, constraint, or public-root check fails.
+#!
+#! Inputs:  [D]
+#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#!
+#! Invocation: exec
+pub proc verify_proof
+    exec.utils::load_security_params
+
+    exec.public_inputs::stage_public_root
+    exec.load_air_context
+
+    # Dynamic hook digests in the generic verifier's ABI order.
+    procref.deep_queries::compute_deep_composition_polynomial_queries
+    procref.constraints_eval::execute_constraint_evaluation_check
+    procref.ood_frames::process_row_ood_evaluations
+    procref.public_inputs::process_public_inputs
+    procref.aux_trace::observe_aux_trace
+
+    exec.verifier::verify
+end

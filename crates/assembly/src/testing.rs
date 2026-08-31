@@ -1,9 +1,13 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(any(feature = "std", feature = "testing"))]
+use alloc::vec::Vec;
+use alloc::{boxed::Box, sync::Arc};
 
+#[cfg(feature = "std")]
+use miden_assembly_syntax::Word;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
-    Parse, Path, Word,
+    Parse, Path,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
@@ -188,18 +192,6 @@ impl TestContext {
         package.version = version;
         Ok(package)
     }
-
-    /// Compile a module from `source`, with the fully-qualified name `path`, to MAST, returning
-    /// the MAST roots of all the exported procedures of that module.
-    #[track_caller]
-    pub fn assemble_module(
-        &self,
-        _path: impl AsRef<Path>,
-        _module: impl Parse,
-    ) -> Result<Vec<Word>, Report> {
-        // This API will change after we implement `Assembler::add_library()`
-        unimplemented!()
-    }
 }
 
 #[cfg(feature = "std")]
@@ -233,7 +225,7 @@ mod package_features {
 
     impl TestRegistry {
         pub fn add_package(&mut self, package: Arc<Package>) -> Version {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.publish_package(package).expect("failed to add test package");
             version
         }
@@ -259,7 +251,7 @@ mod package_features {
         }
 
         pub fn replace_semver_package(&mut self, package: Arc<Package>) -> Version {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.packages.retain(|(name, existing), _| {
                 name != &package.name || existing.version != package.version
             });
@@ -321,7 +313,7 @@ mod package_features {
         type Error = Report;
 
         fn cache_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             self.caches.lock().unwrap().push(format!("{}@{version}", package.name));
             if let Some(record) = self.get_by_semver(&package.name, &package.version) {
                 if record.version() == &version {
@@ -347,7 +339,7 @@ mod package_features {
 
     impl PackageStore for TestRegistry {
         fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
-            let version = Version::new(package.version.clone(), package.digest());
+            let version = Version::new(package.version.clone(), package.dependency_commitment());
             let dependencies = package
                 .manifest
                 .dependencies()

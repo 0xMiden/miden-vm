@@ -40,7 +40,7 @@ use crate::{
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 #[repr(u8)]
 pub enum ModuleKind {
@@ -853,16 +853,11 @@ impl crate::prettier::PrettyPrint for Module {
             .map(|docstring| docstring.render() + nl())
             .unwrap_or(Document::Empty);
 
-        doc += nl()
-            + const_text("namespace")
-            + const_text(" ")
-            + display(self.path().to_relative())
-            + nl();
+        doc +=
+            const_text("namespace") + const_text(" ") + display(self.path().to_relative()) + nl();
 
-        for (i, package) in self.extern_packages.iter().enumerate() {
-            if i > 0 {
-                doc += nl();
-            }
+        for package in self.extern_packages.iter() {
+            doc += nl();
             doc += const_text("extern package") + const_text(" ") + package.render();
         }
 
@@ -870,10 +865,8 @@ impl crate::prettier::PrettyPrint for Module {
             doc += nl();
         }
 
-        for (i, submodule) in self.submodules.iter().enumerate() {
-            if i > 0 {
-                doc += nl();
-            }
+        for submodule in self.submodules.iter() {
+            doc += nl();
             if submodule.visibility.is_public() {
                 doc += const_text("pub mod");
             } else {
@@ -886,22 +879,16 @@ impl crate::prettier::PrettyPrint for Module {
             doc += nl();
         }
 
-        for (import_index, import) in self.imports.iter().enumerate() {
-            if import_index > 0 {
-                doc += nl();
-            }
-            doc += import.render();
+        for import in self.imports.iter() {
+            doc += nl() + import.render();
         }
 
         if !self.imports.is_empty() {
             doc += nl();
         }
 
-        for (item_index, item) in self.items.iter().enumerate() {
-            if item_index > 0 {
-                doc += nl();
-            }
-            doc += item.render();
+        for item in self.items.iter() {
+            doc += nl() + item.render();
         }
 
         doc

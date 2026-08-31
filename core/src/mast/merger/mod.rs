@@ -62,7 +62,7 @@ impl MastForestMerger {
         merger.merge_inner(forests.clone())?;
 
         let Self { mast_forest, node_id_mappings, .. } = merger;
-        let (mast_forest, final_id_remapping) = mast_forest.finish_with_id_map()?;
+        let (mast_forest, final_id_remapping) = mast_forest.build_with_id_map()?;
         let node_id_mappings =
             Self::remap_finalized_node_ids(node_id_mappings, &final_id_remapping);
 

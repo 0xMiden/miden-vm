@@ -1,15 +1,18 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 
+use hashbrown::HashMap;
 use miden_air::trace::chiplets::hasher::{
-    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MAX_MERKLE_INDEX_HALF,
+    MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH,
+    Selectors,
 };
 use miden_core::chiplets::hasher::apply_permutation;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
-    Word as Digest, ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, Word as Digest,
+    ZERO,
 };
+use crate::trace::range::RangeChecker;
 
 mod trace;
 use trace::{HasherTrace, fill_poseidon2_permutation_trace};
@@ -32,13 +35,13 @@ pub(super) struct PermRequest {
     multiplicity: u64,
 }
 
-/// Converts a Digest to a DigestKey for BTreeMap lookup.
+/// Converts a Digest to a DigestKey for map lookup.
 fn digest_to_key(digest: Digest) -> DigestKey {
     let elems = digest.as_elements();
     core::array::from_fn(|i| elems[i].as_canonical_u64())
 }
 
-/// Converts a HasherState to a StateKey for BTreeMap lookup.
+/// Converts a HasherState to a StateKey for map lookup.
 fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
@@ -64,10 +67,13 @@ fn state_to_key(state: &HasherState) -> StateKey {
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
+    // Both maps are keyed by program-chosen values under a fast, non-HashDoS-hardened
+    // hasher (foldhash); a crafted program can degrade lookups, but trace growth is
+    // bounded by `max_trace_len`, which caps the damage.
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
-    memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
+    memoized_trace_map: HashMap<DigestKey, (usize, usize)>,
     /// Maps input state -> Poseidon2 cycle id.
-    perm_request_map: BTreeMap<StateKey, usize>,
+    perm_request_map: HashMap<StateKey, usize>,
     /// Deduplicated Poseidon2 requests in cycle-id order.
     perm_requests: Vec<PermRequest>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
@@ -84,7 +90,7 @@ impl Hasher {
     ///
     /// Before finalization, this returns the padded controller-region estimate. The estimate is
     /// checked against the actual length during `fill_trace()`.
-    pub(super) fn trace_len(&self) -> usize {
+    pub(crate) fn trace_len(&self) -> usize {
         if self.finalized {
             self.trace.trace_len()
         } else {
@@ -110,6 +116,11 @@ impl Hasher {
         } else {
             (self.perm_requests.len() + 1) * HASH_CYCLE_LEN
         }
+    }
+
+    /// Adds range-check requests for the level-0 Merkle canonicality witnesses.
+    pub(super) fn append_range_checks(&self, range_checker: &mut RangeChecker) {
+        self.trace.append_range_checks(range_checker);
     }
 
     /// Estimates the controller trace length before finalization.
@@ -181,23 +192,30 @@ impl Hasher {
         (addr, result)
     }
 
-    /// Computes a sequential hash of all operation batches and returns the result.
+    /// Computes a sequential hash of a basic block's operation batches, given as one group-hash
+    /// array per batch (the only part of a batch the hasher absorbs), and returns the result.
     ///
     /// Returns (addr, digest).
-    pub fn hash_basic_block(
+    pub fn hash_basic_block<'a, I>(
         &mut self,
-        op_batches: &[OpBatch],
+        batch_groups: I,
         expected_hash: Digest,
-    ) -> (Felt, Digest) {
+    ) -> (Felt, Digest)
+    where
+        I: IntoIterator<Item = &'a [Felt; RATE_LEN]>,
+        I::IntoIter: ExactSizeIterator,
+    {
         if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
             return memoized;
         }
 
+        let mut batch_groups = batch_groups.into_iter();
+        let num_batches = batch_groups.len();
+        let first_batch = batch_groups.next().expect("basic blocks contain at least one op batch");
+
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
-        let init_state = init_state(op_batches[0].groups(), ZERO);
-
-        let num_batches = op_batches.len();
+        let init_state = init_state(first_batch, ZERO);
 
         if num_batches == 1 {
             // One-batch hashes have both boundary flags set.
@@ -231,8 +249,8 @@ impl Hasher {
         );
 
         // Middle batches: no boundary flags.
-        for batch in op_batches.iter().take(num_batches - 1).skip(1) {
-            absorb_into_state(&mut state, batch.groups());
+        for groups in batch_groups.by_ref().take(num_batches - 2) {
+            absorb_into_state(&mut state, groups);
             state = self.append_controller_permutation(
                 LINEAR_HASH,
                 RETURN_STATE,
@@ -247,7 +265,10 @@ impl Hasher {
         }
 
         // Last batch: boundary output only.
-        absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
+        let last_batch = batch_groups.next().expect("multi-batch block has a final op batch");
+        let next = batch_groups.next();
+        debug_assert!(next.is_none());
+        absorb_into_state(&mut state, last_batch);
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,
@@ -376,6 +397,18 @@ impl Hasher {
     ) -> HasherState {
         let perm_id = self.record_perm_request(&state);
 
+        // Level-0 Merkle rows store the canonical-index witness in the capacity columns. Keep the
+        // witness separate from `state`, which is the zero-capacity input used by the permutation
+        // request and by memoized replay.
+        let is_merkle_input = init_selectors == MP_VERIFY
+            || init_selectors == MR_UPDATE_OLD
+            || init_selectors == MR_UPDATE_NEW;
+        let canonicality_witness = if is_boundary_input == ONE && is_merkle_input {
+            Some(merkle_index_canonicality_witness(output_node_index, input_direction_bit))
+        } else {
+            None
+        };
+
         self.trace.append_controller_row(
             init_selectors,
             &state,
@@ -384,6 +417,7 @@ impl Hasher {
             is_boundary_input,
             input_direction_bit,
             perm_id,
+            canonicality_witness,
         );
 
         let mut permuted = state;
@@ -397,6 +431,7 @@ impl Hasher {
             is_boundary_output,
             output_direction_bit,
             perm_id,
+            None,
         );
 
         permuted
@@ -559,6 +594,30 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 
 fn perm_id_felt(id: usize) -> Felt {
     Felt::from_u32(u32::try_from(id).expect("Poseidon2 permutation id exceeds u32"))
+}
+
+/// Builds the four limbs of the level-0 Merkle canonicality slack.
+///
+/// Let `x` be the index after removing the first direction bit `b`, and let
+/// `M = (Q - 1) / 2`. A canonical index satisfies `x + b <= M`, so its slack is
+/// `y = M - x - b`. The AIR checks this equation, while the range bus checks all four 16-bit limbs
+/// and `2*y_3`. The latter makes the top limb 15-bit and therefore keeps `y` below `2^63`.
+/// For the largest canonical index, `Q - 1`, the slack is zero.
+fn merkle_index_canonicality_witness(node_index_next: Felt, direction_bit: Felt) -> [Felt; 4] {
+    const LIMB_MASK: u64 = (1 << 16) - 1;
+
+    let x = node_index_next.as_canonical_u64();
+    let bit = direction_bit.as_canonical_u64();
+    let slack = MAX_MERKLE_INDEX_HALF
+        .checked_sub(x.checked_add(bit).expect("Merkle index plus direction bit overflowed"))
+        .expect("non-canonical Merkle index has no canonicality slack witness");
+
+    [
+        Felt::new_unchecked(slack & LIMB_MASK),
+        Felt::new_unchecked((slack >> 16) & LIMB_MASK),
+        Felt::new_unchecked((slack >> 32) & LIMB_MASK),
+        Felt::new_unchecked(slack >> 48),
+    ]
 }
 
 // HASHER STATE MUTATORS

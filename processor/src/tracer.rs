@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId,
+    ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
@@ -18,9 +18,9 @@ use crate::{
 /// A trait for tracing the execution of a processor.
 ///
 /// Allows for recording different aspects of the processor's execution. For example, the
-/// [`crate::FastProcessor::execute_trace_inputs`] execution mode needs to build a
-/// [`crate::TraceGenerationContext`] which records information necessary to build the trace at each
-/// clock cycle.
+/// [`crate::FastProcessor::execute_for_proving`] execution mode needs to build a
+/// private trace replay which records information necessary to build the trace at each clock
+/// cycle.
 ///
 /// A useful mental model to differentiate between the processor and the tracer is:
 /// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)
@@ -100,7 +100,7 @@ pub trait Tracer {
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Self::Forest,
-    );
+    ) -> Result<(), ExecutionError>;
 
     // MAST FOREST RESOLUTION
     // --------------------------------------------------------------------------------------------
@@ -154,6 +154,7 @@ pub trait Tracer {
         &mut self,
         _node: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _output_root: Word,
     ) {
@@ -170,6 +171,7 @@ pub trait Tracer {
         _old_value: Word,
         _new_value: Word,
         _path: Option<&MerklePath>,
+        _depth: Felt,
         _index: Felt,
         _old_root: Word,
         _new_root: Word,
@@ -190,7 +192,7 @@ pub trait Tracer {
 
     /// Records the word read from memory at the given address.
     ///
-    /// Called by: `MLOADW`, `HORNER_EVAL_EXT`, `DYN`.
+    /// Called by: `MLOADW`, `HORNER_EVAL_BASE`, `HORNER_EVAL_EXT`, `DYN`.
     fn record_memory_read_word(
         &mut self,
         _word: Word,
@@ -219,20 +221,6 @@ pub trait Tracer {
         &mut self,
         _word: Word,
         _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-    }
-
-    /// Records two element reads at the given addresses.
-    ///
-    /// Called by: `HORNER_EVAL_BASE`.
-    fn record_memory_read_element_pair(
-        &mut self,
-        _element_0: Felt,
-        _addr_0: Felt,
-        _element_1: Felt,
-        _addr_1: Felt,
         _ctx: ContextId,
         _clk: RowIndex,
     ) {
@@ -309,9 +297,24 @@ pub trait Tracer {
     /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
     /// the range checker. This is expected to result in four 16-bit range checks.
     ///
-    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
-    /// `U32ASSERT2`.
+    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32ASSERT2`.
     fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
+
+    /// Records the quotient, remainder, and `divisor - remainder - 1` range checks.
+    ///
+    /// Implementations that populate range-check replay data must override this method to record
+    /// the final difference. The default preserves no-op behavior for tracers that do not own that
+    /// replay data.
+    ///
+    /// Called by: `U32DIV`.
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        _remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+    }
 
     /// Records the procedure hash of a syscall.
     ///
@@ -428,11 +431,18 @@ pub enum OperationHelperRegisters {
     /// Helper for the `U32DIV` operation, which divides `a` by `b` and pushes the quotient and
     /// remainder.
     ///
-    /// - `lo`: `numerator - quotient`, used to range-check that `quotient <= numerator`.
-    /// - `hi`: `denominator - remainder - 1`, used to range-check that `remainder < denominator`.
+    /// - `quotient`: the quotient.
+    /// - `remainder`: the remainder.
+    /// - `remainder_diff`: `divisor - remainder - 1`, used to establish that the remainder is
+    ///   smaller than the divisor.
     ///
-    /// The helper registers hold the four 16-bit limbs of `lo` and `hi`.
-    U32Div { lo: Felt, hi: Felt },
+    /// The helper registers hold the four 16-bit limbs of `quotient` and `remainder`, followed by
+    /// the two 16-bit limbs of `remainder_diff`.
+    U32Div {
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    },
     /// Helper for the `U32ASSERT2` operation, which asserts that the top two stack elements are
     /// valid u32 values.
     ///
@@ -467,16 +477,9 @@ pub enum OperationHelperRegisters {
     /// on a polynomial with extension-field coefficients.
     ///
     /// - `alpha`: the evaluation point, read from memory.
-    /// - `k0`, `k1`: auxiliary values read from the same memory word as `alpha` (elements 2 and 3
-    ///   of the word).
     /// - `acc_tmp`: the intermediate accumulator after processing the first 2 (highest-degree)
     ///   coefficients: `(acc * alpha + s[0]) * alpha + s[1]`.
-    HornerEvalExt {
-        alpha: QuadFelt,
-        k0: Felt,
-        k1: Felt,
-        acc_tmp: QuadFelt,
-    },
+    HornerEvalExt { alpha: QuadFelt, acc_tmp: QuadFelt },
     /// Helper for the `LOG_DEFERRED` operation, which folds a verified statement digest into
     /// the rolling deferred root via a Poseidon2 permutation.
     ///
@@ -585,17 +588,18 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::U32Div { lo, hi } => {
-                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+            Self::U32Div { quotient, remainder, remainder_diff } => {
+                let (q1, q0) = split_u32_into_u16(quotient.as_canonical_u64());
+                let (r1, r0) = split_u32_into_u16(remainder.as_canonical_u64());
+                let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
 
                 [
-                    Felt::from_u16(t0),
-                    Felt::from_u16(t1),
-                    Felt::from_u16(t2),
-                    Felt::from_u16(t3),
-                    ZERO,
-                    ZERO,
+                    Felt::from_u16(q0),
+                    Felt::from_u16(q1),
+                    Felt::from_u16(r0),
+                    Felt::from_u16(r1),
+                    Felt::from_u16(d0),
+                    Felt::from_u16(d1),
                 ]
             },
             Self::U32Assert2 { first, second } => {
@@ -621,11 +625,11 @@ impl OperationHelperRegisters {
                 tmp0.as_basis_coefficients_slice()[0],
                 tmp0.as_basis_coefficients_slice()[1],
             ],
-            Self::HornerEvalExt { alpha, k0, k1, acc_tmp } => [
+            Self::HornerEvalExt { alpha, acc_tmp } => [
                 alpha.as_basis_coefficients_slice()[0],
                 alpha.as_basis_coefficients_slice()[1],
-                *k0,
-                *k1,
+                ZERO,
+                ZERO,
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],

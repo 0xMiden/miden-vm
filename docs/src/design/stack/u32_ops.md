@@ -7,7 +7,7 @@ sidebar_position: 5
 In this section we describe semantics and AIR constraints of operations over u32 values (i.e., 32-bit unsigned integers) as they are implemented in Miden VM. Unless stated otherwise, $s_0$ denotes the top of the stack, $s_1$ the next element, $s_2$ the third element, and so on.
 
 ### Range checks
-Most operations described below require some number of 16-bit range checks (i.e., verifying that the value of a field element is smaller than $2^{16}$). The number of required range checks varies between $2$ and $4$, depending on the operation. However, to simplify the constraint system, we force each relevant operation to consume exactly $4$ range checks.
+Most operations described below require some number of 16-bit range checks (i.e., verifying that the value of a field element is smaller than $2^{16}$). The number of required range checks varies between $2$ and $4$, depending on the operation. However, to simplify the constraint system, we force each relevant operation to consume exactly $4$ range checks. `U32DIV` performs two additional range checks for its remainder bound, as described below.
 
 To perform these range checks, the prover puts the values to be range-checked into helper registers $h_0, ..., h_3$, and then updates the range checker bus column $b_{range}$ according to the LogUp construction described in the [range checker](../range.md) documentation, using multiplicity $1$ for each value.
 
@@ -241,28 +241,34 @@ The effect of this operation on the rest of the stack is:
 ## U32DIV
 Assume the divisor $s_0$ is at the top of the stack and the dividend $s_1$ is below it, and both are
 smaller than $2^{32}$. The `U32DIV` operation computes $(r, q) \leftarrow s_1 / s_0$, where $r$ is
-the remainder and $q$ is the quotient. The diagram below illustrates this graphically.
+the remainder and $q$ is the quotient.
 
 ![u32div](../../img/design/stack/u32_operations/U32DIV.png)
 
 To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and high
-16-bit limbs of $(s_1 - q)$, and values in $h_2$ and $h_3$ to the low and high 16-bit limbs of
-$(s_0 - r - 1)$. Thus, stack transition for this operation must satisfy the following constraints:
+16-bit limbs of $q$, values in $h_2$ and $h_3$ to the low and high 16-bit limbs of $r$, and values
+in $h_4$ and $h_5$ to the low and high 16-bit limbs of $(s_0-r-1)$. Thus, the stack transition must
+satisfy the following constraints:
 
 $$
 s_1 = s_0 \cdot s_1' + s_0' \text{ | degree} = 2
 $$
 
 $$
-s_1 - s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0 - s_0' - 1= 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
+s_0' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
-The second constraint enforces that $q \leq s_1$ (equivalently $s_1' \leq s_1$), while the third
-constraint enforces that $r < s_0$ (equivalently $s_0' < s_0$).
+$$
+s_0 - s_0' - 1 = 2^{16} \cdot h_5 + h_4 \text{ | degree} = 1
+$$
+
+All six helpers are range-checked to 16 bits. This directly bounds $q$ and $r$ to 32 bits, while
+the final constraint establishes $r < s_0$. The division identity therefore cannot wrap and
+determines the unique integer quotient and remainder.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.

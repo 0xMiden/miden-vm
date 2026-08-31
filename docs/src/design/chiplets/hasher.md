@@ -187,8 +187,16 @@ The controller AIR enforces:
 - index decomposition `idx = 2 * idx_next + direction_bit` on Merkle input rows,
 - direction-bit booleanity,
 - continuity of the shifted index across non-final controller boundaries,
-- zero capacity on Merkle input rows,
+- the level-0 canonical-index witness equation in the reused capacity columns
+  (see [Merkle range checks](../stack/crypto_ops.md#merkle-range-checks)),
+- zero capacity on Merkle input rows after level 0,
 - digest routing into the correct rate half for the next path step.
+
+Merkle compression uses a zero capacity word. After level 0, the controller
+stores those zeros directly. At level 0, the same four columns hold the
+canonical-index slack witness instead. The permutation-link lookup replaces
+the witness values with zeros in its message, so the Poseidon2 permutation
+still receives the same zero-capacity input.
 
 On non-final Merkle boundaries, the output row carries the next step's
 `direction_bit`. This lets the AIR route the current digest into either `RATE0`
@@ -283,7 +291,8 @@ The hasher design is implemented across the following files:
 
 - `air/src/constraints/chiplets/hasher_control/mod.rs`
   Hash-controller constraints: lifecycle, padding, sponge capacity preservation,
-  Merkle routing, `mrupdate_id` progression, and pair-level `perm_id` equality.
+  Merkle routing, the canonical-index witness, `mrupdate_id` progression, and
+  pair-level `perm_id` equality.
 
 - `air/src/constraints/chiplets/hasher_control/flags.rs`
   Named row-kind flags derived from the controller-internal selectors.

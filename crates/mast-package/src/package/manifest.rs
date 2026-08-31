@@ -15,8 +15,6 @@ use miden_core::serde::{Deserializable, Serializable};
 use miden_core::{Word, mast::MastNodeId, utils::DisplayHex};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{Strategy, any};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{Dependency, PackageId, debug_info::DebugSourceNodeId};
@@ -39,7 +37,7 @@ use crate::{Dependency, PackageId, debug_info::DebugSourceNodeId};
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct PackageManifest {
     /// The set of exports in this package.
@@ -55,6 +53,10 @@ pub struct PackageManifest {
     pub(super) modules: BTreeMap<Arc<Path>, PackageModule>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "arbitrary_dependencies()")
+    )]
     pub(super) dependencies: Vec<Dependency>,
     /// The (optional) entrypoint function for this package, if it is executable
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
@@ -334,10 +336,8 @@ impl PackageManifest {
 
 /// Represents a module surface declared by a package.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageModule {
     /// The fully-qualified path of this module.
-    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
     pub path: Arc<Path>,
     /// The public submodules declared by this module.
     pub submodules: Vec<PackageSubmodule>,
@@ -366,7 +366,6 @@ impl PackageModule {
 
 /// Represents a submodule declaration in a package module surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageSubmodule {
     /// The name of the submodule.
     pub name: ast::Ident,
@@ -381,10 +380,9 @@ impl PackageSubmodule {
 /// Represents a named item exported from a package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub enum PackageExport {
     /// A procedure definition or alias with 'pub' visibility
@@ -504,14 +502,12 @@ impl proptest::arbitrary::Arbitrary for PackageExport {
 /// A procedure exported by a package, along with its digest, signature, and attributes.
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct ProcedureExport {
     /// The fully-qualified path of the procedure exported by this package.
-    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(strategy = "miden_assembly_syntax::arbitrary::path::bare_path_random_length(2)")
@@ -536,7 +532,6 @@ pub struct ProcedureExport {
     ///
     /// If this field contains `None`, the digest is used to resolve a MAST node.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
-    #[cfg_attr(feature = "serde", serde(default))]
     pub node: Option<MastNodeId>,
     /// Source/debug occurrence corresponding to this exported procedure, when package debug info
     /// is present.
@@ -544,18 +539,15 @@ pub struct ProcedureExport {
     /// This disambiguates exports that collapse to the same executable [`MastNodeId`] but retain
     /// distinct source/debug metadata in the package-owned source occurrence graph.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
-    #[cfg_attr(feature = "serde", serde(default))]
     pub source_node: Option<DebugSourceNodeId>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Word::default()"))]
     pub digest: Word,
     /// The type signature of the exported procedure.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
-    #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
     /// Attributes attached to the exported procedure.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "AttributeSet::default()"))]
-    #[cfg_attr(feature = "serde", serde(default))]
     pub attributes: AttributeSet,
 }
 
@@ -606,14 +598,12 @@ impl fmt::Debug for ProcedureExport {
 /// A constant definition exported by a package
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct ConstantExport {
     /// The fully-qualified path of the constant exported by this package.
-    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(
@@ -643,14 +633,12 @@ impl fmt::Debug for ConstantExport {
 /// A named type declaration exported by a package
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct TypeExport {
     /// The fully-qualified path of the type exported by this package.
-    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
     #[cfg_attr(
         any(test, feature = "arbitrary"),
         proptest(
@@ -673,25 +661,54 @@ impl fmt::Debug for TypeExport {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+fn arbitrary_dependencies() -> impl Strategy<Value = Vec<Dependency>> {
+    proptest::collection::vec(any::<Dependency>(), 0..10).prop_filter(
+        "package dependencies must have unique ids",
+        |dependencies| {
+            use alloc::collections::BTreeSet;
+
+            let mut seen = BTreeSet::new();
+            dependencies.iter().all(|dependency| seen.insert(dependency.id().clone()))
+        },
+    )
+}
+
 fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidationError> {
     let canonical_path = canonicalize_export_path(export.path().as_ref())?;
-    let leaf = export_raw_leaf(&canonical_path)?;
 
     match export {
         PackageExport::Procedure(proc) => {
-            ast::ProcedureName::new(leaf).map_err(|err| {
-                ManifestValidationError::InvalidExportPath {
-                    path: proc.path.clone(),
-                    error: ast::PathError::InvalidComponent(err),
-                }
-            })?;
+            let _ = canonical_path
+                .procedure_name()
+                .map_err(|error| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error,
+                })?
+                .ok_or_else(|| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::Empty,
+                })?;
             proc.path = canonical_path;
         },
         PackageExport::Constant(ConstantExport { path, .. })
         | PackageExport::Type(TypeExport { path, .. }) => {
-            ast::Ident::new(leaf).map_err(|err| ManifestValidationError::InvalidExportPath {
-                path: path.clone(),
-                error: ast::PathError::InvalidComponent(err),
+            let leaf = canonical_path
+                .components()
+                .next_back()
+                .ok_or_else(|| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::Empty,
+                })?
+                .map_err(|error| ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error,
+                })?;
+            let _ = ast::Ident::new(leaf.as_str()).map_err(|err| {
+                ManifestValidationError::InvalidExportPath {
+                    path: canonical_path.clone(),
+                    error: ast::PathError::InvalidComponent(err),
+                }
             })?;
             *path = canonical_path;
         },
@@ -737,18 +754,4 @@ fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, ManifestValidation
                 path: path.to_path_buf().into(),
             })?;
     Ok(Arc::<Path>::from(canonical.into_boxed_path()))
-}
-
-fn export_raw_leaf(path: &Arc<Path>) -> Result<&str, ManifestValidationError> {
-    use ast::PathComponent;
-    match path.components().next_back() {
-        Some(Ok(PathComponent::Normal(leaf))) => Ok(leaf),
-        Some(Err(error)) => {
-            Err(ManifestValidationError::InvalidExportPath { path: path.clone(), error })
-        },
-        Some(Ok(PathComponent::Root)) | None => Err(ManifestValidationError::InvalidExportPath {
-            path: path.clone(),
-            error: ast::PathError::Empty,
-        }),
-    }
 }

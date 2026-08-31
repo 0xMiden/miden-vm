@@ -1,8 +1,8 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
 //! The pipeline is:
-//! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
-//! 2. Lower symbolic expressions into a DAG that matches verifier constraints evaluation.
+//! 1. Capture AIR constraints into the `miden-constraint-compiler` IR.
+//! 2. Lower the constraint graph into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
 //! The resulting circuit is intended to run inside the recursive verifier. All
@@ -14,20 +14,24 @@
 //! ```ignore
 //! use miden_ace_codegen::{AceConfig, LayoutKind, build_ace_circuit_for_air};
 //! use miden_air::ChipletsAir;
-//! use miden_core::{Felt, field::QuadFelt};
 //!
 //! let config = AceConfig { num_quotient_chunks: 8, layout: LayoutKind::Masm, num_airs: 1 };
-//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ChipletsAir, config)?;
+//! let circuit = build_ace_circuit_for_air(&ChipletsAir, config)?;
 //! ```
 //!
 //! Module map (data flow):
 //! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
 //! - `dag`: verifier-style DAG IR and lowering helpers.
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
+//! - `factored`: shuffle/common split of a multi-AIR circuit, so per-proof-order variants share one
+//!   order-invariant section (used by the recursive verifier's circuit registry).
+//! - `factory`: cached per-order encoding and registry-leaf construction.
 //! - `layout`: READ-section layout and index mapping.
 //! - `encode`: ACE stream encoding + padding rules.
+//! - `masm`: shared renderer for relation-local MASM constraint evaluators.
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
+//! - `registry`: order tags, registry layout, subtree construction, and path authentication.
 
 // Core IR and lowering.
 mod circuit;
@@ -35,9 +39,13 @@ mod dag;
 
 // Input layout and encoding.
 mod encode;
+mod factored;
+mod factory;
 mod layout;
+mod masm;
 mod quotient;
 mod randomness;
+mod registry;
 
 // High-level orchestration.
 mod pipeline;
@@ -62,12 +70,24 @@ pub enum AceError {
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+/// Exposed for the lowering differential tests (`miden-air/tests/ace_codegen.rs`);
+/// production consumes the IR lowering through the pipeline.
+#[cfg(any(test, feature = "testing"))]
+pub use crate::dag::{PeriodicColumnData, build_verifier_dag, build_verifier_dag_from_ir};
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,
+    factored::ShuffleEncodeBuffer,
+    factory::{FactoredCircuitFactory, FactoredEncodedCircuit, PackedLeafScratch},
     layout::{InputCounts, InputKey, InputLayout},
+    masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
     pipeline::{
-        AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
+        AceArtifacts, AceConfig, FactoredMultiAirCircuit, LayoutKind, build_ace_circuit_for_air,
+        build_ace_dag_for_air, build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit,
+    },
+    registry::{
+        MAX_REGISTRY_AIRS, RegistryLayout, ceil_log2, factorial, fold_row_to_root, order_from_tag,
+        order_tag, padding_leaf, path_in_verified_tree, subtree_leaves, verify_row,
     },
 };

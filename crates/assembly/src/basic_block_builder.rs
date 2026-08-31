@@ -6,20 +6,23 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
     debuginfo::{Location, Span},
     diagnostics::Report,
 };
 use miden_core::{
     Felt,
     events::SystemEvent,
-    operations::{AssemblyOp, DebugVarInfo, Operation},
+    operations::{AssemblyOp, Operation},
+};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugLocIdx, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceVar,
 };
 
 use crate::{
     ProcedureContext,
     assembler::BodyWrapper,
-    mast_forest_builder::{AsmOpRef, DebugVarRef, MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeUse},
 };
 
 // PENDING ASM OP
@@ -42,6 +45,12 @@ struct PendingAsmOp {
     op: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ActiveInlineCall {
+    callee_idx: DebugFunctionIdx,
+    loc_idx: DebugLocIdx,
+}
+
 // BASIC BLOCK BUILDER
 // ================================================================================================
 
@@ -59,11 +68,14 @@ pub struct BasicBlockBuilder<'a> {
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
-    /// Finalized AssemblyOps with their operation indices (op_idx, asm_op_ref).
-    asm_ops: Vec<(usize, AsmOpRef)>,
+    /// Assembly op metadata attached to operations in this block.
+    asm_ops: Vec<DebugSourceAsmOp>,
     /// Debug variables attached to operations in this block.
-    /// Each entry is (op_index, debug_var_ref).
-    debug_vars: Vec<(usize, DebugVarRef)>,
+    debug_vars: Vec<DebugSourceVar>,
+    /// Inline call chains attached to operations in this block.
+    inline_calls: Vec<DebugSourceInlineCall>,
+    /// The source-level inline call chain active for subsequently generated operations.
+    active_inline_calls: Vec<ActiveInlineCall>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -85,6 +97,8 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Vec::new(),
+                inline_calls: Vec::new(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
             None => Self {
@@ -93,9 +107,21 @@ impl<'a> BasicBlockBuilder<'a> {
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
                 debug_vars: Default::default(),
+                inline_calls: Default::default(),
+                active_inline_calls: Vec::new(),
                 mast_forest_builder,
             },
         }
+    }
+
+    pub(super) fn with_active_inline_calls(
+        wrapper: Option<BodyWrapper>,
+        mast_forest_builder: &'a mut MastForestBuilder,
+        active_inline_calls: Vec<ActiveInlineCall>,
+    ) -> Self {
+        let mut builder = Self::new(wrapper, mast_forest_builder);
+        builder.active_inline_calls = active_inline_calls;
+        builder
     }
 }
 
@@ -110,12 +136,30 @@ impl BasicBlockBuilder<'_> {
     pub fn mast_forest_builder_mut(&mut self) -> &mut MastForestBuilder {
         self.mast_forest_builder
     }
+
+    pub(super) fn active_inline_calls(&self) -> &[ActiveInlineCall] {
+        &self.active_inline_calls
+    }
+
+    pub(super) fn active_inline_call_rows(&self, op_idx: u32) -> Vec<DebugSourceInlineCall> {
+        self.active_inline_calls
+            .iter()
+            .map(|inline_call| DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            })
+            .collect()
+    }
 }
 
 /// Operations
 impl BasicBlockBuilder<'_> {
     /// Adds the specified operation to the list of basic block operations.
     pub fn push_op(&mut self, op: Operation) {
+        if !self.active_inline_calls.is_empty() {
+            self.record_active_inline_calls(self.ops.len() as u32);
+        }
         self.ops.push(op);
     }
 
@@ -125,13 +169,24 @@ impl BasicBlockBuilder<'_> {
         I: IntoIterator<Item = O>,
         O: Borrow<Operation>,
     {
-        self.ops.extend(ops.into_iter().map(|o| *o.borrow()));
+        if self.active_inline_calls.is_empty() {
+            self.ops.extend(ops.into_iter().map(|op| *op.borrow()));
+        } else {
+            for op in ops {
+                self.push_op(*op.borrow());
+            }
+        }
     }
 
     /// Adds the specified operation n times to the list of basic block operations.
     pub fn push_op_many(&mut self, op: Operation, n: usize) {
-        let new_len = self.ops.len() + n;
-        self.ops.resize(new_len, op);
+        if self.active_inline_calls.is_empty() {
+            self.ops.resize(self.ops.len() + n, op);
+        } else {
+            for _ in 0..n {
+                self.push_op(op);
+            }
+        }
     }
 
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
@@ -172,21 +227,36 @@ impl BasicBlockBuilder<'_> {
     /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a control
     /// node. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
     /// registration with the node's debug info.
-    pub fn set_instruction_cycle_count(&mut self) -> Result<Option<AssemblyOp>, Report> {
+    pub fn set_instruction_cycle_count(&mut self) -> Option<AssemblyOp> {
         let pending = self.pending_asm_op.take().expect("no pending asm op to finalize");
 
         // Compute the cycle count for the instruction
         let cycle_count = self.ops.len() - pending.op_start;
-
-        let asm_op =
-            AssemblyOp::new(pending.location, pending.context_name, cycle_count as u8, pending.op);
-
         match cycle_count {
-            0 => Ok(Some(asm_op)),
+            0 => {
+                let asm_op = AssemblyOp::new(
+                    pending.location,
+                    pending.context_name,
+                    cycle_count as u8,
+                    pending.op,
+                );
+
+                Some(asm_op)
+            },
             _ => {
-                let asm_op_ref = self.mast_forest_builder.add_asm_op_ref(asm_op)?;
-                self.asm_ops.push((pending.op_start, asm_op_ref));
-                Ok(None)
+                let debug_info = self.mast_forest_builder.debug_info_mut();
+                let location_idx = pending.location.map(|loc| debug_info.add_location(loc));
+                let context_name_idx = debug_info.add_string(pending.context_name);
+                let op_name_idx = debug_info.add_string(pending.op);
+                let asm_op = DebugSourceAsmOp::new(
+                    pending.op_start as u32,
+                    location_idx,
+                    context_name_idx,
+                    op_name_idx,
+                    cycle_count as u8,
+                );
+                self.asm_ops.push(asm_op);
+                None
             },
         }
     }
@@ -197,9 +267,60 @@ impl BasicBlockBuilder<'_> {
     /// only accessed by the debugger. They track source-level variable locations at
     /// specific points in program execution.
     pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) -> Result<(), Report> {
-        let debug_var_ref = self.mast_forest_builder.add_debug_var_ref(debug_var)?;
-        self.debug_vars.push((self.ops.len(), debug_var_ref));
+        let debug_info = self.mast_forest_builder.debug_info_mut();
+        let name_idx = debug_info.add_string(debug_var.name().clone());
+        let location_idx = debug_var.location().cloned().map(|loc| debug_info.add_location(loc));
+        let type_id = if let Some(ty) = debug_var.ty() {
+            let declared_ty = debug_var.declared_type();
+            Some(debug_info.register_debug_type(None, declared_ty.as_deref(), ty)?)
+        } else {
+            None
+        };
+        let debug_var = DebugSourceVar {
+            op_idx: self.ops.len() as u32,
+            name_idx,
+            type_id,
+            arg_idx: debug_var.arg_index(),
+            location_idx,
+            value_location: debug_var.value_location().clone(),
+        };
+        self.debug_vars.push(debug_var);
         Ok(())
+    }
+
+    /// Appends one frame to the inline call chain active for subsequently generated operations.
+    pub fn push_debug_inline_call(
+        &mut self,
+        inline_call: &DebugInlineCallInfo,
+        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
+    ) {
+        let Some(call_site_span) =
+            source_manager.file_line_col_to_span(inline_call.call_site().clone())
+        else {
+            return;
+        };
+        let Ok(call_site) = source_manager.location(call_site_span) else {
+            return;
+        };
+
+        let callee_idx = self.mast_forest_builder.register_inline_function(inline_call);
+        let loc_idx = self.mast_forest_builder.debug_info_mut().add_location(call_site);
+        self.active_inline_calls.push(ActiveInlineCall { callee_idx, loc_idx });
+    }
+
+    /// Clears the inline call chain active for subsequently generated operations.
+    pub fn clear_debug_inline_calls(&mut self) {
+        self.active_inline_calls.clear();
+    }
+
+    fn record_active_inline_calls(&mut self, op_idx: u32) {
+        self.inline_calls.extend(self.active_inline_calls.iter().map(|inline_call| {
+            DebugSourceInlineCall {
+                op_idx,
+                callee_idx: inline_call.callee_idx,
+                loc_idx: inline_call.loc_idx,
+            }
+        }));
     }
 }
 
@@ -211,16 +332,22 @@ impl BasicBlockBuilder<'_> {
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
-    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeUse>, Report> {
         if !self.ops.is_empty() {
-            let ops = self.ops.drain(..).collect();
+            let ops = core::mem::take(&mut self.ops);
             let asm_ops = core::mem::take(&mut self.asm_ops);
-            let debug_vars = self.debug_vars.drain(..).collect();
+            let debug_vars = core::mem::take(&mut self.debug_vars);
+            let inline_calls = core::mem::take(&mut self.inline_calls);
 
-            let basic_block_node_ref =
-                self.mast_forest_builder.ensure_block_ref(ops, asm_ops, debug_vars)?;
+            let basic_block_node_use = self.mast_forest_builder.ensure_block_use(
+                ops,
+                asm_ops,
+                debug_vars,
+                inline_calls,
+                vec![],
+            )?;
 
-            Ok(Some(basic_block_node_ref))
+            Ok(Some(basic_block_node_use))
         } else {
             Ok(None)
         }
@@ -233,7 +360,7 @@ impl BasicBlockBuilder<'_> {
     /// - Operations contained in the epilogue of the builder are appended to the list of ops which
     ///   go into the new BASIC BLOCK node.
     /// - The builder is consumed in the process.
-    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeRef>, Report> {
+    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeUse>, Report> {
         self.ops.append(&mut self.epilogue);
         self.make_basic_block()
     }

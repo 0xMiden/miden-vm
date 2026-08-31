@@ -22,7 +22,6 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// The root is represented by the pair $(0, 0)$, its left child is $(1, 0)$ and its right child
 /// $(1, 1)$.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct NodeIndex {
     depth: u8,
     position: u64,
@@ -60,7 +59,7 @@ impl NodeIndex {
     /// # Panics
     /// Panics if the `position` is greater than or equal to 2^{depth}.
     #[cfg(test)]
-    pub fn make(depth: u8, position: u64) -> Self {
+    pub(super) fn make(depth: u8, position: u64) -> Self {
         Self::new(depth, position).unwrap()
     }
 

@@ -237,7 +237,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Tests
 
-The end-to-end test suite lives in `src/testing/`, behind the `testing` feature:
+The end-to-end unit-test suite lives in `src/testing/`. For external tests and benchmarks, the
+`testing` feature exposes the hash configurations and example AIRs used by the full test and
+benchmark matrix:
 
 - **`test_tiny_air.rs`** — `TinyAir` exercising single-trace, multi-trace
   (same and different heights), periodic columns, and malformed transcript

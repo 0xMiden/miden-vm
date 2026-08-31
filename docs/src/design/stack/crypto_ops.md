@@ -125,6 +125,66 @@ The above constraint enforces that the specified input and output controller row
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
 
+## Merkle range checks
+
+`MPVERIFY` and `MRUPDATE` request 16-bit range checks for $d$ and
+$1024(d - 1)$. Together, the checks accept exactly $1 \le d \le 64$.
+
+The hasher controller must also show that the path bits describe the canonical
+integer represented by the node-index field element. At each level it enforces
+
+$$
+i_k = 2i_{k+1} + b_k
+$$
+
+where $b_k$ is a boolean direction bit. This is a field equality modulo
+$Q = 2^{64} - 2^{32} + 1$. By itself, it does not distinguish an integer
+index from that index plus $Q$.
+
+The stack/hasher lookup addresses bind the computation to exactly $d$ levels,
+and the controller ends with $i_d = 0$. Working backwards, $i_1$ is built from
+at most $d - 1 \le 63$ direction bits. Therefore $0 \le i_1 < 2^{63} < Q$,
+so this suffix cannot wrap in the field.
+
+The complete index is $n = 2i_1 + b_0$, which may use all 64 bits. Let
+$M = (Q - 1)/2$. Because $b_0$ is boolean,
+
+$$
+n < Q \quad\Longleftrightarrow\quad i_1 + b_0 \le M.
+$$
+
+For $b_0 = 0$, both bounds require $i_1 \le M$. For $b_0 = 1$, both
+require $i_1 \le M - 1$.
+
+The controller proves this inequality with a non-negative slack $y$:
+
+$$
+i_1 + b_0 + y = M,
+$$
+
+where
+
+$$
+y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3.
+$$
+
+The range bus checks all four limbs and also checks $2y_3$. The first four
+checks give $y_j < 2^{16}$. Since doubling $y_3$ cannot wrap modulo $Q$, the
+extra check gives $y_3 < 2^{15}$. Hence $0 \le y < 2^{63}$. The five requests
+are spread across the chiplet-responses, wiring, and hash-kernel columns to fit
+the existing per-row interaction budgets without adding another lookup column.
+All target the same `RangeCheck` bus, so only their combined multiset matters.
+
+The slack equation is checked in the field, but its left-hand side is at most
+$2^{64} - 1$, which is less than $M + Q$. In this interval, $M$ is the only
+integer congruent to $M$ modulo $Q$. The equation therefore also holds over the
+integers, proving $n < Q$. Conversely, every canonical index has the slack
+$y = M - i_1 - b_0$; when $n = Q - 1$, the slack is zero.
+
+The four slack limbs reuse the controller's capacity columns on the level-0
+Merkle input row. The permutation-link lookup sends zeros in those positions,
+so the Poseidon2 input and the resulting Merkle root do not change.
+
 ## CRYPTOSTREAM
 The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
 top 8 stack elements (the rate), writes the resulting ciphertext back to memory,
@@ -238,16 +298,18 @@ where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation poin
 The stack for the operation is expected to be arranged as follows:
 - The first $8$ stack elements (positions 0-7) are the $8$ base field elements representing the current 8-element batch of coefficients for the polynomial being evaluated, arranged as $[c_0, c_1, c_2, c_3, c_4, c_5, c_6, c_7]$ where $c_0$ is at position 0 (top of stack). Here $c_0$ is the highest-degree coefficient ($\alpha^7$ term) and $c_7$ is the constant term.
 - The next $5$ stack elements are irrelevant for the operation and unaffected by it.
-- The next stack element contains the memory address `alpha_ptr` pointing to the evaluation point $\alpha = (\alpha_0, \alpha_1)$. The operation reads $\alpha_0$ from `alpha_ptr` and $\alpha_1$ from `alpha_ptr + 1`.
+- The next stack element contains the word-aligned address `alpha_ptr` pointing to the word $[\alpha_0, \alpha_1, 0, 0]$, which contains the evaluation point $\alpha = (\alpha_0, \alpha_1)$.
 - The next $2$ stack elements contain the value of the current accumulator $\textsf{acc} = (\textsf{acc}_0, \textsf{acc}_1)$.
 
-The diagram below illustrates the stack transition for `HORNERBASE` operation.
+Execution fails if either padding element is nonzero; the AIR enforces the same requirement.
+
+The diagram below illustrates the stack transition for `HORNERBASE`.
 
 ![horner_eval_base](../../img/design/stack/crypto_ops/HORNERBASE.png)
 
 After calling the operation:
-- Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, \mathsf{tmp1}_0, \mathsf{tmp1}_1, \mathsf{tmp0}_0, \mathsf{tmp0}_1]$.
-- Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
+- Helper registers contain $[\alpha_0, \alpha_1, \mathsf{tmp1}_0, \mathsf{tmp1}_1, \mathsf{tmp0}_0, \mathsf{tmp0}_1]$.
+- Stack elements $14$ and $15$ contain the updated accumulator $\mathsf{acc}^{'}$.
 
 More specifically, the stack transition for this operation must satisfy the following constraints.
 Here $\alpha = (\alpha_0, \alpha_1)$ is an element of $\mathbb{F}_{p^2}$ with $u^2 = 7$.
@@ -272,26 +334,16 @@ $$
 \end{align*}
 $$
 
-The `HORNERBASE` makes two memory access requests (reading $\alpha_0$ and $\alpha_1$ individually):
+`HORNERBASE` makes one word-read request, which also constrains the unused half of the word to zero:
 
 $$
-\begin{aligned}
- u_{mem,0} &= \alpha_0 + \alpha_1 \cdot op_{mem\_read} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} \\
-           &\quad + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0}.
-\end{aligned}
+u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1}
 $$
 
-$$
-\begin{aligned}
- u_{mem,1} &= \alpha_0 + \alpha_1 \cdot op_{mem\_read} + \alpha_2 \cdot ctx + \alpha_3 \cdot (s_{13} + 1) \\
-           &\quad + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{1}.
-\end{aligned}
-$$
-
-Using the above values, we can describe the constraint for the chiplets bus column as follows:
+Using the above value, we can describe the constraint for the chiplets bus column as follows:
 
 $$
-b_{chip}' \cdot u_{mem,0} \cdot u_{mem,1} = b_{chip} \text{ | degree} = 3
+b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 2
 $$
 
 The effect on the rest of the stack is:
@@ -307,16 +359,18 @@ where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation poin
 The stack for the operation is expected to be arranged as follows:
 - The first $8$ stack elements contain $8$ base field elements that make up the current 4-element batch of coefficients, in the quadratic extension field, for the polynomial being evaluated. We interpret these coefficients as $c_0 = (s_0, s_1)$, $c_1 = (s_2, s_3)$, $c_2 = (s_4, s_5)$, and $c_3 = (s_6, s_7)$.
 - The next $5$ stack elements are irrelevant for the operation and unaffected by it.
-- The next stack element contains the value of the memory pointer `alpha_ptr` to the evaluation point $\alpha$. The word address containing $\alpha = (\alpha_0, \alpha_1)$ is expected to have layout $[\alpha_0, \alpha_1, k_0, k_1]$ where $[k_0, k_1]$ is the second half of the memory word containing $\alpha$. Note that, in the context of the above expressions, we only care about the first half i.e., $[\alpha_0, \alpha_1]$, but providing the second half of the word in order to be able to do a one word memory read is more optimal than doing two element memory reads.
+- The next stack element contains the word-aligned address `alpha_ptr` pointing to the word $[\alpha_0, \alpha_1, 0, 0]$, which contains the evaluation point $\alpha = (\alpha_0, \alpha_1)$.
 - The next $2$ stack elements contain the value of the current accumulator $\textsf{acc} = (\textsf{acc}_0, \textsf{acc}_1)$.
 
-The diagram below illustrates the stack transition for `HORNEREXT` operation.
+Execution fails if either padding element is nonzero; the AIR enforces the same requirement.
+
+The diagram below illustrates the stack transition for `HORNEREXT`.
 
 ![horner_eval_ext](../../img/design/stack/crypto_ops/HORNEREXT.png)
 
 After calling the operation:
-- Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, k_0, k_1, \mathsf{tmp}_0, \mathsf{tmp}_1]$.
-- Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
+- Helper registers $h_0$ and $h_1$ contain $(\alpha_0, \alpha_1)$, $h_2$ and $h_3$ are unused, and $h_4$ and $h_5$ contain the intermediate extension-field value $\mathsf{tmp}$.
+- Stack elements $14$ and $15$ contain the updated accumulator $\mathsf{acc}^{'}$.
 
 More specifically, the stack transition for this operation must satisfy the following constraints.
 Here $\alpha = (\alpha_0, \alpha_1)$ is an element of $\mathbb{F}_{p^2}$ with $u^2 = 7$.
@@ -339,10 +393,10 @@ $$
 The effect on the rest of the stack is:
 * **No change.**
 
-The `HORNEREXT` makes one memory access request:
+`HORNEREXT` makes one word-read request, which also constrains the unused half of the word to zero:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{2} + \alpha_{8} \cdot h_{3}
+u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1}
 $$
 
 Using the above value, we can describe the constraint for the chiplets bus column as follows:
@@ -387,11 +441,8 @@ $$
 The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
 merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
-`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The final root is a public input;
-`DeferredProof` material later resolves the trusted root before VM STARK verification. Final
-verification accepts `Empty` or verified `Stark`; explicit partial verification rehydrates `Wire`
-under the built-in `miden_precompiles::registry()`. This section concentrates on the stack
-interaction and bus messages.
+`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The VM STARK authenticates the final
+root as one public value.
 
 ### Operation Overview
 
@@ -525,6 +576,5 @@ v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \al
 $$
 
 Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
-itself the digest at every step. The final deferred root is a fixed four-field-element public value,
-not a variable-length request transcript. Partial proofs may carry the root-reachable DAG as
-`DeferredStateWire`; final proofs may instead carry a precompile VM STARK proof for the same root.
+itself the digest at every step. The final deferred root is a fixed four-field-element value
+committed by `VmProof`, not a variable-length request transcript.

@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use miden_crypto::{
     field::TwoAdicField,
-    stark::dft::{NaiveDft, TwoAdicSubgroupDft},
+    stark::dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft},
 };
 
 use crate::layout::InputKey;
@@ -117,6 +117,7 @@ impl<EF> PeriodicColumnData<EF> {
         F: TwoAdicField,
         EF: From<F>,
     {
+        let dft = Radix2DFTSmallBatch::<F>::default();
         let mut columns = Vec::with_capacity(periodic_columns.len());
         for col in periodic_columns {
             assert!(!col.is_empty(), "periodic column must not be empty");
@@ -136,7 +137,7 @@ impl<EF> PeriodicColumnData<EF> {
             let column = if terms.is_empty() || sparse_ops < dense_ops {
                 PeriodicColumn::Sparse { period, terms }
             } else {
-                let coeffs = NaiveDft.idft(col).into_iter().map(EF::from).collect();
+                let coeffs = dft.idft(col).into_iter().map(EF::from).collect();
                 PeriodicColumn::Dense(coeffs)
             };
             columns.push(column);
@@ -257,7 +258,9 @@ impl<EF: Clone> AceDag<EF> {
     ///
     /// After compaction, `nodes` contains only nodes reachable from `root`, in the same
     /// relative order. All `NodeId` references, including `root`, are remapped to the new
-    /// contiguous indices.
+    /// contiguous indices. When any node is removed, the DAG also takes a fresh `dag_id`,
+    /// so `NodeId`s issued before compaction fail provenance checks instead of silently
+    /// resolving to whichever node now occupies their old index.
     pub fn compact(&mut self) {
         let n = self.nodes.len();
         if n == 0 {
@@ -296,7 +299,7 @@ impl<EF: Clone> AceDag<EF> {
             return;
         }
 
-        let dag_id = self.dag_id;
+        let dag_id = DagId::fresh();
         let remap_id = |id: NodeId| NodeId::in_dag(remap[id.index()], dag_id);
 
         let mut new_nodes = Vec::with_capacity(new_len);
@@ -317,6 +320,7 @@ impl<EF: Clone> AceDag<EF> {
 
         self.nodes = new_nodes;
         self.root = remap_id(self.root);
+        self.dag_id = dag_id;
     }
 }
 

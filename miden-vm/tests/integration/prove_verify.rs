@@ -1,22 +1,19 @@
-//! Integration tests for the prove/verify flow with different hash functions.
+//! Integration tests for the public proving lifecycle and recursive-verifier regressions.
 
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
 use miden_core::{
-    Felt,
-    deferred::{DeferredState, TRUE_DIGEST},
-    proof::{DeferredProof, ExecutionProof},
-    utils::bytes_to_packed_u32_elements,
+    Felt, program::ExecutionClaim, proof::ExecutionProof, utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::CoreLibrary;
-use miden_processor::ExecutionOptions;
-use miden_prover::{
-    AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
+use miden_utils_testing::{
+    PrimeField64, recursive_verifier::generate_request_inputs, stack_inputs_from_ints,
 };
-use miden_utils_testing::{recursive_verifier::generate_advice_inputs, stack_inputs_from_ints};
-use miden_verifier::Verifier;
-use miden_vm::{DefaultHost, HashFunction};
+use miden_vm::{
+    DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
+    StackOutputs, Verifier, advice::AdviceInputs,
+};
 
 fn masm_push_felts(felts: &[Felt]) -> String {
     felts
@@ -42,115 +39,115 @@ fn assert_prove_verify(
     let advice_inputs = AdviceInputs::default();
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    let options = ProvingOptions::with_96_bit_security(hash_fn);
-
     println!("Proving with {hash_name}...");
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        options,
-    )
-    .expect("Proving failed");
+    let witness =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .expect("processor initialization failed")
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution failed");
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = Prover::new().with_hash_fn(hash_fn).prove_full(witness).expect("Proving failed");
 
     println!("Proof generated successfully!");
     if print_stack_outputs {
         println!("Stack outputs: {stack_outputs:?}");
     }
 
-    let proof = if verify_recursively {
-        assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, proof)
-    } else {
-        proof
-    };
+    if verify_recursively {
+        assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
+    }
 
     println!("Verifying proof...");
-    let security_level = Verifier::new()
-        .verify(program.into(), stack_inputs, stack_outputs, proof)
-        .expect("Verification failed");
+    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
+    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    assert!(outcome.is_complete());
 
-    println!("Verification successful! Security level: {security_level}");
+    println!("Verification successful! Security level: {}", outcome.security_level());
 }
 
 fn assert_recursive_verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-) -> ExecutionProof {
-    let stark_proof = proof.miden_proof();
-    let deferred_proof = proof.deferred_proof();
-    assert_eq!(stark_proof.hash_fn(), HashFunction::Poseidon2);
-
-    let final_deferred_root = match deferred_proof {
-        DeferredProof::Empty => TRUE_DIGEST,
-        DeferredProof::Wire(wire) => {
-            DeferredState::from_wire(Arc::new(miden_precompiles::registry()), wire, usize::MAX)
-                .expect("deferred wire should rehydrate under official precompiles")
-                .root()
-        },
-        DeferredProof::Stark { .. } => {
-            panic!("recursive verifier does not support deferred STARK proofs")
-        },
-    };
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, final_deferred_root);
-    let verifier_inputs = generate_advice_inputs(stark_proof.bytes(), pub_inputs)
-        .expect("recursive verifier advice construction failed");
+    proof: &ExecutionProof,
+) {
+    let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
+    let verifier_root = CoreLibrary::default().recursive_verifier_root();
+    let verifier_inputs = generate_request_inputs(verifier_root, proof, &claim)
+        .expect("recursive verifier request construction failed");
 
     let source = "
+        use miden::core::sys
         use miden::core::sys::vm
 
-        # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
-        #   Input:  [dst, count, ...]
-        #   Output: [...]
-        proc copy_advice_to_mem
-            dup.1 push.0 neq
-            while.true
-                # [dst, count, ...]
-                padw adv_loadw
-                # [w0, w1, w2, w3, dst, count, ...]
-                dup.4 mem_storew_le dropw
-                # [dst, count, ...]
-                add.4
-                # [dst+4, count, ...]
-                swap sub.4 swap
-                # [dst+4, count-4, ...]
-                dup.1 push.0 neq
-            end
-            drop drop
-        end
-
         begin
-            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3].
-
-            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
-            # (kernel_ptr = 0). Build [dst=0, count=4N].
-            dup.1 mul.4 push.0
-            exec.copy_advice_to_mem
-
-            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
-            # Build [dst=4096, count=32].
-            push.32 push.4096
-            exec.copy_advice_to_mem
-
-            exec.vm::verify_proof
+            # Initial stack: [CLAIM_COMMITMENT].
+            dupw
+            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            adv.push_mapval dropw
+            exec.vm::verify_vm_proof
+            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            exec.sys::truncate_stack
         end
     ";
 
     let mut test = crate::build_test!(
         source,
-        &verifier_inputs.initial_stack,
-        &verifier_inputs.advice_stack,
+        &verifier_inputs.initial_stack(),
+        &verifier_inputs.advice_stack(),
         verifier_inputs.store,
         verifier_inputs.advice_map
     );
     test.libraries.push(CoreLibrary::default().package());
     test.execute().expect("recursive verifier execution failed");
+}
 
-    proof
+#[test]
+fn test_all_hash_functions_prove_verify() {
+    let source = "
+        begin
+            repeat.149
+                swap dup.1 add
+            end
+        end
+    ";
+
+    for (hash_fn, hash_name) in [
+        (HashFunction::Blake3_256, "Blake3_256"),
+        (HashFunction::Keccak, "Keccak"),
+        (HashFunction::Rpo256, "RPO"),
+        (HashFunction::Poseidon2, "Poseidon2"),
+        (HashFunction::Rpx256, "RPX"),
+    ] {
+        assert_prove_verify(source, hash_fn, hash_name, false, false);
+    }
+}
+
+#[test]
+fn test_u32div_prove_verify() {
+    // Together, these divisions exercise both quotient limbs, both limbs of the remainder and its
+    // bound, and replay of more than one U32DIV range-check batch.
+    let source = "
+        begin
+            push.3866705 push.524299 u32divmod drop drop
+            push.196612 push.3 u32divmod drop drop
+        end
+    ";
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+}
+
+#[test]
+fn test_exp_lowerings_prove_verify() {
+    let exponent = Felt::ORDER_U64 - 1;
+    let source = format!(
+        "
+        begin
+            push.3 push.5 exp eq.243 assert
+            push.3 exp.{exponent} eq.1 assert
+        end
+    "
+    );
+    assert_prove_verify(&source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
 #[test]
@@ -179,92 +176,22 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
         .with_library(&core_lib)
         .expect("failed to load CoreLibrary into the host");
 
-    let (stack_outputs, proof) = prove_sync(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        ExecutionOptions::default(),
-        ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
-    )
-    .expect("Keccak precompile wrapper should prove");
+    let witness =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+            .expect("processor initialization failed")
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("failed to execute Keccak precompile program");
+    let stack_outputs = *witness.claim().stack_outputs();
+    let proof = Prover::new()
+        .with_hash_fn(HashFunction::Blake3_256)
+        .prove_full(witness)
+        .expect("failed to prove Keccak precompile execution");
 
-    assert!(proof.is_final());
-    assert!(matches!(proof.deferred_proof(), DeferredProof::Stark { .. }));
-    Verifier::new()
-        .verify(program.into(), stack_inputs, stack_outputs, proof)
-        .expect("Verification failed");
-}
-
-#[test]
-fn test_blake3_256_prove_verify() {
-    // Compute many Fibonacci iterations to generate a trace >= 2048 rows
-    let source = "
-        begin
-            repeat.1000
-                swap dup.1 add
-            end
-        end
-    ";
-
-    assert_prove_verify(source, HashFunction::Blake3_256, "Blake3_256", false, false);
-}
-
-#[test]
-fn test_keccak_prove_verify() {
-    // Compute 150th Fibonacci number to generate a longer trace
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
-
-    assert_prove_verify(source, HashFunction::Keccak, "Keccak", true, false);
-}
-
-#[test]
-fn test_rpo_prove_verify() {
-    // Compute 150th Fibonacci number to generate a longer trace
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
-
-    assert_prove_verify(source, HashFunction::Rpo256, "RPO", true, false);
-}
-
-#[test]
-fn test_poseidon2_prove_verify() {
-    // Compute 150th Fibonacci number to generate a longer trace
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
-
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, true);
-}
-
-/// Sanity test that the multi-AIR Rust prover + Rust verifier work end-to-end with Poseidon2,
-/// independent of the MASM recursive verifier path.
-#[test]
-fn test_poseidon2_prove_verify_rust_only() {
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
-
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
+    assert!(matches!(proof, ExecutionProof::Complete { precompile: Some(_), .. }));
+    let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
+    let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+    assert!(outcome.is_complete());
+    assert_eq!(outcome.outstanding_precompile_root(), None);
 }
 
 /// Equal-heights regression: tiny program where every AIR lands at MIN_TRACE_LEN.
@@ -311,207 +238,570 @@ fn test_hash_heavy_divergent_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
-/// Test end-to-end proving and verification with RPX
-#[test]
-fn test_rpx_prove_verify() {
-    // Compute 150th Fibonacci number to generate a longer trace
-    let source = "
-        begin
-            repeat.149
-                swap dup.1 add
-            end
-        end
-    ";
+// PROVER API LIFECYCLE TESTS
+// ================================================================================================
 
-    assert_prove_verify(source, HashFunction::Rpx256, "RPX", true, false);
+mod prover_api_lifecycle {
+    use miden_assembly::Assembler;
+    use miden_core::{
+        Felt, Word, ZERO,
+        deferred::{DeferredStateWire, Node, Tag, precompile_id},
+    };
+    use miden_vm::{
+        DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
+        FastProcessor, HashFunction, PrecompileProof, PrecompileWitness, Program, Prover,
+        StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
+        precompile_witness_from_wire, prove_sync,
+    };
+
+    fn assemble(source: &str) -> Program {
+        Assembler::default()
+            .assemble_program("program", source)
+            .expect("program should compile")
+            .unwrap_program()
+    }
+
+    fn execute(program: &Program) -> ExecutionWitness {
+        FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(program, &mut DefaultHost::default())
+            .expect("execution should produce a witness")
+    }
+
+    fn word_literal(word: Word) -> String {
+        format!(
+            "[{}, {}, {}, {}]",
+            word[0].as_canonical_u64(),
+            word[1].as_canonical_u64(),
+            word[2].as_canonical_u64(),
+            word[3].as_canonical_u64(),
+        )
+    }
+
+    fn u256_witness(value: u64) -> ExecutionWitness {
+        let precompile_id = precompile_id("uint256");
+        let value_tag = Tag::precompile(
+            precompile_id,
+            [
+                Felt::new(0).expect("VALUE operation ID is a felt"),
+                Felt::new(1).expect("U256 bound pointer is a felt"),
+                ZERO,
+            ],
+        )
+        .expect("uint precompile ID is not reserved");
+        let mut value_chunk = [ZERO; 8];
+        value_chunk[0] = Felt::new(value).expect("test U256 value is a felt");
+        let value_digest = Node::value(value_tag, value_chunk)
+            .expect("U256 value node should be valid")
+            .digest();
+        let equality_tag = Tag::precompile(
+            precompile_id,
+            [Felt::new(4).expect("EQ operation ID is a felt"), ZERO, ZERO],
+        )
+        .expect("uint precompile ID is not reserved");
+
+        // This is the inlined equivalent of the core library's U256 `push_*_digest`, `assert_eq`,
+        // `precompiles::register_expr`, and `precompiles::log_deferred` procedures. The processor's
+        // built-in registry seeds the constant U256 value nodes used here.
+        let source = format!(
+            "begin\n\
+                 push.{}\n\
+                 push.{}\n\
+                 push.{}\n\
+                 movdnw.2\n\
+                 adv.register_deferred\n\
+                 hperm\n\
+                 swapw.2 dropw dropw\n\
+                 padw padw movdnw.2\n\
+                 log_deferred\n\
+                 dropw dropw dropw\n\
+             end",
+            word_literal(value_digest),
+            word_literal(value_digest),
+            word_literal(equality_tag.as_word().into()),
+        );
+
+        execute(&assemble(&source))
+    }
+
+    fn assert_complete(
+        program: &Program,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        proof: &ExecutionProof,
+    ) {
+        let claim =
+            ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
+        let outcome = Verifier::new()
+            .verify(&claim, proof)
+            .expect("complete execution proof should verify");
+        assert_eq!(outcome.security_level(), 96);
+        assert!(outcome.is_complete());
+        assert_eq!(outcome.outstanding_precompile_root(), None);
+    }
+
+    #[test]
+    fn configured_prove_sync_matches_buffered_and_overlapped_routes() {
+        let program = assemble("begin push.1 drop end");
+        let stack_inputs = StackInputs::default();
+        let prover = Prover::new().with_hash_fn(HashFunction::Blake3_256);
+        let execution_options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(1)
+            .expect("one-row trace fragments should be supported");
+
+        let mut buffered_host = DefaultHost::default();
+        let (buffered_outputs, buffered_proof) = prove_sync(
+            &prover,
+            &program,
+            stack_inputs,
+            AdviceInputs::default(),
+            &mut buffered_host,
+            execution_options.with_overlapped_trace_build(false),
+        )
+        .expect("buffered execute-and-prove should succeed");
+
+        let mut overlapped_host = DefaultHost::default();
+        let (overlapped_outputs, overlapped_proof) = prove_sync(
+            &prover,
+            &program,
+            stack_inputs,
+            AdviceInputs::default(),
+            &mut overlapped_host,
+            execution_options.with_overlapped_trace_build(true),
+        )
+        .expect("overlapped execute-and-prove should succeed");
+
+        assert_eq!(buffered_outputs, overlapped_outputs);
+
+        // Parallel proof-of-work grinding may select different valid witnesses, so verify both
+        // proofs instead of requiring byte-identical encodings.
+        assert_complete(&program, stack_inputs, buffered_outputs, &buffered_proof);
+        assert_complete(&program, stack_inputs, overlapped_outputs, &overlapped_proof);
+    }
+
+    #[test]
+    fn delegated_and_merged_precompile_proving_composes_across_transport() {
+        let one_witness = u256_witness(1);
+        let one_claim = one_witness.claim();
+        let one_deferred = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(one_witness)
+            .expect("root-one execution should produce a deferred proof");
+        let ExecutionProof::Deferred { vm: one_vm, .. } = &one_deferred else {
+            panic!("root-one execution should remain deferred");
+        };
+        let one_root = one_vm.precompile_root;
+        let deferred_outcome = Verifier::new()
+            .verify(&one_claim, &one_deferred)
+            .expect("deferred VM proof should verify");
+        assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
+
+        let unrelated_wire = ExecutionProof::Deferred {
+            vm: one_vm.clone(),
+            precompile: DeferredStateWire::default(),
+        };
+        let unrelated_outcome = Verifier::new()
+            .verify(&one_claim, &unrelated_wire)
+            .expect("deferred verification should authenticate only the VM root");
+        assert_eq!(unrelated_outcome.outstanding_precompile_root(), Some(one_root));
+
+        let two_witness = u256_witness(2);
+        let two_claim = two_witness.claim();
+        let two_deferred = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(two_witness)
+            .expect("root-two execution should produce a deferred proof");
+
+        let one_encoded = one_deferred.to_bytes();
+        let one_transported = ExecutionProof::read_from_bytes(&one_encoded)
+            .expect("root-one deferred proof transport should decode without hydrating its wire");
+        let two_transported = ExecutionProof::read_from_bytes(&two_deferred.to_bytes())
+            .expect("root-two deferred proof transport should decode without hydrating its wire");
+
+        let ExecutionProof::Deferred { precompile: one_wire, .. } = &one_transported else {
+            panic!("transported root-one proof should remain deferred");
+        };
+        let ExecutionProof::Deferred { vm: two_vm, precompile: two_wire } = &two_transported else {
+            panic!("transported root-two proof should remain deferred");
+        };
+        let two_root = two_vm.precompile_root;
+        let one_witness = precompile_witness_from_wire(one_wire)
+            .expect("transported root-one wire should hydrate under the standard registry");
+        let two_witness = precompile_witness_from_wire(two_wire)
+            .expect("transported root-two wire should hydrate under the standard registry");
+
+        let merged = PrecompileWitness::merge(vec![one_witness.clone(), one_witness, two_witness])
+            .expect("ordered singleton witnesses should merge");
+        let ordered_roots = vec![one_root, one_root, two_root];
+
+        let shared_precompile = Prover::new()
+            .with_hash_fn(HashFunction::Poseidon2)
+            .prove_precompile(&merged)
+            .expect("merged precompile witness should prove once");
+        assert_eq!(shared_precompile.roots, ordered_roots);
+
+        let verifier = Verifier::new();
+        assert_eq!(
+            verifier
+                .verify_precompile(&shared_precompile, one_root)
+                .expect("shared precompile proof should directly verify root one"),
+            96
+        );
+
+        assert_eq!(
+            verifier
+                .verify_precompile(&shared_precompile, two_root)
+                .expect("compatible extra roots should directly verify root two"),
+            96
+        );
+
+        let mut reordered_precompile = shared_precompile.clone();
+        reordered_precompile.roots.swap(1, 2);
+        assert!(matches!(
+            verifier.verify_precompile(&reordered_precompile, one_root),
+            Err(VerificationError::PrecompileStarkVerification(_))
+        ));
+
+        let mut missing_duplicate_precompile = shared_precompile.clone();
+        missing_duplicate_precompile.roots.remove(1);
+        assert!(matches!(
+            verifier.verify_precompile(&missing_duplicate_precompile, one_root),
+            Err(VerificationError::PrecompileStarkVerification(_))
+        ));
+
+        let mut mutated_vm_root = one_transported.clone();
+        let ExecutionProof::Deferred { vm, .. } = &mut mutated_vm_root else {
+            panic!("transported root-one proof should remain deferred");
+        };
+        vm.precompile_root = two_root;
+        let mutated_vm_root = mutated_vm_root
+            .complete(shared_precompile.clone())
+            .expect("completion should attach a compatible precompile proof");
+        assert!(matches!(
+            verifier.verify(&one_claim, &mutated_vm_root),
+            Err(VerificationError::StarkVerificationError(..))
+        ));
+
+        let mut trailing_vm_bytes = one_vm.proof.bytes().to_vec();
+        trailing_vm_bytes.push(0);
+        let trailing_vm_proof = ExecutionProof::Deferred {
+            vm: miden_vm::VmProof {
+                proof: StarkProof::new(trailing_vm_bytes, one_vm.proof.hash_fn()),
+                precompile_root: one_root,
+            },
+            precompile: DeferredStateWire::default(),
+        };
+        assert!(matches!(
+            verifier.verify(&one_claim, &trailing_vm_proof),
+            Err(VerificationError::StarkVerificationError(..))
+        ));
+
+        let invalid_complete = one_transported
+            .clone()
+            .complete(PrecompileProof {
+                proof: StarkProof::new(vec![0, 0], HashFunction::Poseidon2),
+                roots: vec![one_root],
+            })
+            .expect("completion should only attach the precompile proof");
+        let error = Verifier::new()
+            .verify(&one_claim, &invalid_complete)
+            .expect_err("the verifier should reject an invalid precompile STARK");
+        assert!(matches!(error, VerificationError::PrecompileStarkVerification(_)));
+
+        let one_complete = one_transported
+            .complete(shared_precompile.clone())
+            .expect("shared proof should complete the root-one execution");
+        let two_complete = two_transported
+            .complete(shared_precompile)
+            .expect("shared proof should complete the root-two execution");
+        let one_outcome = Verifier::new()
+            .verify(&one_claim, &one_complete)
+            .expect("completed root-one execution should verify");
+        let two_outcome = Verifier::new()
+            .verify(&two_claim, &two_complete)
+            .expect("completed root-two execution should verify");
+        assert!(one_outcome.is_complete());
+        assert!(two_outcome.is_complete());
+    }
 }
 
-// ================================================================================================
-// FAST PROCESSOR + PARALLEL TRACE GENERATION TESTS
-// ================================================================================================
-
-mod fast_parallel {
-    use alloc::sync::Arc;
+mod execution_witness_serialization {
+    use std::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{DeferredProof, ExecutionProof, HashFunction};
+    #[cfg(feature = "arbitrary")]
+    use miden_core::Felt;
+    use miden_core::{
+        Word,
+        mast::{
+            BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
+        },
+        operations::Operation,
+        proof::ExecutionProof,
+    };
     use miden_processor::{
-        DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+        DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
     use miden_prover::{
-        ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync,
-        prove_partial_from_trace_sync, prove_stark,
+        HashFunction, Prover,
+        serde::{Deserializable, Serializable},
     };
-    use miden_verifier::{VerificationError, Verifier};
-    use miden_vm::{Program, TraceBuildInputs};
-
-    /// Default fragment size for parallel trace generation
-    const FRAGMENT_SIZE: usize = 1024;
-
-    fn parallel_execution_options() -> ExecutionOptions {
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(FRAGMENT_SIZE)
-            .unwrap()
-    }
-
-    fn execute_parallel_trace_inputs(
-        program: &Program,
-        stack_inputs: StackInputs,
-        advice_inputs: AdviceInputs,
-        host: &mut DefaultHost,
-    ) -> TraceBuildInputs {
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, parallel_execution_options())
-            .expect("processor should initialize with built-in precompiles")
-            .execute_trace_inputs_sync(program, host)
-            .expect("Fast processor execution failed")
-    }
+    #[cfg(feature = "arbitrary")]
+    use miden_utils_testing::proptest::prelude::*;
+    use miden_verifier::Verifier;
+    use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
     }
 
-    /// Test that proves and verifies using the fast processor + parallel trace generation path.
-    /// This verifies the complete code path works end-to-end.
-    ///
-    /// Note: We only test one hash function here since
-    /// `test_trace_equivalence_slow_vs_fast_parallel` verifies trace equivalence, and the slow
-    /// processor tests already cover all hash functions.
-    #[test]
-    fn test_fast_parallel_prove_verify() {
-        // Use a program with enough iterations to generate a meaningful trace
-        let source = "
-            begin
-                repeat.500
-                    swap dup.1 add
-                end
-            end
-        ";
+    fn create_simple_library() -> HostLibrary {
+        let mut mast_forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        mast_forest.make_root(swap_block);
+        HostLibrary::from(Arc::new(mast_forest))
+    }
 
+    fn external_lib_proc_digest() -> Word {
+        let mut forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.get_node_by_id(swap_block).unwrap().digest()
+    }
+
+    fn external_program() -> Program {
+        let mut program = MastForest::new();
+        let basic_block = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut program)
+            .unwrap();
+        let external_node = ExternalNodeBuilder::new(external_lib_proc_digest())
+            .add_to_forest(&mut program)
+            .unwrap();
+        let root = JoinNodeBuilder::new([basic_block, external_node])
+            .add_to_forest(&mut program)
+            .unwrap();
+        program.make_root(root);
+        Program::new(Arc::new(program), root)
+    }
+
+    fn stack_neutral_program_source(operations: &[u8]) -> String {
+        let mut source = String::from("begin push.1 drop");
+        for operation in operations {
+            source.push_str(match operation {
+                0 => " push.1 drop",
+                1 => " push.1 push.2 add drop",
+                2 => " push.1 dup drop drop",
+                _ => " push.1 push.2 swap drop drop",
+            });
+        }
+        source.push_str(" end");
+        source
+    }
+
+    fn execute_witness(source: &str, stack_inputs: StackInputs) -> ExecutionWitness {
         let program = Assembler::default()
             .assemble_program("program", source)
-            .unwrap()
+            .expect("program should compile")
             .unwrap_program();
-        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
-        let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
-        let trace_inputs =
-            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
+        FastProcessor::new(stack_inputs)
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness")
+    }
 
-        let fast_stack_outputs = *trace_inputs.stack_outputs();
-
-        // Build trace using parallel trace generation
-        let trace = build_trace(trace_inputs).unwrap();
-
-        // Build public inputs
-        let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-
-        // Per-AIR matrices for prove_multi.
-        let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.to_air_matrices();
-
-        // Generate proof using Blake3_256
-        let blake3_config =
-            config::blake3_256_config(config::pcs_params(), config::RELATION_DIGEST);
-        let proof_bytes = prove_stark(
-            &blake3_config,
-            core_matrix,
-            chiplets_matrix,
-            poseidon2_matrix,
-            &public_values,
-            &aux_inputs,
-        )
-        .expect("Proving failed");
-
-        assert_eq!(trace.deferred_state().root(), miden_core::deferred::TRUE_DIGEST);
-
-        let proof =
-            ExecutionProof::from_parts(proof_bytes, HashFunction::Blake3_256, DeferredProof::Empty);
-
-        // Verify the proof
-        Verifier::new()
-            .verify(program.into(), stack_inputs, fast_stack_outputs, proof)
-            .expect("Verification failed");
+    fn write_execution_witness_fuzz_seed(
+        corpus_dir: &std::path::Path,
+        name: &str,
+        witness: ExecutionWitness,
+    ) {
+        let bytes = witness.to_bytes();
+        let budget = bytes.len().saturating_mul(4);
+        ExecutionWitness::read_from_bytes_with_budget(&bytes, budget)
+            .expect("witness seed should decode within the fuzzing budget");
+        std::fs::write(corpus_dir.join(name), bytes).expect("witness seed should be writable");
     }
 
     #[test]
-    fn test_prove_from_trace_sync() {
-        let source = "
-            begin
-                repeat.128
-                    swap dup.1 add
-                end
-            end
-        ";
+    #[ignore = "generates corpus files rather than asserting behavior"]
+    fn generate_execution_witness_fuzz_seeds() {
+        let corpus_dir =
+            std::path::Path::new("../tools/miden-core-fuzz/corpus/execution_witness_deserialize");
+        std::fs::create_dir_all(corpus_dir).expect("fuzz corpus directory should be writable");
 
-        let program = Assembler::default()
-            .assemble_program("program", source)
-            .unwrap()
-            .unwrap_program();
-        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
-        let advice_inputs = AdviceInputs::default();
-        let mut host = default_source_manager_host();
-        let trace_inputs =
-            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
+        let ordinary =
+            execute_witness(&stack_neutral_program_source(&[0, 1, 2, 3]), StackInputs::default());
+        write_execution_witness_fuzz_seed(corpus_dir, "ordinary.bin", ordinary);
 
-        let (stack_outputs, proof) = prove_from_trace_sync(TraceProvingInputs::new(
-            trace_inputs,
-            ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
-        ))
-        .expect("prove_from_trace_sync failed");
+        let deferred = execute_witness("begin log_deferred end", StackInputs::default());
+        write_execution_witness_fuzz_seed(corpus_dir, "deferred.bin", deferred);
+    }
 
-        assert!(proof.is_final());
-        assert_eq!(proof.deferred_proof(), &DeferredProof::Empty);
-        Verifier::new()
-            .verify(program.into(), stack_inputs, stack_outputs, proof)
-            .expect("Verification failed");
+    #[cfg(feature = "arbitrary")]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn proptest_execution_witness_round_trip_preserves_trace(
+            inputs in prop::collection::vec(any::<u32>(), 0..=16),
+            operations in prop::collection::vec(0_u8..4, 0..=16),
+        ) {
+            let source = stack_neutral_program_source(&operations);
+            let stack = inputs.iter().copied().map(Felt::from_u32).collect::<Vec<_>>();
+            let stack_inputs = StackInputs::new(&stack).expect("generated stack should be valid");
+            let witness = execute_witness(&source, stack_inputs);
+
+            let expected_claim = witness.claim();
+            let witness_bytes = witness.to_bytes();
+            let witness_budget = witness_bytes
+                .len()
+                .checked_mul(4)
+                .expect("generated witness budget should fit usize");
+            let restored = ExecutionWitness::read_from_bytes_with_budget(
+                &witness_bytes,
+                witness_budget,
+            )
+            .expect("generated witness should round trip");
+
+            prop_assert_eq!(restored.claim(), expected_claim);
+            prop_assert_eq!(restored.to_bytes(), witness_bytes);
+
+            let (original_vm, _) = witness.into_parts();
+            let (restored_vm, _) = restored.into_parts();
+            let original_trace =
+                build_trace(original_vm).expect("original generated witness should build a trace");
+            let restored_trace =
+                build_trace(restored_vm).expect("restored generated witness should build a trace");
+            prop_assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+            prop_assert_eq!(restored_trace.program_info(), original_trace.program_info());
+            prop_assert_eq!(
+                restored_trace.trace_len_summary(),
+                original_trace.trace_len_summary()
+            );
+            prop_assert_eq!(
+                restored_trace.public_inputs().to_air_inputs(),
+                original_trace.public_inputs().to_air_inputs()
+            );
+        }
     }
 
     #[test]
-    fn test_prove_partial_from_trace_sync_preserves_deferred_wire() {
-        let source = "begin log_deferred end";
-        let program = Assembler::default()
-            .assemble_program("program", source)
-            .unwrap()
-            .unwrap_program();
+    fn test_execution_witness_round_trip_proves_external_library_program() {
+        std::thread::Builder::new()
+            .name("execution-witness-round-trip".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(execution_witness_round_trip_proves_external_library_program)
+            .expect("failed to spawn round-trip test thread")
+            .join()
+            .expect("round-trip test thread panicked");
+    }
+
+    fn execution_witness_round_trip_proves_external_library_program() {
+        let program = external_program();
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
-        let trace_inputs =
-            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
-        let expected_deferred_root = trace_inputs.deferred_state().root();
-        let expected_wire = trace_inputs
-            .deferred_state()
-            .to_wire()
-            .expect("deferred state should serialize to wire");
+        host.load_library(create_simple_library())
+            .expect("failed to load test library into host");
+        let witness =
+            FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+                .expect("invalid advice inputs")
+                .execute_for_proving_sync(&program, &mut host)
+                .expect("execution should produce a witness");
+
+        let claim = witness.claim();
+        let witness_bytes = witness.to_bytes();
+        let (restored_vm, _) = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("witness round trip")
+            .into_parts();
         assert!(
-            !expected_wire.entries.is_empty(),
-            "log_deferred should advance the deferred root"
+            restored_vm.mast_forest_count() > 1,
+            "expected dynamic library execution to serialize multiple MAST forests"
         );
 
-        let (stack_outputs, proof) = prove_partial_from_trace_sync(TraceProvingInputs::new(
-            trace_inputs,
-            ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
-        ))
-        .expect("prove_partial_from_trace_sync failed");
-
-        assert!(!proof.is_final());
-        assert_eq!(proof.deferred_proof(), &DeferredProof::Wire(expected_wire.clone()));
-
-        let err = Verifier::new()
-            .verify(program.to_info(), stack_inputs, stack_outputs, proof.clone())
-            .unwrap_err();
-        assert!(
-            matches!(err, VerificationError::UnsupportedDeferredProof),
-            "wire-backed partial proofs should be rejected by final verification, got {err:?}"
-        );
-
-        let (security_level, hydrated_state) = Verifier::new()
-            .verify_partial(program.to_info(), stack_inputs, stack_outputs, proof)
-            .expect("wire-backed partial proof should verify and hydrate deferred state");
-        assert_eq!(security_level, 96);
-        assert_eq!(hydrated_state.root(), expected_deferred_root);
+        let (vm, _) = witness.into_parts();
+        let original_trace = build_trace(vm).expect("original witness builds trace");
+        let restored_trace = build_trace(restored_vm).expect("restored witness builds trace");
+        assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+        assert_eq!(restored_trace.program_info(), original_trace.program_info());
+        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
         assert_eq!(
-            hydrated_state.to_wire().expect("hydrated state should serialize to wire"),
+            restored_trace.public_inputs().to_air_inputs(),
+            original_trace.public_inputs().to_air_inputs()
+        );
+
+        let witness_budget =
+            witness_bytes.len().checked_mul(4).expect("test input budget overflow");
+        let restored_witness =
+            ExecutionWitness::read_from_bytes_with_budget(&witness_bytes, witness_budget)
+                .expect("execution witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(restored_witness)
+            .expect("restored execution witness should prove");
+
+        let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
+        assert!(outcome.is_complete());
+    }
+
+    #[test]
+    fn test_execution_witness_round_trip_preserves_deferred_wire() {
+        std::thread::Builder::new()
+            .name("partial-deferred-wire".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(execution_witness_round_trip_preserves_deferred_wire)
+            .expect("failed to spawn partial-wire test thread")
+            .join()
+            .expect("partial-wire test thread panicked");
+    }
+
+    fn execution_witness_round_trip_preserves_deferred_wire() {
+        let source = "begin log_deferred end";
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .expect("program should compile")
+            .unwrap_program();
+        let mut host = default_source_manager_host();
+        let witness = FastProcessor::new(StackInputs::default())
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution should produce a witness");
+
+        let witness_bytes = witness.to_bytes();
+        let inspected =
+            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
+        let (_, precompile) = inspected.into_parts();
+        let precompile = precompile.expect("deferred execution should carry a precompile witness");
+        let expected_deferred_root = precompile.state().root();
+        let expected_wire = precompile
+            .state()
+            .to_wire()
+            .expect("deferred state should serialize to canonical wire");
+
+        let proving =
+            ExecutionWitness::read_from_bytes(&witness_bytes).expect("witness round trip");
+        let proof = Prover::new()
+            .with_hash_fn(HashFunction::Blake3_256)
+            .prove(proving)
+            .expect("wire-backed partial proof should be produced from the restored witness");
+
+        assert!(!proof.is_complete());
+        let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
+            panic!("partial proving should keep the deferred proof wire-backed");
+        };
+        assert_eq!(wire, &expected_wire);
+        let claim = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("witness round trip")
+            .claim();
+        let outcome =
+            Verifier::new().verify(&claim, &proof).expect("deferred VM proof should verify");
+        assert_eq!(outcome.outstanding_precompile_root(), Some(expected_deferred_root));
+
+        let hydrated = precompile_witness_from_wire(wire)
+            .expect("transported wire should hydrate under the standard registry");
+        assert_eq!(
+            hydrated.state().to_wire().expect("hydrated state should serialize to wire"),
             expected_wire
         );
     }

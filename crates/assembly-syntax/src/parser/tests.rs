@@ -4,7 +4,10 @@ use core::assert_matches;
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
 use super::*;
-use crate::ast::{Form, Immediate, Instruction, Op, Visibility};
+use crate::{
+    MAX_CONTROL_FLOW_NESTING,
+    ast::{Form, Immediate, Instruction, Op, Visibility},
+};
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -493,6 +496,27 @@ end
 }
 
 #[test]
+fn parse_variadic_procedure_signatures() {
+    let source = test_source_file(
+        "\
+pub proc log(...)
+    nop
+end
+
+pub proc collect(prefix: felt, ...) -> (count: u32, ...)
+    nop
+end
+
+pub proc passthrough() -> ...
+    nop
+end
+",
+    );
+
+    assert_parses(source);
+}
+
+#[test]
 fn parse_advice_map_and_begin_forms() {
     let source = test_source_file(
         "\
@@ -557,6 +581,23 @@ end
     );
 
     assert_parses(source);
+}
+
+#[test]
+fn control_flow_nesting_depth_exceeded_during_lowering() {
+    let mut source = String::from("begin\n");
+    for _ in 0..=MAX_CONTROL_FLOW_NESTING {
+        source.push_str("push.1\nif.true\n");
+    }
+    source.push_str("push.1\n");
+    for _ in 0..=MAX_CONTROL_FLOW_NESTING {
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+
+    let error = parse_forms(test_source_file(&source))
+        .expect_err("lowering should reject control-flow nesting beyond the configured limit");
+    crate::assert_diagnostic!(error, "control-flow nesting depth exceeded");
 }
 
 #[test]
@@ -640,6 +681,7 @@ begin
     adv.insert_hdword
     adv.push_mapvaln
     emit
+    trace
     mem_load
     u32div
     add.1
@@ -751,6 +793,8 @@ begin
     procref.foo::bar
     emit.EVENT_ID
     emit.event(\"abc\")
+    trace.EVENT_ID
+    trace.event(\"abc\")
     assert.err=\"oops\"
     u32assert.err=ERR_CODE
 end

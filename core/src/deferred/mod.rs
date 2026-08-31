@@ -8,19 +8,23 @@
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
 //! provides system-event plumbing.
 
+mod claim;
 mod node;
 mod precompile;
 mod precompile_registry;
 mod state;
 mod wire;
+mod witness;
 
 use alloc::boxed::Box;
 
+pub use claim::DeferredClaim;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
+pub use wire::{DeferredStateWire, IntegrityError};
+pub use witness::{PrecompileWitness, PrecompileWitnessError};
 
 use crate::Word;
 
@@ -30,36 +34,17 @@ pub type DeferredRoot = Digest;
 /// Fixed capacity word used to domain-separate deferred root folds.
 pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
 
-/// Default maximum approximate number of field elements allowed in deferred state.
-pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+/// Hard maximum approximate number of field elements allowed in deferred state.
+pub const MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
+
+/// Hard library safety ceiling for ordered precompile roots.
+///
+/// This bounds root-vector allocation and aggregate-root folding.
+pub const MAX_PRECOMPILE_ROOTS: usize = 1 << 12;
 
 /// Folds a verified deferred statement into the rolling deferred root.
 pub fn fold_deferred_root(root: DeferredRoot, statement: Digest) -> DeferredRoot {
     Node::and(root, statement).digest()
-}
-
-/// Small helper for tests and trace plumbing that need to advance a deferred root incrementally.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct DeferredRootTracker {
-    root: DeferredRoot,
-}
-
-impl DeferredRootTracker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn from_root(root: DeferredRoot) -> Self {
-        Self { root }
-    }
-
-    pub fn root(&self) -> DeferredRoot {
-        self.root
-    }
-
-    pub fn record_statement(&mut self, statement: Digest) {
-        self.root = fold_deferred_root(self.root, statement);
-    }
 }
 
 // ERROR

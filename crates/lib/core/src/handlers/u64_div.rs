@@ -96,12 +96,9 @@ pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, E
     let (q_hi, q_lo) = u64_to_u32_elements(quotient);
     let (r_hi, r_lo) = u64_to_u32_elements(remainder);
 
-    // Create mutations to extend the advice stack with the result.
-    // extend_stack([a,b,c,d]) puts 'a' on top due to reverse iteration + push_front
-    // So [q_hi, q_lo, r_hi, r_lo] puts q_hi on top
-    // After `adv_push adv_push`: pops q_hi then q_lo → operand stack [q_lo, q_hi, ...] (LE)
-    // After `adv_push adv_push`: pops r_hi then r_lo → operand stack [r_lo, r_hi, ...] (LE)
-    let mutation = AdviceMutation::extend_stack([q_hi, q_lo, r_hi, r_lo]);
+    // MASM reads quotient first with `adv_push adv_push`, so q_lo lands above q_hi.
+    // It reads remainder next with the same pattern, so r_lo lands above r_hi.
+    let mutation = AdviceMutation::extend_advice_stack_with([q_hi, q_lo, r_hi, r_lo]);
     Ok(vec![mutation])
 }
 

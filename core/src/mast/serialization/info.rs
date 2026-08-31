@@ -314,22 +314,11 @@ impl MastNodeInfo {
     ///
     /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
     #[cfg(test)]
-    pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
+    pub(super) fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
         Self {
             entry: MastNodeEntry::new(mast_node, ops_offset),
             digest: mast_node.digest(),
         }
-    }
-
-    /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
-    #[cfg(test)]
-    pub fn try_into_mast_node_builder(
-        self,
-        node_count: usize,
-        basic_block_data_decoder: &BasicBlockDataDecoder,
-    ) -> Result<MastNodeBuilder, DeserializationError> {
-        self.entry
-            .try_into_mast_node_builder(node_count, basic_block_data_decoder, self.digest)
     }
 
     /// Returns the fixed-width structural node entry.

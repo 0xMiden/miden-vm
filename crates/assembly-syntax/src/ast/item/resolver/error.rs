@@ -109,27 +109,6 @@ impl SymbolResolutionError {
         }
     }
 
-    pub fn invalid_alias_target(
-        span: SourceSpan,
-        referrer: SourceSpan,
-        source_manager: &dyn SourceManager,
-    ) -> Self {
-        let referer_source_file = source_manager.get(referrer.source_id()).ok();
-        let source_file = source_manager.get(span.source_id()).ok();
-        Self::InvalidAliasTarget {
-            span,
-            source_file,
-            relative_to: Some(
-                RelatedLabel::advice("this reference specifies a subpath relative to an import")
-                    .with_labeled_span(
-                        referrer,
-                        "this reference specifies a subpath relative to an import",
-                    )
-                    .with_source_file(referer_source_file),
-            ),
-        }
-    }
-
     pub fn invalid_sub_path(
         span: SourceSpan,
         relative_to: SourceSpan,
@@ -195,13 +174,6 @@ impl SymbolResolutionError {
             span,
             source_file: source_manager.get(span.source_id()).ok(),
             max_depth,
-        }
-    }
-
-    pub fn alias_expansion_cycle(span: SourceSpan, source_manager: &dyn SourceManager) -> Self {
-        Self::AliasExpansionCycle {
-            span,
-            source_file: source_manager.get(span.source_id()).ok(),
         }
     }
 

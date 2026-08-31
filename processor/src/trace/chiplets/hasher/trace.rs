@@ -12,11 +12,13 @@ use miden_air::{
     },
 };
 use miden_core::chiplets::hasher::Hasher;
+use rayon::prelude::*;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, STATE_WIDTH, Selectors, ZERO,
-    perm_id_felt,
+    ChipletTraceFragment, Felt, HasherState, ONE, PermRequest, RATE_LEN, STATE_WIDTH, Selectors,
+    ZERO, perm_id_felt,
 };
+use crate::trace::range::RangeChecker;
 
 // HASHER OPERATION
 // ================================================================================================
@@ -36,6 +38,9 @@ enum HasherOp {
         is_boundary: Felt,
         direction_bit: Felt,
         perm_id: Felt,
+        /// Values written into the capacity columns when this row is materialized. `state` keeps
+        /// the zero-capacity permutation input used by requests and memoized replay.
+        canonicality_witness: Option<[Felt; 4]>,
     },
     /// Padding rows used to align the controller region inside `ChipletsAir`.
     Padding { count: usize, mrupdate_id: Felt },
@@ -112,6 +117,7 @@ impl HasherTrace {
         is_boundary: Felt,
         direction_bit: Felt,
         perm_id: Felt,
+        canonicality_witness: Option<[Felt; 4]>,
     ) {
         self.ops.push(HasherOp::Controller {
             selectors,
@@ -121,6 +127,7 @@ impl HasherTrace {
             is_boundary,
             direction_bit,
             perm_id,
+            canonicality_witness,
         });
         self.row_count += 1;
     }
@@ -135,6 +142,25 @@ impl HasherTrace {
             let count = CONTROLLER_TRACE_ALIGNMENT - remainder;
             self.ops.push(HasherOp::Padding { count, mrupdate_id });
             self.row_count += count;
+        }
+    }
+
+    /// Adds range checks for the four slack limbs and the doubled top limb of each level-0 Merkle
+    /// canonicality witness.
+    pub(super) fn append_range_checks(&self, range_checker: &mut RangeChecker) {
+        for op in &self.ops {
+            let HasherOp::Controller { canonicality_witness: Some(witness), .. } = op else {
+                continue;
+            };
+
+            let [slack_0, slack_1, slack_2, slack_3] = witness.map(|value| {
+                u16::try_from(value.as_canonical_u64())
+                    .expect("Merkle canonicality witness limb must fit in 16 bits")
+            });
+            let slack_3_double = slack_3
+                .checked_mul(2)
+                .expect("Merkle canonicality top slack limb must fit in 15 bits");
+            range_checker.add_range_checks(&[slack_0, slack_1, slack_2, slack_3, slack_3_double]);
         }
     }
 
@@ -198,6 +224,7 @@ impl HasherTrace {
                     is_boundary,
                     direction_bit,
                     perm_id,
+                    canonicality_witness,
                 } => {
                     write_controller_row(
                         &mut chunk_rows[0],
@@ -208,6 +235,7 @@ impl HasherTrace {
                         *is_boundary,
                         *direction_bit,
                         *perm_id,
+                        *canonicality_witness,
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
@@ -223,6 +251,7 @@ impl HasherTrace {
                             ZERO,
                             ZERO,
                             ZERO,
+                            None,
                         );
                     }
                 },
@@ -247,6 +276,7 @@ fn write_controller_row(
     is_boundary: Felt,
     direction_bit: Felt,
     perm_id: Felt,
+    canonicality_witness: Option<[Felt; 4]>,
 ) {
     let cols: &mut ControllerCols<Felt> = row.as_mut_slice().borrow_mut();
     let [s0, s1, s2] = selectors;
@@ -254,6 +284,9 @@ fn write_controller_row(
     cols.s1 = s1;
     cols.s2 = s2;
     cols.state = *state;
+    if let Some(witness) = canonicality_witness {
+        cols.state[RATE_LEN..].copy_from_slice(&witness);
+    }
     cols.node_index = node_index;
     cols.mrupdate_id = mrupdate_id;
     cols.is_boundary = is_boundary;
@@ -363,48 +396,56 @@ pub(super) fn fill_poseidon2_permutation_trace(
     trace: &mut [Felt],
 ) {
     const W: usize = NUM_POSEIDON2_PERMUTATION_COLS;
-    debug_assert_eq!(trace.len() % W, 0, "Poseidon2 trace buffer is not row-aligned");
+    // Real asserts, not debug: a violated length invariant here would otherwise
+    // produce a silently wrong trace in release builds (all-zero skipped cycles),
+    // caught only at proving time. The cost is three comparisons per call.
+    assert_eq!(trace.len() % W, 0, "Poseidon2 trace buffer is not row-aligned");
 
     let (rows, _) = trace.as_chunks_mut::<W>();
-    debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "Poseidon2 height must align to cycles");
-    debug_assert!(
+    assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "Poseidon2 height must align to cycles");
+    assert!(
         (perm_requests.len() + 1) * HASH_CYCLE_LEN <= rows.len(),
         "Poseidon2 trace buffer is too short for permutation requests",
     );
 
     let request_count = perm_requests.len();
-    let mut row_idx = 0;
-    for (perm_id, request) in perm_requests.into_iter().enumerate() {
-        let state = request.state.map(Felt::new_unchecked);
-        write_poseidon2_permutation_cycle(
-            &mut rows[row_idx..row_idx + HASH_CYCLE_LEN],
-            &state,
-            perm_id_felt(perm_id),
-            Felt::new_unchecked(request.multiplicity),
-        );
-        row_idx += HASH_CYCLE_LEN;
-    }
-
-    // Padding cycles use zero multiplicity and continue the cycle-id sequence.
-    let mut perm_id = request_count;
+    // Each cycle is an independent permutation writing a disjoint row chunk,
+    // so the fill parallelizes; on large traces this loop dominates the
+    // chiplet's build time.
+    rows[..request_count * HASH_CYCLE_LEN]
+        .par_chunks_exact_mut(HASH_CYCLE_LEN)
+        .zip(perm_requests.par_iter())
+        .enumerate()
+        .for_each(|(perm_id, (cycle_rows, request))| {
+            let state = request.state.map(Felt::new_unchecked);
+            write_poseidon2_permutation_cycle(
+                cycle_rows,
+                &state,
+                perm_id_felt(perm_id),
+                Felt::new_unchecked(request.multiplicity),
+            );
+        });
+    // Padding cycles use zero multiplicity and continue the cycle-id sequence:
+    // one template cycle is computed, then replicated into the remaining rows
+    // in parallel with each cycle's perm-id patched.
+    let padding_start = request_count * HASH_CYCLE_LEN;
     let zero_state = [ZERO; STATE_WIDTH];
-    if row_idx < rows.len() {
-        let padding_start = row_idx;
+    if padding_start < rows.len() {
         write_poseidon2_permutation_cycle(
             &mut rows[padding_start..padding_start + HASH_CYCLE_LEN],
             &zero_state,
-            perm_id_felt(perm_id),
+            perm_id_felt(request_count),
             ZERO,
         );
-        row_idx += HASH_CYCLE_LEN;
-        perm_id += 1;
 
-        while row_idx < rows.len() {
-            rows.copy_within(padding_start..padding_start + HASH_CYCLE_LEN, row_idx);
-            set_perm_id(&mut rows[row_idx..row_idx + HASH_CYCLE_LEN], perm_id_felt(perm_id));
-            row_idx += HASH_CYCLE_LEN;
-            perm_id += 1;
-        }
+        let (head, tail) = rows.split_at_mut(padding_start + HASH_CYCLE_LEN);
+        let template = &head[padding_start..];
+        tail.par_chunks_exact_mut(HASH_CYCLE_LEN)
+            .enumerate()
+            .for_each(|(cycle, cycle_rows)| {
+                cycle_rows.copy_from_slice(template);
+                set_perm_id(cycle_rows, perm_id_felt(request_count + 1 + cycle));
+            });
     }
 }
 

@@ -1,12 +1,12 @@
 use alloc::boxed::Box;
 
-use miden_air::trace::chiplets::hasher::{Hasher, STATE_WIDTH};
-use miden_core::deferred::Tag;
+use miden_air::trace::chiplets::hasher::{Hasher, MAX_MERKLE_DEPTH, STATE_WIDTH};
+use miden_core::{crypto::merkle::MerklePath, deferred::Tag};
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
+    ContextId, Felt, MemoryError, RowIndex, Word, ZERO,
+    errors::{CryptoError, IoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
@@ -73,6 +73,47 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
     Ok(OperationHelperRegisters::HPerm { addr })
 }
 
+/// Rejects Merkle depths outside the VM's supported range.
+///
+/// The AIR enforces the same range through two range-check interactions. This explicit execution
+/// guard keeps ordinary execution, trace generation, and proof verification in agreement. Running
+/// it before advice access prevents MRUPDATE from mutating a tree for a rejected depth.
+fn validate_merkle_depth(depth: Felt) -> Result<(), CryptoError> {
+    let depth_u64 = depth.as_canonical_u64();
+    if depth_u64 == 0 || depth_u64 > MAX_MERKLE_DEPTH.into() {
+        return Err(OperationError::MerkleDepthOutOfRange { depth }.into());
+    }
+    Ok(())
+}
+
+/// Rejects a materialized Merkle path whose length differs from the stack depth.
+///
+/// An absent path is valid for processor implementations whose hasher does not consume advice
+/// paths.
+fn validate_merkle_path_length(
+    path: Option<&MerklePath>,
+    expected_depth: Felt,
+) -> Result<(), CryptoError> {
+    if let Some(path) = path {
+        validate_materialized_merkle_path_length(path.nodes().len(), expected_depth)?;
+    }
+    Ok(())
+}
+
+/// Rejects a materialized Merkle path whose actual node count differs from the stack depth.
+fn validate_materialized_merkle_path_length(
+    path_len: usize,
+    expected_depth: Felt,
+) -> Result<(), CryptoError> {
+    // Compare without narrowing `path_len`: a wrapped length must not appear to match the depth.
+    if u64::try_from(path_len).ok() != Some(expected_depth.as_canonical_u64()) {
+        return Err(
+            OperationError::InvalidMerklePathLength { path_len, depth: expected_depth }.into()
+        );
+    }
+    Ok(())
+}
+
 /// Verifies that a Merkle path from the specified node resolves to the specified root. The
 /// stack is expected to be arranged as follows (from the top):
 /// - value of the node, 4 elements.
@@ -88,10 +129,12 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
 ///
 /// # Errors
 /// Returns an error if:
+/// - The specified depth is outside `1..=64`.
 /// - Merkle tree for the specified root cannot be found in the advice provider.
-/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
-///   the specified root.
+/// - The specified depth is greater than the depth of the Merkle tree identified by the specified
+///   root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
+/// - The advice provider returns a path whose length does not equal the specified depth.
 #[inline(always)]
 pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -104,10 +147,13 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     let index = processor.stack().get(5);
     let root = processor.stack().get_word(6);
 
+    validate_merkle_depth(depth)?;
+
     // get a Merkle path from the advice provider for the specified root and node index
     let path = processor.advice_provider().get_merkle_path(root, depth, index)?;
+    validate_merkle_path_length(path.as_ref(), depth)?;
 
-    tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
+    tracer.record_hasher_build_merkle_root(node, path.as_ref(), depth, index, root);
 
     // verify the path
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
@@ -153,10 +199,12 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
 ///
 /// # Errors
 /// Returns an error if:
+/// - The specified depth is outside `1..=64`.
 /// - Merkle tree for the specified root cannot be found in the advice provider.
-/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
-///   the specified root.
+/// - The specified depth is greater than the depth of the Merkle tree identified by the specified
+///   root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
+/// - The advice provider returns a path whose length does not equal the specified depth.
 #[inline(always)]
 pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -169,6 +217,9 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
     let claimed_old_root = processor.stack().get_word(6);
     let new_value = processor.stack().get_word(10);
 
+    // Validate before the advice provider updates the tree.
+    validate_merkle_depth(depth)?;
+
     // update the node at the specified index in the Merkle tree specified by the old root, and
     // get a Merkle path to it. The length of the returned path is expected to match the
     // specified depth. If the new node is the root of a tree, this instruction will append the
@@ -180,11 +231,7 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
         new_value,
     )?;
 
-    if let Some(path) = &path
-        && path.len() != depth.as_canonical_u64() as usize
-    {
-        return Err(OperationError::InvalidMerklePathLength { path_len: path.len(), depth }.into());
-    }
+    validate_merkle_path_length(path.as_ref(), depth)?;
 
     let (addr, new_root) = processor.hasher().update_merkle_root(
         claimed_old_root,
@@ -206,6 +253,7 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
         old_value,
         new_value,
         path.as_ref(),
+        depth,
         index,
         claimed_old_root,
         new_root,
@@ -219,6 +267,30 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 
 // HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
 // ================================================================================================
+
+/// Reads a Horner evaluation point from an aligned memory word encoded as
+/// `[alpha0, alpha1, 0, 0]`.
+fn read_horner_eval_point<P: Processor, T: Tracer>(
+    processor: &mut P,
+    tracer: &mut T,
+    addr: Felt,
+) -> Result<QuadFelt, IoError> {
+    let clk = processor.system().clock();
+    let ctx = processor.system().ctx();
+    let word = processor.memory_mut().read_word(ctx, addr, clk)?;
+
+    if word[2] != ZERO || word[3] != ZERO {
+        return Err(OperationError::InvalidHornerEvaluationPointWord {
+            ctx,
+            addr: addr.as_canonical_u64(),
+        }
+        .into());
+    }
+
+    tracer.record_memory_read_word(word, addr, ctx, clk);
+
+    Ok(QuadFelt::new([word[0], word[1]]))
+}
 
 /// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
 /// the base field using a 3-level computation to reduce constraint degree.
@@ -262,8 +334,8 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 ///    coefficient (X^7) and s[7] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁). The operation reads α₀
-///    from alpha_addr and α₁ from alpha_addr + 1.
+/// 3. alpha_addr is the word-aligned address of `[alpha0, alpha1, 0, 0]`, which contains the
+///    evaluation point alpha = (alpha0, alpha1).
 ///
 /// The instruction uses helper registers to store intermediate values:
 /// - h₀, h₁: evaluation point α = (α₀, α₁)
@@ -273,32 +345,14 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, MemoryError> {
+) -> Result<OperationHelperRegisters, IoError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clock();
-    let ctx = processor.system().ctx();
-
-    // Read the evaluation point alpha from memory
-    let alpha = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let eval_point_0 = processor.memory_mut().read_element(ctx, addr)?;
-        let eval_point_1 = processor.memory_mut().read_element(ctx, addr + ONE)?;
-
-        tracer.record_memory_read_element_pair(
-            eval_point_0,
-            addr,
-            eval_point_1,
-            addr + ONE,
-            ctx,
-            clk,
-        );
-
-        QuadFelt::from_basis_coefficients_fn(|i: usize| [eval_point_0, eval_point_1][i])
-    };
+    let alpha_addr = processor.stack().get(ALPHA_ADDR_INDEX);
+    let alpha = read_horner_eval_point(processor, tracer, alpha_addr)?;
 
     // Read the coefficients from the stack (top 8 elements)
     let coef: [Felt; 8] = processor.stack().get_double_word(0);
@@ -376,21 +430,19 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 ///    2*i. s[0] is the highest-degree coefficient (X^3) and s[3] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁).
+/// 3. alpha_addr is the word-aligned address of `[alpha0, alpha1, 0, 0]`, which contains the
+///    evaluation point alpha = (alpha0, alpha1).
 ///
 /// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, MemoryError> {
+) -> Result<OperationHelperRegisters, IoError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
-
-    let clk = processor.system().clock();
-    let ctx = processor.system().ctx();
 
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [s0_lo, s0_hi, s1_lo, s1_hi, s2_lo, s2_hi, s3_lo, s3_hi, ...]
@@ -401,23 +453,8 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
         QuadFelt::from_basis_coefficients_fn(|i: usize| [lo, hi][i])
     });
 
-    // Read the evaluation point alpha from memory
-    let (alpha, k0, k1) = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor.memory_mut().read_word(ctx, addr, clk)?;
-        tracer.record_memory_read_word(
-            word,
-            addr,
-            processor.system().ctx(),
-            processor.system().clock(),
-        );
-
-        (
-            QuadFelt::from_basis_coefficients_fn(|i: usize| [word[0], word[1]][i]),
-            word[2],
-            word[3],
-        )
-    };
+    let alpha_addr = processor.stack().get(ALPHA_ADDR_INDEX);
+    let alpha = read_horner_eval_point(processor, tracer, alpha_addr)?;
 
     // Read the current accumulator (LE: low at lower index)
     let acc_low = processor.stack().get(ACC_LOW_INDEX);
@@ -438,7 +475,7 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok(OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, acc_tmp })
+    Ok(OperationHelperRegisters::HornerEvalExt { alpha, acc_tmp })
 }
 
 // LOG DEFERRED OPERATION
@@ -574,7 +611,7 @@ pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
 // function
 
 /// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
-/// are within u32 bounds and do not overlap in the same cycle.
+/// are within the 32-bit memory address space and do not overlap in the same cycle.
 ///
 /// Uses half-open intervals: [addr, addr+8). If ranges overlap, returns an IllegalMemoryAccess
 /// error pointing at the first destination word that would be written.
@@ -585,27 +622,31 @@ fn validate_dual_word_stream_addrs(
     ctx: ContextId,
     clk: RowIndex,
 ) -> Result<(), MemoryError> {
-    // Convert to u32 and check end-exclusive bounds
+    // Convert the start addresses to u32, but keep the end-exclusive addresses as u64 so that
+    // 2^32 can represent the end of the final valid memory range.
     let src_addr_u64 = src_addr.as_canonical_u64();
     let dst_addr_u64 = dst_addr.as_canonical_u64();
+    const MEMORY_SIZE: u64 = (u32::MAX as u64) + 1;
 
     let src_addr_u32 = u32::try_from(src_addr_u64)
         .map_err(|_| MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
-    let src_end = src_addr_u32
-        .checked_add(8)
-        .ok_or(MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
+    let src_end = src_addr_u64 + 8;
+    if src_end > MEMORY_SIZE {
+        return Err(MemoryError::AddressOutOfBounds { addr: src_addr_u64 });
+    }
 
     let dst_addr_u32 = u32::try_from(dst_addr_u64)
         .map_err(|_| MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
-    let dst_end = dst_addr_u32
-        .checked_add(8)
-        .ok_or(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
+    let dst_end = dst_addr_u64 + 8;
+    if dst_end > MEMORY_SIZE {
+        return Err(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 });
+    }
 
     // Check for overlap between [src, src+8) and [dst, dst+8)
-    if src_addr_u32 < dst_end && dst_addr_u32 < src_end {
+    if src_addr_u64 < dst_end && dst_addr_u64 < src_end {
         let dst_word2 = dst_addr_u32 + 4; // safe since dst_end computed above
         // We write dst first, then dst+4. Use the first that overlaps.
-        let overlap_first = (dst_addr_u32 >= src_addr_u32) && (dst_addr_u32 < src_end);
+        let overlap_first = (dst_addr_u32 >= src_addr_u32) && (dst_addr_u64 < src_end);
         let offending_addr = if overlap_first { dst_addr_u32 } else { dst_word2 };
         return Err(MemoryError::IllegalMemoryAccess {
             ctx,

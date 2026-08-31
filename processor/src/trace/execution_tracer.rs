@@ -3,7 +3,11 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use miden_air::trace::chiplets::hasher::{
     CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
 };
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    operations::Operation,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 use super::{
     block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
@@ -18,7 +22,8 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
+    ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex,
+    Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -39,19 +44,19 @@ use crate::{
 struct StateSnapshot {
     state: CoreTraceState,
     /// Continuation stack with forest references already translated to [`MastForestId`]s into the
-    /// `mast_forest_store` of the [`TraceGenerationContext`] being built.
+    /// `mast_forest_store` of the [`TraceReplay`] being built.
     continuation_stack: ContinuationStack<MastForestId>,
     /// The active forest at the start of this fragment, in `mast_forest_store`.
     initial_mast_forest_id: MastForestId,
 }
 
-// TRACE GENERATION CONTEXT
+// TRACE REPLAY
 // ================================================================================================
 
 #[derive(Debug)]
-pub struct TraceGenerationContext {
+pub(crate) struct TraceReplay {
     /// The list of trace fragment contexts built during execution.
-    pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
+    pub(crate) core_trace_contexts: Vec<CoreTraceFragmentContext>,
 
     /// Sparse MAST forests, one per source [`MastForest`] visited during execution.
     ///
@@ -59,24 +64,158 @@ pub struct TraceGenerationContext {
     /// original [`MastNodeId`]s of the source forest. References from `CoreTraceFragmentContext`,
     /// `MastForestResolutionReplay`, and `HasherOp::HashBasicBlock` are encoded as
     /// [`MastForestId`]s into this vector.
-    pub mast_forest_store: Vec<Arc<SparseMastForest>>,
+    ///
+    /// Serialized entries are trusted sparse replay data. Their node and digest maps are not
+    /// checked against a source [`MastForest`] commitment on read; see
+    /// <https://github.com/0xMiden/miden-vm/issues/3303>.
+    pub(crate) mast_forest_store: Vec<Arc<SparseMastForest>>,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
-    pub range_checker_replay: RangeCheckerReplay,
-    pub memory_writes: MemoryWritesReplay,
-    pub bitwise_replay: BitwiseReplay,
-    pub hasher_for_chiplet: HasherRequestReplay,
-    pub kernel_replay: KernelReplay,
-    pub ace_replay: AceReplay,
+    pub(crate) range_checker_replay: RangeCheckerReplay,
+    pub(crate) memory_writes: MemoryWritesReplay,
+    pub(crate) bitwise_replay: BitwiseReplay,
+    pub(crate) hasher_for_chiplet: HasherRequestReplay,
+    pub(crate) kernel_replay: KernelReplay,
+    pub(crate) ace_replay: AceReplay,
 
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
-    pub fragment_size: usize,
+    pub(crate) fragment_size: usize,
 
     /// The maximum number of field elements allowed on the operand stack in an active execution
     /// context.
-    pub max_stack_depth: usize,
+    pub(crate) max_stack_depth: usize,
+}
+
+impl Serializable for TraceReplay {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.mast_forest_store.len());
+        for forest in &self.mast_forest_store {
+            forest.write_into(target);
+        }
+        self.core_trace_contexts.write_into(target);
+        self.range_checker_replay.write_into(target);
+        self.memory_writes.write_into(target);
+        self.bitwise_replay.write_into(target);
+        self.hasher_for_chiplet.write_into(target);
+        self.kernel_replay.write_into(target);
+        self.ace_replay.write_into(target);
+        self.fragment_size.write_into(target);
+        self.max_stack_depth.write_into(target);
+    }
+}
+
+impl Deserializable for TraceReplay {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let store_len = source.read_usize()?;
+        let max_store_len = source.max_alloc(SparseMastForest::min_serialized_size());
+        if store_len > max_store_len {
+            return Err(DeserializationError::InvalidValue(format!(
+                "MAST forest store length {store_len} exceeds reader allocation bound {max_store_len}"
+            )));
+        }
+
+        let mut mast_forest_store = Vec::with_capacity(store_len);
+        for _ in 0..store_len {
+            mast_forest_store.push(Arc::new(SparseMastForest::read_from(source)?));
+        }
+
+        let context = Self {
+            mast_forest_store,
+            core_trace_contexts: Vec::<CoreTraceFragmentContext>::read_from(source)?,
+            range_checker_replay: RangeCheckerReplay::read_from(source)?,
+            memory_writes: MemoryWritesReplay::read_from(source)?,
+            bitwise_replay: BitwiseReplay::read_from(source)?,
+            hasher_for_chiplet: HasherRequestReplay::read_from(source)?,
+            kernel_replay: KernelReplay::read_from(source)?,
+            ace_replay: AceReplay::read_from(source)?,
+            fragment_size: usize::read_from(source)?,
+            max_stack_depth: usize::read_from(source)?,
+        };
+        validate_trace_generation_context_invariants(&context)?;
+        validate_trace_generation_context_forest_ids(&context)?;
+        Ok(context)
+    }
+}
+
+fn validate_trace_generation_context_invariants(
+    context: &TraceReplay,
+) -> Result<(), DeserializationError> {
+    if context.fragment_size == 0 {
+        return Err(DeserializationError::InvalidValue(
+            "trace generation fragment_size must be non-zero".into(),
+        ));
+    }
+    if context.max_stack_depth < MIN_STACK_DEPTH {
+        return Err(DeserializationError::InvalidValue(format!(
+            "trace generation max_stack_depth {} is below minimum {MIN_STACK_DEPTH}",
+            context.max_stack_depth
+        )));
+    }
+    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
+        let stack_depth = fragment.state.stack.stack_depth();
+        if stack_depth > context.max_stack_depth {
+            return Err(DeserializationError::InvalidValue(format!(
+                "fragment {fragment_index}: stack depth {stack_depth} exceeds max_stack_depth {}",
+                context.max_stack_depth
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_trace_generation_context_forest_ids(
+    context: &TraceReplay,
+) -> Result<(), DeserializationError> {
+    let store_len = context.mast_forest_store.len();
+    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
+        validate_mast_forest_id(
+            fragment.initial_mast_forest_id,
+            store_len,
+            "core trace fragment initial_mast_forest_id",
+        )?;
+        for forest_id in fragment.continuation.iter_enter_forest_ids() {
+            validate_mast_forest_id(
+                forest_id,
+                store_len,
+                "core trace fragment continuation EnterForest",
+            )
+            .map_err(|err| {
+                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+            })?;
+        }
+        for forest_id in fragment.replay.mast_forest_resolution.iter_forest_ids() {
+            validate_mast_forest_id(
+                forest_id,
+                store_len,
+                "core trace fragment MastForestResolutionReplay",
+            )
+            .map_err(|err| {
+                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+            })?;
+        }
+    }
+
+    for forest_id in context.hasher_for_chiplet.iter_hash_basic_block_forest_ids() {
+        validate_mast_forest_id(forest_id, store_len, "hasher HashBasicBlock replay")?;
+    }
+
+    Ok(())
+}
+
+fn validate_mast_forest_id(
+    forest_id: MastForestId,
+    store_len: usize,
+    label: &str,
+) -> Result<(), DeserializationError> {
+    if forest_id.to_usize() >= store_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} id {} is out of range for mast_forest_store length {store_len}",
+            u32::from(forest_id)
+        )));
+    }
+    Ok(())
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -130,12 +269,12 @@ pub struct ExecutionTracer {
     ///
     /// Each builder accumulates the [`MastNodeId`]s of nodes visited inside its source forest
     /// during execution, and is finalized into an [`Arc<SparseMastForest>`] in
-    /// [`Self::into_trace_generation_context`].
+    /// [`Self::into_trace_replay`].
     mast_forest_builders: Vec<SparseMastForestBuilder>,
 
     /// Maps a source forest's `Arc::as_ptr` identity to its [`MastForestId`] in
     /// `mast_forest_builders` (and, by construction, the eventual id in
-    /// `TraceGenerationContext::mast_forest_store`).
+    /// `TraceReplay::mast_forest_store`).
     ///
     /// Pointer identity is sound here because the trace-generation flow never crosses a process
     /// boundary: the tracer builds the store and the replay processor consumes it in the same
@@ -161,6 +300,20 @@ pub struct ExecutionTracer {
 }
 
 impl ExecutionTracer {
+    /// Creates a tracer whose hasher-chiplet requests stream to `hasher_sender` as they are
+    /// recorded, instead of buffering for post-execution replay. Everything else records as in
+    /// [`Self::new`].
+    #[cfg(feature = "std")]
+    pub(crate) fn new_with_streamed_hasher(
+        fragment_size: usize,
+        max_stack_depth: usize,
+        hasher_sender: std::sync::mpsc::Sender<crate::trace::ResolvedHasherOp<'static>>,
+    ) -> Self {
+        let mut tracer = Self::new(fragment_size, max_stack_depth);
+        tracer.hasher_for_chiplet = HasherRequestReplay::streamed(hasher_sender);
+        tracer
+    }
+
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
     pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
@@ -240,11 +393,14 @@ impl ExecutionTracer {
         let mut translated: ContinuationStack<MastForestId> = ContinuationStack::default();
         for cont in live.into_inner() {
             let translated_cont = match cont {
-                Continuation::EnterForest { forest, package_debug_info } => {
-                    Continuation::EnterForest {
-                        forest: self.forest_id(&forest),
-                        package_debug_info,
-                    }
+                Continuation::EnterForest {
+                    forest,
+                    package_debug_info,
+                    inline_context_depth,
+                } => Continuation::EnterForest {
+                    forest: self.forest_id(&forest),
+                    package_debug_info,
+                    inline_context_depth,
                 },
                 Continuation::StartNode(id) => Continuation::StartNode(id),
                 Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
@@ -265,10 +421,10 @@ impl ExecutionTracer {
         translated
     }
 
-    /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
-    /// during execution.
+    /// Converts the `ExecutionTracer` into a [`TraceReplay`] using the data accumulated during
+    /// execution.
     #[inline(always)]
-    pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
+    pub(crate) fn into_trace_replay(mut self) -> TraceReplay {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
@@ -281,7 +437,7 @@ impl ExecutionTracer {
             .map(|builder| Arc::new(builder.finalize()))
             .collect();
 
-        TraceGenerationContext {
+        TraceReplay {
             core_trace_contexts: self.fragment_contexts,
             mast_forest_store,
             range_checker_replay: self.range_checker,
@@ -667,7 +823,7 @@ impl Tracer for ExecutionTracer {
                     self.hasher_for_chiplet.record_hash_basic_block(
                         forest_id,
                         mast_node_id,
-                        basic_block_node.digest(),
+                        basic_block_node,
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
@@ -752,12 +908,14 @@ impl Tracer for ExecutionTracer {
         &mut self,
         node: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         output_root: Word,
     ) {
         let path = path.expect("execution tracer expects a valid Merkle path");
         self.hasher_chiplet_shim.record_build_merkle_root(path, output_root);
         self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]
@@ -766,6 +924,7 @@ impl Tracer for ExecutionTracer {
         old_value: Word,
         new_value: Word,
         path: Option<&MerklePath>,
+        depth: Felt,
         index: Felt,
         old_root: Word,
         new_root: Word,
@@ -778,6 +937,7 @@ impl Tracer for ExecutionTracer {
             path.clone(),
             index,
         );
+        self.range_checker.record_merkle_depth(depth);
     }
 
     #[inline(always)]
@@ -810,20 +970,6 @@ impl Tracer for ExecutionTracer {
     #[inline(always)]
     fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.memory_writes.record_write_word(word, addr, ctx, clk);
-    }
-
-    #[inline(always)]
-    fn record_memory_read_element_pair(
-        &mut self,
-        element_0: Felt,
-        addr_0: Felt,
-        element_1: Felt,
-        addr_1: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    ) {
-        self.memory_reads.record_read_element(element_0, addr_0, ctx, clk);
-        self.memory_reads.record_read_element(element_1, addr_1, ctx, clk);
     }
 
     #[inline(always)]
@@ -905,6 +1051,18 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
+    fn record_u32div_range_checks(
+        &mut self,
+        quotient: Felt,
+        remainder: Felt,
+        remainder_diff: Felt,
+    ) {
+        self.record_u32_range_checks(quotient, remainder);
+        let (d1, d0) = split_u32_into_u16(remainder_diff.as_canonical_u64());
+        self.range_checker.record_u32div_remainder_diff([d0, d1]);
+    }
+
+    #[inline(always)]
     fn record_kernel_proc_access(&mut self, proc_hash: Word) {
         self.kernel.record_kernel_proc_access(proc_hash);
     }
@@ -920,14 +1078,18 @@ impl Tracer for ExecutionTracer {
         processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
         // from start_clock_cycle because finalize_clock_cycle is only called when the operation
         // succeeds (i.e., the stack depth check in processor.restore_context() passes).
         if self.pending_restore_context {
             // Restore context for call/syscall/dyncall: pop the current context's
             // (empty) overflow stack and restore the previous context's overflow state.
-            self.overflow_table.restore_context();
+            self.overflow_table.restore_context().map_err(|_| {
+                ExecutionError::Internal(
+                    "overflow table restore_context failed during trace finalization",
+                )
+            })?;
             self.overflow_replay.record_restore_context_overflow_addr(
                 MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
                 self.overflow_table.last_update_clk_in_current_ctx(),
@@ -968,6 +1130,8 @@ impl Tracer for ExecutionTracer {
 
             self.is_eval_circuit_op = false;
         }
+
+        Ok(())
     }
 }
 
@@ -1078,5 +1242,154 @@ impl HasherChipletShim {
 impl Default for HasherChipletShim {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::*;
+    use crate::mast::BasicBlockNodeBuilder;
+
+    fn empty_trace_generation_context(fragment_size: usize, max_stack_depth: usize) -> TraceReplay {
+        TraceReplay {
+            mast_forest_store: Vec::new(),
+            core_trace_contexts: Vec::new(),
+            range_checker_replay: RangeCheckerReplay::default(),
+            memory_writes: MemoryWritesReplay::default(),
+            bitwise_replay: BitwiseReplay::default(),
+            hasher_for_chiplet: HasherRequestReplay::default(),
+            kernel_replay: KernelReplay::default(),
+            ace_replay: AceReplay::default(),
+            fragment_size,
+            max_stack_depth,
+        }
+    }
+
+    fn one_node_sparse_forest() -> Arc<SparseMastForest> {
+        let mut forest = MastForest::new();
+        let root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(root);
+
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(root, VisitKind::FullVisit);
+        Arc::new(builder.finalize())
+    }
+
+    fn core_trace_state() -> CoreTraceState {
+        CoreTraceState {
+            system: SystemState {
+                clk: RowIndex::from(0u32),
+                ctx: ContextId::root(),
+                fn_hash: Word::default(),
+                deferred_root: Word::default(),
+            },
+            decoder: DecoderState { current_addr: ZERO, parent_addr: ZERO },
+            stack: StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO),
+        }
+    }
+
+    fn valid_trace_generation_context() -> TraceReplay {
+        TraceReplay {
+            mast_forest_store: vec![one_node_sparse_forest()],
+            core_trace_contexts: vec![CoreTraceFragmentContext {
+                state: core_trace_state(),
+                replay: ExecutionReplay::default(),
+                continuation: ContinuationStack::default(),
+                initial_mast_forest_id: MastForestId::from(0u32),
+            }],
+            range_checker_replay: RangeCheckerReplay::default(),
+            memory_writes: MemoryWritesReplay::default(),
+            bitwise_replay: BitwiseReplay::default(),
+            hasher_for_chiplet: HasherRequestReplay::default(),
+            kernel_replay: KernelReplay::default(),
+            ace_replay: AceReplay::default(),
+            fragment_size: 1,
+            max_stack_depth: MIN_STACK_DEPTH,
+        }
+    }
+
+    fn assert_context_read_rejects_bad_forest_id(context: TraceReplay, expected_label: &str) {
+        let err = TraceReplay::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid forest id error");
+        };
+        assert!(message.contains(expected_label), "{message}");
+        assert!(message.contains("out of range for mast_forest_store length 1"), "{message}");
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_zero_fragment_size() {
+        let context = empty_trace_generation_context(0, MIN_STACK_DEPTH);
+
+        let err = TraceReplay::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid fragment size error");
+        };
+        assert!(message.contains("fragment_size must be non-zero"));
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_max_stack_depth_below_minimum() {
+        let context = empty_trace_generation_context(1, MIN_STACK_DEPTH - 1);
+
+        let err = TraceReplay::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid max stack depth error");
+        };
+        assert!(message.contains("max_stack_depth"));
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_initial_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0].initial_mast_forest_id = MastForestId::from(1u32);
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment initial_mast_forest_id",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_continuation_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0]
+            .continuation
+            .push_enter_forest(MastForestId::from(1u32));
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment continuation EnterForest",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_resolution_replay_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0]
+            .replay
+            .mast_forest_resolution
+            .record_resolution(MastNodeId::from(0), MastForestId::from(1u32));
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment MastForestResolutionReplay",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_hasher_replay_forest_id() {
+        let mut context = valid_trace_generation_context();
+        let basic_block = BasicBlockNodeBuilder::new(vec![Operation::Noop]).build().unwrap();
+        context.hasher_for_chiplet.record_hash_basic_block(
+            MastForestId::from(1u32),
+            MastNodeId::from(0),
+            &basic_block,
+        );
+
+        assert_context_read_rejects_bad_forest_id(context, "hasher HashBasicBlock replay");
     }
 }

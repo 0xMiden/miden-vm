@@ -1,5 +1,8 @@
 mod masm;
 
+use alloc::borrow::Cow;
+use core::ops::ControlFlow;
+
 use miden_assembly_syntax::debuginfo::SourceManager;
 use miden_package_registry::PackageRegistryAndProvider;
 use miden_project::ProjectDependencyGraph;
@@ -13,9 +16,12 @@ pub struct TargetAssemblyContext<'a> {
     /// The package manifest for the target being assembled
     pub package: Arc<ProjectPackage>,
     /// The resolved/canonicalized package manifest path
+    ///
+    /// NOTE: This will be set to an empty path for virtual project manifests
     pub manifest_path: &'a std::path::Path,
-    /// The resolved/canonicalized path to the directory containing `manifest_path`
-    pub project_root: &'a std::path::Path,
+    /// The resolved/canonicalized path to the directory containing `manifest_path`, or the parent
+    /// of `resolved_target_root` for virtual projects.
+    pub project_root: Cow<'a, std::path::Path>,
     /// The resolved/canonicalized path to the root source file of `target`
     pub resolved_target_root: Box<std::path::Path>,
     /// The target being assembled
@@ -62,8 +68,43 @@ impl<'a> TargetAssemblyContext<'a> {
         Ok(TargetAssemblyContext {
             package,
             manifest_path,
-            project_root,
+            project_root: project_root.into(),
             resolved_target_root: root_path.into_boxed_path(),
+            target,
+            profile,
+            dependency_graph,
+            source_manager,
+            package_registry,
+            warnings_as_errors: false,
+        })
+    }
+
+    pub fn new_virtual(
+        package: Arc<ProjectPackage>,
+        target: &'a Target,
+        profile: &'a Profile,
+        dependency_graph: &'a ProjectDependencyGraph,
+        package_registry: &'a dyn PackageRegistryAndProvider,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self, Report> {
+        let target_path = target.path.to_path().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target '{}': '{}' is not a valid file path",
+                target.name.inner(),
+                target.path
+            ))
+        })?;
+        let target_path = target_path.canonicalize().unwrap_or(target_path.clone());
+        let resolved_target_root = target_path.clone().into_boxed_path();
+        let project_root = target_path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or(PathBuf::from("."));
+        Ok(TargetAssemblyContext {
+            package,
+            manifest_path: std::path::Path::new(""),
+            project_root: project_root.into(),
+            resolved_target_root,
             target,
             profile,
             dependency_graph,
@@ -103,6 +144,15 @@ pub trait ProjectSourceProvider {
         &self,
         context: &TargetAssemblyContext<'_>,
     ) -> Result<ProjectSourceInputs, Report>;
+
+    /// Same as `provide_sources`, but allows the provider to interrupt the build and exit early
+    fn provide_sources_interruptible(
+        &self,
+        context: &TargetAssemblyContext<'_>,
+    ) -> Result<ControlFlow<(), ProjectSourceInputs>, Report> {
+        self.provide_sources(context).map(ControlFlow::Continue)
+    }
+
     /// Called to request the source files that are inputs to assembly of the current target, so
     /// that source provenance hash for the target can be computed.
     ///

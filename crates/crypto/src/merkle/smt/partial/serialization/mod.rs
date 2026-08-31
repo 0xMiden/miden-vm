@@ -4,20 +4,16 @@
 pub mod property_tests;
 mod tests;
 
-use alloc::{string::ToString, vec::Vec};
-use core::mem::size_of;
+use alloc::{collections::BTreeMap, string::ToString};
 
-use miden_field::{Felt, FeltFromIntError, Word};
+use miden_field::Word;
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use crate::{
-    Map,
-    merkle::{
-        EmptySubtreeRoots,
-        smt::{SMT_DEPTH, SmtLeaf},
-    },
+use crate::merkle::{
+    EmptySubtreeRoots, NodeIndex,
+    smt::{LeafIndex, SMT_DEPTH, SmtLeaf},
 };
 
 // UNIQUE NODES
@@ -36,8 +32,8 @@ use crate::{
 ///
 /// # Serialization
 ///
-/// The serialization and deserialization process does not validate that node or leaf indices are
-/// valid for their level. This is the responsibility of the client of this type.
+/// Deserialization validates node indices and checks each leaf map key against the index embedded
+/// in its value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniqueNodes {
     /// The expected root of the tree after reconstruction.
@@ -48,19 +44,18 @@ pub struct UniqueNodes {
 
     /// The nodes that make up the tree itself.
     ///
-    /// It maps the node depth to a vector containing all the nodes at that depth, ensuring that no
-    /// data that can be reasonably reconstructed is stored.
-    pub nodes: Map<u8, Vec<(u64, NodeValue)>>,
+    /// It maps each node index to its hash. Empty subtree roots are represented by absence.
+    pub nodes: BTreeMap<NodeIndex, Word>,
 
     /// The leaves of the tree.
     ///
     /// It only stores the populated leaves, keyed on their index.
-    pub leaves: Vec<(u64, SmtLeaf)>,
+    pub leaves: BTreeMap<u64, SmtLeaf>,
 
     /// The leaves for which we only have the hash value, and not the actual leaf value.
     ///
     /// We keep these separately to the `leaves` as storing them this way is more compact.
-    pub value_only_leaves: Vec<(u64, Word)>,
+    pub value_only_leaves: BTreeMap<u64, Word>,
 }
 
 impl UniqueNodes {
@@ -68,10 +63,41 @@ impl UniqueNodes {
     pub fn empty() -> Self {
         Self {
             root: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
-            nodes: Map::default(),
-            leaves: Vec::default(),
-            value_only_leaves: Vec::default(),
+            nodes: BTreeMap::new(),
+            leaves: BTreeMap::new(),
+            value_only_leaves: BTreeMap::new(),
         }
+    }
+
+    /// Returns the hash of the leaf at `position`, or its canonical empty hash when absent.
+    pub fn get_leaf_hash(&self, position: u64) -> Word {
+        self.leaves
+            .get(&position)
+            .map(SmtLeaf::hash)
+            .or_else(|| self.value_only_leaves.get(&position).copied())
+            .unwrap_or_else(|| SmtLeaf::new_empty(LeafIndex::new_max_depth(position)).hash())
+    }
+
+    /// Returns the hash of the node at `index`, or its canonical empty root when absent.
+    pub fn get_node_hash(&self, index: NodeIndex) -> Word {
+        self.nodes
+            .get(&index)
+            .copied()
+            .unwrap_or_else(|| *EmptySubtreeRoots::entry(SMT_DEPTH, index.depth()))
+    }
+
+    /// Checks that each leaf is stored under its embedded tree position.
+    pub(super) fn validate(&self) -> Result<(), DeserializationError> {
+        for (&position, leaf) in &self.leaves {
+            if position != leaf.index().position() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "Node index {position} did not match the embedded leaf index {}",
+                    leaf.index().position()
+                )));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -86,16 +112,29 @@ impl Serializable for UniqueNodes {
         // First we write the expected root into the buffer.
         self.root.write_into(target);
 
-        // We write the length as u64 to ensure portability.
-        let node_count = self.nodes.len() as u64;
-        target.write(node_count);
+        // `NodeIndex` sorts first by depth and then by position. Since `nodes` is a `BTreeMap`, all
+        // nodes at the same depth are next to each other and can be written as one level.
+        let mut levels = self.nodes.iter().peekable();
+        let level_count = self
+            .nodes
+            .keys()
+            .map(NodeIndex::depth)
+            .fold((0, None), |(count, previous), depth| {
+                (count + u64::from(previous != Some(depth)), Some(depth))
+            })
+            .0;
+        target.write(level_count);
 
-        // We then write each of the pairs of (u8, Vec<...>) independently.
-        for (depth, nodes) in self.nodes.iter() {
+        while let Some((index, _)) = levels.peek() {
+            let depth = index.depth();
             target.write(depth);
-            let node_count = nodes.len() as u64;
-            target.write(node_count);
-            target.write_many(nodes.iter());
+            let level_node_count =
+                levels.clone().take_while(|(index, _)| index.depth() == depth).count();
+            target.write(level_node_count as u64);
+            for (index, value) in levels.by_ref().take(level_node_count) {
+                target.write(index.position());
+                target.write(value);
+            }
         }
 
         // The leaves themselves come next.
@@ -118,110 +157,43 @@ impl Deserializable for UniqueNodes {
 
         // We first have to read the count of levels.
         let level_count = source.read_u64()?;
-        let mut nodes = Map::new();
+        let mut nodes = BTreeMap::new();
 
         // Next we have that many levels to read, but each is of a variable size.
         for _ in 0..level_count {
             let depth = source.read_u8()?;
             let node_count = source.read_u64()?;
-            let level_nodes = source
-                .read_many_iter(node_count.try_into().map_err(|_| {
-                    DeserializationError::InvalidValue(format!("Node count {node_count} overflow"))
-                })?)?
-                .collect::<Result<Vec<_>, _>>()?;
-            nodes.insert(depth, level_nodes);
+            for _ in 0..node_count {
+                let position = source.read_u64()?;
+                let index = NodeIndex::new(depth, position)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+                let value = source.read()?;
+                nodes.insert(index, value);
+            }
         }
 
         // Next we need the number of leaves.
         let leaf_count = source.read_u64()?;
-        let mut leaves = Vec::new();
+        let mut leaves = BTreeMap::new();
 
         // And then we have to read that many leaves.
         for _ in 0..leaf_count {
-            leaves.push(source.read()?);
+            let (position, leaf) = source.read()?;
+            leaves.insert(position, leaf);
         }
 
         // Finally we read the number of value-only leaves...
         let value_only_leaf_count = source.read_u64()?;
-        let mut value_only_leaves = Vec::new();
+        let mut value_only_leaves = BTreeMap::new();
 
         // ... and read that many.
         for _ in 0..value_only_leaf_count {
-            value_only_leaves.push(source.read()?);
+            let (position, value) = source.read()?;
+            value_only_leaves.insert(position, value);
         }
 
-        Ok(Self { root, nodes, leaves, value_only_leaves })
-    }
-}
-
-// NODE VALUE
-// ================================================================================================
-
-/// The value of a node in the serialized representation.
-///
-/// # Serialization
-///
-/// This enum can be in one of two cases: empty, or containing a Word. The naïve serialization would
-/// use a flag to indicate the variant, costing at least a byte to avoid the need for potentially
-/// expensive unaligned accesses.
-///
-/// [`Word`], however, consists of four `Felt`s, each of which occupies the Goldilocks field. This
-/// provides a niche in each of those `Felt`s that allows us to not require the extra byte when
-/// serializing a true value. As we assume that real values are more common than empty subtree roots
-/// by their very nature, making an empty root take 8 bytes instead of 1 is a smaller cost to pay
-/// than an extra byte for each populated node.
-///
-/// To that end, we encode the type as follows:
-///
-/// - For `Self::EmptySubtreeRoot` we encode the LE bytes for [`u64::MAX`], which exceeds the field
-///   order and hence serves as a sentinel value using the niche.
-/// - For `Self::Present` we simply encode the word as its four component felts. As none of the
-///   felts can take a value exceeding [`Felt::ORDER`], we can immediately disambiguate between this
-///   case and the one above.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum NodeValue {
-    /// The node is the head of an empty subtree at the depth given by the outer map in
-    /// [`UniqueNodes`].
-    EmptySubtreeRoot,
-
-    /// The node's value is the provided hash.
-    Present(Word),
-}
-
-impl Serializable for NodeValue {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            NodeValue::EmptySubtreeRoot => target.write_u64(u64::MAX),
-            NodeValue::Present(w) => w.write_into(target),
-        }
-    }
-}
-
-impl Deserializable for NodeValue {
-    fn min_serialized_size() -> usize {
-        size_of::<u64>()
-    }
-
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let first_value = source.read_u64()?;
-
-        let to_e = |e: FeltFromIntError| DeserializationError::InvalidValue(e.to_string());
-
-        if first_value == u64::MAX {
-            Ok(Self::EmptySubtreeRoot)
-        } else {
-            // We start by reading the rest of the bytes here to make sure that we have enough data
-            // before actually deserializing.
-            let remaining_values: [u64; Word::NUM_ELEMENTS - 1] = source.read()?;
-
-            let felts = [
-                Felt::new(first_value).map_err(to_e)?,
-                Felt::new(remaining_values[0]).map_err(to_e)?,
-                Felt::new(remaining_values[1]).map_err(to_e)?,
-                Felt::new(remaining_values[2]).map_err(to_e)?,
-            ];
-
-            Ok(Self::Present(Word::new(felts)))
-        }
+        let unique_nodes = Self { root, nodes, leaves, value_only_leaves };
+        unique_nodes.validate()?;
+        Ok(unique_nodes)
     }
 }

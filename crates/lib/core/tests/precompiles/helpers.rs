@@ -34,9 +34,11 @@ pub fn run_precompile_program_with_stack(
 ) -> Result<ExecutionOutput, ExecutionError> {
     let stack_inputs = StackInputs::new(stack).expect("invalid precompile test stack inputs");
     let core_lib = CoreLibrary::default();
-    let program = Assembler::default()
-        .with_package(core_lib.package(), Linkage::Dynamic)
-        .expect("failed to link core library")
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
         .assemble_program("precompile_test", source)
         .expect("failed to assemble precompile test program")
         .unwrap_program();
@@ -111,7 +113,7 @@ pub fn masm_push_u32x8(limbs: U32x8) -> String {
 pub fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
     let registry = Arc::new(registry());
     let wire = output.deferred_state.to_wire().expect("deferred state must encode to wire");
-    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX)
+    let rehydrated = DeferredState::from_wire(Arc::clone(&registry), &wire)
         .expect("deferred wire must rehydrate under miden-precompiles registry");
     assert_eq!(
         rehydrated.root(),

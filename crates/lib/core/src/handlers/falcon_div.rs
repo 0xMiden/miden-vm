@@ -65,15 +65,11 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
     // Assertion from the original code: r_hi should always be zero for Falcon modulus
     assert_eq!(r_hi, ZERO);
 
-    // `mod_12289` consumes the quotient via `adv_push adv_push` and then the remainder via
-    // `adv_push`. `extend_stack([a, b, ...])` puts `a` on top of the advice stack (reverse
-    // iteration + push_front), and the mutations are applied in the order they appear in the
-    // returned vec. So applying remainder first then quotient leaves the advice stack, top first:
-    //     [q_hi, q_lo, r_lo, ...]
-    // `adv_push adv_push` pops q_hi then q_lo → operand [q_lo, q_hi, ...] (LE); the subsequent
-    // `adv_push` pops r_lo.
-    let remainder = AdviceMutation::extend_stack([r_lo]);
-    let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+    // MASM consumes the remainder after the quotient, with one `adv_push`.
+    let remainder = AdviceMutation::extend_advice_stack_with([r_lo]);
+
+    // MASM reads q_hi then q_lo with `adv_push adv_push`, so q_lo lands on top.
+    let quotient = AdviceMutation::extend_advice_stack_with([q_hi, q_lo]);
     Ok(vec![remainder, quotient])
 }
 

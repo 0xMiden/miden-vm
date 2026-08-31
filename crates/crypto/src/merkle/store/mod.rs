@@ -21,7 +21,6 @@ mod tests;
 // ================================================================================================
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct StoreNode {
     left: Word,
     right: Word,
@@ -91,7 +90,6 @@ pub struct StoreNode {
 /// assert_eq!(store.num_internal_nodes() - 255, 10);
 /// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct MerkleStore {
     nodes: Map<Word, StoreNode>,
 }
@@ -246,8 +244,13 @@ impl MerkleStore {
             return Err(MerkleError::RootNotInStore(hash));
         }
 
-        // we traverse from root to leaf, so the path is reversed
-        let mut path = (index << (64 - tree_depth)).reverse_bits();
+        // we traverse from root to leaf, so the path is reversed. A depth-zero tree has the empty
+        // path, and computing it with the shift below would shift by the full 64-bit width.
+        let mut path = if tree_depth == 0 {
+            0
+        } else {
+            (index << (64 - tree_depth)).reverse_bits()
+        };
 
         // iterate every depth and reconstruct the path from root to leaf
         for depth in 0..=tree_depth {

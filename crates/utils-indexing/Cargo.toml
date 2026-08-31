@@ -1,6 +1,6 @@
 [package]
 name = "miden-utils-indexing"
-version = "0.28.0"
+version = "0.31.0"
 description = "Type-safe u32-indexed vector utilities for Miden"
 readme = "README.md"
 categories = ["development-tools", "no-std"]
@@ -12,25 +12,19 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[package.metadata.cargo-shear]
-ignored = ["serde_json"]
-
 [features]
 arbitrary = ["std", "dep:proptest"]
 default = ["std"]
 std = ["proptest?/std"]
-serde = ["dep:serde"]
 
 [dependencies]
 # Required dependencies
-miden-crypto.workspace = true
+miden-serde-utils.workspace = true
 thiserror.workspace = true
 
 # Optional dependencies
 proptest = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
-serde_json.workspace = true

@@ -173,7 +173,11 @@ impl SecretKey {
     ///
     /// These changes make the signature algorithm compliant with the reference implementation.
     #[cfg(test)]
-    pub fn sign_with_rng_testing<R: Rng>(&self, message: &[u8], rng: &mut R) -> Signature {
+    pub(in crate::dsa::falcon512_poseidon2) fn sign_with_rng_testing<R: Rng>(
+        &self,
+        message: &[u8],
+        rng: &mut R,
+    ) -> Signature {
         use crate::dsa::falcon512_poseidon2::{
             hash_to_point::hash_to_point_shake256, tests::ChaCha,
         };

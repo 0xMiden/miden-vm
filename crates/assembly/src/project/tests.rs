@@ -1,18 +1,17 @@
 use std::{path::Path, process::Command, string::String, sync::Arc};
 
-use miden_assembly_syntax::source_file;
+use miden_assembly_syntax::{ast::DebugVarLocation, source_file};
 use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt},
-    operations::{DebugVarInfo, DebugVarLocation, Operation},
+    mast::{BasicBlockNodeBuilder, MastForest, MastNodeExt, MastNodeId},
+    operations::Operation,
     serde::{Deserializable, Serializable, SliceReader},
-    utils::hash_string_to_word,
+    utils::{Idx, hash_string_to_word},
 };
 use miden_mast_package::{
     PackageExport, PackageModule, ProcedureExport, Section, SectionId,
     debug_info::{
-        DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection, DebugSourceAsmOp,
-        DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
-        DebugSourceVar, DebugSourcesSection, DebugTypesSection,
+        DEBUG_INFO_VERSION, DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
+        PackageDebugInfo, PackageDebugInfoBuilder,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -59,11 +58,11 @@ end
         dev.debug_info()
             .expect("dev package debug info should decode")
             .expect("dev package should contain debug info")
-            .source_map()
-            .is_some_and(|source_map| !source_map.asm_ops().is_empty())
+            .nodes()
+            .iter()
+            .any(|node| !node.asm_ops.is_empty())
     );
-    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
-    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
@@ -74,13 +73,7 @@ end
             .expect("release package debug info should decode")
             .is_none()
     );
-    assert!(
-        !release
-            .sections
-            .iter()
-            .any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-    );
-    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
+    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_INFO));
 }
 
 #[test]
@@ -225,61 +218,21 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_sources = package
+    let debug_info = package
         .sections
         .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCES)
-        .expect("package should contain DEBUG_SOURCES");
-    let debug_functions = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_FUNCTIONS)
-        .expect("package should contain DEBUG_FUNCTIONS");
-    let debug_types = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_TYPES)
-        .expect("package should contain DEBUG_TYPES");
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
+        .find(|section| section.id == SectionId::DEBUG_INFO)
+        .expect("package should contain DEBUG_INFO");
 
-    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
-    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
-        .expect("DEBUG_SOURCES should deserialize");
-    assert_eq!(debug_sources.version, 1);
-    assert_eq!(debug_sources.files.len(), 1);
-
-    let mut functions_reader = SliceReader::new(debug_functions.data.as_ref());
-    let debug_functions = DebugFunctionsSection::read_from(&mut functions_reader)
-        .expect("DEBUG_FUNCTIONS should deserialize");
-    assert_eq!(debug_functions.version, DEBUG_FUNCTIONS_VERSION);
-    assert_eq!(debug_functions.functions.len(), 1);
-
-    let mut types_reader = SliceReader::new(debug_types.data.as_ref());
-    let debug_types =
-        DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
-    assert_eq!(debug_types.version, 1);
-
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    assert_eq!(debug_source_graph.version(), 1);
-    assert!(!debug_source_graph.nodes().is_empty());
-    assert!(!debug_source_graph.roots().is_empty());
-
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
-    assert_eq!(debug_source_map.version(), DEBUG_SOURCE_MAP_VERSION);
-    assert!(!debug_source_map.asm_ops().is_empty());
+    let mut reader = SliceReader::new(debug_info.data.as_ref());
+    let debug_info =
+        PackageDebugInfo::read_from(&mut reader).expect("DEBUG_INFO should deserialize");
+    assert_eq!(debug_info.version(), DEBUG_INFO_VERSION);
+    assert_eq!(debug_info.files().len(), 1);
+    assert_eq!(debug_info.functions().len(), 1);
+    assert!(!debug_info.nodes().is_empty());
+    assert!(!debug_info.roots().is_empty());
+    assert!(debug_info.nodes().iter().any(|node| !node.asm_ops.is_empty()));
 }
 
 #[test]
@@ -315,32 +268,19 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
-
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
 
     let mut source_nodes_by_exec = BTreeMap::new();
-    for row in debug_source_map.asm_ops() {
-        let source_node = row.source_node.as_u32() as usize;
-        let exec_node = debug_source_graph.nodes()[source_node].exec_node;
-        source_nodes_by_exec
-            .entry(exec_node)
-            .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
-            .insert(row.source_node);
+    for (source_idx, source_node) in debug_info.nodes().iter().enumerate() {
+        if !source_node.asm_ops.is_empty() {
+            source_nodes_by_exec
+                .entry(source_node.exec_node)
+                .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
+                .insert(DebugSourceNodeId::from(source_idx as u32));
+        }
     }
 
     assert!(
@@ -379,34 +319,16 @@ end
         .assemble_library_package(&manifest_path, Some("dev"))
         .expect("debug build should succeed");
 
-    let debug_source_graph = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
-        .expect("package should contain DEBUG_SOURCE_GRAPH");
-    let debug_source_map = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
-        .expect("package should contain DEBUG_SOURCE_MAP");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
 
-    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
-    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
-        .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
-    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
-        .expect("DEBUG_SOURCE_MAP should deserialize");
-
-    let exec_with_split_ranges = debug_source_graph
+    let exec_with_split_ranges = debug_info
         .nodes()
         .iter()
-        .enumerate()
-        .fold(BTreeMap::new(), |mut ranges_by_exec, (source_idx, source_node)| {
-            let has_asm_op = debug_source_map
-                .asm_ops()
-                .iter()
-                .any(|row| row.source_node.as_u32() as usize == source_idx);
-            if has_asm_op {
+        .fold(BTreeMap::new(), |mut ranges_by_exec, source_node| {
+            if !source_node.asm_ops.is_empty() {
                 ranges_by_exec
                     .entry(source_node.exec_node)
                     .or_insert_with(Vec::new)
@@ -447,11 +369,6 @@ fn debug_bearing_static_package(
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
     push_export_module_path(&mut module_paths, &export_path);
-    let source_root = DebugSourceNodeId::from(0);
-    let export = ProcedureExport::new(export_path, Some(root), digest, None)
-        .with_source_node(Some(source_root));
-    exports.push(PackageExport::Procedure(export));
-
     if let Some((marker_export, marker_op)) = marker_export {
         let marker_root = BasicBlockNodeBuilder::new(vec![marker_op])
             .add_to_forest(&mut forest)
@@ -471,25 +388,34 @@ fn debug_bearing_static_package(
         )));
     }
 
-    let source_graph = DebugSourceGraphSection::from_parts(
-        vec![DebugSourceNode::new(root, vec![], 0, 1)],
-        vec![source_root],
-    );
-    let source_map = DebugSourceMapSection::from_parts(
-        vec![DebugSourceAsmOp::new(
-            source_root,
-            0,
-            None,
-            context.to_string(),
-            "add".to_string(),
-            1,
-        )],
-        vec![DebugSourceVar::new(
-            source_root,
-            0,
-            DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
-        )],
-    );
+    let mut debug_info = PackageDebugInfoBuilder::default();
+    let context_name_idx = debug_info.add_string(context);
+    let op_name_idx = debug_info.add_string("add");
+    let name_idx = debug_info.add_string(var_name);
+    let source_root = debug_info
+        .add_node(DebugSourceNode {
+            exec_node: root,
+            children: vec![],
+            op_start: 0,
+            op_end: 1,
+            asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
+            debug_vars: vec![DebugSourceVar {
+                op_idx: 0,
+                name_idx,
+                type_id: None,
+                arg_idx: None,
+                location_idx: None,
+                value_location: DebugVarLocation::Stack(0),
+            }],
+            inline_calls: vec![],
+        })
+        .expect("test package source node should build");
+    debug_info.add_root(source_root);
+    let debug_info = debug_info.build();
+
+    let export = ProcedureExport::new(export_path, Some(root), digest, None)
+        .with_source_node(Some(source_root));
+    exports.insert(0, PackageExport::Procedure(export));
 
     let modules = module_paths.into_iter().map(|path| PackageModule::new(path, []));
     let mut package = MastPackage::create_with_modules(
@@ -502,10 +428,7 @@ fn debug_bearing_static_package(
         [],
     )
     .expect("test package should be valid");
-    package.sections = vec![
-        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
-        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
-    ];
+    package.sections = vec![Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes())];
     package
 }
 
@@ -522,7 +445,7 @@ fn push_export_module_path(
 }
 
 #[test]
-fn static_linking_preserves_debug_rows_for_deduped_execution_nodes() {
+fn static_linking_keeps_validated_dependency_debug_rows() {
     let tempdir = TempDir::new().unwrap();
 
     let depa = debug_bearing_static_package(
@@ -580,12 +503,16 @@ end
         .expect("root package should contain debug info");
     let source_for_context = |context_name: &str| {
         debug_info
-            .source_map()
-            .expect("root package should contain source map")
-            .asm_ops()
+            .nodes()
             .iter()
-            .find(|row| row.context_name == context_name)
-            .map(|row| row.source_node)
+            .enumerate()
+            .find(|(_, node)| {
+                node.asm_ops.len() == 1
+                    && node.asm_ops.iter().any(|row| {
+                        debug_info.get_string(row.context_name_idx).as_deref() == Some(context_name)
+                    })
+            })
+            .map(|(source_idx, _)| DebugSourceNodeId::from(source_idx as u32))
             .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
     };
     let depa_source = source_for_context("depa_ctx");
@@ -598,32 +525,39 @@ end
         depa_exec, depb_exec,
         "identical static dependency bodies should dedup to one execution node",
     );
+    assert!(debug_info.nodes().iter().any(|node| {
+        node.exec_node == depa_exec
+            && node
+                .asm_ops
+                .iter()
+                .map(|row| debug_info.get_string(row.context_name_idx).unwrap())
+                .eq([Arc::from("depa_ctx"), Arc::from("depb_ctx")])
+    }));
 
     let contexts_for_deduped_exec = [depa_source, depb_source]
         .into_iter()
         .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
         .map(|source_node| {
-            debug_info
-                .first_asm_op_for_source_node(source_node)
-                .unwrap()
-                .context_name
-                .as_str()
+            let row = debug_info.first_asm_op_for_source_node(source_node).unwrap();
+            debug_info.get_string(row.context_name_idx).unwrap()
         })
         .collect::<Vec<_>>();
-    assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
-    assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depa_ctx"));
+    assert!(contexts_for_deduped_exec.iter().any(|context| context.as_ref() == "depb_ctx"));
 
     let vars_at_source_start = |source_node_id| {
         let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
         debug_info
             .debug_vars_for_operation(source_node_id, op_start)
-            .map(|row| row.var.name())
+            .map(|row| debug_info.get_string(row.name_idx).unwrap())
             .collect::<Vec<_>>()
     };
     let depa_vars = vars_at_source_start(depa_source);
     let depb_vars = vars_at_source_start(depb_source);
-    assert_eq!(depa_vars, vec!["depa_var"]);
-    assert_eq!(depb_vars, vec!["depb_var"]);
+    assert_eq!(depa_vars.len(), 1);
+    assert_eq!(depa_vars[0].as_ref(), "depa_var");
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 
     let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
         .expect("root package should deserialize as trusted");
@@ -631,22 +565,19 @@ end
         .debug_info()
         .expect("round-tripped debug sections should decode")
         .expect("round-tripped package should contain debug info");
+    let depa_asm_op = round_tripped_debug_info.first_asm_op_for_source_node(depa_source).unwrap();
     assert_eq!(
-        round_tripped_debug_info
-            .first_asm_op_for_source_node(depa_source)
-            .unwrap()
-            .context_name,
-        "depa_ctx",
+        round_tripped_debug_info.get_string(depa_asm_op.context_name_idx).as_deref(),
+        Some("depa_ctx"),
     );
-    assert_eq!(
-        {
-            let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
-            round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
-        }
-        .map(|row| row.var.name())
-        .collect::<Vec<_>>(),
-        vec!["depb_var"],
-    );
+    let depb_vars = {
+        let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
+        round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
+    }
+    .map(|row| round_tripped_debug_info.get_string(row.name_idx).unwrap())
+    .collect::<Vec<_>>();
+    assert_eq!(depb_vars.len(), 1);
+    assert_eq!(depb_vars[0].as_ref(), "depb_var");
 }
 
 #[test]
@@ -683,15 +614,21 @@ end
         .expect("trim-paths build should succeed");
     let tempdir_prefix = tempdir.path().display().to_string();
 
-    let asm_op_path = package
+    let debug_info = package
         .debug_info()
         .expect("package debug info should decode")
-        .expect("package should contain debug info")
-        .source_map()
-        .expect("package should contain source map")
-        .asm_ops()
+        .expect("package should contain debug info");
+    let asm_op_path = debug_info
+        .nodes()
         .iter()
-        .find_map(|asm_op| asm_op.location.as_ref().map(|location| location.uri.path().to_string()))
+        .flat_map(|node| node.asm_ops.iter())
+        .find_map(|asm_op| {
+            asm_op
+                .location_idx
+                .into_option()
+                .and_then(|location_idx| debug_info.get_location(location_idx))
+                .map(|location| location.uri.path().to_string())
+        })
         .expect("assembled package should contain asm-op locations");
     assert!(
         !asm_op_path.contains(tempdir_prefix.as_str()),
@@ -702,16 +639,9 @@ end
         "asm-op path remained absolute: {asm_op_path}"
     );
 
-    let debug_sources = package
-        .sections
-        .iter()
-        .find(|section| section.id == SectionId::DEBUG_SOURCES)
-        .expect("package should contain DEBUG_SOURCES");
-    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
-    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
-        .expect("DEBUG_SOURCES should deserialize");
-    assert!(!debug_sources.files.is_empty());
-    for path in debug_sources.strings.iter() {
+    assert!(!debug_info.files().is_empty());
+    for file in debug_info.files() {
+        let path = debug_info.get_string(file.path_idx).expect("source file path should exist");
         assert!(
             !path.contains(tempdir_prefix.as_str()),
             "package debug path was not trimmed: {path}"
@@ -730,12 +660,12 @@ fn assembles_mixed_dependencies_and_inherits_static_runtime_deps() {
 
     let runtime =
         context.assemble_library_package_with_export("runtime", "1.0.0", "deps::runtime::leaf", []);
-    let runtime_digest = runtime.digest();
+    let runtime_digest = runtime.dependency_commitment();
     context.registry_mut().add_package(runtime.into());
 
     let regdep =
         context.assemble_library_package_with_export("regdep", "1.0.0", "deps::regdep::leaf", []);
-    let regdep_digest = regdep.digest();
+    let regdep_digest = regdep.dependency_commitment();
     context.registry_mut().add_package(regdep.into());
 
     let predep =
@@ -965,12 +895,12 @@ end
     let registered = context
         .assemble_library("predep", Some("1.0.0"), registered_module, None::<Box<Module>>)
         .unwrap();
-    let registered_digest = registered.digest();
+    let registered_digest = registered.dependency_commitment();
     context.registry_mut().add_package(registered.into());
 
     let predep =
         context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::leaf", []);
-    let predep_digest = predep.digest();
+    let predep_digest = predep.dependency_commitment();
     assert_ne!(registered_digest, predep_digest);
     let predep_path = tempdir.path().join("predep.masp");
     predep.write_to_file(&predep_path).unwrap();
@@ -1086,12 +1016,8 @@ fn preassembled_dependency_does_not_repair_readable_exact_registry_artifact() {
         context.assemble_library_package_with_export("predep", "1.0.0", "deps::predep::leaf", []);
     let selected = context.registry_mut().add_package(predep.clone().into());
 
-    let mut path_predep = MastPackage::read_from_bytes(&predep.to_bytes()).unwrap();
-    path_predep.sections.push(Section::new(
-        SectionId::custom("preassembled-test").unwrap(),
-        Vec::from([1, 2, 3]),
-    ));
-    assert_eq!(path_predep.digest(), predep.digest());
+    let path_predep = MastPackage::read_from_bytes_trusted(&predep.to_bytes()).unwrap();
+    assert_eq!(path_predep.dependency_commitment(), predep.dependency_commitment());
 
     let predep_path = tempdir.path().join("predep.masp");
     path_predep.write_to_file(&predep_path).unwrap();
@@ -1141,12 +1067,12 @@ fn assembles_mixed_path_and_git_dependencies_with_shared_registry_semver_resolut
 
     let shared_120 =
         context.assemble_library_package_with_export("shared", "1.2.0", "deps::shared::leaf", []);
-    let shared_120_digest = shared_120.digest();
+    let shared_120_digest = shared_120.dependency_commitment();
     context.registry_mut().add_package(shared_120.into());
 
     let shared_130 =
         context.assemble_library_package_with_export("shared", "1.3.0", "deps::shared::leaf", []);
-    let shared_130_digest = shared_130.digest();
+    let shared_130_digest = shared_130.dependency_commitment();
     context.registry_mut().add_package(shared_130.into());
 
     let pathdep_dir = tempdir.path().join("pathdep");
@@ -1276,12 +1202,12 @@ fn assembles_mixed_path_and_git_dependencies_with_shared_registry_digest_resolut
 
     let shared_100 =
         context.assemble_library_package_with_export("shared", "1.0.0", "deps::shared::leaf", []);
-    let shared_digest = shared_100.digest();
+    let shared_digest = shared_100.dependency_commitment();
     context.registry_mut().add_package(shared_100.into());
 
     let shared_200 =
         context.assemble_library_package_with_export("shared", "2.0.0", "deps::shared::leaf", []);
-    assert_eq!(shared_200.digest(), shared_digest);
+    assert_ne!(shared_200.dependency_commitment(), shared_digest);
     context.registry_mut().add_package(shared_200.into());
 
     let pathdep_dir = tempdir.path().join("pathdep");
@@ -1478,7 +1404,7 @@ fn statically_linked_dynamic_dependencies_propagate_multiple_levels() {
         "deps::runtime::leaf",
         [],
     ));
-    let runtime_digest = runtime.digest();
+    let runtime_digest = runtime.dependency_commitment();
     context.registry_mut().add_package(runtime);
 
     let mid_dir = tempdir.path().join("mid");
@@ -1649,14 +1575,15 @@ dep.workspace = true
         .assemble_library_package(&app_manifest, None)
         .expect("failed to assemble 'app'");
 
-    assert_eq!(
-        package
-            .manifest
-            .dependencies()
-            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
-            .collect::<Vec<_>>(),
-        vec![format!("dep@0.2.0#{}", dep010.digest())]
-    );
+    let dependency = package.manifest.dependencies().next().unwrap();
+    assert_eq!(dependency.name, PackageId::from("dep"));
+    assert_eq!(dependency.version, "0.2.0".parse().unwrap());
+    assert_ne!(dependency.digest, dep010.dependency_commitment());
+    let dep_record = context
+        .registry()
+        .get_by_semver(&dependency.name, &dependency.version)
+        .expect("workspace dependency should be registered");
+    assert_eq!(dep_record.version().digest, Some(dependency.digest));
 }
 
 #[test]
@@ -2188,7 +2115,7 @@ dep = { path = "dep" }
         context.registry().loaded_packages(),
         vec![format!("dep@{}", dep_record.version())]
     );
-    assert_eq!(second.digest(), first.digest());
+    assert_eq!(second.commitment(), first.commitment());
     assert_eq!(
         second
             .manifest
@@ -2477,12 +2404,12 @@ fn executable_packages_preserve_kernel_when_converted_back_to_program() {
         .sections
         .iter()
         .find(|section| section.id == SectionId::KERNEL)
-        .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+        .map(|section| MastPackage::read_from_bytes_trusted(section.data.as_ref()).unwrap())
         .expect("executable package should embed the linked kernel package");
     assert_eq!(embedded_kernel_package.kind, TargetType::Kernel);
     assert_eq!(embedded_kernel_package.name, kernel_dependency.name);
     assert_eq!(embedded_kernel_package.version, kernel_dependency.version);
-    assert_eq!(embedded_kernel_package.digest(), kernel_dependency.digest);
+    assert_eq!(embedded_kernel_package.dependency_commitment(), kernel_dependency.digest);
 
     let round_tripped_package = MastPackage::read_from_bytes(&package.to_bytes())
         .expect("serialized executable package should round-trip");
@@ -2519,12 +2446,12 @@ fn executable_packages_preserve_transitive_kernel_when_converted_back_to_program
         .sections
         .iter()
         .find(|section| section.id == SectionId::KERNEL)
-        .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+        .map(|section| MastPackage::read_from_bytes_trusted(section.data.as_ref()).unwrap())
         .expect("executable package should embed the transitive kernel package");
     assert_eq!(embedded_kernel_package.kind, TargetType::Kernel);
     assert_eq!(embedded_kernel_package.name, kernel_dependency.name);
     assert_eq!(embedded_kernel_package.version, kernel_dependency.version);
-    assert_eq!(embedded_kernel_package.digest(), kernel_dependency.digest);
+    assert_eq!(embedded_kernel_package.dependency_commitment(), kernel_dependency.digest);
 
     let round_tripped_package = MastPackage::read_from_bytes(&package.to_bytes())
         .expect("serialized executable package should round-trip");
@@ -2596,10 +2523,10 @@ fn preassembled_libraries_prefer_store_kernel_over_embedded_copy() {
         .sections
         .iter()
         .find(|section| section.id == SectionId::KERNEL)
-        .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+        .map(|section| MastPackage::read_from_bytes_trusted(section.data.as_ref()).unwrap())
         .expect("executable package should embed the store-provided kernel package");
     assert_eq!(embedded_kernel_package.version, kernel_package.version);
-    assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
+    assert_eq!(embedded_kernel_package.commitment(), kernel_package.commitment());
 
     let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
         .expect("serialized executable package should round-trip")
@@ -2657,7 +2584,7 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
         .expect("kernel package should round-trip as a kernel library");
     let kernel_version = miden_package_registry::Version::new(
         kernel_package.version.clone(),
-        kernel_package.digest(),
+        kernel_package.dependency_commitment(),
     );
     let mut mid_package = MastPackage::read_from_bytes(
         &build_context
@@ -2688,10 +2615,10 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
         .sections
         .iter()
         .find(|section| section.id == SectionId::KERNEL)
-        .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+        .map(|section| MastPackage::read_from_bytes_trusted(section.data.as_ref()).unwrap())
         .expect("executable package should embed the fallback kernel package");
     assert_eq!(embedded_kernel_package.version, kernel_package.version);
-    assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
+    assert_eq!(embedded_kernel_package.commitment(), kernel_package.commitment());
     assert_eq!(
         context.registry().loaded_packages(),
         vec![format!("kernelpkg@{kernel_version}"), format!("kernelpkg@{kernel_version}")]
@@ -2757,7 +2684,10 @@ end
     let conflicting_kernel = build_context
         .assemble_library_package(&conflicting_kernel_manifest, None)
         .expect("conflicting kernel package build should succeed");
-    assert_ne!(conflicting_kernel.digest(), kernel_package.digest());
+    assert_ne!(
+        conflicting_kernel.dependency_commitment(),
+        kernel_package.dependency_commitment()
+    );
 
     let root_manifest =
         write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
@@ -2903,6 +2833,80 @@ end
 }
 
 #[test]
+fn preassembled_dependency_rejects_tampered_non_root_mast_node_after_graph_selection() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    let dep_manifest = dep_dir.join("miden-project.toml");
+    write_file(
+        &dep_manifest,
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "dep"
+"#,
+    );
+    write_file(
+        &dep_dir.join("lib.masm"),
+        r#"pub proc leaf
+    dup.0
+    if.true
+        push.2
+    else
+        push.3
+    end
+    drop
+    push.1
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let dep_package = context
+        .assemble_library_package(&dep_manifest, Some("dev"))
+        .expect("dependency package should assemble");
+    let dep_package_path = tempdir.path().join("dep.masp");
+    dep_package.write_to_file(&dep_package_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep.masp", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::leaf
+end
+"#,
+    );
+
+    let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
+    fs::write(&dep_package_path, package_bytes_with_spoofed_non_root_node_digest(&dep_package))
+        .unwrap();
+
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect_err("tampered preassembled dependency MAST should fail validation");
+    let error = error.to_string();
+    assert!(error.contains("failed to decode package"));
+    assert!(error.contains("invalid untrusted MAST forest"));
+    assert!(error.contains("hash mismatch for node"));
+}
+
+#[test]
 fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
     let tempdir = TempDir::new().unwrap();
     let runtime_v1 = Arc::<MastPackage>::from(MastPackage::generate(
@@ -2928,7 +2932,7 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
             name: PackageId::from("runtime"),
             version: runtime_v1.version.clone(),
             kind: TargetType::Library,
-            digest: runtime_v1.digest(),
+            digest: runtime_v1.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -2970,7 +2974,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime_v2.version.clone(),
             kind: TargetType::Library,
-            digest: runtime_v2.digest(),
+            digest: runtime_v2.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -2979,11 +2983,7 @@ end
     let error = project_assembler.assemble(ProjectTargetSelector::Library, "dev").expect_err(
         "changing preassembled dependency metadata after graph construction should fail",
     );
-    assert!(
-        error
-            .to_string()
-            .contains("no longer matches the dependency graph dependency requirements")
-    );
+    assert!(error.to_string().contains("no longer matches the dependency graph selection"));
 }
 
 #[test]
@@ -3006,7 +3006,7 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.digest(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3048,7 +3048,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Kernel,
-            digest: runtime.digest(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3057,11 +3057,7 @@ end
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
         .expect_err("changing preassembled dependency kinds after graph construction should fail");
-    assert!(
-        error
-            .to_string()
-            .contains("no longer matches the dependency graph dependency requirements")
-    );
+    assert!(error.to_string().contains("no longer matches the dependency graph selection"));
 }
 
 #[test]
@@ -3084,7 +3080,7 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.digest(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3126,7 +3122,7 @@ end
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
-            digest: runtime.digest(),
+            digest: runtime.dependency_commitment(),
         }],
     )
     .unwrap();
@@ -3135,7 +3131,7 @@ end
     let error = project_assembler
         .assemble(ProjectTargetSelector::Library, "dev")
         .expect_err("changing preassembled package kind after graph construction should fail");
-    assert!(error.to_string().contains("no longer matches the dependency graph target kind"));
+    assert!(error.to_string().contains("no longer matches the dependency graph selection"));
 }
 
 fn write_kernel_program_project(root: &FsPath) -> PathBuf {
@@ -3276,4 +3272,94 @@ end
     );
 
     manifest_path
+}
+
+fn package_bytes_with_spoofed_non_root_node_digest(package: &MastPackage) -> Vec<u8> {
+    let forest = package.mast_forest();
+    let target_node = (0..forest.num_nodes())
+        .map(MastNodeId::new_unchecked)
+        .find(|node_id| !forest.procedure_roots().contains(node_id))
+        .expect("test package should contain a non-root node");
+
+    let mut output_bytes = Vec::new();
+    package.write_header_into(&mut output_bytes);
+    let forest_offset = output_bytes.len();
+    forest.write_into(&mut output_bytes);
+
+    let (node_hashes_start, internal_node_count) =
+        locate_first_node_hash(&output_bytes[forest_offset..]);
+    assert!(
+        target_node.to_usize() < internal_node_count,
+        "test package should not contain external nodes before the tampered node",
+    );
+
+    let spoofed_digest = hash_string_to_word("spoofed-preassembled-dependency-digest");
+    assert_ne!(
+        spoofed_digest,
+        forest[target_node].digest(),
+        "spoofed digest must differ from the original node digest",
+    );
+
+    let mut spoofed_digest_bytes = Vec::new();
+    spoofed_digest.write_into(&mut spoofed_digest_bytes);
+    assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
+
+    let digest_offset =
+        forest_offset + node_hashes_start + target_node.to_usize() * spoofed_digest_bytes.len();
+    output_bytes[digest_offset..digest_offset + spoofed_digest_bytes.len()]
+        .copy_from_slice(&spoofed_digest_bytes);
+
+    package.write_trailer_into(&mut output_bytes);
+
+    output_bytes
+}
+
+fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
+    // Header: magic[4] + flags[1] + version[3]
+    let mut offset = 0usize;
+    offset += 4;
+    offset += 1;
+    offset += 3;
+
+    let internal_node_count = read_usize_vint64(bytes, &mut offset);
+    let external_node_count = read_usize_vint64(bytes, &mut offset);
+    let node_count = internal_node_count
+        .checked_add(external_node_count)
+        .expect("node count overflow");
+
+    // Roots: len (usize) + elements (u32 LE)
+    let roots_len = read_usize_vint64(bytes, &mut offset);
+    offset += roots_len * 4;
+
+    // Basic block data: len (usize) + bytes
+    let bb_len = read_usize_vint64(bytes, &mut offset);
+    offset += bb_len;
+
+    offset += node_count * 8;
+    offset += external_node_count * 32;
+
+    (offset, internal_node_count)
+}
+
+fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
+    // This test patches raw bytes in place, so it needs byte offsets that
+    // ByteReader::read_usize does not expose.
+    let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    if length == 9 {
+        *offset += 1;
+        let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
+        let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
+        *offset = end;
+        let value = u64::from_le_bytes(chunk);
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    } else {
+        let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
+        let mut encoded = [0u8; 8];
+        encoded[..length].copy_from_slice(&bytes[*offset..end]);
+        *offset = end;
+        let value = u64::from_le_bytes(encoded) >> length;
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    }
 }

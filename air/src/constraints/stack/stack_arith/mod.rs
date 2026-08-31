@@ -39,14 +39,17 @@ pub fn enforce_main<AB>(
 
     // Decoder helper columns: hasher_state[2..8] are user-op helpers.
     // - h0 is used as an inverse witness (EQ/EQZ) or exp_val (EXPACC).
-    // - h1..h4 hold u32 limbs / range-check witnesses for u32 ops.
-    // - h5 is currently unused in this module.
-    let [uop_h0, uop_h1, uop_h2, uop_h3, uop_h4, _] = local.decoder.user_op_helpers();
+    // - h0..h3 hold the standard u32 limb witnesses.
+    // - h4 is an inverse witness for U32SPLIT/U32MUL/U32MADD and the low limb of divisor -
+    //   remainder - 1 for U32DIV.
+    // - h5 is the high limb of divisor - remainder - 1 for U32DIV and is otherwise unused here.
+    let [uop_h0, uop_h1, uop_h2, uop_h3, uop_h4, uop_h5] = local.decoder.user_op_helpers();
     let uop_h0: AB::Expr = uop_h0.into();
     let uop_h1: AB::Expr = uop_h1.into();
     let uop_h2: AB::Expr = uop_h2.into();
     let uop_h3: AB::Expr = uop_h3.into();
     let uop_h4: AB::Expr = uop_h4.into();
+    let uop_h5: AB::Expr = uop_h5.into();
 
     // Field ops.
     let is_add = op_flags.add();
@@ -178,6 +181,7 @@ pub fn enforce_main<AB>(
     // U32 limbs: v_lo = h1*2^16 + h0, v_hi = h3*2^16 + h2.
     let u32_v_lo = uop_h1 * TWO_POW_16 + uop_h0;
     let u32_v_hi = uop_h3.clone() * TWO_POW_16 + uop_h2.clone();
+    let u32_remainder_diff = uop_h5 * TWO_POW_16 + uop_h4.clone();
     let u32_v48 = uop_h2 * TWO_POW_32 + u32_v_lo.clone();
     let u32_v64 = uop_h3.clone() * TWO_POW_48 + u32_v48.clone();
 
@@ -221,12 +225,15 @@ pub fn enforce_main<AB>(
     builder.when(is_u32mul).assert_eq(s0.clone() * s1.clone(), u32_v64.clone());
     builder.when(is_u32madd).assert_eq(s0.clone() * s1.clone() + s2, u32_v64);
 
-    // U32DIV: s1 = s0 * s1' + s0', range checks on remainder and quotient bounds.
+    // U32DIV: s1 = s0 * s1' + s0', with direct range checks on both outputs and a range-checked
+    // difference enforcing s0' < s0.
     {
+        let divisor_minus_remainder = s0.clone() - s0_next.clone();
         let builder = &mut builder.when(is_u32div);
-        builder.assert_eq(s1.clone(), s0.clone() * s1_next.clone() + s0_next.clone());
-        builder.assert_eq(s1 - s1_next.clone(), u32_v_lo.clone());
-        builder.assert_eq(s0 - s0_next.clone(), u32_v_hi.clone() + F_1);
+        builder.assert_eq(s1, s0 * s1_next.clone() + s0_next.clone());
+        builder.assert_eq(s1_next.clone(), u32_v_lo.clone());
+        builder.assert_eq(s0_next.clone(), u32_v_hi.clone());
+        builder.assert_eq(divisor_minus_remainder, u32_remainder_diff + F_1);
     }
 
     // U32ASSERT2: verifies both stack elements are valid u32 values.

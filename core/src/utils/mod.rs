@@ -1,13 +1,8 @@
 use alloc::vec::Vec;
 use core::ops::{Bound, Range};
 
-use crate::{Felt, Word, crypto::hash::Blake3_256, field::PrimeCharacteristicRing};
-
 // RE-EXPORTS
 // ================================================================================================
-
-mod col_matrix;
-pub use col_matrix::ColMatrix;
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
@@ -19,9 +14,10 @@ pub use miden_crypto::{
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 pub use miden_utils_indexing::{
-    CsrMatrix, CsrValidationError, DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx,
-    newtype_id,
+    DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };
+
+use crate::{Felt, Word, crypto::hash::Blake3_256, field::PrimeCharacteristicRing};
 
 // TO ELEMENTS
 // ================================================================================================
@@ -179,6 +175,8 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use proptest::prelude::*;
 
     use super::*;

@@ -26,12 +26,6 @@ impl<T, const N: usize> Default for MockBinaryPermutation<T, N> {
     }
 }
 
-impl<T, const N: usize> MockBinaryPermutation<T, N> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 // Binary type implementations (using wrapping arithmetic)
 macro_rules! impl_mock_binary_permutation {
     ($($t:ty),*) => {$(

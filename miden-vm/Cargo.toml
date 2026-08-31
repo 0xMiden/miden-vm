@@ -1,6 +1,6 @@
 [package]
 name = "miden-vm"
-version = "0.28.0"
+version = "0.31.0"
 description = "Miden virtual machine"
 documentation = "https://docs.rs/miden-vm"
 readme = "README.md"
@@ -44,24 +44,35 @@ harness = false
 name = "deserialize_core_lib"
 harness = false
 
+[[bench]]
+name = "deserialize_core_lib_debug_info"
+harness = false
+
 [[test]]
 name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
+arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
+executable = [
+    "dep:clap",
+    "dep:hex",
+    "dep:tracing-subscriber",
+    "internal",
+    "serde",
+    "std",
+]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
     "miden-core-lib/std",
     "miden-processor/std",
+    "miden-precompiles/std",
     "miden-prover/std",
     "miden-verifier/std",
-    "proptest?/std",
     "serde?/std",
     "serde_json?/std",
 ]
@@ -77,6 +88,7 @@ miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
+miden-precompiles.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies
@@ -84,7 +96,6 @@ clap = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-proptest = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, optional = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, optional = true, features = ["ansi", "smallvec"] }
@@ -92,12 +103,10 @@ tracing-forest = { workspace = true, optional = true, features = ["ansi", "small
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
-escargot = { version = "0.5" }
 miden-assembly = { workspace = true, features = ["testing"] }
-miden-precompiles.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
-miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true

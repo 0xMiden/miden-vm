@@ -1,6 +1,6 @@
 [package]
 name = "miden-assembly"
-version = "0.28.0"
+version = "0.31.0"
 description = "Miden VM assembly language"
 documentation = "https://docs.rs/miden-assembly"
 readme = "README.md"
@@ -56,6 +56,6 @@ thiserror.workspace = true
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest = { workspace = true, features = ["std"] }
 tempfile.workspace = true

@@ -53,7 +53,8 @@ pub fn ext2_mul(block_builder: &mut BasicBlockBuilder) {
 /// and b = (b0, b1) represent elements in the extension field of degree 2, this series
 /// of operations outputs the result c = (c0, c1) where c = a * b^-1.
 ///
-/// This operation takes 11 VM cycles.
+/// This operation takes 14 VM cycles: 3 for the `Ext2Inv` system event and 11 for the operations
+/// below.
 pub fn ext2_div(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(Ext2Inv);
     #[rustfmt::skip]
@@ -114,7 +115,8 @@ pub fn ext2_neg(block_builder: &mut BasicBlockBuilder) {
 /// b  = a * a' ( mod Q ) | Q = irreducible polynomial x^2 - 7 over F_p, p = 2^64 - 2^32 + 1
 /// assert b  = (1, 0) | (1, 0) is the multiplicative identity of extension field.
 ///
-/// This operation takes 8 VM cycles.
+/// This operation takes 11 VM cycles: 3 for the `Ext2Inv` system event and 8 for the operations
+/// below.
 pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(Ext2Inv);
     #[rustfmt::skip]

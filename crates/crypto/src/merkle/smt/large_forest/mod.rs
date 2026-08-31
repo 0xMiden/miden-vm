@@ -1473,11 +1473,6 @@ impl<B: BackendReader> LargeSmtForest<B> {
         &self.backend
     }
 
-    /// Gets a mutable reference to the underlying backend of the forest.
-    pub fn get_backend_mut(&mut self) -> &mut B {
-        &mut self.backend
-    }
-
     /// Gets an immutable reference to the underlying configuration object for the forest.
     pub fn get_config(&self) -> &Config {
         &self.config

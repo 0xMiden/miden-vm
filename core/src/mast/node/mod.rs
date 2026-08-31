@@ -71,6 +71,13 @@ pub trait MastNodeExt {
 // MAST NODE
 // ================================================================================================
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(in crate::mast) enum MastNodeOrderClass {
+    External,
+    BasicBlock,
+    Internal,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, From, MastNodeExt)]
 #[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {
@@ -87,13 +94,13 @@ pub enum MastNode {
 /// Public accessors
 impl MastNode {
     /// Returns the ordering class used by finalized dense MAST forests.
-    pub(in crate::mast) fn order_class(&self) -> super::MastNodeOrderClass {
+    pub(in crate::mast) fn order_class(&self) -> MastNodeOrderClass {
         if self.is_external() {
-            super::MastNodeOrderClass::External
+            MastNodeOrderClass::External
         } else if self.is_basic_block() {
-            super::MastNodeOrderClass::BasicBlock
+            MastNodeOrderClass::BasicBlock
         } else {
-            super::MastNodeOrderClass::Internal
+            MastNodeOrderClass::Internal
         }
     }
 

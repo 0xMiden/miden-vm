@@ -6,14 +6,16 @@ edition = "2024"
 [dependencies]
 miden-assembly-current = { package = "miden-assembly", path = "../crates/assembly" }
 miden-assembly-syntax-current = { package = "miden-assembly-syntax", path = "../crates/assembly-syntax" }
+miden-core-lib-current = { package = "miden-core-lib", path = "../crates/lib/core" }
 miden-mast-package-current = { package = "miden-mast-package", path = "../crates/mast-package" }
 miden-package-registry-current = { package = "miden-package-registry", path = "../crates/package-registry", features = ["resolver"] }
 
 # The release wrapper rewrites these tags to the latest release tag on main.
-miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0" }
-miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.23.0", features = ["resolver"] }
+miden-assembly-previous = { package = "miden-assembly", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-assembly-syntax-previous = { package = "miden-assembly-syntax", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-core-lib-previous = { package = "miden-core-lib", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-mast-package-previous = { package = "miden-mast-package", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0" }
+miden-package-registry-previous = { package = "miden-package-registry", git = "https://github.com/0xMiden/miden-vm", tag = "v0.29.0", features = ["resolver"] }
 ---
 
 use std::{
@@ -128,11 +130,10 @@ fn compare_exports(previous: Exports, current: Exports) -> Result<(), String> {
             },
             (None, Some(current_export)) => match current_export {
                 ExportInfo::Procedure(_) => {
-                    eprintln!(
-                        "::error::export added: {name} current={}",
+                    println!(
+                        "::notice::export added: {name} current={}",
                         current_export.describe()
                     );
-                    status = Err("procedure exports changed".to_string());
                 },
                 ExportInfo::Type(_) => {
                     println!("{name} {}", current_export.describe());
@@ -223,7 +224,7 @@ fn is_abi_attribute(name: &str) -> bool {
 /// the `name :` prefix from each struct field so such deltas compare equal.
 ///
 /// It deliberately preserves everything that *is* part of the ABI: field types, field count, field
-/// order, struct names, `repr` attributes (`@bigendian`, `@packed`, etc.), and all non-struct
+/// order, struct names, `repr` attributes (`@packed`, etc.), and all non-struct
 /// syntax. Only the leading `ident :` of a struct field is removed.
 fn canonicalize_type_string(value: &str) -> String {
     normalize(&strip_field_labels(value))
@@ -345,10 +346,7 @@ fn normalize(value: &str) -> String {
                 }
                 if brace_depth > 0 {
                     let next = if i < n { Some(chars[i]) } else { None };
-                    if has_newline
-                        && pending_field_sep
-                        && !matches!(next, None | Some('}' | ','))
-                    {
+                    if has_newline && pending_field_sep && !matches!(next, None | Some('}' | ',')) {
                         pass1.push(',');
                         pending_field_sep = false;
                     } else if !pass1.is_empty() && !pass1.ends_with(' ') {
@@ -388,6 +386,30 @@ fn normalize(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn procedure(digest: &str) -> ExportInfo {
+        ExportInfo::Procedure(ProcedureInfo {
+            digest: digest.to_string(),
+            signature: None,
+            abi_attributes: BTreeMap::new(),
+        })
+    }
+
+    #[test]
+    fn compare_exports_allows_added_procedure() {
+        let previous = Exports::new();
+        let current = Exports::from([("new_proc".to_string(), procedure("0x01"))]);
+
+        assert_eq!(compare_exports(previous, current), Ok(()));
+    }
+
+    #[test]
+    fn compare_exports_rejects_changed_procedure() {
+        let previous = Exports::from([("existing_proc".to_string(), procedure("0x01"))]);
+        let current = Exports::from([("existing_proc".to_string(), procedure("0x02"))]);
+
+        assert!(compare_exports(previous, current).is_err());
+    }
 
     #[test]
     fn canonicalize_strips_struct_field_labels() {
@@ -501,8 +523,9 @@ mod tests {
 mod current {
     use miden_assembly_current::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_current::prettier::PrettyPrint;
+    use miden_core_lib_current::CoreLibrary;
     use miden_mast_package_current::{Package, PackageExport};
-    use miden_package_registry_current::InMemoryPackageRegistry;
+    use miden_package_registry_current::{InMemoryPackageRegistry, PackageCache};
 
     use super::*;
 
@@ -551,8 +574,9 @@ mod current {
 mod previous {
     use miden_assembly_previous::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_previous::prettier::PrettyPrint;
+    use miden_core_lib_previous::CoreLibrary;
     use miden_mast_package_previous::{Package, PackageExport};
-    use miden_package_registry_previous::InMemoryPackageRegistry;
+    use miden_package_registry_previous::{InMemoryPackageRegistry, PackageCache};
 
     use super::*;
 

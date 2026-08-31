@@ -100,7 +100,7 @@ impl proptest::arbitrary::Arbitrary for Package {
                 };
 
                 let (mast_forest, remapping) =
-                    builder.finish_with_id_map().expect("generated package forest should be valid");
+                    builder.build_with_id_map().expect("generated package forest should be valid");
 
                 for (export_index, node_id) in nodes {
                     let node_id = remapping.get(node_id).expect("export node should be retained");

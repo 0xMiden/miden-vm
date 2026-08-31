@@ -2,7 +2,16 @@ extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
 
-use miden_core::Felt;
+use miden_core::{Felt, Word};
+use miden_processor::{ContextId, ExecutionOutput};
+
+/// Reads an initialized felt from root-context memory.
+pub fn read_memory_felt(output: &ExecutionOutput, addr: u32) -> Felt {
+    output
+        .memory
+        .read_element(ContextId::root(), Felt::from_u32(addr))
+        .unwrap_or_else(|_| panic!("memory address {addr} was not written"))
+}
 
 /// Generates MASM code to store field elements sequentially in memory starting at `base_addr`.
 pub fn masm_store_felts(felts: &[Felt], base_addr: u32) -> String {
@@ -31,6 +40,17 @@ pub fn masm_push_felts(felts: &[Felt]) -> String {
         .map(|felt| format!("push.{}", felt.as_canonical_u64()))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Generates one MASM instruction that pushes a word in its original element order.
+pub fn masm_push_word(word: &Word) -> String {
+    let elements = word
+        .iter()
+        .rev()
+        .map(|felt| felt.as_canonical_u64().to_string())
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("push.{elements}")
 }
 
 #[cfg(test)]

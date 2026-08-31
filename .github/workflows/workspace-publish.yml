@@ -22,7 +22,7 @@ on:
         default: ""
         type: string
       allow_existing:
-        description: "Exclude crate versions that already exist on crates.io. Use only to resume a partial publish."
+        description: "Resume a partial publish after checking existing crates."
         required: false
         default: false
         type: boolean
@@ -48,7 +48,7 @@ jobs:
       sha: ${{ steps.prepare.outputs.sha }}
     steps:
       - name: Checkout release tooling
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # Check out the workflow/tooling revision so scripts/prepare-release.sh
@@ -78,6 +78,7 @@ jobs:
     with:
       ref: ${{ needs.prepare-release.outputs.sha }}
       packages: ${{ github.event.inputs.packages || '' }}
+      allow_existing: ${{ github.event_name == 'release' || inputs.allow_existing }}
 
   create-draft:
     name: create draft release
@@ -153,7 +154,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare-release.outputs.sha }}
@@ -175,15 +176,15 @@ jobs:
           mv target/${{ matrix.target }}/optimized/miden-format miden-format-${{ matrix.target }}
           mv target/${{ matrix.target }}/optimized/miden-registry miden-registry-${{ matrix.target }}
       - name: Attest miden-vm
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-vm-${{ matrix.target }}
       - name: Attest miden-format
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-format-${{ matrix.target }}
       - name: Attest miden-registry
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: miden-registry-${{ matrix.target }}
       - name: Upload
@@ -198,25 +199,22 @@ jobs:
            miden-vm-${{ matrix.target }} \
            miden-format-${{ matrix.target }} \
            miden-registry-${{ matrix.target }}
-      # Since the core.masp package is triplet independent, we only build it once.
-      - name: Install nightly
-        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          rustup update --no-self-update nightly
-      - name: Build core.masp
+      # Since the MASM packages are triplet independent, we only build them once.
+      - name: Build MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           make packages
-      - name: Prepare artifact
+      - name: Prepare MASM package artifacts
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           mv target/packages/miden-core.masp core.masp
-      - name: Attest core.masp
+      - name: Attest MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: core.masp
-      - name: Upload core.masp
+          subject-path: |
+            core.masp
+      - name: Upload MASM packages
         if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
@@ -239,7 +237,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare-release.outputs.sha }}
@@ -255,7 +253,7 @@ jobs:
           mode: "publish"
           verify-main-head: "true"
           packages: ${{ github.event.inputs.packages || '' }}
-          allow_existing: ${{ github.event.inputs.allow_existing || 'false' }}
+          allow_existing: ${{ github.event_name == 'release' || inputs.allow_existing }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 

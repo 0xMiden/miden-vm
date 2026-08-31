@@ -48,11 +48,11 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
                 formatter.write_str("a borrowed Path")
             }
 
-            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Path::validate(v).map_err(serde::de::Error::custom)
+                Path::validate(value).map_err(serde::de::Error::custom)
             }
         }
 
@@ -325,11 +325,33 @@ impl Path {
         self.split_first().map(|(first, _)| first)
     }
 
-    /// Get the first non-root component of this path as a `str`
+    /// Get the last non-root component of this path as a `str`
     ///
     /// Returns `None` if the path is empty, or consists only of the root prefix.
     pub fn last(&self) -> Option<&str> {
         self.split_last().map(|(last, _)| last)
+    }
+
+    /// Get the last non-root component of this path as a [crate::ast::ProcedureName]
+    ///
+    /// Returns `Ok(None)` if the path is empty, or consists only of the root prefix.
+    pub fn procedure_name(&self) -> Result<Option<crate::ast::ProcedureName>, PathError> {
+        use crate::ast::ProcedureName;
+
+        let Some(last) = self.components().next_back() else {
+            return Ok(None);
+        };
+        let name = last?;
+        if name == PathComponent::Root {
+            return Ok(None);
+        }
+        if name.is_quoted() {
+            ProcedureName::new(format!("\"{}\"", name.as_str()))
+                .map(Some)
+                .map_err(PathError::InvalidComponent)
+        } else {
+            ProcedureName::new(name.as_str()).map(Some).map_err(PathError::InvalidComponent)
+        }
     }
 
     /// Splits this path on the first non-root component, returning it and a new [Path] of the

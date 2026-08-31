@@ -21,6 +21,7 @@ mod continuation_stack;
 mod errors;
 mod execution;
 mod execution_options;
+mod executor;
 mod fast;
 mod host;
 mod processor;
@@ -29,12 +30,13 @@ mod tracer;
 use miden_core::{
     deferred::{Digest, Node, PrecompileError},
     mast::ExecutableMastForest,
+    serde::{Deserializable, Serializable},
 };
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
-    errors::{MapExecErr, MapExecErrNoCtx},
+    errors::MapExecErr,
     processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
@@ -50,13 +52,14 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use continuation_stack::Continuation;
+pub use continuation_stack::{Continuation, SourceInlineCallContext};
 pub use errors::{
     AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
     advice_error_with_package_source_context, event_error_with_package_source_context,
     procedure_not_found_with_package_source_context,
 };
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use executor::ProgramExecutor;
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
@@ -67,19 +70,19 @@ pub use host::{
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
-        InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs,
-        StackOutputs,
+        ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
+        StackInputs, StackOutputs,
     },
     serde, utils,
 };
-pub use trace::{TraceBuildInputs, TraceGenerationContext};
+pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
 
 pub mod advice {
-    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
 
     pub use super::host::{
         AdviceMutation,
-        advice::{AdviceError, AdviceProvider, MAX_ADVICE_STACK_SIZE},
+        advice::{AdviceError, AdviceProvider},
     };
 }
 
@@ -87,7 +90,8 @@ pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
+        TraceHandlerRegistry,
     };
 }
 
@@ -98,52 +102,6 @@ pub mod operation {
 }
 
 pub mod trace;
-
-// EXECUTORS
-// ================================================================================================
-
-/// Executes the provided program against the provided inputs and returns the resulting execution
-/// output.
-///
-/// The `host` parameter is used to provide the external environment to the program being executed,
-/// such as access to the advice provider and libraries that the program depends on.
-///
-/// # Errors
-/// Returns an error if program execution fails for any reason.
-#[tracing::instrument("execute_program", skip_all)]
-pub async fn execute(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl Host,
-    options: ExecutionOptions,
-) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_exec_err_no_ctx()?;
-    processor.execute(program, host).await
-}
-
-/// Synchronous wrapper for the async `execute()` function.
-///
-/// This method is only available on non-wasm32 targets. On wasm32, use the async `execute()`
-/// method directly since wasm32 runs in the browser's event loop.
-///
-/// # Panics
-/// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
-/// instead in async contexts.
-#[cfg(not(target_family = "wasm"))]
-#[tracing::instrument("execute_program_sync", skip_all)]
-pub fn execute_sync(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-    options: ExecutionOptions,
-) -> Result<ExecutionOutput, ExecutionError> {
-    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options)
-        .map_exec_err_no_ctx()?;
-    processor.execute_sync(program, host)
-}
 
 // PROCESSOR STATE
 // ===============================================================================================
@@ -386,6 +344,24 @@ impl From<ContextId> for u64 {
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
         Felt::from_u32(context_id.0)
+    }
+}
+
+impl Serializable for ContextId {
+    fn write_into<W: serde::ByteWriter>(&self, target: &mut W) {
+        Serializable::write_into(&self.0, target);
+    }
+}
+
+impl Deserializable for ContextId {
+    fn read_from<R: serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, serde::DeserializationError> {
+        Ok(Self(<u32 as Deserializable>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        <u32 as Deserializable>::min_serialized_size()
     }
 }
 

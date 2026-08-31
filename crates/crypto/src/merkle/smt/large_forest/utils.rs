@@ -108,9 +108,10 @@ pub struct LineageMutation {
 impl LineageMutation {
     /// Constructs a lineage mutation.
     ///
-    /// This constructor is crate-private because callers must not be able to fabricate mutation
-    /// metadata that is inconsistent with the backend-prepared data in an [`SmtForestMutationSet`].
-    pub(crate) fn new(
+    /// This is intended for [`Backend`] implementations returning computed mutations. The
+    /// metadata must stay consistent with the backend-prepared data in the corresponding
+    /// [`SmtForestMutationSet`].
+    pub fn new(
         lineage: LineageId,
         old_version: Option<VersionId>,
         new_version: VersionId,
@@ -207,10 +208,10 @@ pub struct AppliedLineageMutation {
 impl AppliedLineageMutation {
     /// Constructs an applied lineage mutation.
     ///
-    /// This constructor is crate-private because backend implementations must keep the returned
-    /// history payload consistent with the prepared mutation data they just applied.
+    /// [`Backend`] implementations must keep the returned history payload consistent with the
+    /// prepared mutation data they just applied.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         lineage: LineageId,
         old_version: Option<VersionId>,
         new_version: VersionId,

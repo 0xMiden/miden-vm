@@ -2,6 +2,7 @@
 //! Miden Asssembly code to MAST.
 #![no_std]
 
+#[macro_use]
 extern crate alloc;
 
 #[cfg(any(test, feature = "std"))]

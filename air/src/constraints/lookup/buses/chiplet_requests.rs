@@ -1,6 +1,9 @@
-//! Chiplet requests bus ([`BusId::Chiplets`]).
+//! Decoder-side chiplet and U32DIV range-check requests.
 //!
-//! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
+//! This column carries requests for the hasher, bitwise, memory, ACE init, and kernel ROM chiplets,
+//! plus `BusId::RangeCheck` requests for the final two U32DIV helper limbs.
+//! The U32DIV range-check batch shares this column because its opcode is disjoint from every
+//! chiplet-request branch and its degree fits the column bound.
 //!
 //! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
 //! The cached-encoding optimization can be reintroduced later if symbolic expression growth
@@ -16,7 +19,7 @@ use miden_core::{
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryMsg},
+        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryMsg, RangeMsg},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
@@ -32,7 +35,7 @@ use crate::{
 /// merkle_new_init + return_hash). No other single branch exceeds 4.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the chiplet requests bus.
+/// Emit decoder-side chiplet and U32DIV range-check requests.
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -510,46 +513,46 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- HORNERBASE / HORNEREXT ---
-                    // Both ops read the evaluation point α from memory at `stack[13]`. HORNERBASE
-                    // reads two base-field elements (α₀ at `addr`, α₁ at `addr + 1`); HORNEREXT
-                    // reads a single word `[α₀, α₁, k₀, k₁]` at `addr`. α is held in helpers[0..2]
-                    // for both ops (HORNEREXT additionally parks k₀, k₁ in helpers[2..4]).
+                    // Both ops read the evaluation point alpha from the aligned word
+                    // `[alpha0, alpha1, 0, 0]` at `stack[13]`.
                     let alpha_ptr = stk.get(13);
-                    g.batch(
-                        "hornerbase",
-                        op_flags.hornerbase(),
-                        move |b| {
-                            let addr0: LB::Expr = alpha_ptr.into();
-                            let addr1: LB::Expr = addr0.clone() + LB::Expr::from_u16(1);
-                            let eval0: LB::Expr = user_helpers[0].into();
-                            let eval1: LB::Expr = user_helpers[1].into();
-                            b.remove(
-                                "hornerbase_alpha0",
-                                MemoryMsg::read_element(sys_ctx.into(), addr0, clk.into(), eval0),
-                                Deg { v: 5, u: 6 },
-                            );
-                            b.remove(
-                                "hornerbase_alpha1",
-                                MemoryMsg::read_element(sys_ctx.into(), addr1, clk.into(), eval1),
-                                Deg { v: 5, u: 6 },
-                            );
-                        },
-                        Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
-                    );
                     g.remove(
-                        "hornerext",
-                        op_flags.hornerext(),
+                        "horner",
+                        op_flags.hornerbase() + op_flags.hornerext(),
                         move || {
-                            let addr: LB::Expr = alpha_ptr.into();
                             let word: [LB::Expr; 4] = [
                                 user_helpers[0].into(),
                                 user_helpers[1].into(),
-                                user_helpers[2].into(),
-                                user_helpers[3].into(),
+                                LB::Expr::ZERO,
+                                LB::Expr::ZERO,
                             ];
-                            MemoryMsg::read_word(sys_ctx.into(), addr, clk.into(), word)
+                            MemoryMsg::read_word(sys_ctx.into(), alpha_ptr.into(), clk.into(), word)
                         },
                         Deg { v: 5, u: 6 },
+                    );
+
+                    // --- U32DIV remainder-bound range check ---
+                    // U32DIV uses h4/h5 for the low/high limbs of divisor - remainder - 1.
+                    // Together with the AIR binding, range-checking these limbs enforces
+                    // remainder < divisor.
+                    // Its opcode is disjoint from every chiplet-request branch in this column, so
+                    // these two removals do not increase the column's per-row interaction bound.
+                    g.batch(
+                        "u32div_remainder_diff_range",
+                        op_flags.u32div(),
+                        move |b| {
+                            b.remove(
+                                "u32div_remainder_diff_lo",
+                                RangeMsg { value: user_helpers[4].into() },
+                                Deg { v: 6, u: 7 },
+                            );
+                            b.remove(
+                                "u32div_remainder_diff_hi",
+                                RangeMsg { value: user_helpers[5].into() },
+                                Deg { v: 6, u: 7 },
+                            );
+                        },
+                        Deg { v: 7, u: 8 }, // (V, U) = (1 + 6, 2 + 6)
                     );
 
                     // --- U32AND / U32XOR ---

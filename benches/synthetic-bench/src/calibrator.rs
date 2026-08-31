@@ -28,11 +28,12 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default());
-    let trace_inputs = processor
-        .execute_trace_inputs_sync(&program, &mut host)
+    let witness = processor
+        .execute_for_proving_sync(&program, &mut host)
         .map_err(|e| MeasurementError::Execution(format!("{e}")))?;
+    let (vm_witness, _) = witness.into_parts();
     let trace =
-        build_trace(trace_inputs).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
+        build_trace(vm_witness).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
     let summary = trace.trace_len_summary();
     let chiplets = summary.chiplets_trace_len();
 
@@ -101,6 +102,7 @@ pub struct IterCost {
     pub core: f64,
     pub hasher: f64,
     pub bitwise: f64,
+    pub chiplets: f64,
     pub memory: f64,
     pub range: f64,
 }
@@ -110,7 +112,7 @@ impl IterCost {
         match component {
             Component::Core => self.core,
             Component::Hasher => self.hasher,
-            Component::Bitwise => self.bitwise,
+            Component::Chiplets => self.chiplets,
             Component::Memory => self.memory,
             Component::Range => self.range,
         }
@@ -139,6 +141,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
         core: shape.totals.core_rows as f64 / k,
         hasher: shape.hasher_work_rows() as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
+        chiplets: shape.totals.chiplets_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
         range: shape.totals.range_rows as f64 / k,
     }
@@ -219,11 +222,12 @@ mod tests {
     }
 
     #[test]
-    fn memory_snippet_two_rows_per_iter() {
+    fn memory_snippet_drives_chiplets() {
         let c = cal();
         let memory = c["memory"];
-        assert!(memory.memory >= 1.5, "memory per-iter ({}) too low", memory.memory);
-        assert!(memory.memory <= 2.5, "memory per-iter ({}) too high", memory.memory);
+        assert!(memory.chiplets >= 1.5, "chiplets per memory iter ({}) too low", memory.chiplets,);
+        assert!(memory.memory >= 1.5, "memory per iter ({}) too low", memory.memory);
+        assert!(memory.memory <= 2.5, "memory per iter ({}) too high", memory.memory);
     }
 
     #[test]

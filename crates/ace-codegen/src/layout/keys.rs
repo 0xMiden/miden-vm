@@ -16,6 +16,15 @@ pub enum InputKey {
     AuxRandBeta,
     /// Challenge used to fold per-AIR constraint roots in proof order.
     MultiAirFoldBeta,
+    /// Fold coefficient for the AIR instance at the given index.
+    ///
+    /// Factored-emission-only: this key has no READ-layout slot. The factored emitter binds it
+    /// to a shuffle-section gate holding a power of [`InputKey::MultiAirFoldBeta`]; which power
+    /// is chosen per assembled circuit by the caller of
+    /// `FactoredAceCircuit::assemble`.
+    MultiAirFoldCoeff(usize),
+    /// Preprocessed trace value at (offset, index).
+    Preprocessed { offset: usize, index: usize },
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
@@ -30,9 +39,10 @@ pub enum InputKey {
     Reserved,
     /// Composition challenge used to fold constraints.
     Alpha,
-    /// `zeta^N`, where `N` is the trace length.
+    /// `zeta^N_max`, where `N_max` is the maximum trace length represented by the circuit.
     ZPowN,
-    /// `zeta^(N / max_cycle_len)` for periodic columns.
+    /// Periodic-column evaluation basis `zeta^(N_max / shared_period)`.
+    /// A period-`p` column is evaluated at `ZK^(shared_period / p)`.
     ZK,
     /// Precomputed first-row selector: `(z^N - 1) / (z - 1)`.
     IsFirst,
@@ -48,7 +58,8 @@ pub enum InputKey {
     IsTransitionAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
-    /// `f = h^N`, the chunk shift ratio between cosets.
+    /// Primitive `D`-th root of unity, where `D` is the quotient chunk count; the chunk shift
+    /// ratio between cosets after taking the trace-height power.
     F,
     /// `s0 = offset^N`, the first chunk shift.
     S0,
@@ -76,6 +87,13 @@ impl InputKeyMapper<'_> {
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
+            // Factored-emission-only key: never present in the READ layout.
+            InputKey::MultiAirFoldCoeff(_) => None,
+            InputKey::Preprocessed { offset, index } => match offset {
+                0 => layout.regions.preprocessed_curr.index(index),
+                1 => layout.regions.preprocessed_next.index(index),
+                _ => None,
+            },
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),

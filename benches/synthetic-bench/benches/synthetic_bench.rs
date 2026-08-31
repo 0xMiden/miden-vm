@@ -4,9 +4,9 @@
 //!   1. Calibrate each snippet's per-iteration cost against the current VM (shared across all
 //!      snapshots in this run).
 //!   2. For each producer JSON (every `snapshots/*.json`, or the single file in `SYNTH_SNAPSHOT`),
-//!      load every scenario it contains and: solve for per-snippet iteration counts, emit the
-//!      resulting MASM program, check it lands in the scenario's padded-trace bracket, and run four
-//!      Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
+//!      load its canonical Falcon/ECDSA P2ID scenarios and: solve for per-snippet iteration counts,
+//!      emit the resulting MASM program, check it lands in the scenario's padded-trace bracket, and
+//!      run four Criterion benches per scenario -- `exec`, `trace_prep`, `prove`, `verify`.
 //!
 //! Env vars:
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
@@ -22,22 +22,21 @@
 //! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
 //!   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm`.
 
-use std::{
-    cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
-};
+use std::{collections::BTreeSet, hint::black_box, path::PathBuf, time::Duration};
 
 use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
+use miden_core::program::ExecutionClaim;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
 };
 use miden_vm::{
-    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, ProvingOptions, StackOutputs,
-    Verifier, prove_sync,
+    Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, Prover, StackOutputs, Verifier,
+    prove_sync,
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
-    snapshot::{TraceShape, TraceSnapshot},
+    snapshot::{POSEIDON2_AUTH_SCENARIOS, TraceShape, TraceSnapshot},
     snippets::{SNIPPETS, memory_max_iters, u32arith_max_iters},
     solver::{Plan, emit, solve},
     verifier::VerificationReport,
@@ -46,7 +45,6 @@ use miden_vm_synthetic_bench::{
 /// Hash function used for STARK `prove` and `verify` axes.
 const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
 const ALL_AXES: [&str; 4] = ["exec", "trace_prep", "prove", "verify"];
-type ProofFixture = (StackOutputs, ExecutionProof);
 
 fn resolve_bench_axes() -> BTreeSet<&'static str> {
     let Some(raw) = std::env::var("SYNTH_BENCH_AXES").ok().filter(|s| !s.trim().is_empty()) else {
@@ -117,6 +115,23 @@ fn processor_inputs(program: &Program) -> (DefaultHost, Program, FastProcessor) 
     (host, program.clone(), processor)
 }
 
+fn execute_and_prove(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut DefaultHost,
+) -> (StackOutputs, ExecutionProof) {
+    prove_sync(
+        &Prover::new().with_hash_fn(BENCH_HASH),
+        program,
+        stack_inputs,
+        advice_inputs,
+        host,
+        ExecutionOptions::default(),
+    )
+    .expect("execute and prove program")
+}
+
 fn resolve_snapshot_paths() -> Vec<PathBuf> {
     if let Ok(explicit) = std::env::var("SYNTH_SNAPSHOT") {
         return vec![PathBuf::from(explicit)];
@@ -166,8 +181,14 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} memory={:6.3} range={:6.3}",
-            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.memory, cost.range,
+            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} chiplets={:6.3} memory={:6.3} range={:6.3}",
+            snippet.name,
+            cost.core,
+            cost.hasher,
+            cost.bitwise,
+            cost.chiplets,
+            cost.memory,
+            cost.range,
         );
     }
 
@@ -182,6 +203,9 @@ fn synthetic_bench(c: &mut Criterion) {
             .unwrap_or_else(|e| panic!("failed to load snapshot at {}: {e}", path.display()));
         scenarios.sort_by_key(|(_, snap)| snap.trace.chiplets_rows);
         for (scenario_key, snapshot) in scenarios {
+            if !POSEIDON2_AUTH_SCENARIOS.contains(&scenario_key.as_str()) {
+                continue;
+            }
             let scenario_slug = slugify(&scenario_key);
             if let Some(filter) = &scenario_filter
                 && !scenario_slug.contains(filter.as_str())
@@ -220,9 +244,10 @@ fn bench_one_scenario(
 ) {
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
     println!(
-        "    trace:   core={} chiplets={} range={} (padded_total={})",
+        "    trace:   core={} chiplets={} poseidon2={} range={} (padded_total={})",
         snapshot.trace.core_rows,
         snapshot.trace.chiplets_rows,
+        snapshot.trace.poseidon2_permutation_rows,
         snapshot.trace.range_rows,
         snapshot.trace.padded_total(),
     );
@@ -236,7 +261,7 @@ fn bench_one_scenario(
     );
     if snapshot.shape.substituted_rows() > 0 {
         println!(
-            "    note:    {} rows (ace={} + kernel_rom={}) folded into memory target",
+            "    note:    {} rows (ace={} + kernel_rom={}) combined with advisory memory rows",
             snapshot.shape.substituted_rows(),
             snapshot.shape.ace_rows,
             snapshot.shape.kernel_rom_rows,
@@ -286,97 +311,82 @@ fn bench_one_scenario(
 
     // Four axes per scenario:
     //   exec       -- FastProcessor::execute_sync (no trace data)
-    //   trace_prep -- FastProcessor::execute_trace_inputs_sync (the input to prove_from_trace_sync)
-    //   prove      -- prove_sync (= trace_prep + STARK prove)
+    //   trace_prep -- FastProcessor::execute_for_proving_sync (post-execution witness creation)
+    //   prove      -- configured prove_sync with overlapped trace construction
     //   verify     -- Verifier::new().verify against a proof generated once outside the timed loop
     if axes.contains("exec") {
         group.bench_function("exec", |b| {
-            b.iter_batched(
-                || processor_inputs(&program),
-                |(mut host, program, processor)| {
-                    black_box(processor.execute_sync(&program, &mut host).expect("exec"));
+            b.iter_batched_ref(
+                || {
+                    let (host, program, processor) = processor_inputs(&program);
+                    (host, program, Some(processor))
                 },
-                BatchSize::SmallInput,
+                |(host, program, processor)| {
+                    black_box(processor.take().unwrap().execute_sync(program, host).expect("exec"))
+                },
+                BatchSize::PerIteration,
             );
         });
     }
 
     if axes.contains("trace_prep") {
         group.bench_function("trace_prep", |b| {
-            b.iter_batched(
-                || processor_inputs(&program),
-                |(mut host, program, processor)| {
+            b.iter_batched_ref(
+                || {
+                    let (host, program, processor) = processor_inputs(&program);
+                    (host, program, Some(processor))
+                },
+                |(host, program, processor)| {
                     black_box(
                         processor
-                            .execute_trace_inputs_sync(&program, &mut host)
+                            .take()
+                            .unwrap()
+                            .execute_for_proving_sync(program, host)
                             .expect("trace_prep"),
-                    );
+                    )
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
 
-    let cached_proof: Rc<RefCell<Option<ProofFixture>>> = Rc::default();
     if axes.contains("prove") {
-        let cached_proof = Rc::clone(&cached_proof);
         group.bench_function("prove", |b| {
-            b.iter_batched(
+            b.iter_batched_ref(
                 || {
                     let host = DefaultHost::default();
                     let stack = StackInputs::default();
                     let advice = AdviceInputs::default();
-                    (host, program.clone(), stack, advice)
+                    (host, program.clone(), Some(stack), Some(advice))
                 },
-                |(mut host, program, stack, advice)| {
-                    let proof = prove_sync(
-                        &program,
-                        stack,
-                        advice,
-                        &mut host,
-                        ExecutionOptions::default(),
-                        ProvingOptions::new(BENCH_HASH),
-                    )
-                    .expect("prove");
-                    let mut cached = cached_proof.borrow_mut();
-                    if cached.is_none() {
-                        *cached = Some(proof.clone());
-                    }
-                    black_box(proof);
+                |(host, program, stack, advice)| {
+                    black_box(execute_and_prove(
+                        program,
+                        stack.take().unwrap(),
+                        advice.take().unwrap(),
+                        host,
+                    ))
                 },
-                BatchSize::SmallInput,
+                BatchSize::PerIteration,
             );
         });
     }
 
     if axes.contains("verify") {
-        // Reuse a proof from the `prove` axis when it ran for this scenario. This keeps prove time
-        // out of the verify measurement without forcing an extra proof in all-axes runs.
-        let program_info = ProgramInfo::from(program.clone());
-        let (stack_outputs, proof) = cached_proof.borrow().clone().unwrap_or_else(|| {
-            let mut host = DefaultHost::default();
-            prove_sync(
-                &program,
-                StackInputs::default(),
-                AdviceInputs::default(),
-                &mut host,
-                ExecutionOptions::default(),
-                ProvingOptions::new(BENCH_HASH),
-            )
-            .expect("prove for verify setup")
-        });
+        let mut host = DefaultHost::default();
+        let (stack_outputs, proof) =
+            execute_and_prove(&program, StackInputs::default(), AdviceInputs::default(), &mut host);
+        let claim = ExecutionClaim::from_program_info(
+            ProgramInfo::from(program.clone()),
+            StackInputs::default(),
+            stack_outputs,
+        );
         group.bench_function("verify", |b| {
-            b.iter_batched(
-                || (program_info.clone(), StackInputs::default(), stack_outputs, proof.clone()),
-                |(program_info, stack_inputs, stack_outputs, proof)| {
-                    black_box(
-                        Verifier::new()
-                            .verify(program_info, stack_inputs, stack_outputs, proof)
-                            .expect("verify"),
-                    );
-                },
-                BatchSize::SmallInput,
-            );
+            b.iter(|| {
+                let outcome = Verifier::new().verify(&claim, &proof).expect("verify");
+                assert!(outcome.is_complete());
+                black_box(outcome.security_level())
+            });
         });
     }
 
@@ -418,6 +428,7 @@ fn assert_counters_fit(plan: &Plan) {
 struct MarginalRates {
     core: f64,
     chiplets: f64,
+    poseidon2: f64,
     range: f64,
 }
 
@@ -443,6 +454,9 @@ fn measure_marginal(
     MarginalRates {
         core: (shape.totals.core_rows as f64 - base_shape.totals.core_rows as f64) / d,
         chiplets: (shape.totals.chiplets_rows as f64 - base_shape.totals.chiplets_rows as f64) / d,
+        poseidon2: (shape.totals.poseidon2_permutation_rows as f64
+            - base_shape.totals.poseidon2_permutation_rows as f64)
+            / d,
         range: (shape.totals.range_rows as f64 - base_shape.totals.range_rows as f64) / d,
     }
 }
@@ -514,6 +528,23 @@ fn range_correction_pass(plan: &mut Plan, target: &TraceShape) {
             Some((add_u32arith, sub_hasher, sub_pad)) => {
                 let sub_hasher = sub_hasher.min(plan.iters("hasher"));
                 let sub_pad = sub_pad.min(plan.iters("decoder_pad"));
+                let projected_poseidon2 = actual.totals.poseidon2_permutation_rows as f64
+                    + u32arith.poseidon2 * add_u32arith as f64
+                    - hasher.poseidon2 * sub_hasher as f64
+                    - decoder_pad.poseidon2 * sub_pad as f64;
+                let mut projected_totals = actual.totals;
+                projected_totals.poseidon2_permutation_rows =
+                    projected_poseidon2.max(0.0).round() as u64;
+                if projected_totals.padded_poseidon2_permutation()
+                    != target.totals.padded_poseidon2_permutation()
+                {
+                    println!(
+                        "    correction skipped: projected Poseidon2 rows ({}) would leave target bracket ({})",
+                        projected_totals.poseidon2_permutation_rows,
+                        target.totals.padded_poseidon2_permutation(),
+                    );
+                    return;
+                }
                 println!(
                     "    applying: +u32arith {add_u32arith}  -hasher {sub_hasher}  -decoder_pad {sub_pad}"
                 );

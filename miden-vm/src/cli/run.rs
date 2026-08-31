@@ -5,14 +5,14 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor,
-    trace::{ExecutionTrace, build_trace},
+    trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
 };
 use miden_vm::internal::InputFile;
 use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -37,6 +37,14 @@ pub struct RunCmd {
     /// Maximum number of cycles a program is allowed to consume
     #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
+
+    /// Maximum memory, in bytes, the prover may allocate (accepts suffixes: 512M, 32Gi)
+    #[arg(
+        long = "max-prover-memory",
+        default_value_t = DEFAULT_MAX_PROVER_MEMORY_BYTES,
+        value_parser = parse_byte_size
+    )]
+    max_prover_memory: u64,
 
     /// Number of outputs
     #[arg(short = 'n', long = "num-outputs", default_value = "16")]
@@ -127,7 +135,7 @@ impl RunCmd {
 // ================================================================================================
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Report> {
+fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let program = get_masp_program(&params.program_file)?;
 
     // use simplified input data reading
@@ -149,16 +157,18 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let trace_inputs = processor
-        .execute_trace_inputs_sync(&program, &mut host)
+    let witness = processor
+        .execute_for_proving_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
-    let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
+    let (vm_witness, _) = witness.into_parts();
+    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
 
 #[instrument(name = "run_program", skip_all)]
-fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Report> {
+fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     for lib in &params.library_paths {
         if !lib.is_file() {
             let name = lib.display();
@@ -207,9 +217,9 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let trace_inputs = match (package_debug_info.as_ref(), entrypoint_source_node) {
+    let execution_witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
         (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+            .execute_for_proving_with_package_debug_info_at_source_node_sync(
                 &program,
                 debug_info,
                 entrypoint_source_node_id,
@@ -217,13 +227,15 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
             )
             .wrap_err("Failed to execute program")?,
         (Some(debug_info), None) => processor
-            .execute_trace_inputs_with_package_debug_info_sync(&program, debug_info, &mut host)
+            .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
             .wrap_err("Failed to execute program")?,
         (None, _) => processor
-            .execute_trace_inputs_sync(&program, &mut host)
+            .execute_for_proving_sync(&program, &mut host)
             .wrap_err("Failed to execute program")?,
     };
-    let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }

@@ -476,7 +476,12 @@ where
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
         | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
-        EmitImm(imm) => visitor.visit_immediate_felt(imm),
+        EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
+            visitor.visit_immediate_felt(imm)
+        },
+        EmitImm(EventImmediate::Name(_)) | TraceImm(EventImmediate::Name(_)) => {
+            ControlFlow::Continue(())
+        },
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
@@ -504,8 +509,10 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit
-        | LogDeferred | Emit => ControlFlow::Continue(()),
+        | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
+        | HornerExt | CryptoStream | EvalCircuit | LogDeferred | Emit | Trace => {
+            ControlFlow::Continue(())
+        },
     }
 }
 
@@ -1040,7 +1047,12 @@ where
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
         | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
-        EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
+        EmitImm(EventImmediate::Immediate(imm)) | TraceImm(EventImmediate::Immediate(imm)) => {
+            visitor.visit_mut_immediate_felt(imm)
+        },
+        EmitImm(EventImmediate::Name(_)) | TraceImm(EventImmediate::Name(_)) => {
+            ControlFlow::Continue(())
+        },
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
@@ -1068,8 +1080,10 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream
-        | LogDeferred | Emit => ControlFlow::Continue(()),
+        | DynCall | DebugVar(_) | DebugInlineCall(_) | DebugInlineCallClear | HornerBase
+        | HornerExt | EvalCircuit | CryptoStream | LogDeferred | Emit | Trace => {
+            ControlFlow::Continue(())
+        },
     }
 }
 

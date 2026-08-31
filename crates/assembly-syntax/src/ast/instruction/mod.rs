@@ -1,10 +1,19 @@
 pub mod advice;
+mod debug_var;
+mod inline_call;
 mod print;
 
 use alloc::vec::Vec;
 use core::ops::Range;
 
-pub use self::advice::SystemEventNode;
+pub use self::{
+    advice::SystemEventNode,
+    debug_var::{
+        DebugFrameBase, DebugLocationExpression, DebugLocationExpressionError,
+        DebugLocationExpressionOp, DebugVarInfo, DebugVarLocation,
+    },
+    inline_call::DebugInlineCallInfo,
+};
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
@@ -278,11 +287,27 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
-    DebugVar(miden_core::operations::DebugVarInfo),
+    /// Records a source variable location at this point in the generated operation stream.
+    DebugVar(DebugVarInfo),
+    /// Appends one source function to the inline call chain active for subsequent operations.
+    ///
+    /// Frames are emitted from innermost to outermost. This compiler-internal marker has no VM
+    /// execution semantics; the assembler stores the active chain on each generated source-node
+    /// occurrence until [`DebugInlineCallClear`](Self::DebugInlineCallClear) is encountered.
+    DebugInlineCall(DebugInlineCallInfo),
+    /// Clears the inline call chain for subsequent generated operations and control nodes.
+    ///
+    /// This marks the point at which source attribution returns to the containing non-inlined
+    /// function. It is compiler-internal and does not emit a VM operation.
+    DebugInlineCallClear,
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
-    EmitImm(ImmFelt),
+    EmitImm(EventImmediate),
+
+    // ----- traces (read-only events) -----------------------------------------------------------
+    Trace,
+    TraceImm(EventImmediate),
 }
 
 impl Instruction {
@@ -291,7 +316,7 @@ impl Instruction {
     /// Some instructions (like [`DebugVar`](Self::DebugVar)) are compiler-internal and have
     /// no surface syntax. They should be skipped during pretty-printing.
     pub const fn has_textual_representation(&self) -> bool {
-        !matches!(self, Self::DebugVar(_))
+        !matches!(self, Self::DebugVar(_) | Self::DebugInlineCall(_) | Self::DebugInlineCallClear)
     }
 }
 

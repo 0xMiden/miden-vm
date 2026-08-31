@@ -9,7 +9,10 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
-use miden_mast_package::Package;
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
@@ -146,6 +149,12 @@ pub struct FastProcessor {
 
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
+
+    /// Package debug information configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) package_debug_info: Option<PackageDebugInfo>,
+
+    /// Entrypoint source node configured through [`ProgramExecutor`](crate::ProgramExecutor).
+    pub(crate) entrypoint_source_node: Option<DebugSourceNodeId>,
 }
 
 impl FastProcessor {
@@ -235,11 +244,9 @@ impl FastProcessor {
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`]. The installed precompile registry
-    /// and any accumulated deferred state are preserved; only the remaining deferred-state
-    /// budget is updated to match the new options.
+    /// and any accumulated deferred state are preserved.
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
-        self.deferred_state.set_max_elements(options.max_deferred_elements());
         self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
@@ -279,11 +286,10 @@ impl FastProcessor {
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             saved_overflow_len: 0,
-            deferred_state: DeferredState::new(
-                Arc::new(miden_precompiles::registry()),
-                options.max_deferred_elements(),
-            )
-            .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            deferred_state: DeferredState::new(Arc::new(miden_precompiles::registry()))
+                .map_err(AdviceError::DeferredStateInitializationFailed)?,
+            package_debug_info: None,
+            entrypoint_source_node: None,
             options,
         })
     }
@@ -301,11 +307,19 @@ impl FastProcessor {
         let current_forest = program.mast_forest().clone();
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
+        let entrypoint_source_node_id = package.entrypoint_source_node();
+        let continuation_stack = if let Some(debug_info) = package_debug_info.as_deref() {
+            Self::source_aware_continuation_stack(&program, debug_info, entrypoint_source_node_id)?
+        } else {
+            ContinuationStack::new(&program)
+        };
+
         Ok(ResumeContext {
             current_forest,
-            continuation_stack: ContinuationStack::new(&program),
+            continuation_stack,
             kernel: program.kernel().clone(),
             package_debug_info,
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -323,6 +337,7 @@ impl FastProcessor {
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
             package_debug_info: None,
+            inline_call_contexts: Vec::new(),
         })
     }
 
@@ -707,7 +722,8 @@ impl Tracer for NoopTracer {
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // do nothing
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 //! Sparse Merkle Tree (SMT) data structures.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::{
     fmt::{self, Display},
     hash::Hash,
@@ -53,7 +53,7 @@ mod simple;
 pub use simple::{SimpleSmt, SimpleSmtProof};
 
 mod partial;
-pub use partial::{NodeValue, PartialSmt, UniqueNodes};
+pub use partial::{PartialSmt, UniqueNodes};
 
 mod forest;
 pub use forest::SmtForest;
@@ -576,7 +576,6 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
 /// part of the public API.
 #[doc(hidden)]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct InnerNode {
     pub left: Word,
     pub right: Word,
@@ -593,7 +592,6 @@ impl InnerNode {
 
 /// The index of a leaf, at a depth known at compile-time.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct LeafIndex<const DEPTH: u8> {
     index: NodeIndex,
 }
@@ -656,7 +654,11 @@ impl<const DEPTH: u8> Serializable for LeafIndex<DEPTH> {
 
 impl<const DEPTH: u8> Deserializable for LeafIndex<DEPTH> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self { index: source.read()? })
+        // A `NodeIndex` is valid on its own terms without knowing `DEPTH`, so route through
+        // `TryFrom` to enforce that its depth matches this type's `DEPTH`.
+        let index: NodeIndex = source.read()?;
+
+        Self::try_from(index).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
     }
 }
 
@@ -733,6 +735,29 @@ impl<const DEPTH: u8, K: Eq + Hash, V> MutationSet<DEPTH, K, V> {
         self.node_mutations.is_empty()
             && self.new_pairs.is_empty()
             && self.old_root == self.new_root
+    }
+
+    /// Creates a new mutation set from pre-computed components.
+    ///
+    /// This constructor performs no validation. The caller must ensure the components are
+    /// internally consistent, meaning that applying `node_mutations` and `new_pairs` to a tree
+    /// whose root is `old_root` yields a tree whose root is `new_root`. Intended for storage
+    /// backends that compute mutations from persisted tree data instead of an in-memory tree.
+    pub fn from_parts(
+        old_root: Word,
+        node_mutations: impl IntoIterator<Item = (NodeIndex, NodeMutation)>,
+        new_pairs: impl IntoIterator<Item = (K, V)>,
+        new_root: Word,
+    ) -> Self
+    where
+        K: Ord,
+    {
+        Self {
+            old_root,
+            node_mutations: node_mutations.into_iter().collect(),
+            new_pairs: new_pairs.into_iter().collect(),
+            new_root,
+        }
     }
 }
 
@@ -836,5 +861,40 @@ impl<const DEPTH: u8, K: Deserializable + Ord + Eq + Hash, V: Deserializable> De
             new_pairs,
             new_root,
         })
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::{LeafIndex, NodeIndex, SMT_MAX_DEPTH};
+    use crate::utils::{Deserializable, Serializable};
+
+    #[test]
+    fn leaf_index_read_from_rejects_depth_mismatch() {
+        // A depth-3 index is valid on its own terms, but wrong for a `LeafIndex<SMT_MAX_DEPTH>`.
+        let mismatched = NodeIndex::new(3, 5).unwrap();
+        assert!(LeafIndex::<SMT_MAX_DEPTH>::try_from(mismatched).is_err());
+
+        assert!(LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&mismatched.to_bytes()).is_err());
+    }
+
+    #[test]
+    fn leaf_index_read_from_rejects_depth_below_minimum() {
+        assert!(LeafIndex::<0>::new(0).is_err());
+
+        let root = NodeIndex::new(0, 0).unwrap();
+        assert!(LeafIndex::<0>::read_from_bytes(&root.to_bytes()).is_err());
+    }
+
+    #[test]
+    fn leaf_index_round_trips_at_matching_depth() {
+        let leaf = LeafIndex::<SMT_MAX_DEPTH>::new(5).unwrap();
+
+        let decoded = LeafIndex::<SMT_MAX_DEPTH>::read_from_bytes(&leaf.to_bytes()).unwrap();
+
+        assert_eq!(leaf, decoded);
     }
 }

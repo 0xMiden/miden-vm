@@ -556,9 +556,8 @@ mod tests {
 
     /// End-to-end collection sanity check: run `SmokeAir::eval` through
     /// `ProverLookupBuilder` over several rows and verify the per-column counts match the
-    /// handcrafted `eval` body, that `accumulate_slow` produces a `num_rows + 1`-long
-    /// output per column starting at zero, and that the running sum monotonically grows
-    /// by the expected amount each row.
+    /// handcrafted `eval` body, that `accumulate_slow` produces exactly `num_rows` entries
+    /// per column starting at zero, and that the normalized cyclic recurrence holds.
     #[test]
     fn prover_lookup_builder_collects_into_fractions() {
         const NUM_ROWS: usize = 8;
@@ -621,10 +620,10 @@ mod tests {
             assert_eq!(*m, expected_m);
         }
 
-        let aux = accumulate_slow(&fractions);
+        let (aux, sigma_prime) = accumulate_slow(&fractions);
         assert_eq!(aux.len(), 2);
         for col_aux in &aux {
-            assert_eq!(col_aux.len(), NUM_ROWS + 1);
+            assert_eq!(col_aux.len(), NUM_ROWS);
         }
         assert_eq!(aux[0][0], QuadFelt::ZERO, "accumulator initial must be zero");
 
@@ -633,12 +632,13 @@ mod tests {
         let d3 = SmokeMsg { value: Felt::new_unchecked(3) }.encode(&challenges);
         let delta0 = d1.try_inverse().unwrap() - d2.try_inverse().unwrap();
         let delta1 = d3.try_inverse().unwrap();
-        // Column 0 (accumulator): each row delta = own fraction + col 1's fraction.
-        for r in 0..NUM_ROWS {
-            assert_eq!(aux[0][r + 1] - aux[0][r], delta0 + delta1);
-        }
-        // Column 1 (fraction, aux_curr): value at row r is the per-row fraction.
-        for &entry in aux[1].iter().take(NUM_ROWS) {
+        let row_total = delta0 + delta1;
+        assert_eq!(sigma_prime, row_total);
+        // Every row has the same total, so centering by sigma_prime keeps the accumulator zero,
+        // including on the last-to-first edge.
+        assert!(aux[0].iter().all(|&entry| entry == QuadFelt::ZERO));
+        // Column 1 stores the per-row fraction on every row.
+        for &entry in &aux[1] {
             assert_eq!(entry, delta1);
         }
     }

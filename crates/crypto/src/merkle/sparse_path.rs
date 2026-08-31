@@ -24,7 +24,6 @@ use crate::{
 /// NOTE: This type assumes that Merkle paths always span from the root of the tree to a leaf.
 /// Partial paths are not supported.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct SparseMerklePath {
     /// A bitmask representing empty nodes. The set bit corresponds to the depth of an empty node.
     /// The least significant bit (bit 0) describes depth 1 node (root's children).
@@ -64,8 +63,10 @@ impl SparseMerklePath {
             return Err(MerkleError::InvalidPathLength(min_non_empty_nodes));
         }
 
-        let depth = Self::depth_from_parts(empty_nodes_mask, &nodes) as u8;
-        if depth > SMT_MAX_DEPTH {
+        // Compare in usize: casting to u8 first would wrap depths >= 256 (e.g. a 256-node vector)
+        // back into the accepted range.
+        let depth = Self::depth_from_parts(empty_nodes_mask, &nodes);
+        if depth > SMT_MAX_DEPTH as usize {
             return Err(MerkleError::DepthTooBig(depth as u64));
         }
 
@@ -86,11 +87,13 @@ impl SparseMerklePath {
         I: IntoIterator<IntoIter: ExactSizeIterator, Item = Word>,
     {
         let iterator = iterator.into_iter();
-        let tree_depth = iterator.len() as u8;
-
-        if tree_depth > SMT_MAX_DEPTH {
+        // Compare in usize: casting to u8 first would wrap iterator lengths >= 256 back into the
+        // accepted range.
+        let tree_depth = iterator.len();
+        if tree_depth > SMT_MAX_DEPTH as usize {
             return Err(MerkleError::DepthTooBig(tree_depth as u64));
         }
+        let tree_depth = tree_depth as u8;
 
         let mut empty_nodes_mask: u64 = 0;
         let mut nodes: Vec<Word> = Default::default();
@@ -273,7 +276,13 @@ impl Deserializable for SparseMerklePath {
         }
         let count = depth as u32 - empty_nodes_count;
         let nodes: Vec<Word> = source.read_many_iter(count as usize)?.collect::<Result<_, _>>()?;
-        Ok(Self { empty_nodes_mask, nodes })
+        // Route through `from_parts` rather than constructing directly, so deserialization
+        // enforces the same invariants as construction. In particular this rejects mask bits at
+        // positions at or beyond the declared depth (they force a minimum path length the node
+        // count cannot satisfy), which the count check above does not.
+        Self::from_parts(empty_nodes_mask, nodes).map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid SparseMerklePath: {err}"))
+        })
     }
 }
 
@@ -505,7 +514,10 @@ mod arbitrary {
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
-    use core::num::NonZero;
+    use core::{
+        num::NonZero,
+        ops::{Deref, DerefMut},
+    };
 
     use assert_matches::assert_matches;
 
@@ -518,6 +530,65 @@ mod tests {
             sparse_path::path_depth_iter,
         },
     };
+
+    /// Regression: `from_parts` used to cast the computed depth to `u8` before the max-depth
+    /// comparison, so a 256-node path wrapped to depth zero and was accepted.
+    #[test]
+    fn from_parts_rejects_depths_beyond_max_including_wrapped_ones() {
+        let node = Word::from([ONE, ONE, ONE, ONE]);
+        for len in [65usize, 256, 300] {
+            let result = SparseMerklePath::from_parts(0, vec![node; len]);
+            assert_matches!(result, Err(MerkleError::DepthTooBig(depth)) if depth == len as u64);
+        }
+    }
+
+    /// Regression: `from_sized_iter` had the same cast-before-check wrap at length 256.
+    #[test]
+    fn from_sized_iter_rejects_depths_beyond_max_including_wrapped_ones() {
+        let node = Word::from([ONE, ONE, ONE, ONE]);
+        for len in [65usize, 256] {
+            let result = SparseMerklePath::from_sized_iter(vec![node; len]);
+            assert_matches!(result, Err(MerkleError::DepthTooBig(depth)) if depth == len as u64);
+        }
+    }
+
+    /// A mask bit at or beyond the declared depth passes the popcount comparison but implies a
+    /// minimum path length the node count cannot satisfy; deserialization must reject it rather
+    /// than construct an internally inconsistent path.
+    #[test]
+    fn deserialization_rejects_mask_bits_beyond_the_declared_depth() {
+        use crate::utils::{ByteWriter, Deserializable, Serializable};
+
+        let mut bytes = Vec::new();
+        bytes.write_u8(2);
+        bytes.write_u64(1u64 << 63);
+        Word::from([ONE, ONE, ONE, ONE]).write_into(&mut bytes);
+        assert!(SparseMerklePath::read_from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn binary_serialization_roundtrips_valid_boundary_paths() {
+        use crate::utils::{Deserializable, Serializable};
+
+        let node = Word::from([ONE, ONE, ONE, ONE]);
+        for (depth, empty_nodes_mask) in [
+            (0u8, 0u64),
+            (1, 0),
+            (1, 1),
+            (64, 0),
+            (64, 1u64 << 63),
+            (64, 0xaaaa_aaaa_aaaa_aaaa),
+            (64, u64::MAX),
+        ] {
+            let node_count = depth as usize - empty_nodes_mask.count_ones() as usize;
+            let path =
+                SparseMerklePath::from_parts(empty_nodes_mask, vec![node; node_count]).unwrap();
+
+            let decoded = SparseMerklePath::read_from_bytes(&path.to_bytes()).unwrap();
+            assert_eq!(decoded, path);
+            assert_eq!(decoded.depth(), depth);
+        }
+    }
 
     fn make_smt(pair_count: u64) -> Smt {
         let entries: Vec<(Word, Word)> = (0..pair_count)
@@ -860,10 +931,21 @@ mod tests {
     fn test_api_differences() {
         // This test documents API differences between MerklePath and SparseMerklePath
 
-        // 1. MerklePath has Deref/DerefMut to Vec<Word> - SparseMerklePath does not
-        let merkle = MerklePath::new(vec![Word::default(); 3]);
-        let _vec_ref: &Vec<Word> = &merkle; // This works due to Deref
-        let _vec_mut: &mut Vec<Word> = &mut merkle.clone(); // This works due to DerefMut
+        // 1. MerklePath dereferences to a slice so nodes can be mutated without changing the path
+        // length. SparseMerklePath does not implement Deref or DerefMut.
+        fn assert_slice_deref<T>()
+        where
+            T: Deref<Target = [Word]> + DerefMut<Target = [Word]>,
+        {
+        }
+
+        assert_slice_deref::<MerklePath>();
+        let mut merkle = MerklePath::new(vec![Word::default(); 3]);
+        let replacement = Word::from([ONE, ONE, ONE, ONE]);
+        let nodes: &mut [Word] = &mut merkle;
+        nodes[0] = replacement;
+        assert_eq!(merkle[0], replacement);
+        assert_eq!(merkle.depth(), 3);
 
         // 2. SparseMerklePath has from_parts() - MerklePath uses new() or from_iter()
         let sparse = SparseMerklePath::from_parts(0b101, vec![Word::default(); 2]).unwrap();

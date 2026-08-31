@@ -1,7 +1,7 @@
 //! Decoder virtual-table bus tests.
 //!
-//! Covers the block-stack table (merged with u32 range checks and the log-deferred
-//! capacity bus) and the block-hash + op-group table column.
+//! Covers the block-stack table (merged with the u32 and Merkle-depth range checks and the
+//! log-deferred capacity bus) and the block-hash + op-group table column.
 //!
 //! Under the LogUp framework the interactions look like "+1 / encode(Msg)" on push rows
 //! and "-1 / encode(Msg)" on pop rows. Each test runs a tiny program that exercises one
@@ -26,8 +26,7 @@ use miden_core::{
 };
 
 use super::{
-    ExecutionTrace, build_trace_from_ops, build_trace_from_program,
-    build_trace_from_program_with_stack,
+    VmTrace, build_trace_from_ops, build_trace_from_program, build_trace_from_program_with_stack,
     lookup_harness::{Expectations, InteractionLog},
 };
 use crate::{RowIndex, StackInputs, trace::MainTrace};
@@ -49,7 +48,7 @@ fn next_op_first_child_flag(main: &MainTrace, next: RowIndex) -> Felt {
 ///
 /// Most decoder tests need `row + 1` lookups (next-row flags, addr_next, etc.) so stopping one
 /// short of the end avoids per-test bounds checks.
-fn for_each_op<F>(trace: &ExecutionTrace, mut f: F)
+fn for_each_op<F>(trace: &VmTrace, mut f: F)
 where
     F: FnMut(usize, Felt),
 {

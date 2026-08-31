@@ -1,0 +1,196 @@
+use miden::core::crypto::hashes::poseidon2
+use miden::core::stark::constants
+use miden::core::stark::deep_queries
+use miden::core::sys::pvm::layout
+
+# The BytePairLut setup trace has 2^16 rows and the PCS uses log_blowup = 3, so its committed
+# LDE tree has depth 19. Full-domain query indices project to this tree by retaining the low
+# 19 bits, exactly as lifted-stark's TreeIndices::fold_to_depth does in natural domain order.
+const PREPROCESSED_TREE_DEPTH = 19
+const PREPROCESSED_INDEX_MASK = 524287
+
+# One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
+# Each double word is eight base-field felts, the Poseidon2 rate/alignment.
+const PREPROCESSED_ROW_DOUBLE_WORDS = 1
+const MAIN_ROW_DOUBLE_WORDS = 55
+const AUX_ROW_DOUBLE_WORDS = 39
+const QUOTIENT_ROW_DOUBLE_WORDS = 1
+
+# ERRORS
+# =================================================================================================
+
+const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value from the Merkle tree"
+
+# MAIN PROCEDURE
+# =================================================================================================
+
+#! Computes the PVM DEEP composition-polynomial FRI queries.
+#!
+#! The opened row is reduced in commitment-group order: preprocessed, main, auxiliary, quotient.
+#! The preprocessed group authenticates at its setup-fixed depth using the low 19 bits of the
+#! full-domain query index; every other group authenticates at the full query depth.
+#!
+#! Inputs:  [Y, query_ptr, query_end_ptr, W, query_ptr]
+#! Outputs: []
+pub proc compute_deep_composition_polynomial_queries
+    # The verifier checks earlier that there is at least one query.
+    push.1
+    while.true
+        exec.load_query_row
+        #=> [Y, X, index, query_ptr, query_end_ptr, W, query_ptr]
+
+        exec.deep_queries::compute_deep_query
+        #=> [has_more_queries, Y, query_ptr+4, query_end_ptr]
+    end
+
+    dropw dropw drop drop drop
+end
+
+# QUERY ROW
+# =================================================================================================
+
+#! Loads and authenticates all committed trace groups for one query, then returns their running
+#! alpha-Horner reduction in the form expected by the generic DEEP quotient computation.
+#!
+#! Inputs:  [Y, query_ptr]
+#! Outputs: [Y, q_x_0, q_x_1, q_x_0, q_x_1, index, query_ptr]
+proc load_query_row
+    exec.process_preprocessed_trace
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    exec.process_main_trace
+    exec.process_aux_trace
+    exec.process_quotient_trace
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
+
+    swapw
+    drop drop
+    dup.1 dup.1
+    swapw
+end
+
+# PREPROCESSED TRACE
+# =================================================================================================
+
+#! Starts the row reduction with the setup-fixed preprocessed trace. The Merkle lookup uses
+#! `index & ((1 << 19) - 1)`, while the original full-depth index remains on the stack for the
+#! other commitment groups and the final DEEP-domain evaluation.
+proc process_preprocessed_trace
+    # Load [index, full_depth, index, 0] from the query word.
+    dup.4 mem_loadw_le
+    #=> [index, full_depth, y, y, query_ptr]
+
+    movdn.3 movdn.2
+    push.0.0
+    exec.layout::preprocessed_com_ptr mem_loadw_le
+    #=> [PREPROCESSED_ROOT, full_depth, index, query_ptr]
+
+    # Authenticate at the setup-fixed tree depth using the folded natural-order index.
+    dup.5 push.PREPROCESSED_INDEX_MASK u32and
+    push.PREPROCESSED_TREE_DEPTH
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+    #=> [LEAF_VALUE, PREPROCESSED_ROOT, full_depth, index, query_ptr]
+
+    exec.constants::tmp2 mem_loadw_le
+    swapw
+    #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
+
+    padw swapw padw
+    exec.load_preprocessed_trace
+
+    swapw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=LEAF_VALUE_MISMATCH
+end
+
+proc load_preprocessed_trace
+    repeat.PREPROCESSED_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+end
+
+# MAIN TRACE
+# =================================================================================================
+
+proc process_main_trace
+    exec.constants::main_trace_com_ptr mem_loadw_le
+
+    dup.9 dup.9
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+
+    padw swapw.2
+    exec.load_main_trace
+
+    swapw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=LEAF_VALUE_MISMATCH
+end
+
+proc load_main_trace
+    repeat.MAIN_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+end
+
+# AUXILIARY TRACE
+# =================================================================================================
+
+proc process_aux_trace
+    exec.constants::aux_trace_com_ptr mem_loadw_le
+
+    dup.9 dup.9
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+
+    padw swapw.2
+    exec.load_aux_trace
+
+    swapw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=LEAF_VALUE_MISMATCH
+end
+
+proc load_aux_trace
+    repeat.AUX_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+end
+
+# QUOTIENT TRACE
+# =================================================================================================
+
+proc process_quotient_trace
+    exec.constants::composition_poly_com_ptr mem_loadw_le
+
+    dup.9 movup.9
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+
+    padw
+    swapw.2
+    exec.load_quotient_trace
+
+    swapw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=LEAF_VALUE_MISMATCH
+end
+
+proc load_quotient_trace
+    repeat.QUOTIENT_ROW_DOUBLE_WORDS
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+end

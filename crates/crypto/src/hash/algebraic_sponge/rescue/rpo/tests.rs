@@ -210,12 +210,14 @@ fn hash_empty_elements_in_domain() {
 }
 
 #[test]
-fn hash_empty_in_domain_does_not_collide_with_full_zero_block() {
-    // Regression: before the padding-marker fix, empty input and a full rate block of zeros
-    // produced identical digests under any nonzero domain.
+fn hash_empty_in_domain_does_not_collide_with_full_rate_blocks() {
     let empty = Rpo256::hash_elements_in_domain(&[] as &[Felt], ONE);
     let full_zero_block = Rpo256::hash_elements_in_domain(&[ZERO; RATE_WIDTH], ONE);
+    let mut marked_rate_block = [ZERO; RATE_WIDTH];
+    marked_rate_block[0] = ONE;
+
     assert_ne!(empty, full_zero_block);
+    assert_ne!(empty, Rpo256::hash_elements_in_domain(&marked_rate_block, ONE));
 }
 
 #[test]

@@ -38,6 +38,7 @@ use super::super::{
 use crate::RowIndex;
 
 const FOUR: Felt = Felt::new_unchecked(4);
+const TWO: Felt = Felt::new_unchecked(2);
 
 /// Covers `MStoreW`, `MLoad`, `MLoadW`, `MStore`, `MStream` — every memory opcode issuable
 /// directly from the stack — asserting the chiplet-bus request/response pair fires at every
@@ -224,13 +225,11 @@ fn cryptostream_emits_four_memory_requests() {
     log.assert_contains(&exp);
 }
 
-/// Verifies that `HornerBase`'s two element-reads land on the chiplet-requests bus.
-/// HornerBase reads α = (α₀, α₁) from memory at (`alpha_ptr`, `alpha_ptr + 1`);
-/// uninitialized memory returns zeros, and the trace stores those same zeros into
-/// helpers[0..2], so a missing request or a swapped addr/clk would fail the subset match.
+/// Verifies that `HornerBase` emits one zero-padded word read on the chiplet-requests bus.
 #[test]
-fn hornerbase_emits_two_memory_requests() {
-    // HornerBase stack layout: [c0..c7, _, _, _, _, _, alpha_ptr, acc_low, acc_high]
+fn hornerbase_emits_one_memory_request() {
+    // Use a point for which helpers[2] and helpers[3] are nonzero. This makes either helper
+    // distinguishable from the zero padding in the memory request.
     let stack = [
         1, 2, 3, 4, 5, 6, 7, 8, // coeffs[0..8]
         0, 0, 0, 0, 0, // pad (5 slots)
@@ -238,22 +237,39 @@ fn hornerbase_emits_two_memory_requests() {
         0, 0, // acc_low, acc_high
     ];
 
-    let trace = build_trace_from_ops(vec![Operation::HornerBase], &stack);
+    let operations = vec![
+        Operation::Push(ZERO),
+        Operation::Push(ZERO),
+        Operation::Push(TWO),
+        Operation::Push(ONE),
+        Operation::Push(ZERO),
+        Operation::MStoreW,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::HornerBase,
+    ];
+    let trace = build_trace_from_ops(operations, &stack);
+    const HORNER_CLK: u32 = 11;
+    let helpers = trace.get_user_op_helpers_at(HORNER_CLK);
+    assert_ne!(helpers[2], ZERO);
+    assert_ne!(helpers[3], ZERO);
+
     let log = InteractionLog::new(&trace);
 
     let mut exp = Expectations::new(&log);
 
-    // HornerBase runs at cycle 1 (cycle 0 is SPAN), ctx = 0, uninitialized memory returns zeros.
-    const ROW: usize = 1;
-    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ZERO, ONE, ZERO));
-    exp.remove(ROW, &MemoryMsg::read_element(ZERO, ONE, ONE, ZERO));
+    // HornerBase runs at cycle 11 (cycle 0 is SPAN).
+    exp.remove(
+        HORNER_CLK as usize,
+        &MemoryMsg::read_word(ZERO, ZERO, Felt::from_u32(HORNER_CLK), [ONE, TWO, ZERO, ZERO]),
+    );
 
     log.assert_contains(&exp);
 }
 
-/// Verifies that `HornerExt`'s single word-read lands on the chiplet-requests bus.
-/// HornerExt reads `[α₀, α₁, k₀, k₁]` as a single word from `alpha_ptr`;
-/// uninitialized memory returns the zero word, which the trace parks in helpers[0..4].
+/// Verifies that `HornerExt`'s word read lands on the chiplet-requests bus.
 #[test]
 fn hornerext_emits_one_memory_request() {
     // HornerExt stack layout: [s0_lo, s0_hi, ..., s3_lo, s3_hi, _, _, _, _, _, alpha_ptr,
@@ -271,8 +287,7 @@ fn hornerext_emits_one_memory_request() {
     let mut exp = Expectations::new(&log);
 
     const ROW: usize = 1;
-    let zero_word = [ZERO, ZERO, ZERO, ZERO];
-    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, zero_word));
+    exp.remove(ROW, &MemoryMsg::read_word(ZERO, ZERO, ONE, [ZERO; 4]));
 
     log.assert_contains(&exp);
 }

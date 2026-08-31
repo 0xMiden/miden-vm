@@ -1,8 +1,5 @@
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_core::{
-    deferred::DEFAULT_MAX_DEFERRED_ELEMENTS as DEFAULT_DEFERRED_STATE_ELEMENTS,
-    program::MIN_STACK_DEPTH,
-};
+use miden_core::program::MIN_STACK_DEPTH;
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -16,20 +13,16 @@ pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
-    /// Maximum number of field elements that can be inserted into the advice map in a single
-    /// `adv.insert_mem` operation.
-    max_adv_map_value_size: usize,
-    /// Maximum total number of field elements allowed in live advice map keys and values.
-    max_adv_map_elements: usize,
+    /// Maximum combined logical size, in bytes, of the advice stack, map, and Merkle store.
+    max_advice_size_bytes: usize,
+    /// Whether the synchronous prover may overlap hasher-chiplet trace building with program
+    /// execution (std-only; the sequential path is used on no_std regardless).
+    overlapped_trace_build: bool,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
-    /// Maximum approximate number of field elements allowed in durable deferred-state nodes.
-    max_deferred_elements: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
-    /// Maximum number of internal nodes allowed in the advice provider's Merkle store.
-    max_merkle_store_nodes: usize,
     /// Maximum number of field elements allowed on the operand stack across the active execution
     /// context and all suspended contexts.
     ///
@@ -50,14 +43,12 @@ impl Default for ExecutionOptions {
             max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
-            max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
+            max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
-            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
-            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            overlapped_trace_build: true,
         }
     }
 }
@@ -72,32 +63,16 @@ impl ExecutionOptions {
     /// Default fragment size for core trace generation.
     pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
 
-    /// Default maximum number of field elements in a single advice map value inserted via
-    /// execution-time advice map mutations. Set to 2^17 (~1 MB given 8-byte field elements).
-    pub const DEFAULT_MAX_ADV_MAP_VALUE_SIZE: usize = 1 << 17;
-
-    /// Default maximum total number of field elements in live advice map keys and values.
-    ///
-    /// Set to 2^20 so the default allows multiple maximum-sized entries while still providing a
-    /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
-    pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
+    /// Default maximum combined logical size of the advice provider. Set to 16 MiB.
+    pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
     /// Default maximum number of input bytes for a single hash precompile invocation.
     /// Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
-    /// Default maximum approximate number of field elements allowed in deferred state.
-    pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = DEFAULT_DEFERRED_STATE_ELEMENTS;
-
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
     pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
-
-    /// Default maximum number of internal nodes allowed in the advice provider's Merkle store.
-    ///
-    /// Set to 2^20 so the default allows large Merkle inputs and repeated updates while still
-    /// providing a finite host-memory backstop.
-    pub const DEFAULT_MAX_MERKLE_STORE_NODES: usize = 1 << 20;
 
     /// Default maximum number of field elements allowed on the operand stack.
     ///
@@ -169,14 +144,12 @@ impl ExecutionOptions {
             max_cycles,
             expected_cycles,
             core_trace_fragment_size,
-            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
-            max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
+            max_advice_size_bytes: Self::DEFAULT_MAX_ADVICE_SIZE_BYTES,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
-            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
-            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
             max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
+            overlapped_trace_build: true,
         })
     }
 
@@ -217,17 +190,10 @@ impl ExecutionOptions {
         self.core_trace_fragment_size
     }
 
-    /// Returns the maximum number of field elements allowed in a single live advice map value.
+    /// Returns the maximum combined logical size, in bytes, of the advice provider.
     #[inline]
-    pub fn max_adv_map_value_size(&self) -> usize {
-        self.max_adv_map_value_size
-    }
-
-    /// Returns the maximum total number of field elements allowed in live advice map keys and
-    /// values.
-    #[inline]
-    pub fn max_adv_map_elements(&self) -> usize {
-        self.max_adv_map_elements
+    pub fn max_advice_size_bytes(&self) -> usize {
+        self.max_advice_size_bytes
     }
 
     /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
@@ -236,21 +202,23 @@ impl ExecutionOptions {
         self.max_hash_len_bytes
     }
 
-    /// Returns the maximum approximate number of field elements allowed in deferred state.
-    #[inline]
-    pub fn max_deferred_elements(&self) -> usize {
-        self.max_deferred_elements
-    }
-
-    /// Sets the maximum number of field elements allowed in a single live advice map value.
-    pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
-        self.max_adv_map_value_size = size;
+    /// Sets whether the synchronous prover may overlap hasher-chiplet trace building with program
+    /// execution (defaults to `true`; ignored on no_std, which always uses the sequential path).
+    /// When enabled, overlap is opportunistic. A caller with no separate Rayon worker uses compact
+    /// buffered replay.
+    pub fn with_overlapped_trace_build(mut self, overlapped: bool) -> Self {
+        self.overlapped_trace_build = overlapped;
         self
     }
 
-    /// Sets the maximum total number of field elements allowed in live advice map keys and values.
-    pub fn with_max_adv_map_elements(mut self, size: usize) -> Self {
-        self.max_adv_map_elements = size;
+    /// Returns whether the synchronous prover may overlap trace building with execution.
+    pub fn overlapped_trace_build(&self) -> bool {
+        self.overlapped_trace_build
+    }
+
+    /// Sets the maximum combined logical size, in bytes, of the advice provider.
+    pub fn with_max_advice_size_bytes(mut self, size: usize) -> Self {
+        self.max_advice_size_bytes = size;
         self
     }
 
@@ -260,22 +228,10 @@ impl ExecutionOptions {
         self
     }
 
-    /// Sets the maximum approximate number of field elements allowed in deferred state.
-    pub fn with_max_deferred_elements(mut self, size: usize) -> Self {
-        self.max_deferred_elements = size;
-        self
-    }
-
     /// Returns the maximum number of continuations allowed on the continuation stack.
     #[inline]
     pub fn max_num_continuations(&self) -> usize {
         self.max_num_continuations
-    }
-
-    /// Returns the maximum number of internal nodes allowed in the advice provider's Merkle store.
-    #[inline]
-    pub fn max_merkle_store_nodes(&self) -> usize {
-        self.max_merkle_store_nodes
     }
 
     /// Returns the maximum number of field elements allowed on the operand stack across the active
@@ -297,12 +253,6 @@ impl ExecutionOptions {
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
-        self
-    }
-
-    /// Sets the maximum number of internal nodes allowed in the advice provider's Merkle store.
-    pub fn with_max_merkle_store_nodes(mut self, max_merkle_store_nodes: usize) -> Self {
-        self.max_merkle_store_nodes = max_merkle_store_nodes;
         self
     }
 

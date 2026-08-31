@@ -36,6 +36,7 @@ jobs:
           - advice_inputs_deserialize
           - operation_deserialize
           - execution_proof_deserialize
+          - execution_witness_deserialize
           - deferred_state_wire_deserialize
           - deferred_state_wire_serde_deserialize
           - package_deserialize
@@ -45,14 +46,14 @@ jobs:
           - project_assemble
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Generate fuzz seed corpus
@@ -61,7 +62,8 @@ jobs:
           GENERATED_CORPUS_TARGETS: >-
             mast_forest_deserialize program_deserialize kernel_deserialize
             stack_io_deserialize advice_inputs_deserialize operation_deserialize
-            execution_proof_deserialize deferred_state_wire_deserialize
+            execution_proof_deserialize execution_witness_deserialize
+            deferred_state_wire_deserialize
             deferred_state_wire_serde_deserialize package_deserialize package_semantic_deserialize
         run: |
           if [[ " $GENERATED_CORPUS_TARGETS " == *" $TARGET "* ]]; then
@@ -114,14 +116,14 @@ jobs:
           - signatures
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
@@ -158,14 +160,14 @@ jobs:
           - budgeted
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install Rust toolchain
         run: rustup update --no-self-update nightly
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)

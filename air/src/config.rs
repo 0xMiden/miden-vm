@@ -3,9 +3,9 @@
 //! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
 //! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec;
 
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
@@ -15,7 +15,7 @@ use miden_crypto::{
         rpo::RpoPermutation256,
         rpx::RpxPermutation256,
     },
-    merkle::MerkleTree,
+    merkle::{MerklePath, MerkleTree, NodeIndex},
     stark::{
         GenericStarkConfig,
         challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
@@ -30,7 +30,7 @@ use miden_crypto::{
     },
 };
 
-use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH};
+use crate::{PROOF_ORDER_COUNT, PROOF_ORDER_REGISTRY_DEPTH, ProofOrder};
 
 // SHARED TYPES
 // ================================================================================================
@@ -52,7 +52,7 @@ const COMPRESSION_INPUTS: usize = 2;
 // ================================================================================================
 
 /// Log2 of the FRI blowup factor (blowup = 8).
-const LOG_BLOWUP: u8 = 3;
+pub(crate) const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
@@ -63,8 +63,38 @@ pub const FOLDING_POW_BITS: usize = 4;
 pub const DEEP_POW_BITS: usize = 12;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
-/// Proof-of-work bits for query phase.
-const QUERY_POW_BITS: usize = 16;
+/// Proof-of-work bits for query phase, calibrated so that with 27 queries
+/// `conjectured_security_level(27, 17) == 96`, with no margin: lowering this or the per-query
+/// rate drops the preset below 96 conjectured bits.
+const QUERY_POW_BITS: usize = 17;
+
+// CONJECTURED SECURITY LEVEL
+// ================================================================================================
+
+/// Fixed-point (16 fractional bits) conjectured security bits contributed per FRI query, for
+/// this configuration's blowup (8) and challenge field (~128 bits):
+/// `floor(-log2(rho + eta) * 2^16)` with `rho = 1/8` and the random-words cutoff
+/// `eta = log2(e/rho) * rho / 128` (<https://eprint.iacr.org/2025/2010>, section 1.5), i.e.
+/// ~2.9508 bits per query. Must match the constant in `crates/lib/core/asm/stark/utils.masm`
+/// (enforced by cross-tests).
+pub const CONJECTURED_BITS_PER_QUERY_FP: u64 = 193_382;
+
+/// Cap on any reported security level: the minimum of the challenge-field size and the
+/// commitment hash's collision resistance (both ~128 bits here).
+pub const MAX_SECURITY_LEVEL: u32 = 128;
+
+/// Returns the conjectured security level (in bits) attained by a proof with the given FRI
+/// query count and query-phase grinding bits, under this configuration's fixed blowup and
+/// challenge field.
+///
+/// The computation is integer fixed-point — `min(((num_queries * C) >> 16) + query_pow, 128)` —
+/// so the MASM mirror can match it bit-for-bit; the constant is floored, so the result never
+/// exceeds the real-valued formula (conservative by at most one bit). `num_queries` is a FRI
+/// query count (the verifier bounds it to `<= 150`), so the product fits comfortably in a `u32`.
+pub fn conjectured_security_level(num_queries: u32, query_pow_bits: u32) -> u32 {
+    let fri_bits = ((num_queries as u64 * CONJECTURED_BITS_PER_QUERY_FP) >> 16) as u32;
+    (fri_bits + query_pow_bits).min(MAX_SECURITY_LEVEL)
+}
 
 /// Default PCS parameters shared by all hash function configurations.
 pub fn pcs_params() -> PcsParams {
@@ -86,25 +116,39 @@ pub fn pcs_params() -> PcsParams {
 /// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
 pub type RelationDigest = [Felt; 4];
 
+/// Bind a protocol version and ACE registry root into a relation digest.
+pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest {
+    let input = [
+        Felt::new_unchecked(protocol_id),
+        registry_root[0],
+        registry_root[1],
+        registry_root[2],
+        registry_root[3],
+    ];
+    let digest = Poseidon2::hash_elements(&input);
+    let elements = digest.as_elements();
+    [elements[0], elements[1], elements[2], elements[3]]
+}
+
 /// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(837197885082815666),
-    Felt::new_unchecked(17812429367884914),
-    Felt::new_unchecked(12945170128166309606),
-    Felt::new_unchecked(6547471563106428306),
+    Felt::new_unchecked(8509919582315365814),
+    Felt::new_unchecked(12865978328275266043),
+    Felt::new_unchecked(12073117316737140237),
+    Felt::new_unchecked(5647109555087128169),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(14555859356618613041),
-    Felt::new_unchecked(12263818504402094214),
-    Felt::new_unchecked(8947171757737633119),
-    Felt::new_unchecked(15898708917413488144),
+    Felt::new_unchecked(8563712008625779037),
+    Felt::new_unchecked(2346635758357605862),
+    Felt::new_unchecked(17725435322360039753),
+    Felt::new_unchecked(12106900609136090006),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -119,64 +163,84 @@ const _: () = assert!(
     "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
 );
 
-/// Leaves in the ACE circuit registry tree.
-///
-/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
-/// Inactive leaves are deterministic padding.
-pub const ACE_CIRCUIT_REGISTRY_LEAVES: &[[Felt; 4]] = &[
-    [
-        Felt::new_unchecked(11837859209345903758),
-        Felt::new_unchecked(9815638019877886793),
-        Felt::new_unchecked(9625207076207895997),
-        Felt::new_unchecked(9695069585445924735),
-    ],
-    [
-        Felt::new_unchecked(9259510150343331840),
-        Felt::new_unchecked(9964209990365158348),
-        Felt::new_unchecked(9771094394334616804),
-        Felt::new_unchecked(6801591902715947619),
-    ],
-    [
-        Felt::new_unchecked(13344682865201754218),
-        Felt::new_unchecked(15894423116029143536),
-        Felt::new_unchecked(14467138423458194619),
-        Felt::new_unchecked(7897270834863694594),
-    ],
-    [
-        Felt::new_unchecked(4099186920626073427),
-        Felt::new_unchecked(682092905703283829),
-        Felt::new_unchecked(12849329509929050984),
-        Felt::new_unchecked(16382140914209989580),
-    ],
-    [
-        Felt::new_unchecked(14539896184148634413),
-        Felt::new_unchecked(16739205143055038643),
-        Felt::new_unchecked(714188673764061491),
-        Felt::new_unchecked(212073732483360886),
-    ],
-    [
-        Felt::new_unchecked(3223252693442251987),
-        Felt::new_unchecked(16359545287906460326),
-        Felt::new_unchecked(7603623116366423371),
-        Felt::new_unchecked(1382565076671067911),
-    ],
-    [
-        Felt::new_unchecked(1422687632582465263),
-        Felt::new_unchecked(6762842649754512176),
-        Felt::new_unchecked(204555358186721414),
-        Felt::new_unchecked(14644894839315568530),
-    ],
-    [
-        Felt::new_unchecked(17922044667460564880),
-        Felt::new_unchecked(15528373781338840444),
-        Felt::new_unchecked(17550563904831590003),
-        Felt::new_unchecked(14149524031833665710),
-    ],
-];
+// NOTE: registry leaves are not checked in. They are recomputed per process from the AIR
+// (see `ace_registry_path`) and authenticated against `ACE_CIRCUIT_REGISTRY_ROOT`, which
+// is the registry commitment. Checking in the six active Miden VM leaves would be cheap but
+// redundant; recomputing them also keeps the Miden VM and PVM on one serving model.
 
-pub fn ace_circuit_registry_tree() -> MerkleTree {
-    let leaves = ACE_CIRCUIT_REGISTRY_LEAVES.iter().copied().map(Word::new).collect::<Vec<_>>();
-    MerkleTree::new(&leaves).expect("ACE circuit registry has power-of-two leaves")
+/// Authentication data for one ACE registry slot: its leaf and Merkle path.
+///
+/// This is the whole registry read surface — the MASM loader consumes exactly one
+/// `mtree_get(ACE_REGISTRY_ROOT, ORDER_TAG)`, so one `(leaf, path)` per proof is all a
+/// caller ever needs. How the registry is stored behind this call is an implementation
+/// detail, which is what lets the precompile VM's 10!-leaf registry swap in a different
+/// strategy without touching callers.
+///
+/// Returns `None` when `tag` does not address a slot of the depth-[`ACE_CIRCUIT_REGISTRY_DEPTH`]
+/// tree. Padding slots (tags at or above [`PROOF_ORDER_COUNT`]) resolve like any other slot;
+/// the MASM verifier's `assert_valid_order_tag` is what keeps them from being opened.
+pub fn ace_registry_path(tag: u32) -> Option<(Word, MerklePath)> {
+    #[cfg(feature = "std")]
+    let tree = miden_vm_ace_registry();
+    #[cfg(not(feature = "std"))]
+    let tree = &build_miden_vm_ace_registry();
+    registry_path_in(tree, tag)
+}
+
+/// Leaf and path for `tag` in a caller-held registry tree.
+pub(crate) fn registry_path_in(tree: &MerkleTree, tag: u32) -> Option<(Word, MerklePath)> {
+    let index = NodeIndex::new(ACE_CIRCUIT_REGISTRY_DEPTH as u8, u64::from(tag)).ok()?;
+    let leaf = tree.get_node(index).ok()?;
+    let path = tree.get_path(index).ok()?;
+    Some((leaf, path))
+}
+
+/// The process-wide Miden VM ACE circuit registry, computed from the AIR on first use.
+///
+/// Leaves are recomputed (not checked in) and the resulting root is authenticated against
+/// the compiled-in [`ACE_CIRCUIT_REGISTRY_ROOT`] before anything can read the tree, so
+/// this cache carries no trust: drift between the AIR and the protocol constant fails
+/// here, loudly, instead of at every later `mtree_get` with an opaque store miss.
+#[cfg(feature = "std")]
+fn miden_vm_ace_registry() -> &'static MerkleTree {
+    static REGISTRY: std::sync::OnceLock<MerkleTree> = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(|| build_miden_vm_ace_registry_with(crate::ace::shared_recursive_factory()))
+}
+
+/// Rebuilds the Miden VM's eight-leaf ACE registry and authenticates it against the protocol root.
+///
+/// `std` caches this tree process-wide; `no_std` callers rebuild it on demand so recursive advice
+/// generation remains available without global state or synchronization support.
+#[cfg(not(feature = "std"))]
+fn build_miden_vm_ace_registry() -> MerkleTree {
+    let factory = crate::ace::RecursiveAceCircuitFactory::new()
+        .expect("recursive-verifier ACE composition must build");
+    build_miden_vm_ace_registry_with(&factory)
+}
+
+/// Builds the eight-leaf registry from an existing factory and authenticates it against
+/// the protocol root, so callers holding a factory pay no second composition build.
+pub(crate) fn build_miden_vm_ace_registry_with(
+    factory: &crate::ace::RecursiveAceCircuitFactory,
+) -> MerkleTree {
+    let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
+    let mut leaves = vec![miden_ace_codegen::padding_leaf(); ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
+    for order in ProofOrder::variants() {
+        let leaf = factory
+            .leaf_for_order(&order, &mut buffer)
+            .expect("registry leaf must encode for every proof order");
+        leaves[order.tag() as usize] = leaf;
+    }
+    let tree = MerkleTree::new(&leaves).expect("ACE circuit registry has power-of-two leaves");
+    assert_eq!(
+        tree.root(),
+        Word::new(ACE_CIRCUIT_REGISTRY_ROOT),
+        "computed ACE registry root does not match ACE_CIRCUIT_REGISTRY_ROOT. If this \
+         protocol change is intentional, run `make regenerate-constraints` and record \
+         the break; otherwise inspect the unexpected registry drift before updating constants",
+    );
+    tree
 }
 
 /// Observes PCS protocol parameters into the challenger.
@@ -184,16 +248,16 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// Call on a challenger obtained from `config.challenger()` to complete the
 /// domain-separated transcript initialization. The config factories bind the
 /// caller-supplied relation digest into the prototype challenger; this function
-/// adds the remaining protocol parameters.
-pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
+/// adds the actual PCS parameters used by that config.
+pub fn observe_protocol_params(params: &PcsParams, challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
-    challenger.observe(Felt::new_unchecked(QUERY_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(DEEP_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(FOLDING_POW_BITS as u64));
-    challenger.observe(Felt::new_unchecked(LOG_BLOWUP as u64));
-    challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
-    challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
+    challenger.observe(Felt::new_unchecked(params.num_queries() as u64));
+    challenger.observe(Felt::new_unchecked(params.query_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.deep_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.folding_pow_bits() as u64));
+    challenger.observe(Felt::new_unchecked(params.log_blowup() as u64));
+    challenger.observe(Felt::new_unchecked(params.log_final_degree() as u64));
+    challenger.observe(Felt::new_unchecked(1_u64 << params.log_folding_arity()));
     challenger.observe(Felt::ZERO);
 }
 
@@ -203,9 +267,9 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
 /// Sponge state width in field elements.
 const SPONGE_WIDTH: usize = 12;
 /// Sponge rate (absorbable elements per permutation).
-const SPONGE_RATE: usize = 8;
+pub(crate) const SPONGE_RATE: usize = 8;
 /// Sponge digest width in field elements.
-const DIGEST_WIDTH: usize = 4;
+pub(crate) const DIGEST_WIDTH: usize = 4;
 /// Range of capacity slots within the sponge state array.
 const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
 
@@ -357,20 +421,40 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-    use miden_crypto::merkle::MerkleTree;
+    use miden_ace_codegen::padding_leaf;
+    use miden_core::{Felt, Word};
+    use miden_crypto::{
+        merkle::MerkleTree,
+        stark::{challenger::CanObserve, pcs::PcsParams},
+    };
 
     use crate::{ProofOrder, ace};
 
-    const PROTOCOL_ID: u64 = 0;
-    const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
+    const PROTOCOL_ID: u64 = 1;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 
-    fn padding_leaf(index: usize) -> Word {
-        Poseidon2::hash_elements(&[
-            Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN),
-            Felt::new_unchecked(index as u64),
-        ])
+    #[derive(Default)]
+    struct RecordingChallenger(Vec<Felt>);
+
+    impl CanObserve<Felt> for RecordingChallenger {
+        fn observe(&mut self, value: Felt) {
+            self.0.push(value);
+        }
+    }
+
+    /// Transcript domain separation must bind the parameters actually supplied to the config,
+    /// not the Miden VM's current compile-time defaults.
+    #[test]
+    fn protocol_observation_uses_the_supplied_pcs_params() {
+        let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
+        let mut challenger = RecordingChallenger::default();
+        super::observe_protocol_params(&params, &mut challenger);
+        assert_eq!(
+            challenger.0,
+            [19, 13, 11, 5, 4, 6, 8, 0].map(Felt::new_unchecked),
+            "the transcript must encode [queries, query PoW, DEEP PoW, folding PoW, blowup log, \
+             final-degree log, folding arity, padding]",
+        );
     }
 
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
@@ -381,20 +465,28 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        assert_eq!(
-            super::ACE_CIRCUIT_REGISTRY_LEAVES.len(),
-            super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT,
-            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
-        );
-
-        let mut expected_leaves = (0..super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT)
-            .map(padding_leaf)
-            .collect::<Vec<_>>();
+        let mut expected_leaves = vec![padding_leaf(); super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
         let mut snapshot_lines = Vec::new();
         let mut expected_metadata = None;
 
+        let factory = ace::RecursiveAceCircuitFactory::new().unwrap();
+        let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
         for order in ProofOrder::variants() {
-            let circuit = ace::build_recursive_verifier_ace_circuit(&order).unwrap();
+            let circuit = factory.circuit_for_order(&order).unwrap();
+
+            // Dual-path leaf equality for EVERY order: the encode-only path (which the
+            // runtime registry uses) against the assembled-stream path. This catches
+            // encoding divergence between the two stream constructions; it is blind to
+            // hash-implementation faults, which hit both paths identically (they share
+            // the cached sponge states) — those are guarded by the one-shot builder
+            // sweep in air/tests/ace_codegen.rs and miden-crypto's packed-vs-scalar
+            // differential test.
+            assert_eq!(
+                factory.leaf_for_order(&order, &mut buffer).unwrap(),
+                circuit.commitment,
+                "encode-only registry leaf diverges from the assembled circuit for {}",
+                order.file_stem(),
+            );
             let metadata = (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len);
             if let Some(expected) = expected_metadata {
                 assert_eq!(metadata, expected, "ACE circuit metadata must be uniform");
@@ -418,18 +510,7 @@ mod tests {
             ));
         }
 
-        let actual_leaves = super::ACE_CIRCUIT_REGISTRY_LEAVES
-            .iter()
-            .copied()
-            .map(Word::new)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual_leaves.as_slice(),
-            expected_leaves.as_slice(),
-            "ACE_CIRCUIT_REGISTRY_LEAVES in config.rs is stale. Regenerate with: {REGEN_HINT}",
-        );
-
-        let tree = MerkleTree::new(expected_leaves).expect("registry tree");
+        let tree = MerkleTree::new(&expected_leaves).expect("registry tree");
         let registry_root = tree.root();
         assert_eq!(
             Word::new(super::ACE_CIRCUIT_REGISTRY_ROOT),
@@ -437,10 +518,20 @@ mod tests {
             "ACE_CIRCUIT_REGISTRY_ROOT in config.rs is stale. Regenerate with: {REGEN_HINT}"
         );
 
-        let relation_input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
-            .chain(registry_root.iter().copied())
-            .collect();
-        let digest = Poseidon2::hash_elements(&relation_input);
+        // The path-shaped read surface must serve every slot — active and padding —
+        // with a leaf and path that verify against the compiled-in root.
+        for tag in 0..super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT as u32 {
+            let (leaf, path) = super::ace_registry_path(tag).expect("tag addresses a slot");
+            assert_eq!(leaf, expected_leaves[tag as usize], "leaf mismatch at tag {tag}");
+            let computed = path.compute_root(u64::from(tag), leaf).expect("path root computes");
+            assert_eq!(computed, registry_root, "path at tag {tag} does not verify");
+        }
+        assert!(
+            super::ace_registry_path(super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT as u32).is_none(),
+            "out-of-range tags must not resolve"
+        );
+
+        let digest = super::relation_digest(PROTOCOL_ID, &registry_root);
         let expected: Vec<u64> = digest.iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!("{}\nrelation_digest: {:?}", snapshot_lines.join("\n"), expected);
@@ -451,5 +542,121 @@ mod tests {
             actual, expected,
             "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
         );
+    }
+
+    /// The deployed PCS preset attains exactly the conjectured target (96 bits) at its actual
+    /// query count and query-PoW constants. Unlike the reference-vector test below (which pins the
+    /// formula against hard-coded inputs), this pins the live `NUM_QUERIES` / `QUERY_POW_BITS`
+    /// preset, so a query-count or query-PoW downgrade is caught here rather than only indirectly.
+    #[test]
+    fn deployed_preset_attains_conjectured_target() {
+        assert_eq!(
+            super::conjectured_security_level(
+                super::NUM_QUERIES as u32,
+                super::QUERY_POW_BITS as u32
+            ),
+            96,
+            "deployed preset no longer attains 96 conjectured bits",
+        );
+    }
+
+    /// The integer fixed-point conjectured-security computation must reproduce the
+    /// reference values of the random-words formula (2025/2010, section 1.5), precomputed
+    /// externally; in particular the calibration points (27, 16) -> 95 and (27, 17) -> 96.
+    #[test]
+    fn conjectured_security_level_matches_reference_vectors() {
+        static VECTORS: &[(u32, u32, u32)] = &[
+            (1, 0, 2),
+            (1, 4, 6),
+            (1, 16, 18),
+            (1, 17, 19),
+            (1, 24, 26),
+            (1, 30, 32),
+            (1, 100, 102),
+            (5, 0, 14),
+            (5, 4, 18),
+            (5, 16, 30),
+            (5, 17, 31),
+            (5, 24, 38),
+            (5, 30, 44),
+            (5, 100, 114),
+            (22, 0, 64),
+            (22, 4, 68),
+            (22, 16, 80),
+            (22, 17, 81),
+            (22, 24, 88),
+            (22, 30, 94),
+            (22, 100, 128),
+            (27, 0, 79),
+            (27, 4, 83),
+            (27, 16, 95),
+            (27, 17, 96),
+            (27, 24, 103),
+            (27, 30, 109),
+            (27, 100, 128),
+            (28, 0, 82),
+            (28, 4, 86),
+            (28, 16, 98),
+            (28, 17, 99),
+            (28, 24, 106),
+            (28, 30, 112),
+            (28, 100, 128),
+            (43, 0, 126),
+            (43, 4, 128),
+            (43, 16, 128),
+            (43, 17, 128),
+            (43, 24, 128),
+            (43, 30, 128),
+            (43, 100, 128),
+            (64, 0, 128),
+            (64, 16, 128),
+            (100, 0, 128),
+            (128, 24, 128),
+            (150, 0, 128),
+            (150, 100, 128),
+            (255, 0, 128),
+        ];
+        for &(q, pow, expected) in VECTORS {
+            assert_eq!(
+                super::conjectured_security_level(q, pow),
+                expected,
+                "conjectured_security_level({q}, {pow})"
+            );
+        }
+    }
+
+    /// The fixed-point estimator must never overstate security relative to the true random-words
+    /// f64 formula, and must track it within one bit. This guards the conservative direction (the
+    /// dangerous one) against any future recalibration of `CONJECTURED_BITS_PER_QUERY_FP`.
+    #[test]
+    fn conjectured_security_level_never_overstates_true_formula() {
+        // The true per-query rate `b = -log2(rho + eta)` with `rho = 1/8` (blowup 8) and the
+        // random-words cutoff `eta = log2(e/rho) * rho / 128` (2025/2010, section 1.5).
+        let rho = 0.125_f64;
+        let eta = (core::f64::consts::LOG2_E + 3.0) * rho / 128.0;
+        let bits_per_query = -(rho + eta).log2();
+
+        // The compiled constant is exactly that rate in 16-fractional-bit fixed point.
+        assert_eq!(
+            super::CONJECTURED_BITS_PER_QUERY_FP,
+            (bits_per_query * 65536.0).floor() as u64,
+            "CONJECTURED_BITS_PER_QUERY_FP is stale relative to the random-words rate"
+        );
+
+        // Over the whole verifier domain (num_queries a u8, query_pow_bits < 32) the fixed-point
+        // level never exceeds the f64 formula and trails it by at most one bit.
+        for nq in 0u32..256 {
+            for pow in 0u32..32 {
+                let float_fri = (f64::from(nq) * bits_per_query) as u32;
+                let float_level = (float_fri + pow).min(super::MAX_SECURITY_LEVEL);
+                let fixed_level = super::conjectured_security_level(nq, pow);
+                let delta = i64::from(float_level) - i64::from(fixed_level);
+                assert!(
+                    (0..=1).contains(&delta),
+                    "num_queries={nq}, query_pow_bits={pow}: float={float_level}, \
+                     fixed={fixed_level} (delta={delta})"
+                );
+            }
+        }
     }
 }

@@ -1,30 +1,36 @@
-use alloc::{format, string::ToString, sync::Arc, vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+};
 use core::{assert_matches, str::FromStr};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Linkage, Path,
-    ast::{Module, ModuleKind, QualifiedProcedureName},
+    ast::{DebugInlineCallInfo, Instruction, Module, ModuleKind, Op, QualifiedProcedureName},
 };
 use miden_core::{
     ONE, Word,
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastNodeExt,
-        SplitNodeBuilder,
+        MastNodeId, SplitNodeBuilder,
     },
     operations::Operation,
     program::StackInputs,
     serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
+    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan,
+    Span, Uri,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
     debug_info::{
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
-        DebugSourceNodeId, PackageDebugInfo,
+        DebugSourceAsmOp, DebugSourceNode, DebugSourceNodeId, PackageDebugInfo,
+        PackageDebugInfoBuilder,
     },
 };
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
@@ -32,7 +38,8 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
+    SyncHost,
     advice::AdviceMutation,
     event::EventError,
     operation::OperationError,
@@ -47,6 +54,94 @@ mod memory;
 fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
+
+fn set_entrypoint_inline_context(
+    source_manager: &DefaultSourceManager,
+    module: &mut Module,
+    name: &str,
+) {
+    let entrypoint = module
+        .procedures_mut()
+        .find(|procedure| procedure.is_entrypoint())
+        .expect("executable module should contain an entrypoint");
+    let mut replacements = [None, Some(name)].into_iter();
+    for op in entrypoint.body_mut().iter_mut() {
+        let Op::Inst(instruction) = op else {
+            continue;
+        };
+        if !matches!(instruction.inner(), Instruction::Nop) {
+            continue;
+        }
+        let replacement = replacements.next().expect("unexpected marker placeholder");
+        let span = instruction.span();
+        let instruction = match replacement {
+            None => Instruction::DebugInlineCallClear,
+            Some(name) => {
+                let location = source_manager.file_line_col(span).unwrap();
+                Instruction::DebugInlineCall(DebugInlineCallInfo::new(
+                    name,
+                    location.clone(),
+                    location,
+                ))
+            },
+        };
+        *op = Op::Inst(Span::new(span, instruction));
+    }
+    assert!(replacements.next().is_none(), "test fixture has too few marker placeholders");
+}
+
+fn active_inline_names(resume_context: &ResumeContext) -> Vec<String> {
+    resume_context
+        .inherited_inline_call_contexts()
+        .flat_map(|context| {
+            context.inline_calls().map(|inline_call| {
+                let function = context
+                    .debug_info()
+                    .get_function(inline_call.callee_idx)
+                    .expect("inline callee should be registered");
+                context.debug_info()[function.name_idx].to_string()
+            })
+        })
+        .collect()
+}
+
+fn debug_asm_op(
+    builder: &mut PackageDebugInfoBuilder,
+    op_idx: u32,
+    location: Option<Location>,
+    context_name: &str,
+    op_name: &str,
+    num_cycles: u8,
+) -> DebugSourceAsmOp {
+    DebugSourceAsmOp::new(
+        op_idx,
+        location.map(|location| builder.add_location(location)),
+        builder.add_string(context_name),
+        builder.add_string(op_name),
+        num_cycles,
+    )
+}
+
+fn debug_source_node(
+    exec_node: MastNodeId,
+    children: Vec<DebugSourceNodeId>,
+    op_end: u32,
+    asm_ops: Vec<DebugSourceAsmOp>,
+) -> DebugSourceNode {
+    DebugSourceNode {
+        exec_node,
+        children,
+        op_start: 0,
+        op_end,
+        asm_ops,
+        debug_vars: Vec::new(),
+        inline_calls: Vec::new(),
+    }
+}
+
+fn debug_info_section(debug_info: &PackageDebugInfo) -> Section {
+    Section::new(SectionId::DEBUG_INFO, debug_info.to_bytes())
 }
 
 #[test]
@@ -225,7 +320,7 @@ fn test_syscall_fail() {
 }
 
 #[test]
-fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() {
+fn validated_debug_child_bearing_package_executes_with_debug_info() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let package = Assembler::new(source_manager)
         .assemble_program(
@@ -250,7 +345,7 @@ fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() 
     assert!(package.debug_info().unwrap().is_some());
 
     let package = Package::read_from_bytes(&package.to_bytes()).unwrap();
-    assert!(package.debug_info().unwrap().is_none());
+    assert!(package.debug_info().unwrap().is_some());
 
     let program = package.unwrap_program();
     let output = FastProcessor::new(StackInputs::new(&[Felt::new_unchecked(3)]).unwrap())
@@ -540,19 +635,12 @@ fn host_loaded_ambiguous_debug_root_drops_precise_loaded_source_span() {
         .mast_forest()
         .find_procedure_root(target_digest)
         .expect("root exists");
-    let source_a = DebugSourceNodeId::from(0);
-    let source_b = DebugSourceNodeId::from(1);
-    loaded_package.sections = vec![Section::new(
-        SectionId::DEBUG_SOURCE_GRAPH,
-        DebugSourceGraphSection::from_parts(
-            vec![
-                DebugSourceNode::new(root_id, Vec::new(), 0, 1),
-                DebugSourceNode::new(root_id, Vec::new(), 0, 1),
-            ],
-            vec![source_a, source_b],
-        )
-        .to_bytes(),
-    )];
+    let mut builder = PackageDebugInfoBuilder::default();
+    let source_a = builder.add_node(debug_source_node(root_id, Vec::new(), 1, Vec::new())).unwrap();
+    let source_b = builder.add_node(debug_source_node(root_id, Vec::new(), 1, Vec::new())).unwrap();
+    builder.add_root(source_a);
+    builder.add_root(source_b);
+    loaded_package.sections = vec![debug_info_section(&builder.build())];
 
     let (program, caller_debug_info) = external_program_for_digest(target_digest);
     let mut host = DefaultHost::default()
@@ -621,8 +709,6 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         .expect("library debug info should decode")
         .expect("library should contain debug info");
     let mut same_digest_roots = lib_debug_info
-        .source_graph()
-        .expect("library should have a source graph")
         .roots()
         .iter()
         .map(|root| lib_debug_info.source_node(*root).unwrap().exec_node)
@@ -656,18 +742,20 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         .debug_info()
         .expect("program debug info should decode")
         .expect("program should contain debug info");
-    let source_map = package_debug_info.source_map().expect("program should have a source map");
-    let selected_row_found = source_map.asm_ops().iter().any(|row| {
-        row.location
-            .as_ref()
+    let asm_ops = package_debug_info.nodes().iter().flat_map(|node| node.asm_ops.iter());
+    let selected_row_found = asm_ops.clone().any(|row| {
+        row.location_idx
+            .into_option()
+            .and_then(|location_idx| package_debug_info.get_location(location_idx))
             .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
     });
 
     assert!(selected_row_found, "the selected call should keep lib/b.masm metadata");
     assert!(
-        !source_map.asm_ops().iter().any(|row| {
-            row.location
-                .as_ref()
+        !asm_ops.clone().any(|row| {
+            row.location_idx
+                .into_option()
+                .and_then(|location_idx| package_debug_info.get_location(location_idx))
                 .is_some_and(|location| location.uri().as_str() == "lib/a.masm")
         }),
         "the uncalled identical procedure should not leak into the executable source map",
@@ -703,40 +791,34 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     );
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let source_root = DebugSourceNodeId::from(0);
-    let source_true = DebugSourceNodeId::from(1);
-    let source_false = DebugSourceNodeId::from(2);
-    let package_debug_info = PackageDebugInfo::with_source_debug(
-        DebugSourceGraphSection::from_parts(
-            vec![
-                DebugSourceNode::new(root_id, vec![source_true, source_false], 0, 1),
-                DebugSourceNode::new(block_id, vec![], 0, 1),
-                DebugSourceNode::new(block_id, vec![], 0, 1),
-            ],
-            vec![source_root],
-        ),
-        DebugSourceMapSection::from_parts(
-            vec![
-                DebugSourceAsmOp::new(
-                    source_true,
-                    0,
-                    Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(5))),
-                    "true_branch".into(),
-                    "assert".into(),
-                    1,
-                ),
-                DebugSourceAsmOp::new(
-                    source_false,
-                    0,
-                    Some(Location::new(uri, ByteIndex::new(6), ByteIndex::new(12))),
-                    "false_branch".into(),
-                    "assert".into(),
-                    2,
-                ),
-            ],
-            Vec::new(),
-        ),
+    let mut builder = PackageDebugInfoBuilder::default();
+    let true_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(5))),
+        "true_branch",
+        "assert",
+        1,
     );
+    let source_true = builder
+        .add_node(debug_source_node(block_id, Vec::new(), 1, vec![true_asm_op]))
+        .unwrap();
+    let false_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri, ByteIndex::new(6), ByteIndex::new(12))),
+        "false_branch",
+        "assert",
+        2,
+    );
+    let source_false = builder
+        .add_node(debug_source_node(block_id, Vec::new(), 1, vec![false_asm_op]))
+        .unwrap();
+    let source_root = builder
+        .add_node(debug_source_node(root_id, vec![source_true, source_false], 1, Vec::new()))
+        .unwrap();
+    builder.add_root(source_root);
+    let package_debug_info = *builder.build();
 
     let processor = FastProcessor::new(StackInputs::default());
     let err = processor
@@ -789,6 +871,52 @@ fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
     );
 }
 
+/// Covers the `Some(entrypoint_source_node)` arm of
+/// [`ProgramExecutor::execute_with_package_debug_info`], so the trait-level dispatch to
+/// [`FastProcessor::execute_with_package_debug_info_at_source_node`] is not left untested. It
+/// mirrors [`package_source_debug_execution_uses_manifest_entrypoint_source_node`] but drives
+/// execution through the trait instead of the inherent method.
+#[tokio::test(flavor = "current_thread")]
+async fn program_executor_routes_package_debug_to_entrypoint_source_node() {
+    let fixture =
+        same_digest_entrypoint_fixture(vec![Operation::Assert(Felt::from_u32(9))], "assert");
+    assert!(
+        fixture
+            .debug_info
+            .unique_source_root_for_exec_node(fixture.program.entrypoint())
+            .is_err(),
+        "debug info alone cannot pick the manifest-selected same-digest entrypoint"
+    );
+
+    let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
+    let processor = <FastProcessor as ProgramExecutor>::new(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .unwrap();
+    let processor =
+        <FastProcessor as ProgramExecutor>::with_debug_info(processor, fixture.debug_info.clone());
+    let processor = <FastProcessor as ProgramExecutor>::with_entrypoint_source_node(
+        processor,
+        Some(fixture.entrypoint_source_node_id),
+    );
+    let err = <FastProcessor as ProgramExecutor>::execute(processor, &fixture.program, &mut host)
+        .await
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
+            && actual_source_file.id() == fixture.source_file.id()
+            && err_code == Felt::from_u32(9)
+    );
+}
+
 #[test]
 fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
     let fixture = same_digest_entrypoint_fixture(vec![Operation::Add], "add");
@@ -801,16 +929,19 @@ fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
     );
 
     let mut trace_host = DefaultHost::default();
-    let trace_inputs =
+    let execution_witness =
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(3), Felt::from_u32(4)]).unwrap())
-            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+            .execute_for_proving_with_package_debug_info_at_source_node_sync(
                 &fixture.program,
                 &fixture.debug_info,
                 fixture.entrypoint_source_node_id,
                 &mut trace_host,
             )
             .unwrap();
-    assert_eq!(trace_inputs.stack_outputs().get_element(0), Some(Felt::from_u32(7)));
+    assert_eq!(
+        execution_witness.claim().stack_outputs().get_element(0),
+        Some(Felt::from_u32(7))
+    );
 
     let mut step_host = DefaultHost::default();
     let stack_outputs =
@@ -823,6 +954,17 @@ fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
             )
             .unwrap();
     assert_eq!(stack_outputs.get_element(0), Some(Felt::from_u32(7)));
+}
+
+#[test]
+fn initial_package_resume_context_tracks_manifest_entrypoint_source_node() {
+    let fixture = same_digest_entrypoint_fixture(vec![Operation::Add], "add");
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let resume_context = processor
+        .get_initial_resume_context_for_package(fixture.package)
+        .expect("package resume context should initialize");
+
+    assert_eq!(resume_context.next_source_node_id(), Some(fixture.entrypoint_source_node_id),);
 }
 
 #[test]
@@ -854,18 +996,20 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
         .find(|&root| root != entrypoint)
         .expect("program should contain a callee procedure root");
 
-    let source_entry = DebugSourceNodeId::from(0);
-    let source_callee_a = DebugSourceNodeId::from(1);
-    let source_callee_b = DebugSourceNodeId::from(2);
-    let package_debug_info =
-        PackageDebugInfo::default().with_source_graph(DebugSourceGraphSection::from_parts(
-            vec![
-                DebugSourceNode::new(entrypoint, vec![], 0, 1),
-                DebugSourceNode::new(callee_root, vec![], 0, 1),
-                DebugSourceNode::new(callee_root, vec![], 0, 1),
-            ],
-            vec![source_entry, source_callee_a, source_callee_b],
-        ));
+    let mut builder = PackageDebugInfoBuilder::default();
+    let source_entry = builder
+        .add_node(debug_source_node(entrypoint, Vec::new(), 1, Vec::new()))
+        .unwrap();
+    let source_callee_a = builder
+        .add_node(debug_source_node(callee_root, Vec::new(), 1, Vec::new()))
+        .unwrap();
+    let source_callee_b = builder
+        .add_node(debug_source_node(callee_root, Vec::new(), 1, Vec::new()))
+        .unwrap();
+    builder.add_root(source_entry);
+    builder.add_root(source_callee_a);
+    builder.add_root(source_callee_b);
+    let package_debug_info = *builder.build();
 
     let processor = FastProcessor::new(StackInputs::default());
     let output = processor
@@ -877,6 +1021,211 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
         .unwrap();
 
     assert_eq!(output.stack.get_element(0), Some(Felt::from_u32(7)));
+}
+
+#[test]
+fn dynexec_propagates_inline_context_through_the_selected_target() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut parser = Module::parser(Some(ModuleKind::Executable));
+    let mut module = parser
+        .parse_str(
+            None,
+            "
+            proc target
+                push.7
+                drop
+            end
+
+            begin
+                procref.target mem_storew_le.100 dropw push.100
+                nop
+                nop
+                dynexec
+                push.9
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    set_entrypoint_inline_context(&source_manager, &mut module, "source::dynamic");
+    let package: Arc<Package> =
+        Arc::from(Assembler::new(source_manager).assemble_program("program", module).unwrap());
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context_for_package(package)
+        .expect("package resume context should initialize");
+    let mut host = DefaultHost::default();
+    let mut saw_target_context = false;
+    let mut saw_context_cleared = false;
+    loop {
+        let names = active_inline_names(&resume_context);
+        if names.is_empty() {
+            saw_context_cleared |= saw_target_context;
+        } else {
+            assert_eq!(names, ["source::dynamic"]);
+            saw_target_context = true;
+        }
+
+        let Some(next_resume_context) = processor.step_sync(&mut host, resume_context).unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_target_context, "dynexec target should inherit the call-site inline context");
+    assert!(saw_context_cleared, "inline context should end when dynexec returns");
+}
+
+#[test]
+fn external_exec_propagates_inline_context_into_the_loaded_package() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut library_parser = Module::parser(Some(ModuleKind::Library));
+    let library_module = library_parser
+        .parse_str(
+            None,
+            "
+            namespace dep::math
+
+            pub proc target
+                push.7
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    let library: Arc<Package> = Arc::from(
+        Assembler::new(source_manager.clone())
+            .assemble_library("dep", library_module, None::<Box<Module>>)
+            .unwrap(),
+    );
+    let assembler = Assembler::new(source_manager.clone())
+        .with_package(library.clone(), Linkage::Dynamic)
+        .unwrap();
+    let mut program_parser = Module::parser(Some(ModuleKind::Executable));
+    let mut program_module = program_parser
+        .parse_str(
+            None,
+            "
+            use dep::math
+
+            begin
+                nop
+                nop
+                exec.math::target
+                push.9
+                drop
+            end
+            ",
+            source_manager.clone(),
+        )
+        .unwrap();
+    set_entrypoint_inline_context(&source_manager, &mut program_module, "source::external");
+    let package: Arc<Package> =
+        Arc::from(assembler.assemble_program("program", program_module).unwrap());
+    let caller_forest = package.mast_forest().clone();
+
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context_for_package(package)
+        .expect("package resume context should initialize");
+    let mut host = DefaultHost::default();
+    host.load_library(library).unwrap();
+    let mut saw_target_context = false;
+    let mut saw_context_cleared = false;
+    loop {
+        let names = active_inline_names(&resume_context);
+        if names.is_empty() {
+            if saw_target_context {
+                saw_context_cleared = true;
+                assert_eq!(
+                    resume_context.current_forest().commitment(),
+                    caller_forest.commitment()
+                );
+                assert!(
+                    !matches!(
+                        resume_context.continuation_stack().peek_continuation(),
+                        Some(Continuation::EnterForest { .. })
+                    ),
+                    "resume contexts must eagerly restore non-clock forest continuations",
+                );
+            }
+        } else {
+            assert_eq!(names, ["source::external"]);
+            saw_target_context = true;
+        }
+
+        let Some(next_resume_context) = processor.step_sync(&mut host, resume_context).unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_target_context, "loaded target should inherit the external boundary context");
+    assert!(saw_context_cleared, "inline context should end when external execution returns");
+}
+
+#[test]
+fn nested_external_returns_restore_the_caller_before_resuming() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (leaf_package, leaf_digest, _) = host_loaded_package_fixture(
+        source_manager.clone(),
+        vec![Operation::Pad, Operation::Drop],
+        true,
+    );
+    let leaf_forest = leaf_package.mast_forest().clone();
+    let (forwarder_package, forwarder_digest) = host_loaded_forwarder_package(leaf_digest);
+    let forwarder_forest = forwarder_package.mast_forest().clone();
+    let (program, caller_debug_info) = external_program_for_digest(forwarder_digest);
+    let caller_forest = program.mast_forest().clone();
+
+    let mut host = DefaultHost::default()
+        .with_source_manager(source_manager)
+        .with_library(Arc::new(forwarder_package))
+        .expect("forwarder package should register")
+        .with_library(Arc::new(leaf_package))
+        .expect("leaf package should register");
+    let mut processor = FastProcessor::new(StackInputs::default());
+    let mut resume_context = processor
+        .get_initial_resume_context(&program)
+        .expect("program resume context should initialize");
+    let mut saw_leaf = false;
+    let mut saw_restored_caller = false;
+
+    loop {
+        let current_forest = resume_context.current_forest();
+        assert!(
+            !Arc::ptr_eq(current_forest, &forwarder_forest),
+            "source-unaware external forwarding must not expose an intermediate resume context",
+        );
+        if Arc::ptr_eq(current_forest, &leaf_forest) {
+            saw_leaf = true;
+        } else if saw_leaf && Arc::ptr_eq(current_forest, &caller_forest) {
+            saw_restored_caller = true;
+            assert!(
+                !matches!(
+                    resume_context.continuation_stack().peek_continuation(),
+                    Some(Continuation::EnterForest { .. })
+                ),
+                "all pending forest restorations must be applied before resuming",
+            );
+        }
+
+        let Some(next_resume_context) = processor
+            .step_with_package_debug_info_sync(&mut host, resume_context, &caller_debug_info)
+            .unwrap()
+        else {
+            break;
+        };
+        resume_context = next_resume_context;
+    }
+
+    assert!(saw_leaf, "execution should enter the leaf package");
+    assert!(saw_restored_caller, "execution should resume directly in the caller package");
 }
 
 fn absolute_path(name: &str) -> Arc<Path> {
@@ -914,26 +1263,21 @@ fn host_loaded_package_fixture(
         .load_from_raw_parts(uri.clone(), SourceContent::new("masm", uri.clone(), "assert.fail"));
 
     if include_debug_info {
-        let source_node_id = DebugSourceNodeId::from(0);
-        let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceNode::new(root_id, Vec::new(), 0, op_end)],
-            vec![source_node_id],
+        let mut builder = PackageDebugInfoBuilder::default();
+        let asm_op = debug_asm_op(
+            &mut builder,
+            0,
+            Some(Location::new(uri, ByteIndex::new(0), ByteIndex::new(11))),
+            "loaded::target",
+            "assert.fail",
+            1,
         );
-        let source_map = DebugSourceMapSection::from_parts(
-            vec![DebugSourceAsmOp::new(
-                source_node_id,
-                0,
-                Some(Location::new(uri, ByteIndex::new(0), ByteIndex::new(11))),
-                "loaded::target".into(),
-                "assert.fail".into(),
-                1,
-            )],
-            Vec::new(),
-        );
-        package.sections = vec![
-            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
-            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
-        ];
+        let source_node_id = builder
+            .add_node(debug_source_node(root_id, Vec::new(), op_end, vec![asm_op]))
+            .unwrap();
+        assert_eq!(source_node_id, DebugSourceNodeId::from(0));
+        builder.add_root(source_node_id);
+        package.sections = vec![debug_info_section(&builder.build())];
         assert!(package.debug_info().unwrap().is_some());
     }
 
@@ -971,12 +1315,12 @@ fn external_program_for_digest(target_digest: Word) -> (Program, PackageDebugInf
     let external_id = ExternalNodeBuilder::new(target_digest).add_to_forest(&mut forest).unwrap();
     forest.make_root(external_id);
     let program = Program::new(forest.into(), external_id);
-    let source_node_id = DebugSourceNodeId::from(0);
-    let package_debug_info =
-        PackageDebugInfo::default().with_source_graph(DebugSourceGraphSection::from_parts(
-            vec![DebugSourceNode::new(external_id, Vec::new(), 0, 1)],
-            vec![source_node_id],
-        ));
+    let mut builder = PackageDebugInfoBuilder::default();
+    let source_node_id = builder
+        .add_node(debug_source_node(external_id, Vec::new(), 1, Vec::new()))
+        .unwrap();
+    builder.add_root(source_node_id);
+    let package_debug_info = *builder.build();
     (program, package_debug_info)
 }
 
@@ -999,34 +1343,31 @@ fn external_then_fail_program_for_digest(
         SourceContent::new("masm", uri.clone(), "exec.loaded\nassert.fail"),
     );
 
-    let source_root = DebugSourceNodeId::from(0);
-    let source_external = DebugSourceNodeId::from(1);
-    let source_fail = DebugSourceNodeId::from(2);
-    let package_debug_info = PackageDebugInfo::with_source_debug(
-        DebugSourceGraphSection::from_parts(
-            vec![
-                DebugSourceNode::new(root_id, vec![source_external, source_fail], 0, 1),
-                DebugSourceNode::new(external_id, Vec::new(), 0, 1),
-                DebugSourceNode::new(fail_id, Vec::new(), 0, 1),
-            ],
-            vec![source_root],
-        ),
-        DebugSourceMapSection::from_parts(
-            vec![DebugSourceAsmOp::new(
-                source_fail,
-                0,
-                Some(Location::new(uri, ByteIndex::new(12), ByteIndex::new(23))),
-                "caller::main".into(),
-                "assert.fail".into(),
-                2,
-            )],
-            Vec::new(),
-        ),
+    let mut builder = PackageDebugInfoBuilder::default();
+    let source_external = builder
+        .add_node(debug_source_node(external_id, Vec::new(), 1, Vec::new()))
+        .unwrap();
+    let fail_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri, ByteIndex::new(12), ByteIndex::new(23))),
+        "caller::main",
+        "assert.fail",
+        2,
     );
+    let source_fail = builder
+        .add_node(debug_source_node(fail_id, Vec::new(), 1, vec![fail_asm_op]))
+        .unwrap();
+    let source_root = builder
+        .add_node(debug_source_node(root_id, vec![source_external, source_fail], 1, Vec::new()))
+        .unwrap();
+    builder.add_root(source_root);
+    let package_debug_info = *builder.build();
     (program, package_debug_info, source_file)
 }
 
 struct SameDigestEntrypointFixture {
+    package: Arc<Package>,
     program: Program,
     debug_info: PackageDebugInfo,
     entrypoint_source_node_id: DebugSourceNodeId,
@@ -1062,34 +1403,34 @@ fn same_digest_entrypoint_fixture(
         uri.clone(),
         SourceContent::new("masm", uri.clone(), "alias_a;\nalias_b;\n"),
     );
-    let source_graph = DebugSourceGraphSection::from_parts(
-        vec![
-            DebugSourceNode::new(block_id, vec![], 0, op_end),
-            DebugSourceNode::new(block_id, vec![], 0, op_end),
-        ],
-        vec![source_alias_a, source_alias_b],
+    let mut builder = PackageDebugInfoBuilder::default();
+    let alias_a_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(8))),
+        "alias_a",
+        op_name,
+        1,
     );
-    let source_map = DebugSourceMapSection::from_parts(
-        vec![
-            DebugSourceAsmOp::new(
-                source_alias_a,
-                0,
-                Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(8))),
-                "alias_a".into(),
-                op_name.into(),
-                1,
-            ),
-            DebugSourceAsmOp::new(
-                source_alias_b,
-                0,
-                Some(Location::new(uri, ByteIndex::new(9), ByteIndex::new(17))),
-                "alias_b".into(),
-                op_name.into(),
-                1,
-            ),
-        ],
-        vec![],
+    let actual_source_alias_a = builder
+        .add_node(debug_source_node(block_id, Vec::new(), op_end, vec![alias_a_asm_op]))
+        .unwrap();
+    assert_eq!(actual_source_alias_a, source_alias_a);
+    let alias_b_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri, ByteIndex::new(9), ByteIndex::new(17))),
+        "alias_b",
+        op_name,
+        1,
     );
+    let actual_source_alias_b = builder
+        .add_node(debug_source_node(block_id, Vec::new(), op_end, vec![alias_b_asm_op]))
+        .unwrap();
+    assert_eq!(actual_source_alias_b, source_alias_b);
+    builder.add_root(source_alias_a);
+    builder.add_root(source_alias_b);
+    let package_debug_info = builder.build();
 
     let mut package = Package::create(
         PackageId::from("app"),
@@ -1100,10 +1441,7 @@ fn same_digest_entrypoint_fixture(
         None,
     )
     .unwrap();
-    package.sections = vec![
-        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
-        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
-    ];
+    package.sections = vec![debug_info_section(&package_debug_info)];
     let executable = package
         .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
         .unwrap();
@@ -1113,6 +1451,7 @@ fn same_digest_entrypoint_fixture(
     assert_eq!(entrypoint_source_node_id, source_alias_b);
 
     SameDigestEntrypointFixture {
+        package: Arc::new(executable.clone()),
         program: executable.unwrap_program(),
         debug_info: executable.debug_info().unwrap().unwrap(),
         entrypoint_source_node_id,
@@ -1144,29 +1483,24 @@ fn missing_external_package_source_debug_fixture() -> (
     );
     let host = DefaultHost::default().with_source_manager(source_manager.clone());
 
-    let source_root = DebugSourceNodeId::from(0);
-    let source_external = DebugSourceNodeId::from(1);
     let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
-    let package_debug_info = PackageDebugInfo::with_source_debug(
-        DebugSourceGraphSection::from_parts(
-            vec![
-                DebugSourceNode::new(root_id, vec![source_external], 0, 1),
-                DebugSourceNode::new(external_id, vec![], 0, 1),
-            ],
-            vec![source_root],
-        ),
-        DebugSourceMapSection::from_parts(
-            vec![DebugSourceAsmOp::new(
-                source_external,
-                0,
-                Some(Location::new(uri, ByteIndex::new(10), ByteIndex::new(28))),
-                "external_call".into(),
-                "call.missing::proc".into(),
-                2,
-            )],
-            Vec::new(),
-        ),
+    let mut builder = PackageDebugInfoBuilder::default();
+    let external_asm_op = debug_asm_op(
+        &mut builder,
+        0,
+        Some(Location::new(uri, ByteIndex::new(10), ByteIndex::new(28))),
+        "external_call",
+        "call.missing::proc",
+        2,
     );
+    let source_external = builder
+        .add_node(debug_source_node(external_id, Vec::new(), 1, vec![external_asm_op]))
+        .unwrap();
+    let source_root = builder
+        .add_node(debug_source_node(root_id, vec![source_external], 1, Vec::new()))
+        .unwrap();
+    builder.add_root(source_root);
+    let package_debug_info = *builder.build();
 
     (program, package_debug_info, host, source_manager, expected_span, source_file)
 }
@@ -1350,6 +1684,74 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
         result.is_ok(),
         "Program using exactly max_cycles should succeed, but got: {result:?}"
     );
+}
+
+/// Tests that `ExecutionError::ProverMemoryExceeded` is correctly emitted when the modelled peak
+/// prover memory for a trace exceeds the configured budget.
+///
+/// Execution itself is unaffected by the budget (enforcement happens in `build_trace`), so this
+/// measures the exact modelled peak for the trace under a generous budget, then rebuilds with a
+/// budget one byte short of that peak.
+#[test]
+fn test_prover_memory_budget_exceeded() {
+    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
+
+    let build_witness = || {
+        let mut host = DefaultHost::default();
+        // A fragment size close to the program's real row count keeps the tier-1 allocation
+        // precheck (based on `fragment_size`, not the actual padded height) from dominating the
+        // exact byte-budget boundary this test targets.
+        let options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(MIN_TRACE_LEN)
+            .unwrap();
+        let processor = FastProcessor::new_with_options(
+            StackInputs::default(),
+            AdviceInputs::default(),
+            options,
+        )
+        .expect("processor advice inputs should fit advice map limits");
+        let witness = processor
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("execution is unaffected by the prover memory budget");
+        witness.into_parts().0
+    };
+
+    let measured = crate::trace::build_trace(build_witness()).expect("default budget must succeed");
+    let params = miden_air::config::pcs_params();
+    let exact_peak = measured
+        .trace_len_summary()
+        .prover_memory_bytes(&params)
+        .expect("modelled peak fits in u64");
+
+    let err = crate::trace::build_trace_with_budget(build_witness(), exact_peak - 1).unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::ProverMemoryExceeded { estimated_bytes, budget_bytes }
+            if estimated_bytes == exact_peak && budget_bytes == exact_peak - 1
+    );
+}
+
+/// Tests that the default prover memory budget does not reject a normal-sized trace.
+#[test]
+fn test_prover_memory_default_budget_accepts_normal_trace() {
+    let mut host = DefaultHost::default();
+
+    let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN * 4]);
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let witness = processor
+        .execute_for_proving_sync(&program, &mut host)
+        .expect("execution should succeed");
+    let (vm_witness, _) = witness.into_parts();
+
+    crate::trace::build_trace(vm_witness)
+        .expect("the default prover memory budget must accept a normal-sized trace");
 }
 
 #[test]
@@ -1667,13 +2069,14 @@ fn issue_2818_traced_execution_stack_grows_past_initial_buffer() {
         .with_max_stack_depth(DEFAULT_MAX_STACK_DEPTH + GROWTH_MARGIN)
         .unwrap();
 
-    let trace_inputs =
+    let execution_witness =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
             .expect("processor advice inputs should fit advice map limits")
-            .execute_trace_inputs_sync(&program, &mut host)
+            .execute_for_proving_sync(&program, &mut host)
             .expect("traced execution should grow the stack buffer past the initial buffer");
+    let (vm_witness, _) = execution_witness.into_parts();
 
-    crate::trace::build_trace(trace_inputs)
+    crate::trace::build_trace(vm_witness)
         .expect("trace replay should accept the same operand stack depth limit");
 }
 

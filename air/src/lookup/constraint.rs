@@ -11,16 +11,15 @@
 //! stores the *numerator–denominator pair* `(Nᵢ, Dᵢ)` — the cross-multiplied sum of all
 //! interactions assigned to that column on row `r`. The constraints then check:
 //!
-//! - Fraction columns (i > 0): `Dᵢ · acc[i] - Nᵢ = 0` on transition rows. This binds `acc[i]` to
-//!   `Nᵢ/Dᵢ`, the row's fraction sum for column `i`.
+//! - Fraction columns (i > 0): `Dᵢ · acc[i] - Nᵢ = 0` on every row. This binds `acc[i]` to `Nᵢ/Dᵢ`,
+//!   the row's fraction sum for column `i`.
 //!
-//! - **Accumulator** (col 0): the single running sum across the entire trace.
-//!   - `when_first:      acc[0] = 0` — starts at zero.
-//!   - `when_transition: D₀ · (acc_next[0] - Σᵢ acc[i]) - N₀ = 0` — the next accumulator value
-//!     equals the current value plus every column's per-row contribution (including col 0's own
-//!     interactions folded via `N₀/D₀`).
-//!   - `when_last:       acc[0] = committed_final` — binds the final sum to the value committed
-//!     during the Fiat-Shamir transcript, ensuring the global LogUp sum is correct.
+//! - **Accumulator** (col 0): a normalized cyclic running sum.
+//!   - `when_first: acc[0] = 0` anchors the witness.
+//!   - On every row, including the last-to-first edge, `D₀ · (acc_next[0] - Σᵢ acc[i] +
+//!     sigma_prime) - N₀ = 0`.
+//!   - The committed value is `sigma_prime = sigma / n`. Summing the cyclic recurrence over all `n`
+//!     rows binds `n · sigma_prime` to the trace's global LogUp sum `sigma`.
 //!
 //! ## Algebra location
 //!
@@ -154,12 +153,12 @@ where
         self.column_idx += 1;
 
         if col_idx == 0 {
-            let (acc, acc_next, committed_final) = {
+            let (acc, acc_next, sigma_prime) = {
                 let mp = self.ab.permutation();
                 let acc: AB::ExprEF = mp.current_slice()[0].into();
                 let acc_next: AB::ExprEF = mp.next_slice()[0].into();
-                let committed_final: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
-                (acc, acc_next, committed_final)
+                let sigma_prime: AB::ExprEF = self.ab.permutation_values()[0].clone().into();
+                (acc, acc_next, sigma_prime)
             };
 
             // Σ_i acc[i] across all permutation columns.
@@ -173,30 +172,18 @@ where
                 sum
             };
 
-            //   when_first:      acc[0] = 0
-            //   when_transition: D₀ · (acc_next[0] - Σᵢ acc[i]) - N₀ = 0
-            //   when_last:       acc[0] = committed_final
-            //
-            // The natural closing check would fold the last row's interactions into the
-            // boundary constraint, but `when_last_row`'s selector adds a polynomial factor
-            // that would push some columns past the degree budget. Our model assumes the
-            // last row never fires any interactions (V = 0, U = 1), so we use the
-            // lower-degree form: `acc − committed_final = 0`. The fraction columns below
-            // enforce this algebraically via `when_last_row acc[i] = 0`.
-            self.ab.when_first_row().assert_zero_ext(acc.clone());
-            self.ab.when_transition().assert_zero_ext(u * (acc_next - all_curr_sum) - v);
-            self.ab.when_last_row().assert_eq_ext(acc, committed_final);
+            // The recurrence is deliberately unfiltered: the permutation window wraps from the
+            // last row to the first, and summing all rows yields `n * sigma_prime = sigma`.
+            self.ab.when_first_row().assert_zero_ext(acc);
+            self.ab.assert_zero_ext(u * (acc_next - all_curr_sum + sigma_prime) - v);
         } else {
-            //   when_transition: Dᵢ · acc[i] - Nᵢ = 0
-            //   when_last:       acc[i] = 0  — no bus may fire on the padding row; this
-            //                                  is the invariant col 0's closing check
-            //                                  assumes.
+            // Fraction columns are bound on every row because the cyclic accumulator consumes the
+            // last row's contribution as well.
             let acc_curr: AB::ExprEF = {
                 let mp = self.ab.permutation();
                 mp.current_slice()[col_idx].into()
             };
-            self.ab.when_transition().assert_zero_ext(u * acc_curr.clone() - v);
-            self.ab.when_last_row().assert_zero_ext(acc_curr);
+            self.ab.assert_zero_ext(u * acc_curr - v);
         }
 
         result

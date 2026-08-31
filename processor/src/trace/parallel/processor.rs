@@ -43,7 +43,7 @@ use crate::{
 ///
 /// The replay structures and initial system and stack state are built by the
 /// [`crate::trace::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::FastProcessor::execute_trace_inputs`].
+/// [`crate::FastProcessor::execute_for_proving`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -55,8 +55,8 @@ pub(crate) struct ReplayProcessor {
     pub hasher_response_replay: HasherResponseReplay,
     pub mast_forest_resolution_replay: MastForestResolutionReplay,
 
-    /// Per-fragment view of the [`crate::TraceGenerationContext`]'s `mast_forest_store`. Used to
-    /// resolve `usize` indices recorded in the replays back to [`Arc<SparseMastForest>`] handles
+    /// Per-fragment view of the trace replay's `mast_forest_store`. Used to resolve `usize`
+    /// indices recorded in the replays back to [`Arc<SparseMastForest>`] handles
     /// during execution.
     pub mast_forest_store: Vec<Arc<SparseMastForest>>,
 
@@ -73,7 +73,7 @@ impl ReplayProcessor {
     ///
     /// The parameters are expected to be built by the
     /// [`crate::trace::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::FastProcessor::execute_trace_inputs`].
+    /// [`crate::FastProcessor::execute_for_proving`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,
@@ -149,6 +149,7 @@ impl ReplayProcessor {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
         let mut package_debug_info = None;
+        let mut inline_call_contexts = Vec::new();
 
         while let ControlFlow::Break(internal_break_reason) = execute_impl_noop_host(
             self,
@@ -159,6 +160,7 @@ impl ReplayProcessor {
             tracer,
             stopper,
             &mut package_debug_info,
+            &mut inline_call_contexts,
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
@@ -201,6 +203,7 @@ impl ReplayProcessor {
                         self,
                         current_forest,
                         &mut package_debug_info,
+                        &inline_call_contexts,
                         continuation_stack,
                         tracer,
                         stopper,
@@ -232,9 +235,11 @@ impl ReplayProcessor {
                         new_forest,
                         None,
                         None,
+                        None,
                         external_node_id,
                         current_forest,
                         &mut package_debug_info,
+                        &mut inline_call_contexts,
                         continuation_stack,
                         tracer,
                     )?;

@@ -1,10 +1,7 @@
 use core::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 mod debug_metadata;
-pub use debug_metadata::{AssemblyOp, DebugVarInfo, DebugVarLocation};
+pub use debug_metadata::AssemblyOp;
 
 use crate::{
     Felt,
@@ -139,7 +136,6 @@ pub mod opcodes {
 /// Note though that those operations have their own unique opcode which lives in the same 7-bit
 /// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
@@ -172,9 +168,11 @@ pub enum Operation {
     /// - User-defined events are conventionally derived from strings via
     ///   `hash_string_to_word(name)[0]` (Blake3-based) and may be emitted via immediate forms in
     ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
-    /// - System events are still identified by specific 32-bit codes; the VM attempts to interpret
-    ///   the stack `Felt` as `u32` to dispatch known system events, and otherwise forwards the
-    ///   event to the host.
+    /// - System events are identified by reserved [`SystemEvent`](crate::events::SystemEvent) IDs.
+    ///   Most are handled by the VM; `SystemEvent::TraceEvent` triggers the host's optional
+    ///   read-only trace handler for the trace event id at stack position 1. Assembly exposes this
+    ///   through `trace`, `trace.CONST`, and `trace.event("...")`.
+    /// - Any non system event ID is forwarded to the host's regular event handler.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
     Emit = opcodes::EMIT,

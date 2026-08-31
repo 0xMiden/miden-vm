@@ -22,7 +22,7 @@ use crate::{
     BaseHost, DefaultHost, FastProcessor, KernelDescriptor, LoadedMastForest, ONE, ProcessorState,
     Program, StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
-    event::{EventError, EventHandler, EventName},
+    event::{EventError, EventHandler, EventName, TraceError, TraceHandler},
     operation::Operation,
 };
 
@@ -48,6 +48,18 @@ struct AlwaysFailEventHandler;
 impl EventHandler for AlwaysFailEventHandler {
     fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Err(DummyHostEventError.into())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("dummy host trace failure")]
+struct DummyHostTraceError;
+
+struct AlwaysFailTraceHandler;
+
+impl TraceHandler for AlwaysFailTraceHandler {
+    fn on_trace(&self, _process: &ProcessorState) -> Result<(), TraceError> {
+        Err(DummyHostTraceError.into())
     }
 }
 
@@ -271,6 +283,47 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 4 |         end",
+        "   `----"
+    );
+}
+
+#[test]
+fn test_diagnostic_host_trace_error_uses_trace_location() {
+    let trace = EventName::new("test::host_trace_error");
+    let trace_id = trace.to_event_id();
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let source = format!(
+        "
+        begin
+            trace.event(\"{trace}\")
+        end"
+    );
+    let package = Assembler::new(source_manager.clone())
+        .assemble_program("program", source)
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    host.register_trace_handler(trace.clone(), Arc::new(AlwaysFailTraceHandler))
+        .unwrap();
+
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .expect("advice inputs should fit advice map limits");
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .expect_err("expected error");
+    #[rustfmt::skip]
+    assert_diagnostic_lines!(
+        err,
+        // Name and id of the user defined trace event are shown
+        format!("  x error during processing of event '{trace}' (ID: {trace_id})"),
+        "  `-> dummy host trace failure",
+        regex!(r#",-\[.*:3:13\]"#),
+      r#" 3 |             trace.event("test::host_trace_error")"#,
+        regex!(r#":\s+\^+"#),
         " 4 |         end",
         "   `----"
     );

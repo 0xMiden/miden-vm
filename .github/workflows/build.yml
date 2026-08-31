@@ -13,34 +13,16 @@ on:
     types: [opened, reopened, synchronize]
 
 jobs:
-  diffs:
-    name: detect changed areas
-    runs-on: ubuntu-latest
-    outputs:
-      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
-      isVm: ${{ steps.diffs.outputs.isVm }}
-      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
-      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
-      isRelease: ${{ steps.diffs.outputs.isRelease }}
-      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - id: diffs
-        uses: ./.github/actions/diffs
-
   no-std:
     name: Build for no-std
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         toolchain: [stable, nightly]
+        target: [wasm32-unknown-unknown, wasm32-wasip1]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -48,17 +30,14 @@ jobs:
       - name: Build for no-std
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}
-          rustup +${{ matrix.toolchain }} target add wasm32-unknown-unknown
-          rustup default ${{ matrix.toolchain }}
-          make build-no-std
+          rustup +${{ matrix.toolchain }} target add ${{ matrix.target }}
+          RUSTUP_TOOLCHAIN=${{ matrix.toolchain }} NO_STD_TARGET=${{ matrix.target }} make build-no-std
 
   target-miden:
     name: Build for Miden target
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isDocsOnly != 'true' && (needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -69,13 +48,33 @@ jobs:
           rustup target add wasm32-wasip2
           make build-target-miden
 
-  fuzz-check:
-    name: Check fuzz workspaces
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isFuzz == 'true' || needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
+  wasm-simd-runtime:
+    name: WASM SIMD128 runtime check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add wasm32-wasip1
+      - name: Install wasmtime
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          tool: wasmtime-cli@45.0.2
+      - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128
+        run: make test-wasm-simd
+      - name: Run overlapped trace-build tests on a threadless wasm target
+        run: make test-wasm-threadless
+
+  fuzz-check:
+    name: Check fuzz workspaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install Rust toolchain

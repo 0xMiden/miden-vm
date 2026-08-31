@@ -1,8 +1,15 @@
-use alloc::{collections::VecDeque, string::ToString};
+use alloc::{collections::VecDeque, string::ToString, sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HasherState, STATE_WIDTH},
+    chiplets::hasher::{HasherState, MERKLE_DEPTH_RANGE_SCALE, RATE_LEN, STATE_WIDTH},
+};
+use miden_core::{
+    mast::{BasicBlockNode, ExecutableMastForest, MastNode, MastNodeExt, OpBatch},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
 };
 
 use crate::{
@@ -11,12 +18,18 @@ use crate::{
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForestId, MastNodeId},
+    mast::{MastForestId, MastNodeId, SparseMastForest},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
     trace::chiplets::CircuitEvaluation,
+    utils::Idx,
 };
+
+mod serde;
+
+#[cfg(test)]
+mod serialization_tests;
 
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
@@ -38,12 +51,17 @@ use crate::{
 /// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
 ///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
 ///    [`miden_core::mast::DynNode`]).
-#[derive(Debug)]
+///
+/// Note: the binary wire format is deliberately lossy because the embedded
+/// [`ContinuationStack`](crate::continuation_stack::ContinuationStack) drops its debug metadata
+/// (`package_debug_info` and `source_node_ids`), so the exact-equality round-trip test generated
+/// by `serde_test` does not apply to this type.
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
     /// Continuation stack with forest references encoded as [`MastForestId`]s into the
-    /// `mast_forest_store` of the owning [`crate::TraceGenerationContext`].
+    /// `mast_forest_store` of the owning trace replay.
     pub continuation: ContinuationStack<MastForestId>,
     /// MAST forest active at the start of this fragment.
     pub initial_mast_forest_id: MastForestId,
@@ -54,7 +72,7 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -104,7 +122,7 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -153,7 +171,7 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -279,7 +297,7 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -294,7 +312,7 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -321,7 +339,7 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -330,14 +348,6 @@ pub struct BlockStackReplay {
 }
 
 impl BlockStackReplay {
-    /// Creates a new instance of `BlockStackReplay`.
-    pub fn new() -> Self {
-        Self {
-            node_start_parent_addr: VecDeque::new(),
-            node_end: VecDeque::new(),
-        }
-    }
-
     /// Records the node's parent address
     pub fn record_node_start_parent_addr(&mut self, parent_addr: Felt) {
         self.node_start_parent_addr.push_back(parent_addr);
@@ -385,6 +395,11 @@ pub struct NodeFlags {
 
 impl NodeFlags {
     /// Creates a new instance of `NodeFlags`.
+    ///
+    /// The four booleans are independent flags packed into the hasher state's
+    /// second word for an END operation; there is no natural smaller grouping,
+    /// so we accept the bool parameters explicitly.
+    #[allow(clippy::fn_params_excessive_bools)]
     pub fn new(is_loop_body: bool, is_loop: bool, is_call: bool, is_syscall: bool) -> Self {
         Self {
             is_loop_body,
@@ -426,7 +441,7 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -440,7 +455,7 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -456,10 +471,10 @@ pub struct ExecutionContextSystemInfo {
 /// a procedure not present in the current forest.
 ///
 /// The forest reference is stored as a [`MastForestId`] into the `mast_forest_store` of the
-/// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
-/// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
+/// trace replay that owns this data. This avoids holding a strong `Arc<MastForest>` reference per
+/// resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -478,6 +493,10 @@ impl MastForestResolutionReplay {
             .pop_front()
             .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
     }
+
+    pub(crate) fn iter_forest_ids(&self) -> impl Iterator<Item = MastForestId> + '_ {
+        self.mast_forest_resolutions.iter().map(|(_node_id, forest_id)| *forest_id)
+    }
 }
 
 // MEMORY REPLAY
@@ -494,7 +513,7 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -552,6 +571,11 @@ impl MemoryReadsReplay {
     pub fn iter_read_words(&self) -> impl Iterator<Item = (Word, Felt, ContextId, RowIndex)> {
         self.words_read.iter().copied()
     }
+
+    /// Returns the total number of trace rows contributed by recorded reads, or `None` on overflow.
+    pub fn num_accesses(&self) -> Option<usize> {
+        self.elements_read.len().checked_add(self.words_read.len())
+    }
 }
 
 /// Records and replays all the writes made to memory, in which all elements written to memory
@@ -559,7 +583,7 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -594,6 +618,12 @@ impl MemoryWritesReplay {
     /// (word, address, context ID, clock cycle).
     pub fn iter_words_written(&self) -> impl Iterator<Item = &(Word, Felt, ContextId, RowIndex)> {
         self.words_written.iter()
+    }
+
+    /// Returns the total number of trace rows contributed by recorded writes, or `None` on
+    /// overflow.
+    pub fn num_accesses(&self) -> Option<usize> {
+        self.elements_written.len().checked_add(self.words_written.len())
     }
 }
 
@@ -645,7 +675,7 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -736,14 +766,14 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
 }
 
 /// Replay data for bitwise operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BitwiseReplay {
     u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
 }
@@ -761,6 +791,11 @@ impl BitwiseReplay {
     pub fn record_u32xor(&mut self, a: Felt, b: Felt) {
         self.u32op_with_operands.push_back((BitwiseOp::U32Xor, a, b));
     }
+
+    /// Returns the number of recorded operations.
+    pub fn num_operations(&self) -> usize {
+        self.u32op_with_operands.len()
+    }
 }
 
 impl IntoIterator for BitwiseReplay {
@@ -777,7 +812,7 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -806,7 +841,7 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -819,6 +854,14 @@ impl AceReplay {
     pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
         let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
+    }
+
+    /// Returns the total number of trace rows contributed by recorded evaluations, or `None` on
+    /// overflow.
+    pub fn trace_len(&self) -> Option<usize> {
+        self.circuit_evaluations
+            .iter()
+            .try_fold(0usize, |len, (_, evaluation)| len.checked_add(evaluation.num_rows()))
     }
 }
 
@@ -835,12 +878,26 @@ impl IntoIterator for AceReplay {
 // RANGE CHECKER REPLAY
 // ================================================================================================
 
+/// Values requested from the 16-bit range-check table by a single operation.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RangeCheckReplayValues {
+    Two([u16; 2]),
+    Four([u16; 4]),
+}
+
+impl AsRef<[u16]> for RangeCheckReplayValues {
+    fn as_ref(&self) -> &[u16] {
+        match self {
+            Self::Two(values) => values,
+            Self::Four(values) => values,
+        }
+    }
+}
+
 /// Replay data for range checking operations.
-///
-/// This currently only records
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeCheckerReplay {
-    range_checks_u32_ops: VecDeque<[u16; 4]>,
+    range_checks: VecDeque<RangeCheckReplayValues>,
 }
 
 impl RangeCheckerReplay {
@@ -849,24 +906,41 @@ impl RangeCheckerReplay {
 
     /// Records the set of range checks which result from a u32 operation.
     pub fn record_range_check_u32(&mut self, u16_limbs: [u16; 4]) {
-        self.range_checks_u32_ops.push_back(u16_limbs);
+        self.range_checks.push_back(RangeCheckReplayValues::Four(u16_limbs));
+    }
+
+    /// Records the two range checks which enforce that a Merkle depth is in `[1, 64]`.
+    pub fn record_merkle_depth(&mut self, depth: Felt) {
+        let depth =
+            u16::try_from(depth.as_canonical_u64()).expect("Merkle depth must fit in 16 bits");
+        let scaled_depth = depth
+            .checked_sub(1)
+            .and_then(|depth_minus_one| depth_minus_one.checked_mul(MERKLE_DEPTH_RANGE_SCALE))
+            .expect("Merkle depth must be in the range 1..=64");
+
+        self.range_checks.push_back(RangeCheckReplayValues::Two([depth, scaled_depth]));
+    }
+
+    /// Records the two 16-bit limbs of `divisor - remainder - 1` for U32DIV.
+    pub fn record_u32div_remainder_diff(&mut self, u16_limbs: [u16; 2]) {
+        self.range_checks.push_back(RangeCheckReplayValues::Two(u16_limbs));
     }
 }
 
 impl IntoIterator for RangeCheckerReplay {
-    type Item = [u16; 4];
-    type IntoIter = <VecDeque<[u16; 4]> as IntoIterator>::IntoIter;
+    type Item = RangeCheckReplayValues;
+    type IntoIter = <VecDeque<RangeCheckReplayValues> as IntoIterator>::IntoIter;
 
-    /// Returns an iterator over all recorded range checks resulting from u32 operations.
+    /// Returns an iterator over all range checks recorded during execution.
     fn into_iter(self) -> Self::IntoIter {
-        self.range_checks_u32_ops.into_iter()
+        self.range_checks.into_iter()
     }
 }
 
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -896,7 +970,7 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
@@ -1003,13 +1077,51 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
-    /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
+    /// `mast_forest_store` of the trace replay that owns this operation.
     HashBasicBlock((MastForestId, MastNodeId, Word)),
+    BuildMerkleRoot((Word, MerklePath, Felt)),
+    UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
+}
+
+impl HasherOp {
+    /// Resolves the four forest-free variants; `None` for [`HasherOp::HashBasicBlock`], which
+    /// needs forest access.
+    fn resolve_forest_free<'a>(self) -> Option<ResolvedHasherOp<'a>> {
+        match self {
+            HasherOp::Permute(s) => Some(ResolvedHasherOp::Permute(s)),
+            HasherOp::HashControlBlock(x) => Some(ResolvedHasherOp::HashControlBlock(x)),
+            HasherOp::HashBasicBlock(_) => None,
+            HasherOp::BuildMerkleRoot(x) => Some(ResolvedHasherOp::BuildMerkleRoot(x)),
+            HasherOp::UpdateMerkleRoot(x) => Some(ResolvedHasherOp::UpdateMerkleRoot(x)),
+        }
+    }
+}
+
+/// Basic-block data resolved for replay by the hasher-chiplet builder.
+#[derive(Debug)]
+pub enum ResolvedBasicBlockGroups<'a> {
+    /// Buffered replay borrows batches from the finalized MAST forest.
+    Borrowed(&'a [OpBatch]),
+    /// Streamed replay owns the group hashes because it crosses a thread boundary.
+    Owned(Vec<[Felt; RATE_LEN]>),
+}
+
+/// A hasher-chiplet request with all operands resolved, so it can be replayed without further
+/// MAST forest lookups.
+///
+/// This is what the hasher-chiplet builder consumes: the buffered replay resolves its recorded
+/// [`HasherOp`]s at drain time and borrows basic-block batches from the finalized forest, while the
+/// streaming path resolves at record time and forwards owned data to the concurrent builder.
+#[derive(Debug)]
+pub enum ResolvedHasherOp<'a> {
+    Permute([Felt; STATE_WIDTH]),
+    HashControlBlock((Word, Word, Felt, Word)),
+    HashBasicBlock((ResolvedBasicBlockGroups<'a>, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -1017,17 +1129,100 @@ pub enum HasherOp {
 /// Records and replays all the requests made to the hasher chiplet during the execution of a
 /// program, for the purposes of generating the hasher chiplet's trace.
 ///
-/// The hasher requests are recorded during fast processor execution and then replayed during hasher
-/// chiplet trace generation.
+/// In buffered mode (the default) requests are recorded during fast-processor execution and
+/// replayed during hasher chiplet trace generation. In streamed mode
+/// ([`HasherRequestReplay::streamed`]) each request is resolved at record time and forwarded to
+/// a hasher-chiplet builder running concurrently with execution; see
+/// `FastProcessor::execute_and_build_trace_sync`.
 #[derive(Debug, Default)]
 pub struct HasherRequestReplay {
-    hasher_ops: VecDeque<HasherOp>,
+    sink: HasherOpSink,
+}
+
+#[derive(Debug)]
+enum HasherOpSink {
+    Buffered(VecDeque<HasherOp>),
+    #[cfg(feature = "std")]
+    Streamed(std::sync::mpsc::Sender<ResolvedHasherOp<'static>>),
+}
+
+impl PartialEq for HasherRequestReplay {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.sink, &other.sink) {
+            (HasherOpSink::Buffered(lhs), HasherOpSink::Buffered(rhs)) => lhs == rhs,
+            #[cfg(feature = "std")]
+            (HasherOpSink::Streamed(_), HasherOpSink::Streamed(_)) => true,
+            #[cfg(feature = "std")]
+            _ => false,
+        }
+    }
+}
+
+impl Eq for HasherRequestReplay {}
+
+impl Default for HasherOpSink {
+    fn default() -> Self {
+        Self::Buffered(VecDeque::new())
+    }
 }
 
 impl HasherRequestReplay {
+    /// Creates a replay that forwards each request, resolved, to the receiving end as it is
+    /// recorded.
+    ///
+    /// Send failures are ignored: they mean the consumer stopped early, and its error surfaces
+    /// when the caller joins it.
+    #[cfg(feature = "std")]
+    pub(crate) fn streamed(sender: std::sync::mpsc::Sender<ResolvedHasherOp<'static>>) -> Self {
+        Self { sink: HasherOpSink::Streamed(sender) }
+    }
+
+    // `resolved` is consumed only by the std-only streamed arm; without std the buffered arm
+    // stores the raw op and resolves later at drain.
+    #[cfg_attr(not(feature = "std"), allow(unused_variables))]
+    fn record_resolved(
+        &mut self,
+        op: HasherOp,
+        resolved: impl FnOnce() -> ResolvedHasherOp<'static>,
+    ) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(sender) => {
+                let _ = sender.send(resolved());
+            },
+        }
+    }
+
+    /// Records a forest-free op: buffered sinks store it as is, streamed sinks resolve and
+    /// forward it. [`HasherOp::HashBasicBlock`] must go through
+    /// [`Self::record_hash_basic_block`] instead.
+    fn record(&mut self, op: HasherOp) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(sender) => {
+                let resolved =
+                    op.resolve_forest_free().expect("`record` is only called with forest-free ops");
+                let _ = sender.send(resolved);
+            },
+        }
+    }
+
+    /// Records a raw, unresolved op — test-only escape hatch for injecting
+    /// malformed ids to exercise the drain-time resolution error paths.
+    #[cfg(test)]
+    pub(crate) fn record_raw(&mut self, op: HasherOp) {
+        match &mut self.sink {
+            HasherOpSink::Buffered(ops) => ops.push_back(op),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => panic!("record_raw is for buffered replays"),
+        }
+    }
+
     /// Records a `Hasher::permute()` request.
     pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.hasher_ops.push_back(HasherOp::Permute(state));
+        self.record(HasherOp::Permute(state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.
@@ -1038,24 +1233,34 @@ impl HasherRequestReplay {
         domain: Felt,
         expected_hash: Word,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
+        self.record(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
+    ///
+    /// `basic_block_node` must be the node identified by `(forest_id, node_id)`; streamed
+    /// replays copy its per-batch group hashes so the concurrent builder needs no forest
+    /// access.
     pub fn record_hash_basic_block(
         &mut self,
         forest_id: MastForestId,
         node_id: MastNodeId,
-        expected_hash: Word,
+        basic_block_node: &BasicBlockNode,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)));
+        let expected_hash = basic_block_node.digest();
+        self.record_resolved(HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)), || {
+            ResolvedHasherOp::HashBasicBlock((
+                ResolvedBasicBlockGroups::Owned(
+                    basic_block_node.op_batches().iter().map(|batch| *batch.groups()).collect(),
+                ),
+                expected_hash,
+            ))
+        });
     }
 
     /// Records a `Hasher::build_merkle_root()` request.
     pub fn record_build_merkle_root(&mut self, leaf: Word, path: MerklePath, index: Felt) {
-        self.hasher_ops.push_back(HasherOp::BuildMerkleRoot((leaf, path, index)));
+        self.record(HasherOp::BuildMerkleRoot((leaf, path, index)));
     }
 
     /// Records a `Hasher::update_merkle_root()` request.
@@ -1066,17 +1271,76 @@ impl HasherRequestReplay {
         path: MerklePath,
         index: Felt,
     ) {
-        self.hasher_ops
-            .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
+        self.record(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
     }
-}
 
-impl IntoIterator for HasherRequestReplay {
-    type Item = HasherOp;
-    type IntoIter = <VecDeque<HasherOp> as IntoIterator>::IntoIter;
+    /// Returns the forest IDs referenced by buffered basic-block hash requests.
+    ///
+    /// Trace replay deserialization uses these IDs to validate that every request points into the
+    /// replay's finalized MAST forest store. Streamed requests have already been delivered to the
+    /// concurrent trace builder, so they yield no IDs here.
+    pub(crate) fn iter_hash_basic_block_forest_ids(
+        &self,
+    ) -> impl Iterator<Item = MastForestId> + '_ {
+        self.buffered_ops()
+            .into_iter()
+            .flat_map(|ops| ops.iter())
+            .filter_map(|op| match op {
+                HasherOp::HashBasicBlock((forest_id, _node_id, _expected_hash)) => Some(*forest_id),
+                _ => None,
+            })
+    }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.hasher_ops.into_iter()
+    fn buffered_ops(&self) -> Option<&VecDeque<HasherOp>> {
+        match &self.sink {
+            HasherOpSink::Buffered(ops) => Some(ops),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => None,
+        }
+    }
+
+    /// Drains the buffered requests as resolved ops, looking basic blocks up in the finalized
+    /// forest store.
+    ///
+    /// A streamed replay must not reach this path — its ops were already delivered to the
+    /// concurrent builder (and the overlap path swaps in an empty buffered replay via
+    /// `take_hasher_replay`) — so it yields an error rather than silently producing an empty
+    /// hasher chiplet.
+    pub fn into_resolved_ops<'a>(
+        self,
+        mast_forest_store: &'a [Arc<SparseMastForest>],
+    ) -> impl Iterator<Item = Result<ResolvedHasherOp<'a>, ExecutionError>> + 'a {
+        let (streamed_err, ops) = match self.sink {
+            HasherOpSink::Buffered(ops) => (None, ops),
+            #[cfg(feature = "std")]
+            HasherOpSink::Streamed(_) => (
+                Some(ExecutionError::Internal(
+                    "streamed hasher replay reached the buffered trace-build path",
+                )),
+                VecDeque::new(),
+            ),
+        };
+        streamed_err.into_iter().map(Err).chain(ops.into_iter().map(move |op| match op {
+            HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
+                let forest =
+                    mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
+                        "MAST forest id in hasher replay out of range of mast_forest_store",
+                    ))?;
+                let node = forest
+                    .get_node_by_id(node_id)
+                    .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
+                let MastNode::Block(basic_block_node) = node else {
+                    return Err(ExecutionError::Internal(
+                        "expected basic block node in hasher replay",
+                    ));
+                };
+                Ok(ResolvedHasherOp::HashBasicBlock((
+                    ResolvedBasicBlockGroups::Borrowed(basic_block_node.op_batches()),
+                    expected_hash,
+                )))
+            },
+            op => Ok(op.resolve_forest_free().expect("all other variants are forest-free")),
+        }))
     }
 }
 
@@ -1095,7 +1359,7 @@ impl IntoIterator for HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
@@ -1179,5 +1443,21 @@ impl StackOverflowReplay {
         self.restore_context_info
             .pop_front()
             .ok_or(OperationError::Internal("no overflow address operations recorded"))
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+
+    /// A streamed replay reaching the buffered trace-build path is a logic error
+    /// and must surface immediately, not as a silently empty hasher chiplet.
+    #[test]
+    fn streamed_replay_in_buffered_path_errors() {
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        let replay = HasherRequestReplay::streamed(sender);
+        let mut ops = replay.into_resolved_ops(&[]);
+        assert!(matches!(ops.next(), Some(Err(ExecutionError::Internal(_)))));
+        assert!(ops.next().is_none());
     }
 }

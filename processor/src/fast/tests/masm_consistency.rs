@@ -190,7 +190,7 @@ use super::*;
 // ---- horner ops --------------------------------
 #[case(None,
     "begin
-        push.1.2.3.4 mem_storew_le.40 dropw
+        push.0.0.3.4 mem_storew_le.40 dropw
         horner_eval_base
     end",
     vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),
@@ -199,7 +199,7 @@ use super::*;
 )]
 #[case(None,
     "begin
-        push.1.2.3.4 mem_storew_le.40 dropw
+        push.0.0.3.4 mem_storew_le.40 dropw
         horner_eval_ext
         end",
     vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),

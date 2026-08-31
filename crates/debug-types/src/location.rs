@@ -16,7 +16,10 @@ use super::{
 /// A [Location] represents file and span information for portability across source managers
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serialization_macros::serialization_test
+)]
 pub struct Location {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,
@@ -43,12 +46,29 @@ impl Location {
     }
 }
 
+impl Serializable for Location {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.uri.write_into(target);
+        self.start.to_u32().write_into(target);
+        self.end.to_u32().write_into(target);
+    }
+}
+
+impl Deserializable for Location {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let uri = Uri::read_from(source)?;
+        let start = ByteIndex::from(source.read_u32()?);
+        let end = ByteIndex::from(source.read_u32()?);
+        Ok(Self::new(uri, start, end))
+    }
+}
+
 /// A [FileLineCol] represents traditional file/line/column information for use in rendering.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serialization_macros::serialization_test
 )]
 pub struct FileLineCol {
     /// The path to the source file in which the relevant source code can be found

@@ -2,9 +2,8 @@
 # Source template: {{TEMPLATE_PATH}}
 # Regenerate with: {{REGENERATE_COMMAND}}
 
-use miden::precompiles
-use miden::precompiles::fields::{{BASE_FIELD_MODULE}}
-use miden::core::word
+use miden::core::precompiles
+use miden::core::precompiles::fields::{{BASE_FIELD_MODULE}}
 
 # {{TITLE}} CURVE PRECOMPILE SUPPORT WRAPPERS
 # ================================================================================================
@@ -131,7 +130,6 @@ end
 pub proc push_generator
     push.GENERATOR_DIGEST
 end
-
 
 #! Registers `lhs + rhs` and returns the result expression digest.
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
@@ -302,7 +300,7 @@ pub proc is_eq
     # => [RHS_DIGEST, LHS_VALUE_DIGEST, ...]
     exec.eval_digest
     # => [RHS_VALUE_DIGEST, LHS_VALUE_DIGEST, ...]
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [is_equal, ...]
 end
 
@@ -314,7 +312,7 @@ pub proc is_eq_digest
     # => [EXPR_DIGEST, TARGET_DIGEST, ...]
     exec.eval_digest
     # => [VALUE_DIGEST, TARGET_DIGEST, ...]
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [is_equal, ...]
 end
 
@@ -352,7 +350,7 @@ pub proc assert_not_identity
     # => [VALUE_DIGEST, ...]
     push.IDENTITY_DIGEST
     # => [IDENTITY_DIGEST, VALUE_DIGEST, ...]
-    exec.word::eq
+    exec.precompiles::word_eq
     # => [is_identity, ...]
     assertz
 end

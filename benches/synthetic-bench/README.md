@@ -33,8 +33,8 @@ stale calibration constants checked into the repo.
    tomorrow's iteration count grows to compensate, and the target
    bracket is still hit.
 
-For each scenario in every producer file under `snapshots/` (or the
-single file in `SYNTH_SNAPSHOT`):
+For each canonical Falcon/ECDSA P2ID scenario in every producer file
+under `snapshots/` (or the single file in `SYNTH_SNAPSHOT`):
 
 2. **Load scenario** -- read the target row counts from the producer's
    `trace` section. See [Snapshot format](#snapshot-format).
@@ -51,12 +51,9 @@ single file in `SYNTH_SNAPSHOT`):
    concatenate, and enclose in `begin ... end`. The output is the MASM
    program that Criterion actually runs.
 5. **Verify** -- execute the emitted program, measure its real row
-   counts, and assert that the available padded brackets match the
-   scenario's. Split-aware snapshots enforce core/range, chiplets,
-   Poseidon2 permutation, and total brackets. Legacy snapshots without a
-   Poseidon2 target enforce only core/range and total brackets, because
-   their `chiplets_rows` still include inlined Poseidon2 permutations.
-   A bracket miss fails the bench; smaller drift inside the same bracket
+   counts, and assert that the core/range, chiplets, Poseidon2
+   permutation, and total padded brackets match the scenario's. A
+   bracket miss fails the bench; smaller drift inside the same bracket
    is reported but tolerated, because proving cost is driven by the
    padded length, not the raw count.
 
@@ -67,9 +64,9 @@ Five patterns cover every component the solver targets:
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
 | `hasher`      | `hperm`                                      | Poseidon2 hash work           |
-| `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
+| `bitwise`     | `u32split u32xor`                            | total chiplets bracket        |
 | `u32arith`    | `u32assert2 push.65537 add swap push.65537 add swap` | range chiplet |
-| `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |
+| `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | advisory memory composition |
 | `decoder_pad` | `swap dup.1 add`                             | core (decoder + stack)        |
 
 `u32arith` and `memory` use banded counters (strides of 65537 and
@@ -84,18 +81,16 @@ The solver has no snippets targeting the ACE or kernel-ROM chiplets.
   READ section -- more setup than the other snippets warrant, and not
   currently done here.
 - **Kernel-ROM** rows are a small, near-constant contribution in
-  practice, so we simplify by folding them into the memory target
-  rather than driving them directly.
+  practice, so a dedicated driver would add complexity without
+  materially improving the profile.
 
-Since snapshots still carry row counts for both, they're **folded into
-the memory target** -- growing memory ops preserves the overall
-chiplet-trace length and therefore the chiplet bracket.
-
-One producer-side caveat: the consumer can measure `ace_chiplet_len()`
-when it runs synthetic programs, but a producer pinned to an older
-`miden-processor` may report `ace_rows: 0` until that dependency
-exposes the accessor. Treat zero ACE rows in a snapshot as a producer
-visibility limitation, not as proof that the VM emitted no ACE rows.
+Instead of trying to reproduce every chiplet subtype, the bitwise
+snippet acts as the efficient adjustable filler for the authoritative
+total-chiplets target. The memory snippet keeps the advisory memory mix
+representative; bitwise, ACE, and kernel-ROM composition is reported for
+visibility but is not a hard constraint. This preserves the total
+chiplets proving bracket while the separate Poseidon2 target preserves
+native-hash work.
 
 ## Snapshot format
 
@@ -104,24 +99,28 @@ must carry a `trace` section; any sibling fields (cycle counts,
 metadata, ...) are silently ignored. Inside `trace`, the AIR-side
 totals (`core_rows`, `chiplets_rows`, `poseidon2_permutation_rows`,
 `range_rows`) are the verifier's contract; nested `chiplets_shape` is an
-advisory per-chiplet breakdown. `poseidon2_permutation_rows` defaults to
-zero for older snapshots that predate the split Poseidon2 AIR. The
-loader checks
+advisory per-chiplet breakdown. All four totals are required. The loader
+checks
 `trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
+
+Raw `range_rows` can vary slightly with witness values between producer
+runs. The reproducibility contract is the generated scenario, its
+authoritative Poseidon2 count, and the independently pinned padded
+brackets—not byte stability across separate producer executions.
 
 ```json
 {
-  "consume single P2ID note": {
+  "consume single P2ID note with Falcon signing": {
     "trace": {
-      "core_rows": 77699,
-      "chiplets_rows": 123129,
-      "poseidon2_permutation_rows": 17740,
-      "range_rows": 20203,
+      "core_rows": 80284,
+      "chiplets_rows": 11351,
+      "poseidon2_permutation_rows": 54160,
+      "range_rows": 20521,
       "chiplets_shape": {
-        "hasher_rows": 120352,
-        "bitwise_rows": 416,
-        "memory_rows": 2297,
-        "kernel_rom_rows": 63,
+        "hasher_rows": 8360,
+        "bitwise_rows": 592,
+        "memory_rows": 2397,
+        "kernel_rom_rows": 1,
         "ace_rows": 0
       }
     }
@@ -129,11 +128,15 @@ loader checks
 }
 ```
 
-Snapshots live in `snapshots/`. The bench loads every `*.json` file in
-that directory and runs one Criterion group per `(producer_file,
-scenario_key)` pair, named `<producer-stem>/<scenario-slug>`. See the
-[Running](#running) section below for `SYNTH_SNAPSHOT` /
-`SYNTH_SCENARIO` filters.
+Snapshots live in `snapshots/`. The checked-in `bench-tx.json` is an
+exact copy of the protocol producer artifact and therefore contains
+more scenarios than this focused suite. The bench selects the canonical
+create-one, consume-one, and consume-two P2ID transactions for both
+Falcon and ECDSA, and runs one Criterion group per selected
+`(producer_file, scenario_key)` pair, named
+`<producer-stem>/<scenario-slug>`. Both Falcon and ECDSA scenario slugs
+carry an explicit signer suffix. See the [Running](#running) section below for
+`SYNTH_SNAPSHOT` / `SYNTH_SCENARIO` filters.
 
 There is no schema-version field; the on-disk shape is the contract.
 If the producer changes that shape, the loader fails loudly (serde
@@ -157,30 +160,22 @@ assertions that can fail the bench are on padded proxies:
 - `padded_core_side = max(64, next_pow2(max(core_rows, range_rows)))`
   -- the non-chiplets side of the AIR.
 - `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
-- `padded_poseidon2  = max(64, next_pow2(poseidon2_permutation_rows))`
-  when the snapshot carries a non-zero Poseidon2 target.
+- `padded_poseidon2  = max(64, next_pow2(poseidon2_permutation_rows))`.
 - `padded_total      = max(padded_core_side, padded_chiplets, padded_poseidon2)`.
 
 These can land in *different* brackets on the same workload -- `consume
-two P2ID notes`, for example, has `padded_core_side = 131072` but
-`padded_chiplets = 262144`. Checking them independently catches a
-bracket miss that a single global `padded_total` check would hide.
-
-Legacy snapshots do not carry `poseidon2_permutation_rows`. In that
-mode, `chiplets_rows` still includes the old inlined Poseidon2
-permutation segment, so it is not comparable to the split branch's
-controller-only hasher rows. The verifier therefore hard-checks
-`padded_core_side` and `padded_total`; chiplets and Poseidon2 rows are
-reported as informational.
+two P2ID notes with Falcon signing`, for example, currently has
+`padded_core_side = 131072`, `padded_chiplets = 16384`, and
+`padded_poseidon2 = 65536`. Checking them independently catches a bracket
+miss that a single global `padded_total` check would hide.
 
 ### Soft checks -- report, don't fail
 
 `core_rows`, `chiplets_rows`, and `poseidon2_permutation_rows` are
 compared against the targets within a 2% band. A drift inside that band
-is harmless for proving cost (same bracket either way), so the bench
-only reports it. A drift that *crosses* a bracket is already caught by
-the hard tier above, so this tier exists purely to surface in-bracket
-near-misses worth noticing.
+usually leaves the proving bracket unchanged, so the bench only reports
+it. A drift that *crosses* a bracket is always caught by the hard tier
+above; this tier exists to surface raw-count near-misses worth noticing.
 
 ### Info -- no judgement
 
@@ -206,11 +201,11 @@ Snapshots travel by hand so that producer and consumer can evolve
 independently. For the `protocol/bin/bench-transaction/` producer:
 
 1. In `protocol`: `cargo run --release --bin bench-transaction --features concurrent`.
-2. Copy `bin/bench-transaction/bench-tx.json` over
+2. Copy `bin/bench-transaction/bench-tx.json` byte-for-byte over
    `miden-vm/benches/synthetic-bench/snapshots/bench-tx.json`.
 3. Run `cargo bench -p miden-vm-synthetic-bench` and verify
-   `=> BRACKET MATCH` for every scenario in the printed verifier
-   tables.
+   `=> BRACKET MATCH` for all six selected scenarios in the printed
+   verifier tables.
 
 If a kernel change moves a scenario into a different padded bucket,
 the `committed_snapshots_load` test in `src/snapshot.rs` fails with
@@ -237,6 +232,51 @@ Env vars:
 
 The `prove` and `verify` axes use `HashFunction::Poseidon2` for STARK
 proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`).
+
+## Recursive-verification benchmarks
+
+The `recursive_verify` benchmark measures recursive verification of synthetic transaction proofs.
+First emit the Falcon `consume-single-p2id-note` transaction fixture:
+
+```sh
+SYNTH_SCENARIO="consume single P2ID note with Falcon signing" \
+SYNTH_BENCH_AXES=exec \
+SYNTH_MASM_WRITE=1 \
+cargo bench -p miden-vm-synthetic-bench --bench synthetic_bench --profile optimized
+```
+
+Then pass the generated MASM program to the recursive benchmark. By default it measures two
+through eight MVM proofs:
+
+```sh
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm" \
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
+
+Set `RECURSION_BENCH_TX_PROOF_CACHE_DIR` to reuse the generated transaction proofs across runs.
+Relative cache paths are resolved from the workspace root.
+
+### PVM comparison
+
+The focused comparison places mixed cases containing one proof of the canonical
+100-Keccak/4-ECDSA deferred workload beside pure-MVM baselines:
+
+```sh
+RECURSION_BENCH_MASM="benches/synthetic-bench/target/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm" \
+RECURSION_PVM_COMPARISON=1 \
+RECURSION_BENCH_TX_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/tx" \
+RECURSION_BENCH_PVM_PROOF_CACHE_DIR="${PWD}/target/recursive-bench-cache/pvm" \
+RECURSION_PROFILE_PROVE=1 \
+RECURSION_PROFILE_PROVE_REPEATS=10 \
+RECURSION_PROFILE_PROVE_WARMUPS=1 \
+cargo bench -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
+```
+
+The four cases are `4 MVM + 1 PVM`, `7 MVM`, `5 MVM + 1 PVM`, and `8 MVM`, in that order. Eight
+distinct proofs of the same synthetic transaction program and the single PVM proof are loaded or
+generated before any timed section. Set `RECURSION_PROFILE_ONLY=1` to print trace shapes without
+Criterion timing, or `RECURSION_PROFILE_PROVE=1` to record repeated outer-proof measurements. The
+profile mode rotates the starting case in each round to limit cache and thermal ordering bias.
 
 ## License
 

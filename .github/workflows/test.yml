@@ -11,30 +11,11 @@ permissions:
   pull-requests: read
 
 jobs:
-  diffs:
-    name: detect changed areas
-    runs-on: ubuntu-latest
-    outputs:
-      isCrypto: ${{ steps.diffs.outputs.isCrypto }}
-      isVm: ${{ steps.diffs.outputs.isVm }}
-      isRustWorkspace: ${{ steps.diffs.outputs.isRustWorkspace }}
-      isFuzz: ${{ steps.diffs.outputs.isFuzz }}
-      isRelease: ${{ steps.diffs.outputs.isRelease }}
-      isDocsOnly: ${{ steps.diffs.outputs.isDocsOnly }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - id: diffs
-        uses: ./.github/actions/diffs
-
   test:
     name: test on warpbuild
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -43,7 +24,7 @@ jobs:
       # install-action commit and set tool explicitly, or zizmor's
       # impostor-commit audit can flag stale shortcut-tag hashes.
       - name: Install nextest
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -52,23 +33,21 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Build tests
-        run: make test-build
+        run: make test-build NEXTEST_PROFILE=ci
       - name: test
-        run: make test
+        run: make test NEXTEST_PROFILE=ci
 
   crypto-test:
     name: crypto test on warpbuild
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install nextest
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
@@ -81,11 +60,9 @@ jobs:
 
   doc-tests:
     name: doc-tests
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -101,10 +78,9 @@ jobs:
   check-core-lib-docs:
     name: check core library docs
     runs-on: warp-ubuntu-latest-x64-8x
-    needs: [diffs, test, doc-tests]
-    if: ${{ always() && (needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true') && needs.test.result == 'success' && needs.doc-tests.result == 'success' }}
+    needs: [test, doc-tests]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -141,16 +117,14 @@ jobs:
 
   check-constraints:
     name: check recursive constraint artifacts
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -158,13 +132,29 @@ jobs:
       - name: Check recursive constraint artifacts for drift
         run: make check-constraints
 
+  check-pvm-registry:
+    name: check PVM registry and MASM artifacts
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Check PVM registry and MASM artifacts for drift (full 10! recompute)
+        run: make check-pvm-registry
+
   run-examples:
     name: run masm examples
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -179,11 +169,9 @@ jobs:
 
   check-features:
     name: check all feature combinations
-    needs: diffs
-    if: ${{ needs.diffs.outputs.isVm == 'true' || needs.diffs.outputs.isCrypto == 'true' || needs.diffs.outputs.isRustWorkspace == 'true' }}
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cleanup large tools for build space
@@ -196,7 +184,7 @@ jobs:
       # Keep this on a released install-action commit with an explicit tool; see
       # the nextest install above for the zizmor/tool-shortcut rationale.
       - name: Install cargo-hack
-        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: cargo-hack
       - name: Check all feature combinations

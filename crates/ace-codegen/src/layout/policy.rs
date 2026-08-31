@@ -18,6 +18,7 @@ enum Alignment {
 struct LayoutPolicy {
     public_values: Alignment,
     randomness: Alignment,
+    preprocessed: Alignment,
     main: Alignment,
     aux: Alignment,
     quotient: Alignment,
@@ -64,6 +65,7 @@ impl LayoutPolicy {
         Self {
             public_values: Alignment::Unaligned,
             randomness: Alignment::Unaligned,
+            preprocessed: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
             quotient: Alignment::Unaligned,
@@ -77,6 +79,7 @@ impl LayoutPolicy {
         Self {
             public_values: Alignment::QuadWord,
             randomness: Alignment::Word,
+            preprocessed: Alignment::DoubleWord,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
             quotient: Alignment::DoubleWord,
@@ -150,10 +153,12 @@ impl InputLayout {
         let public_values = builder.alloc(counts.num_public, policy.public_values);
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
         let (aux_rand_alpha, aux_rand_beta) = randomness::aux_rand_indices(randomness);
+        let preprocessed_curr = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
         let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
@@ -181,9 +186,11 @@ impl InputLayout {
             regions: LayoutRegions {
                 public_values,
                 randomness,
+                preprocessed_curr,
                 main_curr,
                 aux_curr,
                 quotient_curr,
+                preprocessed_next,
                 main_next,
                 aux_next,
                 quotient_next,
@@ -217,6 +224,7 @@ mod tests {
 
     fn test_counts() -> InputCounts {
         InputCounts {
+            preprocessed_width: 0,
             width: 1,
             aux_width: 1,
             num_aux_boundary: 3,

@@ -27,8 +27,9 @@
 //! ## Operation semantics
 //!
 //! - **Sponge** (`is_sponge_input`): LINEAR_HASH (multi-batch span), single 2-to-1 hash, or HPERM.
-//!   In sponge mode, capacity is set once on the first input and carried through across
-//!   continuations; in tree mode (Merkle ops), capacity is zeroed at every level.
+//!   In sponge mode, capacity is set once on the first input and carried through continuations.
+//!   Merkle permutations use zero logical capacity at every level; on level 0, the controller's
+//!   capacity columns instead hold the canonical-index witness.
 //! - **MP**: MPVERIFY - read-only Merkle path check. Does not interact with the sibling table.
 //! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling table
 //!   via the hash_kernel bus.

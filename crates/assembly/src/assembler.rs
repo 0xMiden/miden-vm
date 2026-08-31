@@ -1,3 +1,4 @@
+#[cfg(feature = "std")]
 pub(super) mod debuginfo;
 pub(crate) mod error;
 mod product;
@@ -10,9 +11,8 @@ use alloc::{
     vec::Vec,
 };
 
-use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
-    ExportedTypeUse, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
+    ExportedTypeUse, MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -31,7 +31,7 @@ use miden_core::{
 use miden_mast_package::{
     ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
     PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
-    debug_info::DebugSourceNodeId,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 use miden_project::{Linkage, TargetType};
 
@@ -39,23 +39,16 @@ use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
-    basic_block_builder::BasicBlockBuilder,
+    basic_block_builder::{ActiveInlineCall, BasicBlockBuilder},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{
         Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
         SymbolResolver,
     },
     mast_forest_builder::{
-        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
-        StaticLibrary,
+        MastForestBuilder, MastNodeRef, MastNodeUse, SourceNodeRef, StaticLibrary,
     },
 };
-
-/// Maximum allowed nesting of control-flow blocks during compilation.
-///
-/// This limit is intended to prevent stack overflows from maliciously deep block nesting while
-/// remaining far above typical program structure depth.
-pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
 
 /// Maximum number of locals a single procedure may allocate.
 ///
@@ -86,7 +79,7 @@ impl PendingPackageExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, DebugSourceNodeId>,
     ) -> Result<PackageExport, Report> {
         match self {
             Self::Procedure(export) => export.into_package_export(node_id_by_ref, source_id_by_ref),
@@ -100,7 +93,7 @@ impl PendingProcedureExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, DebugSourceNodeId>,
     ) -> Result<PackageExport, Report> {
         let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
             Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
@@ -174,8 +167,6 @@ pub struct Assembler {
     source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
     linker: Box<Linker>,
-    /// The debug information gathered during assembly
-    pub(super) debug_info: DebugInfoSections,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
     /// Whether to preserve debug information in the assembled artifact.
@@ -191,7 +182,6 @@ impl Default for Assembler {
         Self {
             source_manager,
             linker,
-            debug_info: Default::default(),
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
@@ -208,7 +198,6 @@ impl Assembler {
         Self {
             source_manager,
             linker,
-            debug_info: Default::default(),
             warnings_as_errors: false,
             emit_debug_info: true,
             trim_paths: false,
@@ -419,8 +408,9 @@ impl Assembler {
             .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a library [`Package`] from the set of modules reachable from `root`.
@@ -446,10 +436,11 @@ impl Assembler {
         )?;
 
         // Derive the package name from the namespace of the root module
-        let name = root.path().as_str().replace("::", "-");
+        let name = root.path().to_relative().as_str().replace("::", "-");
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assembles the provided module into a kernel package.
@@ -463,8 +454,9 @@ impl Assembler {
         root: Box<ast::Module>,
         support: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<Box<Package>, Report> {
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -496,8 +488,9 @@ impl Assembler {
             self.warnings_as_errors,
         )?;
 
+        let emit_debug_info = self.emit_debug_info;
         self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
-            .into_artifact()
+            .into_artifact(emit_debug_info)
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -582,8 +575,8 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref, source_graph, source_id_by_ref) =
-            mast_forest_builder.build()?.into_parts_with_source_graph();
+        let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
+            mast_forest_builder.build()?.into_parts_with_debug_info();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
@@ -594,7 +587,7 @@ impl Assembler {
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         let modules = self.package_modules(module_indices);
-        self.finish_library_product(name, mast_forest, source_graph, exports, modules, kind)
+        self.finish_library_product(name, mast_forest, debug_info, exports, modules, kind)
     }
 
     fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
@@ -656,7 +649,7 @@ impl Assembler {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_ref(),
+                        node: proc.body_node_use(),
                         signature: proc.signature(),
                     },
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -666,6 +659,7 @@ impl Assembler {
                         let node = self.ensure_valid_procedure_mast_root(
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
+                            Some(&self.linker[gid.module].path().join(&item.name)),
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
@@ -686,16 +680,17 @@ impl Assembler {
                     signature.clone(),
                     module_kind.is_kernel(),
                     self.source_manager.clone(),
-                );
+                )
+                .with_attributes(attributes.clone());
 
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
-                mast_forest_builder.insert_procedure(gid, procedure)?;
+                mast_forest_builder.insert_procedure(gid, procedure, &self.source_manager)?;
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
-                    node_ref: node,
-                    source_ref: mast_forest_builder.latest_source_ref_for_node_ref(node),
+                    node_ref: node.node_ref(),
+                    source_ref: Some(node.source_ref()),
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
@@ -721,8 +716,7 @@ impl Assembler {
                     digest,
                     path: symbol_path,
                     node_ref: proc.body_node_ref(),
-                    source_ref: mast_forest_builder
-                        .latest_source_ref_for_node_ref(proc.body_node_ref()),
+                    source_ref: Some(proc.body_source_ref()),
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
                 })
@@ -793,7 +787,9 @@ impl Assembler {
             ));
         }
 
-        self.assemble_executable_modules(name.into(), program, [])?.into_artifact()
+        let emit_debug_info = self.emit_debug_info;
+        self.assemble_executable_modules(name.into(), program, [])?
+            .into_artifact(emit_debug_info)
     }
 
     pub(crate) fn assemble_library_modules(
@@ -1055,32 +1051,36 @@ impl Assembler {
         }
 
         self.compile_subgraph(SubgraphRoot::with_entrypoint(entrypoint), &mut mast_forest_builder)?;
-        let entry_node_ref = mast_forest_builder
+        let entry_procedure = mast_forest_builder
             .get_procedure(entrypoint)
-            .expect("compilation succeeded but root not found in cache")
-            .body_node_ref();
+            .expect("compilation succeeded but root not found in cache");
+        let entry_node_ref = entry_procedure.body_node_ref();
+        let entry_source_ref = entry_procedure.body_source_ref();
 
-        let (mast_forest, node_id_by_ref, source_graph, _) =
-            mast_forest_builder.build()?.into_parts_with_source_graph();
+        let (mast_forest, node_id_by_ref, debug_info, source_id_by_ref) =
+            mast_forest_builder.build()?.into_parts_with_debug_info();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
+        let entry_source_id = source_id_by_ref.get(&entry_source_ref).copied();
 
+        let kernel_package = self.linker.kernel_package();
         self.finish_program_product(
             name,
             namespace,
             mast_forest,
-            source_graph,
+            debug_info,
             entry_node_id,
-            self.linker.kernel_package(),
+            entry_source_id,
+            kernel_package,
         )
     }
 
     fn finish_library_product(
-        &self,
+        self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
-        source_graph: SourceDebugGraph,
+        #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
         kind: TargetType,
@@ -1098,20 +1098,15 @@ impl Assembler {
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
-            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
-            let mut debug_info = self.debug_info.clone();
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                debug_info.trim_paths(&trimmer);
-            }
-            debug_info
-        });
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+        #[cfg(feature = "std")]
+        if self.emit_debug_info
+            && let Some(trimmer) = self.source_path_trimmer()
+        {
+            debuginfo::trim_paths(&mut debug_info, &trimmer);
+        }
 
-        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
+        Ok(AssemblyProduct::new(package, None, debug_info))
     }
 
     fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
@@ -1128,30 +1123,24 @@ impl Assembler {
                         )));
                     },
                 };
-                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info)
-                    .with_source_library_commitment(lib.commitment())
-                    .with_alternate_source_library_commitment(
-                        lib.package.interface_digest().into_diagnostic()?,
-                    ))
+                StaticLibrary::from_link_library(lib, debug_info).into_diagnostic()
             })
             .collect()
     }
 
     fn finish_program_product(
-        &self,
+        self,
         name: PackageId,
         namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
-        source_graph: SourceDebugGraph,
+        #[cfg_attr(not(feature = "std"), allow(unused_mut))] mut debug_info: Box<PackageDebugInfo>,
         entrypoint: MastNodeId,
+        entrypoint_source_id: Option<DebugSourceNodeId>,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
-        let entry_source_node = source_graph
-            .unique_root_for_exec_node(entrypoint)
-            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(
                 name,
@@ -1160,40 +1149,19 @@ impl Assembler {
                 mast,
                 vec![PackageExport::Procedure(
                     ProcedureExport::new(entry, Some(entrypoint), entry_digest, None)
-                        .with_source_node(entry_source_node),
+                        .with_source_node(entrypoint_source_id),
                 )],
                 None,
             )
             .map_err(Report::msg)?,
         );
-        let debug_info = self.emit_debug_info.then(|| {
-            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
-            let mut debug_info = self.debug_info.clone();
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                debug_info.trim_paths(&trimmer);
-            }
-            debug_info
-        });
 
-        let source_graph =
-            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
-
-        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
-    }
-
-    fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
-        if self.trim_paths {
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                return source_graph.with_rewritten_source_locations(
-                    |location| trimmer.trim_location(location),
-                    |location| trimmer.trim_file_line_col(location),
-                );
-            }
+        #[cfg(feature = "std")]
+        if let Some(trimmer) = self.source_path_trimmer() {
+            debuginfo::trim_paths(&mut debug_info, &trimmer);
         }
 
-        source_graph
+        Ok(AssemblyProduct::new(package, kernel, debug_info))
     }
 
     #[cfg(feature = "std")]
@@ -1275,6 +1243,7 @@ impl Assembler {
                         self.source_manager.clone(),
                     )
                     .with_span(proc.span())
+                    .with_attributes(proc.attributes().clone())
                     .with_num_locals(num_locals)?;
 
                     // Compile this procedure
@@ -1285,14 +1254,14 @@ impl Assembler {
                     // procedure body node itself, all nodes that make up the procedure body would
                     // be added to the forest.
 
-                    // Record the debug info for this procedure
-                    self.debug_info
-                        .register_procedure_debug_info(&procedure, self.source_manager.as_ref())?;
-
                     // Cache the compiled procedure
                     drop(proc);
                     self.linker.register_procedure_root(procedure_gid, procedure.mast_root());
-                    mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
+                    mast_forest_builder.insert_procedure(
+                        procedure_gid,
+                        procedure,
+                        self.source_manager.as_ref(),
+                    )?;
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
@@ -1356,13 +1325,19 @@ impl Assembler {
             None
         };
 
-        let proc_body_ref =
-            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
+        let proc_body = self.compile_body(
+            proc.iter(),
+            &mut proc_ctx,
+            body_wrapper,
+            Vec::new(),
+            mast_forest_builder,
+            0,
+        )?;
 
         let proc_mast_root = mast_forest_builder
-            .mast_root_for_ref(proc_body_ref)
+            .mast_root_for_ref(proc_body.node_ref())
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref))
+        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body))
     }
 
     /// Creates assembly operation metadata for control flow nodes.
@@ -1383,16 +1358,21 @@ impl Assembler {
         body: I,
         proc_ctx: &mut ProcedureContext,
         wrapper: Option<BodyWrapper>,
+        active_inline_calls: Vec<ActiveInlineCall>,
         mast_forest_builder: &mut MastForestBuilder,
         nesting_depth: usize,
-    ) -> Result<MastNodeRef, Report>
+    ) -> Result<MastNodeUse, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
     {
         use ast::Op;
 
-        let mut body_node_refs: Vec<MastNodeRef> = Vec::new();
-        let mut block_builder = BasicBlockBuilder::new(wrapper, mast_forest_builder);
+        let mut body_node_uses = Vec::new();
+        let mut block_builder = BasicBlockBuilder::with_active_inline_calls(
+            wrapper,
+            mast_forest_builder,
+            active_inline_calls,
+        );
 
         for op in body {
             match op {
@@ -1401,17 +1381,19 @@ impl Assembler {
                         self.compile_instruction(inst, &mut block_builder, proc_ctx)?
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                            body_node_refs.push(basic_block_id);
+                            body_node_uses.push(basic_block_id);
                         }
 
-                        body_node_refs.push(node_ref);
+                        body_node_uses.push(node_ref);
                     }
                 },
 
                 Op::If { then_blk, else_blk, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1426,6 +1408,7 @@ impl Assembler {
                         then_blk.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls.clone(),
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1433,6 +1416,7 @@ impl Assembler {
                         else_blk.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1440,15 +1424,16 @@ impl Assembler {
                     let asm_op = self.create_asm_op(span, "if.true", proc_ctx);
                     let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_split_node_ref([then_blk, else_blk], asm_op)?;
+                        .ensure_split_node_use([then_blk, else_blk], asm_op, inline_calls)?;
 
-                    body_node_refs.push(split_node_ref);
+                    body_node_uses.push(split_node_ref);
                 },
 
                 Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1463,6 +1448,7 @@ impl Assembler {
                         body.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
@@ -1493,14 +1479,16 @@ impl Assembler {
                     }
 
                     for _ in 0..iteration_count {
-                        body_node_refs.push(repeat_node_ref);
+                        body_node_uses.push(repeat_node_ref);
                     }
                 },
 
                 Op::While { body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1526,29 +1514,40 @@ impl Assembler {
                         body.iter(),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let loop_node_ref = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_loop_node_ref(loop_body_node_ref, asm_op.clone())?;
-                    let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_ref(
+                    let loop_node_ref =
+                        block_builder.mast_forest_builder_mut().ensure_loop_node_use(
+                            loop_body_node_ref,
+                            asm_op.clone(),
+                            inline_calls.clone(),
+                        )?;
+                    let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_use(
                         vec![Operation::Noop],
                         vec![],
                         vec![],
+                        inline_calls.clone(),
+                        vec![],
                     )?;
 
-                    let split_node_ref = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_split_node_ref([loop_node_ref, noop_block_ref], asm_op)?;
+                    let split_node_ref =
+                        block_builder.mast_forest_builder_mut().ensure_split_node_use(
+                            [loop_node_ref, noop_block_ref],
+                            asm_op,
+                            inline_calls,
+                        )?;
 
-                    body_node_refs.push(split_node_ref);
+                    body_node_uses.push(split_node_ref);
                 },
 
                 Op::DoWhile { body, condition, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_refs.push(basic_block_id);
+                        body_node_uses.push(basic_block_id);
                     }
+                    let inline_calls = block_builder.active_inline_call_rows(0);
+                    let nested_inline_calls = block_builder.active_inline_calls().to_vec();
 
                     let next_depth = nesting_depth + 1;
                     if next_depth > MAX_CONTROL_FLOW_NESTING {
@@ -1571,27 +1570,35 @@ impl Assembler {
                         body.iter().chain(condition.iter()),
                         proc_ctx,
                         None,
+                        nested_inline_calls,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
                     let loop_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_loop_node_ref(loop_body_node_ref, asm_op)?;
+                        .ensure_loop_node_use(loop_body_node_ref, asm_op, inline_calls)?;
 
-                    body_node_refs.push(loop_node_ref);
+                    body_node_uses.push(loop_node_ref);
                 },
             }
         }
 
+        let fallback_inline_calls = block_builder.active_inline_call_rows(0);
         if let Some(basic_block_id) = block_builder.try_into_basic_block()? {
-            body_node_refs.push(basic_block_id);
+            body_node_uses.push(basic_block_id);
         }
 
-        let procedure_body_ref = if body_node_refs.is_empty() {
-            mast_forest_builder.ensure_block_ref(vec![Operation::Noop], vec![], vec![])?
+        let procedure_body_ref = if body_node_uses.is_empty() {
+            mast_forest_builder.ensure_block_use(
+                vec![Operation::Noop],
+                vec![],
+                vec![],
+                fallback_inline_calls,
+                vec![],
+            )?
         } else {
             let asm_op = self.create_asm_op(&proc_ctx.span(), "begin", proc_ctx);
-            mast_forest_builder.join_node_refs(body_node_refs, Some(asm_op))?
+            mast_forest_builder.join_node_uses(body_node_uses, Some(asm_op))?
         };
 
         Ok(procedure_body_ref)
@@ -1616,9 +1623,14 @@ impl Assembler {
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
             SymbolResolution::MastRoot(mast_root) => {
+                let path = match target {
+                    InvocationTarget::Path(path) => Some(path.inner().as_ref()),
+                    InvocationTarget::MastRoot(_) | InvocationTarget::Symbol(_) => None,
+                };
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
+                    path,
                     mast_root.into_inner(),
                     None,
                     None,
@@ -1630,7 +1642,7 @@ impl Assembler {
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(ResolvedProcedure {
-                        node: proc.body_node_ref(),
+                        node: proc.body_node_use(),
                         signature: proc.signature(),
                     }),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1640,6 +1652,7 @@ impl Assembler {
                             let node = self.ensure_valid_procedure_mast_root(
                                 kind,
                                 target.span(),
+                                Some(&self.linker[gid.module].path().join(&p.name)),
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
@@ -1671,12 +1684,13 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         span: SourceSpan,
+        path: Option<&Path>,
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
         source_debug_root_id: Option<DebugSourceNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<MastNodeRef, Report> {
+    ) -> Result<MastNodeUse, Report> {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
@@ -1685,9 +1699,13 @@ impl Assembler {
             // procedures at this point, so if the digest is not present in the kernel,
             // it is a definite error.
             if !self.linker.kernel().contains_proc(mast_root) {
-                let callee = mast_forest_builder
-                    .find_procedure_by_mast_root(&mast_root)
-                    .map(|proc| proc.path().clone())
+                let callee = path
+                    .map(|p| p.to_path_buf().into_boxed_path().into())
+                    .or_else(|| {
+                        mast_forest_builder
+                            .find_procedure_by_mast_root(&mast_root)
+                            .map(|proc| proc.path().clone())
+                    })
                     .unwrap_or_else(|| {
                         let digest_path = format!("{mast_root}");
                         Arc::<Path>::from(Path::new(&digest_path))
@@ -1700,30 +1718,15 @@ impl Assembler {
             }
         }
 
-        if let (Some(source_library_commitment), Some(source_root_id)) =
-            (source_library_commitment, source_root_id)
-            && let Some(conflicting_root) = self.linker.conflicting_dynamic_procedure_export_root(
-                source_library_commitment,
-                mast_root,
-                source_root_id,
-            )
-        {
-            return Err(Report::new(LinkerError::AmbiguousDynamicProcedureRoot {
-                span,
-                source_file: current_source_file,
-                mast_root,
-                source_library_commitment,
-                selected_root: source_root_id,
-                conflicting_root,
-            }));
-        }
-
-        mast_forest_builder.ensure_external_link_with_source_ref(
+        let node_ref = mast_forest_builder.ensure_external_link_with_source_ref(
             mast_root,
             source_library_commitment,
             source_root_id,
             source_debug_root_id,
-        )
+        )?;
+        Ok(mast_forest_builder
+            .latest_node_use(node_ref)
+            .expect("linked procedure root must have a source occurrence"))
     }
 }
 
@@ -1757,6 +1760,6 @@ pub(crate) struct BodyWrapper {
 }
 
 pub(super) struct ResolvedProcedure {
-    pub node: MastNodeRef,
+    pub node: MastNodeUse,
     pub signature: Option<Arc<FunctionType>>,
 }

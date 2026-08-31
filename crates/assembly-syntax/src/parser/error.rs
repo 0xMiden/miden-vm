@@ -4,7 +4,7 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Range};
 
-use miden_debug_types::{SourceId, SourceSpan};
+use miden_debug_types::SourceSpan;
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 // LITERAL ERROR KIND
@@ -170,6 +170,13 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
+    #[error("control-flow nesting depth exceeded")]
+    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    ControlFlowNestingDepthExceeded {
+        #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        max_depth: usize,
+    },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
         #[label]
@@ -308,9 +315,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help(
-        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
-    ))]
+    #[diagnostic(help("expected one of: '@packed', '@packed(N)', '@transparent', or '@align(N)'"))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,
@@ -442,18 +447,6 @@ impl PartialEq for ParsingError {
                 Self::UnrecognizedEof { expected: rexpect, .. },
             ) => lexpect == rexpect,
             (x, y) => x.tag() == y.tag(),
-        }
-    }
-}
-
-impl ParsingError {
-    pub fn from_utf8_error(source_id: SourceId, err: core::str::Utf8Error) -> Self {
-        let start = u32::try_from(err.valid_up_to()).ok().unwrap_or(u32::MAX);
-        match err.error_len() {
-            None => Self::IncompleteUtf8 { span: SourceSpan::at(source_id, start) },
-            Some(len) => Self::InvalidUtf8 {
-                span: SourceSpan::new(source_id, start..(start + len as u32)),
-            },
         }
     }
 }

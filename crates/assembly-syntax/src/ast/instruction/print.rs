@@ -1,6 +1,6 @@
 use crate::{
     DisplayHex,
-    ast::{Immediate, Instruction, InvocationTarget},
+    ast::{EventImmediate, Immediate, Instruction, InvocationTarget},
     prettier::{Document, PrettyPrint},
 };
 
@@ -333,14 +333,43 @@ impl PrettyPrint for Instruction {
                 flatten(const_text("procref") + const_text(".") + display(path))
             },
 
-            // ----- event decorators -------------------------------------------------------------
+            // ----- events -----------------------------------------------------------------------
             Self::Emit => const_text("emit"),
-            Self::EmitImm(value) => inst_with_felt_imm("emit", value),
+            Self::EmitImm(value) => inst_with_event_imm("emit", value),
+
+            // ----- traces (read-only events) ----------------------------------------------------
+            Self::Trace => const_text("trace"),
+            Self::TraceImm(value) => inst_with_event_imm("trace", value),
 
             // Handled by the early return for !has_textual_representation()
-            Self::DebugVar(_) => unreachable!(),
+            Self::DebugVar(_) | Self::DebugInlineCall(_) | Self::DebugInlineCallClear => {
+                unreachable!()
+            },
         }
     }
+}
+
+fn inst_with_event_imm(name: &'static str, imm: &EventImmediate) -> Document {
+    use crate::prettier::*;
+
+    match imm {
+        EventImmediate::Name(event) => inline_event_imm(name, event.inner()),
+        EventImmediate::Immediate(imm @ Immediate::Constant(_)) => inst_with_felt_imm(name, imm),
+        // A felt literal is not valid as an `emit` or `trace` instruction suffix.
+        EventImmediate::Immediate(imm @ Immediate::Value(_)) => flatten(
+            inst_with_felt_imm("push", imm)
+                + const_text(" ")
+                + const_text(name)
+                + const_text(" drop"),
+        ),
+    }
+}
+
+fn inline_event_imm(name: &'static str, event: &str) -> Document {
+    use crate::prettier::*;
+
+    // Event names retain their source escapes during lowering, so preserve the lexeme here.
+    flatten(const_text(name) + const_text(".event(\"") + text(event) + const_text("\")"))
 }
 
 fn inst_with_imm(name: &'static str, imm: &dyn PrettyPrint) -> Document {

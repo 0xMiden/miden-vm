@@ -3,6 +3,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
+use miden_air::trace::chiplets::hasher::MAX_MERKLE_DEPTH;
 use miden_core::{deferred::PrecompileError, program::MIN_STACK_DEPTH};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_mast_package::{
@@ -79,6 +80,11 @@ pub enum ExecutionError {
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
+    /// This means the modelled peak prover memory for the trace exceeds the configured budget.
+    #[error(
+        "estimated prover memory of {estimated_bytes} bytes exceeds the budget of {budget_bytes} bytes"
+    )]
+    ProverMemoryExceeded { estimated_bytes: u64, budget_bytes: u64 },
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -329,6 +335,10 @@ pub enum OperationError {
     #[error("FRI operation failed: {0}")]
     FriError(String),
     #[error(
+        "Horner evaluation point at memory address {addr} in context {ctx} must be encoded as [alpha0, alpha1, 0, 0]"
+    )]
+    InvalidHornerEvaluationPointWord { ctx: ContextId, addr: u64 },
+    #[error(
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
     )]
     InvalidMerklePathLength { path_len: usize, depth: Felt },
@@ -340,6 +350,8 @@ pub enum OperationError {
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
     MalformedMastForestInHost { root_digest: Word },
+    #[error("Merkle tree depth must be in the range 1..={MAX_MERKLE_DEPTH}, but was {depth}")]
+    MerkleDepthOutOfRange { depth: Felt },
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
       value = to_hex(inner.value.as_bytes()),
       root = to_hex(inner.root.as_bytes()),
@@ -405,7 +417,7 @@ impl OperationError {
         op_idx: Option<usize>,
     ) -> ExecutionError {
         let (label, source_file) =
-            label_and_source_file_from_location(context.assembly_location(op_idx), host);
+            label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
         ExecutionError::OperationError {
             label,
             source_file,
@@ -490,7 +502,7 @@ impl<'a> PackageSourceDebugContext<'a> {
     /// Returns source location metadata for `op_idx`, if present.
     ///
     /// If `op_idx` is absent, this falls back to the first operation row for the source occurrence.
-    pub fn assembly_location(&self, op_idx: Option<usize>) -> Option<&'a Location> {
+    pub fn assembly_location(&self, op_idx: Option<usize>) -> Option<Location> {
         let source_node_id = self.source_node_id?;
         let assembly_op = match op_idx {
             Some(op_idx) => u32::try_from(op_idx)
@@ -499,7 +511,10 @@ impl<'a> PackageSourceDebugContext<'a> {
             None => self.debug_info.first_asm_op_for_source_node(source_node_id),
         }?;
 
-        assembly_op.location.as_ref()
+        assembly_op
+            .location_idx
+            .into_option()
+            .and_then(|idx| self.debug_info.get_location(idx))
     }
 }
 
@@ -539,7 +554,7 @@ pub fn advice_error_with_package_source_context(
     op_idx: Option<usize>,
 ) -> ExecutionError {
     let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx), host);
+        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
     ExecutionError::AdviceError { label, source_file, err }
 }
 
@@ -572,7 +587,7 @@ pub fn event_error_with_package_source_context(
     event_name: Option<EventName>,
 ) -> ExecutionError {
     let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(op_idx), host);
+        label_and_source_file_from_location(context.assembly_location(op_idx).as_ref(), host);
     ExecutionError::EventError {
         label,
         source_file,
@@ -595,7 +610,7 @@ pub fn procedure_not_found_with_package_source_context(
     host: &(dyn BaseHost + '_),
 ) -> ExecutionError {
     let (label, source_file) =
-        label_and_source_file_from_location(context.assembly_location(None), host);
+        label_and_source_file_from_location(context.assembly_location(None).as_ref(), host);
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
 }
 
@@ -784,7 +799,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
                 let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)),
+                    context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(ExecutionError::MemoryError { label, source_file, err })
@@ -860,7 +875,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
                 let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)),
+                    context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
@@ -932,7 +947,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
             (Err(IoError::Execution(boxed_err)), _) => Err(*boxed_err),
             (Err(err), Some(context)) => {
                 let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)),
+                    context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
@@ -990,7 +1005,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
                 let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)),
+                    context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
@@ -1050,7 +1065,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
             (Ok(v), _) => Ok(v),
             (Err(err), Some(context)) => {
                 let (label, source_file) = label_and_source_file_from_location(
-                    context.assembly_location(Some(op_idx)),
+                    context.assembly_location(Some(op_idx)).as_ref(),
                     host,
                 );
                 Err(match err {
@@ -1084,10 +1099,10 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
 mod error_assertions {
     use alloc::sync::Arc;
 
+    use miden_core::mast::MastNodeId;
     use miden_debug_types::{ByteIndex, SourceId, Uri};
     use miden_mast_package::debug_info::{
-        DebugErrorMessage, DebugErrorMessagesSection, DebugSourceAsmOp, DebugSourceMapSection,
-        PackageDebugInfo,
+        DebugSourceAsmOp, DebugSourceNode, PackageDebugInfoBuilder,
     };
 
     use super::*;
@@ -1097,6 +1112,35 @@ mod error_assertions {
 
     fn _assert_execution_error_bounds(err: ExecutionError) {
         _assert_error_is_send_sync_static(err);
+    }
+
+    fn debug_asm_op(
+        builder: &mut PackageDebugInfoBuilder,
+        op_idx: u32,
+        location: Option<Location>,
+        context_name: &str,
+        op_name: &str,
+    ) -> DebugSourceAsmOp {
+        DebugSourceAsmOp::new(
+            op_idx,
+            location.map(|location| builder.add_location(location)),
+            builder.add_string(context_name),
+            builder.add_string(op_name),
+            1,
+        )
+    }
+
+    fn debug_source_node(exec_node: u32, asm_ops: Vec<DebugSourceAsmOp>) -> DebugSourceNode {
+        let op_end = asm_ops.iter().map(|row| row.op_idx + 1).max().unwrap_or(1);
+        DebugSourceNode {
+            exec_node: MastNodeId::from(exec_node),
+            children: Vec::new(),
+            op_start: 0,
+            op_end,
+            asm_ops,
+            debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
+        }
     }
 
     struct RecordingHost {
@@ -1116,8 +1160,6 @@ mod error_assertions {
 
     #[test]
     fn package_source_context_resolves_by_source_occurrence() {
-        let source_a = DebugSourceNodeId::from(0);
-        let source_b = DebugSourceNodeId::from(1);
         let location_a = Location::new(
             Uri::new("file://pkg/first.masm"),
             ByteIndex::new(10),
@@ -1133,43 +1175,23 @@ mod error_assertions {
             ByteIndex::new(30),
             ByteIndex::new(35),
         );
-        let debug_info =
-            PackageDebugInfo::default().with_source_map(DebugSourceMapSection::from_parts(
-                vec![
-                    DebugSourceAsmOp::new(
-                        source_a,
-                        0,
-                        Some(location_a),
-                        "first".into(),
-                        "add".into(),
-                        1,
-                    ),
-                    DebugSourceAsmOp::new(
-                        source_b,
-                        2,
-                        Some(later_location_b),
-                        "second_later".into(),
-                        "mul".into(),
-                        1,
-                    ),
-                    DebugSourceAsmOp::new(
-                        source_b,
-                        0,
-                        Some(location_b.clone()),
-                        "second".into(),
-                        "add".into(),
-                        1,
-                    ),
-                ],
-                Vec::new(),
-            ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        let source_a_op = debug_asm_op(&mut builder, 0, Some(location_a), "first", "add");
+        let _source_a = builder.add_node(debug_source_node(0, vec![source_a_op])).unwrap();
+        let source_b_later_op =
+            debug_asm_op(&mut builder, 2, Some(later_location_b), "second_later", "mul");
+        let source_b_op = debug_asm_op(&mut builder, 0, Some(location_b.clone()), "second", "add");
+        let source_b = builder
+            .add_node(debug_source_node(1, vec![source_b_later_op, source_b_op]))
+            .unwrap();
+        let debug_info = *builder.build();
         let host = RecordingHost {
             expected_location: location_b,
             returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
         };
         let context = PackageSourceDebugContext::new(&debug_info, source_b);
 
-        assert_eq!(context.assembly_location(None), Some(&host.expected_location));
+        assert_eq!(context.assembly_location(None), Some(host.expected_location.clone()));
 
         let err = OperationError::DivideByZero.with_package_source_context(context, &host, Some(0));
 
@@ -1185,19 +1207,10 @@ mod error_assertions {
 
     #[test]
     fn package_source_context_without_location_uses_unknown_span() {
-        let source_node_id = DebugSourceNodeId::from(0);
-        let debug_info =
-            PackageDebugInfo::default().with_source_map(DebugSourceMapSection::from_parts(
-                vec![DebugSourceAsmOp::new(
-                    source_node_id,
-                    0,
-                    None,
-                    "missing_location".into(),
-                    "add".into(),
-                    1,
-                )],
-                Vec::new(),
-            ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        let asm_op = debug_asm_op(&mut builder, 0, None, "missing_location", "add");
+        let source_node_id = builder.add_node(debug_source_node(0, vec![asm_op])).unwrap();
+        let debug_info = *builder.build();
         let host = RecordingHost {
             expected_location: Location::new(
                 Uri::new("file://unused.masm"),
@@ -1227,10 +1240,9 @@ mod error_assertions {
 
     #[test]
     fn package_debug_info_without_source_node_restores_error_message() {
-        let debug_info =
-            PackageDebugInfo::default().with_error_messages(DebugErrorMessagesSection::from_parts(
-                vec![DebugErrorMessage::new(7, Arc::from("some error message"))],
-            ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        assert!(builder.add_error_message(7, Arc::from("some error message")));
+        let debug_info = *builder.build();
         let context = PackageSourceDebugContext::new_optional(&debug_info, None);
         let err = Err::<(), _>(OperationError::FailedAssertion {
             err_code: Felt::from_u32(7),
@@ -1266,10 +1278,9 @@ mod error_assertions {
 
     #[test]
     fn package_debug_info_restores_merkle_path_error_message() {
-        let debug_info =
-            PackageDebugInfo::default().with_error_messages(DebugErrorMessagesSection::from_parts(
-                vec![DebugErrorMessage::new(7, Arc::from("some error message"))],
-            ));
+        let mut builder = PackageDebugInfoBuilder::default();
+        assert!(builder.add_error_message(7, Arc::from("some error message")));
+        let debug_info = *builder.build();
         let err = OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: Word::default(),

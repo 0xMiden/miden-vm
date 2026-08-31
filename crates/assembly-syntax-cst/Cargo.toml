@@ -1,6 +1,6 @@
 [package]
 name = "miden-assembly-syntax-cst"
-version = "0.28.0"
+version = "0.31.0"
 description = "Lossless concrete syntax tree support for the Miden Assembly language"
 documentation = "https://docs.rs/miden-assembly-syntax-cst"
 readme = "README.md"
@@ -19,12 +19,11 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-debug-types/std", "miden-utils-diagnostics/std", "rowan/std", "thiserror/std"]
+std = ["miden-debug-types/std", "miden-utils-diagnostics/std", "rowan/std"]
 
 [dependencies]
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
-thiserror.workspace = true
 rowan = { package = "miden-rowan", version = "0.16", default-features = false }
 
 [dev-dependencies]

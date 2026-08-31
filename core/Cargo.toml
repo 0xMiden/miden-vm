@@ -1,6 +1,6 @@
 [package]
 name = "miden-core"
-version = "0.28.0"
+version = "0.31.0"
 description = "Miden VM core components"
 documentation = "https://docs.rs/miden-core"
 readme = "README.md"
@@ -34,15 +34,10 @@ std = [
     "miden-crypto/std",
     "miden-debug-types/std",
     "miden-formatting/std",
+    "miden-serde-utils/std",
     "miden-utils-indexing/std",
     "miden-utils-sync/std",
     "thiserror/std",
-]
-serde = [
-    "dep:serde",
-    "miden-crypto/serde",
-    "miden-debug-types/serde",
-    "miden-utils-indexing/serde",
 ]
 arbitrary = ["dep:proptest"]
 testing = ["arbitrary"]
@@ -53,6 +48,7 @@ fuzzing = []
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
+miden-serde-utils.workspace = true
 miden-utils-core-derive.workspace = true
 miden-utils-indexing.workspace = true
 miden-utils-sync.workspace = true
@@ -61,15 +57,18 @@ miden-utils-sync.workspace = true
 derive_more.workspace = true
 log.workspace = true
 proptest = { workspace = true, optional = true }
-serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
 insta.workspace = true
-miden-test-serde-macros.workspace = true
+miden-test-serialization-macros.workspace = true
 proptest.workspace = true
 rstest = { workspace = true }
-serde_json = { workspace = true }
 miden-utils-testing.workspace = true
 trybuild.workspace = true
+
+[package.metadata.cargo-shear]
+# `tests/ui/` holds trybuild `compile_fail` fixtures loaded by path at runtime
+# (see core/tests/public_api.rs), so static analysis cannot link them.
+ignored-paths = ["tests/ui/**"]

@@ -25,10 +25,15 @@ const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
 const ACE_READ_ROW_EF_NODES: usize = 2;
 /// Constants are padded to an even number of EF nodes (full READ rows).
-const CONST_EF_ALIGN: usize = 2;
+pub(crate) const CONST_EF_ALIGN: usize = 2;
 /// Instruction stream padding unit in base felts (adv_pipe block size), so that
 /// the constants+ops stream can be read in aligned chunks.
-const ADV_PIPE_BLOCK_FELTS: usize = 8;
+pub(crate) const ADV_PIPE_BLOCK_FELTS: usize = 8;
+/// Maximum number of circuit nodes accepted by the ACE runtime.
+///
+/// Packed node ids occupy 30 bits, but `eval_circuit` requires the total number of READ and EVAL
+/// nodes to be strictly less than `2^30`.
+const MAX_NUM_ACE_NODES: usize = (1 << 30) - 1;
 
 /// Encoded ACE circuit ready for chiplet consumption.
 ///
@@ -84,9 +89,115 @@ impl EncodedCircuit {
         self.instructions.len()
     }
 
-    /// Poseidon2 digest of the instruction stream.
+    /// Poseidon2 digest of the whole instruction stream.
+    ///
+    /// Note this is not the recursive verifier's registry leaf: a factored circuit is committed
+    /// as `merge(H(constants | shuffle), H(common))` over the two stream segments.
     pub fn circuit_hash(&self) -> Word {
         Poseidon2::hash_elements(self.instructions())
+    }
+}
+
+/// Node-id bases and operation packing for one encoded circuit shape.
+///
+/// The chiplet numbers nodes downward from `num_nodes - 1`: inputs first, then constants,
+/// then operations. Every circuit assembled from one factored composition shares these
+/// bases, so a caller that only wants part of the stream can encode it without building
+/// the whole circuit — see `FactoredMultiAirCircuit::encode_shuffle_section_for_order`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StreamGeometry {
+    input_start: usize,
+    constants_start: usize,
+    ops_start: usize,
+}
+
+impl StreamGeometry {
+    /// Derive the bases from UNPADDED counts, applying the chiplet padding rules:
+    /// constants are rounded up to full READ rows and the constants+ops stream is padded
+    /// to whole `adv_pipe` blocks. The single authority for this arithmetic — `to_ace`
+    /// and `emit_factored_circuit` must agree on node ids, so both derive them here.
+    pub(crate) fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
+        let num_const_nodes = num_constants.next_multiple_of(CONST_EF_ALIGN);
+        let const_felts = num_const_nodes * BASE_FELTS_PER_EF;
+        let num_ops_padded =
+            (const_felts + num_ops).next_multiple_of(ADV_PIPE_BLOCK_FELTS) - const_felts;
+        Self::new(num_inputs, num_const_nodes, num_ops_padded)
+    }
+
+    /// Derive the bases from the final (padded) node counts.
+    fn new(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
+        let num_nodes = num_inputs + num_constants + num_ops;
+        let input_start = num_nodes - 1;
+        let constants_start = input_start - num_inputs;
+        let ops_start = constants_start - num_constants;
+        Self { input_start, constants_start, ops_start }
+    }
+
+    /// Number of input nodes in the READ section.
+    fn num_inputs(&self) -> usize {
+        self.input_start - self.constants_start
+    }
+
+    /// Number of constant nodes (EF), including READ-row padding.
+    pub(crate) fn num_const_nodes(&self) -> usize {
+        self.constants_start - self.ops_start
+    }
+
+    /// Number of operations, including the trailing block padding.
+    pub(crate) fn num_padded_ops(&self) -> usize {
+        self.ops_start + 1
+    }
+
+    /// Total nodes these bases were derived from.
+    fn num_nodes(&self) -> usize {
+        self.input_start + 1
+    }
+
+    /// Reject shapes the ACE chiplet cannot consume: READ layouts that do not fill whole
+    /// rows, and node counts beyond the id-packing bound. Shared by `to_ace` and the
+    /// encode-only registry path so the two cannot drift apart.
+    pub(crate) fn validate(&self) -> Result<(), AceError> {
+        if !self.num_inputs().is_multiple_of(ACE_READ_ROW_EF_NODES) {
+            return Err(AceError::InvalidInputLayout {
+                message: "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"
+                    .to_string(),
+            });
+        }
+        if self.num_nodes() > MAX_NUM_ACE_NODES {
+            return Err(AceError::InvalidInputLayout {
+                message: format!(
+                    "ACE circuit has {} nodes, must be less than 2^30",
+                    self.num_nodes()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn node_id(&self, node: AceNode) -> Result<u64, AceError> {
+        let id = match node {
+            AceNode::Input(idx) => self.input_start.checked_sub(idx),
+            AceNode::Constant(idx) => self.constants_start.checked_sub(idx),
+            AceNode::Operation(idx) => self.ops_start.checked_sub(idx),
+        }
+        .ok_or_else(|| AceError::InvalidInputLayout {
+            message: format!("ACE circuit node index out of range: {node:?}"),
+        })?;
+        Ok(id as u64)
+    }
+
+    /// Pack one operation as `lhs_id + rhs_id * 2^30 + op_tag * 2^60`.
+    pub(crate) fn encode_operation(&self, op: &AceOpNode) -> Result<Felt, AceError> {
+        const RHS_NODE_OFFSET: u64 = 1 << 30;
+        const OP_TAG_OFFSET: u64 = 1 << 60;
+        let tag = match op.op {
+            AceOp::Sub => 0,
+            AceOp::Mul => 1,
+            AceOp::Add => 2,
+        };
+        let lhs_id = self.node_id(op.lhs)?;
+        let rhs_id = self.node_id(op.rhs)?;
+        Ok(Felt::new_unchecked(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET))
     }
 }
 
@@ -96,17 +207,7 @@ where
 {
     /// Encode the circuit into the ACE chiplet format.
     pub fn to_ace(&self) -> Result<EncodedCircuit, AceError> {
-        const MAX_NODE_ID: u64 = (1 << 30) - 1;
-
-        if !self.layout.total_inputs.is_multiple_of(ACE_READ_ROW_EF_NODES) {
-            return Err(AceError::InvalidInputLayout {
-                message: "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"
-                    .to_string(),
-            });
-        }
-
         let num_input_nodes = self.layout.total_inputs;
-        let num_const_nodes = self.constants.len().next_multiple_of(CONST_EF_ALIGN);
         let num_op_nodes = self.operations.len();
         if num_op_nodes == 0 {
             return Err(AceError::InvalidInputLayout {
@@ -119,24 +220,16 @@ where
             });
         }
 
-        // Constants are serialized as EF elements (2 base felts per EF).
-        let num_const_felts = num_const_nodes * BASE_FELTS_PER_EF;
-        let num_op_felts = num_op_nodes;
+        let geometry =
+            StreamGeometry::from_counts(num_input_nodes, self.constants.len(), num_op_nodes);
+        geometry.validate()?;
+
         // The instruction stream is measured in base felts:
         // - constants are EF-encoded (2 base felts each)
         // - ops are 1 base felt each
-        let len_circuit = num_const_felts + num_op_felts;
-        let len_circuit_padded = len_circuit.next_multiple_of(ADV_PIPE_BLOCK_FELTS);
-
-        let num_padding_felts = len_circuit_padded - len_circuit;
-        let num_padding_nodes = num_padding_felts;
-        let num_nodes = num_input_nodes + num_const_nodes + num_op_nodes + num_padding_nodes;
-
-        if num_nodes as u64 > MAX_NODE_ID {
-            return Err(AceError::InvalidInputLayout {
-                message: format!("ACE circuit has {num_nodes} nodes, exceeds 2^30-1 limit"),
-            });
-        }
+        let num_const_nodes = geometry.num_const_nodes();
+        let num_const_felts = num_const_nodes * BASE_FELTS_PER_EF;
+        let len_circuit_padded = num_const_felts + geometry.num_padded_ops();
 
         let mut instructions = Vec::with_capacity(len_circuit_padded);
         for constant in &self.constants {
@@ -146,42 +239,8 @@ where
         }
         instructions.resize(num_const_felts, Felt::ZERO);
 
-        let node_id = |node: AceNode| -> Result<u64, AceError> {
-            let input_start = num_nodes - 1;
-            let constants_start = input_start - num_input_nodes;
-            let ops_start = constants_start - num_const_nodes;
-
-            let id = match node {
-                AceNode::Input(idx) => input_start.checked_sub(idx),
-                AceNode::Constant(idx) => constants_start.checked_sub(idx),
-                AceNode::Operation(idx) => ops_start.checked_sub(idx),
-            }
-            .ok_or_else(|| AceError::InvalidInputLayout {
-                message: format!("ACE circuit node index out of range: {node:?}"),
-            })?;
-            Ok(id as u64)
-        };
-
-        let op_tag = |op: AceOp| -> u64 {
-            match op {
-                AceOp::Sub => 0,
-                AceOp::Mul => 1,
-                AceOp::Add => 2,
-            }
-        };
-
-        let encode_operation = |op: &AceOpNode| -> Result<Felt, AceError> {
-            // Pack as: lhs_id + rhs_id * 2^30 + op_tag * 2^60.
-            const RHS_NODE_OFFSET: u64 = 1 << 30;
-            const OP_TAG_OFFSET: u64 = 1 << 60;
-            let lhs_id = node_id(op.lhs)?;
-            let rhs_id = node_id(op.rhs)?;
-            let tag = op_tag(op.op);
-            Ok(Felt::new_unchecked(lhs_id + rhs_id * RHS_NODE_OFFSET + tag * OP_TAG_OFFSET))
-        };
-
         for op in &self.operations {
-            instructions.push(encode_operation(op)?);
+            instructions.push(geometry.encode_operation(op)?);
         }
 
         // The ACE chiplet checks the last EVAL row. Padding preserves zero-ness by repeatedly
@@ -194,12 +253,12 @@ where
                 lhs: last_node,
                 rhs: last_node,
             };
-            instructions.push(encode_operation(&dummy_op)?);
+            instructions.push(geometry.encode_operation(&dummy_op)?);
             last_node_index += 1;
         }
 
         let num_vars = num_input_nodes + num_const_nodes;
-        let num_ops = num_op_nodes + num_padding_nodes;
+        let num_ops = geometry.num_padded_ops();
         Ok(EncodedCircuit { num_vars, num_ops, instructions })
     }
 

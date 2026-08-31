@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Operand stack
 
-Miden VM is a stack machine. The stack is a push-down stack of practically unlimited depth (in practical terms, the depth will never exceed $2^{32}$), but only the top $16$ items are directly accessible to the VM. Items on the stack are elements in a prime field with modulus $2^{64} - 2^{32} + 1$.
+Miden VM is a stack machine. The stack is a push-down stack of practically unlimited depth (in practical terms, the depth will never exceed $2^{32}$), but only the top $16$ items are directly accessible to the VM. Items on the stack are elements in a prime field with modulus $2^{64}-2^{32} + 1$.
 
 To keep the constraint system for the stack manageable, we impose the following rules:
 
@@ -28,7 +28,7 @@ The meaning of the above columns is as follows:
 * $s_0 ... s_{15}$ are the columns representing the top $16$ slots of the stack.
 * Column $b_0$ contains the number of items on the stack (i.e., the stack depth). In the above picture, there are 16 items on the stacks, so $b_0 = 16$.
 * Column $b_1$ contains an address of a row in the "overflow table" in which we'll store the data that doesn't fit into the top $16$ slots. When $b_1 = 0$, it means that all stack data fits into the top $16$ slots of the stack.
-* Helper column $h_0$ is used to ensure that stack depth does not drop below $16$. Values in this column are set by the prover non-deterministically to $\frac{1}{b_0 - 16}$ when $b_0 \neq 16$, and to any other value otherwise.
+* Helper column $h_0$ is used to ensure that stack depth does not drop below $16$. Values in this column are set by the prover non-deterministically to $\frac{1}{b_0-16}$ when $b_0 \neq 16$, and to any other value otherwise.
 
 ### Overflow table
 
@@ -104,7 +104,7 @@ Overall, during a right shift we do the following:
 * Add a row to the overflow table described by tuple $(clk, s_{15}, b_0)$.
 * Set the next value of $b_1$ to the current value of $clk$.
 
-Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0 - 16}$.
+Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0-16}$.
 
 ## Left shift
 
@@ -126,7 +126,7 @@ Overall, during the left shift we do the following:
   * Set the value of $s_{15}$ to $0$.
   * Set the value to $h_0$ to $0$ (or any other value).
 
-If the stack depth becomes (or remains) $16$, the prover can set $h_0$ to any value (e.g., $0$). But if the depth is greater than $16$ the prover sets $h_0$ to $\frac{1}{b_0 - 16}$.
+If the stack depth becomes (or remains) $16$, the prover can set $h_0$ to any value (e.g., $0$). But if the depth is greater than $16$ the prover sets $h_0$ to $\frac{1}{b_0-16}$.
 
 ## AIR Constraints
 
@@ -148,19 +148,19 @@ validated by the block stack table constraints and is not handled by the stack d
 Additionally, we'll define a flag to indicate whether the overflow table contains values. This flag will be set to $0$ when the overflow table is empty, and to $1$ otherwise (i.e., when stack depth $>16$). This flag can be computed as follows:
 
 $$
-f_{ov} = (b_0 - 16) \cdot h_0 \text{ | degree} = 2
+f_{ov} = (b_0-16) \cdot h_0 \text{ | degree} = 2
 $$
 
 To ensure that this flag is set correctly, we need to impose the following constraint:
 
 $$
-(1 - f_{ov}) \cdot (b_0 - 16) = 0 \text{ | degree} = 3
+(1-f_{ov}) \cdot (b_0-16) = 0 \text{ | degree} = 3
 $$
 
 The above constraint can be satisfied only when either of the following holds:
 
 * $b_0 = 16$, in which case $f_{ov}$ evaluates to $0$, regardless of the value of $h_0$.
-* $f_{ov} = 1$, in which case $b_0$ cannot be equal to $16$ (and $h_0$ must be set to $\frac{1}{b_0 - 16}$).
+* $f_{ov} = 1$, in which case $b_0$ cannot be equal to $16$ (and $h_0$ must be set to $\frac{1}{b_0-16}$).
 
 ### Stack depth constraints
 To make sure stack depth column $b_0$ is updated correctly, we need to impose the following constraints:
@@ -168,7 +168,7 @@ To make sure stack depth column $b_0$ is updated correctly, we need to impose th
 | Condition                   | Constraint__     | Description                                                                                                          |
 | --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
 | $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
-| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
+| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0-1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
 | $f_{enter}=1$               | $b'_0 = 16$      | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.                          |
 | otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
 
@@ -176,7 +176,7 @@ For non-call rows (no CALL/SYSCALL/DYNCALL entry and no END-of-call), we can com
 constraints into a single expression as follows:
 
 $$
-b'_0 - b_0 + f_{shl} \cdot f_{ov} - f_{shr} = 0 \text{ | degree} = 7
+b'_0-b_0 + f_{shl} \cdot f_{ov}-f_{shr} = 0 \text{ | degree} = 7
 $$
 
 On CALL/SYSCALL/DYNCALL entry, we instead enforce $b'_0 = 16$ via a dedicated term. END-of-call
@@ -202,7 +202,7 @@ the "prev" value comes from decoder hasher state/helper element 5 instead of $b'
 Using the above variables, we can ensure that right and left shifts update the overflow table correctly by enforcing the following constraint:
 
 $$
-p_1' \cdot (u \cdot f_{shl} \cdot f_{ov} + 1 - f_{shl} \cdot f_{ov}) = p_1 \cdot (v \cdot f_{shr} + 1 - f_{shr}) \text{ | degree} = 9
+p_1' \cdot (u \cdot f_{shl} \cdot f_{ov} + 1-f_{shl} \cdot f_{ov}) = p_1 \cdot (v \cdot f_{shr} + 1-f_{shr}) \text{ | degree} = 9
 $$
 
 For DYNCALL, the same structure applies with $f_{dyncall}$ in place of $f_{shl}$ and with $u$
@@ -222,13 +222,34 @@ Notice that in the case of the left shift, the constraint forces the prover to s
 In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $clk$. This can be done with the following constraint:
 
 $$
-f_{shr} \cdot (b'_1 - clk) = 0 \text{ | degree} = 7
+f_{shr} \cdot (b'_1-clk) = 0 \text{ | degree} = 7
+$$
+
+Entering a CALL, DYNCALL, or SYSCALL context starts with an empty overflow table, so we also
+enforce:
+
+$$
+f_{enter} \cdot b'_1 = 0
+$$
+
+All other operations must preserve $b_1$, except for a non-empty left shift or the end of a CALL,
+DYNCALL, or SYSCALL context. Those transitions restore $b_1$ through the overflow-table or
+block-stack lookup. Let $f_{exit}$ select the latter three END variants and define:
+
+$$
+f_{update} = f_{enter} + f_{exit} + f_{shr} + f_{shl} \cdot f_{ov}
+$$
+
+The direct preservation constraint is:
+
+$$
+(1-f_{update}) \cdot (b'_1-b_1) = 0
 $$
 
 In case of a left shift, when the overflow table is empty, we need to make sure that a $0$ is "shifted in" from the right (i.e., $s_{15}$ is set to $0$). This can be done with the following constraint:
 
 $$
-f_{shl} \cdot (1 - f_{ov}) \cdot s_{15}' = 0 \text{ | degree} = 8
+f_{shl} \cdot (1-f_{ov}) \cdot s_{15}' = 0 \text{ | degree} = 8
 $$
 
 ### Boundary constraints

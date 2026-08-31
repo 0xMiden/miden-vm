@@ -1,5 +1,5 @@
 use miden_processor::{
-    ExecutionError, ZERO,
+    ExecutionError, ProcessorState, ZERO,
     event::{EventName, NoopEventHandler},
     mast,
     operation::OperationError,
@@ -93,5 +93,24 @@ fn emit() {
     let source = format!("push.{event_id} emit drop");
     let test =
         build_op_test!(&source, &[0, 0, 0, 0]).with_event_handler(event_name, NoopEventHandler);
+    test.check_constraints();
+}
+
+#[test]
+fn emit_trace_event_without_handler() {
+    let trace_name = "test::emit_trace::no_handler";
+
+    let source = format!("trace.event(\"{trace_name}\")");
+    let test = build_op_test!(&source, &[0, 0, 0, 0]);
+    test.check_constraints();
+}
+
+#[test]
+fn emit_trace_event_with_handler() {
+    let trace_name = "test::emit_trace::handler";
+
+    let source = format!("trace.event(\"{trace_name}\")");
+    let test = build_op_test!(&source, &[0, 0, 0, 0])
+        .with_trace_handler(EventName::new(trace_name), |_: &ProcessorState| Ok(()));
     test.check_constraints();
 }

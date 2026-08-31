@@ -1,4 +1,4 @@
-//! Boundary corrections and committed-final metadata for the Miden VM LogUp argument.
+//! Boundary corrections and normalized committed-sum metadata for the Miden VM LogUp argument.
 
 use alloc::vec::Vec;
 
@@ -7,10 +7,11 @@ use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 use super::messages::{BlockHashMsg, KernelRomMsg, LogDeferredMsg};
 use crate::{MIDEN_AIR_COUNT, lookup::BoundaryBuilder};
 
-// COMMITTED-FINALS COUNT
+// COMMITTED NORMALIZED SUM COUNT
 // ================================================================================================
 
-/// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
+/// Number of committed normalized LogUp sums (`sigma_prime`) in the multi-AIR proof shape: one per
+/// AIR.
 pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 
 // BOUNDARY EMITTERS
@@ -64,10 +65,18 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 
 /// Emit boundary corrections for Chiplets lookup columns.
 pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     let kernel_digests: Vec<[B::F; 4]> = boundary
         .var_len_public_inputs()
         .first()
-        .map(|felts| felts.chunks_exact(WORD_SIZE).map(|d| [d[0], d[1], d[2], d[3]]).collect())
+        .map(|felts| {
+            felts
+                .as_chunks::<WORD_SIZE>()
+                .0
+                .iter()
+                .map(|d| [d[0], d[1], d[2], d[3]])
+                .collect()
+        })
         .unwrap_or_default();
 
     // Kernel ROM init: one contribution per kernel procedure digest.

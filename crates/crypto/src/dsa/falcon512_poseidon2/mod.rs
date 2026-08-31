@@ -148,7 +148,7 @@ impl Nonce {
     /// This is used only in testing against the test vectors of the reference (non-deterministic)
     /// Falcon DSA implementation.
     #[cfg(test)]
-    pub fn random<R: rand::Rng>(rng: &mut R) -> Self {
+    fn random<R: rand::Rng>(rng: &mut R) -> Self {
         let mut nonce_bytes = [0u8; SIG_NONCE_LEN];
         rng.fill_bytes(&mut nonce_bytes);
         Self::from_bytes(nonce_bytes)

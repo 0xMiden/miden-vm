@@ -41,7 +41,10 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
 - **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
 - **Fast processor execution mode.** In addition to the trace-generating processor used for proof generation, Miden VM includes a fast processor that can execute programs at up to 320 MHz, enabling among other things rapid program testing and debugging.
-- **Precompiles.** Miden VM supports [precompiles](./docs/src/design/stack/precompiles.md), allowing programs to defer expensive computations to the host while still producing auditable evidence inside the STARK proof. This enables efficient verification of operations like signature schemes and hash functions that would otherwise be prohibitively expensive to execute natively in the VM.
+- **Precompiles.** Miden VM supports
+  [precompiles](./docs/src/design/stack/precompiles.md), allowing programs to defer expensive
+  computations to the host. VM verification authenticates the outstanding deferred root; an
+  aggregate precompile proof can settle compatible deferred executions later.
 
 #### Planned features
 
@@ -54,6 +57,8 @@ In the coming months we plan to finalize the design of the VM and implement supp
 
 Miden VM is written in pure Rust and can be compiled to WebAssembly. Rust's `std` standard library is linked by default for most crates. To compile to one of the two `wasm32` supported targets, use `cargo`'s `--no-default-features` flag to ensure Rust's standard library isn't linked (*i.e. compiling in `no_std`).
 
+This workspace's [`.cargo/config.toml`](.cargo/config.toml) sets `-C target-feature=+simd128` for the `wasm32-unknown-unknown` target, enabling Plonky3's SIMD128 backend for faster hashing (Blake3, Poseidon2) in WASM. Cargo only applies `.cargo/config.toml` to builds run from this workspace (or a directory nested under it); downstream consumers building Miden as a dependency (e.g. via `web-sdk`) must set this flag themselves, for example with `RUSTFLAGS="-C target-feature=+simd128"` or their own `.cargo/config.toml`, to get the same speedup.
+
 #### Concurrent proof generation
 
 When compiled with the `concurrent` feature enabled, the prover will generate STARK proofs using multiple threads. For the benefits of concurrent proof generation, check out benchmarks below.
@@ -62,19 +67,33 @@ Internally, we use [rayon](https://github.com/rayon-rs/rayon) for parallel compu
 
 ### Project structure
 
-The project is organized into several crates like so:
+The workspace contains the main crates below. Internal support and benchmark crates are omitted.
 
-| Crate                       | Description                                                                                                                                                                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [core](core)                | Contains components defining the Miden VM instruction set, program structure, and a set of utility functions used by other crates.                                                                                         |
-| [assembly](crates/assembly) | Contains the Miden assembler. The assembler is used to compile Miden assembly source code into Miden VM programs.                                                                                                          |
-| [processor](processor)      | Contains the Miden VM processor. The processor is used to execute Miden programs and to generate program execution traces. These traces are then used by the Miden prover to generate proofs of correct program execution. |
-| [air](air)                  | Contains _algebraic intermediate representation_ (AIR) of Miden VM processor logic. This AIR is used by the VM during proof generation and verification.                                                     |
-| [prover](prover)            | Contains the Miden VM prover. The prover is used to generate STARK proofs attesting to correct execution of Miden VM programs. Internally, the prover uses Miden processor to execute programs and generate the execution traces.                            |
-| [verifier](verifier)        | Contains a light-weight verifier which can be used to verify proofs of program execution generated by the Miden VM.                                                                                                        |
-| [miden-vm](miden-vm)        | Aggregates functionality exposed by Miden VM processor, prover, and verifier in a single place, and also provides a CLI interface for the Miden VM.                                                                         |
-| [core-lib](crates/lib/core)  | Contains the Miden core assembly library. The goal of Miden core library is to provide highly-optimized and battle-tested implementations of commonly-used primitives.                                                      |
-| [test-utils](crates/test-utils)    | Contains utilities for testing execution of Miden VM programs.                                                                                                                                                         |
+| Area | Crate | Purpose |
+| --- | --- | --- |
+| VM | [core](core) | Defines the instruction set and shared VM types. |
+| VM | [assembly](crates/assembly) | Parses and assembles Miden Assembly programs. |
+| VM | [processor](processor) | Executes programs and builds execution traces. |
+| VM | [air](air) | Defines the constraints checked for VM execution. |
+| VM | [prover](prover) | Produces STARK proofs from execution traces. |
+| VM | [verifier](verifier) | Verifies VM execution proofs. |
+| VM | [miden-vm](miden-vm) | Provides the main library and command line interface. |
+| Shared code | [field](crates/field) | Provides a common field element type for Miden Rust code. |
+| Shared code | [crypto](crates/crypto) | Provides the cryptographic primitives used across the workspace. |
+| Proof system | [lifted-air](crates/lifted-air) | Defines AIR traits and symbolic constraints for the lifted STARK protocol. |
+| Proof system | [lifted-stark](crates/lifted-stark) | Implements lifted STARK proving and verification. |
+| Proof system | [stark-transcript](crates/stark-transcript) | Provides transcript channels used by proof protocols. |
+| Proof system | [constraint-compiler](crates/miden-constraint-compiler) | Compiles symbolic AIR constraints into evaluator code. |
+| Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
+| Precompiles | [precompiles-air](crates/precompiles-air) | Defines precompile AIRs and common proof setup. |
+| Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
+| Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs and registry data. |
+| Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |
+| Packages and tools | [mast-package](crates/mast-package) | Stores compiled MAST artifacts with their dependencies and exports. |
+| Packages and tools | [project](crates/project) | Loads and builds Miden projects. |
+| Packages and tools | [package-registry](crates/package-registry) | Defines package registry and dependency resolution interfaces. |
+| Packages and tools | [package-registry-local](crates/package-registry-local) | Provides a local package registry and its command line interface. |
+| Packages and tools | [miden-format](crates/miden-format) | Formats Miden Assembly source files. |
 
 ## Documentation
 
@@ -107,7 +126,13 @@ RAYON_NUM_THREADS=16 cargo run --profile optimized -p miden-vm-blake3-bench --bi
   --git-ref "$(git rev-parse HEAD)"
 ```
 
-The result is written to `target/blake3-nonregression/result.json`; the harness does not parse the `miden-vm run` or `miden-vm prove` text output. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `e2e_prove`. The `e2e_prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
+The result is written to `target/blake3-nonregression/result.json`; the harness does not parse
+the `miden-vm run` or `miden-vm prove` text output. The benchmark records
+`execute_for_proving_sync`, `build_trace`, `prove_trace_sync`, and `e2e_prove`. It also accepts the
+historical `execute_trace_inputs_sync` axis input, normalizing both spellings to the stable
+`execute_for_proving_sync` metric key. The `e2e_prove` metric runs execution and trace generation
+on each sample, but only measures the prover span. The harness also proves and verifies the program
+once before timing proof-heavy axes.
 
 ### Single-core prover performance
 

@@ -1,21 +1,19 @@
 //! Type-safe u32-indexed vector utilities for Miden
 //!
 //! This module provides utilities for working with u32-indexed vectors in a type-safe manner,
-//! including the [`IndexVec`] type and the [`CsrMatrix`] compressed sparse row storage.
+//! including the [`IndexVec`] type and related functionality.
 #![no_std]
 
 extern crate alloc;
 
-mod csr;
 #[doc = include_str!("../README.md")]
 use alloc::{collections::BTreeMap, vec, vec::Vec};
-use core::{fmt::Debug, marker::PhantomData, ops};
+use core::{fmt::Debug, marker::PhantomData, mem::size_of, ops};
 
-pub use csr::{CsrMatrix, CsrValidationError};
+#[doc(hidden)]
+pub use miden_serde_utils;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Error returned when too many items are added to an IndexedVec.
@@ -48,14 +46,23 @@ pub trait Idx: Copy + Eq + Ord + Debug + From<u32> + Into<u32> {
 /// Macro to create a newtyped ID that implements Idx.
 #[macro_export]
 macro_rules! newtype_id {
-    ($name:ident) => {
+    (
+        $(#[$a:meta])*
+        $vis:vis struct $name:ident;
+    ) => {
+        $(#[$a])*
         #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
         #[repr(transparent)]
-        pub struct $name(u32);
+        $vis struct $name(u32);
 
         impl core::fmt::Debug for $name {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
+        impl core::fmt::Display for $name {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Display::fmt(&self.0, f)
             }
         }
         impl From<u32> for $name {
@@ -69,12 +76,31 @@ macro_rules! newtype_id {
             }
         }
         impl $crate::Idx for $name {}
+
+        impl $crate::miden_serde_utils::Serializable for $name {
+            fn write_into<W: $crate::miden_serde_utils::ByteWriter>(&self, target: &mut W) {
+                target.write_u32(self.0);
+            }
+        }
+
+        impl $crate::miden_serde_utils::Deserializable for $name {
+            fn read_from<R: $crate::miden_serde_utils::ByteReader>(source: &mut R) -> Result<Self, $crate::miden_serde_utils::DeserializationError> {
+                Ok(Self(source.read_u32()?))
+            }
+
+            fn min_serialized_size() -> usize {
+                4
+            }
+        }
+    };
+
+    ($name:ident) => {
+        $crate::newtype_id!(pub struct $name;);
     };
 }
 
 #[cfg(test)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(transparent)]
 pub struct SerdeTestId(u32);
 
@@ -99,10 +125,9 @@ impl Idx for SerdeTestId {}
 ///
 /// This provides O(1) access and storage for dense ID-indexed data.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true), types(SerdeTestId, u32))
+    miden_test_serialization_macros::serialization_test(types(SerdeTestId, u32))
 )]
 pub struct IndexVec<I: Idx, T> {
     raw: Vec<T>,
@@ -206,6 +231,11 @@ impl<I: Idx, T> IndexVec<I, T> {
     /// Remove an element at the specified index and return it.
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.raw.swap_remove(index)
+    }
+
+    /// Shortens the vector, keeping the first `new_len` elements and dropping the rest
+    pub fn truncate(&mut self, new_len: usize) {
+        self.raw.truncate(new_len);
     }
 
     /// Check if this IndexVec contains a specific element.
@@ -382,8 +412,8 @@ impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
 // SERIALIZATION
 // ================================================================================================
 
-use miden_crypto::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use miden_serde_utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, read_bounded_len,
 };
 
 impl<I, T> Serializable for IndexVec<I, T>
@@ -409,15 +439,96 @@ where
     }
 }
 
+impl<I, T> IndexVec<I, T>
+where
+    I: Idx,
+    T: Deserializable,
+{
+    /// Reads and validates a serialized length before it is used for allocation.
+    pub fn read_from_bounded<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+    ) -> Result<Self, DeserializationError> {
+        let len = read_bounded_len(source, label, <T as Deserializable>::min_serialized_size())?;
+        if len > u32::MAX as usize {
+            return Err(DeserializationError::InvalidValue(
+                "IndexVec length exceeds u32::MAX".into(),
+            ));
+        }
+
+        let mut vec = Vec::<T>::with_capacity(bounded_initial_capacity::<T, _>(source, len));
+        for element in source.read_many_iter(len)? {
+            vec.push(element?);
+        }
+
+        Ok(Self { raw: vec, _m: PhantomData })
+    }
+}
+
+impl<I, T> IndexVec<I, T>
+where
+    I: Idx,
+{
+    /// Reads and validates a serialized length before it is used for allocation, using the provided
+    /// function to deserializing each element
+    pub fn read_from_bounded_with<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+        min_element_size: usize,
+        deserializer: impl Fn(&mut R) -> Result<T, DeserializationError>,
+    ) -> Result<Self, DeserializationError> {
+        let len = read_bounded_len(source, label, min_element_size)?;
+        if len > u32::MAX as usize {
+            return Err(DeserializationError::InvalidValue(
+                "IndexVec length exceeds u32::MAX".into(),
+            ));
+        }
+
+        let mut vec = Vec::<T>::with_capacity(bounded_initial_capacity::<T, _>(source, len));
+        for _ in 0..len {
+            vec.push(deserializer(source)?);
+        }
+
+        Ok(Self { raw: vec, _m: PhantomData })
+    }
+}
+
+/// Bounds speculative collection capacity by both the declared length and the reader's remaining
+/// budget expressed in bytes of the in-memory element type.
+///
+/// Variable-width values can have a much smaller minimum serialized size than their in-memory
+/// representation. Reserving their full declared length before decoding the first value would
+/// amplify a compact malformed payload into a much larger allocation. A valid input can still grow
+/// the vector as each element is successfully decoded.
+fn bounded_initial_capacity<T, R: ByteReader>(source: &R, len: usize) -> usize {
+    let element_size = size_of::<T>();
+    if element_size == 0 {
+        len
+    } else {
+        len.min(source.max_alloc(element_size))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::{String, ToString};
+
+    use miden_serde_utils::{BudgetedReader, SliceReader};
 
     use super::*;
 
     // Test ID types
     newtype_id!(TestId);
     newtype_id!(TestId2);
+
+    #[test]
+    fn bounded_initial_capacity_uses_in_memory_element_size() {
+        let reader = BudgetedReader::new(SliceReader::new(&[]), 256);
+
+        assert_eq!(bounded_initial_capacity::<[u8; 64], _>(&reader, 100), 4);
+        assert_eq!(bounded_initial_capacity::<[u8; 64], _>(&reader, 2), 2);
+        assert_eq!(bounded_initial_capacity::<(), _>(&reader, 100), 100);
+    }
 
     #[test]
     fn test_indexvec_basic() {

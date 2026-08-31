@@ -40,8 +40,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for KeccakWithLookup {
 
         // Single balanced local LogUp lookup, producing one EF permutation column.
         builder.push_local_interaction(vec![
-            (vec![AB::Expr::ONE], AB::Expr::ONE),
-            (vec![AB::Expr::ONE], -AB::Expr::ONE),
+            (vec![AB::Expr::ONE], 1.into()),
+            (vec![AB::Expr::ONE], (-1).into()),
         ]);
     }
 }
@@ -77,8 +77,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MidenWithLookups {
         let col0: AB::Expr = local[0].into();
         for _ in 0..self.num_lookups_target {
             builder.push_local_interaction(vec![
-                (vec![col0.clone()], AB::Expr::ONE),
-                (vec![col0.clone()], -AB::Expr::ONE),
+                (vec![col0.clone()], 1.into()),
+                (vec![col0.clone()], (-1).into()),
             ]);
         }
     }

@@ -24,7 +24,7 @@ const OP_BATCH_FLAGS_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_FLAG
 const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 22..24;
 use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
-    events::EventName,
+    events::{EventName, SystemEvent},
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
@@ -32,12 +32,11 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::{KernelDescriptor, Program, StackInputs},
 };
-use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor,
-    event::NoopEventHandler,
-    trace::{ExecutionTrace, build_trace},
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
+    event::{NoopEventHandler, TraceError},
+    trace::{VmTrace, build_trace},
 };
 
 // CONSTANTS
@@ -50,6 +49,7 @@ const FOURTEEN: Felt = Felt::new_unchecked(14);
 
 const INIT_ADDR: Felt = ONE;
 const EMIT_EVENT: EventName = EventName::new("test::emit::event");
+const TRACE_EVENT: EventName = EventName::new("test::emit::trace");
 
 // TYPE ALIASES
 // ================================================================================================
@@ -223,6 +223,70 @@ fn test_basic_block_small_with_emit_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 8..trace_len {
+        assert!(contains_op(&trace, i, opcodes::HALT));
+        assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
+        assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
+        assert_eq!(program_hash, get_hasher_state1(&trace, i));
+    }
+}
+
+#[test]
+fn test_basic_block_small_with_emit_trace_decoding() {
+    let trace_id_felt = TRACE_EVENT.to_event_id().as_felt();
+    let trace_sys_event_id = SystemEvent::TraceEvent.event_id().as_felt();
+    let ops = vec![
+        Operation::Push(ONE),
+        Operation::Push(trace_id_felt),
+        Operation::Push(trace_sys_event_id),
+        Operation::Emit,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Add,
+    ];
+    let (basic_block, program) = {
+        let mut mast_forest = MastForest::new();
+
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
+        let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
+        mast_forest.make_root(basic_block_id);
+
+        (basic_block, Program::new(mast_forest.into(), basic_block_id))
+    };
+
+    let (trace, trace_len) = build_trace_helper(&[], &program);
+
+    // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 4, 0, 0);
+    check_op_decoding_with_imm(&trace, 1, INIT_ADDR, ONE, 1, 3, 0, 1);
+    check_op_decoding_with_imm(&trace, 2, INIT_ADDR, trace_id_felt, 2, 2, 1, 1);
+    check_op_decoding_with_imm(&trace, 3, INIT_ADDR, trace_sys_event_id, 3, 1, 2, 1);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::EMIT, 0, 3, 1);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::DROP, 0, 4, 1);
+    check_op_decoding(&trace, 6, INIT_ADDR, opcodes::DROP, 0, 5, 1);
+    check_op_decoding(&trace, 7, INIT_ADDR, opcodes::ADD, 0, 6, 1);
+    check_op_decoding(&trace, 8, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 9, ZERO, opcodes::HALT, 0, 0, 0);
+
+    // --- check hasher state columns -------------------------------------------------------------
+    let program_hash = program.hash();
+    check_hasher_state(
+        &trace,
+        vec![
+            basic_block.op_batches()[0].groups().to_vec(),
+            vec![build_op_group(&ops[1..])],
+            vec![build_op_group(&ops[2..])],
+            vec![build_op_group(&ops[3..])],
+            vec![build_op_group(&ops[4..])],
+            vec![build_op_group(&ops[5..])],
+            vec![build_op_group(&ops[6..])],
+            vec![build_op_group(&ops[7..])],
+            program_hash.to_vec(), // last row should contain program hash
+        ],
+    );
+
+    // HALT opcode and program hash gets propagated to the last row
+    for i in 9..trace_len {
         assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
@@ -1507,8 +1571,8 @@ fn test_dyn_node_decoding() {
 // ================================================================================================
 
 #[test]
-fn set_user_op_helpers_many() {
-    // --- user operation with 4 helper values ----------------------------------------------------
+fn u32div_sets_all_user_op_helpers() {
+    // --- user operation with 6 helper values ----------------------------------------------------
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -1519,25 +1583,25 @@ fn set_user_op_helpers_many() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
+    let dividend = u32::MAX - 1;
+    let divisor = 1_000_003;
     let (trace, ..) = build_trace_helper(&[divisor as u64, dividend as u64], &program);
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.
-    // h2 to h5 are expected to hold the values for range checks.
-    let quot = dividend / divisor;
-    let rem = dividend - quot * divisor;
-    let check_1 = dividend - quot;
-    let check_2 = divisor as i128 - rem as i128 - 1; // note that `check2` is non-negative
+    // h2 to h7 are expected to hold the values for range checks.
+    let quotient = dividend / divisor;
+    let remainder = dividend - quotient * divisor;
+    let remainder_diff = divisor - remainder - 1;
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new_unchecked((check_1 as u16).into()),
-        Felt::new_unchecked(((check_1 >> 16) as u16).into()),
-        Felt::new_unchecked((check_2 as u16).into()),
-        Felt::new_unchecked(((check_2 >> 16) as u16).into()),
+        Felt::new_unchecked((quotient as u16).into()),
+        Felt::new_unchecked(((quotient >> 16) as u16).into()),
+        Felt::new_unchecked((remainder as u16).into()),
+        Felt::new_unchecked(((remainder >> 16) as u16).into()),
+        Felt::new_unchecked((remainder_diff as u16).into()),
+        Felt::new_unchecked(((remainder_diff >> 16) as u16).into()),
     ]);
 
     assert_eq!(expected, hasher_state);
@@ -1564,9 +1628,15 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
+    host.register_trace_handler(
+        TRACE_EVENT,
+        Arc::new(|_: &ProcessorState| -> Result<(), TraceError> { Ok(()) }),
+    )
+    .unwrap();
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    let trace = build_trace(trace_inputs).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = build_trace(vm_witness).unwrap();
 
     // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().core_trace_len();
@@ -1595,8 +1665,9 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     .expect("processor advice inputs should fit advice map limits");
     let mut host = DefaultHost::default();
 
-    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
-    let trace = build_trace(trace_inputs).unwrap();
+    let execution_witness = processor.execute_for_proving_sync(program, &mut host).unwrap();
+    let (vm_witness, _) = execution_witness.into_parts();
+    let trace = build_trace(vm_witness).unwrap();
 
     // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().core_trace_len();
@@ -1608,7 +1679,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 }
 
 /// Extracts the decoder trace columns from the execution trace.
-fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
+fn extract_decoder_trace(trace: &VmTrace) -> DecoderTrace {
     use miden_air::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     let main_segment = trace.main_trace();
@@ -1619,7 +1690,7 @@ fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
 }
 
 /// Extracts the system trace columns from the execution trace.
-fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
+fn extract_system_trace(trace: &VmTrace) -> SystemTrace {
     use miden_air::trace::SYS_TRACE_WIDTH;
 
     let main_segment = trace.main_trace();
@@ -1802,7 +1873,7 @@ fn build_expected_hasher_state(values: &[Felt]) -> [Felt; NUM_HASHER_COLUMNS] {
 
 /// Build an operation group from the specified list of operations.
 #[cfg(test)]
-pub fn build_op_group(ops: &[Operation]) -> Felt {
+fn build_op_group(ops: &[Operation]) -> Felt {
     use miden_core::mast::OP_GROUP_SIZE;
 
     let mut group = 0u64;

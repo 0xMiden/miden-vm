@@ -143,10 +143,8 @@ impl AnalysisContext {
         }
     }
 
-    /// Rewrite all constant declarations by performing const evaluation of their expressions.
-    ///
-    /// This also has the effect of validating that the constant expressions themselves are valid.
-    pub fn simplify_constants(&mut self) {
+    /// Evaluate constants for validation and cache their values without changing their expressions.
+    pub fn evaluate_constants(&mut self) {
         self.cached_constant_values.clear();
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
@@ -162,7 +160,6 @@ impl AnalysisContext {
                     } else {
                         self.cached_constant_values.remove(constant);
                     }
-                    self.constants.get_mut(constant).unwrap().value = value;
                 },
                 Err(err) => {
                     self.cached_constant_values.remove(constant);
@@ -172,12 +169,17 @@ impl AnalysisContext {
         }
     }
 
-    /// Get the constant value bound to `name`
+    /// Get the evaluated constant expression bound to `name`.
     ///
     /// Returns `Err` if the symbol is undefined
-    pub fn get_constant(&self, name: &Ident) -> Result<&ConstantExpr, SemanticAnalysisError> {
-        if let Some(expr) = self.constants.get(name) {
-            Ok(&expr.value)
+    pub fn get_evaluated_constant(
+        &self,
+        name: &Ident,
+    ) -> Result<ConstantExpr, SemanticAnalysisError> {
+        if let Some(value) = self.cached_constant_values.get(name) {
+            Ok(value.clone().into())
+        } else if let Some(constant) = self.constants.get(name) {
+            Ok(constant.value.clone())
         } else {
             Err(SemanticAnalysisError::SymbolResolutionError(Box::new(
                 SymbolResolutionError::undefined(name.span(), &self.source_manager),

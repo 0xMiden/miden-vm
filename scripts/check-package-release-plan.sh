@@ -20,6 +20,25 @@ trap 'rm -rf "$RELEASE_PLAN_TMPDIR"' EXIT
 metadata_json="$(cargo metadata --locked --no-deps --format-version 1)"
 workspace_root="$(printf '%s' "$metadata_json" | jq -r '.workspace_root')"
 selected_packages=()
+allow_existing=true
+check_semver=true
+package_arguments=()
+
+for argument in "$@"; do
+    case "$argument" in
+        --allow-existing=*) allow_existing="${argument#*=}" ;;
+        --skip-semver) check_semver=false ;;
+        *) package_arguments+=("$argument") ;;
+    esac
+done
+
+case "$allow_existing" in
+    true | false) ;;
+    *)
+        echo "ERROR: --allow-existing must be true or false" >&2
+        exit 2
+        ;;
+esac
 
 add_packages() {
     local item word
@@ -33,7 +52,9 @@ add_packages() {
     done
 }
 
-add_packages "$@"
+if [[ "${#package_arguments[@]}" -gt 0 ]]; then
+    add_packages "${package_arguments[@]}"
+fi
 selected_package_count="${#selected_packages[@]}"
 
 publishable_package_names="$(
@@ -72,13 +93,14 @@ would_publish=()
 already_published=()
 version_errors=()
 semver_failures=()
+semver_packages=()
+semver_local_versions=()
+semver_latest_versions=()
 
 echo "Package release plan"
 echo
 
 while IFS=$'\t' read -r package local_version manifest_path; do
-    baseline_commit=""
-
     if ! is_selected_package "$package"; then
         continue
     fi
@@ -91,12 +113,18 @@ while IFS=$'\t' read -r package local_version manifest_path; do
     fi
 
     if crate_version_exists "$package" "$local_version"; then
-        if ! package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
-            version_errors+=("$package v$local_version already exists on crates.io, but the local package archive differs from the published crate")
-            continue
+        if [[ "$allow_existing" == "false" ]]; then
+            version_errors+=("$package v$local_version already exists on crates.io")
+        elif package_archive_matches_published "$package" "$local_version" "$workspace_root"; then
+            already_published+=("$package v$local_version (latest published: $latest_version)")
+        else
+            archive_status=$?
+            if [[ "$archive_status" -eq 1 ]]; then
+                version_errors+=("$package v$local_version already exists on crates.io, but the local package archive differs from the published crate")
+            else
+                version_errors+=("$package v$local_version already exists on crates.io, but the local package could not be built and compared with the published crate")
+            fi
         fi
-
-        already_published+=("$package v$local_version (latest published: $latest_version)")
         continue
     fi
 
@@ -106,14 +134,40 @@ while IFS=$'\t' read -r package local_version manifest_path; do
         continue
     fi
 
-    echo "Checking semver for $package v$local_version against published v$latest_version"
-    baseline_commit="$(baseline_commit_for "$package" "$latest_version" || true)"
-    if run_semver_check "$package" "$latest_version" "$workspace_root" "$baseline_commit"; then
+    if [[ "$check_semver" == "false" ]]; then
         would_publish+=("$package v$local_version (latest published: $latest_version)")
-    else
-        semver_failures+=("$package v$local_version against published v$latest_version")
+        continue
     fi
+
+    semver_packages+=("$package")
+    semver_local_versions+=("$local_version")
+    semver_latest_versions+=("$latest_version")
 done < <(publishable_packages)
+
+if [[ ${#version_errors[@]} -gt 0 && ${#semver_packages[@]} -gt 0 ]]; then
+    echo
+    echo "Skipping semver checks until package version errors are fixed:"
+    for ((i = 0; i < ${#semver_packages[@]}; i++)); do
+        printf '  - %s v%s against published v%s\n' \
+            "${semver_packages[$i]}" \
+            "${semver_local_versions[$i]}" \
+            "${semver_latest_versions[$i]}"
+    done
+else
+    for ((i = 0; i < ${#semver_packages[@]}; i++)); do
+        package="${semver_packages[$i]}"
+        local_version="${semver_local_versions[$i]}"
+        latest_version="${semver_latest_versions[$i]}"
+
+        echo "Checking semver for $package v$local_version against published v$latest_version"
+        baseline_commit="$(baseline_commit_for "$package" "$latest_version" || true)"
+        if run_semver_check "$package" "$latest_version" "$workspace_root" "$baseline_commit"; then
+            would_publish+=("$package v$local_version (latest published: $latest_version)")
+        else
+            semver_failures+=("$package v$local_version against published v$latest_version")
+        fi
+    done
+fi
 
 echo
 

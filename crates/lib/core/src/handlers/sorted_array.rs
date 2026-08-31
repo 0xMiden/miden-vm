@@ -114,7 +114,8 @@ fn push_lowerbound_result(
 
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
-        return Ok(vec![AdviceMutation::extend_stack(vec![
+        // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
+        return Ok(vec![AdviceMutation::extend_advice_stack_with([
             Felt::from_u32(addr_range.end),
             Felt::from_bool(false),
         ])]);
@@ -157,7 +158,8 @@ fn push_lowerbound_result(
         previous_word = word;
     }
 
-    Ok(vec![AdviceMutation::extend_stack(vec![
+    // MASM consumes maybe_ptr first and was_found second with `adv_push adv_push`.
+    Ok(vec![AdviceMutation::extend_advice_stack_with([
         Felt::from_u32(result.unwrap_or(addr_range.end)),
         Felt::from_bool(was_key_found),
     ])])

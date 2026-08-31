@@ -173,6 +173,41 @@ impl ConstraintDegrees {
     }
 }
 
+/// Symbolic constraint counts, split by constraint kind.
+///
+/// Soundness of the constraint-batching round scales with how many constraints are folded into the
+/// composition polynomial, so a security estimate needs the count alongside
+/// [`ConstraintDegrees`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintCounts {
+    /// Number of base-field constraints.
+    pub base: usize,
+    /// Number of extension-field constraints.
+    pub ext: usize,
+}
+
+impl ConstraintCounts {
+    /// Compute symbolic constraint counts from an AIR.
+    pub fn from_air<F, EF, A>(air: &A) -> Self
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
+        let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
+        air.eval(&mut builder);
+
+        Self {
+            base: builder.base_constraints().len(),
+            ext: builder.extension_constraints().len(),
+        }
+    }
+
+    /// Total number of constraints folded into the composition polynomial.
+    pub fn total(&self) -> usize {
+        self.base + self.ext
+    }
+}
+
 /// Boxed error returned by [`MultiAir::eval_external`].
 pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 

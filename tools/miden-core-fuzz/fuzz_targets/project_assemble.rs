@@ -18,8 +18,7 @@ use libfuzzer_sys::fuzz_target;
 use miden_assembly::{Assembler, ProjectTargetSelector};
 use miden_core::serde::{Deserializable, SliceReader};
 use miden_mast_package::{
-    Package as MastPackage, SectionId, TargetType,
-    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
+    Package as MastPackage, SectionId, TargetType, debug_info::PackageDebugInfo,
 };
 use miden_package_registry::InMemoryPackageRegistry;
 
@@ -289,15 +288,9 @@ fn validate_package(package: &MastPackage) {
 
 fn validate_debug_sections(package: &MastPackage) {
     for section in &package.sections {
-        if section.id == SectionId::DEBUG_SOURCES {
+        if section.id == SectionId::DEBUG_INFO {
             let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugSourcesSection::read_from(&mut reader);
-        } else if section.id == SectionId::DEBUG_FUNCTIONS {
-            let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugFunctionsSection::read_from(&mut reader);
-        } else if section.id == SectionId::DEBUG_TYPES {
-            let mut reader = SliceReader::new(section.data.as_ref());
-            let _ = DebugTypesSection::read_from(&mut reader);
+            let _ = PackageDebugInfo::read_from(&mut reader);
         }
     }
 }

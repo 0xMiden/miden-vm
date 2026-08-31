@@ -8,13 +8,57 @@
 extern crate alloc;
 
 use alloc::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     format,
     string::String,
     sync::Arc,
     vec::Vec,
 };
 use core::mem::size_of;
+
+/// Deserializes a wincode schema and rejects trailing bytes.
+///
+/// Unlike `wincode::config::deserialize_exact`, this accepts schema adapters whose decoded type
+/// differs from the schema type.
+pub fn deserialize_schema_exact<'de, T, C>(
+    mut bytes: &'de [u8],
+    _config: C,
+) -> wincode::ReadResult<T::Dst>
+where
+    T: wincode::SchemaRead<'de, C>,
+    C: wincode::config::Config,
+{
+    use wincode::io::Reader as _;
+
+    let value = T::get(bytes.by_ref())?;
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(wincode::error::trailing_bytes())
+    }
+}
+
+#[cfg(test)]
+mod wincode_tests {
+    use serde_wincode::SerdeCompat;
+
+    use super::deserialize_schema_exact;
+
+    #[test]
+    fn exact_deserialization_rejects_trailing_bytes() {
+        let config = wincode::config::Configuration::default();
+        let mut bytes =
+            <SerdeCompat<u8> as wincode::config::Serialize<_>>::serialize(&7, config).unwrap();
+
+        assert_eq!(deserialize_schema_exact::<SerdeCompat<u8>, _>(&bytes, config).unwrap(), 7);
+
+        bytes.push(0);
+        assert!(matches!(
+            deserialize_schema_exact::<SerdeCompat<u8>, _>(&bytes, config),
+            Err(wincode::error::ReadError::TrailingBytes)
+        ));
+    }
+}
 
 // ERROR
 // ================================================================================================
@@ -49,6 +93,63 @@ pub use byte_reader::{BudgetedReader, ByteReader, ReadManyIter, SliceReader};
 
 mod byte_writer;
 pub use byte_writer::ByteWriter;
+
+// BOUNDED LENGTH HELPERS
+// ================================================================================================
+
+/// Reads and validates a serialized length before it is used for allocation.
+///
+/// `label` names the collection being read and is only used to build the error message.
+/// `min_element_size` is the minimum number of bytes one element occupies once serialized.
+///
+/// # Errors
+/// Returns an error if the length cannot be read, or if it fails the checks described in
+/// [`validate_bounded_len`].
+pub fn read_bounded_len<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+    min_element_size: usize,
+) -> Result<usize, DeserializationError> {
+    let len = source.read_usize()?;
+    validate_bounded_len(source, label, len, min_element_size)?;
+    Ok(len)
+}
+
+/// Validates that a serialized length fits both the reader budget and remaining input.
+///
+/// This guards against malicious length prefixes that would otherwise cause a compact payload
+/// to be amplified into a large allocation.
+///
+/// # Errors
+/// Returns [`DeserializationError::InvalidValue`] if:
+/// * `len` exceeds the number of elements the reader's remaining budget allows.
+/// * `len * min_element_size` overflows.
+/// * The source does not hold `len * min_element_size` more bytes.
+pub fn validate_bounded_len<R: ByteReader>(
+    source: &R,
+    label: &str,
+    len: usize,
+    min_element_size: usize,
+) -> Result<(), DeserializationError> {
+    let max_len = source.max_alloc(min_element_size);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds budget {max_len}"
+        )));
+    }
+
+    let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
+        DeserializationError::InvalidValue(format!(
+            "{label} count {len} overflows minimum serialized size {min_element_size}"
+        ))
+    })?;
+    source.check_eor(min_bytes).map_err(|err| match err {
+        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds remaining input"
+        )),
+        err => err,
+    })
+}
 
 // SERIALIZABLE TRAIT
 // ================================================================================================
@@ -414,6 +515,7 @@ pub trait Deserializable: Sized {
     /// Returns an error if:
     /// * The `source` does not contain enough bytes to deserialize `Self`.
     /// * Bytes read from the `source` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError>;
 
     /// Returns the minimum serialized size for one instance of this type.
@@ -448,6 +550,7 @@ pub trait Deserializable: Sized {
     /// # Security
     /// This method is for trusted input. It does not bound allocations or reject trailing bytes.
     /// Use [`Deserializable::read_from_bytes_with_budget`] for attacker-controlled bytes.
+    #[track_caller]
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         Self::read_from(&mut SliceReader::new(bytes))
     }
@@ -463,6 +566,7 @@ pub trait Deserializable: Sized {
     /// * The budget is exhausted before deserialization completes.
     /// * The `bytes` do not contain enough information to deserialize `Self`.
     /// * The `bytes` do not represent a valid value for `Self`.
+    #[track_caller]
     fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,
@@ -694,6 +798,38 @@ impl<T: Deserializable> Deserializable for Vec<T> {
     }
 }
 
+impl<T: Serializable> Serializable for VecDeque<T> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.len());
+        for item in self {
+            item.write_into(target);
+        }
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let mut size = self.len().get_size_hint();
+        for item in self {
+            size += item.get_size_hint();
+        }
+        size
+    }
+}
+
+impl<T: Deserializable> Deserializable for VecDeque<T> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let len = source.read_usize()?;
+        source.read_many_iter(len)?.collect()
+    }
+
+    /// Returns 1 (the minimum vint length prefix size).
+    ///
+    /// See the note on the `Vec` impl above: budget enforcement during the actual reads provides
+    /// the real protection against oversized length prefixes.
+    fn min_serialized_size() -> usize {
+        1
+    }
+}
+
 impl<K: Deserializable + Ord, V: Deserializable> Deserializable for BTreeMap<K, V> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let len = source.read_usize()?;
@@ -756,8 +892,39 @@ impl Deserializable for Arc<str> {
     }
 }
 
-// GOLDILOCKS FIELD ELEMENT IMPLEMENTATIONS
+// PLONKY3 FIELD IMPLEMENTATIONS
 // ================================================================================================
+
+impl<F, const D: usize> Serializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let coefficients =
+            <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self);
+        target.write_many(coefficients);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        <Self as p3_field::BasedVectorSpace<F>>::as_basis_coefficients_slice(self)
+            .iter()
+            .map(Serializable::get_size_hint)
+            .sum()
+    }
+}
+
+impl<F, const D: usize> Deserializable for p3_field::extension::BinomialExtensionField<F, D>
+where
+    F: p3_field::Field + p3_field::extension::BinomiallyExtendable<D> + Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::new(<[F; D]>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        D.saturating_mul(F::min_serialized_size())
+    }
+}
 
 impl Serializable for p3_goldilocks::Goldilocks {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -785,7 +952,10 @@ impl Deserializable for p3_goldilocks::Goldilocks {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{collections::VecDeque, sync::Arc};
+
+    use p3_field::extension::BinomialExtensionField;
+    use p3_goldilocks::Goldilocks;
 
     use super::*;
 
@@ -803,6 +973,32 @@ mod tests {
         let bytes = original.to_bytes();
         let deserialized = String::read_from_bytes(&bytes).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn vec_deque_roundtrip_and_vec_compatibility() {
+        let original = VecDeque::from([1u32, 2, 3]);
+        let bytes = original.to_bytes();
+
+        assert_eq!(VecDeque::<u32>::read_from_bytes(&bytes).unwrap(), original);
+        assert_eq!(Vec::<u32>::read_from_bytes(&bytes).unwrap(), Vec::from([1, 2, 3]));
+        assert_eq!(
+            VecDeque::<u32>::read_from_bytes(&Vec::from([1u32, 2, 3]).to_bytes()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn binomial_extension_field_roundtrip() {
+        let coefficients = [Goldilocks::new(1), Goldilocks::new(2)];
+        let original = BinomialExtensionField::<Goldilocks, 2>::new(coefficients);
+        let bytes = original.to_bytes();
+
+        assert_eq!(bytes, coefficients.to_bytes());
+        assert_eq!(
+            BinomialExtensionField::<Goldilocks, 2>::read_from_bytes(&bytes).unwrap(),
+            original
+        );
     }
 
     #[test]
@@ -879,6 +1075,49 @@ mod tests {
         let result = BTreeSet::<u8>::read_from_bytes(&bytes);
 
         assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn read_bounded_len_accepts_a_length_backed_by_enough_input() {
+        let mut bytes = 3usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 3]);
+        let mut source = SliceReader::new(&bytes);
+
+        assert_eq!(read_bounded_len(&mut source, "elements", 1).unwrap(), 3);
+    }
+
+    #[test]
+    fn read_bounded_len_rejects_a_length_exceeding_remaining_input() {
+        let mut bytes = 8usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 3]);
+        let mut source = SliceReader::new(&bytes);
+
+        assert!(matches!(
+            read_bounded_len(&mut source, "elements", 1),
+            Err(DeserializationError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn read_bounded_len_rejects_a_length_exceeding_the_budget() {
+        let mut bytes = 64usize.to_bytes();
+        bytes.extend_from_slice(&[0u8; 64]);
+        let mut source = BudgetedReader::new(SliceReader::new(&bytes), 16);
+
+        assert!(matches!(
+            read_bounded_len(&mut source, "elements", 1),
+            Err(DeserializationError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn validate_bounded_len_rejects_a_length_overflowing_the_element_size() {
+        let source = SliceReader::new(&[]);
+
+        assert!(matches!(
+            validate_bounded_len(&source, "elements", usize::MAX, 2),
+            Err(DeserializationError::InvalidValue(_))
+        ));
     }
 
     #[test]

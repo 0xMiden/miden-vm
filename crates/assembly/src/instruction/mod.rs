@@ -6,12 +6,13 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
+    events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    mast_forest_builder::MastNodeRef, push_value_ops,
+    mast_forest_builder::MastNodeUse, push_value_ops,
 };
 
 mod crypto_ops;
@@ -31,7 +32,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         // Determine whether this instruction can create a new node
         let can_create_node = matches!(
             instruction.inner(),
@@ -51,7 +52,7 @@ impl Assembler {
         let pending_node_asm_op = if can_create_node {
             // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
             // since the instruction creates exactly one node (call/syscall/dyn).
-            block_builder.set_instruction_cycle_count()?.map(|mut asm_op| {
+            block_builder.set_instruction_cycle_count().map(|mut asm_op| {
                 asm_op.set_num_cycles(1);
                 asm_op
             })
@@ -69,7 +70,7 @@ impl Assembler {
 
         // If we didn't create a node, set the cycle count after compilation.
         if !can_create_node {
-            let _ = block_builder.set_instruction_cycle_count()?;
+            let _ = block_builder.set_instruction_cycle_count();
         }
 
         Ok(opt_new_node_id)
@@ -81,7 +82,7 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
         node_asm_op: Option<AssemblyOp>,
-    ) -> Result<Option<MastNodeRef>, Report> {
+    ) -> Result<Option<MastNodeUse>, Report> {
         use Operation::*;
 
         let span = instruction.span();
@@ -123,11 +124,11 @@ impl Assembler {
             Instruction::Incr => block_builder.push_op(Incr),
 
             Instruction::Pow2 => field_ops::pow2(block_builder),
-            Instruction::Exp => field_ops::exp(block_builder, proc_ctx, 64_u8, span)?,
-
-            Instruction::ExpImm(pow) => {
-                field_ops::exp_imm(block_builder, proc_ctx, pow.expect_value(), pow.span())?
+            Instruction::Exp => {
+                field_ops::exp(block_builder, proc_ctx, crate::MAX_DYNAMIC_EXP_BITS, span)?
             },
+
+            Instruction::ExpImm(pow) => field_ops::exp_imm(block_builder, pow.expect_value()),
             Instruction::ExpBitLength(num_pow_bits) => {
                 field_ops::exp(block_builder, proc_ctx, *num_pow_bits, span)?
             },
@@ -541,6 +542,7 @@ impl Assembler {
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Exec,
@@ -548,10 +550,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         None,
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::Call(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::Call,
@@ -559,10 +563,12 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("call instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::SysCall(callee) => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self
                     .invoke(
                         InvokeKind::SysCall,
@@ -570,25 +576,36 @@ impl Assembler {
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                         Some(node_asm_op.expect("syscall instructions must provide an AssemblyOp")),
+                        inline_calls,
                     )
                     .map(Into::into);
             },
             Instruction::DynExec => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dynexec(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dynexec instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::DynCall => {
+                let inline_calls = block_builder.active_inline_call_rows(0);
                 return self.dyncall(
                     block_builder.mast_forest_builder_mut(),
                     node_asm_op.expect("dyncall instructions must provide an AssemblyOp"),
+                    inline_calls,
                 );
             },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             Instruction::DebugVar(debug_var_info) => {
                 block_builder.push_debug_var(debug_var_info.clone())?;
+            },
+            Instruction::DebugInlineCall(inline_call) => {
+                block_builder.push_debug_inline_call(inline_call, proc_ctx.source_manager());
+            },
+            Instruction::DebugInlineCallClear => {
+                block_builder.clear_debug_inline_calls();
             },
 
             // ----- emit instruction -------------------------------------------------------------
@@ -600,6 +617,28 @@ impl Assembler {
             Instruction::EmitImm(event_id) => {
                 let event_id_value = event_id.expect_value();
                 block_builder.push_ops([Push(event_id_value), Emit, Drop]);
+            },
+
+            // trace: reads the trace ID from the top of the stack and expands to
+            // `push.<sys::trace_event>, emit, drop`, leaving the stack unchanged.
+            Instruction::Trace => {
+                // The trace ID is already on the stack. In addition we need the system event which
+                // triggers traces.
+                let sys_event_id = SystemEvent::TraceEvent.event_id().as_felt();
+                block_builder.push_ops([Push(sys_event_id), Emit, Drop]);
+            },
+            // trace.<id>: expands to
+            // `push.<id>, push.<sys::trace_event>, emit, drop, drop`, leaving the stack unchanged.
+            Instruction::TraceImm(trace_id) => {
+                let trace_id_value = trace_id.expect_value();
+                let sys_event_id = SystemEvent::TraceEvent.event_id().as_felt();
+                block_builder.push_ops([
+                    Push(trace_id_value),
+                    Push(sys_event_id),
+                    Emit,
+                    Drop,
+                    Drop,
+                ]);
             },
         }
 
