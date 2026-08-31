@@ -6,7 +6,7 @@ use core::ops::Range;
 use miden_core::{
     Felt, Word,
     deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN},
-    field::{Field, PrimeCharacteristicRing, PrimeField64},
+    field::{Field, PrimeCharacteristicRing},
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -19,7 +19,7 @@ use super::compression::{
     },
 };
 use crate::{
-    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, EidosRotation},
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
         COL_ABSORPTION_ID, COL_CHAIN_CONTEXT_BEGIN, COL_CV_IN_BEGIN, COL_IN_MULTIPLICITY,
@@ -316,11 +316,8 @@ impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
             EidosCompressionByteLookup::And8 => {
                 self.requires.require(BytePairOp::And, lhs, rhs) as u32
             },
-            EidosCompressionByteLookup::Rot12 { byte } => {
-                self.requires.require_eidos_rotation(EidosRotation::Rot12, byte, lhs, rhs)
-            },
-            EidosCompressionByteLookup::Rot7 { byte } => {
-                self.requires.require_eidos_rotation(EidosRotation::Rot7, byte, lhs, rhs)
+            EidosCompressionByteLookup::Rotation { rotation, byte } => {
+                self.requires.require_eidos_rotation(rotation, byte, lhs, rhs)
             },
         };
         debug_assert_eq!(expected, result);

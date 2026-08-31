@@ -41,7 +41,7 @@ use crate::{
         chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{And8Msg, MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
+            messages::{BytePairLookupMsg, MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
         },
         utils::{BoolNot, pack_u32_bytes_le},
     },
@@ -297,7 +297,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             for idx in 0..4 {
                                 b.remove(
                                     "bitwise_and8_byte",
-                                    And8Msg::new(
+                                    BytePairLookupMsg::from_and(
                                         bitwise.a_bytes[idx].into(),
                                         bitwise.b_bytes[idx].into(),
                                         bitwise.and_bytes[idx].into(),

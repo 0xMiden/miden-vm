@@ -230,11 +230,14 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
             .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
-        assert_eq!(crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [2; 5]);
+        assert_eq!(
+            crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE,
+            [1, 2, 2, 2],
+        );
     }
 
     #[test]
-    fn and8_lookup_packs_all_ten_live_interactions_into_five_pairs() {
+    fn and8_lookup_packs_seven_live_interactions_into_four_columns() {
         const NUM_ROWS: usize = 2;
 
         let air = MidenAir::AND8_LOOKUP;
@@ -265,9 +268,9 @@ mod tests {
 
         let fractions = build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &challenges);
 
-        assert_eq!(fractions.shape(), &[2; 5]);
-        assert_eq!(fractions.counts(), &[2; NUM_ROWS * 5]);
-        assert_eq!(fractions.fractions().len(), NUM_ROWS * 10);
+        assert_eq!(fractions.shape(), &[1, 2, 2, 2]);
+        assert_eq!(fractions.counts(), &[1, 2, 2, 2, 1, 2, 2, 2]);
+        assert_eq!(fractions.fractions().len(), NUM_ROWS * 7);
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued

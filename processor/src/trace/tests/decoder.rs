@@ -100,7 +100,7 @@ fn assert_core_mutation_rejected(
     mutate: impl FnOnce(&mut CoreCols<Felt>),
 ) {
     let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
     mutate(core_row_mut(&mut core_matrix, row));
     super::lookup::assert_trace_constraints_reject(
         trace,
@@ -923,7 +923,7 @@ fn op_batch_encoding_pins_every_unused_hasher_lane(
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     let row = batch_row(&trace, encoding);
     let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
 
     for lane in unused_lanes {
         let mut core_matrix = honest_core.clone();
@@ -964,7 +964,7 @@ fn valid_op_batch_encoding_swaps_unbalance_the_op_group_bus(
     let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
     let row = batch_row(&trace, original_encoding);
     let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
     let decoder = &mut core_row_mut(&mut core_matrix, row).decoder;
     decoder.full_batch = replacement_encoding[0];
     decoder.batch_size_code = replacement_encoding[1];

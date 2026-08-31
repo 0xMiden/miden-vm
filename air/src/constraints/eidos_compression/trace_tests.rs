@@ -12,7 +12,7 @@ use super::{
     },
     views::{FooterOverlayRow, FusedGRow, LookupSlot},
 };
-use crate::constraints::and8_lookup::columns::eidos_compression_rotation_contribution;
+use crate::constraints::and8_lookup::eidos::{self as eidos_lookup, Rotation};
 
 fn test_block() -> [u32; 16] {
     [
@@ -215,11 +215,11 @@ fn fused_g_rows_materialize_expected_slots() {
                         (d_bytes[byte] & a_new_bytes[byte]) as u64,
                     ],
                 );
-                let expected_result = eidos_compression_rotation_contribution(
+                let expected_result = eidos_lookup::contribution(
+                    Rotation::from_bits(step.second_rotation),
                     byte,
                     b_bytes[byte],
                     c_new_bytes[byte],
-                    step.second_rotation,
                 ) as u64;
                 if g_bd_rot_result_col(g, byte).is_some() {
                     assert_slot(
@@ -303,7 +303,11 @@ fn footer_overlay_rows_materialize_expected_surface() {
             [
                 low[odd].to_le_bytes()[3] as u64,
                 F_TOP_BIT_MASK as u64,
-                (low[odd].to_le_bytes()[3] & F_TOP_BIT_MASK) as u64,
+                eidos_lookup::denormalize(
+                    F_TOP_BIT_LOOKUP_BYTE_POSITION,
+                    Felt::from(low[odd].to_le_bytes()[3] ^ F_TOP_BIT_MASK),
+                )
+                .as_canonical_u64(),
             ],
         );
         for word_slot in 0..F_MSG_WORD_SLOTS {

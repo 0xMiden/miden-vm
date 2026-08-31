@@ -18,6 +18,7 @@ use miden_core::{
 use miden_crypto::{hash::eidos::Eidos, stark::air::ConstraintDegrees};
 use miden_lifted_air::{BaseAir, LiftedAir};
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile};
+use miden_precompiles_air::primitives::byte_pair_lut::eidos;
 
 use crate::{
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, build_lookup_fractions},
@@ -31,9 +32,11 @@ use crate::{
         NUM_AUX_COLS, NUM_MAIN_COLS,
         compression::{
             layout::{
-                BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_CYCLE_ID_COL,
-                F_CV_STORAGE_COLS, FOOTER_START, G_COMPRESSION_CYCLE_ID_COL,
+                BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTE_SLOT_WIDTH, BYTES_PER_WORD,
+                F_COMPRESSION_CYCLE_ID_COL, F_CV_STORAGE_COLS, F_TOP_BIT_MASK,
+                F_TOP_BIT_SLOT_BASE_COL, FOOTER_START, G_COMPRESSION_CYCLE_ID_COL,
                 NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, footer_digest_col, footer_r_col,
+                g_bd_rot_slot_col,
             },
             trace::{
                 EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,
@@ -516,6 +519,104 @@ fn physical_cycle_id_rejects_two_cycle_message_swap() {
             assert_eq!(net_multiplicity(&report, encode(advertised)), -seven);
         }
     }
+}
+
+#[test]
+fn top_bit_overlay_lookup_rejects_the_other_locally_valid_branch() {
+    let block = core::array::from_fn(|i| 10 + i as u32);
+    let cv = core::array::from_fn(|i| 1_000 + i as u32);
+    let mut trace_block = generate_felt_trace_block_with_cycle_id(block, cv, 0);
+
+    let matrix = |rows: &[[Felt; NUM_EIDOS_COMPRESSION_COLS]; EIDOS_COMPRESSION_CYCLE_LEN]| {
+        RowMajorMatrix::new(rows.iter().flatten().copied().collect(), NUM_EIDOS_COMPRESSION_COLS)
+    };
+    let honest = parent_matrix_from_core(&matrix(&trace_block.rows), &[cv]);
+
+    let footer = EIDOS_COMPRESSION_CYCLE_LEN - 1;
+    let row = &mut trace_block.rows[footer];
+    let a = row[F_TOP_BIT_SLOT_BASE_COL];
+    let mask = Felt::from_u8(F_TOP_BIT_MASK);
+    let valid_h = Felt::from_u8((a.as_canonical_u64() as u8) & F_TOP_BIT_MASK);
+    let wrong_h = mask - valid_h;
+    let wrong_x = a + mask - wrong_h.double();
+    let lookup_byte_position = (F_TOP_BIT_SLOT_BASE_COL / BYTE_SLOT_WIDTH) % BYTES_PER_WORD;
+    row[F_TOP_BIT_SLOT_BASE_COL + 2] = eidos::denormalize(lookup_byte_position, wrong_x);
+
+    // The footer digest masks this bit as `out_odd - 2^24*h` before packing at weight 2^32.
+    // Adjusting it by `-2^56 * (wrong_h - valid_h)` keeps every base constraint satisfied.
+    let digest_delta = -Felt::from_u64(1 << 56) * (wrong_h - valid_h);
+    row[footer_digest_col(3)] += digest_delta;
+    // Digest coordinate 3 overlays byte 3 of the first C word. Preserve the atomic CV value by
+    // compensating its 2^24 byte weight through that word's 2^32 footer-storage coordinate.
+    row[F_CV_STORAGE_COLS[0]] -= digest_delta / Felt::from_u16(1 << 8);
+
+    let forged = parent_matrix_from_core(&matrix(&trace_block.rows), &[cv]);
+    crate::tests::check_local(EidosCompressionAir, &forged);
+
+    let challenges = lookup_challenges();
+    let honest_report = lookup_balance(&honest);
+    let forged_report = lookup_balance(&forged);
+    let encode = |x| challenges.encode(BusId::BytePairLut as usize, [a, mask, x]);
+    let correct_x = Felt::from_u8((a.as_canonical_u64() as u8) ^ F_TOP_BIT_MASK);
+
+    assert_eq!(
+        net_multiplicity(&forged_report, encode(correct_x)) + Felt::ONE,
+        net_multiplicity(&honest_report, encode(correct_x)),
+    );
+    assert_eq!(
+        net_multiplicity(&forged_report, encode(wrong_x)),
+        net_multiplicity(&honest_report, encode(wrong_x)) + Felt::ONE,
+    );
+}
+
+#[test]
+fn dedicated_rotation_bus_encodes_the_normalized_physical_contribution() {
+    let block = core::array::from_fn(|i| 10 + i as u32);
+    let cv = core::array::from_fn(|i| 1_000 + i as u32);
+    let mut trace_block = generate_felt_trace_block_with_cycle_id(block, cv, 0);
+    let matrix = |rows: &[[Felt; NUM_EIDOS_COMPRESSION_COLS]; EIDOS_COMPRESSION_CYCLE_LEN]| {
+        RowMajorMatrix::new(rows.iter().flatten().copied().collect(), NUM_EIDOS_COMPRESSION_COLS)
+    };
+
+    let row = 0;
+    let byte_position = 1;
+    let base = g_bd_rot_slot_col(0, byte_position, 0);
+    let a = trace_block.rows[row][base];
+    let b = trace_block.rows[row][base + 1];
+    let correct_physical = trace_block.rows[row][base + 2];
+    assert_eq!(
+        correct_physical,
+        Felt::from(eidos::contribution(
+            eidos::Rotation::Rot12,
+            byte_position,
+            a.as_canonical_u64() as u8,
+            b.as_canonical_u64() as u8,
+        )),
+    );
+
+    let honest = parent_matrix_from_core(&matrix(&trace_block.rows), &[cv]);
+    trace_block.rows[row][base + 2] += Felt::ONE;
+    let wrong_physical = trace_block.rows[row][base + 2];
+    let forged = parent_matrix_from_core(&matrix(&trace_block.rows), &[cv]);
+
+    let challenges = lookup_challenges();
+    let honest_report = lookup_balance(&honest);
+    let forged_report = lookup_balance(&forged);
+    let encode = |physical| {
+        challenges.encode(
+            BusId::EidosRot12Pos1 as usize,
+            [a, b, eidos::normalize(byte_position, physical)],
+        )
+    };
+
+    assert_eq!(
+        net_multiplicity(&forged_report, encode(correct_physical)) + Felt::ONE,
+        net_multiplicity(&honest_report, encode(correct_physical)),
+    );
+    assert_eq!(
+        net_multiplicity(&forged_report, encode(wrong_physical)),
+        net_multiplicity(&honest_report, encode(wrong_physical)) + Felt::ONE,
+    );
 }
 
 #[test]
