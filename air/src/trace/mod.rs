@@ -91,11 +91,14 @@ pub mod eidos_compression {
 }
 
 pub mod and8_lookup {
-    pub use crate::constraints::and8_lookup::columns::{
-        AND8_LOOKUP_TRACE_HEIGHT, AND8_TABLE_ROWS, BYTE_LOOKUP_COLUMN_COUNT, BYTE_LOOKUP_COUNT_LEN,
-        BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7,
-        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12, BYTE_PAIR_ROWS, LOG_AND8_LOOKUP_TRACE_HEIGHT,
-        NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL, byte_lookup_result,
+    pub use crate::constraints::and8_lookup::{
+        columns::{
+            AND8_LOOKUP_TRACE_HEIGHT, AND8_TABLE_ROWS, BYTE_LOOKUP_COLUMN_COUNT,
+            BYTE_LOOKUP_COUNT_LEN, BYTE_PAIR_RELATION_COUNT, BYTE_PAIR_ROWS,
+            LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET,
+            RANGE_CHECK_LOOKUP_COL, byte_pair_count_index, byte_pair_row,
+        },
+        eidos::BytePairRelation,
     };
 }
 

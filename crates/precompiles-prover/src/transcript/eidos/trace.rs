@@ -19,7 +19,7 @@ use super::compression::{
     },
 };
 use crate::{
-    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, EidosRotation},
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
         COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, NUM_MAIN_COLS,
@@ -240,11 +240,8 @@ impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
             EidosCompressionByteLookup::And8 => {
                 self.requires.require(BytePairOp::And, lhs, rhs) as u32
             },
-            EidosCompressionByteLookup::Rot12 { byte } => {
-                self.requires.require_eidos_rotation(EidosRotation::Rot12, byte, lhs, rhs)
-            },
-            EidosCompressionByteLookup::Rot7 { byte } => {
-                self.requires.require_eidos_rotation(EidosRotation::Rot7, byte, lhs, rhs)
+            EidosCompressionByteLookup::Rotation { rotation, byte } => {
+                self.requires.require_eidos_rotation(rotation, byte, lhs, rhs)
             },
         };
         debug_assert_eq!(expected, result);
