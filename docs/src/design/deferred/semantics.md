@@ -52,17 +52,28 @@ Registration stores and shape-checks a node in `nodes`, evaluates it immediately
 canonical result. False predicates and other semantic evaluation failures are reported by
 registration.
 
-## One fixed ceiling
+## Fixed ceilings
 
-`DeferredState::new(registry)` initializes one total budget from the library safety ceiling:
+`DeferredState::new(registry)` initializes fixed library safety ceilings:
 
 ```text
 remaining_elements = MAX_DEFERRED_ELEMENTS
+nodes.len() <= MAX_DEFERRED_NODES
+root_reachable_depth <= MAX_DEFERRED_DAG_DEPTH
+data_payload_bytes <= MAX_DEFERRED_DATA_BYTES
+pair_list_pairs <= MAX_DEFERRED_PAIR_LIST_PAIRS
 ```
 
 Initialization also installs the registry's `init()` constants, charging them against that same
-budget. `extend_precompiles(precompiles)` merges additional precompiles into an existing state
-without discarding existing nodes, evaluation results, root, or budget accounting.
+element and node budget. `extend_precompiles(precompiles)` merges additional precompiles into an
+existing state without discarding existing nodes, evaluation results, root, or budget accounting.
+
+The node count is state-wide and includes implicit TRUE, initialization nodes, caller nodes, and
+canonical/helper nodes created during evaluation. Duplicate registration remains free for both the
+element and node budgets. Structural depth is measured transiently from the prospective root: the
+root has depth zero and each child edge increases depth by one. Unreachable intermediate nodes may
+be deeper, but they remain covered by the state-wide node and element budgets and cannot be admitted
+as an oversized root.
 
 Every new unique durable node inserted into `nodes` decrements `remaining_elements` by the node's
 field-element footprint using checked subtraction. Duplicate insertion is free, so registering the
@@ -74,10 +85,11 @@ The precompile's `decode` result is the framework shape gate:
 
 - `NodeType::Data` authorizes a non-empty data payload. For memory-backed registration, the host
   reads exactly the stack-supplied `n_chunks`; precompile evaluation checks any tag-derived semantic
-  data length.
+  data length. Every data payload is additionally capped by `MAX_DEFERRED_DATA_BYTES`.
 - `NodeType::Join` authorizes exactly one 8-felt payload block, interpreted as two child digests.
 - `NodeType::PairList` authorizes a non-empty list of `lhs_digest || rhs_digest` chunks. Precompile
-  evaluation checks any tag-derived semantic pair count.
+  evaluation checks any tag-derived semantic pair count, within
+  `MAX_DEFERRED_PAIR_LIST_PAIRS`.
 
 Processor handlers perform a cheap deferred-budget pre-check before allocating or reading a
 memory-backed payload, but exact data/pair-list arity remains precompile-specific semantics.
@@ -131,7 +143,8 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 - pair-list entries emit pairs of child indices.
 
 The wire root is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the
-final entry. `from_wire(registry, wire)` decodes untrusted wire under `MAX_DEFERRED_ELEMENTS`,
+final entry. `from_wire(registry, wire)` decodes untrusted wire under the element, node, and payload
+ceilings, then validates depth from the rehydrated root,
 rejects non-canonical or dangling wire by requiring `state.to_wire() == wire`, then evaluates the
 implicit wire root to `Node::TRUE`. Evaluation may insert canonical/helper nodes in addition to the
 wire nodes.
@@ -184,10 +197,11 @@ without validating cross-artifact consistency. `DeferredStateWire` is likewise p
 bundled façade hydration step.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
-`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and
-`MAX_DEFERRED_ELEMENTS` for deferred wire. Hydration and witness merge also enforce the deferred
-state and root ceilings. These are library safety bounds, not configurable protocol, whole-envelope,
-file, network, or ingestion policy.
+`MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and the
+deferred element, node, data-payload, and pair-list limits for deferred wire. Hydration additionally
+enforces structural depth, while witness merge applies the same deferred-state and root ceilings.
+These are library safety bounds, not configurable protocol, whole-envelope, file, network, or
+ingestion policy.
 
 Proof and wire artifacts use derived Serde as a representation format. Generic Serde
 deserialization is not guaranteed to apply the canonical decoder's early allocation bounds and must

@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use miden_core::{
     Word, ZERO,
     deferred::{
-        DataChunk, DeferredError, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType, PrecompileError,
-        Tag,
+        DataChunk, DeferredError, Digest, MAX_DEFERRED_DATA_BYTES, MAX_DEFERRED_ELEMENTS,
+        MAX_DEFERRED_PAIR_LIST_PAIRS, Node, NodeType, PrecompileError, Tag,
     },
 };
 
@@ -70,6 +70,31 @@ fn payload_node_num_elements(n_blocks: u32) -> usize {
         .checked_mul(PAYLOAD_BLOCK_NUM_ELEMENTS)
         .and_then(|payload_elements| payload_elements.checked_add(TAG_NUM_ELEMENTS))
         .unwrap_or(usize::MAX)
+}
+
+fn validate_memory_payload_size(node_type: NodeType, n_chunks: u32) -> Result<(), DeferredError> {
+    match node_type {
+        NodeType::Data => {
+            let num_bytes = (n_chunks as usize).saturating_mul(Node::PACKED_BYTES_PER_CHUNK);
+            if num_bytes > MAX_DEFERRED_DATA_BYTES {
+                return Err(DeferredError::DeferredDataTooLarge {
+                    num_bytes,
+                    max: MAX_DEFERRED_DATA_BYTES,
+                });
+            }
+        },
+        NodeType::PairList => {
+            let num_pairs = n_chunks as usize;
+            if num_pairs > MAX_DEFERRED_PAIR_LIST_PAIRS {
+                return Err(DeferredError::DeferredPairListTooLarge {
+                    num_pairs,
+                    max: MAX_DEFERRED_PAIR_LIST_PAIRS,
+                });
+            }
+        },
+        NodeType::True | NodeType::Join => {},
+    }
+    Ok(())
 }
 
 /// Stack-resident registration of an operand-stack deferred node.
@@ -218,8 +243,8 @@ pub(super) fn handle_deferred_register_data(
         return Err(PrecompileError::InvalidNode.into());
     }
 
-    // Decode the tag before any memory reads. The precompile is the source of truth for payload
-    // shape, but data/pair-list lengths are semantic and checked during registration/evaluation.
+    // Decode the tag and apply shape-wide payload limits before any memory reads. Exact semantic
+    // lengths encoded by precompile tags are still checked during registration/evaluation.
     let node_type = processor.deferred_state().decode(tag)?;
     match node_type {
         NodeType::Data | NodeType::PairList => {},
@@ -228,6 +253,7 @@ pub(super) fn handle_deferred_register_data(
             return Err(PrecompileError::InvalidNode.into());
         },
     }
+    validate_memory_payload_size(node_type, n).map_err(PrecompileError::from)?;
 
     // Reject nodes that can never fit in the fixed deferred-state budget before
     // reading memory. Remaining-budget accounting still belongs to `DeferredState::register`,

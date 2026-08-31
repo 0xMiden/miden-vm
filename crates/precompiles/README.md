@@ -16,6 +16,14 @@ Use `miden_precompiles::registry()` to construct the standard
 - **Fixed uint and field arithmetic**: arithmetic precompile support used by generated MASM wrappers.
 - **secp256k1 curve support**: curve precompile support used by the ECDSA verifier path.
 
+## Resource limits
+
+The crate exposes the fixed safety ceilings used by the official registry. Hash assertions accept
+at most 1 MiB of input, MSM nodes accept at most 256 terms, root-reachable expression DAGs have a
+maximum depth of 1,024, data nodes carry at most 1 MiB of packed chunk capacity, and a deferred
+state stores at most 65,536 nodes. These hard limits are enforced during execution and verifier
+rehydration.
+
 ## Crate features
 
 Miden precompiles provides the following Cargo feature:

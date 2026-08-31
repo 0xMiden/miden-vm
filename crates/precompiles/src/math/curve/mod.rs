@@ -55,7 +55,10 @@ pub use self::{
     glv::{SECP256K1_BETA, SECP256K1_LAMBDA, glv_decompose, phi_generator, scalar_mul_mod_n},
     secp256k1::{SECP256K1_GENERATOR_X, SECP256K1_GENERATOR_Y, SECP256K1_ID},
 };
-use crate::math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec};
+use crate::{
+    MAX_MSM_TERMS,
+    math::uint::{Limbs, UintDomain, UintPrecompile, UintSpec},
+};
 
 /// VM-owned store pointer for the secp256k1 curve coefficient `A`.
 pub const K1_A_PTR: u32 = 8;
@@ -511,6 +514,14 @@ impl CurveNode {
                 Self::Eq { lhs, rhs }
             },
             CurveOp::Msm => {
+                let num_pairs = payload.as_chunks().len();
+                if num_pairs > MAX_MSM_TERMS {
+                    return Err(DeferredError::DeferredPairListTooLarge {
+                        num_pairs,
+                        max: MAX_MSM_TERMS,
+                    }
+                    .into());
+                }
                 let pairs = payload.as_pair_list()?;
                 Self::Msm { pairs }
             },
@@ -993,6 +1004,33 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn msm_term_limit_is_inclusive_at_the_structural_seam() {
+        let exact = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(TRUE_DIGEST, TRUE_DIGEST); MAX_MSM_TERMS],
+        )
+        .unwrap();
+        assert!(matches!(
+            CurvePrecompile::decode_node(&exact).unwrap(),
+            Some(CurveNodeRef::Msm { pairs }) if pairs.len() == MAX_MSM_TERMS
+        ));
+
+        let oversized = Node::try_pair_list(
+            CurvePrecompile::msm_tag(),
+            vec![(TRUE_DIGEST, TRUE_DIGEST); MAX_MSM_TERMS + 1],
+        )
+        .unwrap();
+        let error = CurvePrecompile::decode_node(&oversized).unwrap_err();
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredPairListTooLarge {
+                num_pairs,
+                max: MAX_MSM_TERMS,
+            }) if *num_pairs == MAX_MSM_TERMS + 1
+        ));
     }
 
     #[test]

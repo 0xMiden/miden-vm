@@ -16,7 +16,10 @@ use miden_core::{
     },
 };
 
-use crate::codec::{chunks_to_bytes_exact, n_chunks};
+use crate::{
+    MAX_HASH_INPUT_BYTES,
+    codec::{chunks_to_bytes_exact, n_chunks},
+};
 
 pub mod keccak256;
 
@@ -95,7 +98,7 @@ impl<H: HashFunction> HashPrecompile<H> {
             u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
         let n_bytes =
             u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC || args[2] != ZERO {
+        if disc != ASSERT_DISC || args[2] != ZERO || n_bytes as usize > MAX_HASH_INPUT_BYTES {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -141,7 +144,10 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         if disc != ASSERT_DISC || args[2] != ZERO {
             return None;
         }
-        u32::try_from(args[1].as_canonical_u64()).ok()?;
+        let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
+        if n_bytes as usize > MAX_HASH_INPUT_BYTES {
+            return None;
+        }
         Some(NodeType::Join)
     }
 
@@ -155,7 +161,7 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
             u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
         let n_bytes =
             u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC || args[2] != ZERO {
+        if disc != ASSERT_DISC || args[2] != ZERO || n_bytes as usize > MAX_HASH_INPUT_BYTES {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -273,6 +279,38 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), non_u32, ZERO])
             .is_none()
     );
+
+    let max_hash_len = MAX_HASH_INPUT_BYTES as u32;
+    assert_eq!(
+        pc.decode([
+            Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID),
+            Felt::from_u32(max_hash_len),
+            ZERO,
+        ]),
+        Some(NodeType::Join),
+    );
+    assert!(
+        pc.decode([
+            Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID),
+            Felt::from_u32(max_hash_len + 1),
+            ZERO,
+        ])
+        .is_none()
+    );
+    assert_eq!(
+        HashPrecompile::<H>::decode_assert_tag(HashPrecompile::<H>::assert_tag(max_hash_len))
+            .unwrap(),
+        Some(max_hash_len),
+    );
+    assert!(matches!(
+        HashPrecompile::<H>::decode_assert_tag(HashPrecompile::<H>::assert_tag(max_hash_len + 1)),
+        Err(PrecompileError::InvalidNode)
+    ));
+    let mut state = fresh();
+    let error = state
+        .register(HashPrecompile::<H>::assert_node(max_hash_len + 1, TRUE_DIGEST, TRUE_DIGEST))
+        .unwrap_err();
+    assert_error(error, PrecompileError::InvalidNode);
 
     let assert_tag = HashPrecompile::<H>::assert_tag(65);
     assert_eq!(HashPrecompile::<H>::decode_assert_tag(assert_tag).unwrap(), Some(65));

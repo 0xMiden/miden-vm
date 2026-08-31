@@ -37,6 +37,26 @@ pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
 /// Hard maximum approximate number of field elements allowed in deferred state.
 pub const MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
 
+/// Hard maximum number of nodes stored in one deferred state.
+///
+/// This includes the implicit TRUE node, precompile initialization nodes, caller-registered nodes,
+/// and canonical/helper nodes created during evaluation.
+pub const MAX_DEFERRED_NODES: usize = 1 << 16;
+
+/// Hard maximum structural depth reachable from a deferred root.
+///
+/// The root has depth zero, and each structural edge increases depth by one.
+pub const MAX_DEFERRED_DAG_DEPTH: usize = 1 << 10;
+
+/// Hard maximum logical byte capacity of one deferred data payload.
+///
+/// A [`DataChunk`] has eight field elements and represents 32 packed bytes, so this permits at
+/// most 32,768 chunks in one data node.
+pub const MAX_DEFERRED_DATA_BYTES: usize = 1 << 20;
+
+/// Hard maximum number of structural digest pairs in one deferred pair-list payload.
+pub const MAX_DEFERRED_PAIR_LIST_PAIRS: usize = 1 << 8;
+
 /// Hard library safety ceiling for ordered precompile roots.
 ///
 /// This bounds root-vector allocation and aggregate-root folding.
@@ -65,6 +85,14 @@ pub enum DeferredError {
     AssertionFailed,
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
+    #[error("deferred insertion would store {num_nodes} nodes, maximum is {max}")]
+    DeferredStateTooManyNodes { num_nodes: usize, max: usize },
+    #[error("deferred node depth {depth} exceeds the maximum of {max}")]
+    DeferredNodeTooDeep { depth: usize, max: usize },
+    #[error("deferred data payload is {num_bytes} bytes, maximum is {max}")]
+    DeferredDataTooLarge { num_bytes: usize, max: usize },
+    #[error("deferred pair-list payload has {num_pairs} pairs, maximum is {max}")]
+    DeferredPairListTooLarge { num_pairs: usize, max: usize },
     #[error("operation is not supported by this handler")]
     Unsupported,
     #[error("invalid deferred root transition: expected {expected:?}, got {actual:?}")]

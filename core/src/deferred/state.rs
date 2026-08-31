@@ -1,8 +1,10 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use super::{
-    DeferredError, DeferredStateWire, Digest, IntegrityError, MAX_DEFERRED_ELEMENTS, Node,
-    NodeType, PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
+    DeferredError, DeferredStateWire, Digest, IntegrityError, MAX_DEFERRED_DAG_DEPTH,
+    MAX_DEFERRED_DATA_BYTES, MAX_DEFERRED_ELEMENTS, MAX_DEFERRED_NODES,
+    MAX_DEFERRED_PAIR_LIST_PAIRS, Node, NodeType, PrecompileError, PrecompileRegistry, TRUE_DIGEST,
+    Tag,
 };
 
 /// In-memory witness for deferred-DAG verification.
@@ -61,7 +63,8 @@ impl DeferredState {
         // Load the complete set before enforcing child closure. This lets init nodes depend on
         // TRUE or on any other node in the complete init set, independent of registry order.
         for node in init_nodes {
-            self.registry.validate_node(&node)?;
+            let node_type = self.registry.validate_node(&node)?;
+            Self::validate_node_resource_limits(&node, node_type)?;
             self.insert_node(node)?;
         }
 
@@ -206,6 +209,7 @@ impl DeferredState {
     /// deferred root, memoizes the new root as TRUE, and returns the new root.
     pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
         let prev_root = self.root;
+        self.validate_depth_from([(prev_root, 1), (statement_digest, 1)])?;
 
         self.require_true_eval(prev_root)?;
         self.require_true_eval(statement_digest)?;
@@ -300,6 +304,13 @@ impl DeferredState {
         wire.rehydrate(registry)
     }
 
+    /// Validates the longest structural path reachable from `root` without retaining per-node
+    /// depth metadata. Reaching a shared node at a greater depth revisits it; cycles therefore also
+    /// terminate at the fixed depth ceiling.
+    pub(super) fn validate_root_depth(&self, root: Digest) -> Result<(), PrecompileError> {
+        self.validate_depth_from([(root, 0)])
+    }
+
     fn import_reachable_from(
         &mut self,
         source: &DeferredState,
@@ -331,6 +342,7 @@ impl DeferredState {
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
         let node_type = self.registry.validate_node(node)?;
+        Self::validate_node_resource_limits(node, node_type)?;
         for child in node.children() {
             if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
                 return Err(PrecompileError::MissingNode);
@@ -339,12 +351,52 @@ impl DeferredState {
         Ok(node_type)
     }
 
+    fn validate_node_resource_limits(
+        node: &Node,
+        node_type: NodeType,
+    ) -> Result<(), PrecompileError> {
+        match node_type {
+            NodeType::Data => {
+                let num_bytes =
+                    node.payload().as_data()?.len().saturating_mul(Node::PACKED_BYTES_PER_CHUNK);
+                if num_bytes > MAX_DEFERRED_DATA_BYTES {
+                    return Err(DeferredError::DeferredDataTooLarge {
+                        num_bytes,
+                        max: MAX_DEFERRED_DATA_BYTES,
+                    }
+                    .into());
+                }
+            },
+            NodeType::PairList => {
+                let num_pairs = node.payload().as_chunks().len();
+                if num_pairs > MAX_DEFERRED_PAIR_LIST_PAIRS {
+                    return Err(DeferredError::DeferredPairListTooLarge {
+                        num_pairs,
+                        max: MAX_DEFERRED_PAIR_LIST_PAIRS,
+                    }
+                    .into());
+                }
+            },
+            NodeType::True | NodeType::Join => {},
+        }
+        Ok(())
+    }
+
     fn insert_node(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         let digest = node.digest();
         match self.nodes.get(&digest) {
             Some(existing) if existing == &node => Ok(digest),
             Some(_) => Err(DeferredError::ConflictingNode.into()),
             None => {
+                let num_nodes = self.nodes.len().saturating_add(1);
+                if num_nodes > MAX_DEFERRED_NODES {
+                    return Err(DeferredError::DeferredStateTooManyNodes {
+                        num_nodes,
+                        max: MAX_DEFERRED_NODES,
+                    }
+                    .into());
+                }
+
                 let required = node.storage_felt_len();
                 self.remaining_elements = self.remaining_elements.checked_sub(required).ok_or(
                     DeferredError::DeferredStateTooLarge {
@@ -356,6 +408,78 @@ impl DeferredState {
                 Ok(digest)
             },
         }
+    }
+
+    fn validate_depth_from<I>(&self, roots: I) -> Result<(), PrecompileError>
+    where
+        I: IntoIterator<Item = (Digest, usize)>,
+    {
+        // Discover the reachable subgraph and its incoming-edge counts. The optional value tracks
+        // the greatest distance seen from any supplied root.
+        let mut reachable = BTreeMap::<Digest, (usize, Option<usize>)>::new();
+        let mut pending = Vec::new();
+        for (digest, depth) in roots {
+            let entry = reachable.entry(digest).or_insert_with(|| {
+                pending.push(digest);
+                (0, None)
+            });
+            entry.1 = Some(entry.1.map_or(depth, |previous| previous.max(depth)));
+        }
+        while let Some(digest) = pending.pop() {
+            let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?;
+            for child in node.children() {
+                let entry = reachable.entry(child).or_insert_with(|| {
+                    pending.push(child);
+                    (0, None)
+                });
+                entry.0 = entry.0.saturating_add(1);
+            }
+        }
+
+        // Process the reachable DAG in topological order, propagating the greatest root-relative
+        // depth. Pair-list duplicate edges are counted and consumed independently.
+        let mut ready = reachable
+            .iter()
+            .filter_map(|(digest, (incoming, _))| (*incoming == 0).then_some(*digest))
+            .collect::<Vec<_>>();
+        let mut processed = 0usize;
+        while let Some(digest) = ready.pop() {
+            let depth = reachable
+                .get(&digest)
+                .and_then(|(_, depth)| *depth)
+                .ok_or(PrecompileError::MissingNode)?;
+            if depth > MAX_DEFERRED_DAG_DEPTH {
+                return Err(DeferredError::DeferredNodeTooDeep {
+                    depth,
+                    max: MAX_DEFERRED_DAG_DEPTH,
+                }
+                .into());
+            }
+            processed = processed.saturating_add(1);
+
+            let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?;
+            let child_depth = depth.saturating_add(1);
+            for child in node.children() {
+                let (incoming, greatest_depth) =
+                    reachable.get_mut(&child).ok_or(PrecompileError::MissingNode)?;
+                *greatest_depth =
+                    Some(greatest_depth.map_or(child_depth, |previous| previous.max(child_depth)));
+                *incoming = incoming.checked_sub(1).ok_or(PrecompileError::InvalidNode)?;
+                if *incoming == 0 {
+                    ready.push(child);
+                }
+            }
+        }
+
+        if processed != reachable.len() {
+            return Err(DeferredError::DeferredNodeTooDeep {
+                depth: MAX_DEFERRED_DAG_DEPTH + 1,
+                max: MAX_DEFERRED_DAG_DEPTH,
+            }
+            .into());
+        }
+
+        Ok(())
     }
 
     /// Records an evaluation memo and stores its canonical node in `nodes` for downstream
@@ -484,6 +608,38 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    struct PairListPrecompile;
+
+    impl Precompile for PairListPrecompile {
+        fn name(&self) -> &'static str {
+            "state-pair-list-fixture"
+        }
+
+        fn id(&self) -> Felt {
+            precompile_id(self.name())
+        }
+
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            (args == [ZERO; 3]).then_some(NodeType::PairList)
+        }
+
+        fn evaluate(
+            &self,
+            _args: [Felt; 3],
+            _payload: &Payload,
+            _context: &mut DeferredContext<'_>,
+        ) -> Result<Node, PrecompileError> {
+            Ok(Node::TRUE)
+        }
+    }
+
+    impl PairListPrecompile {
+        fn tag(self) -> Tag {
+            Tag::precompile(self.id(), [ZERO; 3]).expect("fixture id is precompile-owned")
+        }
+    }
+
     #[test]
     fn construction_uses_the_fixed_deferred_element_limit() {
         let state = DeferredState::new(Arc::new(PrecompileRegistry::new())).unwrap();
@@ -508,6 +664,114 @@ mod tests {
 
         assert!(matches!(error.root(), PrecompileError::AssertionFailed));
         assert_eq!(state.get_canonical_digest(digest), None);
+    }
+
+    #[test]
+    fn data_and_pair_list_limits_are_inclusive() {
+        let max_chunks = MAX_DEFERRED_DATA_BYTES / Node::PACKED_BYTES_PER_CHUNK;
+        let mut data_state = DeferredState::default();
+        data_state
+            .register(Node::chunks(alloc::vec![[ZERO; 8]; max_chunks]).unwrap())
+            .expect("the maximum-sized data node must register");
+        let error = data_state
+            .register(Node::chunks(alloc::vec![[ZERO; 8]; max_chunks + 1]).unwrap())
+            .unwrap_err();
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredDataTooLarge {
+                num_bytes,
+                max: MAX_DEFERRED_DATA_BYTES,
+            }) if *num_bytes == MAX_DEFERRED_DATA_BYTES + Node::PACKED_BYTES_PER_CHUNK
+        ));
+
+        let precompile = PairListPrecompile;
+        let mut pair_state =
+            DeferredState::new(Arc::new(PrecompileRegistry::new().with_precompile(precompile)))
+                .unwrap();
+        pair_state
+            .register(
+                Node::try_pair_list(
+                    precompile.tag(),
+                    alloc::vec![(TRUE_DIGEST, TRUE_DIGEST); MAX_DEFERRED_PAIR_LIST_PAIRS],
+                )
+                .unwrap(),
+            )
+            .expect("the maximum-sized pair list must register");
+        let error = pair_state
+            .register(
+                Node::try_pair_list(
+                    precompile.tag(),
+                    alloc::vec![(TRUE_DIGEST, TRUE_DIGEST);
+                        MAX_DEFERRED_PAIR_LIST_PAIRS + 1],
+                )
+                .unwrap(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredPairListTooLarge {
+                num_pairs,
+                max: MAX_DEFERRED_PAIR_LIST_PAIRS,
+            }) if *num_pairs == MAX_DEFERRED_PAIR_LIST_PAIRS + 1
+        ));
+    }
+
+    #[test]
+    fn root_depth_limit_is_inclusive_while_unreachable_nodes_remain_flexible() {
+        let mut state = DeferredState::default();
+        for _ in 0..MAX_DEFERRED_DAG_DEPTH {
+            state.log_statement(TRUE_DIGEST).unwrap();
+        }
+
+        let root_at_limit = state.root();
+        let num_nodes_at_limit = state.nodes().len();
+        let error = state.log_statement(TRUE_DIGEST).unwrap_err();
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredNodeTooDeep {
+                depth,
+                max: MAX_DEFERRED_DAG_DEPTH,
+            }) if *depth == MAX_DEFERRED_DAG_DEPTH + 1
+        ));
+        assert_eq!(state.root(), root_at_limit);
+        assert_eq!(state.nodes().len(), num_nodes_at_limit);
+
+        let mut state = DeferredState::default();
+        let mut unreachable = TRUE_DIGEST;
+        for _ in 0..=MAX_DEFERRED_DAG_DEPTH {
+            unreachable = state.register(Node::and(unreachable, TRUE_DIGEST)).unwrap();
+        }
+        assert!(state.nodes().contains_key(&unreachable));
+        assert!(matches!(
+            state.log_statement(unreachable).unwrap_err().root(),
+            PrecompileError::Other(DeferredError::DeferredNodeTooDeep { .. })
+        ));
+    }
+
+    #[test]
+    fn node_limit_counts_true_and_keeps_duplicates_free() {
+        let mut state = DeferredState::default();
+        let mut first = None;
+        for i in 0..MAX_DEFERRED_NODES - 1 {
+            let mut chunk = [ZERO; 8];
+            chunk[0] = Felt::from_u32((i + 1) as u32);
+            let node = Node::chunks(alloc::vec![chunk]).unwrap();
+            state.register(node.clone()).unwrap();
+            first.get_or_insert(node);
+        }
+        assert_eq!(state.nodes().len(), MAX_DEFERRED_NODES);
+
+        state.register(first.unwrap()).expect("duplicate registration remains free");
+        let mut chunk = [ZERO; 8];
+        chunk[0] = Felt::from_u32(MAX_DEFERRED_NODES as u32);
+        let error = state.register(Node::chunks(alloc::vec![chunk]).unwrap()).unwrap_err();
+        assert!(matches!(
+            error.root(),
+            PrecompileError::Other(DeferredError::DeferredStateTooManyNodes {
+                num_nodes,
+                max: MAX_DEFERRED_NODES,
+            }) if *num_nodes == MAX_DEFERRED_NODES + 1
+        ));
     }
 
     fn framework_state(statement_depth: usize) -> DeferredState {

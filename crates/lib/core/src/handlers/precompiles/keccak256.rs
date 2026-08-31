@@ -9,6 +9,7 @@ use miden_core::{
     utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
 use miden_crypto::hash::keccak::Keccak256;
+use miden_precompiles::MAX_HASH_INPUT_BYTES;
 use miden_processor::{
     ProcessorState,
     advice::{AdviceMutation, AdviceStack},
@@ -33,7 +34,9 @@ pub fn handle_keccak256_digest(
     let ptr = process.get_stack_item(1).as_canonical_u64();
     let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
-    let max = process.execution_options().max_hash_len_bytes();
+    // Execution options may impose a lower policy limit, but cannot raise the library safety
+    // ceiling enforced again when the deferred hash assertion is registered or rehydrated.
+    let max = process.execution_options().max_hash_len_bytes().min(MAX_HASH_INPUT_BYTES);
     if len_bytes > max as u64 {
         return Err(Keccak256DigestEventError::InputTooLong { len_bytes, max }.into());
     }

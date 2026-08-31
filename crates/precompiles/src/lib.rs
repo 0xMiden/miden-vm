@@ -5,6 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+pub use miden_core::deferred::MAX_DEFERRED_NODES;
 use miden_core::deferred::PrecompileRegistry;
 
 mod codec;
@@ -28,6 +29,21 @@ pub use math::{
         UintDomain, UintNodeRef, UintPrecompile, UintSpec, ZERO_LIMBS,
     },
 };
+
+/// Hard maximum structural depth reachable from a deferred expression root.
+pub const MAX_EXPRESSION_DEPTH: usize = miden_core::deferred::MAX_DEFERRED_DAG_DEPTH;
+
+/// Hard maximum logical byte capacity of one deferred data/chunk node.
+pub const MAX_CHUNK_NODE_BYTES: usize = miden_core::deferred::MAX_DEFERRED_DATA_BYTES;
+
+/// Hard maximum number of terms accepted by one MSM node.
+pub const MAX_MSM_TERMS: usize = miden_core::deferred::MAX_DEFERRED_PAIR_LIST_PAIRS;
+
+/// Hard maximum number of input bytes accepted by one hash precompile assertion.
+///
+/// This matches [`MAX_CHUNK_NODE_BYTES`], so a maximum-sized hash preimage fits in one framework
+/// chunk-list node.
+pub const MAX_HASH_INPUT_BYTES: usize = MAX_CHUNK_NODE_BYTES;
 
 // REGISTRY
 // ================================================================================================

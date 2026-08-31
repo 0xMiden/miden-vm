@@ -18,7 +18,8 @@ pub struct ExecutionOptions {
     /// Whether the synchronous prover overlaps hasher-chiplet trace building with program
     /// execution (std-only; the sequential path is used on no_std regardless).
     overlapped_trace_build: bool,
-    /// Maximum number of input bytes allowed for a single hash precompile invocation.
+    /// Configurable maximum number of input bytes allowed for a single hash precompile invocation.
+    /// A concrete precompile may impose a lower hard library ceiling.
     max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
@@ -66,7 +67,7 @@ impl ExecutionOptions {
     /// Default maximum combined logical size of the advice provider. Set to 16 MiB.
     pub const DEFAULT_MAX_ADVICE_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
-    /// Default maximum number of input bytes for a single hash precompile invocation.
+    /// Default configurable maximum number of input bytes for a single hash precompile invocation.
     /// Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
@@ -196,7 +197,8 @@ impl ExecutionOptions {
         self.max_advice_size_bytes
     }
 
-    /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
+    /// Returns the configured maximum number of input bytes for a single hash precompile
+    /// invocation. A concrete precompile may impose a lower hard library ceiling.
     #[inline]
     pub fn max_hash_len_bytes(&self) -> usize {
         self.max_hash_len_bytes
@@ -221,7 +223,8 @@ impl ExecutionOptions {
         self
     }
 
-    /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
+    /// Sets the configurable maximum number of input bytes for a single hash precompile
+    /// invocation. A concrete precompile may impose a lower hard library ceiling.
     pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
         self.max_hash_len_bytes = size;
         self

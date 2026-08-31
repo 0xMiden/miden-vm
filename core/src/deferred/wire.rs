@@ -19,7 +19,8 @@ use alloc::{
 };
 
 use super::{
-    DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_ELEMENTS, Node, NodeType,
+    DataChunk, DeferredError, DeferredState, Digest, MAX_DEFERRED_DATA_BYTES,
+    MAX_DEFERRED_ELEMENTS, MAX_DEFERRED_NODES, MAX_DEFERRED_PAIR_LIST_PAIRS, Node, NodeType,
     PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
@@ -36,7 +37,7 @@ use crate::{
 /// Reserved index for the always-known [`super::TRUE_DIGEST`] / [`super::Node::TRUE`] node.
 const TRUE_INDEX: u32 = 0;
 
-const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_ELEMENTS / Tag::FELT_LEN;
+const MAX_WIRE_ENTRIES: usize = MAX_DEFERRED_NODES - 1;
 
 fn reserve_wire_elements(
     remaining_elements: &mut usize,
@@ -108,7 +109,7 @@ impl DeferredStateWire {
         &self,
         precompiles: Arc<PrecompileRegistry>,
     ) -> Result<DeferredState, IntegrityError> {
-        self.validate_element_limit()?;
+        self.validate_limits()?;
         let (entries, root) = WireDecoder::new(self, precompiles.as_ref())?.decode()?;
         let mut state = DeferredState::new(Arc::clone(&precompiles))?;
 
@@ -123,6 +124,7 @@ impl DeferredStateWire {
         }
 
         state.root = root;
+        state.validate_root_depth(root)?;
 
         // `to_wire` emits the deterministic root-reachable closure. Equality makes the accepted
         // format strict: root-last, canonical DFS order, and no dangling or duplicate
@@ -136,6 +138,18 @@ impl DeferredStateWire {
         }
 
         Ok(state)
+    }
+
+    fn validate_limits(&self) -> Result<(), IntegrityError> {
+        let num_nodes =
+            self.entries.len().checked_add(1).ok_or(IntegrityError::InvalidStructure)?;
+        if num_nodes > MAX_DEFERRED_NODES {
+            return Err(IntegrityError::DeferredStateTooManyNodes {
+                num_nodes,
+                max: MAX_DEFERRED_NODES,
+            });
+        }
+        self.validate_element_limit()
     }
 
     fn validate_element_limit(&self) -> Result<(), IntegrityError> {
@@ -184,18 +198,33 @@ pub enum IntegrityError {
     /// Rehydrating the wire would exceed the fixed deferred-state budget.
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
+    /// Rehydrating the wire would exceed the fixed deferred-node count limit.
+    #[error("deferred state contains {num_nodes} nodes, maximum is {max}")]
+    DeferredStateTooManyNodes { num_nodes: usize, max: usize },
+    /// Rehydrating the wire would exceed the fixed structural-depth limit.
+    #[error("deferred node depth {depth} exceeds the maximum of {max}")]
+    DeferredNodeTooDeep { depth: usize, max: usize },
 }
 
 impl From<PrecompileError> for IntegrityError {
     fn from(err: PrecompileError) -> Self {
-        if let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =
-            err.root()
-        {
-            Self::DeferredStateTooLarge { num_elements: *num_elements, max: *max }
-        } else {
-            Self::EvaluationFailed(err)
+        match err.root() {
+            PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) => {
+                Self::DeferredStateTooLarge { num_elements: *num_elements, max: *max }
+            },
+            PrecompileError::Other(DeferredError::DeferredStateTooManyNodes { num_nodes, max }) => {
+                Self::DeferredStateTooManyNodes { num_nodes: *num_nodes, max: *max }
+            },
+            PrecompileError::Other(DeferredError::DeferredNodeTooDeep { depth, max }) => {
+                Self::DeferredNodeTooDeep { depth: *depth, max: *max }
+            },
+            _ => Self::EvaluationFailed(err),
         }
     }
+}
+
+fn data_payload_num_bytes(chunk_count: usize) -> usize {
+    chunk_count.saturating_mul(Node::PACKED_BYTES_PER_CHUNK)
 }
 
 // WIRE REHYDRATION
@@ -602,6 +631,12 @@ fn read_wire_entry<R: ByteReader>(
             reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
             let tag = Tag::read_from(source)?;
             let chunk_count = source.read_usize()?;
+            let num_bytes = data_payload_num_bytes(chunk_count);
+            if num_bytes > MAX_DEFERRED_DATA_BYTES {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "deferred data payload is {num_bytes} bytes, maximum is {MAX_DEFERRED_DATA_BYTES}"
+                )));
+            }
             reserve_wire_payload(remaining_elements, chunk_count)?;
             let chunks = source
                 .read_many_iter::<WireDataChunk>(chunk_count)?
@@ -620,6 +655,11 @@ fn read_wire_entry<R: ByteReader>(
             reserve_wire_elements(remaining_elements, Tag::FELT_LEN)?;
             let tag = Tag::read_from(source)?;
             let pair_count = source.read_usize()?;
+            if pair_count > MAX_DEFERRED_PAIR_LIST_PAIRS {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "deferred pair-list payload has {pair_count} pairs, maximum is {MAX_DEFERRED_PAIR_LIST_PAIRS}"
+                )));
+            }
             reserve_wire_payload(remaining_elements, pair_count)?;
             let pairs = source
                 .read_many_iter::<WirePair>(pair_count)?
@@ -640,7 +680,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredContext, Payload, Precompile, precompile_id},
+        deferred::{DeferredContext, MAX_DEFERRED_DAG_DEPTH, Payload, Precompile, precompile_id},
         serde::{ByteWriter, Serializable},
     };
 
@@ -832,21 +872,21 @@ mod tests {
     }
 
     #[test]
-    fn wire_encoder_handles_deep_roots_iteratively() {
+    fn wire_encoder_handles_maximum_depth_iteratively() {
         let mut state = DeferredState::default();
-        for _ in 0..4_096 {
+        for _ in 0..MAX_DEFERRED_DAG_DEPTH {
             state.log_statement(TRUE_DIGEST).unwrap();
         }
 
         let root = state.root();
         let wire = state.to_wire().unwrap();
 
-        assert_eq!(wire.entries.len(), 4_096);
+        assert_eq!(wire.entries.len(), MAX_DEFERRED_DAG_DEPTH);
         assert_eq!(
             wire.entries.last(),
             Some(&WireEntry::Join {
                 tag: Tag::AND,
-                lhs: 4_095,
+                lhs: (MAX_DEFERRED_DAG_DEPTH - 1) as u32,
                 rhs: TRUE_INDEX,
             })
         );
@@ -858,6 +898,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rehydration_rejects_over_depth_root() {
+        let mut entries = Vec::with_capacity(MAX_DEFERRED_DAG_DEPTH + 1);
+        for i in 0..=MAX_DEFERRED_DAG_DEPTH {
+            entries.push(WireEntry::Join {
+                tag: Tag::AND,
+                lhs: i as u32,
+                rhs: TRUE_INDEX,
+            });
+        }
+        let depth = wire(entries);
+        assert!(matches!(
+            DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &depth),
+            Err(IntegrityError::DeferredNodeTooDeep {
+                depth,
+                max: MAX_DEFERRED_DAG_DEPTH,
+            }) if depth == MAX_DEFERRED_DAG_DEPTH + 1
+        ));
+    }
+
     fn encoded_entry_count(entry_count: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.write_usize(entry_count);
@@ -865,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_over_budget_entry_count() {
+    fn wire_rejects_over_node_limit_entry_count_before_allocation() {
         assert!(
             DeferredStateWire::read_from_bytes(&encoded_entry_count(MAX_WIRE_ENTRIES + 1)).is_err()
         );
@@ -882,23 +942,23 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_over_budget_data_chunk_count() {
+    fn wire_rejects_over_limit_data_chunk_count_before_allocation() {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(0); // Data entry discriminant
         tag(1).write_into(&mut bytes);
-        bytes.write_usize(usize::MAX);
+        bytes.write_usize(MAX_DEFERRED_DATA_BYTES / Node::PACKED_BYTES_PER_CHUNK + 1);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());
     }
 
     #[test]
-    fn wire_rejects_over_budget_pair_count() {
+    fn wire_rejects_over_limit_pair_count_before_allocation() {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(2); // PairList entry discriminant
         tag(1).write_into(&mut bytes);
-        bytes.write_usize(usize::MAX);
+        bytes.write_usize(MAX_DEFERRED_PAIR_LIST_PAIRS + 1);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());
     }
