@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_precompiles_prover::masm_verifier::{
+use miden_precompiles_verifier::masm_verifier::{
     PvmRecursiveVerifierInputs, PvmRecursiveVerifierInputsError,
 };
 use miden_processor::{

@@ -2210,6 +2210,7 @@ dependencies = [
  "miden-package-registry",
  "miden-precompiles",
  "miden-precompiles-prover",
+ "miden-precompiles-verifier",
  "miden-processor",
  "miden-prover",
  "miden-test-utils",
@@ -2519,27 +2520,57 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-precompiles-prover"
+name = "miden-precompiles-air"
 version = "0.31.0"
 dependencies = [
- "insta",
- "k256",
- "miden-ace-codegen",
  "miden-air",
  "miden-core",
  "miden-crypto",
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "miden-serde-utils",
  "p3-security",
- "rand 0.10.2",
- "rayon",
  "ruint",
+]
+
+[[package]]
+name = "miden-precompiles-prover"
+version = "0.31.0"
+dependencies = [
+ "k256",
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles",
+ "miden-precompiles-air",
+ "miden-precompiles-verifier",
+ "rand 0.10.2",
  "serde",
  "serde-wincode",
  "thiserror",
  "tracing",
+ "wincode",
+]
+
+[[package]]
+name = "miden-precompiles-verifier"
+version = "0.31.0"
+dependencies = [
+ "insta",
+ "miden-ace-codegen",
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-lifted-air",
+ "miden-lifted-stark",
+ "miden-precompiles-air",
+ "miden-serde-utils",
+ "rayon",
+ "serde",
+ "serde-wincode",
+ "thiserror",
  "wincode",
 ]
 
@@ -2725,7 +2756,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
- "miden-precompiles-prover",
+ "miden-precompiles-verifier",
  "miden-serde-utils",
  "serde",
  "serde-wincode",
@@ -2795,7 +2826,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-precompiles-prover",
+ "miden-precompiles-verifier",
  "miden-processor",
  "miden-verifier",
  "miden-vm",

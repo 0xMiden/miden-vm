@@ -1,20 +1,15 @@
 # miden-precompiles-prover
 
-`miden-precompiles-prover` proves and verifies STARK-backed deferred precompile
-claims for Miden VM execution proofs.
+`miden-precompiles-prover` proves STARK-backed deferred precompile claims for
+Miden VM execution proofs.
 
-The crate is primarily a workspace component. Its supported integration entry
-points are the root-level deferred proving and verification helpers used by
-`miden-prover` and `miden-verifier`, plus the `masm_verifier` host adapter for
-`miden::core::sys::pvm::verify_proof` when `std` is enabled; the chiplet/session
-modules remain crate-private.
+The public entry point is `prove_deferred_state`. The chiplet and session
+modules remain private.
 
 ## What's here
 
-The implementation translates one VM `DeferredState` into the precompile
-prover's session representation, generates the chiplet traces for the supported
-deferred nodes, serializes the resulting STARK proof, and verifies that proof
-against an explicit deferred root.
+The crate translates a VM `DeferredState` into a proving session. It builds the
+chiplet traces and serializes the resulting STARK proof.
 
 ## Build
 
@@ -28,12 +23,8 @@ make test-fast
 ```
 src/
 ├── lib.rs              crate root
-├── ace.rs              PVM ACE circuit and proof-order policy
-├── ace_registry/       checked-in registry data and authenticated path serving
-├── ace_registry_regen.rs registry and MASM artifact generator (`registry-tools`)
-├── masm_verifier.rs    host inputs for the in-VM PVM verifier
 ├── relations.rs        global relation-tag (bus-id) registry
-├── math.rs             256-bit integer arithmetic (ruint)
+├── math.rs             field and integer helpers
 ├── logup/              LogUp encoding + natural last-row σ-closing adapter
 ├── stark_config.rs     Poseidon2 STARK configuration
 ├── utils.rs            shared field-element helpers

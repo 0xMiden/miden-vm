@@ -13,6 +13,7 @@ use miden_core::{
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
+use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -24,13 +25,12 @@ use crate::{
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::{Session, SessionTraces, VerifyError},
+    session::{Session, SessionTraces},
     tests::{
         SessionTracesTestExt, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
     transcript::poseidon2::P2Digest,
-    verify_deferred,
 };
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
@@ -395,7 +395,7 @@ fn prove_deferred_state_proves_non_empty_root() {
 }
 
 /// Each `HashFunction` selects a distinct preprocessed-bundle cache slot
-/// (`session::preprocessed_cache`, keyed by LMCS type). Proving and
+/// (`miden_precompiles_air::preprocessed`, keyed by LMCS type). Proving and
 /// verifying twice per hash function exercises both the cold path (first
 /// call in the process, builds and caches the bundle) and the warm path
 /// (later calls, reused from cache) for every slot, guarding against a

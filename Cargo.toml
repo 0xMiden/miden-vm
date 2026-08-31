@@ -16,6 +16,7 @@ members = [
     "crates/debug-types",
     "crates/field",
     "crates/lib/core",
+    "crates/lib/core/codegen",
     "crates/lifted-air",
     "crates/lifted-stark",
     "crates/mast-package",
@@ -36,7 +37,8 @@ members = [
     "crates/utils-sync",
     "miden-vm",
     "crates/precompiles",
-    "crates/lib/core/codegen",
+    "crates/precompiles-air",
+    "crates/precompiles-verifier",
     "crates/precompiles-prover",
     "processor",
     "prover",
@@ -89,6 +91,8 @@ miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.31",
 miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.31", default-features = false }
 miden-constraint-compiler = { path = "./crates/miden-constraint-compiler", version = "0.31", default-features = false }
 miden-core              = { path = "./core", version = "0.31", default-features = false }
+miden-core-lib          = { path = "./crates/lib/core", version = "0.31", default-features = false }
+miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.31", default-features = false }
 miden-crypto            = { path = "./crates/crypto", version = "0.31", default-features = false }
 miden-crypto-derive     = { path = "./crates/crypto-derive", version = "0.31", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "0.31", default-features = false }
@@ -98,13 +102,13 @@ miden-lifted-stark      = { path = "./crates/lifted-stark", version = "0.31", de
 miden-mast-package      = { path = "./crates/mast-package", version = "0.31", default-features = false }
 miden-package-registry  = { path = "./crates/package-registry", version = "0.31", default-features = false }
 miden-precompiles       = { path = "./crates/precompiles", version = "0.31", default-features = false }
+miden-precompiles-air   = { path = "./crates/precompiles-air", version = "0.31", default-features = false }
 miden-precompiles-prover = { path = "./crates/precompiles-prover", version = "0.31", default-features = false }
-miden-core-lib-codegen  = { path = "./crates/lib/core/codegen", version = "0.31", default-features = false }
+miden-precompiles-verifier = { path = "./crates/precompiles-verifier", version = "0.31", default-features = false }
 miden-processor         = { path = "./processor", version = "0.31", default-features = false }
 miden-test-serialization-macros = { path = "./crates/test-serialization-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "0.31", default-features = false }
 miden-prover            = { path = "./prover", version = "0.31", default-features = false }
-miden-core-lib          = { path = "./crates/lib/core", version = "0.31", default-features = false }
 miden-serde-utils       = { path = "./crates/serde-utils", version = "0.31", default-features = false }
 miden-stark-transcript  = { path = "./crates/stark-transcript", version = "0.31", default-features = false }
 miden-stateful-hasher   = { path = "./crates/stateful-hasher", version = "0.31", default-features = false }
