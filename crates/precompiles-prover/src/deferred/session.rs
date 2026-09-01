@@ -225,9 +225,21 @@ impl<'a> DeferredSessionBuilder<'a> {
     fn translate_uint(&mut self, root: Digest) -> Result<TranslatedUint, DeferredSessionError> {
         enum Step {
             Visit(Digest),
-            CombineAdd { digest: Digest, value: U256, domain: UintDomain },
-            CombineSub { digest: Digest, value: U256, domain: UintDomain },
-            CombineMul { digest: Digest, value: U256, domain: UintDomain },
+            CombineAdd {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
+            CombineSub {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
+            CombineMul {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
         }
 
         let mut work = Vec::new();
