@@ -18,7 +18,8 @@ use miden_crypto::{
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
-use miden_precompiles_prover::{HashFunction, prove_deferred_state, verify_deferred};
+use miden_precompiles_prover::{HashFunction, prove_deferred_state};
+use miden_precompiles_verifier::verify_deferred;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
     ProcessorState, StackInputs,

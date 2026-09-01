@@ -62,7 +62,7 @@ jobs:
           rustup toolchain install --no-self-update
           rustup target add wasm32-wasip1
       - name: Install wasmtime
-        uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: wasmtime-cli@45.0.2
       - name: Run packed Goldilocks/Poseidon2 vs scalar tests under WASM SIMD128

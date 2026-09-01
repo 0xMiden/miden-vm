@@ -1,0 +1,55 @@
+[package]
+name = "miden-precompiles-verifier"
+version.workspace = true
+description = "Verifier for Miden VM precompile proofs"
+documentation = "https://docs.rs/miden-precompiles-verifier"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "verifier", "zkp"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+concurrent = [
+    "std",
+    "dep:rayon",
+    "miden-precompiles-air/concurrent",
+]
+registry-tools = ["std", "dep:miden-air", "dep:rayon"]
+std = [
+    "dep:miden-ace-codegen",
+    "miden-core/std",
+    "miden-crypto/std",
+    "miden-precompiles-air/std",
+    "thiserror/std",
+]
+
+[dependencies]
+miden-ace-codegen = { workspace = true, optional = true }
+miden-air = { workspace = true, optional = true }
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-lifted-air.workspace = true
+miden-lifted-stark.workspace = true
+miden-precompiles-air.workspace = true
+miden-serde-utils.workspace = true
+rayon = { workspace = true, optional = true }
+serde.workspace = true
+serde-wincode.workspace = true
+thiserror.workspace = true
+wincode.workspace = true
+
+[[bin]]
+name = "pvm-registry-regen"
+path = "src/bin/pvm_registry_regen.rs"
+required-features = ["registry-tools"]
+
+[dev-dependencies]
+insta.workspace = true
+miden-air = { workspace = true, features = ["std"] }
+miden-ace-codegen = { workspace = true, features = ["testing"] }

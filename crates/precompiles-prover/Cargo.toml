@@ -17,50 +17,38 @@ repository.workspace = true
 default = ["std"]
 concurrent = [
     "std",
-    "dep:rayon",
     "miden-air/concurrent",
     "miden-crypto/concurrent",
     "miden-lifted-stark/concurrent",
+    "miden-precompiles-air/concurrent",
 ]
-registry-tools = ["std", "dep:rayon"]
 std = [
-    "dep:miden-ace-codegen",
     "miden-air/std",
     "miden-core/std",
     "miden-crypto/std",
+    "miden-precompiles-air/std",
     "miden-precompiles/std",
-    "ruint/std",
     "thiserror/std",
 ]
 
 [dependencies]
-miden-ace-codegen = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
+miden-precompiles-air.workspace = true
 miden-precompiles.workspace = true
-miden-serde-utils.workspace = true
-p3-security.workspace = true
-ruint.workspace = true
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wincode.workspace = true
 
-[[bin]]
-name = "pvm-registry-regen"
-path = "src/bin/pvm_registry_regen.rs"
-required-features = ["registry-tools"]
-
 [dev-dependencies]
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
 k256 = { workspace = true, features = ["arithmetic"] }
-insta.workspace = true
 miden-air = { workspace = true, features = ["std"] }
-miden-ace-codegen = { workspace = true, features = ["testing"] }
+miden-precompiles-verifier = { workspace = true, features = ["std"] }
 rand = { workspace = true, features = ["std_rng"] }

@@ -22,7 +22,7 @@ default = ["std"]
 std = [
     "miden-air/std",
     "miden-core/std",
-    "miden-precompiles-prover/std",
+    "miden-precompiles-verifier/std",
     "thiserror/std",
 ]
 
@@ -31,7 +31,7 @@ std = [
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
-miden-precompiles-prover.workspace = true
+miden-precompiles-verifier.workspace = true
 miden-serde-utils.workspace = true
 
 # External dependencies

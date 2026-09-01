@@ -12,27 +12,14 @@ extern crate std;
 use alloc::string::{String, ToString};
 
 use miden_core::deferred::DeferredState;
-pub(crate) use miden_core::proof::MAX_STARK_PROOF_BYTES;
-pub use miden_core::{
-    deferred::DeferredRoot,
-    proof::{HashFunction, StarkProof},
-};
-pub use session::VerifyError;
+pub use miden_core::proof::{HashFunction, StarkProof};
 
-#[cfg(any(test, feature = "std"))]
-pub(crate) mod ace;
-pub(crate) mod ace_registry;
-#[cfg(feature = "registry-tools")]
-pub mod ace_registry_regen;
 pub(crate) mod ec;
 pub(crate) mod hash;
 pub(crate) mod logup;
-#[cfg(feature = "std")]
-pub mod masm_verifier;
 pub(crate) mod math;
 pub(crate) mod primitives;
 pub(crate) mod relations;
-pub mod security;
 pub(crate) mod session;
 pub(crate) mod stark_config;
 pub(crate) mod transcript;
@@ -53,23 +40,6 @@ pub fn prove_deferred_state(
         deferred.session.finish(deferred.root)
     };
     Ok(traces.prove_stark(hash_fn)?)
-}
-
-/// Verifies a precompile STARK against an explicit deferred root, and returns its conjectured
-/// security level in bits.
-///
-/// The level depends on the proof's largest chiplet trace height, its commitment scheme's column
-/// alignment (which varies by hash function), and its PCS parameters, so it is computed from the
-/// verified proof rather than fixed by the parameter preset.
-pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<u32, VerifyError> {
-    let (log_max_height, alignment) =
-        session::verify_stark(proof, transcript::poseidon2::P2Digest::from(public_root))?;
-
-    Ok(security::conjectured_security_level_for_alignment(
-        &stark_config::precompile_pcs_params(),
-        log_max_height,
-        alignment,
-    ))
 }
 
 /// Errors produced while proving deferred precompile claims from VM deferred state.
@@ -108,28 +78,6 @@ pub enum ProveError {
 }
 
 pub(crate) mod deferred;
-
-#[cfg(test)]
-mod limit_tests {
-    use alloc::vec;
-
-    use miden_core::{deferred::TRUE_DIGEST, proof::HashFunction};
-
-    use super::*;
-
-    #[test]
-    fn verify_deferred_enforces_fixed_stark_proof_size_ceiling() {
-        let proof = StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Blake3_256);
-
-        assert!(matches!(
-            verify_deferred(&proof, TRUE_DIGEST),
-            Err(VerifyError::ProofTooLarge {
-                size,
-                max: MAX_STARK_PROOF_BYTES,
-            }) if size == MAX_STARK_PROOF_BYTES + 1
-        ));
-    }
-}
 
 #[cfg(test)]
 mod tests;
