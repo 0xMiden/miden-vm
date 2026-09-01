@@ -97,6 +97,36 @@ fn same_module_qualified_constant_used_transitively() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn self_qualified_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nconst A = 1\npub const B = self::A\n\npub proc foo\n    push.1\nend"
+    );
+
+    let module = context.parse_module(source)?;
+    context.assemble_library("test", None, module, [])?;
+    Ok(())
+}
+
+#[test]
+fn relative_full_namespace_does_not_mark_constant_used() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\nnamespace test::lib\n\nconst A = 1\npub const B = test::lib::A\n\npub proc foo\n    push.1\nend"
+    );
+    let error = context
+        .parse_module(source)
+        .expect_err("the relative path must not resolve to the local constant");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+
+    assert!(rendered.contains("unused constant"), "{rendered}");
+    assert!(rendered.contains("const A = 1"), "{rendered}");
+}
+
 fn constant_library(context: &TestContext, name: &str) -> Box<Package> {
     let module = parse_module!(
         context,
