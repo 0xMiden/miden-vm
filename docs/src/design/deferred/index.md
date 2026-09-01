@@ -92,7 +92,7 @@ for them is currently treated as internal implementation detail.
 A precompile supplies three things:
 
 - `decode(args) -> Option<NodeType>` checks which constructor a tag names and what
-  structural shape does it carry? This inspects only `Tag::args()`; payload data is not available yet.
+  structural shape it carries. This inspects only `Tag::args()`; payload data is not available yet.
   The returned shape drives registration and wire handling, but exact data/pair-list arity is
   semantic and is checked during precompile evaluation:
   - `NodeType::Data` declares a non-empty opaque data payload.
@@ -190,10 +190,9 @@ failed predicate has already surfaced as an error before any felts are pushed.
 ## The deferred root commitment
 
 The deferred root commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word
-(`TRUE_DIGEST`), which is also the digest of the always-present canonical `Node::TRUE`. To fold a
-verified
-**statement**, which is any registered digest that evaluates to `TRUE` and need not be a primitive
-predicate node. The framework registers an AND node
+(`TRUE_DIGEST`), which is also the digest of the always-present canonical `Node::TRUE`. A verified
+**statement** is any registered digest that evaluates to `TRUE` and need not be a primitive
+predicate node. To fold one, the framework registers an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
 The append path first evaluates the statement under the installed registry and rejects missing or
 non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
