@@ -116,10 +116,9 @@ impl ExecutionWitness {
     /// Decodes one execution witness from a potentially adversarial byte slice.
     ///
     /// The reader applies an input-proportional limit to byte consumption and collection
-    /// preallocation, rejects trailing bytes, and requires the payload to use the canonical
-    /// encoding produced by [`Serializable::to_bytes`]. These checks establish safe transport
-    /// syntax. They do not prove that the sparse MAST replay is a subset of a particular source
-    /// forest because the witness wire does not carry such a proof.
+    /// preallocation, then rejects trailing bytes. These checks establish safe transport syntax.
+    /// They do not prove that the sparse MAST replay is a subset of a particular source forest
+    /// because the witness wire does not carry such a proof.
     ///
     /// Use [`Self::read_from_bytes_trusted`] for bytes retained inside a trusted prover system.
     #[track_caller]
@@ -133,12 +132,6 @@ impl ExecutionWitness {
                 "extra bytes after execution witness payload".into(),
             ));
         }
-        if witness.to_bytes() != bytes {
-            return Err(DeserializationError::InvalidValue(
-                "execution witness bytes are not canonically encoded".into(),
-            ));
-        }
-
         Ok(witness)
     }
 
