@@ -33,13 +33,7 @@ use miden::core::precompiles::fields::{{BASE_FIELD_MODULE}}
 # - MSM_TAG       = one word [PRECOMPILE_ID, MSM_OP_ID, 0, 0].
 # - POINT_VALUE   = `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]` under VALUE_TAG.
 
-const PRECOMPILE_ID = {{PRECOMPILE_ID}}
-const GROUP_PTR = {{GROUP_PTR}}
-const VALUE_OP_ID = {{VALUE_OP_ID}}
-const ADD_OP_ID = {{ADD_OP_ID}}
-const SUB_OP_ID = {{SUB_OP_ID}}
-const EQ_OP_ID = {{EQ_OP_ID}}
-const MSM_OP_ID = {{MSM_OP_ID}}
+# generated parameters: precompile id {{PRECOMPILE_ID}}, group pointer {{GROUP_PTR}}, operation ids {{VALUE_OP_ID}}/{{ADD_OP_ID}}/{{SUB_OP_ID}}/{{EQ_OP_ID}}/{{MSM_OP_ID}}
 
 # VALUE tags carry GROUP_PTR; ADD/SUB/EQ/MSM tags deliberately use zero in that slot.
 const VALUE_TAG = {{VALUE_TAG}}
