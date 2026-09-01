@@ -6,7 +6,6 @@ use miden::core::sys::pvm::layout
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
-const MAX_LOGUP_MESSAGE_WIDTH = 18
 const NUM_AUX_VALUE_WORDS = 5
 
 #! Observes the PVM auxiliary trace commitment and its ten per-chiplet sigma values.

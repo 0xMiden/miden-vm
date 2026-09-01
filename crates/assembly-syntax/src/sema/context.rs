@@ -1,6 +1,7 @@
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -16,8 +17,14 @@ use crate::ast::{
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
+    module_path: PathBuf,
     constants: BTreeMap<Ident, Constant>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
+    used_constants: BTreeSet<Ident>,
+    constant_deps: BTreeMap<Ident, BTreeSet<Ident>>,
+    constant_import_refs: BTreeMap<Ident, BTreeSet<String>>,
+    evaluating_constants: Vec<Ident>,
+    evaluating_constant: Option<Ident>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     errors: Vec<SemanticAnalysisError>,
@@ -38,10 +45,14 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        if let Some(value) = self.cached_constant_values.get(name) {
-            Ok(Some(CachedConstantValue::Hit(value)))
-        } else if let Some(constant) = self.constants.get(name) {
-            Ok(Some(CachedConstantValue::Miss(&constant.value)))
+        if self.constants.contains_key(name) {
+            self.record_constant_ref(name);
+            if let Some(value) = self.cached_constant_values.get(name) {
+                return Ok(Some(CachedConstantValue::Hit(value)));
+            }
+            Ok(Some(CachedConstantValue::Miss(
+                &self.constants.get(name).expect("constant should exist").value,
+            )))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
             Ok(None)
@@ -60,8 +71,19 @@ impl constants::ConstEnvironment for AnalysisContext {
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = path.as_ident() {
             self.get(&name)
+        } else if let Some(name) = self.local_constant_name_for_path(path) {
+            self.get(&name)
         } else {
             Ok(None)
+        }
+    }
+
+    #[inline]
+    fn on_eval_start(&mut self, path: Span<&Path>) {
+        if let Some(name) = path.as_ident()
+            && self.constants.contains_key(&name)
+        {
+            self.evaluating_constants.push(name);
         }
     }
 
@@ -70,6 +92,10 @@ impl constants::ConstEnvironment for AnalysisContext {
         let Some(name) = name.as_ident() else {
             return;
         };
+        if self.constants.contains_key(&name) {
+            let current = self.evaluating_constants.pop();
+            debug_assert_eq!(current.as_ref(), Some(&name));
+        }
         if let Some(value) = value.as_value() {
             self.cached_constant_values.insert(name, value);
         } else {
@@ -79,10 +105,20 @@ impl constants::ConstEnvironment for AnalysisContext {
 }
 
 impl AnalysisContext {
-    pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new(
+        module_path: impl AsRef<Path>,
+        source_file: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Self {
         Self {
+            module_path: module_path.as_ref().to_relative().to_path_buf(),
             constants: Default::default(),
             cached_constant_values: Default::default(),
+            used_constants: Default::default(),
+            constant_deps: Default::default(),
+            constant_import_refs: Default::default(),
+            evaluating_constants: Default::default(),
+            evaluating_constant: None,
             imported: Default::default(),
             procedures: Default::default(),
             errors: Default::default(),
@@ -94,6 +130,10 @@ impl AnalysisContext {
 
     pub fn set_warnings_as_errors(&mut self, yes: bool) {
         self.warnings_as_errors = yes;
+    }
+
+    pub fn set_module_path(&mut self, path: &Path) {
+        self.module_path = path.to_relative().to_path_buf();
     }
 
     #[inline(always)]
@@ -112,6 +152,65 @@ impl AnalysisContext {
 
     pub fn register_imported_name(&mut self, name: Ident) {
         self.imported.insert(name);
+    }
+
+    fn record_constant_ref(&mut self, name: &Ident) {
+        let parent = self.evaluating_constants.last().or(self.evaluating_constant.as_ref());
+        if parent == Some(name) {
+            return;
+        }
+        if let Some(parent) = parent {
+            self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
+        } else {
+            self.used_constants.insert(name.clone());
+        }
+    }
+
+    fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
+        let (name, module_path) = path.split_last()?;
+        if module_path.to_relative() != self.module_path.as_path() {
+            return None;
+        }
+        let name = Ident::new_with_span(path.span(), name).ok()?;
+        self.constants.contains_key(&name).then_some(name)
+    }
+
+    pub fn is_constant_used(&self, constant: &Constant) -> bool {
+        constant.visibility.is_public() || self.used_constants.contains(&constant.name)
+    }
+
+    pub fn mark_constant_used(&mut self, name: &Ident) {
+        self.used_constants.insert(name.clone());
+    }
+
+    pub fn record_constant_import_ref(&mut self, constant: &Ident, import: String) {
+        self.constant_import_refs.entry(constant.clone()).or_default().insert(import);
+    }
+
+    pub fn add_live_constant_import_refs(&self, used_imports: &mut BTreeSet<String>) {
+        for (constant, imports) in &self.constant_import_refs {
+            if self.used_constants.contains(constant) {
+                used_imports.extend(imports.iter().cloned());
+            }
+        }
+    }
+
+    pub fn resolve_constant_usage(&mut self) {
+        let mut worklist = VecDeque::from_iter(self.used_constants.iter().cloned());
+        for (name, constant) in &self.constants {
+            if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
+                worklist.push_back(name.clone());
+            }
+        }
+        while let Some(name) = worklist.pop_front() {
+            if let Some(deps) = self.constant_deps.get(&name) {
+                for dep in deps {
+                    if self.used_constants.insert(dep.clone()) {
+                        worklist.push_back(dep.clone());
+                    }
+                }
+            }
+        }
     }
 
     /// Define a new constant `constant`
@@ -149,6 +248,7 @@ impl AnalysisContext {
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
         for constant in constants.iter() {
+            self.evaluating_constant = Some(constant.clone());
             let expr = ConstantExpr::Var(Span::new(
                 constant.span(),
                 PathBuf::from(constant.clone()).into(),
@@ -166,6 +266,7 @@ impl AnalysisContext {
                     self.errors.push(err);
                 },
             }
+            self.evaluating_constant = None;
         }
     }
 
@@ -316,6 +417,10 @@ mod tests {
             }
         }
 
+        fn on_eval_start(&mut self, path: Span<&Path>) {
+            <AnalysisContext as constants::ConstEnvironment>::on_eval_start(self.inner, path);
+        }
+
         fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {
             <AnalysisContext as constants::ConstEnvironment>::on_eval_completed(
                 self.inner, name, value,
@@ -368,7 +473,7 @@ mod tests {
             String::from("begin\n    nop\nend\n").into_boxed_str(),
         );
         let source_file = source_manager.load_from_raw_parts(uri, content);
-        let mut context = AnalysisContext::new(source_file, source_manager);
+        let mut context = AnalysisContext::new(Path::EMPTY, source_file, source_manager);
 
         // Each Ci references C(i+1) twice, so without memoization the number of misses would
         // grow exponentially with depth.

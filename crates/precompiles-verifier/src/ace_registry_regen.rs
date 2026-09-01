@@ -443,14 +443,25 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     for region in &layout.regions {
         writeln!(
             out,
-            "### {} felts: {}..{}.\nconst {} = {}\n",
+            "### {} felts: {}..{}.",
             region.extent,
             region.ptr,
-            region.ptr + region.extent,
-            region.constant,
-            region.ptr
+            region.ptr + region.extent
         )
         .expect("writing to String cannot fail");
+        if matches!(
+            region.constant,
+            "PUBLIC_INPUTS_PTR"
+                | "AUX_RAND_ELEM_PTR"
+                | "PREPROCESSED_CURRENT_PTR"
+                | "AUX_BUS_BOUNDARY_PTR"
+                | "AUXILIARY_ACE_INPUTS_PTR"
+        ) {
+            writeln!(out, "const {} = {}\n", region.constant, region.ptr)
+                .expect("writing to String cannot fail");
+        } else {
+            out.push('\n');
+        }
     }
     writeln!(
         out,

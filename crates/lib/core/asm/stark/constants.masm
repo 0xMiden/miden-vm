@@ -122,12 +122,6 @@ const ACE_REGISTRY_ROOT_PTR = 3223322732
 const AIR_TRACE_LENGTH_LOGS_PTR = 3223322736
 const AIR_TRACE_LENGTH_LOGS_CAPACITY = 16
 
-### Addresses to store parameters needed for calls to the ACE chiplet.
-const NUM_FIXED_LEN_PUBLIC_INPUTS_PTR = 3223322752
-const NUM_ACE_INPUTS_PTR = 3223322753
-const NUM_ACE_GATES_PTR = 3223322754
-const MAX_CYCLE_LEN_LOG_PTR = 3223322755
-
 ### Addresses to store proof-of-work bit counts.
 ### query_pow_bits: PoW before query index sampling (PCS_PARAMS.query_pow_bits)
 ### deep_pow_bits: PoW before DEEP challenge sampling (PCS_PARAMS.deep.deep_pow_bits)
@@ -147,9 +141,6 @@ const OOD_EVALUATIONS_ADDRESS_PTR = 3223322761
 
 ### Address storing the relation-local query-row buffer.
 const CURRENT_TRACE_ROW_ADDRESS_PTR = 3223322762
-
-### Reserved to align the following relation-owned frame to a word boundary.
-const GENERIC_ALIGNMENT_PADDING_PTR = 3223322763
 
 ## FRI
 ##

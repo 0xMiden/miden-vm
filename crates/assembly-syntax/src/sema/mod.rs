@@ -42,9 +42,6 @@ pub fn analyze(
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<Box<Module>, SyntaxError> {
     log::debug!(target: "sema", "starting semantic analysis for '{}' (kind = {kind:?})", path.map(Path::as_str).unwrap_or("None"));
-    let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
-    analyzer.set_warnings_as_errors(warnings_as_errors);
-
     let expected_path = match path {
         Some(path) => Some(normalize_namespace_path(path).map_err(|err| SyntaxError {
             source_file: source.clone(),
@@ -56,6 +53,8 @@ pub fn analyze(
         None => None,
     };
     let module_path = expected_path.as_deref().unwrap_or(Path::new(""));
+    let mut analyzer = AnalysisContext::new(module_path, source.clone(), source_manager);
+    analyzer.set_warnings_as_errors(warnings_as_errors);
     let mut module = Box::new(
         Module::new(kind.unwrap_or_default(), module_path).with_span(source.source_span()),
     );
@@ -208,6 +207,7 @@ pub fn analyze(
             return Err(analyzer.into_result().unwrap_err());
         }
     }
+    analyzer.set_module_path(module.path());
 
     // Check all forms that have kind-specific restrictions now that the kind is concrete
     if !actual_kind.is_library() {
@@ -273,6 +273,12 @@ pub fn analyze(
     for import in module.imports() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.unused_span() });
+        }
+    }
+
+    for constant in module.constants() {
+        if !analyzer.is_constant_used(constant) {
+            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
         }
     }
 
@@ -498,6 +504,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                         &mut used_aliases,
                         None,
                     );
+                    visitor.set_current_constant(Some(constant.name.clone()));
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 if let Err(err) = module.push_export(Item::Constant(constant)) {
@@ -522,6 +529,9 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             },
         }
     }
+
+    analyzer.resolve_constant_usage();
+    analyzer.add_live_constant_import_refs(&mut used_aliases);
 
     for import in module.imports_mut() {
         if import.is_used() || !used_aliases.contains(import.local_name().as_str()) {
@@ -659,6 +669,7 @@ fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mu
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );
     context.define_constant(module, cst);
+    context.mark_constant_used(&entry.name);
     match module.advice_map.get(&key) {
         Some(_) => {
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });
