@@ -25,7 +25,7 @@ will be passed to `Prover`.
 
 ```rust,ignore
 use miden_prover::{ExecutionProof, Prover};
-use miden_verifier::Verifier;
+use miden_verifier::{Verifier, VersionedProof};
 use miden_vm::precompile_witness_from_wire;
 
 // `witness` is an ExecutionWitness produced by FastProcessor.
@@ -33,17 +33,19 @@ let claim = witness.claim();
 let prover = Prover::new();
 let deferred = prover.prove(witness)?;
 
-// Passively transport the proof, then decode it without a registry.
-let bytes = deferred.to_bytes();
-let transported = ExecutionProof::read_from_bytes(&bytes)?;
-let ExecutionProof::Deferred { precompile: wire, .. } = &transported else {
+// Add the current version, then transport and decode the proof without a registry.
+let versioned = VersionedProof::new(Verifier::accepted_proof_version(), deferred);
+let bytes = versioned.to_bytes();
+let transported = VersionedProof::read_from_bytes(&bytes)?;
+let (version, proof) = transported.into_parts();
+let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
     unreachable!("precompile proving is only needed for deferred proofs");
 };
 
 // Hydration installs the bundled registry only when precompile proving begins.
 let precompile_witness = precompile_witness_from_wire(wire)?;
 let precompile_proof = prover.prove_precompile(&precompile_witness)?;
-let complete = transported.complete(precompile_proof)?;
+let complete = VersionedProof::new(version, proof.complete(precompile_proof)?);
 let outcome = Verifier::new().verify(&claim, &complete)?;
 assert!(outcome.is_complete());
 ```

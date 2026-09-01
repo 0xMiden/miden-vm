@@ -113,11 +113,12 @@ proving consumes it. `Prover::prove` proves the VM portion and returns `Complete
 work exists, or `Deferred` containing a passive `DeferredStateWire`. Use `Prover::prove_full` to
 complete all proof work in the local process.
 
-For delegated precompile proving, transport `proof.to_bytes()`, decode with the registry-free
-`ExecutionProof::read_from_bytes`, match `ExecutionProof::Deferred`, and pass its wire to
-`precompile_witness_from_wire`. Optionally merge hydrated singleton witnesses, call
-`Prover::prove_precompile`, transition each deferred proof with `complete`, and establish validity
-with `Verifier::verify`.
+For delegated precompile proving, wrap the proof in `VersionedProof` with
+`Verifier::accepted_proof_version()`. Transport it with `VersionedProof::to_bytes`, then decode it
+with `VersionedProof::read_from_bytes`. Split the result with `into_parts` and keep its version.
+Match the raw `ExecutionProof::Deferred` and pass its wire to `precompile_witness_from_wire`. After
+precompile proving, call `complete` on the raw proof and wrap it with the same version before calling
+`Verifier::verify`.
 
 `ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in
