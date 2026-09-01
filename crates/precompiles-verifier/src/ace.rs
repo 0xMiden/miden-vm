@@ -374,8 +374,11 @@ mod tests {
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
+        const RELATION_PATH: &str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
-        let derived: Vec<usize> = ChipletAir::all()
+        let airs = ChipletAir::all();
+        let derived: Vec<usize> = airs
             .iter()
             .map(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
             .collect();
@@ -389,6 +392,35 @@ mod tests {
             2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
             "the MASM hook must read every normalized LogUp value exactly once"
         );
+        assert_eq!(
+            masm_const(RELATION_PATH, "NUM_AUX_VALUE_FELTS"),
+            2 * derived.iter().sum::<usize>() as u64,
+            "the pointer materializer must span every auxiliary-value coordinate"
+        );
+        assert_eq!(
+            masm_const(RELATION_PATH, "LAST_CHIPLET_INDEX"),
+            u64::try_from(airs.len() - 1).expect("PVM AIR index must fit in u64"),
+            "the reverse proof-order scan must start at the last AIR scratch slot"
+        );
+        for (constant, target) in [
+            ("EIDOS_COMPRESSION_AIR_INDEX", ChipletAir::EidosCompression),
+            ("BYTE_PAIR_AND8_AIR_INDEX", ChipletAir::BytePairAnd8),
+        ] {
+            let expected = airs
+                .iter()
+                .position(|air| air == &target)
+                .expect("composite AIR must be in canonical order");
+            assert_eq!(
+                masm_const(RELATION_PATH, constant),
+                expected as u64,
+                "PVM context {constant} must match ChipletAir::all()"
+            );
+            assert_eq!(
+                masm_const(HOOK_PATH, constant),
+                expected as u64,
+                "PVM auxiliary hook {constant} must match ChipletAir::all()"
+            );
+        }
     }
 
     #[test]
@@ -495,8 +527,14 @@ mod tests {
             current_trace_row_ptr + current_row_felts as u64,
             "the query-row scratch extent must come from the codegen layout"
         );
+        let aux_value_ptrs_ptr = masm_const(LAYOUT_PATH, "AUX_VALUE_PTRS_PTR");
+        assert_eq!(
+            aux_value_ptrs_ptr,
+            preprocessed_com_ptr + 4,
+            "the per-AIR auxiliary-value pointers must follow the setup commitment"
+        );
         assert!(
-            preprocessed_com_ptr + 4 <= NEXT_VM_REGION,
+            aux_value_ptrs_ptr + NUM_CHIPLETS as u64 <= NEXT_VM_REGION,
             "the complete PVM READ + stream + relation scratch allocation overlaps the next VM region"
         );
     }
