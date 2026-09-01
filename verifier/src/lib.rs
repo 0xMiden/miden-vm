@@ -55,6 +55,8 @@ const PVM_VERIFIER_ROOT_V1: Word = Word::new([
 
 struct VerifierSupport {
     format: u8,
+    proof_vm_roots: &'static [Word],
+    proof_pvm_roots: &'static [Word],
     accepted_vm_roots: &'static [Word],
     accepted_pvm_roots: &'static [Word],
 }
@@ -77,8 +79,8 @@ impl VerifierSupport {
 
     fn wrap(&self, proof: ExecutionProof) -> VersionedProof {
         let compatibility = ExecutionProofCompatibility::new(
-            self.accepted_vm_roots.to_vec(),
-            self.accepted_pvm_roots.to_vec(),
+            self.proof_vm_roots.to_vec(),
+            self.proof_pvm_roots.to_vec(),
         );
         VersionedProof::new(compatibility, proof)
     }
@@ -86,6 +88,8 @@ impl VerifierSupport {
 
 const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
     format: ExecutionProofCompatibility::FORMAT_V1,
+    proof_vm_roots: &[VM_VERIFIER_ROOT_V1],
+    proof_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
     accepted_vm_roots: &[VM_VERIFIER_ROOT_V1],
     accepted_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
 };
@@ -683,5 +687,40 @@ mod tests {
             Verifier::new().verify(&claim(), &incompatible_pvm),
             Err(VerificationError::IncompatiblePvmVerifier)
         ));
+    }
+
+    #[test]
+    fn wrapping_uses_proof_compatibility_not_verifier_history() {
+        const OLD_VM_ROOT: Word = Word::new([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+        ]);
+        const OLD_PVM_ROOT: Word = Word::new([
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+        ]);
+        const SUPPORT: VerifierSupport = VerifierSupport {
+            format: ExecutionProofCompatibility::FORMAT_V1,
+            proof_vm_roots: &[VM_VERIFIER_ROOT_V1],
+            proof_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
+            accepted_vm_roots: &[OLD_VM_ROOT, VM_VERIFIER_ROOT_V1],
+            accepted_pvm_roots: &[OLD_PVM_ROOT, PVM_VERIFIER_ROOT_V1],
+        };
+
+        let proof = complete(TRUE_DIGEST, None);
+        let wrapped = SUPPORT.wrap(proof.clone());
+
+        assert_eq!(wrapped.compatibility().vm_verifier_roots(), &[VM_VERIFIER_ROOT_V1]);
+        assert_eq!(wrapped.compatibility().pvm_verifier_roots(), &[PVM_VERIFIER_ROOT_V1]);
+
+        let old_compatible = VersionedProof::new(
+            ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]),
+            proof,
+        );
+        assert!(SUPPORT.check(&old_compatible).is_ok());
     }
 }
