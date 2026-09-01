@@ -20,7 +20,7 @@ use miden_core::{
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
+use miden_verifier::{Verifier, VersionedProof, recursive::RecursiveVerifierInputs};
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, PrecompileWitness, ProgramInfo, Prover, StackInputs,
     StackOutputs, internal::InputFile, prove_sync, trace::build_trace,
@@ -32,7 +32,7 @@ use super::{
     recursive_host,
 };
 
-const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v2";
+const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v3";
 const PVM_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-pvm-proof-cache-v3";
 const INNER_PROOF_HASH: HashFunction = HashFunction::Poseidon2;
 const PVM_WORKLOAD_CONTENT_DIGEST: [u8; 32] = [
@@ -129,14 +129,14 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    let proof = match ExecutionProof::read_from_bytes(&proof_bytes) {
+    let proof = match VersionedProof::read_from_bytes(&proof_bytes) {
         Ok(proof) => proof,
         Err(err) => {
             eprintln!("ignoring undecodable cached proof {}: {err}", proof_path.display());
             return None;
         },
     };
-    let vm_proof = match &proof {
+    let vm_proof = match proof.proof() {
         ExecutionProof::Complete { vm, precompile: None } => vm,
         ExecutionProof::Complete { precompile: Some(_), .. } | ExecutionProof::Deferred { .. } => {
             eprintln!(
@@ -176,7 +176,7 @@ fn load_cached_tx_proof(
         return None;
     }
 
-    Some((stack_outputs, proof))
+    Some((stack_outputs, proof.into_parts().1))
 }
 
 fn store_cached_tx_proof(
@@ -190,6 +190,7 @@ fn store_cached_tx_proof(
         .unwrap_or_else(|err| panic!("create proof cache {}: {err}", cache_dir.display()));
     let (proof_path, outputs_path) = tx_proof_cache_paths(cache_dir, proof_index, cache_key);
 
+    let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof.clone());
     std::fs::write(&proof_path, proof.to_bytes())
         .unwrap_or_else(|err| panic!("write cached proof {}: {err}", proof_path.display()));
 
@@ -478,7 +479,8 @@ pub(super) fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
                  this benchmark expects precompile-free fixtures"
             );
-            let proof_bytes = proof.to_bytes();
+            let proof_bytes =
+                VersionedProof::new(Verifier::accepted_proof_version(), proof.clone()).to_bytes();
             let proof_bytes_len = proof_bytes.len();
             let proof_digest: [u8; 32] = Blake3_256::hash(&proof_bytes).into();
             let proof_prefix = hex_prefix(&proof_bytes);

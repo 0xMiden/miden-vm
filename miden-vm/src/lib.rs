@@ -15,7 +15,8 @@ pub use miden_core::{
     deferred::{DeferredStateWire, PrecompileWitnessError},
     program::ExecutionClaim,
     proof::{
-        ExecutionProof, ExecutionProofError, HashFunction, PrecompileProof, StarkProof, VmProof,
+        ExecutionProof, ExecutionProofError, ExecutionProofVersion, HashFunction, PrecompileProof,
+        StarkProof, VersionedProof, VmProof,
     },
 };
 pub use miden_processor::{

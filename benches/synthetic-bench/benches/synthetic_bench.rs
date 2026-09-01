@@ -32,7 +32,7 @@ use miden_processor::{
 };
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, Prover, StackOutputs, Verifier,
-    prove_sync,
+    VersionedProof, prove_sync,
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
@@ -381,6 +381,7 @@ fn bench_one_scenario(
             StackInputs::default(),
             stack_outputs,
         );
+        let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
         group.bench_function("verify", |b| {
             b.iter(|| {
                 let outcome = Verifier::new().verify(&claim, &proof).expect("verify");

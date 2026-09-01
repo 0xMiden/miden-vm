@@ -9,7 +9,7 @@ use miden_processor::{
     event::{EventError, EventName},
 };
 use miden_prover::{AdviceInputs, ExecutionClaim, ExecutionProof, Prover, StackInputs};
-use miden_verifier::Verifier;
+use miden_verifier::{Verifier, VersionedProof};
 
 struct YieldingAsyncHost {
     event_calls: usize,
@@ -51,8 +51,9 @@ impl Host for YieldingAsyncHost {
 }
 
 fn verify_generated_proof(claim: &ExecutionClaim, proof: &ExecutionProof) {
+    let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof.clone());
     let outcome = Verifier::new()
-        .verify(claim, proof)
+        .verify(claim, &proof)
         .expect("generated proof should verify against its execution claim");
     assert!(outcome.is_complete());
 }

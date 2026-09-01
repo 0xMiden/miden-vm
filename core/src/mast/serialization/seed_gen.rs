@@ -12,7 +12,9 @@ use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    proof::{
+        ExecutionProof, ExecutionProofVersion, HashFunction, StarkProof, VersionedProof, VmProof,
+    },
     serde::{ByteWriter, Serializable},
 };
 
@@ -282,13 +284,17 @@ fn generate_fuzz_seeds() {
             precompile_root: TRUE_DIGEST,
         };
         let proof = ExecutionProof::Complete { vm, precompile: None };
-        let proof = proof.to_bytes();
+        let proof = VersionedProof::new(ExecutionProofVersion::new(Vec::new(), Vec::new()), proof)
+            .to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
     }
 
     // Execution proof seed for malicious VM STARK length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_u8(ExecutionProofVersion::FORMAT_V1);
+        oversized_proof_len.write_usize(0); // VM verifier roots.
+        oversized_proof_len.write_usize(0); // PVM verifier roots.
         oversized_proof_len.write_u8(1); // Complete execution proof discriminant.
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);

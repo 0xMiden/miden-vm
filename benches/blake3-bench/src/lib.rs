@@ -7,7 +7,8 @@ use std::{
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
     Assembler, DefaultHost, ExecutionOptions, ExecutionOutput, ExecutionProof, ExecutionWitness,
-    FastProcessor, HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier, VmTrace,
+    FastProcessor, HashFunction, Program, Prover, StackInputs, StackOutputs, Verifier,
+    VersionedProof, VmTrace,
     advice::AdviceInputs,
     assembly::{
         DefaultSourceManager, Path as LibraryPath,
@@ -165,6 +166,7 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
     let witness = execute_for_proving(fixture);
     let claim = witness.claim();
     let (_, proof) = prove_trace_outputs(witness);
+    let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
     let outcome = Verifier::new()
         .verify(&claim, &proof)
         .expect("failed to verify Blake3 benchmark proof");

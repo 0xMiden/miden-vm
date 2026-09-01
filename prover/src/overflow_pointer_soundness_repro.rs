@@ -13,7 +13,7 @@ use miden_core::{
 };
 use miden_crypto::stark::verifier::VerifierError;
 use miden_processor::{DefaultHost, FastProcessor, StackInputs};
-use miden_verifier::{StarkVerificationError, VerificationError, Verifier};
+use miden_verifier::{StarkVerificationError, VerificationError, Verifier, VersionedProof};
 
 use crate::{Prover, config, prove_stark};
 
@@ -160,6 +160,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
         forged_outputs,
     );
 
+    let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
     let verification_result = Verifier::new().verify(&claim, &proof);
     assert!(
         matches!(

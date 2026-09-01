@@ -15,7 +15,9 @@ use miden_assembly::{
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
-use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
+use miden_vm::{
+    ExecutionProof, Program, StackOutputs, Verifier, VersionedProof, Word, serde::SliceReader,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{field::Empty, instrument};
 
@@ -182,7 +184,7 @@ impl ProofFile {
     pub fn read(
         proof_path: &Option<PathBuf>,
         program_path: &Path,
-    ) -> Result<ExecutionProof, String> {
+    ) -> Result<VersionedProof, String> {
         // If proof_path has been provided then use this as path.  Alternatively we will
         // replace the program_path extension with `.proof` and use this as a default.
         let path = match proof_path {
@@ -194,8 +196,8 @@ impl ProofFile {
         let file = fs::read(&path)
             .map_err(|err| format!("Failed to open proof file `{}` - {}", path.display(), err))?;
 
-        // deserialize bytes into an execution proof
-        ExecutionProof::read_from_bytes(&file)
+        // deserialize bytes into a versioned execution proof
+        VersionedProof::read_from_bytes(&file)
             .map_err(|err| format!("Failed to decode proof data - {err}"))
     }
 
@@ -216,6 +218,7 @@ impl ProofFile {
             None => program_path.with_extension("proof"),
         };
 
+        let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
         let proof_bytes = proof.to_bytes();
         tracing::Span::current()
             .record("size", tracing::field::display(format!("{} KB", proof_bytes.len() / 1024)));

@@ -4,8 +4,8 @@ use std::{hint::black_box, time::Instant};
 
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor, trace::TraceLenSummary};
 use miden_vm::{
-    ExecutionProof, ExecutionWitness, HashFunction, Prover, StackInputs, StackOutputs, VmTrace,
-    prove_sync, trace::build_trace,
+    ExecutionProof, ExecutionWitness, HashFunction, Prover, StackInputs, StackOutputs, Verifier,
+    VersionedProof, VmTrace, prove_sync, trace::build_trace,
 };
 
 use super::{RecursionCase, config::ProofComposition, recursive_host};
@@ -80,7 +80,9 @@ fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, us
     )
     .expect("prove recursive verifier");
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
-    let proof_bytes = proof.to_bytes().len();
+    let proof_bytes = VersionedProof::new(Verifier::accepted_proof_version(), proof.clone())
+        .to_bytes()
+        .len();
     black_box(proof);
     (elapsed_ms, proof_bytes)
 }

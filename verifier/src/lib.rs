@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec};
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
@@ -27,7 +27,10 @@ mod exports {
     pub use miden_core::{
         Word,
         program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof},
+        proof::{
+            ExecutionProof, ExecutionProofVersion, HashFunction, PrecompileProof, StarkProof,
+            VersionedProof, VmProof,
+        },
     };
     pub mod math {
         pub use miden_core::Felt;
@@ -36,6 +39,19 @@ mod exports {
 pub use exports::*;
 
 pub mod recursive;
+
+const VM_VERIFIER_ROOT_V1: Word = Word::new([
+    Felt::new_unchecked(4465259443638079335),
+    Felt::new_unchecked(17418505147041915588),
+    Felt::new_unchecked(17745366771765383900),
+    Felt::new_unchecked(5300166905943834781),
+]);
+const PVM_VERIFIER_ROOT_V1: Word = Word::new([
+    Felt::new_unchecked(4577265377705777154),
+    Felt::new_unchecked(4184571826008741582),
+    Felt::new_unchecked(13177478522234947032),
+    Felt::new_unchecked(17782284996265163606),
+]);
 
 // VERIFIER
 // ================================================================================================
@@ -50,7 +66,12 @@ impl Verifier {
         Self
     }
 
-    /// Verifies a deferred or complete execution proof against its public claim.
+    /// Returns the execution proof version accepted by this verifier.
+    pub fn accepted_proof_version() -> ExecutionProofVersion {
+        ExecutionProofVersion::new(vec![VM_VERIFIER_ROOT_V1], vec![PVM_VERIFIER_ROOT_V1])
+    }
+
+    /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. Deferred wire data
     /// is neither hydrated nor validated by the verifier. Complete proofs additionally verify the
@@ -62,6 +83,29 @@ impl Verifier {
     ///
     /// Returns an error if the proof structure is invalid or a required STARK rejects.
     pub fn verify(
+        &self,
+        claim: &ExecutionClaim,
+        proof: &VersionedProof,
+    ) -> Result<VerificationOutcome, VerificationError> {
+        let version = proof.version();
+        match version.format() {
+            ExecutionProofVersion::FORMAT_V1 => {
+                let accepted = Self::accepted_proof_version();
+                if !roots_overlap(version.vm_verifier_roots(), accepted.vm_verifier_roots()) {
+                    return Err(VerificationError::IncompatibleVmVerifier);
+                }
+                if !roots_overlap(version.pvm_verifier_roots(), accepted.pvm_verifier_roots()) {
+                    return Err(VerificationError::IncompatiblePvmVerifier);
+                }
+
+                self.verify_v1(claim, proof.proof())
+            },
+            format => Err(VerificationError::UnsupportedProofFormat(format)),
+        }
+    }
+
+    /// Verifies an execution proof encoded with transport format 1.
+    fn verify_v1(
         &self,
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
@@ -301,6 +345,10 @@ impl Verifier {
     }
 }
 
+fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
+    proof_roots.iter().any(|root| accepted_roots.contains(root))
+}
+
 impl Default for Verifier {
     fn default() -> Self {
         Self::new()
@@ -348,6 +396,12 @@ impl VerificationOutcome {
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
+    #[error("execution proof format {0} is not supported")]
+    UnsupportedProofFormat(u8),
+    #[error("execution proof does not name a compatible VM verifier")]
+    IncompatibleVmVerifier,
+    #[error("execution proof does not name a compatible PVM verifier")]
+    IncompatiblePvmVerifier,
     #[error("failed to verify VM STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("a deferred execution proof cannot authenticate TRUE_DIGEST")]
@@ -426,6 +480,10 @@ mod tests {
         }
     }
 
+    fn versioned(proof: ExecutionProof) -> VersionedProof {
+        VersionedProof::new(Verifier::accepted_proof_version(), proof)
+    }
+
     #[test]
     fn verifier_owns_shape_policy() {
         type CheckError = fn(VerificationError) -> bool;
@@ -464,7 +522,7 @@ mod tests {
         ];
 
         for (proof, check) in cases {
-            let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
+            let error = Verifier::new().verify(&claim(), &versioned(proof)).unwrap_err();
             assert!(check(error));
         }
     }
@@ -513,7 +571,7 @@ mod tests {
             }),
         };
 
-        let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
+        let error = Verifier::new().verify(&claim(), &versioned(proof)).unwrap_err();
         assert!(matches!(
             error,
             VerificationError::PrecompileStarkVerification(
@@ -524,9 +582,9 @@ mod tests {
 
     #[test]
     fn malformed_transport_round_trips_then_verifier_rejects_it() {
-        let malformed = complete(root(1), Some(vec![]));
+        let malformed = versioned(complete(root(1), Some(vec![])));
         let bytes = malformed.to_bytes();
-        let decoded = ExecutionProof::read_from_bytes(&bytes).unwrap();
+        let decoded = VersionedProof::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(decoded.to_bytes(), bytes);
         assert!(matches!(
@@ -548,7 +606,7 @@ mod tests {
             precompile: None,
         };
 
-        let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
+        let error = Verifier::new().verify(&claim(), &versioned(proof)).unwrap_err();
         let VerificationError::StarkVerificationError(_, source) = error else {
             panic!("expected oversized VM STARK proof to be rejected")
         };
@@ -566,7 +624,30 @@ mod tests {
         let vm_root = root(2);
         let proof = complete(vm_root, Some(vec![root(1), vm_root, root(3)]));
 
-        let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
+        let error = Verifier::new().verify(&claim(), &versioned(proof)).unwrap_err();
         assert!(matches!(error, VerificationError::StarkVerificationError(..)));
+    }
+
+    #[test]
+    fn verifier_requires_compatible_vm_and_pvm_roots() {
+        let accepted = Verifier::accepted_proof_version();
+        let proof = complete(TRUE_DIGEST, None);
+        let incompatible_vm = VersionedProof::new(
+            ExecutionProofVersion::new(vec![root(100)], accepted.pvm_verifier_roots().to_vec()),
+            proof.clone(),
+        );
+        let incompatible_pvm = VersionedProof::new(
+            ExecutionProofVersion::new(accepted.vm_verifier_roots().to_vec(), vec![root(200)]),
+            proof,
+        );
+
+        assert!(matches!(
+            Verifier::new().verify(&claim(), &incompatible_vm),
+            Err(VerificationError::IncompatibleVmVerifier)
+        ));
+        assert!(matches!(
+            Verifier::new().verify(&claim(), &incompatible_pvm),
+            Err(VerificationError::IncompatiblePvmVerifier)
+        ));
     }
 }
