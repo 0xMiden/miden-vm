@@ -32,6 +32,15 @@ const MSM_WNAF_WINDOW: usize = 5;
 /// any fallback rows are built.
 const MAX_TERM_PRESERVING_TERMS: usize = 4096;
 
+/// Cap on the *sum* of fallback term counts across every PairList this session lowers.
+/// [`MAX_TERM_PRESERVING_TERMS`] only bounds one claim at a time — many claims each near that cap
+/// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
+/// running total and rejects a new claim before it grows the aggregate past this bound. A generous
+/// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
+/// stay well under it, while an attacker can no longer bypass the per-claim bound by splitting one
+/// oversized ask into many claims.
+const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
+
 pub(crate) struct DeferredSession {
     pub(crate) session: Session,
     pub(crate) root: Truthy,
@@ -63,6 +72,7 @@ pub(crate) fn session_from_deferred_state(
         session: Session::new(),
         wnaf_tables: BTreeMap::new(),
         glv_endo_tables: BTreeMap::new(),
+        term_preserving_terms_used: 0,
     };
 
     let root = builder.translate_truthy(state.root())?;
@@ -91,6 +101,10 @@ struct DeferredSessionBuilder<'a> {
     /// recurring base's tables are shared across every claim on it
     /// regardless of each claim's GLV split signs.
     glv_endo_tables: BTreeMap<(EcPointPtr, usize), strategies::WnafTable>,
+    /// Running total of term-preserving-fallback terms lowered so far this session, checked
+    /// against [`MAX_TOTAL_TERM_PRESERVING_TERMS`] before each new claim's fallback rows are
+    /// built.
+    term_preserving_terms_used: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -331,6 +345,15 @@ impl<'a> DeferredSessionBuilder<'a> {
                              count",
                 });
             }
+            let total = self.term_preserving_terms_used.saturating_add(terms.len());
+            if total > MAX_TOTAL_TERM_PRESERVING_TERMS {
+                return Err(DeferredSessionError::UnsupportedMsm {
+                    digest,
+                    reason: "this session's aggregate term-preserving fallback budget, summed \
+                             across every PairList requiring it, is exhausted",
+                });
+            }
+            self.term_preserving_terms_used = total;
             self.msm_term_preserving_expr(curve, &terms)
         };
 

@@ -42,7 +42,11 @@ pub fn intro(
 
 /// Promote a stored point `P` to the 1-term MSM expression `⟨P × 0⟩`
 /// (value = the group's point at infinity) — the zero-scalar leaf, dual to
-/// [`intro`]'s `⟨P × 1⟩`.
+/// [`intro`]'s `⟨P × 1⟩`. Unlike `intro`, `val = base` doesn't hold here, so
+/// `base`'s own group membership (`is_pai = 0`) isn't implied by `val`'s
+/// PAI tie — this independently authenticates it, the same way
+/// [`intro_endo`] authenticates its own base. Panics if `base` is the point
+/// at infinity.
 pub fn intro_zero(
     msm: &mut EcMsmRequires,
     ec: &mut EcStores,
@@ -53,11 +57,21 @@ pub fn intro_zero(
         return e; // a prior ⟨base × 0⟩ — reuse it
     }
     let group = ec.store.point_params(base).0;
+    let (a_ptr, b_ptr, bound_ptr) = ec.store.group_params(group);
+    let (beta_ptr, lambda_ptr) = ec.store.group_glv_params(group);
     let sbound = ec.store.group_sbound(group);
     let zero = uint.require().intern(from_hex("0"), sbound);
+    let (base_x, base_y) =
+        ec.store.point_params(base).1.expect("intro_zero of the point at infinity");
     let val = ec.store.group_pai(group);
+    ec.store.require_ecpoint(base);
     ec.store.require_ecpoint(val);
-    msm.intro_zero(group, sbound, base, zero, val)
+    ec.store.require_ecgroup(group);
+
+    msm.intro_zero(
+        group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, base_x, base_y, zero,
+        val,
+    )
 }
 
 /// Promote a stored point `P` to the 1-term MSM expression `⟨P × λ⟩`

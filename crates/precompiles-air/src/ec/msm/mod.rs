@@ -256,17 +256,24 @@ pub const COL_BETA_PTR: usize = 38;
 pub const COL_LAMBDA_PTR: usize = 39;
 
 // --- intro_endo-only columns (0 on intro / combine / neg / pad rows) --
-/// Op-family flag for `intro_endo` — the fourth one-hot member (`is_intro +
-/// is_intro_endo + is_combine + is_neg = act`). An `intro_endo(φ(P), P)` is
-/// a 1-row run recording the term `⟨P × λ⟩` with value `φ(P)` — GLV's
-/// endomorphism leaf, mirroring plain `intro`'s `⟨P × 1⟩` / `val = P` but
-/// with the value relation `x_φ = β·x_P`, `y_φ = y_P` in place of a ptr
-/// equality (see `msm::require::intro_endo` in the prover crate).
+/// Op-family flag for `intro_endo` — one of five mutually exclusive
+/// members (`is_intro + is_intro_endo + is_combine + is_neg +
+/// is_intro_zero = act`). An `intro_endo(φ(P), P)` is a 1-row run
+/// recording the term `⟨P × λ⟩` with value `φ(P)` — GLV's endomorphism
+/// leaf, mirroring plain `intro`'s `⟨P × 1⟩` / `val = P` but with the
+/// value relation `x_φ = β·x_P`, `y_φ = y_P` in place of a ptr equality
+/// (see `msm::require::intro_endo` in the prover crate).
 pub const COL_IS_INTRO_ENDO: usize = 40;
-/// `P`'s x ptr (from the `EcPoint(base)` consume).
+/// `intro_endo`'s `P`'s x ptr (from the `EcPoint(base)` consume). Also
+/// carries `intro_zero`'s own base's x ptr (from *its* `EcPoint(base,
+/// is_pai = 0)` consume) — the two op-kinds are mutually exclusive, so
+/// the column's meaning never collides.
 pub const COL_ENDO_BASE_X: usize = 41;
-/// The shared y ptr: both the `EcPoint(base)` and `EcPoint(val)` consumes
-/// carry it, so they pin `y_φ = y_P` for free.
+/// `intro_endo`'s shared y ptr: both its `EcPoint(base)` and
+/// `EcPoint(val)` consumes carry it, so they pin `y_φ = y_P` for free.
+/// Also carries `intro_zero`'s own base's y ptr, with no such sharing
+/// (`intro_zero`'s `val` consume uses a literal-zero coordinate pair,
+/// not this column) — see [`COL_ENDO_BASE_X`].
 pub const COL_ENDO_Y: usize = 42;
 /// `φ(P)`'s x ptr (from the `EcPoint(val)` consume; tied to `β·x_P` by the
 /// `UintMul` consume).
@@ -280,14 +287,20 @@ pub const COL_ENDO_MINTED: usize = 44;
 /// The term evaluates to the curve's canonical point at infinity. Therefore,
 /// unlike a normal `intro` row (`P × 1 = P`), this row cannot require `val`
 /// to equal `base`. Instead, the EC-point lookup below verifies that `val` is
-/// the point at infinity.
+/// the point at infinity — and a second EC-point lookup verifies that `base`
+/// is itself a genuine finite point of `group_ptr` (`is_pai = 0`), reusing
+/// [`COL_ENDO_BASE_X`]/[`COL_ENDO_Y`] for its coordinates; the boundary's
+/// `EcGroup` consume (shared with `combine`/`neg`/`intro_endo`) ties
+/// `sbound_ptr` to `group_ptr` the same way. Without both ties, a base that
+/// is off-group or the identity point would still satisfy every other
+/// `intro_zero` constraint.
 ///
 /// This is one of five mutually exclusive operation flags:
 /// `is_intro + is_intro_endo + is_combine + is_neg + is_intro_zero = act`.
 pub const COL_IS_INTRO_ZERO: usize = 45;
 pub const NUM_MAIN_COLS: usize = 46;
 
-// Aux: 14 columns, flattened via `frac_col!` over the 26 fractions so
+// Aux: 15 columns, flattened via `frac_col!` over the 27 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
 // 1 (folding the intermediate 12-column flatten and the follow-on
 // singleton-pack into one step):
@@ -299,15 +312,17 @@ pub const NUM_MAIN_COLS: usize = 46;
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
 //  col 7:  EcGroupAdd (combine value) + EcPoint(val_a) (neg value coord).
-//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin — combine, neg, and intro_endo).
+//  col 8:  EcPoint(R) (neg value coord) + EcGroup (sbound pin — combine, neg, intro_endo, and
+//          intro_zero).
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
 //  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
 //  col 12: UintMul (intro_endo's x_φ = β·x_P) + EcOnCurveCert provide (intro_endo value).
 //  col 13: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
-const NUM_LOGUP_COLS: usize = 14;
-const AUX_WIDTH: usize = 14;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+//  col 14: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
+const NUM_LOGUP_COLS: usize = 15;
+const AUX_WIDTH: usize = 15;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -643,14 +658,18 @@ where
         // boundary traffic (operand-A head, ordering) fires for combine AND
         // neg; the b-side and the combine value for combine only; the neg
         // value for neg only. `bnd_group` is the wider `EcGroup`-pin gate:
-        // combine, neg, AND intro_endo (which has no operand head / ordering
-        // of its own, only the group pin authenticating β/λ).
+        // combine, neg, intro_endo (which has no operand head / ordering of
+        // its own, only the group pin authenticating β/λ), AND intro_zero
+        // (which needs it to tie `sbound_ptr` to `group_ptr`, same as the
+        // other three).
         let adv_i = take_a + take_both.clone() + is_neg.clone();
         let adv_j = take_b + take_both.clone();
         let bnd_a = (is_combine.clone() + is_neg.clone()) * is_boundary.clone();
         let bnd_b = is_combine.clone() * is_boundary.clone();
         let bnd_neg = is_neg.clone() * is_boundary.clone();
-        let bnd_group = (is_combine + is_neg.clone() + is_intro_endo.clone()) * is_boundary.clone();
+        let bnd_group =
+            (is_combine + is_neg.clone() + is_intro_endo.clone() + is_intro_zero.clone())
+                * is_boundary.clone();
         let bnd_endo = is_intro_endo * is_boundary.clone();
         let bnd_intro_zero = is_intro_zero.clone() * is_boundary.clone();
 
@@ -974,7 +993,7 @@ where
                     point_ptr: val.clone(),
                     group_ptr: group_ptr.clone(),
                     x_ptr: endo_val_x.clone(),
-                    y_ptr: endo_y,
+                    y_ptr: endo_y.clone(),
                     is_pai: LB::Expr::ZERO,
                 },
                 two_deg
@@ -995,7 +1014,7 @@ where
                     kappa_a: LB::Expr::ONE,
                     kappa_c: LB::Expr::ZERO,
                     a_ptr: beta_ptr,
-                    b_ptr: endo_base_x,
+                    b_ptr: endo_base_x.clone(),
                     c_ptr: bound_ptr.clone(),
                     r_ptr: endo_val_x,
                     bound_ptr,
@@ -1045,13 +1064,36 @@ where
             ),
             (
                 "consume-ecpoint-intro-zero-val",
-                bnd_intro_zero,
+                bnd_intro_zero.clone(),
                 EcPointMsg {
                     point_ptr: val,
-                    group_ptr,
+                    group_ptr: group_ptr.clone(),
                     x_ptr: LB::Expr::ZERO,
                     y_ptr: LB::Expr::ZERO,
                     is_pai: LB::Expr::ONE,
+                },
+                two_deg
+            ),
+        );
+        // col 14: intro_zero's own base-membership tie — unlike `val`,
+        // `base` must be a genuine finite point of `group_ptr` (`is_pai =
+        // 0`), not a literal PAI, so this reuses the coordinate cells
+        // `intro_endo` uses for the analogous tie on its own base (see
+        // [`COL_ENDO_BASE_X`]). Without it, an `intro_zero` row would place
+        // no constraint at all on `base` beyond its bare pointer value.
+        frac_col!(
+            builder,
+            "ec-msm-intro-zero",
+            single_deg,
+            (
+                "consume-ecpoint-intro-zero-base",
+                bnd_intro_zero,
+                EcPointMsg {
+                    point_ptr: base,
+                    group_ptr,
+                    x_ptr: endo_base_x,
+                    y_ptr: endo_y,
+                    is_pai: LB::Expr::ZERO,
                 },
                 two_deg
             ),

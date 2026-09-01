@@ -256,15 +256,28 @@ impl EcMsmRequires {
 
     /// Record an `intro_zero` — `⟨base × 0⟩` with `val` the group's
     /// canonical point-at-infinity row. `scalar` must be the store ptr of
-    /// the value `0` under `sbound`; `val` must be `group`'s PAI point
-    /// (the boundary's `EcPoint(val, is_pai = 1)` consume authenticates
-    /// it — see [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
-    /// Returns the handle.
+    /// the value `0` under `sbound`; `val` must be `group`'s PAI point (the
+    /// boundary's `EcPoint(val, is_pai = 1)` consume authenticates it — see
+    /// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
+    /// `a_ptr`/`b_ptr`/`bound_ptr`/`beta_ptr`/`lambda_ptr` are the group's
+    /// curve params (closing the boundary's `EcGroup` consume, shared with
+    /// `combine`/`neg`/`intro_endo`, pinning `sbound`); `base_x`/`base_y`
+    /// are `base`'s own coordinates (closing a second `EcPoint(base, is_pai
+    /// = 0)` consume, authenticating that `base` — unlike `val` — is a
+    /// genuine finite point of `group`). Returns the handle.
+    #[allow(clippy::too_many_arguments)]
     pub fn intro_zero(
         &mut self,
         group: EcGroupPtr,
         sbound: UintPtr,
+        a_ptr: UintPtr,
+        b_ptr: UintPtr,
+        bound_ptr: UintPtr,
+        beta_ptr: UintPtr,
+        lambda_ptr: UintPtr,
         base: EcPointPtr,
+        base_x: UintPtr,
+        base_y: UintPtr,
         scalar: UintPtr,
         val: EcPointPtr,
     ) -> EcExprPtr {
@@ -277,17 +290,17 @@ impl EcMsmRequires {
             b_expr: 0,
             val_a: 0,
             val_b: 0,
-            a_ptr: 0,
-            b_ptr: 0,
-            bound_ptr: 0,
-            beta_ptr: 0,
-            lambda_ptr: 0,
+            a_ptr: a_ptr.addr(),
+            b_ptr: b_ptr.addr(),
+            bound_ptr: bound_ptr.addr(),
+            beta_ptr: beta_ptr.addr(),
+            lambda_ptr: lambda_ptr.addr(),
             neg_x: 0,
             neg_ya: 0,
             neg_yr: 0,
             neg_minted: 0,
-            endo_base_x: 0,
-            endo_y: 0,
+            endo_base_x: base_x.addr(),
+            endo_y: base_y.addr(),
             endo_val_x: 0,
             endo_minted: 0,
             rows: vec![RowVals {
@@ -726,9 +739,22 @@ pub fn generate_trace(
                 set(COL_ENDO_Y, e.endo_y);
                 set(COL_ENDO_VAL_X, e.endo_val_x);
                 set(COL_ENDO_MINTED, e.endo_minted);
+            } else if is_intro_zero {
+                // `base`'s own coordinates (reusing the endo cells — see
+                // `COL_ENDO_BASE_X`) + the boundary's `EcGroup` pin
+                // (authenticating the group params against the real
+                // group) — the point-store demand for `base` was already
+                // routed by `require::intro_zero`.
+                set(COL_A_PTR, e.a_ptr);
+                set(COL_B_PTR, e.b_ptr);
+                set(COL_BOUND_PTR, e.bound_ptr);
+                set(COL_BETA_PTR, e.beta_ptr);
+                set(COL_LAMBDA_PTR, e.lambda_ptr);
+                set(COL_ENDO_BASE_X, e.endo_base_x);
+                set(COL_ENDO_Y, e.endo_y);
+                store.require_uintval(UintPtr::from_addr(rv.scalar));
             } else {
-                // intro / intro_zero: the literal-1 or literal-0 scalar's
-                // UintVal demand.
+                // intro: the literal-1 scalar's UintVal demand.
                 store.require_uintval(UintPtr::from_addr(rv.scalar));
             }
             vals.extend(r);
@@ -1014,16 +1040,24 @@ mod tests {
     #[test]
     fn intro_zero_constraints_hold() {
         // ⟨P × 0⟩ with val = the group's PAI point — the zero-scalar leaf.
-        // Chiplet-local: the `EcPoint(val, is_pai)` / literal-0 `UintVal`
-        // bus edges balance against nothing outside this trace (mult 0),
-        // only the native one-hot / boundary constraints are exercised here.
+        // Chiplet-local: the `EcPoint(val, is_pai)` / `EcPoint(base,
+        // is_pai)` / `EcGroup` / literal-0 `UintVal` bus edges balance
+        // against nothing outside this trace (mult 0), only the native
+        // one-hot / boundary constraints are exercised here.
         let group = EcGroupPtr::from_addr(1);
         let sbound = UintPtr::from_addr(7);
+        let (a_ptr, b_ptr, bound_ptr) =
+            (UintPtr::from_addr(2), UintPtr::from_addr(3), UintPtr::from_addr(1));
+        let (beta_ptr, lambda_ptr) = (UintPtr::from_addr(10), UintPtr::from_addr(11));
         let zero = UintPtr::from_addr(9);
         let base = EcPointPtr::from_addr(3);
+        let (base_x, base_y) = (UintPtr::from_addr(20), UintPtr::from_addr(21));
         let pai = EcPointPtr::from_addr(4);
         let mut req = EcMsmRequires::new();
-        let e = req.intro_zero(group, sbound, base, zero, pai);
+        let e = req.intro_zero(
+            group, sbound, a_ptr, b_ptr, bound_ptr, beta_ptr, lambda_ptr, base, base_x, base_y,
+            zero, pai,
+        );
         req.consume_op(e, 1);
         local_check(req);
     }
@@ -1040,7 +1074,14 @@ mod tests {
         let e = req.intro_zero(
             EcGroupPtr::from_addr(1),
             UintPtr::from_addr(7),
+            UintPtr::from_addr(2),
+            UintPtr::from_addr(3),
+            UintPtr::from_addr(1),
+            UintPtr::from_addr(10),
+            UintPtr::from_addr(11),
             EcPointPtr::from_addr(3),
+            UintPtr::from_addr(20),
+            UintPtr::from_addr(21),
             UintPtr::from_addr(9),
             EcPointPtr::from_addr(4),
         );
