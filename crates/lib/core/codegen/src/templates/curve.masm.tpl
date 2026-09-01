@@ -33,13 +33,7 @@ use miden::core::precompiles::fields::{{BASE_FIELD_MODULE}}
 # - MSM_FRAME     = one word [PRECOMPILE_ID, MSM_OP_ID, n_pairs, 0].
 # - POINT_VALUE   = `[X_OR_TRUE_DIGEST, Y_OR_TRUE_DIGEST]` under VALUE_FRAME.
 
-const PRECOMPILE_ID = {{PRECOMPILE_ID}}
-const GROUP_PTR = {{GROUP_PTR}}
-const VALUE_OP_ID = {{VALUE_OP_ID}}
-const ADD_OP_ID = {{ADD_OP_ID}}
-const SUB_OP_ID = {{SUB_OP_ID}}
-const EQ_OP_ID = {{EQ_OP_ID}}
-const MSM_OP_ID = {{MSM_OP_ID}}
+# generated parameters: precompile id {{PRECOMPILE_ID}}, group pointer {{GROUP_PTR}}, operation ids {{VALUE_OP_ID}}/{{ADD_OP_ID}}/{{SUB_OP_ID}}/{{EQ_OP_ID}}/{{MSM_OP_ID}}
 
 # The VALUE frame carries GROUP_PTR. ADD/SUB/EQ use zero for their remaining parameters; MSM binds
 # its pair count in param1. Codegen derives each fixed initial chaining word from its complete frame.
