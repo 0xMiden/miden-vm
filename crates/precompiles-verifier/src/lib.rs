@@ -30,8 +30,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn verifies_pre_split_poseidon2_proof() {
-        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_30.bin");
+    fn verifies_pinned_poseidon2_proof() {
+        const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_poseidon2_v0_31.bin");
         let root = Word::new(
             [
                 8727402973153492738,
@@ -43,7 +43,7 @@ mod tests {
         );
         let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Poseidon2);
 
-        verify_deferred(&proof, root).expect("pre-split proof must verify");
+        verify_deferred(&proof, root).expect("pinned poseidon2 proof must verify");
         assert!(verify_deferred(&proof, TRUE_DIGEST).is_err());
     }
 
