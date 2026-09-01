@@ -34,6 +34,10 @@ mod exports {
     }
 }
 pub use exports::*;
+pub use miden_air::security::{
+    ProofSecurityParameters, conjectured_security_level_from_parameters,
+    conjectured_security_report,
+};
 
 pub mod recursive;
 
@@ -55,8 +59,9 @@ impl Verifier {
     /// The VM STARK authenticates the carried precompile root in either state. Deferred wire data
     /// is neither hydrated nor validated by the verifier. Complete proofs additionally verify the
     /// aggregate precompile STARK when the VM authenticated outstanding work. The outcome reports
-    /// the minimum security level of the components actually verified and any authenticated
-    /// precompile root that remains outstanding.
+    /// the authenticated security parameters of the components actually verified and any
+    /// precompile root that remains outstanding. The caller chooses an estimator and acceptance
+    /// policy for those parameters.
     ///
     /// # Errors
     ///
@@ -92,21 +97,24 @@ impl Verifier {
             self.preflight_precompile_stark(precompile)?;
         }
 
-        let mut security_level = self.verify_vm(claim, vm)?;
-        if let Some(precompile) = precompile {
-            security_level =
-                security_level.min(self.verify_precompile(precompile, vm.precompile_root)?);
-        }
+        let vm_security_parameters = self.verify_vm(claim, vm)?;
+        let precompile_security_parameters = precompile
+            .map(|precompile| self.verify_precompile(precompile, vm.precompile_root))
+            .transpose()?;
 
-        Ok(VerificationOutcome::new(security_level, outstanding_root))
+        Ok(VerificationOutcome::new(
+            vm_security_parameters,
+            precompile_security_parameters,
+            outstanding_root,
+        ))
     }
 
     /// Verifies a precompile proof against an expected outstanding execution root.
     ///
     /// The expected root may occur anywhere in the proof's ordered constituent roots. All roots,
     /// including compatible extras and duplicate occurrences, are folded from the first root to
-    /// derive the aggregate precompile STARK statement. On success, this returns the authenticated
-    /// security level of the precompile STARK.
+    /// derive the aggregate precompile STARK statement. On success, this returns the precompile
+    /// STARK's authenticated security parameters.
     ///
     /// The expected root and every constituent root must differ from [`TRUE_DIGEST`].
     ///
@@ -118,7 +126,7 @@ impl Verifier {
         &self,
         proof: &PrecompileProof,
         expected_root: DeferredRoot,
-    ) -> Result<u32, VerificationError> {
+    ) -> Result<ProofSecurityParameters, VerificationError> {
         self.validate_precompile(proof, expected_root)?;
         self.preflight_precompile_stark(proof)?;
 
@@ -190,13 +198,17 @@ impl Verifier {
         Ok(())
     }
 
-    /// Verifies the Miden VM STARK proof and returns its conjectured security level in bits.
+    /// Verifies the Miden VM STARK proof and returns its authenticated security parameters.
     ///
-    /// The level depends on the proof's largest AIR trace height, its commitment scheme's column
-    /// alignment (which varies by hash function), and its kernel procedure count (bound through
-    /// the kernel witness) as well as its PCS parameters, so it is computed from the verified
-    /// proof and claim rather than fixed by the parameter preset.
-    fn verify_vm(&self, claim: &ExecutionClaim, proof: &VmProof) -> Result<u32, VerificationError> {
+    /// The returned parameters include the largest AIR trace height, the DEEP term count implied
+    /// by the commitment scheme's column alignment, and the lookup boundary terms implied by the
+    /// authenticated kernel. The PCS parameters and commitment collision resistance come from the
+    /// configuration used to verify the proof.
+    fn verify_vm(
+        &self,
+        claim: &ExecutionClaim,
+        proof: &VmProof,
+    ) -> Result<ProofSecurityParameters, VerificationError> {
         let program_root = claim.program_root();
         let pub_inputs = PublicInputs::new(
             claim.to_program_info(),
@@ -208,40 +220,38 @@ impl Verifier {
 
         let stark = &proof.proof;
         let proof_bytes = stark.bytes();
-        let params = config::pcs_params();
+        let pcs_params = config::pcs_params();
         let num_kernel_procedures = claim.kernel().proc_hashes().len() as u32;
         match stark.hash_fn() {
             HashFunction::Blake3_256 => {
-                let config = config::blake3_256_config(params, config::RELATION_DIGEST);
+                let config = config::blake3_256_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
             HashFunction::Rpo256 => {
-                let config = config::rpo_config(params, config::RELATION_DIGEST);
+                let config = config::rpo_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
             HashFunction::Rpx256 => {
-                let config = config::rpx_config(params, config::RELATION_DIGEST);
+                let config = config::rpx_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
             HashFunction::Poseidon2 => {
-                let config = config::poseidon2_config(params, config::RELATION_DIGEST);
+                let config = config::poseidon2_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
             HashFunction::Keccak => {
-                let config = config::keccak_config(params, config::RELATION_DIGEST);
+                let config = config::keccak_config(pcs_params, config::RELATION_DIGEST);
                 self.verify_stark_proof(&config, &public_values, &aux_inputs, proof_bytes)
             },
         }
         .map_err(|error| VerificationError::StarkVerificationError(program_root, Box::new(error)))
         .map(|(log_max_height, alignment)| {
-            security::conjectured_security_level_for_alignment(
-                params.num_queries() as u32,
-                params.query_pow_bits() as u32,
-                params.deep_pow_bits() as u32,
-                params.folding_pow_bits() as u32,
+            security::proof_security_parameters(
+                &pcs_params,
                 log_max_height,
                 num_kernel_procedures,
                 alignment,
+                stark.hash_fn().collision_resistance(),
             )
         })
     }
@@ -311,21 +321,32 @@ impl Default for Verifier {
 #[must_use = "verification may leave an outstanding precompile obligation"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerificationOutcome {
-    security_level: u32,
+    vm_security_parameters: ProofSecurityParameters,
+    precompile_security_parameters: Option<ProofSecurityParameters>,
     outstanding_precompile_root: Option<DeferredRoot>,
 }
 
 impl VerificationOutcome {
-    const fn new(security_level: u32, outstanding_precompile_root: Option<DeferredRoot>) -> Self {
+    const fn new(
+        vm_security_parameters: ProofSecurityParameters,
+        precompile_security_parameters: Option<ProofSecurityParameters>,
+        outstanding_precompile_root: Option<DeferredRoot>,
+    ) -> Self {
         Self {
-            security_level,
+            vm_security_parameters,
+            precompile_security_parameters,
             outstanding_precompile_root,
         }
     }
 
-    /// Returns the minimum security level of the STARK components that were verified.
-    pub const fn security_level(&self) -> u32 {
-        self.security_level
+    /// Returns the authenticated security parameters of the verified MVM proof.
+    pub const fn vm_security_parameters(&self) -> &ProofSecurityParameters {
+        &self.vm_security_parameters
+    }
+
+    /// Returns the authenticated security parameters if verification included a PVM proof.
+    pub const fn precompile_security_parameters(&self) -> Option<&ProofSecurityParameters> {
+        self.precompile_security_parameters.as_ref()
     }
 
     /// Returns whether this verified outcome has no outstanding precompile obligation.

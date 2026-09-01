@@ -8,6 +8,7 @@ pub use miden_core::{
     deferred::DeferredRoot,
     proof::{HashFunction, StarkProof},
 };
+pub use miden_precompiles_air::security::ProofSecurityParameters;
 
 #[cfg(any(test, feature = "std"))]
 pub(crate) mod ace;

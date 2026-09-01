@@ -12,8 +12,20 @@ use miden_utils_testing::{
 };
 use miden_vm::{
     DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
-    StackOutputs, Verifier, advice::AdviceInputs,
+    StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
+    conjectured_security_level_from_parameters,
 };
+
+/// Applies the integration tests' policy to all STARK components in a verification outcome.
+fn minimum_conjectured_security_level(outcome: &VerificationOutcome) -> u32 {
+    let vm_security_level =
+        conjectured_security_level_from_parameters(outcome.vm_security_parameters());
+    outcome
+        .precompile_security_parameters()
+        .map_or(vm_security_level, |precompile_parameters| {
+            vm_security_level.min(conjectured_security_level_from_parameters(precompile_parameters))
+        })
+}
 
 fn masm_push_felts(felts: &[Felt]) -> String {
     felts
@@ -62,7 +74,10 @@ fn assert_prove_verify(
     let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
     assert!(outcome.is_complete());
 
-    println!("Verification successful! Security level: {}", outcome.security_level());
+    println!(
+        "Verification successful! Security level: {}",
+        minimum_conjectured_security_level(&outcome)
+    );
 }
 
 fn assert_recursive_verify(
@@ -242,6 +257,7 @@ fn test_hash_heavy_divergent_heights_recursive() {
 // ================================================================================================
 
 mod prover_api_lifecycle {
+    use super::minimum_conjectured_security_level;
     use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
@@ -251,7 +267,7 @@ mod prover_api_lifecycle {
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileWitness, Program, Prover,
         StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
-        precompile_witness_from_wire, prove_sync,
+        conjectured_security_level_from_parameters, precompile_witness_from_wire, prove_sync,
     };
 
     fn assemble(source: &str) -> Program {
@@ -334,8 +350,9 @@ mod prover_api_lifecycle {
         let outcome = Verifier::new()
             .verify(&claim, proof)
             .expect("complete execution proof should verify");
-        assert_eq!(outcome.security_level(), 96);
         assert!(outcome.is_complete());
+        assert!(outcome.precompile_security_parameters().is_none());
+        assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
     }
 
@@ -394,6 +411,7 @@ mod prover_api_lifecycle {
             .verify(&one_claim, &one_deferred)
             .expect("deferred VM proof should verify");
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
+        assert!(deferred_outcome.precompile_security_parameters().is_none());
 
         let unrelated_wire = ExecutionProof::Deferred {
             vm: one_vm.clone(),
@@ -440,19 +458,15 @@ mod prover_api_lifecycle {
         assert_eq!(shared_precompile.roots, ordered_roots);
 
         let verifier = Verifier::new();
-        assert_eq!(
-            verifier
-                .verify_precompile(&shared_precompile, one_root)
-                .expect("shared precompile proof should directly verify root one"),
-            96
-        );
+        let root_one_security_parameters = verifier
+            .verify_precompile(&shared_precompile, one_root)
+            .expect("shared precompile proof should directly verify root one");
+        assert_eq!(conjectured_security_level_from_parameters(&root_one_security_parameters), 96);
 
-        assert_eq!(
-            verifier
-                .verify_precompile(&shared_precompile, two_root)
-                .expect("compatible extra roots should directly verify root two"),
-            96
-        );
+        let root_two_security_parameters = verifier
+            .verify_precompile(&shared_precompile, two_root)
+            .expect("compatible extra roots should directly verify root two");
+        assert_eq!(conjectured_security_level_from_parameters(&root_two_security_parameters), 96);
 
         let mut reordered_precompile = shared_precompile.clone();
         reordered_precompile.roots.swap(1, 2);
@@ -521,6 +535,16 @@ mod prover_api_lifecycle {
             .expect("completed root-two execution should verify");
         assert!(one_outcome.is_complete());
         assert!(two_outcome.is_complete());
+        assert_eq!(
+            one_outcome.precompile_security_parameters(),
+            Some(&root_one_security_parameters)
+        );
+        assert_eq!(
+            two_outcome.precompile_security_parameters(),
+            Some(&root_two_security_parameters)
+        );
+        assert_eq!(minimum_conjectured_security_level(&one_outcome), 96);
+        assert_eq!(minimum_conjectured_security_level(&two_outcome), 96);
     }
 }
 

@@ -20,6 +20,28 @@ use crate::{
     constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
 };
 
+/// Inputs for estimating the conjectured security of a verified Miden STARK proof.
+///
+/// Native MVM and PVM verifiers return these parameters after deriving them from the verified
+/// proof, the proof's commitment scheme, and the committed AIR configuration. Callers pass the
+/// returned value to a security estimator and apply their own acceptance policy. Constructing a
+/// value directly does not authenticate it.
+///
+/// Recursive MASM verifiers return a compact descriptor containing the normalized inputs required
+/// by the in-VM estimator instead of this Rust type. Both APIs leave estimation and acceptance
+/// policy to the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProofSecurityParameters {
+    /// Protocol parameters bound by the proof transcript.
+    pub protocol_params: ProtocolParams,
+    /// Instance shape derived from the proof and its commitment scheme.
+    pub instance_shape: InstanceShape,
+    /// Security-relevant shape of the AIR relation and commitment scheme.
+    pub air_shape: AirShape,
+    /// Lookup fractions consumed once per proof in addition to the per-row fractions.
+    pub num_lookup_boundary_terms: u32,
+}
+
 /// Log2 of the challenge field size, in fixed point, rounded down.
 ///
 /// The challenge field is the quadratic extension of the Goldilocks base field, so this is
@@ -229,31 +251,30 @@ pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
 /// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
 /// via `log2(1 + x) <= x · log2(e)`.
 ///
-/// `boundary` is the number of one-time lookup fractions `emit_core_boundary` and
-/// `emit_chiplets_boundary` add on top of the per-row bus terms [`AIR_SHAPE`]'s
-/// `lookup.fractions_per_row` already counts — the block-hash seed, the two log-deferred-root
-/// terminals, and one `kernel_rom_init` per kernel procedure digest. Both divisions round up, so
-/// the correction is never smaller than the true log term, keeping the corrected round
-/// conservative. The two-step division order (first by `fractions_per_row`, then by
-/// `2^log_max_height`) is what the common MASM estimator mirrors bit-for-bit: a single combined
-/// divisor overflows a `u32` at the deployed shape's larger heights.
-fn lookup_boundary_correction(num_kernel_procedures: u32, log_max_height: u32) -> u64 {
-    let boundary = CORE_BOUNDARY_LOOKUP_TERMS as u64 + num_kernel_procedures as u64;
-    let numerator = boundary * LOG2_E;
-    numerator
-        .div_ceil(AIR_SHAPE.lookup.fractions_per_row as u64)
-        .div_ceil(1u64 << log_max_height)
+/// `num_boundary_terms` is the number of one-time lookup fractions consumed on top of the
+/// per-row terms counted by `fractions_per_row`. Both divisions round up, so the correction is
+/// never smaller than the true log term, keeping the corrected round conservative. The two-step
+/// division order (first by `fractions_per_row`, then by `2^log_max_height`) is what the common
+/// MASM estimator mirrors bit-for-bit: a single combined divisor overflows a `u32` at the deployed
+/// shape's larger heights.
+fn lookup_boundary_correction(
+    num_boundary_terms: u32,
+    fractions_per_row: u32,
+    log_max_height: u32,
+) -> u64 {
+    if num_boundary_terms == 0 {
+        return 0;
+    }
+    assert!(fractions_per_row > 0, "lookup boundary terms require per-row lookup fractions");
+    let height = 1u64
+        .checked_shl(log_max_height)
+        .expect("maximum trace height must fit in a u64");
+    (u64::from(num_boundary_terms) * LOG2_E)
+        .div_ceil(u64::from(fractions_per_row))
+        .div_ceil(height)
 }
 
-/// Corrects a report's lookup round for the one-time boundary fractions
-/// `emit_core_boundary`/`emit_chiplets_boundary` add on top of the per-row bus terms
-/// [`AIR_SHAPE`] counts.
-fn apply_lookup_boundary_correction(
-    report: SecurityReport,
-    num_kernel_procedures: u32,
-    log_max_height: u32,
-) -> SecurityReport {
-    let correction = lookup_boundary_correction(num_kernel_procedures, log_max_height);
+fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityReport {
     let terms = (*report.terms()).map(|term| {
         if term.label == LOOKUP_LABEL {
             SecurityTerm::new(term.label, term.bits.saturating_sub(correction))
@@ -262,6 +283,73 @@ fn apply_lookup_boundary_correction(
         }
     });
     SecurityReport::new(terms)
+}
+
+/// Computes the conjectured round budget for a verified proof.
+///
+/// The same estimator handles MVM and PVM proofs because `params` contains the verified protocol,
+/// instance, and AIR shapes. Callers must use parameters returned by the verifier that
+/// authenticated the proof rather than values assembled independently.
+pub fn conjectured_security_report(parameters: &ProofSecurityParameters) -> SecurityReport {
+    let report = p3_security::budget::security_report(
+        &parameters.protocol_params,
+        &parameters.instance_shape,
+        &parameters.air_shape,
+    );
+    let correction = lookup_boundary_correction(
+        parameters.num_lookup_boundary_terms,
+        parameters.air_shape.lookup.fractions_per_row,
+        parameters.instance_shape.log_max_height,
+    );
+    apply_lookup_correction(report, correction)
+}
+
+/// Returns the conjectured security level for a verified proof.
+pub fn conjectured_security_level_from_parameters(parameters: &ProofSecurityParameters) -> u32 {
+    conjectured_security_report(parameters).security_level()
+}
+
+/// Builds MVM security parameters from values obtained during proof verification.
+///
+/// `log_max_height` and `alignment` must come from successful STARK verification,
+/// `num_kernel_procedures` from the authenticated execution claim, and `collision_resistance`
+/// from the commitment hash used to verify the proof.
+pub fn proof_security_parameters(
+    pcs_params: &PcsParams,
+    log_max_height: u32,
+    num_kernel_procedures: u32,
+    alignment: usize,
+    collision_resistance: u32,
+) -> ProofSecurityParameters {
+    proof_security_parameters_from_protocol(
+        protocol_params(pcs_params),
+        log_max_height,
+        num_kernel_procedures,
+        alignment,
+        collision_resistance,
+    )
+}
+
+fn proof_security_parameters_from_protocol(
+    protocol_params: ProtocolParams,
+    log_max_height: u32,
+    num_kernel_procedures: u32,
+    alignment: usize,
+    collision_resistance: u32,
+) -> ProofSecurityParameters {
+    ProofSecurityParameters {
+        protocol_params,
+        instance_shape: InstanceShape {
+            log_max_height,
+            field_bits: CHALLENGE_FIELD_BITS,
+            collision_resistance,
+        },
+        air_shape: AirShape {
+            num_deep_terms: Some(num_deep_terms(alignment)),
+            ..AIR_SHAPE
+        },
+        num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+    }
 }
 
 /// Computes a deployed Miden VM proof's conjectured security level, in whole bits.
@@ -286,7 +374,7 @@ pub fn conjectured_security_level(
     log_max_height: u32,
     num_kernel_procedures: u32,
 ) -> u32 {
-    let params = ProtocolParams {
+    let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
         log_folding_arity: config::LOG_FOLDING_ARITY as u32,
         num_queries,
@@ -295,12 +383,13 @@ pub fn conjectured_security_level(
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
     };
-    let report = p3_security::budget::security_report(
-        &params,
-        &deployed_instance(log_max_height),
-        &AIR_SHAPE,
-    );
-    apply_lookup_boundary_correction(report, num_kernel_procedures, log_max_height).security_level()
+    conjectured_security_level_from_parameters(&proof_security_parameters_from_protocol(
+        protocol,
+        log_max_height,
+        num_kernel_procedures,
+        COMMITMENT_ALIGNMENT,
+        COLLISION_RESISTANCE,
+    ))
 }
 
 /// Computes a deployed Miden VM proof's conjectured security level, in whole bits, for a proof
@@ -322,7 +411,7 @@ pub fn conjectured_security_level_for_alignment(
     num_kernel_procedures: u32,
     alignment: usize,
 ) -> u32 {
-    let params = ProtocolParams {
+    let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
         log_folding_arity: config::LOG_FOLDING_ARITY as u32,
         num_queries,
@@ -331,16 +420,13 @@ pub fn conjectured_security_level_for_alignment(
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
     };
-    let air_shape = AirShape {
-        num_deep_terms: Some(num_deep_terms(alignment)),
-        ..AIR_SHAPE
-    };
-    let report = p3_security::budget::security_report(
-        &params,
-        &deployed_instance(log_max_height),
-        &air_shape,
-    );
-    apply_lookup_boundary_correction(report, num_kernel_procedures, log_max_height).security_level()
+    conjectured_security_level_from_parameters(&proof_security_parameters_from_protocol(
+        protocol,
+        log_max_height,
+        num_kernel_procedures,
+        alignment,
+        COLLISION_RESISTANCE,
+    ))
 }
 
 /// Maps PCS parameters onto the protocol parameters the round budget reads.
@@ -380,7 +466,12 @@ pub fn security_report(
         collision_resistance,
     };
     let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
-    apply_lookup_boundary_correction(report, num_kernel_procedures, log_max_height)
+    let correction = lookup_boundary_correction(
+        CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
+        AIR_SHAPE.lookup.fractions_per_row,
+        log_max_height,
+    );
+    apply_lookup_correction(report, correction)
 }
 
 #[cfg(test)]
@@ -409,6 +500,25 @@ mod tests {
         assert_eq!(num_deep_terms(1), 123, "Blake3 (alignment 1) DEEP term count moved");
         assert_eq!(num_deep_terms(8), 138, "algebraic (alignment 8) DEEP term count moved");
         assert_eq!(num_deep_terms(17), 172, "Keccak (alignment 17) DEEP term count moved");
+    }
+
+    /// Parameters built for an MVM proof must reproduce the independent MVM security report.
+    #[test]
+    fn proof_security_parameters_match_mvm_security_report() {
+        let pcs_params = config::pcs_params();
+        let expected_protocol_params = protocol_params(&pcs_params);
+        let security_parameters = proof_security_parameters(
+            &pcs_params,
+            22,
+            255,
+            COMMITMENT_ALIGNMENT,
+            COLLISION_RESISTANCE,
+        );
+
+        assert_eq!(
+            conjectured_security_report(&security_parameters),
+            security_report(&expected_protocol_params, 22, COLLISION_RESISTANCE, 255)
+        );
     }
 
     /// The deployed preset's computed security level, per trace height, with the round that

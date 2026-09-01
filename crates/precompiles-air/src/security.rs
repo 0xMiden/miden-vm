@@ -7,7 +7,10 @@
 //! The AIR shape is stored as the constant [`AIR_SHAPE`] and guarded against drift by
 //! `air_shape_matches_symbolic`, matching how the VM side does it.
 
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
+pub use miden_air::security::ProofSecurityParameters;
+use miden_air::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, conjectured_security_report,
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -296,12 +299,37 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
     }
 }
 
+/// Builds PVM security parameters from values obtained during proof verification.
+///
+/// `log_max_height` and `alignment` must come from successful STARK verification, and
+/// `collision_resistance` from the commitment hash used to verify the proof.
+pub fn proof_security_parameters(
+    pcs_params: &PcsParams,
+    log_max_height: u32,
+    alignment: usize,
+    collision_resistance: u32,
+) -> ProofSecurityParameters {
+    ProofSecurityParameters {
+        protocol_params: protocol_params(pcs_params),
+        instance_shape: InstanceShape {
+            log_max_height,
+            field_bits: CHALLENGE_FIELD_BITS,
+            collision_resistance,
+        },
+        air_shape: AirShape {
+            num_deep_terms: Some(num_deep_terms(alignment)),
+            ..AIR_SHAPE
+        },
+        num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
+    }
+}
+
 /// Computes a chiplet-stack proof's conjectured security level, per protocol round.
 ///
 /// `log_max_height` is the largest chiplet trace height in the proof; the Fiat-Shamir transcript
 /// binds every AIR's log height, so a prover cannot understate it to inflate the reported level.
 /// The lookup round is corrected for the fixed-environment boundary fractions the verifier
-/// consumes on top of [`AIR_SHAPE`]'s per-row fractions — see `fixed_boundary_correction`.
+/// consumes on top of [`AIR_SHAPE`]'s per-row fractions.
 /// The recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits,
 /// fixed zero lookup grinding, and a maximum log trace height in `16..=29`. This native function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
@@ -314,7 +342,13 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    security_report(&protocol_params(params), log_max_height).security_level()
+    conjectured_security_report(&proof_security_parameters(
+        params,
+        log_max_height,
+        COMMITMENT_ALIGNMENT,
+        COLLISION_RESISTANCE,
+    ))
+    .security_level()
 }
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
@@ -330,16 +364,13 @@ pub fn conjectured_security_level_for_alignment(
     log_max_height: u32,
     alignment: usize,
 ) -> u32 {
-    let air_shape = AirShape {
-        num_deep_terms: Some(num_deep_terms(alignment)),
-        ..AIR_SHAPE
-    };
-    let report = p3_security::budget::security_report(
-        &protocol_params(params),
-        &deployed_instance(log_max_height),
-        &air_shape,
-    );
-    apply_fixed_boundary_correction(report, log_max_height).security_level()
+    conjectured_security_report(&proof_security_parameters(
+        params,
+        log_max_height,
+        alignment,
+        COLLISION_RESISTANCE,
+    ))
+    .security_level()
 }
 
 #[cfg(test)]
@@ -401,6 +432,20 @@ mod tests {
     #[test]
     fn num_deep_terms_matches_the_reference_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
+    }
+
+    /// Parameters built for a PVM proof must reproduce the independent PVM security report.
+    #[test]
+    fn proof_security_parameters_match_pvm_security_report() {
+        let pcs_params = precompile_pcs_params();
+        let expected_protocol_params = protocol_params(&pcs_params);
+        let security_parameters =
+            proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE);
+
+        assert_eq!(
+            conjectured_security_report(&security_parameters),
+            security_report(&expected_protocol_params, 19)
+        );
     }
 
     /// The deployed preset's computed security level, per trace height, with the round that

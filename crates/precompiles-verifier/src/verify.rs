@@ -12,7 +12,8 @@ use miden_lifted_stark::{
     lmcs::Lmcs as LmcsTrait, proof::StarkProofData,
 };
 use miden_precompiles_air::{
-    ChipletMultiAir, preprocessed, security,
+    ChipletMultiAir, preprocessed,
+    security::{self, ProofSecurityParameters},
     stark_config::{
         PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config, observe_protocol_params,
         poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
@@ -23,19 +24,23 @@ use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
-/// Verifies a precompile STARK against an explicit deferred root, and returns its conjectured
-/// security level in bits.
+/// Verifies a precompile STARK against an explicit deferred root and returns its authenticated
+/// security parameters.
 ///
-/// The level depends on the proof's largest chiplet trace height, its commitment scheme's column
-/// alignment (which varies by hash function), and its PCS parameters, so it is computed from the
-/// verified proof rather than fixed by the parameter preset.
-pub fn verify_deferred(proof: &StarkProof, public_root: DeferredRoot) -> Result<u32, VerifyError> {
+/// The returned parameters include the largest chiplet trace height and the DEEP term count
+/// implied by the commitment scheme's column alignment. The PCS parameters and commitment
+/// collision resistance come from the configuration used to verify the proof.
+pub fn verify_deferred(
+    proof: &StarkProof,
+    public_root: DeferredRoot,
+) -> Result<ProofSecurityParameters, VerifyError> {
     let (log_max_height, alignment) = verify_stark(proof, P2Digest::from(public_root))?;
 
-    Ok(security::conjectured_security_level_for_alignment(
+    Ok(security::proof_security_parameters(
         &precompile_pcs_params(),
         log_max_height,
         alignment,
+        proof.hash_fn().collision_resistance(),
     ))
 }
 

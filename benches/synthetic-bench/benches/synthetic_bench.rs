@@ -32,7 +32,7 @@ use miden_processor::{
 };
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, Program, ProgramInfo, Prover, StackOutputs, Verifier,
-    prove_sync,
+    conjectured_security_level_from_parameters, prove_sync,
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
@@ -385,7 +385,9 @@ fn bench_one_scenario(
             b.iter(|| {
                 let outcome = Verifier::new().verify(&claim, &proof).expect("verify");
                 assert!(outcome.is_complete());
-                black_box(outcome.security_level())
+                black_box(conjectured_security_level_from_parameters(
+                    outcome.vm_security_parameters(),
+                ))
             });
         });
     }
