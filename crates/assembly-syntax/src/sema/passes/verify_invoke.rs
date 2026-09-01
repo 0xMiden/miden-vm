@@ -58,6 +58,7 @@ pub(crate) struct VerifyInvokeTargets<'a> {
     locals: &'a BTreeMap<String, LocalInvokeTarget>,
     used_aliases: &'a mut BTreeSet<String>,
     current_procedure: Option<ProcedureName>,
+    current_constant: Option<Ident>,
     invoked: BTreeSet<Invoke>,
 }
 
@@ -75,8 +76,13 @@ impl<'a> VerifyInvokeTargets<'a> {
             locals,
             used_aliases,
             current_procedure,
+            current_constant: None,
             invoked: Default::default(),
         }
+    }
+
+    pub fn set_current_constant(&mut self, name: Option<Ident>) {
+        self.current_constant = name;
     }
 }
 
@@ -366,9 +372,21 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     }
     fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
         if let Some(name) = path.as_ident() {
-            self.track_used_alias(&name);
+            if let Some(constant) = self.current_constant.as_ref()
+                && matches!(self.locals.get(name.as_str()), Some(LocalInvokeTarget::ItemImport))
+            {
+                self.analyzer.record_constant_import_ref(constant, name.as_str().to_string());
+            } else {
+                self.track_used_alias(&name);
+            }
         } else if let Some((module, _)) = path.split_first() {
-            self.track_used_module_prefix(module);
+            if let Some(constant) = self.current_constant.as_ref()
+                && matches!(self.locals.get(module), Some(LocalInvokeTarget::ModuleImport))
+            {
+                self.analyzer.record_constant_import_ref(constant, module.to_string());
+            } else {
+                self.track_used_module_prefix(module);
+            }
         }
         ControlFlow::Continue(())
     }
