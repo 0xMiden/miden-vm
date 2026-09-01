@@ -13,7 +13,7 @@
 //! The processor reads one table from the project manifest:
 //!
 //! ```toml
-//! [package.metadata.wasm-event-handlers]
+//! [package.metadata.midenc.event-handlers]
 //! crate = "handlers"          # a Rust guest crate directory, XOR:
 //! module = "handlers.wasm"    # a prebuilt core-Wasm module
 //! ```

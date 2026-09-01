@@ -1,4 +1,4 @@
-//! The Rust guest crate the fixture project declares through `[package.metadata.wasm-event-handlers]`.
+//! The Rust guest crate the fixture project declares through `[package.metadata.midenc.event-handlers]`.
 //!
 //! This crate compiles only for `wasm32-unknown-unknown` (see `../.cargo/config.toml`); the
 //! manifest is embedded in the `miden:event-manifest` custom section by the SDK macro.

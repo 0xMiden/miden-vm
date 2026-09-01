@@ -29,7 +29,7 @@ const EVENT: &str = "test::project::double";
 /// Returns the manifest path of the fixture MASM project.
 ///
 /// The project declares the guest crate of the sibling fixture workspace through
-/// `[package.metadata.wasm-event-handlers]`.
+/// `[package.metadata.midenc.event-handlers]`.
 fn fixture_manifest() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/miden-project.toml")
 }
