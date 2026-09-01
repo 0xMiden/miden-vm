@@ -17,6 +17,7 @@ use crate::{
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
 const ORDER_TAG_PTR: u32 = 3223322639;
+const ORDER_TAG_SCRATCH_PTR: u32 = 3223322684;
 const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322744;
 const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3223322770;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3223322771;
@@ -369,6 +370,35 @@ fn derive_order_tag_from_heights_matches_the_rust_ranking() {
     assert_eq!(expected_order_tag(&(0..12).rev().collect::<Vec<_>>()), 479_001_599);
 }
 
+#[test]
+fn derive_order_tag_materializes_reverse_proof_order_in_its_scratch_table() {
+    const HEIGHTS_PTR: u64 = 1000;
+    let mut cases = vec![vec![12, 12, 11, 11, 13, 13, 12, 11, 13, 12]];
+    for num_airs in 2..=12_u64 {
+        cases.push((0..num_airs).rev().collect());
+        cases.push(vec![12; num_airs as usize]);
+    }
+
+    for heights in cases {
+        let num_airs = heights.len();
+        let (output, _) =
+            build_test!(derive_order_tag_source(), &[HEIGHTS_PTR, num_airs as u64], &heights)
+                .execute_for_output()
+                .expect("order-tag derivation must execute");
+
+        let mut proof_order: Vec<usize> = (0..num_airs).collect();
+        proof_order.sort_by_key(|&air_index| (heights[air_index], air_index));
+        for (proof_position, &air_index) in proof_order.iter().enumerate() {
+            let reverse_position = num_airs - 1 - proof_position;
+            assert_eq!(
+                read_memory(&output, ORDER_TAG_SCRATCH_PTR + reverse_position as u32),
+                air_index as u64,
+                "scratch entry for proof position {proof_position} is wrong"
+            );
+        }
+    }
+}
+
 #[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
@@ -598,6 +628,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, Until("CURRENT_TRACE_ROW_PTR")),
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, Until("PREPROCESSED_COM_PTR")),
         ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, Fixed(4)),
+        ("pvm/layout.masm", "AUX_VALUE_PTRS_PTR", 0, Fixed(10)),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
@@ -920,9 +951,9 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     let relation_region_refs: Vec<_> = relation_regions.iter().collect();
     let pvm_frame_end = relation_regions
         .iter()
-        .find(|region| region.source == "pvm/layout.masm" && region.name == "PREPROCESSED_COM_PTR")
+        .find(|region| region.source == "pvm/layout.masm" && region.name == "AUX_VALUE_PTRS_PTR")
         .and_then(|region| region.hi.checked_add(1))
-        .expect("the terminal PVM commitment region must define the frame end");
+        .expect("the terminal PVM auxiliary-value pointer region must define the frame end");
 
     assert_disjoint(&canonical_generic_regions, "generic");
     assert_disjoint(&relation_region_refs, "relation");
