@@ -42,7 +42,7 @@ A handler module must not contain SIMD instructions: the runner executes a deter
 A Miden project declares its handler module in `miden-project.toml`. The project assembler then embeds the `event_handlers` section into each package of the project under assembly — its root target and its required libraries, whatever the target type; source dependencies are never post-processed — so a handler needs no separate packaging step:
 
 ```toml
-[package.metadata.wasm-event-handlers]
+[package.metadata.midenc.event-handlers]
 crate = "handlers"   # the Rust guest crate directory; built and embedded by the project build
 # Alternatively, set `module = "handlers.wasm"` instead to embed a prebuilt core-Wasm module.
 # Exactly one of the two keys must be set.

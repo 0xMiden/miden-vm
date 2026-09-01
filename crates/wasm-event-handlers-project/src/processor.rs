@@ -18,7 +18,7 @@ use crate::{
 /// under assembly (its root target and its required libraries, whatever the target type).
 /// Source dependencies are never post-processed.
 ///
-/// The processor reads `[package.metadata.wasm-event-handlers]` (see the [crate] documentation
+/// The processor reads `[package.metadata.midenc.event-handlers]` (see the [crate] documentation
 /// for the schema). It builds the guest crate, or reads the prebuilt module, derives the
 /// `event_handlers` section from the module's own manifest records, and attaches the section to
 /// the package. A package that declares no such table passes through unchanged.

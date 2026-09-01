@@ -1,4 +1,4 @@
-//! The `[package.metadata.wasm-event-handlers]` table of a Miden project manifest.
+//! The `[package.metadata.midenc.event-handlers]` table of a Miden project manifest.
 
 use std::{
     fmt::Display,
@@ -8,8 +8,9 @@ use std::{
 use miden_assembly::diagnostics::Report;
 use miden_project::Package as ProjectPackage;
 
-/// The name of the metadata table the processor reads.
-pub(crate) const TABLE: &str = "wasm-event-handlers";
+/// The dotted name of the metadata table the processor reads: the `event-handlers` table
+/// inside the `midenc` namespace table.
+pub(crate) const TABLE: &str = "midenc.event-handlers";
 
 /// The key that names a Rust guest crate directory.
 const CRATE_KEY: &str = "crate";
@@ -40,7 +41,7 @@ impl HandlerSource {
 
 /// Reads the handler source that `package` declares.
 ///
-/// Returns `Ok(None)` when the package declares no `[package.metadata.wasm-event-handlers]`
+/// Returns `Ok(None)` when the package declares no `[package.metadata.midenc.event-handlers]`
 /// table. Paths in the table resolve against `project_root`, the directory that holds the
 /// manifest.
 ///
@@ -52,14 +53,24 @@ pub(crate) fn read(
     manifest_path: &Path,
     project_root: &Path,
 ) -> Result<Option<HandlerSource>, Report> {
-    let Some(table) = package.metadata().get(TABLE) else {
+    let (namespace, leaf) = TABLE.split_once('.').expect("the table name is namespaced");
+    let Some(namespace_table) = package.metadata().get(namespace) else {
         return Ok(None);
+    };
+    let Some(value) = namespace_table.get(leaf) else {
+        return Ok(None);
+    };
+    let Some(table) = value.inner().as_table() else {
+        return Err(error(
+            manifest_path,
+            format!("the value must be a table, but it is {}", value.inner().type_str()),
+        ));
     };
 
     let mut guest_crate = None;
     let mut module = None;
     for (key, value) in table {
-        let key = key.inner().as_ref();
+        let key = key.as_str();
         let slot = match key {
             CRATE_KEY => &mut guest_crate,
             MODULE_KEY => &mut module,
@@ -72,13 +83,10 @@ pub(crate) fn read(
                 ));
             },
         };
-        let path = value.inner().as_str().ok_or_else(|| {
+        let path = value.as_str().ok_or_else(|| {
             error(
                 manifest_path,
-                format!(
-                    "key '{key}' must be a string path, but it is {}",
-                    value.inner().type_str()
-                ),
+                format!("key '{key}' must be a string path, but it is {}", value.type_str()),
             )
         })?;
         let joined = project_root.join(path);

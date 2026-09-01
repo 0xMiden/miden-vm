@@ -1,7 +1,7 @@
 # miden-wasm-event-handlers-project
 
 A `PackagePostProcessor` plugin for the Miden project assembler. It reads the
-`[package.metadata.wasm-event-handlers]` table of a `miden-project.toml` manifest, produces the
+`[package.metadata.midenc.event-handlers]` table of a `miden-project.toml` manifest, produces the
 handler module the table names, and attaches the `event_handlers` section to every package of the
 project under assembly (its root target and its required libraries, whatever the target type).
 Source dependencies are never post-processed.

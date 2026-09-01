@@ -1,4 +1,4 @@
-//! The `[package.metadata.wasm-event-handlers]` table: its rules, its errors, and the section it
+//! The `[package.metadata.midenc.event-handlers]` table: its rules, its errors, and the section it
 //! attaches.
 //!
 //! These tests drive the real project assembler, so they pin what a developer sees from a build.
@@ -83,7 +83,7 @@ fn write_lib_and_bin_project(root: &Path) -> std::path::PathBuf {
 name = "handlerapp"
 version = "1.0.0"
 
-[package.metadata.wasm-event-handlers]
+[package.metadata.midenc.event-handlers]
 module = "handlers.wasm"
 
 [lib]
@@ -150,7 +150,7 @@ fn a_prebuilt_module_attaches_to_the_package() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
     write_handler_module(tempdir.path());
 
@@ -212,7 +212,7 @@ fn both_keys_set_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\ncrate = \"handlers\"\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\ncrate = \"handlers\"\nmodule = \"handlers.wasm\"\n",
     );
 
     let error = assemble_library_error(&manifest_path);
@@ -223,7 +223,8 @@ fn both_keys_set_is_an_error() {
 #[test]
 fn neither_key_set_is_an_error() {
     let tempdir = TempDir::new().unwrap();
-    let manifest_path = write_project(tempdir.path(), "\n[package.metadata.wasm-event-handlers]\n");
+    let manifest_path =
+        write_project(tempdir.path(), "\n[package.metadata.midenc.event-handlers]\n");
 
     let error = assemble_library_error(&manifest_path);
     assert!(
@@ -237,7 +238,7 @@ fn an_unknown_key_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\nfuel = 10\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\nfuel = 10\n",
     );
 
     let error = assemble_library_error(&manifest_path);
@@ -248,7 +249,7 @@ fn an_unknown_key_is_an_error() {
 fn a_value_of_the_wrong_type_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path =
-        write_project(tempdir.path(), "\n[package.metadata.wasm-event-handlers]\nmodule = 7\n");
+        write_project(tempdir.path(), "\n[package.metadata.midenc.event-handlers]\nmodule = 7\n");
 
     let error = assemble_library_error(&manifest_path);
     assert!(
@@ -262,7 +263,7 @@ fn a_missing_module_file_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
 
     let error = assemble_library_error(&manifest_path);
@@ -275,7 +276,7 @@ fn a_module_without_manifest_records_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
     // The module loads, but it carries no `miden:event-manifest` record.
     fs::write(
@@ -295,7 +296,7 @@ fn a_module_the_host_would_refuse_fails_the_build() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
     // The module exports no linear memory, so every host refuses it at load. Build-time
     // validation must refuse it here instead.
@@ -315,7 +316,7 @@ fn a_second_handler_section_is_an_error() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
     write_handler_module(tempdir.path());
 
@@ -355,7 +356,7 @@ fn a_source_path_is_read_once_per_processor() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_project(
         tempdir.path(),
-        "\n[package.metadata.wasm-event-handlers]\nmodule = \"handlers.wasm\"\n",
+        "\n[package.metadata.midenc.event-handlers]\nmodule = \"handlers.wasm\"\n",
     );
     write_handler_module(tempdir.path());
 

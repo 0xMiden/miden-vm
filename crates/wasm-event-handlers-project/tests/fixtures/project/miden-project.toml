@@ -5,7 +5,7 @@ name = "handlerapp"
 version = "1.0.0"
 description = "MASM project with Wasm event handlers"
 
-[package.metadata.wasm-event-handlers]
+[package.metadata.midenc.event-handlers]
 crate = "../guest"
 
 [[bin]]
