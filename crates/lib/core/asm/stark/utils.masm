@@ -208,7 +208,12 @@ end
 #! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
 #!
 #! This procedure uses `tmp1..tmp3` as a twelve-entry factorial table and clobbers
-#! their previous contents.
+#! their previous contents. Once a factorial entry has contributed to the tag, it is replaced
+#! by that proof position's canonical AIR index. Thus, on success,
+#! `tmp1 + (num_airs - 1 - proof_position)` stores the canonical AIR index at that position.
+#! Reading the first `num_airs` entries in descending address order therefore enumerates AIRs in
+#! proof order. This postcondition lets relation wrappers reuse the comparisons already paid for
+#! here instead of sorting the same heights again.
 #!
 #! Precondition: `num_airs >= 2`. The procedure rejects counts above `MAX_ORDER_AIRS = 12`, the
 #! largest count whose complete tag range fits in u32. The AIR count is relation metadata, never
@@ -285,7 +290,12 @@ pub proc derive_order_tag_from_heights
         # tag += inv * (num_airs - 1 - pos)!
         swap
         dup.5 sub.1 swap sub
-        exec.constants::tmp1 add mem_load
+        # Each proof position, and therefore each factorial slot, is used exactly once. Preserve
+        # the loaded weight, then replace its slot with k for proof-order consumers.
+        exec.constants::tmp1 add
+        dup mem_load
+        dup.4 dup.2 mem_store
+        swap drop
         mul
         movup.3 add movdn.2
         # => [h_k, k, tag', num_airs, heights_ptr]
