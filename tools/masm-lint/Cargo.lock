@@ -810,7 +810,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "log",
  "miden-assembly-syntax-cst",
@@ -829,23 +829,23 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax-cst"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "miden-debug-types",
  "miden-rowan",
  "miden-utils-diagnostics",
- "thiserror",
 ]
 
 [[package]]
 name = "miden-core"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "derive_more",
  "log",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
+ "miden-serde-utils",
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "blake3",
  "cc",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint 0.5.1",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -1025,15 +1025,16 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
+ "wincode",
 ]
 
 [[package]]
 name = "miden-stark-transcript"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1043,7 +1044,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.28.2"
+version = "0.31.0"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1051,7 +1052,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1060,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "miden-debug-types",
  "miden-miette",
@@ -1069,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "miden-serde-utils",
  "proptest",
@@ -1078,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.28.0"
+version = "0.31.0"
 dependencies = [
  "lock_api",
  "loom",
@@ -1088,12 +1089,10 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.9.1"
+version = "0.13.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
- "serde",
- "serde_repr",
  "smallvec",
  "thiserror",
 ]
@@ -1446,6 +1445,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1538,9 +1543,9 @@ dependencies = [
 
 [[package]]
 name = "proptest-derive"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb6dc647500e84a25a85b100e76c85b8ace114c209432dc174f20aac11d4ed6c"
+checksum = "c57924a81864dddafba92e1bf92f9bf82f97096c44489548a60e888e1547549b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1799,17 +1804,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_repr"
-version = "0.1.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -2233,6 +2227,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "wincode"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfc6339f1ba427bf7ad7c42403b28e524832ba2ddb5eef1bb2cc3b85db6b7b75"
+dependencies = [
+ "pastey",
+ "proc-macro2",
+ "quote",
+ "thiserror",
 ]
 
 [[package]]

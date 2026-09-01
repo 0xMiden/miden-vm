@@ -5,7 +5,8 @@ use std::sync::Arc;
 use masm_decompiler::analysis::{ProcSignature, SymbolPath, Workspace};
 use miden_assembly_syntax::ast::{
     FunctionType, GlobalItemIndex, ItemIndex, LocalSymbolResolver, Module, SymbolResolution,
-    SymbolResolutionError, TypeResolver, types::Type as AstType,
+    SymbolResolutionError, TypeResolver,
+    types::{self, Type as AstType, TypeTemplate},
 };
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan, Span, Spanned};
 
@@ -158,7 +159,7 @@ impl TypeResolver<SymbolResolutionError> for ModuleLocalTypeResolver<'_> {
         &mut self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
-    ) -> Result<AstType, SymbolResolutionError> {
+    ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
         Err(self.undefined(context))
     }
 
@@ -166,7 +167,7 @@ impl TypeResolver<SymbolResolutionError> for ModuleLocalTypeResolver<'_> {
         &mut self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<AstType>, SymbolResolutionError> {
+    ) -> Result<Option<TypeTemplate>, SymbolResolutionError> {
         let item_name = self.resolver.get_item_name(id);
         let Some(type_decl) = self
             .module
@@ -175,7 +176,7 @@ impl TypeResolver<SymbolResolutionError> for ModuleLocalTypeResolver<'_> {
         else {
             return Err(self.undefined(context));
         };
-        type_decl.ty().resolve_type(self)
+        type_decl.ty().resolve_template(self)
     }
 
     fn resolve_type_ref(
@@ -183,6 +184,14 @@ impl TypeResolver<SymbolResolutionError> for ModuleLocalTypeResolver<'_> {
         ty: Span<&miden_assembly_syntax::ast::Path>,
     ) -> Result<SymbolResolution, SymbolResolutionError> {
         self.resolver.resolve_path(ty)
+    }
+
+    fn finalize(
+        &mut self,
+        context: SourceSpan,
+        template: TypeTemplate,
+    ) -> Result<AstType, SymbolResolutionError> {
+        types::close_template(&template, |_| None).map_err(|_| self.undefined(context))
     }
 }
 
@@ -195,14 +204,14 @@ where
 {
     let mut inputs = 0usize;
     for arg in signature.args.iter() {
-        let ty = arg.resolve_type(resolver).ok().flatten()?;
+        let ty = resolver.resolve(arg).ok().flatten()?;
         let felts = type_felts(&ty)?;
         inputs = inputs.checked_add(felts)?;
     }
 
     let mut outputs = 0usize;
     for result in signature.results.iter() {
-        let ty = result.resolve_type(resolver).ok().flatten()?;
+        let ty = resolver.resolve(result).ok().flatten()?;
         let felts = type_felts(&ty)?;
         outputs = outputs.checked_add(felts)?;
     }
