@@ -32,8 +32,35 @@ const PROOF_ORDER_CASES: [(&str, LogHeights); 3] = [
 ];
 const AUX_VALUE_WIDTHS: [usize; 10] = [1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
 
-fn setup_masm(log_heights: &LogHeights) -> String {
+fn random_coin_setup_masm() -> String {
     let cv = INITIAL_CV;
+    format!(
+        r#"
+        push.{cv3}.{cv2}.{cv1}.{cv0}
+        exec.constants::random_coin_cv_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_block_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.0 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 exec.constants::random_coin_counter_ptr mem_store
+        "#,
+        cv0 = cv[0],
+        cv1 = cv[1],
+        cv2 = cv[2],
+        cv3 = cv[3],
+    )
+}
+
+fn direct_random_coin_setup_masm() -> String {
+    format!(
+        "{}\npush.{} exec.constants::set_aux_rand_elem_address",
+        random_coin_setup_masm(),
+        pvm_layout_const("AUX_RAND_ELEM_PTR")
+    )
+}
+
+fn setup_masm(log_heights: &LogHeights) -> String {
     let mut heights = String::new();
     for (index, &height) in log_heights.iter().enumerate() {
         let offset = if index == 0 {
@@ -47,22 +74,32 @@ fn setup_masm(log_heights: &LogHeights) -> String {
         )
         .expect("write height setup");
     }
+
+    let mut value_ptrs = [0_u32; 10];
+    let mut next_value_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+    for air_index in proof_order(log_heights) {
+        value_ptrs[air_index] = next_value_ptr;
+        next_value_ptr += u32::try_from(2 * AUX_VALUE_WIDTHS[air_index])
+            .expect("test auxiliary-value width must fit in u32");
+    }
+    let value_ptrs_base = pvm_layout_const("AUX_VALUE_PTRS_PTR");
+    let mut value_ptr_setup = String::new();
+    for (air_index, value_ptr) in value_ptrs.into_iter().enumerate() {
+        writeln!(
+            value_ptr_setup,
+            "push.{value_ptr} push.{} mem_store",
+            value_ptrs_base + u32::try_from(air_index).expect("AIR index must fit in u32")
+        )
+        .expect("write auxiliary-value pointer setup");
+    }
+
     format!(
         r#"
-        push.{cv3}.{cv2}.{cv1}.{cv0}
-        exec.constants::random_coin_cv_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_block_ptr mem_storew_le dropw
-        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_counter_ptr mem_store
+        {random_coin_setup}
         {heights}
+        {value_ptr_setup}
         "#,
-        cv0 = cv[0],
-        cv1 = cv[1],
-        cv2 = cv[2],
-        cv3 = cv[3],
+        random_coin_setup = direct_random_coin_setup_masm(),
     )
 }
 
@@ -94,6 +131,30 @@ fn hook_source(log_heights: &LogHeights) -> String {
         "#,
         setup_masm(log_heights)
     )
+}
+
+fn production_hook_source() -> String {
+    format!(
+        r#"
+        use miden::core::stark::constants
+        use miden::core::sys::pvm
+        use miden::core::sys::pvm::aux_trace
+
+        begin
+            {}
+            exec.pvm::load_air_context
+            exec.aux_trace::observe_aux_trace
+        end
+        "#,
+        random_coin_setup_masm()
+    )
+}
+
+fn air_context_source() -> &'static str {
+    "use miden::core::sys::pvm
+     begin
+         exec.pvm::load_air_context
+     end"
 }
 
 /// A deliberately straightforward transcript path: consume the same seven advice words through
@@ -377,6 +438,47 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
                 "{case}: aux commitment coordinate {i} mismatch"
             );
         }
+    }
+}
+
+#[test]
+fn pvm_aux_hook_uses_value_ptrs_materialized_by_air_context() {
+    for (case, log_heights) in PROOF_ORDER_CASES {
+        let (alpha, beta) = sampled_challenges(&log_heights);
+        let normalized_sums =
+            balanced_normalized_sums(fixed_boundary_correction(alpha, beta), &log_heights);
+        let proof_advice = advice(&normalized_sums, &log_heights);
+        let height_advice: Vec<u64> = log_heights.into_iter().map(u64::from).collect();
+
+        let (context_output, _) = build_test!(air_context_source(), &[], &height_advice)
+            .execute_for_output()
+            .unwrap_or_else(|error| panic!("{case}: PVM context load failed: {error}"));
+        let mut next_value_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+        let mut expected_value_ptrs = [0_u32; 10];
+        for air_index in proof_order(&log_heights) {
+            expected_value_ptrs[air_index] = next_value_ptr;
+            next_value_ptr += u32::try_from(2 * AUX_VALUE_WIDTHS[air_index])
+                .expect("test auxiliary-value width must fit in u32");
+        }
+        let value_ptrs_base = pvm_layout_const("AUX_VALUE_PTRS_PTR");
+        for (air_index, expected) in expected_value_ptrs.into_iter().enumerate() {
+            assert_eq!(
+                read_memory_felt(&context_output, value_ptrs_base + air_index as u32),
+                Felt::from_u32(expected),
+                "{case}: AIR {air_index} auxiliary-value pointer is wrong"
+            );
+        }
+
+        let combined_advice: Vec<u64> =
+            height_advice.into_iter().chain(proof_advice.iter().copied()).collect();
+
+        build_test!(&production_hook_source(), &[], &combined_advice)
+            .execute()
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{case}: production PVM context + aux hook rejected balanced boundary: {error}"
+                )
+            });
     }
 }
 
