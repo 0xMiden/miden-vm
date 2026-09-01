@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec};
+use alloc::boxed::Box;
 
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config, security};
 use miden_core::{
@@ -28,7 +28,7 @@ mod exports {
         Word,
         program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{
-            ExecutionProof, ExecutionProofVersion, HashFunction, PrecompileProof, StarkProof,
+            ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof, StarkProof,
             VersionedProof, VmProof,
         },
     };
@@ -53,6 +53,43 @@ const PVM_VERIFIER_ROOT_V1: Word = Word::new([
     Felt::new_unchecked(17782284996265163606),
 ]);
 
+struct VerifierSupport {
+    format: u8,
+    accepted_vm_roots: &'static [Word],
+    accepted_pvm_roots: &'static [Word],
+}
+
+impl VerifierSupport {
+    fn check(&self, proof: &VersionedProof) -> Result<(), VerificationError> {
+        let compatibility = proof.compatibility();
+        if compatibility.format() != self.format {
+            return Err(VerificationError::UnsupportedProofFormat(compatibility.format()));
+        }
+        if !roots_overlap(compatibility.vm_verifier_roots(), self.accepted_vm_roots) {
+            return Err(VerificationError::IncompatibleVmVerifier);
+        }
+        if !roots_overlap(compatibility.pvm_verifier_roots(), self.accepted_pvm_roots) {
+            return Err(VerificationError::IncompatiblePvmVerifier);
+        }
+
+        Ok(())
+    }
+
+    fn wrap(&self, proof: ExecutionProof) -> VersionedProof {
+        let compatibility = ExecutionProofCompatibility::new(
+            self.accepted_vm_roots.to_vec(),
+            self.accepted_pvm_roots.to_vec(),
+        );
+        VersionedProof::new(compatibility, proof)
+    }
+}
+
+const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
+    format: ExecutionProofCompatibility::FORMAT_V1,
+    accepted_vm_roots: &[VM_VERIFIER_ROOT_V1],
+    accepted_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
+};
+
 // VERIFIER
 // ================================================================================================
 
@@ -66,9 +103,9 @@ impl Verifier {
         Self
     }
 
-    /// Returns the execution proof version accepted by this verifier.
-    pub fn accepted_proof_version() -> ExecutionProofVersion {
-        ExecutionProofVersion::new(vec![VM_VERIFIER_ROOT_V1], vec![PVM_VERIFIER_ROOT_V1])
+    /// Wraps an execution proof in the current versioned transport format.
+    pub fn wrap_proof(proof: ExecutionProof) -> VersionedProof {
+        VERIFIER_SUPPORT_V1.wrap(proof)
     }
 
     /// Verifies a deferred or complete versioned execution proof against its public claim.
@@ -87,17 +124,9 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &VersionedProof,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let version = proof.version();
-        match version.format() {
-            ExecutionProofVersion::FORMAT_V1 => {
-                let accepted = Self::accepted_proof_version();
-                if !roots_overlap(version.vm_verifier_roots(), accepted.vm_verifier_roots()) {
-                    return Err(VerificationError::IncompatibleVmVerifier);
-                }
-                if !roots_overlap(version.pvm_verifier_roots(), accepted.pvm_verifier_roots()) {
-                    return Err(VerificationError::IncompatiblePvmVerifier);
-                }
-
+        match proof.compatibility().format() {
+            ExecutionProofCompatibility::FORMAT_V1 => {
+                VERIFIER_SUPPORT_V1.check(proof)?;
                 self.verify_v1(claim, proof.proof())
             },
             format => Err(VerificationError::UnsupportedProofFormat(format)),
@@ -481,7 +510,7 @@ mod tests {
     }
 
     fn versioned(proof: ExecutionProof) -> VersionedProof {
-        VersionedProof::new(Verifier::accepted_proof_version(), proof)
+        Verifier::wrap_proof(proof)
     }
 
     #[test]
@@ -630,14 +659,19 @@ mod tests {
 
     #[test]
     fn verifier_requires_compatible_vm_and_pvm_roots() {
-        let accepted = Verifier::accepted_proof_version();
         let proof = complete(TRUE_DIGEST, None);
         let incompatible_vm = VersionedProof::new(
-            ExecutionProofVersion::new(vec![root(100)], accepted.pvm_verifier_roots().to_vec()),
+            ExecutionProofCompatibility::new(
+                vec![root(100)],
+                VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
+            ),
             proof.clone(),
         );
         let incompatible_pvm = VersionedProof::new(
-            ExecutionProofVersion::new(accepted.vm_verifier_roots().to_vec(), vec![root(200)]),
+            ExecutionProofCompatibility::new(
+                VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
+                vec![root(200)],
+            ),
             proof,
         );
 

@@ -218,7 +218,7 @@ impl ProofFile {
             None => program_path.with_extension("proof"),
         };
 
-        let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
+        let proof = Verifier::wrap_proof(proof);
         let proof_bytes = proof.to_bytes();
         tracing::Span::current()
             .record("size", tracing::field::display(format!("{} KB", proof_bytes.len() / 1024)));

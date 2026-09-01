@@ -688,7 +688,7 @@ impl Test {
             .unwrap();
         let claim =
             ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
-        let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
+        let proof = Verifier::wrap_proof(proof);
         if test_fail {
             let mut elements = [ZERO; MIN_STACK_DEPTH];
             elements.copy_from_slice(&*stack_outputs);

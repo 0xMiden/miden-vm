@@ -222,10 +222,10 @@ orphans are dropped.
 
 `VersionedProof::to_bytes` is infallible, and `VersionedProof::read_from_bytes` decodes canonical
 transport without a registry or hydration. When precompile proving is required, the caller splits
-the envelope with `into_parts` and keeps its version. The caller passes the raw deferred proof's wire
-to `miden_vm::precompile_witness_from_wire`. After completion, the caller wraps the proof with the
-same version before verification. The hydration step uses the bundled registry and validates the
-wire's implicit root.
+the envelope with `into_parts` and keeps its compatibility declaration. The caller passes the raw
+deferred proof's wire to `miden_vm::precompile_witness_from_wire`. After completion, the caller wraps
+the proof with the same declaration before verification. The hydration step uses the bundled
+registry and validates the wire's implicit root.
 
 Hydration performs structural decoding, a canonicality check, and root evaluation:
 

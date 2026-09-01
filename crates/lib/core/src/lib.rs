@@ -212,6 +212,10 @@ pub fn conjectured_security_estimator_root() -> Word {
 
 #[cfg(test)]
 mod tests {
+    use miden_core::{
+        deferred::TRUE_DIGEST,
+        proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    };
     use miden_verifier::Verifier;
 
     use super::*;
@@ -242,13 +246,24 @@ mod tests {
     }
 
     #[test]
-    fn accepted_proof_roots_match_the_embedded_core_library() {
+    fn wrapped_proof_roots_match_the_embedded_core_library() {
         let core_lib = CoreLibrary::default();
-        let accepted = Verifier::accepted_proof_version();
+        let proof = ExecutionProof::Complete {
+            vm: VmProof {
+                proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+                precompile_root: TRUE_DIGEST,
+            },
+            precompile: None,
+        };
+        let wrapped = Verifier::wrap_proof(proof);
+        let compatibility = wrapped.compatibility();
 
-        assert_eq!(accepted.vm_verifier_roots().last(), Some(&core_lib.recursive_verifier_root()),);
         assert_eq!(
-            accepted.pvm_verifier_roots().last(),
+            compatibility.vm_verifier_roots().last(),
+            Some(&core_lib.recursive_verifier_root()),
+        );
+        assert_eq!(
+            compatibility.pvm_verifier_roots().last(),
             Some(&core_lib.pvm_recursive_verifier_root()),
         );
     }

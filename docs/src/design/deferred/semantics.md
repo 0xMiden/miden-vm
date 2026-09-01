@@ -172,8 +172,8 @@ hold an inconsistent artifact. None of these operations establishes validity.
 `Verifier::verify_precompile` validates the precompile proof shape, expected root membership,
 ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
 an expected outstanding root and returns the artifact's security level. `Verifier::verify` checks
-the proof version and execution lifecycle before it verifies the VM STARK. It reuses
-`verify_precompile` for complete proofs. A successful deferred verification returns only the
+the proof's compatibility declaration and execution lifecycle before it verifies the VM STARK. It
+reuses `verify_precompile` for complete proofs. A successful deferred verification returns only the
 authenticated outstanding VM root. A successful complete verification has no outstanding
 obligation.
 
@@ -184,9 +184,9 @@ obligation.
 rejects trailing bytes, and remains registry-free. The envelope stores the transport format and the
 compatible VM and PVM verifier root histories. Decoding selects the format-specific proof decoder.
 Native verification requires a shared VM root and a shared PVM root with
-`Verifier::accepted_proof_version()`. Transport preserves the represented lifecycle variant without
-validating consistency between artifacts. `DeferredStateWire` is passive until the bundled façade
-hydration step.
+the verifier's private support policy. Callers use `Verifier::wrap_proof` to create a new transport
+artifact. Transport preserves the represented lifecycle variant without validating consistency
+between artifacts. `DeferredStateWire` is passive until the bundled façade hydration step.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and

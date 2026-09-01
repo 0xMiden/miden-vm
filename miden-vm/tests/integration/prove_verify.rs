@@ -16,7 +16,7 @@ use miden_vm::{
 };
 
 fn versioned(proof: ExecutionProof) -> VersionedProof {
-    VersionedProof::new(Verifier::accepted_proof_version(), proof)
+    Verifier::wrap_proof(proof)
 }
 
 fn masm_push_felts(felts: &[Felt]) -> String {
@@ -259,7 +259,7 @@ mod prover_api_lifecycle {
     };
 
     fn versioned(proof: ExecutionProof) -> VersionedProof {
-        VersionedProof::new(Verifier::accepted_proof_version(), proof)
+        Verifier::wrap_proof(proof)
     }
 
     fn assemble(source: &str) -> Program {
@@ -563,7 +563,7 @@ mod execution_witness_serialization {
     use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
 
     fn versioned(proof: ExecutionProof) -> VersionedProof {
-        VersionedProof::new(Verifier::accepted_proof_version(), proof)
+        Verifier::wrap_proof(proof)
     }
 
     fn default_source_manager_host() -> DefaultHost {

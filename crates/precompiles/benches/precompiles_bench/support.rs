@@ -2,7 +2,7 @@ use miden_core::{Felt, program::ExecutionClaim};
 use miden_core_lib::CoreLibrary;
 use miden_vm::{
     Assembler, DefaultHost, ExecutionOptions, ExecutionProof, FastProcessor, HashFunction, Program,
-    Prover, StackInputs, StackOutputs, Verifier, VersionedProof, advice::AdviceInputs,
+    Prover, StackInputs, StackOutputs, Verifier, advice::AdviceInputs,
 };
 
 use self::input_generation::generate_advice_inputs;
@@ -117,7 +117,7 @@ pub fn verify_once(
         fixture.stack_inputs,
         stack_outputs,
     );
-    let proof = VersionedProof::new(Verifier::accepted_proof_version(), proof);
+    let proof = Verifier::wrap_proof(proof);
     let outcome = Verifier::new()
         .verify(&claim, &proof)
         .expect("failed to verify precompile benchmark proof");

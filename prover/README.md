@@ -33,11 +33,11 @@ let claim = witness.claim();
 let prover = Prover::new();
 let deferred = prover.prove(witness)?;
 
-// Add the current version, then transport and decode the proof without a registry.
-let versioned = VersionedProof::new(Verifier::accepted_proof_version(), deferred);
+// Add the current compatibility declaration, then transport and decode without a registry.
+let versioned = Verifier::wrap_proof(deferred);
 let bytes = versioned.to_bytes();
 let transported = VersionedProof::read_from_bytes(&bytes)?;
-let (version, proof) = transported.into_parts();
+let (compatibility, proof) = transported.into_parts();
 let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
     unreachable!("precompile proving is only needed for deferred proofs");
 };
@@ -45,7 +45,7 @@ let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
 // Hydration installs the bundled registry only when precompile proving begins.
 let precompile_witness = precompile_witness_from_wire(wire)?;
 let precompile_proof = prover.prove_precompile(&precompile_witness)?;
-let complete = VersionedProof::new(version, proof.complete(precompile_proof)?);
+let complete = VersionedProof::new(compatibility, proof.complete(precompile_proof)?);
 let outcome = Verifier::new().verify(&claim, &complete)?;
 assert!(outcome.is_complete());
 ```

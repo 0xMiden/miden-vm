@@ -217,22 +217,22 @@ impl Deserializable for PrecompileProof {
 const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
 const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
-/// The transport format and recursive verifier roots supported by an execution proof.
+/// The transport format and recursive verifier roots declared by an execution proof.
 ///
 /// Verifier roots are listed in chronological order, with the newest root last. Root order does
 /// not affect compatibility checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionProofVersion {
+pub struct ExecutionProofCompatibility {
     format: u8,
     vm_verifier_roots: Vec<Word>,
     pvm_verifier_roots: Vec<Word>,
 }
 
-impl ExecutionProofVersion {
+impl ExecutionProofCompatibility {
     /// The first execution proof transport format.
     pub const FORMAT_V1: u8 = 1;
 
-    /// Creates a proof version for format `1`.
+    /// Creates a proof compatibility declaration for format `1`.
     pub fn new(vm_verifier_roots: Vec<Word>, pvm_verifier_roots: Vec<Word>) -> Self {
         Self {
             format: Self::FORMAT_V1,
@@ -260,19 +260,19 @@ impl ExecutionProofVersion {
 /// A versioned execution proof transport artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionedProof {
-    version: ExecutionProofVersion,
+    compatibility: ExecutionProofCompatibility,
     proof: ExecutionProof,
 }
 
 impl VersionedProof {
     /// Creates a versioned proof for transport.
-    pub const fn new(version: ExecutionProofVersion, proof: ExecutionProof) -> Self {
-        Self { version, proof }
+    pub const fn new(compatibility: ExecutionProofCompatibility, proof: ExecutionProof) -> Self {
+        Self { compatibility, proof }
     }
 
-    /// Returns this proof's transport and verifier version.
-    pub const fn version(&self) -> &ExecutionProofVersion {
-        &self.version
+    /// Returns the compatibility declared by this proof.
+    pub const fn compatibility(&self) -> &ExecutionProofCompatibility {
+        &self.compatibility
     }
 
     /// Returns the execution proof payload.
@@ -280,9 +280,9 @@ impl VersionedProof {
         &self.proof
     }
 
-    /// Splits this artifact into its version and execution proof.
-    pub fn into_parts(self) -> (ExecutionProofVersion, ExecutionProof) {
-        (self.version, self.proof)
+    /// Splits this artifact into its compatibility declaration and execution proof.
+    pub fn into_parts(self) -> (ExecutionProofCompatibility, ExecutionProof) {
+        (self.compatibility, self.proof)
     }
 
     /// Encodes this proof canonically.
@@ -312,9 +312,9 @@ impl VersionedProof {
 
 impl Serializable for VersionedProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version.format);
-        self.version.vm_verifier_roots.write_into(target);
-        self.version.pvm_verifier_roots.write_into(target);
+        target.write_u8(self.compatibility.format);
+        self.compatibility.vm_verifier_roots.write_into(target);
+        self.compatibility.pvm_verifier_roots.write_into(target);
         self.proof.write_into_v1(target);
     }
 }
@@ -322,7 +322,7 @@ impl Serializable for VersionedProof {
 impl Deserializable for VersionedProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let format = source.read_u8()?;
-        if format != ExecutionProofVersion::FORMAT_V1 {
+        if format != ExecutionProofCompatibility::FORMAT_V1 {
             return Err(DeserializationError::InvalidValue(format!(
                 "unsupported execution proof format {format}"
             )));
@@ -333,7 +333,7 @@ impl Deserializable for VersionedProof {
         let proof = ExecutionProof::read_from_v1(source)?;
 
         Ok(Self {
-            version: ExecutionProofVersion {
+            compatibility: ExecutionProofCompatibility {
                 format,
                 vm_verifier_roots,
                 pvm_verifier_roots,
@@ -541,16 +541,17 @@ mod tests {
 
     fn versioned(proof: ExecutionProof) -> VersionedProof {
         VersionedProof::new(
-            ExecutionProofVersion::new(vec![root(11), root(12)], vec![root(21)]),
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]),
             proof,
         )
     }
 
     fn version_prefix() -> Vec<u8> {
-        let version = ExecutionProofVersion::new(vec![root(11), root(12)], vec![root(21)]);
-        let mut bytes = vec![version.format()];
-        version.vm_verifier_roots().to_vec().write_into(&mut bytes);
-        version.pvm_verifier_roots().to_vec().write_into(&mut bytes);
+        let compatibility =
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]);
+        let mut bytes = vec![compatibility.format()];
+        compatibility.vm_verifier_roots().to_vec().write_into(&mut bytes);
+        compatibility.pvm_verifier_roots().to_vec().write_into(&mut bytes);
         bytes
     }
 
@@ -586,17 +587,17 @@ mod tests {
         let bytes = proof.to_bytes();
         let decoded = VersionedProof::read_from_bytes(&bytes).unwrap();
 
-        assert_eq!(bytes[0], ExecutionProofVersion::FORMAT_V1);
+        assert_eq!(bytes[0], ExecutionProofCompatibility::FORMAT_V1);
         assert_eq!(decoded, proof);
-        assert_eq!(decoded.version().format(), ExecutionProofVersion::FORMAT_V1);
-        assert_eq!(decoded.version().vm_verifier_roots(), &[root(11), root(12)]);
-        assert_eq!(decoded.version().pvm_verifier_roots(), &[root(21)]);
+        assert_eq!(decoded.compatibility().format(), ExecutionProofCompatibility::FORMAT_V1);
+        assert_eq!(decoded.compatibility().vm_verifier_roots(), &[root(11), root(12)]);
+        assert_eq!(decoded.compatibility().pvm_verifier_roots(), &[root(21)]);
     }
 
     #[test]
     fn versioned_proof_decoder_rejects_unknown_format_before_body() {
-        let error =
-            VersionedProof::read_from_bytes(&[ExecutionProofVersion::FORMAT_V1 + 1]).unwrap_err();
+        let error = VersionedProof::read_from_bytes(&[ExecutionProofCompatibility::FORMAT_V1 + 1])
+            .unwrap_err();
 
         assert!(
             matches!(error, DeserializationError::InvalidValue(message) if message.contains("unsupported execution proof format 2"))
@@ -626,7 +627,7 @@ mod tests {
 
     #[test]
     fn versioned_proof_decoder_applies_the_input_budget_to_root_lists() {
-        let mut bytes = vec![ExecutionProofVersion::FORMAT_V1];
+        let mut bytes = vec![ExecutionProofCompatibility::FORMAT_V1];
         bytes.write_usize(usize::MAX);
 
         let error = VersionedProof::read_from_bytes(&bytes).unwrap_err();
