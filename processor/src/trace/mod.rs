@@ -555,7 +555,7 @@ mod wire_tests {
     use miden_core::deferred::TRUE_DIGEST;
 
     use super::{ExecutionWitness, Serializable};
-    use crate::{DefaultHost, FastProcessor, StackInputs};
+    use crate::{DefaultHost, FastProcessor, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -568,8 +568,12 @@ mod wire_tests {
             .expect("execution should produce a witness")
     }
 
+    fn deferred_witness() -> ExecutionWitness {
+        execution_witness("begin log_deferred end")
+    }
+
     fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
-        execution_witness("begin log_deferred end").to_bytes()
+        deferred_witness().to_bytes()
     }
 
     #[test]
@@ -613,6 +617,27 @@ mod wire_tests {
             ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok(),
             "the explicit trusted reader should preserve the old permissive behavior"
         );
+    }
+
+    #[test]
+    fn witness_wire_accepts_large_minimally_encoded_continuation_stack() {
+        let mut witness = deferred_witness();
+        let continuation = &mut witness
+            .vm
+            .trace_replay_mut()
+            .core_trace_contexts
+            .first_mut()
+            .expect("witness should contain a trace fragment")
+            .continuation;
+        for _ in 0..4096 {
+            continuation.push_start_node(MastNodeId::from(0));
+        }
+
+        let bytes = witness.to_bytes();
+        let restored = ExecutionWitness::read_from_bytes(&bytes)
+            .expect("valid witness should fit its input-proportional allocation budget");
+
+        assert_eq!(restored.to_bytes(), bytes);
     }
 
     #[test]
