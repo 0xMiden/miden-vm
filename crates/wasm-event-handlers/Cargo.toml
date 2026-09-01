@@ -1,0 +1,61 @@
+[package]
+name = "miden-wasm-event-handlers"
+version = "0.31.0"
+description = "Host-side runner for Wasm-compiled Miden VM event handlers"
+documentation = "https://docs.rs/miden-wasm-event-handlers"
+readme = "README.md"
+categories = ["no-std", "wasm"]
+keywords = ["events", "miden", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+std = [
+    "miden-crypto/std",
+    "miden-mast-package/std",
+    "miden-processor/std",
+    "thiserror/std",
+    "wasmi/std",
+]
+
+[dependencies]
+# Miden dependencies
+miden-crypto.workspace = true
+miden-event-handler-abi.workspace = true
+miden-mast-package.workspace = true
+miden-processor.workspace = true
+
+# External dependencies
+thiserror.workspace = true
+# The 'simd' feature is enabled ON PURPOSE: only with it does wasmi expose the
+# Config::wasm_simd/wasm_relaxed_simd setters, and the loader calls both with `false`. Without
+# the feature, SIMD acceptance would follow `cfg!(feature = "simd")` — any crate in a
+# consumer's dependency graph could then flip it through Cargo feature unification.
+wasmi = { workspace = true, features = ["simd"] }
+
+[dev-dependencies]
+miden-assembly.workspace = true
+# `testing` provides `FastProcessor::execute_mut_sync`, which the fuel-calibration bench needs to
+# keep the processor whose memory a program populated.
+miden-processor = { workspace = true, features = ["testing"] }
+wat.workspace = true
+# The import-set test parses the guest fixture with the same parser the loader uses.
+wasmi.workspace = true
+
+# criterion does not build for wasm targets, and the wasip1 smoke test compiles the
+# dev-dependency set.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "handler_call"
+harness = false

@@ -1,6 +1,7 @@
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
 mod error;
+mod event_handlers;
 mod id;
 mod manifest;
 mod section;
@@ -32,11 +33,15 @@ use miden_core::{
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::KernelDescriptor,
-    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
+    serde::{ByteWriter, Deserializable, Serializable},
 };
 
 pub use self::{
     error::{PackageDebugInfoError, PackageStripError},
+    event_handlers::{
+        EventHandlerManifestEntry, EventHandlerSection, EventHandlerSectionError, MAX_HANDLERS,
+        MAX_MODULE_BYTES, MAX_NAME_BYTES, MIN_ABI_VERSION, validate_manifest_entries,
+    },
     id::PackageId,
     manifest::{
         ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
@@ -51,6 +56,7 @@ use crate::{
         DebugFunctionIdx, DebugFunctionInfo, DebugSourceNode, DebugSourceNodeId, DebugStringIdx,
         DebugTypeIdx, DebugTypeInfo, PackageDebugInfo,
     },
+    serde_helpers::{PayloadError, read_payload_with_budget},
 };
 
 // PACKAGE
@@ -263,8 +269,9 @@ impl Package {
 
     /// Returns the commitment used to identify this package during dependency resolution.
     ///
-    /// This binds the package code, identity, manifest, and sections which affect package use.
-    /// Optional debug data, descriptions, and opaque custom sections are excluded.
+    /// This binds the package code, identity, manifest, and sections which affect package use
+    /// (account component metadata and event handlers). Optional debug data, descriptions, and
+    /// opaque custom sections are excluded.
     pub fn dependency_commitment(&self) -> Word {
         let mut bytes = Vec::new();
         bytes.write_bytes(b"miden.package.dependency.v1");
@@ -278,11 +285,27 @@ impl Package {
     }
 
     fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
-        let sections = self
+        // Event-handler code decides the advice a program receives, so the section affects
+        // package use: two packages that differ only in handler code must not share a
+        // dependency identity.
+        let mut sections = self
             .sections
             .iter()
-            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .filter(|section| {
+                section.id == SectionId::ACCOUNT_COMPONENT_METADATA
+                    || section.id == SectionId::EVENT_HANDLERS
+            })
             .collect::<Vec<_>>();
+        // The commitment must not depend on the order in which the sections were attached, so
+        // the sections go into the preimage in a canonical order. The on-disk order does not
+        // change. The data breaks a tie on the ID: a malformed package can carry two sections
+        // with the same ID, and the commitment of such a package must still not depend on the
+        // attach order.
+        sections.sort_by(|a, b| {
+            a.id.as_str()
+                .cmp(b.id.as_str())
+                .then_with(|| a.data.as_ref().cmp(b.data.as_ref()))
+        });
         target.write_usize(sections.len());
         for section in sections {
             section.write_into(target);
@@ -644,17 +667,31 @@ impl Package {
         Ok(modules_by_path.into_values().collect())
     }
 
+    /// Returns the section with `id`, or `None` when the package has no section with that ID.
+    ///
+    /// # Errors
+    /// Returns an error when the package has more than one section with `id`. Every accessor of
+    /// a well-known section applies this rule: a second section with the same ID makes the
+    /// content of the package ambiguous.
+    fn single_section(&self, id: &SectionId) -> Result<Option<&Section>, DuplicateSectionError> {
+        let mut sections = self.sections.iter().filter(|section| &section.id == id);
+        let section = sections.next();
+        if sections.next().is_some() {
+            return Err(DuplicateSectionError);
+        }
+        Ok(section)
+    }
+
     fn read_debug_section<T>(&self, id: SectionId) -> Result<Option<T>, PackageDebugInfoError>
     where
         T: Deserializable,
     {
-        let mut sections = self.sections.iter().filter(|section| section.id == id);
-        let Some(section) = sections.next() else {
+        let section = self
+            .single_section(&id)
+            .map_err(|_| PackageDebugInfoError::DuplicateSection { id: id.clone() })?;
+        let Some(section) = section else {
             return Ok(None);
         };
-        if sections.next().is_some() {
-            return Err(PackageDebugInfoError::DuplicateSection { id });
-        }
 
         read_section_payload(&id, section.data.as_ref()).map(Some)
     }
@@ -1118,17 +1155,20 @@ impl Package {
     }
 }
 
+/// The package has more than one section with a given ID.
+struct DuplicateSectionError;
+
+/// Decodes the payload of a well-known package section under a byte budget.
 fn read_section_payload<T>(id: &SectionId, bytes: &[u8]) -> Result<T, PackageDebugInfoError>
 where
     T: Deserializable,
 {
-    let mut reader = SliceReader::new(bytes);
-    let section = T::read_from(&mut reader)
-        .map_err(|source| PackageDebugInfoError::DecodeSection { id: id.clone(), source })?;
-    if reader.has_more_bytes() {
-        return Err(PackageDebugInfoError::TrailingBytes { id: id.clone() });
-    }
-    Ok(section)
+    read_payload_with_budget(bytes).map_err(|err| match err {
+        PayloadError::Decode(source) => {
+            PackageDebugInfoError::DecodeSection { id: id.clone(), source }
+        },
+        PayloadError::TrailingBytes => PackageDebugInfoError::TrailingBytes { id: id.clone() },
+    })
 }
 
 /// Conversions
@@ -1204,6 +1244,61 @@ impl Package {
         self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
     }
 
+    /// Decodes the [`EventHandlerSection`] of this package, if present.
+    ///
+    /// Returns `Ok(None)` when the package has no `event_handlers` section.
+    ///
+    /// # Errors
+    /// Returns an error when the package contains more than one `event_handlers` section, when
+    /// the section payload fails to decode (including size-cap violations), when bytes follow
+    /// the encoded section, or when the decoded section fails
+    /// [`EventHandlerSection::validate`].
+    pub fn event_handlers(&self) -> Result<Option<EventHandlerSection>, EventHandlerSectionError> {
+        let section = self
+            .single_section(&SectionId::EVENT_HANDLERS)
+            .map_err(|_| EventHandlerSectionError::DuplicateSection)?;
+        let Some(section) = section else {
+            return Ok(None);
+        };
+        EventHandlerSection::from_payload(section.data.as_ref()).map(Some)
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package.
+    ///
+    /// The section is semantic package content: it becomes part of
+    /// [`Self::dependency_commitment`], and the manifest order inside the section is canonical.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when the
+    /// section fails [`EventHandlerSection::validate`].
+    pub fn with_event_handlers(
+        mut self,
+        section: &EventHandlerSection,
+    ) -> Result<Self, EventHandlerSectionError> {
+        self.attach_event_handlers(section)?;
+        Ok(self)
+    }
+
+    /// Attaches an [`EventHandlerSection`] to this package in place.
+    ///
+    /// The same operation as [`Self::with_event_handlers`], for callers that hold the package by
+    /// mutable reference. On error the package is unchanged.
+    ///
+    /// # Errors
+    /// Returns an error when the package already has an `event_handlers` section, or when the
+    /// section fails [`EventHandlerSection::validate`].
+    pub fn attach_event_handlers(
+        &mut self,
+        section: &EventHandlerSection,
+    ) -> Result<(), EventHandlerSectionError> {
+        if self.sections.iter().any(|existing| existing.id == SectionId::EVENT_HANDLERS) {
+            return Err(EventHandlerSectionError::AlreadyPresent);
+        }
+        section.validate()?;
+        self.sections.push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        Ok(())
+    }
+
     /// Extract the embedded kernel package from this package.
     ///
     /// Returns `Ok(None)` if the kernel custom section is not present.
@@ -1229,7 +1324,14 @@ impl Package {
     /// * There are duplicate KERNEL sections
     /// * Deserialization of a package from the KERNEL section fails
     fn embedded_kernel_package(&self) -> Result<Option<Box<Self>>, Report> {
-        let Some(section) = self.embedded_kernel_section()? else {
+        let section = self.single_section(&SectionId::KERNEL).map_err(|_| {
+            Report::msg(format!(
+                "package '{}' contains multiple '{}' sections",
+                self.name,
+                SectionId::KERNEL
+            ))
+        })?;
+        let Some(section) = section else {
             return Ok(None);
         };
 
@@ -1242,21 +1344,6 @@ impl Package {
                     self.name
                 ))
             })
-    }
-
-    fn embedded_kernel_section(&self) -> Result<Option<&Section>, Report> {
-        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
-        let Some(section) = sections.next() else {
-            return Ok(None);
-        };
-        if sections.next().is_some() {
-            return Err(Report::msg(format!(
-                "package '{}' contains multiple '{}' sections",
-                self.name,
-                SectionId::KERNEL
-            )));
-        }
-        Ok(Some(section))
     }
 
     fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
@@ -1294,6 +1381,11 @@ impl Package {
     }
 
     /// Get a [Dependency] that represents this package
+    ///
+    /// The dependency digest is [`Self::dependency_commitment`], which binds the package code,
+    /// identity, manifest, and the sections that affect package use — the `event_handlers`
+    /// section included: two packages that differ only in handler code have different
+    /// dependency digests.
     pub fn to_dependency(&self) -> Dependency {
         Dependency {
             name: self.name.clone(),
@@ -1662,6 +1754,221 @@ mod tests {
         assert_ne!(code_commitment, with_advice.code_commitment());
         assert_eq!(artifacts_commitment, with_advice.artifacts_commitment());
         assert_ne!(package_commitment, with_advice.commitment());
+    }
+
+    /// Returns a valid `event_handlers` section with one manifest entry, for the tests that
+    /// attach a section to a package.
+    fn sample_event_handlers() -> EventHandlerSection {
+        EventHandlerSection {
+            abi_version: 1,
+            // The 8-byte header of an empty Wasm module.
+            module: vec![0, 97, 115, 109, 1, 0, 0, 0],
+            handlers: vec![EventHandlerManifestEntry::new(
+                miden_core::events::EventName::new("test::wasm::handler"),
+                "handler",
+            )],
+        }
+    }
+
+    #[test]
+    fn event_handler_section_roundtrips_through_package_serialization() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        let bytes = package.to_bytes();
+        let decoded = Package::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.event_handlers().unwrap(), Some(section));
+    }
+
+    #[test]
+    fn event_handler_section_binds_the_dependency_commitment() {
+        let package = build_kernel_package("kernel");
+        let without = package.dependency_commitment();
+
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+        let with_digest = with_handlers.dependency_commitment();
+        assert_ne!(without, with_digest, "attaching handlers must change the identity");
+
+        // A change in only the handler bytes must change the identity.
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let other = package.with_event_handlers(&other_section).unwrap();
+        assert_ne!(with_digest, other.dependency_commitment());
+
+        // The identity is stable across serialization roundtrips.
+        let decoded = Package::read_from_bytes(&with_handlers.to_bytes()).unwrap();
+        assert_eq!(with_digest, decoded.dependency_commitment());
+    }
+
+    #[test]
+    fn dependency_commitment_does_not_depend_on_the_semantic_section_order() {
+        let metadata = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![7, 8, 9]);
+        let handlers = Section::new(SectionId::EVENT_HANDLERS, sample_event_handlers().to_bytes());
+
+        let mut metadata_first = build_kernel_package("kernel");
+        metadata_first.sections.push(metadata.clone());
+        metadata_first.sections.push(handlers.clone());
+
+        let mut handlers_first = build_kernel_package("kernel");
+        handlers_first.sections.push(handlers);
+        handlers_first.sections.push(metadata);
+
+        assert_eq!(metadata_first.dependency_commitment(), handlers_first.dependency_commitment());
+    }
+
+    #[test]
+    fn dependency_digest_binds_the_event_handlers_section() {
+        // Handler code decides the advice a program receives, so it affects package use: two
+        // packages that differ only in handler code must not resolve as one dependency.
+        let package = build_kernel_package("kernel");
+        let with_handlers = package.clone().with_event_handlers(&sample_event_handlers()).unwrap();
+
+        let mut other_section = sample_event_handlers();
+        other_section.module.push(0);
+        let with_other_handlers = package.with_event_handlers(&other_section).unwrap();
+
+        assert_ne!(
+            with_handlers.to_dependency().digest,
+            with_other_handlers.to_dependency().digest
+        );
+    }
+
+    #[test]
+    fn event_handler_section_with_trailing_bytes_is_rejected() {
+        let mut package = build_kernel_package("kernel");
+        let mut data = sample_event_handlers().to_bytes();
+        data.extend_from_slice(&[0xde, 0xad]);
+        package.sections.push(Section::new(SectionId::EVENT_HANDLERS, data));
+
+        assert!(matches!(package.event_handlers(), Err(EventHandlerSectionError::TrailingBytes)));
+    }
+
+    #[test]
+    fn duplicate_event_handler_sections_are_rejected() {
+        let section = sample_event_handlers();
+        let package = build_kernel_package("kernel").with_event_handlers(&section).unwrap();
+
+        // A second attach is rejected.
+        assert!(matches!(
+            package.clone().with_event_handlers(&section),
+            Err(EventHandlerSectionError::AlreadyPresent)
+        ));
+
+        // A manually duplicated section is rejected on access.
+        let mut broken = package;
+        broken
+            .sections
+            .push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+        assert!(matches!(
+            broken.event_handlers(),
+            Err(EventHandlerSectionError::DuplicateSection)
+        ));
+    }
+
+    #[test]
+    fn oversized_event_handler_section_is_rejected_on_attach() {
+        let mut section = sample_event_handlers();
+        // The names are zero-padded, so the manifest is in the canonical order and the count is
+        // the only rule it breaks.
+        section.handlers = (0..=MAX_HANDLERS)
+            .map(|idx| {
+                EventHandlerManifestEntry::new(
+                    miden_core::events::EventName::from_string(format!("test::wasm::h{idx:03}")),
+                    format!("h{idx}"),
+                )
+            })
+            .collect();
+        assert!(matches!(
+            build_kernel_package("kernel").with_event_handlers(&section),
+            Err(EventHandlerSectionError::TooManyHandlers { max: MAX_HANDLERS })
+        ));
+    }
+
+    #[test]
+    fn invalid_event_handler_section_is_rejected_on_attach() {
+        use miden_core::events::EventName;
+
+        let with_handlers = |handlers| {
+            let mut section = sample_event_handlers();
+            section.handlers = handlers;
+            build_kernel_package("kernel").with_event_handlers(&section)
+        };
+
+        // An empty export name names no export.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::new("test::wasm::handler"),
+                "",
+            )]),
+            Err(EventHandlerSectionError::EmptyName { field: "export name" })
+        ));
+
+        // An empty event name names no event.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::from_string(String::new()),
+                "handler",
+            )]),
+            Err(EventHandlerSectionError::EmptyName { field: "event name" })
+        ));
+
+        // Two handlers for one event cannot both register.
+        assert!(matches!(
+            with_handlers(vec![
+                EventHandlerManifestEntry::new(EventName::new("test::wasm::handler"), "a"),
+                EventHandlerManifestEntry::new(EventName::new("test::wasm::handler"), "b"),
+            ]),
+            Err(EventHandlerSectionError::DuplicateEvent { .. })
+        ));
+
+        // The reserved namespace belongs to the VM.
+        assert!(matches!(
+            with_handlers(vec![EventHandlerManifestEntry::new(
+                EventName::new("sys::handler"),
+                "handler",
+            )]),
+            Err(EventHandlerSectionError::ReservedEventName { .. })
+        ));
+
+        // Version 0 names no ABI contract.
+        let mut section = sample_event_handlers();
+        section.abi_version = 0;
+        assert!(matches!(
+            build_kernel_package("kernel").with_event_handlers(&section),
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn invalid_event_handler_section_is_rejected_on_access() {
+        // A section can reach a package without the attach path, for example over the wire.
+        let mut section = sample_event_handlers();
+        section.abi_version = 0;
+        let mut package = build_kernel_package("kernel");
+        package
+            .sections
+            .push(Section::new(SectionId::EVENT_HANDLERS, section.to_bytes()));
+
+        assert!(matches!(
+            package.event_handlers(),
+            Err(EventHandlerSectionError::InvalidAbiVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn dependency_commitment_does_not_depend_on_the_order_of_same_id_sections() {
+        let first = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3]);
+        let second = Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 5, 6]);
+
+        let mut first_package = build_kernel_package("kernel");
+        first_package.sections.push(first.clone());
+        first_package.sections.push(second.clone());
+
+        let mut second_package = build_kernel_package("kernel");
+        second_package.sections.push(second);
+        second_package.sections.push(first);
+
+        assert_eq!(first_package.dependency_commitment(), second_package.dependency_commitment());
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {

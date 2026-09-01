@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{get_masm_program, get_masp_package, load_package_with_handlers, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -136,7 +136,8 @@ impl RunCmd {
 
 #[instrument(name = "run_program", skip_all)]
 fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
-    let program = get_masp_program(&params.program_file)?;
+    let package = get_masp_package(&params.program_file)?;
+    let program = package.try_into_program()?;
 
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
@@ -144,6 +145,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    load_package_with_handlers(&mut host, &package)?;
 
     let program_hash: [u8; 32] = program.hash().into();
 
@@ -201,8 +203,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
-    for lib in libraries.libraries {
-        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
+    for lib in &libraries.libraries {
+        load_package_with_handlers(&mut host, lib)?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();

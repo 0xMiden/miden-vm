@@ -1,0 +1,634 @@
+//! Loading, validation, and execution of Wasm handler modules.
+
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+
+use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, MEMORY_EXPORT, host_fn};
+use miden_mast_package::{MAX_MODULE_BYTES, MIN_ABI_VERSION, validate_manifest_entries};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler, EventName},
+};
+use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
+
+use crate::{
+    error::{HostTrap, HostTrapKind, WasmHandlerLoadError, WasmHandlerRunError},
+    host::{FUEL_PER_FELT, HostCtx, build_linker},
+};
+
+// LIMITS
+// ================================================================================================
+
+/// Resource limits for one handler call.
+///
+/// Handler modules are untrusted, so every call runs under these limits. Going over any of them
+/// traps the handler, which discards all buffered mutations.
+#[derive(Debug, Clone)]
+pub struct WasmHandlerLimits {
+    /// The fuel budget for one call. Roughly one unit per executed Wasm instruction; host calls
+    /// charge additional fuel in proportion to the field elements they move and to the hashes
+    /// they compute, so the budget bounds the total work a handler causes.
+    pub fuel: u64,
+    /// The maximum size of the guest linear memory, in bytes.
+    pub max_memory_bytes: usize,
+    /// The maximum total number of table elements. Tables are allocated eagerly, so without
+    /// this cap a tiny module could demand a multi-gigabyte allocation before any fuel applies.
+    pub max_table_elements: usize,
+    /// The maximum size of the Wasm binary, in bytes. This limit binds the direct path through
+    /// [`WasmHandlerModule::new`]; the package path enforces [`MAX_MODULE_BYTES`] of its own,
+    /// whatever this value is.
+    pub max_module_bytes: usize,
+    /// The maximum total number of field elements across all mutations one call buffers.
+    ///
+    /// The processor bounds the same data again when the mutations are applied, with
+    /// `ExecutionOptions::max_advice_size_bytes` (default 16 MiB). This cap is per call and in
+    /// field elements, so at the two defaults (65,536 felts = 512 KiB) it binds about 32 times
+    /// tighter. Tune the two together: raising the advice-size budget alone changes nothing for
+    /// handler mutations.
+    pub max_mutation_felts: usize,
+    /// Permits float instructions in the handler module. Off by default: handler output must be
+    /// deterministic across hosts, and handlers have no use for floats.
+    ///
+    /// This flag is validation policy, like the rest of the limits: enabling it voids the
+    /// cross-host determinism guarantee, and hosts with different settings accept different
+    /// modules.
+    pub allow_floats: bool,
+}
+
+impl Default for WasmHandlerLimits {
+    fn default() -> Self {
+        Self {
+            fuel: 10_000_000,
+            // The guest memory cap is its own knob; it only happens to match the module cap.
+            max_memory_bytes: 16 * 1024 * 1024,
+            max_table_elements: 4096,
+            max_module_bytes: MAX_MODULE_BYTES,
+            max_mutation_felts: 1 << 16,
+            allow_floats: false,
+        }
+    }
+}
+
+/// The maximum number of exports a handler module may have.
+///
+/// The manifest can name at most `MAX_HANDLERS` (256) exports, plus the `memory` export and
+/// toolchain extras; per-call instantiation pays one unmetered allocation per export, so the
+/// count is bounded at load.
+const MAX_MODULE_EXPORTS: usize = 1024;
+
+// WASM HANDLER MODULE
+// ================================================================================================
+
+/// A validated Wasm handler module together with its manifest.
+///
+/// The module is parsed, validated, and compiled once. Each event call then runs in a fresh
+/// store and instance, so handlers keep no state between calls.
+pub struct WasmHandlerModule {
+    /// The wasmi engine, configured with the fixed feature policy and fuel metering.
+    engine: Engine,
+    /// The compiled module, shared by every call.
+    module: Module,
+    /// The linker that holds the host function set.
+    linker: Linker<HostCtx>,
+    /// The per-call resource limits.
+    limits: WasmHandlerLimits,
+    /// The validated `(event, export)` pairs.
+    manifest: Vec<(EventName, String)>,
+    /// The fuel charge for one instantiation, deducted from the budget of every call.
+    instantiation_fuel: u64,
+}
+
+impl WasmHandlerModule {
+    /// Parses, validates, and compiles a handler module.
+    ///
+    /// `manifest` maps each event name to the export that handles it.
+    ///
+    /// # Errors
+    /// Returns an error when:
+    /// - `abi_version` is below [`MIN_ABI_VERSION`] or newer than the version this crate
+    ///   implements;
+    /// - the Wasm binary is larger than `limits.max_module_bytes`;
+    /// - the Wasm binary does not parse or validate, or oversteps the structural compilation limits
+    ///   ([`EnforcedLimits::strict`]);
+    /// - the module imports from a namespace other than `miden:event/v1`, imports a name outside
+    ///   the host function set, imports the same function more than once, or an import has a
+    ///   signature the host function set does not provide;
+    /// - the module has more than 1024 exports (`MAX_MODULE_EXPORTS`);
+    /// - the module has a start section;
+    /// - the fixed instantiation charge does not fit `limits.fuel`, so no call could ever run;
+    /// - a manifest export is missing or does not have the `() -> ()` signature;
+    /// - the module does not export its linear memory as `memory`;
+    /// - the manifest breaks a section rule (more entries than the manifest cap, an empty or
+    ///   over-long name, a duplicate event, or a reserved `sys::` event name); the manifest is
+    ///   canonicalized by event name before the check.
+    pub fn new(
+        wasm: &[u8],
+        abi_version: u32,
+        manifest: Vec<(EventName, String)>,
+        limits: WasmHandlerLimits,
+    ) -> Result<Self, WasmHandlerLoadError> {
+        // ABI version bumps are additive only, so every version from `MIN_ABI_VERSION` up to the
+        // version this crate implements is acceptable. See `miden_event_handler_abi::ABI_VERSION`.
+        if abi_version < MIN_ABI_VERSION || abi_version > ABI_VERSION {
+            return Err(WasmHandlerLoadError::AbiVersionMismatch {
+                declared: abi_version,
+                supported: ABI_VERSION,
+            });
+        }
+
+        // The package decode path has its own module-size cap, but this constructor is public,
+        // so it enforces the limit itself before handing the bytes to the compiler.
+        if wasm.len() > limits.max_module_bytes {
+            return Err(WasmHandlerLoadError::ModuleTooLarge {
+                size: wasm.len(),
+                max: limits.max_module_bytes,
+            });
+        }
+
+        // Canonicalize the order (which manifest_from_module already guarantees, but this
+        // constructor is public), then validate the manifest against the one rule set of the
+        // package section, before touching the Wasm binary.
+        let mut manifest = manifest;
+        manifest.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        validate_manifest_entries(manifest.iter().map(|(event, export)| (event, export.as_str())))
+            .map_err(WasmHandlerLoadError::InvalidManifest)?;
+
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        // Translate the whole module at load time. wasmi's default lazy translation would run
+        // per-function translation inside the first event call that reaches each function —
+        // host-side work that no fuel meters. With eager mode, all compilation cost lands in
+        // the load path, next to parsing and validation.
+        config.compilation_mode(CompilationMode::Eager);
+        // The accepted Wasm feature set is validation policy: it decides which modules load,
+        // on every host, so it is stated explicitly instead of inherited from wasmi's
+        // defaults (which change with wasmi versions and with Cargo feature unification).
+        //
+        // On: the post-MVP features rustc emits for wasm32-unknown-unknown by default.
+        config.wasm_mutable_global(true);
+        config.wasm_sign_extension(true);
+        config.wasm_multi_value(true);
+        config.wasm_bulk_memory(true);
+        config.wasm_reference_types(true);
+        config.wasm_saturating_float_to_int(true);
+        // Off: SIMD and relaxed SIMD are not deterministic across platforms, and the rest
+        // widens the sandbox surface with no use for handlers.
+        config.wasm_simd(false);
+        config.wasm_relaxed_simd(false);
+        config.wasm_memory64(false);
+        config.wasm_multi_memory(false);
+        config.wasm_tail_call(false);
+        config.wasm_extended_const(false);
+        config.wasm_custom_page_sizes(false);
+        config.wasm_wide_arithmetic(false);
+        // Floats follow the host policy; enabling them voids cross-host determinism.
+        config.floats(limits.allow_floats);
+        // Structural compilation limits (function/global/segment counts, signature sizes)
+        // defend `Module::new` itself against compilation bombs in untrusted binaries.
+        config.enforced_limits(EnforcedLimits::strict());
+        let engine = Engine::new(&config);
+
+        let module = Module::new(&engine, wasm)
+            .map_err(|err| WasmHandlerLoadError::InvalidModule(err.to_string()))?;
+
+        // The import allowlist closes the sandbox: no WASI, no other namespaces.
+        let mut import_names = BTreeSet::new();
+        for import in module.imports() {
+            if import.module() != IMPORT_MODULE {
+                return Err(WasmHandlerLoadError::ForbiddenImport {
+                    module: import.module().to_string(),
+                    name: import.name().to_string(),
+                });
+            }
+            // wasmi resolves every import against the linker on each per-call instantiation,
+            // and no engine limit bounds the import section. An unknown name could never
+            // resolve, and a module never needs the same import twice, so both are rejected
+            // here; the two checks together bound the import count of a loadable module by
+            // the host function set.
+            if !host_fn::ALL.contains(&import.name()) {
+                return Err(WasmHandlerLoadError::UnknownImport {
+                    name: import.name().to_string(),
+                });
+            }
+            if !import_names.insert(import.name().to_string()) {
+                return Err(WasmHandlerLoadError::DuplicateImport {
+                    name: import.name().to_string(),
+                });
+            }
+        }
+
+        // wasmi rebuilds the export map (one allocation per export) inside every per-call
+        // instantiation, no fuel meters it, and the engine's structural limits do not bound
+        // the export count. The cap closes that amplification the same way the
+        // duplicate-import rejection does; the manifest can name at most 256 exports, so the
+        // cap is generous.
+        let export_count = module.exports().count();
+        if export_count > MAX_MODULE_EXPORTS {
+            return Err(WasmHandlerLoadError::TooManyExports {
+                count: export_count,
+                max: MAX_MODULE_EXPORTS,
+            });
+        }
+
+        // One section walk answers both questions below.
+        let statics = module_statics(wasm).ok_or_else(|| {
+            WasmHandlerLoadError::InvalidModule("malformed section layout".to_string())
+        })?;
+
+        // No guest code may run before the fuel budget and the limits are installed, and a start
+        // function would also re-run on every instantiate-per-call. wasmi's instantiation always
+        // runs the start function, so modules with a start section are rejected here instead.
+        if statics.has_start_section {
+            return Err(WasmHandlerLoadError::StartSection);
+        }
+
+        // wasmi meters no instantiation work (memory zeroing, segment copies), so the static
+        // cost is computed once here and deducted from the fuel budget of every call. A module
+        // whose instantiation alone eats the whole budget can never run; refuse it now.
+        let instantiation_fuel = statics.instantiation_fuel;
+        if instantiation_fuel >= limits.fuel {
+            return Err(WasmHandlerLoadError::InstantiationOverBudget {
+                cost: instantiation_fuel,
+                fuel: limits.fuel,
+            });
+        }
+
+        let linker = build_linker(&engine);
+        let this = Self {
+            engine,
+            module,
+            linker,
+            limits,
+            manifest,
+            instantiation_fuel,
+        };
+        this.validate_instantiation()?;
+        Ok(this)
+    }
+
+    /// Returns the validated `(event, export)` manifest.
+    pub fn manifest(&self) -> &[(EventName, String)] {
+        &self.manifest
+    }
+
+    /// Returns one registered-handler pair per manifest entry, ready for host registration.
+    pub fn handlers(self: &Arc<Self>) -> Vec<(EventName, Arc<dyn EventHandler>)> {
+        self.manifest
+            .iter()
+            .map(|(event, export)| {
+                let handler = WasmEventHandler {
+                    module: Arc::clone(self),
+                    export: export.clone(),
+                };
+                (event.clone(), Arc::new(handler) as Arc<dyn EventHandler>)
+            })
+            .collect()
+    }
+
+    /// Dry-run instantiation at load time: resolves every import against the host function set
+    /// (this catches signature mismatches), checks that every manifest export exists with the
+    /// `() -> ()` signature, and checks that the module exports its linear memory as `memory`.
+    /// No guest code runs: start sections were rejected before.
+    fn validate_instantiation(&self) -> Result<(), WasmHandlerLoadError> {
+        let mut store = self.new_store(core::ptr::null());
+        let instance = self
+            .linker
+            .instantiate_and_start(&mut store, &self.module)
+            .map_err(|err| WasmHandlerLoadError::Instantiation(err.to_string()))?;
+        for (_, export) in &self.manifest {
+            instance.get_typed_func::<(), ()>(&store, export).map_err(|err| {
+                WasmHandlerLoadError::BadExport {
+                    export: export.clone(),
+                    reason: err.to_string(),
+                }
+            })?;
+        }
+        // Every host function that takes a guest pointer needs this export, so a module without
+        // it is refused at load instead of at the first host call of the first event.
+        if instance.get_memory(&store, MEMORY_EXPORT).is_none() {
+            return Err(WasmHandlerLoadError::MissingMemoryExport);
+        }
+        Ok(())
+    }
+
+    /// Returns the fuel budget one call gets: the configured budget less the fixed
+    /// instantiation charge. The load-time check keeps the charge under the budget.
+    fn call_fuel(&self) -> u64 {
+        self.limits.fuel.saturating_sub(self.instantiation_fuel)
+    }
+
+    /// Creates a fresh store for one call, with the resource limiter installed and the fuel
+    /// budget set.
+    fn new_store(&self, state: *const ProcessorState<'static>) -> Store<HostCtx> {
+        let mut store = Store::new(&self.engine, HostCtx::new(state, &self.limits));
+        store.limiter(|ctx| &mut ctx.limits);
+        store
+            .set_fuel(self.call_fuel())
+            .expect("fuel metering is enabled in the engine config");
+        store
+    }
+
+    /// Runs one handler export against the given processor state and returns the mutations it
+    /// buffered.
+    fn call(
+        &self,
+        process: &ProcessorState<'_>,
+        export: &str,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        // Erase the lifetime for storage in the store data. The pointer stays valid for this
+        // whole function, which outlives the store; see `host::StatePtr` for the safety
+        // contract.
+        let state_ptr = core::ptr::from_ref(process).cast::<ProcessorState<'static>>();
+        let mut store = self.new_store(state_ptr);
+
+        // `instantiate_and_start` runs no guest code here: modules with a start section are
+        // rejected at load time.
+        let instance = self
+            .linker
+            .instantiate_and_start(&mut store, &self.module)
+            .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
+        cache_memory(&mut store, instance);
+        let func = instance
+            .get_typed_func::<(), ()>(&store, export)
+            .map_err(|err| WasmHandlerRunError::Instantiation(err.to_string()))?;
+
+        match func.call(&mut store, ()) {
+            Ok(()) => Ok(store.into_data().mutations),
+            Err(err) => {
+                let data = store.into_data();
+                let run_err = if let Some(msg) = data.error_msg {
+                    WasmHandlerRunError::Failed(msg)
+                } else {
+                    classify_trap(&err, self.call_fuel())
+                };
+                Err(run_err.into())
+            },
+        }
+    }
+}
+
+/// Stores the instance's exported linear memory in the store data.
+///
+/// Host functions read the handle from there, so no host call repeats the export lookup. Load
+/// refuses a module without the [`MEMORY_EXPORT`] export
+/// ([`WasmHandlerLoadError::MissingMemoryExport`]), so the lookup here always succeeds; the
+/// `Option` is defense in depth for that invariant.
+fn cache_memory(store: &mut Store<HostCtx>, instance: Instance) {
+    let memory = instance.get_memory(&*store, MEMORY_EXPORT);
+    store.data_mut().memory = memory;
+}
+
+/// Maps a wasmi error to the run-error variant, so resource-limit violations are
+/// distinguishable from handler defects.
+///
+/// Fuel can run out in two places: wasmi's own metering of guest instructions (a
+/// [`wasmi::TrapCode`]) and [`HostTrap`]s raised by the host-call fuel charges. Both map to
+/// [`WasmHandlerRunError::OutOfFuel`], which reports `fuel`: the effective per-call budget, not
+/// the configured one.
+fn classify_trap(err: &wasmi::Error, fuel: u64) -> WasmHandlerRunError {
+    if let Some(trap) = err.downcast_ref::<HostTrap>() {
+        return match trap.kind {
+            HostTrapKind::OutOfFuel => WasmHandlerRunError::OutOfFuel(fuel),
+            HostTrapKind::MutationLimit => WasmHandlerRunError::LimitExceeded(trap.msg.clone()),
+            HostTrapKind::Defect => WasmHandlerRunError::Trapped(err.to_string()),
+        };
+    }
+    match err.as_trap_code() {
+        Some(wasmi::TrapCode::OutOfFuel) => WasmHandlerRunError::OutOfFuel(fuel),
+        // The store limits refused a memory or table growth (`trap_on_grow_failure`).
+        Some(wasmi::TrapCode::GrowthOperationLimited) => {
+            WasmHandlerRunError::LimitExceeded(err.to_string())
+        },
+        _ => WasmHandlerRunError::Trapped(err.to_string()),
+    }
+}
+
+/// Decodes a LEB128 value from `data` at `pos` into a `u64`; returns the value and the next
+/// position.
+///
+/// `max_shift` bounds the encoding length: the read stops with `None` when a continuation byte
+/// asks for a shift of `max_shift` or more.
+fn read_leb(data: &[u8], mut pos: usize, max_shift: u32) -> Option<(u64, usize)> {
+    let mut value: u64 = 0;
+    let mut shift = 0u32;
+    loop {
+        let byte = *data.get(pos)?;
+        pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= max_shift {
+            return None;
+        }
+    }
+    Some((value, pos))
+}
+
+/// Decodes a LEB128-encoded `u32` from `data` at `pos`; returns the value and the next
+/// position.
+///
+/// An encoding over five bytes returns `None`, and so does a five-byte encoding whose value
+/// does not fit a `u32`.
+pub(crate) fn read_leb_u32(data: &[u8], pos: usize) -> Option<(u32, usize)> {
+    let (value, pos) = read_leb(data, pos, 35)?;
+    u32::try_from(value).ok().map(|value| (value, pos))
+}
+
+/// The length of the Wasm binary header (magic + version).
+pub(crate) const HEADER_LEN: usize = 8;
+
+/// Walks the top-level sections of a Wasm binary, calling `visit` with each section ID, its
+/// payload, and the range of the whole section in `wasm` (the ID byte, the size prefix, and the
+/// payload). The range lets a caller copy a section back out unchanged.
+///
+/// Returns `None` when the walk meets a malformed layout.
+pub(crate) fn walk_wasm_sections<'a>(
+    wasm: &'a [u8],
+    mut visit: impl FnMut(u8, &'a [u8], core::ops::Range<usize>),
+) -> Option<()> {
+    if wasm.len() < HEADER_LEN {
+        return None;
+    }
+    let mut pos = HEADER_LEN;
+    while pos < wasm.len() {
+        let id = wasm[pos];
+        let (size, payload_start) = read_leb_u32(wasm, pos + 1)?;
+        let payload_end = payload_start.checked_add(size as usize)?;
+        visit(id, wasm.get(payload_start..payload_end)?, pos..payload_end);
+        pos = payload_end;
+    }
+    Some(())
+}
+
+/// Decodes a LEB128-encoded `u64` from `data` at `pos`; returns the value and the next
+/// position.
+///
+/// At the last shift (63), the bits of an over-long encoding drop silently instead of
+/// returning `None`. This is harmless here: the reader runs after `Module::new` validated the
+/// binary, and its result only feeds the instantiation-cost upper bound.
+fn read_leb_u64(data: &[u8], pos: usize) -> Option<(u64, usize)> {
+    read_leb(data, pos, 70)
+}
+
+/// The load-time facts one walk of the module sections provides.
+pub(crate) struct ModuleStatics {
+    /// The fuel charge for one instantiation.
+    pub instantiation_fuel: u64,
+    /// `true` when the module has a start section.
+    pub has_start_section: bool,
+}
+
+/// Computes the fuel charge for one instantiation of the module and reports whether the module
+/// has a start section.
+///
+/// wasmi meters no instantiation work: it allocates and zeroes the declared initial memory,
+/// allocates the initial tables, copies the data segments, and materializes every element
+/// segment (passive included) before any guest code runs. The sizes are static, so the charge
+/// is computed once at load time. Memory, tables, and data segments charge one fuel unit per
+/// 8 bytes, the same as [`FUEL_PER_FELT`] for host-moved data — an upper bound that counts
+/// passive data segments as if they were copied. The element section charges per encoded byte
+/// at its own, much higher rate; see `ELEMENT_FUEL_PER_BYTE` below.
+///
+/// Returns `None` when a section does not parse, which `WasmHandlerModule::new` reports as an
+/// invalid module.
+pub(crate) fn module_statics(wasm: &[u8]) -> Option<ModuleStatics> {
+    /// The section ID of the table section, whose elements instantiation allocates.
+    const TABLE_SECTION_ID: u8 = 4;
+    /// The section ID of the memory section, whose pages instantiation allocates.
+    const MEMORY_SECTION_ID: u8 = 5;
+    /// The section ID of the element section, whose segments instantiation materializes.
+    const ELEMENT_SECTION_ID: u8 = 9;
+    /// The section ID of the data section, whose segments instantiation materializes.
+    const DATA_SECTION_ID: u8 = 11;
+    /// The section ID of the start section.
+    const START_SECTION_ID: u8 = 8;
+    /// The size of one Wasm linear-memory page.
+    const PAGE_BYTES: u64 = 65536;
+    /// The size of one table element (a reference) on a 64-bit host.
+    const TABLE_ELEMENT_BYTES: u64 = 8;
+    /// Fuel charged per encoded byte of the element section.
+    ///
+    /// wasmi materializes every element segment — passive included — as a boxed value array
+    /// with one const-expr evaluation per item, on every instantiation. An item encodes as
+    /// ~2 bytes but realizes as an 8-byte value plus an evaluation (tens of nanoseconds), so
+    /// the byte-copy rate of the data section would undercharge by two orders of magnitude.
+    /// 16 fuel per encoded byte is an upper bound at the calibrated ~0.8 ns per fuel unit,
+    /// and it needs no parsing of the segment encodings.
+    const ELEMENT_FUEL_PER_BYTE: u64 = 16;
+
+    let mut bytes: u64 = 0;
+    let mut element_fuel: u64 = 0;
+    let mut malformed = false;
+    let mut has_start_section = false;
+    walk_wasm_sections(wasm, |id, payload, _| match id {
+        MEMORY_SECTION_ID => match limits_min_total(payload, false) {
+            Some(pages) => bytes = bytes.saturating_add(pages.saturating_mul(PAGE_BYTES)),
+            None => malformed = true,
+        },
+        TABLE_SECTION_ID => match limits_min_total(payload, true) {
+            Some(elems) => bytes = bytes.saturating_add(elems.saturating_mul(TABLE_ELEMENT_BYTES)),
+            None => malformed = true,
+        },
+        DATA_SECTION_ID => {
+            bytes = bytes.saturating_add(payload.len() as u64);
+        },
+        ELEMENT_SECTION_ID => {
+            element_fuel = element_fuel
+                .saturating_add((payload.len() as u64).saturating_mul(ELEMENT_FUEL_PER_BYTE));
+        },
+        START_SECTION_ID => has_start_section = true,
+        _ => {},
+    })?;
+    if malformed {
+        return None;
+    }
+    Some(ModuleStatics {
+        instantiation_fuel: bytes
+            .div_ceil(8)
+            .saturating_mul(FUEL_PER_FELT)
+            .saturating_add(element_fuel),
+        has_start_section,
+    })
+}
+
+/// Sums the limit minimums of a memory or table section payload: the pages (memory) or
+/// elements (table) allocated at instantiation. `skip_reftype` skips the reference-type byte
+/// that leads each table entry.
+fn limits_min_total(payload: &[u8], skip_reftype: bool) -> Option<u64> {
+    let (count, mut pos) = read_leb_u32(payload, 0)?;
+    let mut total: u64 = 0;
+    for _ in 0..count {
+        if skip_reftype {
+            // A table's reference type is one byte in the short form (0x70 funcref,
+            // 0x6F externref). With the reference-types feature this loader enables, wasmi
+            // also validates the long-form encoding 0x63 0x70 / 0x63 0x6F — `(ref null
+            // func/extern)` — whose heaptype is an s33 LEB. wasmi 1.1.0 rejects every other
+            // encoding (0x64, GC heap types, type indices, the 0x40 table-with-initializer
+            // form), so the match below covers all of them.
+            //
+            // The default branch fails closed: a wasmi upgrade that admits one more encoding
+            // must not make this walk mis-read the bytes that follow and under-meter the
+            // instantiation. A false rejection is visible to the differential fuzz target
+            // (`wasm_section_walk_differential`); a wrong fuel value is not.
+            let reftype = *payload.get(pos)?;
+            pos += 1;
+            match reftype {
+                0x70 | 0x6f => {},
+                0x63 => {
+                    let (_, next) = read_leb_u64(payload, pos)?;
+                    pos = next;
+                },
+                _ => return None,
+            }
+        }
+        let flags = *payload.get(pos)?;
+        pos += 1;
+        // Valid limit flags: bit 0 = maximum present, bit 1 = shared, bit 2 = 64-bit.
+        if flags > 0b111 {
+            return None;
+        }
+        let (min, next) = read_leb_u64(payload, pos)?;
+        pos = next;
+        if flags & 1 != 0 {
+            let (_, next) = read_leb_u64(payload, pos)?;
+            pos = next;
+        }
+        total = total.saturating_add(min);
+    }
+    Some(total)
+}
+
+impl core::fmt::Debug for WasmHandlerModule {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WasmHandlerModule")
+            .field("limits", &self.limits)
+            .field("manifest", &self.manifest)
+            .finish_non_exhaustive()
+    }
+}
+
+// WASM EVENT HANDLER
+// ================================================================================================
+
+/// An [`EventHandler`] that runs one export of a [`WasmHandlerModule`].
+///
+/// Each call instantiates the module afresh, so the handler keeps no state between events.
+pub struct WasmEventHandler {
+    /// The validated module that holds the export.
+    module: Arc<WasmHandlerModule>,
+    /// The name of the Wasm export this handler runs.
+    export: String,
+}
+
+impl EventHandler for WasmEventHandler {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        self.module.call(process, &self.export)
+    }
+}

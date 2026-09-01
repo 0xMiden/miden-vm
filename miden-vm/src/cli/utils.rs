@@ -10,16 +10,43 @@ use miden_mast_package::{
     Package,
     debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
+use miden_processor::DefaultHost;
 use miden_prover::serde::Deserializable;
+use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
 
 use crate::cli::data::{Libraries, ProgramFile};
 
-/// Returns a `Program` type from a `.masp` package file.
-pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
-    let package = Package::deserialize_from_file(path)
+/// Returns the `Package` read from a `.masp` package file.
+///
+/// The callers extract the program with [`Package::try_into_program`] and register the package
+/// with [`load_package_with_handlers`].
+pub fn get_masp_package(path: &Path) -> Result<Arc<Package>, Report> {
+    Package::deserialize_from_file(path)
         .into_diagnostic()
-        .wrap_err("Failed to deserialize package")?;
-    package.try_into_program()
+        .wrap_err("Failed to deserialize package")
+        .map(Arc::new)
+}
+
+/// Registers the MAST forest, the debug info, and the Wasm event handlers of `package` with
+/// `host`.
+///
+/// `DefaultHost::load_library` on a package alone leaves the `event_handlers` section
+/// unregistered, because the processor cannot depend on the Wasm handler runner. This function
+/// routes the package through that runner, so every package the CLI loads answers its own events.
+///
+/// # Errors
+/// Returns an error when the handler module of the package fails validation, or when the host
+/// already holds a handler for one of the events the package declares.
+pub fn load_package_with_handlers(
+    host: &mut DefaultHost,
+    package: &Arc<Package>,
+) -> Result<(), Report> {
+    let library = host_library_from_package(package, WasmHandlerLimits::default())
+        .into_diagnostic()
+        .wrap_err("Failed to load the package's Wasm event handlers")?;
+    host.load_library(library)
+        .into_diagnostic()
+        .wrap_err("Failed to register the package's Wasm event handlers")
 }
 
 /// Returns a `Program` type from a `.masm` assembly file.

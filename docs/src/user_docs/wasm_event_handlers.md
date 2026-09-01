@@ -1,0 +1,147 @@
+---
+title: "Wasm Event Handlers"
+sidebar_position: 3
+---
+
+# Wasm event handlers
+
+Custom [event](./assembly/events.md) handlers can ship as untrusted WebAssembly modules inside a `.masp` package. Any host runs them with the [wasmi](https://crates.io/crates/wasmi) interpreter — native hosts and hosts that are themselves compiled to Wasm (for example in a browser) get the same behavior. The handler code links no VM crate: it talks to the host only through imported functions and plain `#[repr(C)]` data types, which the small guest SDK supplies together with the `Felt` and `Word` types it re-exports.
+
+## Model
+
+- A handler module is a core Wasm module. Each handler is an exported function with the signature `() -> ()`.
+- The package's `event_handlers` section carries the module bytes, the ABI version, and a manifest that maps event names to export names. The section is part of the package's dependency commitment: two packages that differ only in handler code have different identities.
+- When the VM emits an event with a registered Wasm handler, the host runs the export in a fresh instance. Handlers are stateless across calls.
+- The handler reads VM state through host functions and buffers advice mutations through host calls. The host applies the mutations only when the handler returns without a trap. A trap — including an explicit `fail` — discards them all.
+
+Advice a handler produces is an unbound hint, exactly as for native handlers: the program must verify it in-VM before relying on it.
+
+## Writing handlers in Rust
+
+Use the `miden-event-handler-sdk` crate and compile for `wasm32-unknown-unknown` with `crate-type = ["cdylib"]`:
+
+```rust
+use miden_event_handler_sdk as sdk;
+use sdk::Felt;
+
+#[sdk::miden_event_handler("myapp::double")]
+fn double() {
+    let value = sdk::stack_get(1); // position 0 holds the event ID
+    sdk::adv_stack_extend(&mut [value * Felt::from_u32(2)]);
+}
+```
+
+Handler code works with `Felt`, `Word` and `MerkleNode`, which the SDK re-exports as `sdk::Felt`, `sdk::Word` and `sdk::MerkleNode`, so a handler crate needs no direct `miden-field` dependency. These are also the types the host imports take: the wire encoding of a field element is the canonical `u64` residue that `Felt` already holds off-chain, so there is no conversion layer. The wrappers only canonicalize the elements they send, because guest arithmetic can leave a lazy residue that the host rejects.
+
+The attribute macro rejects an invalid event name at compile time: the name must not be empty, must not start with the reserved `sys::` namespace, must stay inside 255 UTF-8 bytes, and must not be `memory` (the name of the required linear-memory export). The macro exports the function under the event name and embeds a manifest record in the `miden:event-manifest` custom section. Package tooling derives the section manifest from those records (`miden_wasm_event_handlers::section_from_module`), so no hand-written manifest is needed. Derivation sorts the manifest by event name and removes the `miden:event-manifest` sections from the module it embeds, so neither the record order nor the duplicated records reach the package. The module bytes themselves stay link-order dependent: the linker also decides the order of the code and data sections, so two builds of the same source can still give two package identities. A `no_std` handler crate also needs the SDK's `panic-handler` feature, which forwards panic messages to the host, and its `bump-allocator` feature, which installs a global allocator; enable both in the final handler crate.
+
+A handler module must not contain SIMD instructions: the runner executes a deterministic, non-SIMD instruction set, and the loader rejects a module that uses `simd128`. Compile handler crates with `-C target-feature=-simd128`, because a toolchain or a workspace `.cargo/config.toml` can turn `simd128` on for `wasm32-unknown-unknown` (this repository does). The test fixtures show the override in `crates/wasm-event-handlers/tests/fixtures/.cargo/config.toml`.
+
+## Project integration
+
+A Miden project declares its handler module in `miden-project.toml`. The project assembler then embeds the `event_handlers` section into each package of the project under assembly — its root target and its required libraries, whatever the target type; source dependencies are never post-processed — so a handler needs no separate packaging step:
+
+```toml
+[package.metadata.midenc.event-handlers]
+crate = "handlers"   # the Rust guest crate directory; built and embedded by the project build
+# Alternatively, set `module = "handlers.wasm"` instead to embed a prebuilt core-Wasm module.
+# Exactly one of the two keys must be set.
+```
+
+Set exactly one of the two keys. Both keys, no key, an unknown key, or a value that is not a string stop the build with an error that names the manifest and the key. Both paths are relative to the directory of the `miden-project.toml` file. A package declares at most one handler module.
+
+Every package of the project therefore carries the same, full handler set. A host registers the handlers of **one** package of a project: a host that loads the handlers of a second package of the same project fails with a duplicate-handler error, because both packages declare the same events. The failure is deliberate — a silent second registration would hide which package answers an event.
+
+Use `crate` to build the handlers together with the project. The key needs `cargo` and the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) on the machine that builds the project. The build is a release build of only the crate's library target — binaries and examples of the guest crate are not built — so give the crate a `[lib]` with `crate-type = ["cdylib"]`. It writes into a target directory of its own below the guest crate, and it sets `-C target-feature=-simd128` itself, so no `.cargo/config.toml` of the guest crate is necessary for that flag.
+
+The build pins those flags through `RUSTFLAGS`, which keeps the module the same whatever the environment of the caller holds. By cargo precedence `RUSTFLAGS` replaces the `[target.*] rustflags` of the guest crate's own `.cargo/config.toml`, so a guest crate must not depend on flags it sets there; state what the crate needs in the crate itself.
+
+Use `module` to ship a module that another build produced. The build reads the file and does not compile anything.
+
+The manifest of the section comes from the module's own `miden:event-manifest` records, so a module whose functions carry no `#[miden_event_handler("...")]` attribute stops the build.
+
+The build also validates the module: it applies the same load rules a host applies, with the **default** `WasmHandlerLimits`. A forbidden import, a SIMD instruction, a start section, a missing or wrongly-typed export, or an instantiation charge over the fuel budget therefore fails the build instead of every host that later loads the package. Limits stay host policy: a host can run stricter limits than the default and refuse a module this validation accepted. See [Determinism across hosts](#determinism-across-hosts).
+
+The project assembler holds no knowledge of event handlers. The `miden-wasm-event-handlers-project` crate supplies it as a package post-processor, which the toolchain registers:
+
+```rust
+use miden_wasm_event_handlers_project::WasmEventHandlerProcessor;
+
+let mut project_assembler = assembler.for_project_at_path(&manifest_path, &mut registry)?;
+project_assembler.with_package_post_processor(WasmEventHandlerProcessor::new());
+let package = project_assembler.assemble(target_selector, "release")?;
+```
+
+## Loading handlers in a host
+
+```rust
+use miden_wasm_event_handlers::{WasmHandlerLimits, host_library_from_package};
+
+let library = host_library_from_package(&package, WasmHandlerLimits::default())?;
+let mut host = DefaultHost::default();
+host.load_library(library)?; // registers the MAST forest and the handlers
+```
+
+## ABI reference
+
+The contract lives in the `miden-event-handler-abi` crate (`ABI_VERSION` is `1`). All host functions are imported from the `miden:event/v1` namespace. A field element crosses the boundary as its canonical little-endian `u64` (less than the field modulus), a `Word` is four of them, and a `MerkleNode` is three words (`value`, `left`, `right`). The extern declarations use those `Felt` and `Word` types directly, because their off-chain memory layout is exactly this encoding. The host validates every element it receives and traps the handler on a non-canonical value; every element the host writes is canonical.
+
+Version bumps are additive only: a newer ABI version may add host functions but must not change or remove existing ones, so hosts accept every declared version from `1` up to their own. A breaking change gets a new import namespace (`miden:event/v2`) instead.
+
+**VM memory granularity.** VM memory initializes one word (four elements) at a time, so the `Uninit` status of the memory reads is word-granular: after a program writes any address of a word, the other three addresses of that word read as `Ok` with the value zero. `Uninit` therefore means that no cell of the containing word was ever written, not that the addressed cell alone was never written.
+
+**Memory ownership.** Every pointer is an offset into the guest's own linear memory, which the module must export as `"memory"`. The guest allocates all buffers; the host only reads from and writes into them. Output pointers are validated before the host computes the result, so a bad pointer traps even when the call would otherwise return a status such as `NotFound`.
+
+**Queries** mirror the read surface of `ProcessorState`. A call returns a status only when a non-`Ok` outcome is reachable; calls that cannot fail return their value directly (or nothing):
+
+| Import | Description |
+| --- | --- |
+| `stack_depth() -> u32` | Depth of the operand stack. |
+| `stack_get(pos) -> u64` | Operand-stack element, returned directly in canonical form; position `0` holds the event ID, positions past the depth read as zero. |
+| `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count`, ordered from the top down. |
+| `clk() -> u64`, `ctx() -> u32` | Clock cycle and execution context. |
+| `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
+| `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |
+| `mem_read_ctx(ctx, addr, out, count) -> status` | The same batch read for an explicit execution context, for example the root context (ID `0`). |
+| `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
+| `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. The result is a boolean, not a status code: do not put it through `Status::from_raw`, because `1` is also the raw value of `Status::OutOfBounds`. |
+| `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
+| `adv_map_value_len(key, out_len) -> status`, `adv_map_value_read(key, out, cap, out_len) -> status` | Advice-map reads; `NotFound` when the key has no entry. `adv_map_value_read` writes the element count to `out_len` on success and on `CapacityTooSmall`, so one call (plus at most one retry with a grown buffer) suffices. |
+
+**Mutations** are buffered, return nothing (limit violations trap), and map one-to-one onto the processor's advice mutations:
+
+| Import | Description |
+| --- | --- |
+| `adv_stack_extend(vals, len)` | Extend the advice stack, ordered from the new top down. |
+| `adv_map_insert(key, vals, len)` | Insert an advice-map entry. |
+| `merkle_store_extend(nodes, len)` | Add inner nodes; each must satisfy `value == hash(left, right)`. |
+
+**Hashing** is done by the host, so a handler agrees bit-for-bit with the VM's advice-key and Merkle conventions and carries no crypto implementation of its own. Each call is fuel-charged in proportion to the work it causes: per permutation for Poseidon2, per input byte for the byte hashes.
+
+| Import | Description |
+| --- | --- |
+| `poseidon2_merge(pair, domain, out)` | Merge of two words; domain `0` is the plain merge behind `adv.insert_hdword` keys and Merkle inner nodes. |
+| `poseidon2_hash(elems, count, domain, out)` | Sequential hash of field elements; domain `0` is the plain hash behind `adv.insert_hqword` keys. |
+| `poseidon2_permute(state)` | The raw permutation over 12 elements, in place; matches `adv.insert_hperm` keys, whose digest is `state[4..8]`. |
+| `keccak256(data, len, out)` | Keccak-256 digest of `len` bytes (32 bytes out). |
+| `sha256(data, len, out)` | SHA-256 digest of `len` bytes (32 bytes out). |
+| `sha512(data, len, out)` | SHA-512 digest of `len` bytes (64 bytes out). |
+| `blake3(data, len, out)` | BLAKE3 digest of `len` bytes (32 bytes out). |
+
+**Failure.** `fail(msg_ptr, msg_len)` records an error message and traps; the host reads at most `MAX_FAIL_MSG_BYTES` (4,096) bytes of the message and truncates the rest. Status codes cover conditions a correct handler can meet (`OutOfBounds`, `NotFound`, `Uninit`, `CapacityTooSmall`). Defects always trap: pointer ranges outside the guest memory or with overflowing arithmetic, non-canonical field elements (`>= 2^64 - 2^32 + 1`), and mutation-size violations.
+
+## Limits and validation
+
+Handler modules are untrusted. At load time the host rejects: imports outside `miden:event/v1` (no WASI), imports of a name that is not a host function of the ABI, the same host function imported more than once, modules with a start section, modules with more than 1,024 exports, modules that do not export their linear memory under the name `memory`, missing or wrongly-typed manifest exports, duplicate or reserved (`sys::`) event names, an ABI version mismatch, and modules whose fixed instantiation charge does not fit the fuel budget. Float instructions are rejected by default for cross-host determinism.
+
+The loader also applies wasmi's strict structural limits (`EnforcedLimits::strict()`), which bound the work the compiler itself does on an untrusted binary. A module is rejected when it declares more than 10,000 functions, 1,000 globals, 100 tables, 1,000 element segments, 1 memory, 1,000 data segments, or more than 32 parameters or 32 results in one signature. One more rule bounds many tiny functions: once the function bodies of a module hold 1,000 bytes in total, the bodies must average at least 40 bytes each. Normal compiler output stays far inside these numbers; a module that goes over one of them is almost always machine-written to attack the compiler.
+
+Each call runs under configurable limits (`WasmHandlerLimits`): a fuel budget (default 10,000,000), a linear-memory cap (default 16 MiB, a failed grow traps), a table-element cap (default 4,096), a module-size cap (default 16 MiB), and a cap on the total buffered mutation size (default 65,536 field elements). Fuel meters more than instructions: every host call charges a flat transition fee plus fuel in proportion to the field elements it moves, the hashes it computes, and the map or tree probes it causes (memory element reads, Merkle-store levels, advice-map lookups), so the budget bounds the total work a handler causes on the host, not only what it executes itself.
+
+Each call also pays a fixed instantiation charge, which the loader computes once from the static sizes of the module. Initial memory, initial tables, and data segments charge 1 fuel per 8 bytes. Element segments charge much more, 16 fuel per encoded byte, because wasmi realizes every element segment — passive segments included — as boxed values, with one constant-expression evaluation per item, on every instantiation. When the charge alone does not fit the fuel budget, no call could ever run, so the loader refuses the module.
+
+## Determinism across hosts
+
+Advice shapes execution, so every host that executes a program must obtain byte-identical advice from its handlers. For handlers this means: all hosts in a proving pipeline must run the same handler module, the same runner version, and **identical `WasmHandlerLimits`**. A handler that sits near a limit can succeed on one host and trap on another when their fuel, memory, or mutation caps differ — which makes the executions diverge. Treat the limits as part of the deployment configuration, not as a per-machine tuning knob.
+
+The limits stay on the host side by design: a package must not dictate how much fuel or memory every host spends on it, so the package format carries no limit values. To make a limits divergence diagnosable, the runner reports limit violations as their own error variants (`WasmHandlerRunError::OutOfFuel` and `WasmHandlerRunError::LimitExceeded`), distinguishable from handler defects (`Trapped`) and from guest-reported failures (`Failed`). When the same program run fails on one host with a limit variant and succeeds elsewhere, compare the hosts' `WasmHandlerLimits` (including `allow_floats`, which changes what modules validate) before debugging the handler.

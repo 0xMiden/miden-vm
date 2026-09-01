@@ -399,6 +399,17 @@ impl AdviceProvider {
         self.stack.iter().copied().collect()
     }
 
+    /// Returns the number of elements on the advice stack without allocating.
+    pub fn stack_len(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// Returns an iterator over the advice stack elements, ordered from the top (first) to the
+    /// bottom, without allocating.
+    pub fn stack_iter(&self) -> impl Iterator<Item = &Felt> {
+        self.stack.iter()
+    }
+
     /// Extends the stack with typed advice stack values.
     pub fn extend_advice_stack(&mut self, stack: AdviceStack) -> Result<(), AdviceError> {
         self.check_stack_capacity(stack.len())?;

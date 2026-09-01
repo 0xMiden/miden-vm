@@ -1,14 +1,14 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
 use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{get_masm_program, get_masp_package, load_package_with_handlers, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -119,20 +119,23 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+        let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
         // Use a single match expression to load the program.
-        let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, None, None, host),
+        let (program, package_debug_info, entrypoint_source_node) = match ext.as_str() {
+            "masp" => {
+                let package = get_masp_package(&self.program_file)?;
+                let program = package.try_into_program()?;
+                load_package_with_handlers(&mut host, &package)?;
+                (program, None, None)
+            },
             "masm" => {
                 let (program, package_debug_info, entrypoint_source_node, source_manager) =
                     get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_manager(source_manager);
-                for library in libraries.libraries.iter().cloned() {
-                    host.load_library(library)
-                        .into_diagnostic()
-                        .wrap_err("Failed to load library")?;
+                host = host.with_source_manager(source_manager);
+                for library in &libraries.libraries {
+                    load_package_with_handlers(&mut host, library)?;
                 }
-                (program, package_debug_info, entrypoint_source_node, host)
+                (program, package_debug_info, entrypoint_source_node)
             },
             _ => unreachable!("program file extension was validated above"),
         };

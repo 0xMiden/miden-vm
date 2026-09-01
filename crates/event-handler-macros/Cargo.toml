@@ -1,0 +1,28 @@
+[package]
+name = "miden-event-handler-macros"
+version = "0.31.0"
+description = "Attribute macro for declaring Wasm-compiled Miden VM event handlers"
+documentation = "https://docs.rs/miden-event-handler-macros"
+readme = "README.md"
+categories = ["development-tools::procedural-macro-helpers", "wasm"]
+keywords = ["events", "miden", "proc-macro", "wasm"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote.workspace = true
+syn2.workspace = true
+
+# The tests pin the wire constants this crate repeats against the crates that own them. These are
+# dev-dependencies only, so a consumer of the macro still builds no extra crate for the host.
+[dev-dependencies]
+miden-core.workspace = true
+miden-event-handler-abi.workspace = true
+miden-mast-package.workspace = true

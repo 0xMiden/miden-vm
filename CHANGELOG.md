@@ -5,6 +5,12 @@
 #### Features
 
 - [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
+- Added Wasm-compiled custom event handlers: untrusted Wasm modules ship inside a `.masp` package (`event_handlers` section) and run under the wasmi interpreter on any host. New crates: `miden-event-handler-abi` (host/guest ABI contract), `miden-wasm-event-handlers` (host-side runner with fuel, memory, and mutation limits), `miden-event-handler-sdk` + `miden-event-handler-macros` (Rust guest SDK with manifest emission). Also added `ProcessorState::stack_depth` ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] The package dependency commitment now binds the `event_handlers` section (next to the account-component metadata), and the semantic sections enter its preimage in a canonical order, so the dependency commitment of a package that carries handlers changes ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] `DefaultHost::replace_handler` and `DefaultHost::replace_trace_handler` now return `Result<bool, ExecutionError>` instead of `bool`, because the event name is validated before the handler is registered ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] Added the `EmptyEventName` variant to `HostError`. The enum is not `non_exhaustive`, so downstream exhaustive matches must handle it ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- [BREAKING] Handler registration now rejects the whole reserved `sys::` event-name prefix and empty event names, not only the known system-event names ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
+- Added project-assembler support for Wasm event handlers: `miden-assembly` gains a generic package post-processor mechanism (`PackagePostProcessor`, `PostProcessContext`, `ProjectAssembler::with_package_post_processor`), and the new `miden-wasm-event-handlers-project` crate plugs into it. The plugin reads `[package.metadata.midenc.event-handlers]` from `miden-project.toml` (`crate =` builds a Rust guest crate, `module =` reads a prebuilt module), validates the module with the default `WasmHandlerLimits`, and embeds the `event_handlers` section into every package of the project under assembly (never into source dependencies) ([#3664](https://github.com/0xMiden/miden-vm/pull/3664)).
 
 #### Changes
 
