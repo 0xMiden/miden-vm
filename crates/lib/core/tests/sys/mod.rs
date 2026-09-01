@@ -366,7 +366,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
     const MAX_KERNEL_PROCEDURES: u64 = NUM_KERNEL_PROCEDURES_BOUND - 1;
 
     // Query count against query grinding, at the maximum supported height.
-    sweep(
+    vm_sweep(
         NQ_BOUND,
         POW_BOUND,
         [
@@ -380,7 +380,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
     );
 
     // DEEP grinding against trace height.
-    sweep(
+    vm_sweep(
         LOG_HEIGHT_SPAN,
         POW_BOUND,
         [
@@ -394,7 +394,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
     );
 
     // Folding grinding against trace height.
-    sweep(
+    vm_sweep(
         LOG_HEIGHT_SPAN,
         POW_BOUND,
         [
@@ -408,7 +408,7 @@ fn masm_compute_conjectured_security_level_matches_native() {
     );
 
     // Kernel procedure count against trace height: the lookup round's boundary correction.
-    sweep(
+    vm_sweep(
         LOG_HEIGHT_SPAN,
         NUM_KERNEL_PROCEDURES_BOUND,
         [
@@ -422,8 +422,8 @@ fn masm_compute_conjectured_security_level_matches_native() {
     );
 }
 
-/// How one estimator input is supplied across a [`sweep`]: held at a constant, or taken from a
-/// loop counter shifted by an offset.
+/// How one estimator input is supplied across [`vm_sweep`] or [`pvm_sweep`]: held at a constant, or
+/// taken from a loop counter shifted by an offset.
 #[derive(Copy, Clone)]
 enum Axis {
     Fixed(u64),
@@ -459,7 +459,7 @@ impl Axis {
 ///
 /// `axes` supplies the procedure's six inputs in call order. They are pushed deepest-first, so
 /// each push sinks the loop counters one slot further and the `dup` depths shift accordingly.
-fn sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
+fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
     use miden_core::Felt;
     use miden_processor::ContextId;
 
@@ -595,8 +595,184 @@ fn security_level_threshold_rejects_below_target() {
     assert!(tall.execute_for_output().is_err(), "a below-target level must be rejected");
 }
 
-/// The naive query-only estimate stays in `stark::utils` for the PVM settlement flow, which
-/// has no round-budget mirror yet; this pins it until it gains one.
+/// The MASM `sys::pvm::compute_conjectured_security_level` procedure must agree with the native
+/// PVM round budget. As on the VM side, the constant-drift test checks every algebraic-round
+/// literal; this output sweep checks the complete MASM computation over slices of its input domain.
+#[test]
+fn masm_compute_pvm_conjectured_security_level_matches_native() {
+    use Axis::{Fixed, Inner, Outer};
+    use miden_precompiles_air::primitives::byte_pair_lut::TRACE_HEIGHT;
+
+    // Includes every query count accepted by the generic verifier: 0..=150.
+    const NQ_BOUND: u64 = 151;
+    const POW_BOUND: u64 = 32;
+    const LOG_HEIGHT_MIN: u64 = TRACE_HEIGHT.ilog2() as u64;
+    const LOG_HEIGHT_BOUND: u64 = 30;
+    const LOG_HEIGHT_SPAN: u64 = LOG_HEIGHT_BOUND - LOG_HEIGHT_MIN;
+
+    const QUERIES: u64 = 27;
+    const QUERY_POW: u64 = 17;
+    const DEEP_POW: u64 = 12;
+    const FOLDING_POW: u64 = 4;
+    const MAX_HEIGHT: u64 = LOG_HEIGHT_MIN + LOG_HEIGHT_SPAN - 1;
+
+    // Query count against query grinding, at the maximum supported height.
+    pvm_sweep(
+        NQ_BOUND,
+        POW_BOUND,
+        [Outer(0), Inner(0), Fixed(DEEP_POW), Fixed(FOLDING_POW), Fixed(MAX_HEIGHT)],
+    );
+
+    // DEEP grinding against every supported PVM maximum trace height.
+    pvm_sweep(
+        LOG_HEIGHT_SPAN,
+        POW_BOUND,
+        [
+            Fixed(QUERIES),
+            Fixed(QUERY_POW),
+            Inner(0),
+            Fixed(FOLDING_POW),
+            Outer(LOG_HEIGHT_MIN),
+        ],
+    );
+
+    // Folding grinding against every supported PVM maximum trace height.
+    pvm_sweep(
+        LOG_HEIGHT_SPAN,
+        POW_BOUND,
+        [
+            Fixed(QUERIES),
+            Fixed(QUERY_POW),
+            Fixed(DEEP_POW),
+            Inner(0),
+            Outer(LOG_HEIGHT_MIN),
+        ],
+    );
+}
+
+/// Runs the PVM estimator over an `outer_bound × inner_bound` grid in one VM execution and checks
+/// every cell against the native PVM implementation.
+fn pvm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 5]) {
+    use miden_core::Felt;
+    use miden_precompiles_air::{security, stark_config::precompile_pcs_params};
+    use miden_processor::ContextId;
+
+    let push_args = (0..5)
+        .rev()
+        .map(|position| axes[position].push(4 - position))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let source = format!(
+        "
+        use miden::core::sys::pvm
+
+        begin
+            push.0
+            dup push.{outer_bound} u32lt
+            while.true
+                # => [outer]
+                push.0
+                dup push.{inner_bound} u32lt
+                while.true
+                    # => [inner, outer]
+                    {push_args}
+                    # => [num_queries, query_pow, deep_pow, folding_pow, log_height, inner, outer]
+                    exec.pvm::compute_conjectured_security_level
+                    # => [level, inner, outer]
+                    dup.2 push.{inner_bound} mul dup.2 add
+                    # => [outer*inner_bound + inner, level, inner, outer]
+                    mem_store
+                    # => [inner, outer]
+                    add.1
+                    dup push.{inner_bound} u32lt
+                end
+                drop
+                add.1
+                dup push.{outer_bound} u32lt
+            end
+            drop
+        end
+        "
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    let (output, _host) = test.execute_for_output().expect("PVM estimator sweep execution failed");
+    let pcs_params = precompile_pcs_params();
+
+    let ctx = ContextId::root();
+    for outer in 0..outer_bound {
+        for inner in 0..inner_bound {
+            let addr = (outer * inner_bound + inner) as u32;
+            let masm = output
+                .memory
+                .read_element(ctx, Felt::new_unchecked(u64::from(addr)))
+                .expect("every swept address is written")
+                .as_canonical_u64();
+
+            let mut params = security::protocol_params(&pcs_params);
+            params.num_queries = axes[0].value(outer, inner);
+            params.query_pow_bits = axes[1].value(outer, inner);
+            params.deep_pow_bits = axes[2].value(outer, inner);
+            params.folding_pow_bits = axes[3].value(outer, inner);
+            let log_height = axes[4].value(outer, inner);
+            let native = u64::from(security::security_report(&params, log_height).security_level());
+
+            assert_eq!(
+                masm,
+                native,
+                "PVM mismatch at inputs {:?}",
+                axes.map(|axis| axis.value(outer, inner))
+            );
+        }
+    }
+}
+
+/// A PVM maximum trace height is at least the fixed BytePairLut height and remains below the
+/// generic verifier's exponentiation bound.
+#[test]
+fn pvm_security_level_rejects_an_out_of_range_trace_height() {
+    let source = "
+        use miden::core::sys::pvm
+
+        begin
+            exec.pvm::compute_conjectured_security_level
+        end
+        ";
+
+    for log_height in [0_u64, 15, 30] {
+        let test = build_test!(source, &[27_u64, 17, 12, 4, log_height]);
+        assert!(
+            test.execute_for_output().is_err(),
+            "log trace height {log_height} is outside the PVM verifier's range and must be rejected"
+        );
+    }
+}
+
+/// A common 96-bit policy accepts the deployed PVM preset at height 16, but rejects it once the
+/// lookup round lowers the conjectured level to 95 bits at height 20.
+#[test]
+fn pvm_security_level_threshold_rejects_a_tall_trace() {
+    let source = "
+        use miden::core::sys::pvm
+
+        begin
+            exec.pvm::compute_conjectured_security_level
+            u32lt.96 assertz
+        end
+        ";
+
+    let at_target = build_test!(source, &[27_u64, 17, 12, 4, 16]);
+    at_target.execute_for_output().expect("a 96-bit PVM proof must be accepted");
+
+    let below_target = build_test!(source, &[27_u64, 17, 12, 4, 20]);
+    assert!(
+        below_target.execute_for_output().is_err(),
+        "a 95-bit PVM proof must be rejected"
+    );
+}
+
+/// The legacy query-only estimate remains in `stark::utils` for callers that explicitly need it.
 ///
 /// The MASM `stark::utils::conjectured_security_level` procedure must agree with the native
 /// `miden_air::config::conjectured_security_level` on every input in the verifier's domain:

@@ -157,6 +157,32 @@ impl CoreLibrary {
             .expect("pvm::verify_proof is exported from the core library")
     }
 
+    /// Returns the MAST root of the main VM's conjectured security estimator.
+    ///
+    /// This root identifies the component-specific estimator implementation. It does not encode
+    /// an acceptance threshold; consumers can apply one common security policy to levels returned
+    /// by the VM and PVM estimators.
+    pub fn vm_conjectured_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::sys::vm::compute_conjectured_security_level",
+            )
+            .expect("vm::compute_conjectured_security_level is exported from the core library")
+    }
+
+    /// Returns the MAST root of the PVM's conjectured security estimator.
+    ///
+    /// This root identifies the component-specific estimator implementation. It does not encode
+    /// an acceptance threshold; consumers can apply one common security policy to levels returned
+    /// by the VM and PVM estimators.
+    pub fn pvm_conjectured_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::sys::pvm::compute_conjectured_security_level",
+            )
+            .expect("pvm::compute_conjectured_security_level is exported from the core library")
+    }
+
     /// Returns the default event handlers required by the core library.
     ///
     /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
@@ -229,5 +255,27 @@ mod tests {
             .is_some();
 
         assert!(exists);
+    }
+
+    #[test]
+    fn conjectured_security_estimator_roots_match_exported_procedures() {
+        let core_lib = CoreLibrary::default();
+
+        for (root, path) in [
+            (
+                core_lib.vm_conjectured_security_estimator_root(),
+                "::miden::core::sys::vm::compute_conjectured_security_level",
+            ),
+            (
+                core_lib.pvm_conjectured_security_estimator_root(),
+                "::miden::core::sys::pvm::compute_conjectured_security_level",
+            ),
+        ] {
+            assert_eq!(
+                Some(root),
+                core_lib.package.get_procedure_root_by_path(path),
+                "estimator accessor must return the exported procedure root for {path}"
+            );
+        }
     }
 }

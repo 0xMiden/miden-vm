@@ -58,6 +58,12 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 // PRECOMPILE PCS PARAMETERS
 // ================================================================================================
 
+/// Log2 of the PVM FRI blowup factor (blowup = 8).
+pub(crate) const LOG_BLOWUP: u8 = 3;
+
+/// Log2 of the PVM FRI folding arity (arity = 4).
+pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
+
 /// PCS parameters for the precompile chiplet stack.
 ///
 /// Mirrors `miden_air::config::pcs_params` in every parameter, including
@@ -72,8 +78,8 @@ pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
 /// review; it is not an independently mutable runtime configuration.
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
-        3,  // log_blowup (must be >= log_quotient_degree)
-        2,  // log_folding_arity
+        LOG_BLOWUP, // must be >= log_quotient_degree
+        LOG_FOLDING_ARITY,
         7,  // log_final_degree
         4,  // folding_pow_bits
         12, // deep_pow_bits

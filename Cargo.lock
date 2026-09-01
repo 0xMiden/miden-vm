@@ -2209,6 +2209,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-precompiles",
+ "miden-precompiles-air",
  "miden-precompiles-prover",
  "miden-precompiles-verifier",
  "miden-processor",

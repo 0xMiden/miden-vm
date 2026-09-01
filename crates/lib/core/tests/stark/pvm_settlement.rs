@@ -153,7 +153,6 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
     let source = "
         use miden::core::sys
         use miden::core::stark::constants
-        use miden::core::stark::utils
         use miden::core::sys::pvm
         use miden::core::sys::vm
         use miden::core::sys::vm::layout
@@ -177,9 +176,12 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
             # advice stack; the response remains untrusted until verify_proof passes.
             exec.pvm::request_proof
             exec.pvm::verify_proof
-            exec.utils::conjectured_security_level
+
+            # Grade the authenticated parameters under the PVM AIR shape and the proof's maximum
+            # trace height. The threshold is common policy; the estimator is component-specific.
+            exec.constants::get_trace_length_log movdn.4
+            exec.pvm::compute_conjectured_security_level
             u32lt.96 assertz
-            drop drop
             exec.sys::truncate_stack
         end
         ";

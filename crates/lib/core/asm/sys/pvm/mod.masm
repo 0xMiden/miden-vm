@@ -9,6 +9,29 @@ use miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
+# Conjectured PVM round budget, in fixed point with 16 fractional bits.
+#
+# The PVM proves a different AIR statement from the main VM, so its algebraic-round constants are
+# derived from `miden_precompiles_air::security` and mirrored here. The query and folding constants
+# happen to match the VM because both use the same PCS geometry; the AIR-dependent constants do
+# not. Cross-tests compare every literal with its derived Rust counterpart and compare the final
+# MASM and native estimators over the verifier's input domain.
+const BITS_PER_QUERY_FP = 193381
+const SECURITY_CAP_FP = 8323072
+# The fixed-boundary correction is exactly one fixed-point unit throughout the recursive
+# verifier's supported height range.
+# `recursive_lookup_boundary_correction_matches_folded_base` proves this against the native
+# derivation, and the MASM/Rust literal cross-test checks the folded value.
+const LOOKUP_BASE_AFTER_BOUNDARY_FP = 7585614
+const COMPOSITION_TERM_FP = 7786018
+const OOD_BASE_FP = 8219197
+const DEEP_BASE_FP = 7760199
+const FOLDING_BASE_FP = 8022589
+
+# Common upper bound used by the PVM shape checks and estimator. The maximum PVM trace height is
+# always at least FIXED_LOG_HEIGHT_3 because BytePairLut has that fixed height.
+const LOG_HEIGHT_BOUND = 30
+
 # Fixed ChipletAir::all() cardinality and registry metadata.
 const NUM_CHIPLETS = 10
 
@@ -123,9 +146,77 @@ end
 #! Outputs: [height, ...]
 proc assert_shape_log
     u32assert.err="AIR log height must be u32"
-    dup u32lt.30 assert.err="AIR log height above maximum"
+    dup u32lt.LOG_HEIGHT_BOUND assert.err="AIR log height above maximum"
     dup.1 dup.1 u32lte assert.err="AIR log height below relation minimum"
     swap drop
+end
+
+#! Computes the PVM proof's conjectured security level, in bits.
+#!
+#! Takes the minimum over the lookup challenge, constraint composition, out-of-domain evaluation,
+#! DEEP composition, FRI folding, FRI query, and commitment-collision terms. The result is a
+#! property of both the transcript-bound proof parameters and its maximum AIR trace height. This
+#! procedure applies no acceptance policy; the caller compares the returned level with its own
+#! threshold.
+#!
+#! Must match `miden_precompiles_air::security::security_report` bit-for-bit (enforced by
+#! cross-tests). `log_max_height` comes from verifier-owned memory after `verify_proof`; the fixed
+#! BytePairLut trace makes every valid PVM maximum at least FIXED_LOG_HEIGHT_3.
+#!
+#! PRECONDITION: `num_queries <= 150`, so the query product fits in a u32. Parameters returned by
+#! `verify_proof` satisfy this bound because the generic verifier enforces it.
+#!
+#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_max_height, ...]
+#! Outputs: [level, ...]
+#!
+#! Invocation: exec
+pub proc compute_conjectured_security_level(
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+    log_max_height: u32,
+) -> u32
+    dup.4 u32assert.err="log trace height must be a u32"
+    dup u32lt.LOG_HEIGHT_BOUND assert.err="log trace height above supported maximum"
+    u32gte.FIXED_LOG_HEIGHT_3 assert.err="log trace height below supported minimum"
+
+    # Consume the height after converting it to fixed point; the height-bearing rounds all
+    # subtract this value.
+    movup.4 mul.65536
+    # => [log_height_fp, num_queries, query_pow, deep_pow, folding_pow, ...]
+
+    # FRI queries: each query contributes the random-words rate, plus query grinding. Both inputs
+    # are consumed after use.
+    swap mul.BITS_PER_QUERY_FP
+    movup.2 mul.65536 add
+    # => [query_level_fp, log_height_fp, deep_pow, folding_pow, ...]
+
+    # Lookup challenges: sampled after the main-trace commitment, with no grinding, and corrected
+    # for the fixed-environment boundary fractions. The correction is exactly one fixed-point unit
+    # over every supported height and is folded into LOOKUP_BASE_AFTER_BOUNDARY_FP.
+    push.LOOKUP_BASE_AFTER_BOUNDARY_FP dup.2 sub u32min
+    # => [min_level_fp, log_height_fp, deep_pow, folding_pow, ...]
+
+    # Out-of-domain point: rejection-sampled, with no grinding.
+    push.OOD_BASE_FP dup.2 sub u32min
+
+    # FRI folding: worst at the first round, where the domain is largest. Consume its grinding
+    # parameter after applying it.
+    push.FOLDING_BASE_FP dup.2 sub movup.4 mul.65536 add u32min
+    # => [min_level_fp, log_height_fp, deep_pow, ...]
+
+    # DEEP composition, consuming its grinding parameter, then height-independent composition and
+    # collision terms.
+    push.DEEP_BASE_FP movup.3 mul.65536 add u32min
+    # => [min_level_fp, log_height_fp, ...]
+    push.COMPOSITION_TERM_FP u32min
+    push.SECURITY_CAP_FP u32min
+    u32shr.16
+    # => [level, log_height_fp, ...]
+
+    swap drop
+    # => [level, ...]
 end
 
 proc store_relation_digest

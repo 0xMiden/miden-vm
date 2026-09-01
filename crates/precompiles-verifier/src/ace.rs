@@ -175,6 +175,9 @@ mod tests {
     use super::*;
     use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST};
 
+    const PVM_WRAPPER_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
+
     fn canonical_order() -> Vec<usize> {
         (0..NUM_CHIPLETS).collect()
     }
@@ -532,17 +535,38 @@ mod tests {
         );
     }
 
+    /// Compare source literals directly because an output-parity sweep cannot detect drift in a
+    /// round that never attains the minimum. The lookup literal includes the one-unit boundary
+    /// correction proved by `recursive_lookup_boundary_correction_matches_folded_base` in
+    /// precompiles-air.
+    #[test]
+    fn pvm_security_masm_matches_air() {
+        use miden_precompiles_air::security as pvm_security;
+
+        for (name, expected) in [
+            ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
+            ("SECURITY_CAP_FP", pvm_security::SECURITY_CAP),
+            ("LOOKUP_BASE_AFTER_BOUNDARY_FP", pvm_security::LOOKUP_BASE_AFTER_BOUNDARY),
+            ("COMPOSITION_TERM_FP", pvm_security::COMPOSITION_TERM),
+            ("OOD_BASE_FP", pvm_security::OOD_BASE),
+            ("DEEP_BASE_FP", pvm_security::DEEP_BASE),
+            ("FOLDING_BASE_FP", pvm_security::FOLDING_BASE),
+        ] {
+            assert_eq!(
+                masm_const(PVM_WRAPPER_PATH, name),
+                expected,
+                "PVM wrapper {name} drifted from its native security constant"
+            );
+        }
+    }
+
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
         use miden_lifted_air::{BaseAir, LiftedAir};
 
-        use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_RELATION_DIGEST};
+        assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
 
-        const WRAPPER_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
-
-        assert_eq!(masm_const(WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
         let derived_minima: Vec<u64> = airs
             .iter()
@@ -569,7 +593,7 @@ mod tests {
                     Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
                     None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
                 };
-                masm_const(WRAPPER_PATH, &name)
+                masm_const(PVM_WRAPPER_PATH, &name)
             })
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
@@ -579,7 +603,7 @@ mod tests {
         ] {
             for (i, expected) in expected.into_iter().enumerate() {
                 assert_eq!(
-                    masm_const(WRAPPER_PATH, &alloc::format!("{prefix}_{i}")),
+                    masm_const(PVM_WRAPPER_PATH, &alloc::format!("{prefix}_{i}")),
                     expected,
                     "PVM wrapper {prefix} limb {i} drifted"
                 );
