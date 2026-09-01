@@ -143,6 +143,12 @@ fn aligned(width: usize, alignment: usize) -> usize {
 // below checks every one of these constants against a fixed numeric snapshot instead,
 // independently of which round determines the minimum.
 
+/// Fractional bits in the fixed-point representation shared with the MASM estimator.
+pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
+
+/// Fixed-point representation of one, shared with the MASM estimator.
+pub const FIXED_POINT_ONE: u64 = fixed::ONE;
+
 /// Conjectured security contributed per FRI query, in fixed point.
 pub const BITS_PER_QUERY: u64 =
     fixed::bits_per_query(config::LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
@@ -177,6 +183,11 @@ pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_term
 /// `log2` of the FRI folding round's error coefficient, in fixed point.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOLDING_ARITY) - 1));
 
+/// Lookup grinding applied before the lookup challenges are sampled.
+///
+/// The deployed Miden VM samples them directly after the main-trace commitment.
+pub const LOOKUP_POW_BITS: u32 = 0;
+
 /// `sys::vm::mod.masm`'s `LOOKUP_BASE_FP`: `log2|E|` less the lookup round's coefficient, in fixed
 /// point.
 pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
@@ -193,8 +204,8 @@ pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 /// point.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// `sys::vm::mod.masm`'s `FOLDING_BASE_FP`: `log2|E|` less the FRI folding round's coefficient and
-/// the fixed blowup, in fixed point.
+/// The common MASM estimator's `FOLDING_BASE_FP`: `log2|E|` less the FRI folding round's
+/// coefficient and the fixed blowup, in fixed point.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
 
@@ -207,7 +218,7 @@ const fn deployed_instance(log_max_height: u32) -> InstanceShape {
     }
 }
 
-/// `log2(e)`, rounded down, in fixed point. Matches `sys::vm::mod.masm`'s `LOG2_E_FP`.
+/// `log2(e)`, rounded down, in fixed point. Matches the common MASM estimator's `LOG2_E_FP`.
 pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// Number of lookup fractions `emit_core_boundary` emits unconditionally: the block-hash seed and
@@ -224,8 +235,8 @@ pub const CORE_BOUNDARY_LOOKUP_TERMS: u32 = 3;
 /// terminals, and one `kernel_rom_init` per kernel procedure digest. Both divisions round up, so
 /// the correction is never smaller than the true log term, keeping the corrected round
 /// conservative. The two-step division order (first by `fractions_per_row`, then by
-/// `2^log_max_height`) is what `sys::vm::lookup_boundary_correction` mirrors bit-for-bit: a single
-/// combined divisor overflows a `u32` at the deployed shape's larger heights.
+/// `2^log_max_height`) is what the common MASM estimator mirrors bit-for-bit: a single combined
+/// divisor overflows a `u32` at the deployed shape's larger heights.
 fn lookup_boundary_correction(num_kernel_procedures: u32, log_max_height: u32) -> u64 {
     let boundary = CORE_BOUNDARY_LOOKUP_TERMS as u64 + num_kernel_procedures as u64;
     let numerator = boundary * LOG2_E;
@@ -262,10 +273,11 @@ fn apply_lookup_boundary_correction(
 /// blowup, folding arity, AIR shape, challenge field, and commitment hash are fixed by the
 /// deployed configuration and enter as the constants above.
 ///
-/// Mirrored bit-for-bit by `sys::vm::compute_conjectured_security_level`, which admits only the
-/// recursive verifier's domain — at most 150 queries, grinding below 32 bits, log trace height in
-/// `6..30`. This function also accepts configurations outside that domain; a proof past it would
-/// trap in the VM.
+/// Mirrored bit-for-bit by the common MASM estimator when supplied with the MVM descriptor. The
+/// recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed
+/// zero lookup grinding, log trace height in `6..=29`, and 0..=255 kernel procedures. This function
+/// also accepts configurations outside that domain; such inputs are not part of the recursive
+/// estimator's contract.
 pub fn conjectured_security_level(
     num_queries: u32,
     query_pow_bits: u32,
@@ -281,7 +293,7 @@ pub fn conjectured_security_level(
         query_pow_bits,
         deep_pow_bits,
         folding_pow_bits,
-        lookup_pow_bits: 0,
+        lookup_pow_bits: LOOKUP_POW_BITS,
     };
     let report = p3_security::budget::security_report(
         &params,
@@ -317,7 +329,7 @@ pub fn conjectured_security_level_for_alignment(
         query_pow_bits,
         deep_pow_bits,
         folding_pow_bits,
-        lookup_pow_bits: 0,
+        lookup_pow_bits: LOOKUP_POW_BITS,
     };
     let air_shape = AirShape {
         num_deep_terms: Some(num_deep_terms(alignment)),
@@ -345,7 +357,7 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
         folding_pow_bits: params.folding_pow_bits() as u32,
         // The protocol samples the lookup challenges directly after the main-trace commitment,
         // with no grinding in between.
-        lookup_pow_bits: 0,
+        lookup_pow_bits: LOOKUP_POW_BITS,
     }
 }
 
@@ -437,9 +449,11 @@ mod tests {
     ///
     /// Under the deployed shape the lookup round sits below every other algebraic term and the
     /// cap across the whole swept domain, so the output cross-test in `crates/lib/core/tests/sys`
-    /// observes only two of these seven constants; the rest would drift unnoticed there.
+    /// observes only two round constants; the rest would drift unnoticed there.
     #[test]
     fn derived_security_constants_match_snapshot() {
+        const FP_SHIFT: u32 = 16;
+        const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_323_072;
         const LOOKUP_BASE_FP: u64 = 7_800_270;
@@ -448,6 +462,8 @@ mod tests {
         const DEEP_BASE_FP: u64 = 7_922_741;
         const FOLDING_BASE_FP: u64 = 8_022_589;
 
+        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
+        assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
         assert_eq!(BITS_PER_QUERY, BITS_PER_QUERY_FP, "BITS_PER_QUERY_FP is stale");
         assert_eq!(SECURITY_CAP, SECURITY_CAP_FP, "SECURITY_CAP_FP is stale");
         assert_eq!(LOOKUP_BASE, LOOKUP_BASE_FP, "LOOKUP_BASE_FP is stale");

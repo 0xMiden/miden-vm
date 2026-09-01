@@ -1,0 +1,138 @@
+# Shared fixed-point format and conjectured round-budget constants.
+#
+# The round constants depend only on the PCS shared by the MVM and PVM recursive verifiers. Each
+# verifier returns the relation-specific fixed-point round bases together with the proof's
+# transcript-bound parameters and instance shape.
+const FP_SHIFT = 16
+const FP_ONE = 65536
+const BITS_PER_QUERY_FP = 193381
+const SECURITY_CAP_FP = 8323072
+const FOLDING_BASE_FP = 8022589
+const LOG2_E_FP = 94548
+
+#! Computes the fixed-point lookup-boundary correction
+#! `ceil(ceil(num_boundary_terms * log2(e) / fractions_per_row) / 2^log_max_height)`.
+#!
+#! A zero boundary count needs no correction. A nonzero count requires nonzero lookup fractions.
+#!
+#! Inputs:  [num_boundary_terms, fractions_per_row, log_max_height, ...]
+#! Outputs: [correction_fp, ...]
+proc lookup_boundary_correction
+    dup eq.0
+    if.true
+        drop drop drop push.0
+    else
+        # ceil(num_boundary_terms * log2(e) / fractions_per_row)
+        mul.LOG2_E_FP sub.1 swap u32div add.1
+
+        # ceil(step1 / 2^log_max_height)
+        sub.1 swap pow2 u32div add.1
+    end
+end
+
+#! Computes a proof's conjectured security level, in bits, from the security descriptor returned
+#! by the verifier which authenticated it.
+#!
+#! The round-budget arithmetic is common to the MVM and PVM. Expensive logarithms of fixed AIR
+#! shape values are evaluated natively and returned as four fixed-point round bases. This
+#! keeps the in-VM estimator small while leaving it independent of either relation:
+#!
+#! - `lookup_base_fp = log2(|E|) - ceil(log2((max_message_width + 2) * fractions_per_row))`
+#! - `composition_base_fp = log2(|E|) - ceil(log2(num_composed_constraints))`
+#! - `ood_base_fp = log2(|E|) - ceil(log2(max_constraint_degree + 1))`
+#! - `deep_base_fp = log2(|E|) - ceil(log2(num_deep_terms))`
+#!
+#! All values above are in Q16 fixed point with conservative rounding. Computing their logarithms
+#! in MASM would be needlessly expensive: they are fixed by the verified relation, derived by the
+#! native AIR security module, and guarded against drift there.
+#!
+#! This procedure is intentionally not a general-purpose estimator. Its input must be the
+#! descriptor returned by a successful MVM or PVM recursive verifier. Their exact accepted
+#! envelopes are:
+#!
+#! - Shared proof parameters: `num_queries` in `7..=150`; query, DEEP, and folding grinding in
+#!   `0..=31` bits.
+#! - MVM: lookup grinding 0, maximum log trace height in `6..=29`, 28 lookup fractions per row,
+#!   and `3..=258` one-time boundary terms (three fixed terms plus 0..=255 kernel procedures).
+#! - PVM: lookup grinding 0, maximum log trace height in `16..=29`, 244 lookup fractions per row,
+#!   and eight fixed one-time boundary terms.
+#!
+#! The verifiers validate the variable fields and supply the normalized relation constants.
+#! Within these envelopes, all fixed-point arithmetic below fits in a u32 and matches the native
+#! estimator exactly. Changing a verifier envelope requires reviewing that arithmetic guarantee.
+#! This procedure does not authenticate a descriptor: callers must pass the verifier's twelve
+#! returned values without modification. Supplying caller-assembled values is programmer error.
+#! No descriptor field controls a loop or allocation, so cycle and stack use are constant.
+#!
+#! `num_lookup_boundary_terms` is deliberately relation-neutral. The MVM derives it from the
+#! authenticated kernel witness plus its fixed core terms; the PVM returns the fixed-environment
+#! boundary count. The common correction below does not know how either value was derived.
+#!
+#! The challenge field, commitment collision cap, blowup, and folding arity are fixed by the shared
+#! recursive PCS and are encoded by the constants above. This procedure applies no acceptance
+#! policy; the caller compares the returned level with its own threshold.
+#!
+#! Inputs:  [num_queries, query_pow_bits, lookup_pow_bits, deep_pow_bits, folding_pow_bits,
+#!          log_max_height, lookup_base_fp, composition_base_fp, ood_base_fp, deep_base_fp,
+#!          lookup_fractions_per_row, num_lookup_boundary_terms, ...]
+#! Outputs: [level, ...]
+#!
+#! Invocation: exec
+pub proc compute_conjectured_security_level(
+    num_queries: u32,
+    query_pow_bits: u32,
+    lookup_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+    log_max_height: u32,
+    lookup_base_fp: u32,
+    composition_base_fp: u32,
+    ood_base_fp: u32,
+    deep_base_fp: u32,
+    lookup_fractions_per_row: u32,
+    num_lookup_boundary_terms: u32,
+) -> u32
+    # Hoist the maximum height in fixed point; the height-bearing rounds all subtract it.
+    dup.5 mul.FP_ONE
+    # => [log_height_fp, nq, query_pow, lookup_pow, deep_pow, folding_pow, log_height,
+    #     lookup_base, composition_base, ood_base, deep_base, fractions_per_row, boundary_terms,
+    #     ...]
+
+    # FRI queries.
+    dup.1 mul.BITS_PER_QUERY_FP dup.3 mul.FP_ONE add
+    # => [query_level_fp, log_height_fp, nq, query_pow, lookup_pow, deep_pow, folding_pow,
+    #     log_height, lookup_base, composition_base, ood_base, deep_base, fractions_per_row,
+    #     boundary_terms, ...]
+
+    # Lookup challenges, including one-time boundary fractions.
+    dup.7 dup.13 dup.15 exec.lookup_boundary_correction
+    # => [boundary_correction, query_level_fp, log_height_fp, nq, query_pow, lookup_pow,
+    #     deep_pow, folding_pow, log_height, lookup_base, composition_base, ood_base, deep_base,
+    #     fractions_per_row, boundary_terms, ...]
+    dup.9 dup.3 sub
+    dup.6 mul.FP_ONE add
+    # Native reports cap this round before applying the Miden boundary correction.
+    push.SECURITY_CAP_FP u32min
+    # The verified envelopes keep the correction smaller than this capped term.
+    swap sub u32min
+    # => [min_level_fp, log_height_fp, nq, query_pow, lookup_pow, deep_pow, folding_pow,
+    #     log_height, lookup_base, composition_base, ood_base, deep_base, fractions_per_row,
+    #     boundary_terms, ...]
+
+    # Constraint composition.
+    dup.9 u32min
+
+    # Out-of-domain evaluation.
+    dup.10 dup.2 sub u32min
+
+    # DEEP composition.
+    dup.11 dup.6 mul.FP_ONE add u32min
+
+    # FRI folding, then the commitment collision cap.
+    push.FOLDING_BASE_FP dup.2 sub
+    dup.7 mul.FP_ONE add u32min
+    push.SECURITY_CAP_FP u32min
+
+    u32shr.FP_SHIFT
+    movdn.13 dropw dropw dropw drop
+end

@@ -143,6 +143,12 @@ fn aligned(width: usize, alignment: usize) -> usize {
 // `pvm_security_masm_matches_air` check every active literal independently of which round
 // determines the minimum.
 
+/// Fractional bits in the fixed-point representation shared with the MASM estimator.
+pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
+
+/// Fixed-point representation of one, shared with the MASM estimator.
+pub const FIXED_POINT_ONE: u64 = fixed::ONE;
+
 /// Conjectured security contributed per FRI query, in fixed point.
 pub const BITS_PER_QUERY: u64 = fixed::bits_per_query(LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
 
@@ -170,19 +176,19 @@ pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_term
 /// `log2` of the FRI folding round's error coefficient, in fixed point.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
 
-/// `log2|E|` less the lookup round's coefficient, in fixed point.
+/// Lookup grinding applied before the lookup challenges are sampled.
 ///
-/// The recursive MASM estimator additionally folds its fixed-boundary correction into
-/// `LOOKUP_BASE_AFTER_BOUNDARY_FP`.
-pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
+/// The deployed chiplet stack samples them directly after the main-trace commitment.
+pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// Lookup-round base used by the recursive estimator after folding in its fixed-boundary
-/// correction.
+/// Number of fixed-environment lookup fractions consumed once per PVM proof.
 ///
-/// `recursive_lookup_boundary_correction_matches_folded_base` proves that the difference from
-/// [`LOOKUP_BASE`] matches the native correction throughout every representable height at or above
-/// the PVM minimum, a strict superset of the recursive verifier's range.
-pub const LOOKUP_BASE_AFTER_BOUNDARY: u64 = LOOKUP_BASE - 1;
+/// [`fixed_boundary_fraction_count`] derives this value from the fixed messages, and the drift
+/// test below keeps the exported descriptor constant tied to that source of truth.
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
+
+/// `log2|E|` less the lookup round's coefficient, in fixed point.
+pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
 
 /// `sys::pvm::mod.masm`'s `COMPOSITION_TERM_FP`.
 pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
@@ -193,9 +199,12 @@ pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 /// `sys::pvm::mod.masm`'s `DEEP_BASE_FP`.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// `sys::pvm::mod.masm`'s `FOLDING_BASE_FP`, including the fixed blowup.
+/// The common MASM estimator's `FOLDING_BASE_FP`, including the fixed blowup.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
+
+/// `log2(e)`, rounded down, in Q16 fixed point.
+pub const LOG2_E: u64 = fixed::LOG2_E;
 
 /// The instance shape of a deployed PVM proof at the given maximum AIR log height.
 const fn deployed_instance(log_max_height: u32) -> InstanceShape {
@@ -252,7 +261,7 @@ fn fixed_boundary_fraction_count() -> u64 {
 /// Both divisions round up, so the correction never understates the true log term, keeping the
 /// corrected round conservative.
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
-    let numerator = fixed_boundary_fraction_count() * fixed::LOG2_E;
+    let numerator = fixed_boundary_fraction_count() * LOG2_E;
     numerator
         .div_ceil(AIR_SHAPE.lookup.fractions_per_row as u64)
         .div_ceil(1u64 << log_max_height)
@@ -283,7 +292,7 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
         folding_pow_bits: params.folding_pow_bits() as u32,
         // The chiplet stack samples its lookup challenges directly after the main-trace
         // commitment, with no grinding in between.
-        lookup_pow_bits: 0,
+        lookup_pow_bits: LOOKUP_POW_BITS,
     }
 }
 
@@ -293,6 +302,10 @@ pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
 /// binds every AIR's log height, so a prover cannot understate it to inflate the reported level.
 /// The lookup round is corrected for the fixed-environment boundary fractions the verifier
 /// consumes on top of [`AIR_SHAPE`]'s per-row fractions — see `fixed_boundary_correction`.
+/// The recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits,
+/// fixed zero lookup grinding, and a maximum log trace height in `16..=29`. This native function
+/// also accepts configurations outside that domain; such inputs are not part of the recursive
+/// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
     let instance = deployed_instance(log_max_height);
     let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
@@ -348,35 +361,21 @@ mod tests {
     /// review, even while its rounded correction remains unchanged.
     #[test]
     fn fixed_boundary_fraction_count_matches_snapshot() {
-        assert_eq!(fixed_boundary_fraction_count(), 8, "fixed boundary shape moved");
-    }
-
-    /// The recursive MASM estimator folds the lookup boundary correction into its lookup-base
-    /// literal. This must remain exactly one fixed-point unit throughout every height the native
-    /// correction can represent at or above the PVM minimum, which covers the recursive verifier's
-    /// supported range.
-    #[test]
-    fn recursive_lookup_boundary_correction_matches_folded_base() {
-        let log_height_min = crate::primitives::byte_pair_lut::TRACE_HEIGHT.ilog2();
-        assert!(log_height_min < u64::BITS, "recursive height range is empty");
-        let folded_correction = LOOKUP_BASE - LOOKUP_BASE_AFTER_BOUNDARY;
-
-        for log_height in log_height_min..u64::BITS {
-            assert_eq!(
-                fixed_boundary_correction(log_height),
-                folded_correction,
-                "recursive lookup boundary correction moved at log height {log_height}"
-            );
-        }
+        assert_eq!(
+            fixed_boundary_fraction_count(),
+            u64::from(FIXED_BOUNDARY_LOOKUP_TERMS),
+            "fixed boundary shape moved"
+        );
     }
 
     /// Every derived Rust security constant, checked against a fixed numeric snapshot.
     ///
-    /// `sys::pvm::mod.masm` carries the corresponding round bases as literals;
-    /// `pvm_security_masm_matches_air` checks them directly against these constants. Its lookup
-    /// literal additionally folds in the one-unit correction proved above.
+    /// `sys::pvm::mod.masm` carries the corresponding descriptor bases as literals;
+    /// `pvm_security_masm_matches_air` checks them directly against these constants.
     #[test]
     fn derived_security_constants_match_snapshot() {
+        const FP_SHIFT: u32 = 16;
+        const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_323_072;
         const LOOKUP_BASE_FP: u64 = 7_585_615;
@@ -385,6 +384,8 @@ mod tests {
         const DEEP_BASE_FP: u64 = 7_760_199;
         const FOLDING_BASE_FP: u64 = 8_022_589;
 
+        assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
+        assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
         assert_eq!(BITS_PER_QUERY, BITS_PER_QUERY_FP, "BITS_PER_QUERY_FP is stale");
         assert_eq!(SECURITY_CAP, SECURITY_CAP_FP, "SECURITY_CAP_FP is stale");
         assert_eq!(LOOKUP_BASE, LOOKUP_BASE_FP, "LOOKUP_BASE_FP is stale");

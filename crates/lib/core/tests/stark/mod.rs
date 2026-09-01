@@ -28,6 +28,7 @@ mod pvm_public_inputs;
 mod pvm_settlement;
 mod pvm_verifier;
 mod pvm_wrapper;
+mod security;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -365,10 +366,9 @@ fn request_consumer_source() -> String {
     format!(
         "
         use miden::core::sys
-        use miden::core::stark::constants
+        use miden::core::stark::security
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
-        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -387,21 +387,13 @@ fn request_consumer_source() -> String {
             adv.push_mapval dropw
             # => [CLAIM_COMMITMENT]
 
-            # 3) Verify the claim; verify_vm_proof returns the deferred obligation and the
-            #    proof's transcript-bound security parameters.
+            # 3) Verify the claim; verify_vm_proof returns the common security descriptor followed
+            #    by the deferred obligation.
             exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            # => [security_descriptor, D]
 
-            # 4) Grade the returned parameters and assert the consumer's acceptance
-            #    threshold (>= 96 conjectured bits). The grade also depends on the proof's
-            #    largest AIR trace height, which the verifier left in its own memory.
-            swapw
-            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
-            exec.constants::get_trace_length_log movdn.4
-            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
-            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_height,
-            #     num_kernel_procedures, D]
-            exec.vm::compute_conjectured_security_level
+            # 4) Grade the returned descriptor and assert the consumer's acceptance threshold.
+            exec.security::compute_conjectured_security_level
             # => [conjectured_level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
@@ -490,10 +482,9 @@ fn stark_verifier_e2f4_request_multi_proof() {
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::stark::constants
+        use miden::core::stark::security
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
-        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -507,10 +498,8 @@ fn stark_verifier_e2f4_request_multi_proof() {
             dupw
             procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
-            exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
-            swapw exec.constants::get_trace_length_log movdn.4
-            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
-            exec.vm::compute_conjectured_security_level  # => [level, D]
+            exec.vm::verify_vm_proof                     # => [security_descriptor, D]
+            exec.security::compute_conjectured_security_level # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
         end
@@ -536,7 +525,7 @@ fn verify_vm_proof_program() -> String {
 
         begin
             exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            # => [security_descriptor, D]
             exec.sys::truncate_stack
         end
     "
@@ -544,6 +533,8 @@ fn verify_vm_proof_program() -> String {
 }
 
 fn run_recursive_verifier(data: &VerifierData) {
+    use miden_air::security;
+
     let source = verify_vm_proof_program();
     let test = build_test!(
         source.as_str(),
@@ -554,19 +545,46 @@ fn run_recursive_verifier(data: &VerifierData) {
     );
     let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
 
-    // `verify_vm_proof` returns [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
-    // Pin D (stack positions 0..4) to the proof-stream value and the parameter tail (positions
-    // 4..8) to the deployed PCS config so a change to the returned tuple's values or order is
-    // caught across every e2e configuration.
+    // Pin the full common descriptor and deferred root so any value or ordering drift is caught
+    // across every end-to-end configuration.
     let params = miden_air::config::pcs_params();
-    let returned = |i: usize| output.stack.get_element(i).map(|f| f.as_canonical_u64());
-    for i in 0..WORD_SIZE {
-        assert_eq!(returned(i), Some(data.proof_stream[4 + i]), "returned deferred root felt {i}");
-    }
-    assert_eq!(returned(4), Some(params.num_queries() as u64), "returned num_queries");
-    assert_eq!(returned(5), Some(params.query_pow_bits() as u64), "returned query_pow_bits");
-    assert_eq!(returned(6), Some(params.deep_pow_bits() as u64), "returned deep_pow_bits");
-    assert_eq!(returned(7), Some(params.folding_pow_bits() as u64), "returned folding_pow_bits");
+    let height_start = 4 + WORD_SIZE;
+    let log_max_height = data.proof_stream[height_start..height_start + miden_air::MIDEN_AIR_COUNT]
+        .iter()
+        .copied()
+        .max()
+        .expect("the MVM relation has AIR instances");
+    let kernel_commitment = claim_kernel_commitment(data);
+    let num_kernel_procedures = data
+        .advice_map
+        .iter()
+        .find(|(key, _)| *key == kernel_commitment)
+        .map(|(_, values)| values.len() / WORD_SIZE)
+        .expect("the authenticated kernel witness must be present");
+
+    let mut expected = vec![
+        params.num_queries() as u64,
+        params.query_pow_bits() as u64,
+        u64::from(security::LOOKUP_POW_BITS),
+        params.deep_pow_bits() as u64,
+        params.folding_pow_bits() as u64,
+        log_max_height,
+        security::LOOKUP_BASE,
+        security::COMPOSITION_TERM,
+        security::OOD_BASE,
+        security::DEEP_BASE,
+        u64::from(security::AIR_SHAPE.lookup.fractions_per_row),
+        u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures as u64,
+    ];
+    expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
+
+    let returned: Vec<u64> = output
+        .stack
+        .get_num_elements(expected.len())
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .collect();
+    assert_eq!(returned, expected, "verify_vm_proof returned the wrong security descriptor");
 
     // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
     ace_read_check::cross_check_ace_circuit(&output);
@@ -640,7 +658,8 @@ fn verify_vm_proof_rejects_oversized_kernel_witness() {
         Some(KERNEL_EVEN_NUM_PROC),
     );
     let k = claim_kernel_commitment(&data);
-    *advice_map_value_mut(&mut data, k) = vec![Felt::ZERO; 256 * WORD_SIZE];
+    *advice_map_value_mut(&mut data, k) =
+        vec![Felt::ZERO; (KernelDescriptor::MAX_NUM_PROCEDURES + 1) * WORD_SIZE];
 
     let source = verify_vm_proof_program();
     let test = build_test!(
@@ -790,9 +809,7 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(2)]
 #[case(3)]
 #[case(8)]
-// 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
-// accepts.
-#[case(255)]
+#[case(KernelDescriptor::MAX_NUM_PROCEDURES)]
 fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize) {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

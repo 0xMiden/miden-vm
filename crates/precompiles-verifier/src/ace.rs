@@ -177,6 +177,8 @@ mod tests {
 
     const PVM_WRAPPER_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
+    const SECURITY_ESTIMATOR_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/stark/security.masm");
 
     fn canonical_order() -> Vec<usize> {
         (0..NUM_CHIPLETS).collect()
@@ -536,21 +538,40 @@ mod tests {
     }
 
     /// Compare source literals directly because an output-parity sweep cannot detect drift in a
-    /// round that never attains the minimum. The lookup literal includes the one-unit boundary
-    /// correction proved by `recursive_lookup_boundary_correction_matches_folded_base` in
-    /// precompiles-air.
+    /// round that never attains the minimum.
     #[test]
     fn pvm_security_masm_matches_air() {
         use miden_precompiles_air::security as pvm_security;
 
         for (name, expected) in [
+            ("FP_SHIFT", u64::from(pvm_security::FIXED_POINT_FRACTIONAL_BITS)),
+            ("FP_ONE", pvm_security::FIXED_POINT_ONE),
             ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
             ("SECURITY_CAP_FP", pvm_security::SECURITY_CAP),
-            ("LOOKUP_BASE_AFTER_BOUNDARY_FP", pvm_security::LOOKUP_BASE_AFTER_BOUNDARY),
+            ("FOLDING_BASE_FP", pvm_security::FOLDING_BASE),
+            ("LOG2_E_FP", pvm_security::LOG2_E),
+        ] {
+            assert_eq!(
+                masm_const(SECURITY_ESTIMATOR_PATH, name),
+                expected,
+                "common estimator {name} drifted from the PVM's native security constant"
+            );
+        }
+
+        for (name, expected) in [
+            ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
+            ("LOOKUP_BASE_FP", pvm_security::LOOKUP_BASE),
             ("COMPOSITION_TERM_FP", pvm_security::COMPOSITION_TERM),
             ("OOD_BASE_FP", pvm_security::OOD_BASE),
             ("DEEP_BASE_FP", pvm_security::DEEP_BASE),
-            ("FOLDING_BASE_FP", pvm_security::FOLDING_BASE),
+            (
+                "LOOKUP_FRACTIONS_PER_ROW",
+                u64::from(pvm_security::AIR_SHAPE.lookup.fractions_per_row),
+            ),
+            (
+                "FIXED_BOUNDARY_LOOKUP_TERMS",
+                u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+            ),
         ] {
             assert_eq!(
                 masm_const(PVM_WRAPPER_PATH, name),

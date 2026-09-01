@@ -90,8 +90,8 @@ fn verify_vm_proof_call_masm(claim_commitment: Word) -> String {
         procref.vm::verify_vm_proof exec.sys::build_proof_request_key
         adv.push_mapval dropw
         exec.vm::verify_vm_proof
-        # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-        dropw dropw
+        # => [security_descriptor, D]
+        dropw dropw dropw dropw
         ",
     )
     .expect("write recursive verifier call source");
@@ -109,8 +109,8 @@ fn verify_pvm_proof_call_masm(claim_commitment: Word) -> String {
         procref.pvm::verify_proof exec.sys::build_proof_request_key
         adv.push_mapval dropw
         exec.pvm::verify_proof
-        # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
-        dropw
+        # => [security_descriptor]
+        dropw dropw dropw
         ",
     )
     .expect("write PVM verifier call source");

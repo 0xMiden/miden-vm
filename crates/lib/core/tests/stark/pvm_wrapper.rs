@@ -2,7 +2,10 @@
 
 use miden_core::Felt;
 
-use crate::helpers::read_memory_felt;
+use crate::{
+    helpers::read_memory_felt,
+    support::security::{LOG_HEIGHT_MAX, PVM_LOG_HEIGHT_MIN},
+};
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3_223_322_634;
 const ORDER_TAG_PTR: u32 = 3_223_322_639;
@@ -81,6 +84,8 @@ fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
 
 #[test]
 fn pvm_wrapper_enforces_every_air_height_boundary() {
+    assert_eq!(MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX], PVM_LOG_HEIGHT_MIN);
+
     build_test!(source(), &[], &MIN_LOG_HEIGHTS)
         .execute()
         .expect("every AIR must accept its derived minimum height");
@@ -94,7 +99,7 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
         }
     }
 
-    let mut maximum = [29; 10];
+    let mut maximum = [LOG_HEIGHT_MAX; 10];
     // BytePairLut's height is fixed; only the other instances range up to the ceiling.
     maximum[BYTE_PAIR_LUT_AIR_INDEX] = MIN_LOG_HEIGHTS[BYTE_PAIR_LUT_AIR_INDEX];
     build_test!(source(), &[], &maximum)
@@ -103,7 +108,7 @@ fn pvm_wrapper_enforces_every_air_height_boundary() {
 
     for air in 0..MIN_LOG_HEIGHTS.len() {
         let mut heights = MIN_LOG_HEIGHTS;
-        heights[air] = 30;
+        heights[air] = LOG_HEIGHT_MAX + 1;
         let test = build_test!(source(), &[], &heights);
         expect_assert_error_message!(test);
     }
@@ -118,6 +123,15 @@ fn pvm_wrapper_rejects_non_fixed_byte_pair_height() {
 
     let test = build_test!(source(), &[], &heights);
     expect_assert_error_message!(test);
+}
+
+#[test]
+fn pvm_wrapper_rejects_a_non_u32_air_height() {
+    let mut heights = MIN_LOG_HEIGHTS;
+    heights[0] = u64::from(u32::MAX) + 1;
+
+    let test = build_test!(source(), &[], &heights);
+    assert!(test.execute().is_err(), "a non-u32 AIR height must be rejected");
 }
 
 #[test]

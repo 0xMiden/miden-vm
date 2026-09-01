@@ -13,7 +13,7 @@
 
 #### Fixes
 
-- Added the missing PVM recursive conjectured security estimator and VM/PVM estimator-root accessors ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
+- [BREAKING] Made the MVM and PVM recursive verifiers return a common security descriptor and added a shared estimator and MAST-root accessor ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 
 ## v0.30.0 (2026-08-26)

@@ -39,6 +39,7 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::stark::ood_frames](./docs/stark/ood_frames.md)
 - [miden::core::stark::public_inputs](./docs/stark/public_inputs.md)
 - [miden::core::stark::random_coin](./docs/stark/random_coin.md)
+- [miden::core::stark::security](./docs/stark/security.md)
 - [miden::core::stark::utils](./docs/stark/utils.md)
 - [miden::core::stark::verifier](./docs/stark/verifier.md)
 - [miden::core::sys](./docs/sys.md)

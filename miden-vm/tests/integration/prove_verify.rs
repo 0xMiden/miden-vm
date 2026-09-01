@@ -86,7 +86,7 @@ fn assert_recursive_verify(
             procref.vm::verify_vm_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
             exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            # => [security_descriptor, D]
             exec.sys::truncate_stack
         end
     ";

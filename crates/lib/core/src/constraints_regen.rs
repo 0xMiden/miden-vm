@@ -12,7 +12,7 @@ use miden_air::{
     ace::RecursiveAceCircuitFactory,
     config::{ACE_CIRCUIT_REGISTRY_DEPTH, relation_digest},
 };
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2, program::KernelDescriptor};
 use miden_crypto::{
     merkle::MerkleTree,
     stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs},
@@ -33,6 +33,7 @@ const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 const PVM_LAYOUT_PATH: &str = "asm/sys/pvm/layout.masm";
+const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(registry_root: &[Felt; 4]) -> [Felt; 4] {
@@ -458,25 +459,38 @@ pub fn public_inputs_masm_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-/// Verify that the conjectured round-budget literals in `sys/vm/mod.masm` match the values
-/// `miden_air::security` derives from the current AIR set.
+/// Verify that the common conjectured estimator and the MVM security descriptor literals match
+/// the values `miden_air::security` derives from the shared PCS and current AIR set.
 ///
 /// The exhaustive cross-test in `crates/lib/core/tests/sys` only exercises whichever round binds
 /// under the deployed shape (lookup and query); a stale composition, out-of-domain, DEEP, or
 /// folding literal moves no output in that sweep. Reading the literals straight out of the
 /// checked-in source is what actually catches that drift.
 pub fn security_masm_matches_air() -> Result<(), String> {
-    let masm = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
-
-    let literals: [(&str, u64); 10] = [
+    let estimator = read_file(SECURITY_ESTIMATOR_PATH).map_err(|e| e.to_string())?;
+    let shared_literals: [(&str, u64); 6] = [
+        ("FP_SHIFT", u64::from(miden_air::security::FIXED_POINT_FRACTIONAL_BITS)),
+        ("FP_ONE", miden_air::security::FIXED_POINT_ONE),
         ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
         ("SECURITY_CAP_FP", miden_air::security::SECURITY_CAP),
+        ("FOLDING_BASE_FP", miden_air::security::FOLDING_BASE),
+        ("LOG2_E_FP", miden_air::security::LOG2_E),
+    ];
+
+    for (name, expected) in shared_literals {
+        let actual = parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH)?;
+        if actual != expected {
+            return Err(format!("{name} in {SECURITY_ESTIMATOR_PATH} is stale"));
+        }
+    }
+
+    let wrapper = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
+    let descriptor_literals: [(&str, u64); 8] = [
+        ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
         ("LOOKUP_BASE_FP", miden_air::security::LOOKUP_BASE),
         ("COMPOSITION_TERM_FP", miden_air::security::COMPOSITION_TERM),
         ("OOD_BASE_FP", miden_air::security::OOD_BASE),
         ("DEEP_BASE_FP", miden_air::security::DEEP_BASE),
-        ("FOLDING_BASE_FP", miden_air::security::FOLDING_BASE),
-        ("LOG2_E_FP", miden_air::security::LOG2_E),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
             miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
@@ -485,12 +499,13 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             "LOOKUP_FRACTIONS_PER_ROW",
             miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
         ),
+        ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
     ];
 
-    for (name, expected) in literals {
-        let actual = parse_masm_const::<u64>(&masm, name, "sys/vm/mod.masm")?;
+    for (name, expected) in descriptor_literals {
+        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
         if actual != expected {
-            return Err(format!("{name} in sys/vm/mod.masm is stale"));
+            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
         }
     }
 

@@ -184,14 +184,38 @@ fn run_pvm_verifier_with_advice(
 }
 
 fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &ExecutionOutput) {
-    let mut expected = proof_stream(inputs)[..4].to_vec();
+    use miden_precompiles_air::security;
+
+    const SECURITY_PARAM_COUNT: usize = 4;
+    const NUM_CHIPLETS: usize = 10;
+
+    let stream = proof_stream(inputs);
+    let log_max_height = stream[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
+        .iter()
+        .copied()
+        .max_by_key(Felt::as_canonical_u64)
+        .expect("the PVM relation has chiplet AIRs");
+    let mut expected = vec![
+        stream[0],
+        stream[1],
+        Felt::from_u32(security::LOOKUP_POW_BITS),
+        stream[2],
+        stream[3],
+        log_max_height,
+        Felt::new_unchecked(security::LOOKUP_BASE),
+        Felt::new_unchecked(security::COMPOSITION_TERM),
+        Felt::new_unchecked(security::OOD_BASE),
+        Felt::new_unchecked(security::DEEP_BASE),
+        Felt::from_u32(security::AIR_SHAPE.lookup.fractions_per_row),
+        Felt::from_u32(security::FIXED_BOUNDARY_LOOKUP_TERMS),
+    ];
     // The claim occupied the next stack word before verification. Requiring zero padding beneath
-    // the returned parameters proves that the verifier consumed it instead of returning it too.
+    // the returned descriptor proves that the verifier consumed it instead of returning it too.
     expected.extend([Felt::ZERO; 4]);
     assert_eq!(
         output.stack.get_num_elements(expected.len()),
         expected,
-        "the verifier must consume the claim and return only its transcript-bound security parameters",
+        "the verifier must consume the claim and return the common security descriptor",
     );
 }
 
@@ -230,7 +254,7 @@ fn run_interleaved_verifiers(
 
         proc verify_vm
             exec.vm::verify_vm_proof
-            dropw dropw
+            dropw dropw dropw dropw
         end
 
         begin
@@ -238,12 +262,12 @@ fn run_interleaved_verifiers(
             exec.verify_vm
             {pvm_operands}
             exec.pvm::verify_proof
-            dropw
+            dropw dropw dropw
             {vm_operands}
             exec.verify_vm
             {pvm_operands}
             exec.pvm::verify_proof
-            dropw
+            dropw dropw dropw
         end
         "
     );
