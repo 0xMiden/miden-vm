@@ -239,6 +239,11 @@ impl ExecutionProof {
         matches!(self, Self::Complete { .. })
     }
 
+    /// Returns whether this proof contains precompile work.
+    pub const fn has_precompiles(&self) -> bool {
+        matches!(self, Self::Deferred { .. } | Self::Complete { precompile: Some(_), .. })
+    }
+
     /// Transitions a deferred proof to complete by attaching a precompile proof.
     pub fn complete(self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
         let Self::Deferred { vm, .. } = self else {
@@ -456,6 +461,28 @@ mod tests {
         assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), deferred);
         assert_eq!(ExecutionProof::read_from(&mut reader).unwrap(), complete);
         assert!(!reader.has_more_bytes());
+    }
+
+    #[test]
+    fn execution_proof_reports_precompile_state() {
+        let (precompile_wire, wire_root) = wire();
+        let deferred = ExecutionProof::Deferred {
+            vm: vm_proof(wire_root),
+            precompile: precompile_wire,
+        };
+        assert!(deferred.has_precompiles());
+
+        let complete_without_precompile = ExecutionProof::Complete {
+            vm: vm_proof(TRUE_DIGEST),
+            precompile: None,
+        };
+        assert!(!complete_without_precompile.has_precompiles());
+
+        let complete_with_precompile = ExecutionProof::Complete {
+            vm: vm_proof(root(1)),
+            precompile: Some(precompile_proof(&[root(1)])),
+        };
+        assert!(complete_with_precompile.has_precompiles());
     }
 
     #[test]
