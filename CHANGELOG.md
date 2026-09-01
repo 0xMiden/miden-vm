@@ -5,6 +5,7 @@
 #### Features
 
 - [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
+- Added `has_precompiles()` to `ExecutionWitness` and `ExecutionProof` so callers can check for precompile work without consuming the witness or inspecting proof variants ([#3757](https://github.com/0xMiden/miden-vm/pull/3757)).
 
 #### Changes
 
