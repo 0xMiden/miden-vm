@@ -183,7 +183,7 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 
 /// Number of fixed-environment lookup fractions consumed once per PVM proof.
 ///
-/// [`fixed_boundary_fraction_count`] derives this value from the fixed messages, and the drift
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages, and the drift
 /// test below keeps the exported descriptor constant tied to that source of truth.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 

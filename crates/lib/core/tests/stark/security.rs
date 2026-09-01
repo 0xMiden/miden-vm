@@ -231,7 +231,7 @@ fn vm_sweep(outer_bound: u64, inner_bound: u64, axes: [Axis; 6]) {
                 .read_element(ctx, Felt::new_unchecked(u64::from(addr)))
                 .expect("every swept address is written")
                 .as_canonical_u64();
-            let native = u64::from(miden_air::security::conjectured_security_level(
+            let native = u64::from(security::conjectured_security_level(
                 axes[0].value(outer, inner),
                 axes[1].value(outer, inner),
                 axes[2].value(outer, inner),
