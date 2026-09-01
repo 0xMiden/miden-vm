@@ -97,6 +97,11 @@ impl ExecutionWitness {
         self.vm.claim()
     }
 
+    /// Returns whether this witness contains precompile work.
+    pub const fn has_precompiles(&self) -> bool {
+        self.precompile.is_some()
+    }
+
     /// Consumes this witness and returns its supported low-level proving components.
     ///
     /// The [`VmWitness`] can be passed to [`build_trace`]. The optional [`PrecompileWitness`] is
@@ -501,16 +506,28 @@ mod wire_tests {
     use super::{Deserializable, ExecutionWitness, Serializable};
     use crate::{DefaultHost, FastProcessor, StackInputs};
 
-    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+    fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
-            .assemble_program("program", "begin log_deferred end")
+            .assemble_program("program", source)
             .expect("program should compile")
             .unwrap_program();
         let mut host = DefaultHost::default();
-        let witness = FastProcessor::new(StackInputs::default())
+        FastProcessor::new(StackInputs::default())
             .execute_for_proving_sync(&program, &mut host)
-            .expect("execution should produce a witness");
-        witness.to_bytes()
+            .expect("execution should produce a witness")
+    }
+
+    fn deferred_witness_bytes() -> alloc::vec::Vec<u8> {
+        execution_witness("begin log_deferred end").to_bytes()
+    }
+
+    #[test]
+    fn witness_reports_precompile_state() {
+        let plain = execution_witness("begin push.1 drop end");
+        assert!(!plain.has_precompiles());
+
+        let deferred = execution_witness("begin log_deferred end");
+        assert!(deferred.has_precompiles());
     }
 
     #[test]
