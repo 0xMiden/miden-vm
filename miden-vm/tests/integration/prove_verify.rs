@@ -257,7 +257,6 @@ fn test_hash_heavy_divergent_heights_recursive() {
 // ================================================================================================
 
 mod prover_api_lifecycle {
-    use super::minimum_conjectured_security_level;
     use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
@@ -269,6 +268,8 @@ mod prover_api_lifecycle {
         StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
         conjectured_security_level_from_parameters, precompile_witness_from_wire, prove_sync,
     };
+
+    use super::minimum_conjectured_security_level;
 
     fn assemble(source: &str) -> Program {
         Assembler::default()
@@ -566,10 +567,7 @@ mod execution_witness_serialization {
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{
-        HashFunction, Prover,
-        serde::{Deserializable, Serializable},
-    };
+    use miden_prover::{HashFunction, Prover, serde::Serializable};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
@@ -642,9 +640,8 @@ mod execution_witness_serialization {
         witness: ExecutionWitness,
     ) {
         let bytes = witness.to_bytes();
-        let budget = bytes.len().saturating_mul(4);
-        ExecutionWitness::read_from_bytes_with_budget(&bytes, budget)
-            .expect("witness seed should decode within the fuzzing budget");
+        ExecutionWitness::read_from_bytes(&bytes)
+            .expect("witness seed should pass adversarial byte-slice decoding");
         std::fs::write(corpus_dir.join(name), bytes).expect("witness seed should be writable");
     }
 
@@ -679,15 +676,8 @@ mod execution_witness_serialization {
 
             let expected_claim = witness.claim();
             let witness_bytes = witness.to_bytes();
-            let witness_budget = witness_bytes
-                .len()
-                .checked_mul(4)
-                .expect("generated witness budget should fit usize");
-            let restored = ExecutionWitness::read_from_bytes_with_budget(
-                &witness_bytes,
-                witness_budget,
-            )
-            .expect("generated witness should round trip");
+            let restored = ExecutionWitness::read_from_bytes(&witness_bytes)
+                .expect("generated witness should round trip");
 
             prop_assert_eq!(restored.claim(), expected_claim);
             prop_assert_eq!(restored.to_bytes(), witness_bytes);
@@ -756,11 +746,8 @@ mod execution_witness_serialization {
             original_trace.public_inputs().to_air_inputs()
         );
 
-        let witness_budget =
-            witness_bytes.len().checked_mul(4).expect("test input budget overflow");
-        let restored_witness =
-            ExecutionWitness::read_from_bytes_with_budget(&witness_bytes, witness_budget)
-                .expect("execution witness round trip");
+        let restored_witness = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("execution witness round trip");
         let proof = Prover::new()
             .with_hash_fn(HashFunction::Blake3_256)
             .prove(restored_witness)
