@@ -4,7 +4,7 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225432064..3225452280.
+### scratch after the stream, is the half-open range 3225432064..3225452290.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
@@ -59,6 +59,9 @@ const CURRENT_TRACE_ROW_PTR = 3225451356
 ### 4 felts: 3225452276..3225452280. Stores the trusted preprocessed-tree commitment for DEEP openings.
 const PREPROCESSED_COM_PTR = 3225452276
 
+### 10 felts: 3225452280..3225452290. Stores, by stable AIR index, the absolute address of its first auxiliary boundary value in the proof-ordered buffer.
+const AUX_VALUE_PTRS_PTR = 3225452280
+
 pub proc public_inputs_ptr
     push.PUBLIC_INPUTS_PTR
 end
@@ -97,4 +100,8 @@ end
 
 pub proc preprocessed_com_ptr
     push.PREPROCESSED_COM_PTR
+end
+
+pub proc aux_value_ptrs_ptr
+    push.AUX_VALUE_PTRS_PTR
 end

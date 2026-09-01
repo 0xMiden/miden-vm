@@ -24,6 +24,10 @@ const LOG_HEIGHT_MAX = 29
 
 # Fixed ChipletAir::all() cardinality and registry metadata.
 const NUM_CHIPLETS = 10
+const LAST_CHIPLET_INDEX = 9
+const EIDOS_COMPRESSION_AIR_INDEX = 1
+const BYTE_PAIR_AND8_AIR_INDEX = 3
+const NUM_AUX_VALUE_FELTS = 24
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
@@ -63,7 +67,8 @@ const PREPROCESSED_COMMITMENT_3 = 8243292716395241032
 #! Loads the fixed PVM relation context.
 #!
 #! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
-#! relation commitments, and fixed OOD/query-row addresses.
+#! absolute addresses of each stable AIR's first auxiliary boundary value in the proof-ordered
+#! buffer, relation commitments, and fixed OOD/query-row addresses.
 #!
 #! Advice order: [h0, ..., h9].
 #! Inputs:  [...]
@@ -91,6 +96,7 @@ pub proc load_air_context
     push.NUM_CHIPLETS
     exec.utils::derive_order_tag_from_heights
     exec.constants::set_order_tag
+    exec.materialize_aux_value_ptrs
 
     exec.store_relation_digest
     exec.store_ace_registry_root
@@ -103,6 +109,44 @@ pub proc load_air_context
     exec.constants::set_auxiliary_ace_inputs_address
     exec.layout::aux_rand_elem_ptr
     exec.constants::set_aux_rand_elem_address
+end
+
+#! Materializes the absolute address of each stable AIR's first auxiliary boundary value in the
+#! proof-ordered buffer from the order left in `tmp1..tmp3` by `derive_order_tag_from_heights`.
+#!
+#! Reading the first ten scratch entries in descending address order yields canonical AIR indices
+#! in proof order. Every AIR contributes one quadratic-extension value; EidosCompression and
+#! BytePairAnd8 each contribute a second. The running pointer therefore advances by two felts for
+#! an ordinary AIR and four for either composite AIR.
+#!
+#! Inputs:  [...]
+#! Outputs: [...]
+proc materialize_aux_value_ptrs
+    exec.layout::aux_bus_boundary_ptr
+    exec.constants::tmp1 add.LAST_CHIPLET_INDEX
+    # => [reverse_order_ptr, next_value_ptr, ...]
+
+    repeat.NUM_CHIPLETS
+        dup mem_load
+        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+
+        # Store the current absolute boundary pointer by canonical AIR index.
+        dup
+        exec.layout::aux_value_ptrs_ptr add
+        dup.3 swap mem_store
+        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+
+        # Advance one extension value, plus one more for either composite AIR.
+        dup eq.EIDOS_COMPRESSION_AIR_INDEX
+        swap eq.BYTE_PAIR_AND8_AIR_INDEX
+        add mul.2 add.2
+        movup.2 add swap sub.1
+        # => [reverse_order_ptr - 1, next_value_ptr', ...]
+    end
+
+    drop
+    exec.layout::aux_bus_boundary_ptr add.NUM_AUX_VALUE_FELTS
+    assert_eq.err="PVM auxiliary-value layout width drifted"
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.

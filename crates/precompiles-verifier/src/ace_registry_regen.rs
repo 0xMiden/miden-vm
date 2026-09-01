@@ -589,6 +589,8 @@ fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
 fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String, String> {
     let stream_len = u32::try_from(stream_len)
         .map_err(|_| "PVM ACE stream length exceeds u32 memory".to_string())?;
+    let num_chiplets =
+        u32::try_from(NUM_CHIPLETS).map_err(|_| "PVM AIR count exceeds u32 memory".to_string())?;
     let stream_end = layout
         .stream_ptr
         .checked_add(stream_len)
@@ -603,9 +605,12 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     let preprocessed_com_ptr = current_trace_row_ptr
         .checked_add(layout.query_row_felts)
         .ok_or_else(|| "PVM current-row allocation overflows u32".to_string())?;
-    let allocation_end = preprocessed_com_ptr
+    let aux_value_ptrs_ptr = preprocessed_com_ptr
         .checked_add(4)
         .ok_or_else(|| "PVM preprocessed-commitment allocation overflows u32".to_string())?;
+    let allocation_end = aux_value_ptrs_ptr
+        .checked_add(num_chiplets)
+        .ok_or_else(|| "PVM auxiliary-value pointer allocation overflows u32".to_string())?;
     if allocation_end > NEXT_VM_REGION_START {
         return Err(format!(
             "PVM ACE allocation {PVM_READ_START}..{allocation_end} reaches the VM scratch region starting at {NEXT_VM_REGION_START}"
@@ -666,7 +671,12 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     .expect("writing to String cannot fail");
     writeln!(
         out,
-        "### 4 felts: {preprocessed_com_ptr}..{allocation_end}. Stores the trusted preprocessed-tree commitment for DEEP openings.\nconst PREPROCESSED_COM_PTR = {preprocessed_com_ptr}\n"
+        "### 4 felts: {preprocessed_com_ptr}..{aux_value_ptrs_ptr}. Stores the trusted preprocessed-tree commitment for DEEP openings.\nconst PREPROCESSED_COM_PTR = {preprocessed_com_ptr}\n"
+    )
+    .expect("writing to String cannot fail");
+    writeln!(
+        out,
+        "### {NUM_CHIPLETS} felts: {aux_value_ptrs_ptr}..{allocation_end}. Stores, by stable AIR index, the absolute address of its first auxiliary boundary value in the proof-ordered buffer.\nconst AUX_VALUE_PTRS_PTR = {aux_value_ptrs_ptr}\n"
     )
     .expect("writing to String cannot fail");
 
@@ -685,6 +695,7 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     out.push_str("\npub proc c_total_ptr\n    push.C_TOTAL_PTR\nend\n");
     out.push_str("\npub proc current_trace_row_ptr\n    push.CURRENT_TRACE_ROW_PTR\nend\n");
     out.push_str("\npub proc preprocessed_com_ptr\n    push.PREPROCESSED_COM_PTR\nend\n");
+    out.push_str("\npub proc aux_value_ptrs_ptr\n    push.AUX_VALUE_PTRS_PTR\nend\n");
 
     Ok(out)
 }

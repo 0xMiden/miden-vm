@@ -1,13 +1,11 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
-use miden::core::stark::utils
 use miden::core::sys::pvm::layout
 
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18
-const NUM_CHIPLETS = 10
 const EIDOS_COMPRESSION_AIR_INDEX = 1
 const BYTE_PAIR_AND8_AIR_INDEX = 3
 const NUM_AUX_VALUE_WORDS = 6
@@ -15,56 +13,17 @@ const NUM_AUX_VALUE_WORDS = 6
 #! Loads `(2^log_height - 1) * sigma_prime` for one normalized LogUp value. Adding this adjustment
 #! to the unweighted sum changes that value's coefficient from one to its trace length.
 #!
-#! Input:  [value_offset, log_height, ...]
+#! Input:  [value_ptr, log_height, ...]
 #! Output: [adjustment_0, adjustment_1, ...]
 proc load_normalization_adjustment
     swap pow2 sub.1
-    exec.layout::aux_bus_boundary_ptr movup.2 add
+    swap
 
     dup mem_load
     dup.2 mul
 
     swap add.1 mem_load
     movup.2 mul swap
-end
-
-#! Returns the felt offset of one canonical AIR's first normalized LogUp value in the flattened,
-#! proof-ordered stream.
-#!
-#! Every AIR contributes one value. EidosCompression and BytePairAnd8 each contribute a second
-#! value, so an AIR's flat value index is its proof-order position plus the number of those two
-#! composite AIRs preceding it. Comparing proof-order positions automatically applies the stable
-#! canonical-index tie break for equal heights.
-#!
-#! Input:  [air_index, ...]
-#! Output: [value_offset, ...]
-proc aux_group_felt_offset
-    # Keep the canonical index below its proof-order position.
-    dup
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_CHIPLETS
-    movup.2
-    exec.utils::proof_order_position_from_heights
-    # => [position, air_index, ...]
-
-    # Count EidosCompression when its group precedes the target group.
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_CHIPLETS
-    push.EIDOS_COMPRESSION_AIR_INDEX
-    exec.utils::proof_order_position_from_heights
-    dup.1 u32lt
-    # => [eidos_precedes, position, air_index, ...]
-
-    # Count BytePairAnd8 under the same stable ordering.
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_CHIPLETS
-    push.BYTE_PAIR_AND8_AIR_INDEX
-    exec.utils::proof_order_position_from_heights
-    dup.2 u32lt
-    # => [byte_pair_precedes, eidos_precedes, position, air_index, ...]
-
-    add add mul.2
-    swap drop
 end
 
 #! Loads the `(n - 1) * sigma_prime` adjustment for a canonical AIR's first LogUp value.
@@ -75,7 +34,7 @@ proc load_air_normalization_adjustment
     dup
     exec.constants::air_trace_length_logs_ptr add mem_load
     swap
-    exec.aux_group_felt_offset
+    exec.layout::aux_value_ptrs_ptr add mem_load
     exec.load_normalization_adjustment
 end
 
@@ -87,7 +46,7 @@ proc load_second_air_normalization_adjustment
     dup
     exec.constants::air_trace_length_logs_ptr add mem_load
     swap
-    exec.aux_group_felt_offset add.2
+    exec.layout::aux_value_ptrs_ptr add mem_load add.2
     exec.load_normalization_adjustment
 end
 
@@ -105,7 +64,9 @@ end
 #! The hook also adds the verifier-side consumes for the fixed uint/curve environment and asserts
 #! `fixed_boundary_correction + sum_i(n_i * sum_j(sigma_prime_ij)) == 0` coordinate-wise.
 #!
-#! Precondition:  input_len=0 (the main commitment was flushed before this hook).
+#! Preconditions:
+#! - `pvm::load_air_context` populated the per-AIR heights and auxiliary-value pointers;
+#! - input_len=0 (the main commitment was flushed before this hook).
 #! Postcondition: input_len=4, output_len=0.
 #!
 #! Input:  [...]
