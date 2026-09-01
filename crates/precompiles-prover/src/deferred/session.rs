@@ -25,6 +25,13 @@ use crate::{
 /// and GLV's 4-base one.
 const MSM_WNAF_WINDOW: usize = 5;
 
+/// Cap on the term count a PairList may carry into
+/// [`msm_term_preserving_expr`](DeferredSessionBuilder::msm_term_preserving_expr) (the fallback
+/// for a zero scalar or a repeated canonical base). Even with a balanced fold the fallback's row
+/// cost grows as `O(n log n)`, unlike the fast joint ladder's `O(n)`; this bounds that cost before
+/// any fallback rows are built.
+const MAX_TERM_PRESERVING_TERMS: usize = 4096;
+
 pub(crate) struct DeferredSession {
     pub(crate) session: Session,
     pub(crate) root: Truthy,
@@ -316,6 +323,14 @@ impl<'a> DeferredSessionBuilder<'a> {
         let expr = if fast_path_eligible {
             self.msm_joint_expr(curve, &terms)
         } else {
+            if terms.len() > MAX_TERM_PRESERVING_TERMS {
+                return Err(DeferredSessionError::UnsupportedMsm {
+                    digest,
+                    reason: "a PairList requiring the term-preserving fallback (a zero scalar \
+                             or a repeated canonical base) exceeds the maximum supported term \
+                             count",
+                });
+            }
             self.msm_term_preserving_expr(curve, &terms)
         };
 
@@ -381,35 +396,69 @@ impl<'a> DeferredSessionBuilder<'a> {
         }
     }
 
+    /// The one-term-at-a-time fallback for a PairList with a zero scalar or
+    /// a repeated canonical base. Every term is built into its own leaf
+    /// expression, then folded pairwise in a balanced binary tree via
+    /// `msm_combine_terms_preserving`, which keeps every declared term
+    /// distinct instead of interleaving bases through `joint_wnaf`.
+    ///
+    /// `msm_combine_terms_preserving` copies both operands' terms into new
+    /// rows on every call, so its cost is proportional to the sum of its two
+    /// operands' term counts. A left-to-right fold pays for the whole
+    /// growing prefix at every step (`1 + 2 + ... + n = O(n^2)` rows for `n`
+    /// leaves); the balanced tree here does `O(n)` row work per level across
+    /// `O(log n)` levels instead.
     fn msm_term_preserving_expr(
         &mut self,
         curve: CurveId,
         terms: &[(TranslatedEc, TranslatedUint)],
     ) -> EcExprPtr {
-        let mut acc: Option<EcExprPtr> = None;
-        for (point, scalar) in terms {
-            let leaf = if scalar.value == U256::ZERO {
-                self.session.msm_intro_zero(&point.node)
-            } else if curve.endomorphism().is_some() {
-                self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
-                self.ensure_wnaf_table_endo(&point.node, MSM_WNAF_WINDOW);
-                let plain = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
-                let endo = self.glv_endo_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
-                strategies::glv_joint_wnaf_with_tables(
-                    &mut self.session,
-                    &[(plain, Some(endo), scalar.value)],
-                )
-            } else {
-                self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
-                let table = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
-                strategies::wnaf_scalarmul(&mut self.session, table, scalar.value)
-            };
-            acc = Some(match acc {
-                None => leaf,
-                Some(a) => self.session.msm_combine_terms_preserving(a, leaf),
-            });
+        let mut level: Vec<EcExprPtr> = terms
+            .iter()
+            .map(|(point, scalar)| self.msm_term_preserving_leaf(curve, point, scalar))
+            .collect();
+
+        while level.len() > 1 {
+            let mut next = Vec::with_capacity(level.len().div_ceil(2));
+            let mut pairs = level.into_iter();
+            while let Some(a) = pairs.next() {
+                next.push(match pairs.next() {
+                    Some(b) => self.session.msm_combine_terms_preserving(a, b),
+                    None => a,
+                });
+            }
+            level = next;
         }
-        acc.expect("translate_ec_msm guarantees a nonempty PairList")
+        level
+            .into_iter()
+            .next()
+            .expect("translate_ec_msm guarantees a nonempty PairList")
+    }
+
+    /// Builds one term-preserving-fallback leaf: `msm_intro_zero` for a zero
+    /// scalar, otherwise a plain or GLV wNAF ladder over the single term.
+    fn msm_term_preserving_leaf(
+        &mut self,
+        curve: CurveId,
+        point: &TranslatedEc,
+        scalar: &TranslatedUint,
+    ) -> EcExprPtr {
+        if scalar.value == U256::ZERO {
+            self.session.msm_intro_zero(&point.node)
+        } else if curve.endomorphism().is_some() {
+            self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
+            self.ensure_wnaf_table_endo(&point.node, MSM_WNAF_WINDOW);
+            let plain = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+            let endo = self.glv_endo_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+            strategies::glv_joint_wnaf_with_tables(
+                &mut self.session,
+                &[(plain, Some(endo), scalar.value)],
+            )
+        } else {
+            self.ensure_wnaf_table(&point.node, MSM_WNAF_WINDOW);
+            let table = self.wnaf_tables.get(&(point.node.point, MSM_WNAF_WINDOW)).unwrap();
+            strategies::wnaf_scalarmul(&mut self.session, table, scalar.value)
+        }
     }
 
     /// Ensures `base`'s [`WnafTable`](strategies::WnafTable) at window `w` is

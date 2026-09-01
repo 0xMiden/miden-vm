@@ -278,14 +278,15 @@ pub const COL_ENDO_VAL_X: usize = 43;
 /// `EcOnCurveCert(group, val)` provide that vouches its (trio-free)
 /// membership — `φ(P)` on-curve because `P` is.
 pub const COL_ENDO_MINTED: usize = 44;
-/// Op-family flag for `intro_zero` — the fifth one-hot member (`is_intro +
-/// is_intro_endo + is_combine + is_neg + is_intro_zero = act`). An
-/// `intro_zero(P)` is a 1-row run recording the term `⟨P × 0⟩` with value
-/// the group's canonical point-at-infinity — the zero-scalar leaf dual to
-/// plain `intro`'s `⟨P × 1⟩` / `val = P`. Unlike `intro`, `val ≠ base` here,
-/// so the value relation isn't a native ptr equality; it's proved by the
-/// `EcPoint(val, is_pai = 1)` consume below (see
-/// [`msm::require::intro_zero`](crate::ec::msm::require::intro_zero)).
+/// Marks a row that introduces the MSM term `P × 0`.
+///
+/// The term evaluates to the curve's canonical point at infinity. Therefore,
+/// unlike a normal `intro` row (`P × 1 = P`), this row cannot require `val`
+/// to equal `base`. Instead, the EC-point lookup below verifies that `val` is
+/// the point at infinity.
+///
+/// This is one of five mutually exclusive operation flags:
+/// `is_intro + is_intro_endo + is_combine + is_neg + is_intro_zero = act`.
 pub const COL_IS_INTRO_ZERO: usize = 45;
 pub const NUM_MAIN_COLS: usize = 46;
 

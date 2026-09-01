@@ -817,6 +817,62 @@ fn msm_resolve_all_zero_proves() {
         .expect("EcMsm all-zero resolve round-trip must verify");
 }
 
+/// A 5-term term-preserving fallback, combined through the same balanced
+/// binary-tree shape `msm_term_preserving_expr` builds for an odd term
+/// count: two level-1 pairs, a level-2 pair of those results, and a final
+/// pair against the term that carried through both levels unpaired.
+/// `⟨G×1⟩ ⊕ ⟨G×0⟩ ⊕ ⟨Q×1⟩ ⊕ ⟨G×1⟩ ⊕ ⟨Q×0⟩` resolves to `2G + Q = 4G` (`Q =
+/// 2G`), the two zero terms contributing nothing.
+fn msm_resolve_balanced_tree_five_terms_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+
+    // Level 0 leaves, in declared term order.
+    let l1 = s.msm_intro(&g_pt);
+    let l2 = s.msm_intro_zero(&g_pt);
+    let l3 = s.msm_intro(&q_pt);
+    let l4 = s.msm_intro(&g_pt);
+    let l5 = s.msm_intro_zero(&q_pt);
+
+    // Level 1: pair up; `l5` has no partner and carries through unpaired.
+    let a = s.msm_combine_terms_preserving(l1, l2);
+    let b = s.msm_combine_terms_preserving(l3, l4);
+    // Level 2: pair the level-1 results; `l5` carries through again.
+    let c = s.msm_combine_terms_preserving(a, b);
+    // Level 3: the final pair.
+    let expr = s.msm_combine_terms_preserving(c, l5);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value =
+        s.ec_msm(expr, &[(g_pt, one), (g_pt, zero), (q_pt, one), (g_pt, one), (q_pt, zero)]);
+    let expected_pt = s.ec_add(&q_pt, &q_pt);
+    let claim = s.ec_is(&value, &expected_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_balanced_tree_five_terms_checks() {
+    let traces = msm_resolve_balanced_tree_five_terms_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_balanced_tree_five_terms_proves() {
+    verify_deferred(&msm_resolve_balanced_tree_five_terms_traces().prove())
+        .expect("EcMsm balanced-tree 5-term fallback resolve round-trip must verify");
+}
+
 /// An absorb run must name **one** expression on every row. The boundary
 /// binds the node's value via `MsmExpr(msm_expr, …)` and each row attributes
 /// its term via `MsmClaimTerm(msm_expr, …)`; if `msm_expr` could change

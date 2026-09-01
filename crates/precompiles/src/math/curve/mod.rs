@@ -10,7 +10,9 @@
 //!   identity point is the single canonical value `[TRUE_DIGEST, TRUE_DIGEST]`.
 //! - `ADD` / `SUB`: point addition and subtraction.
 //! - `MSM`: multi-scalar multiplication over one or more structural `(point_digest, scalar_digest)`
-//!   pairs with nonzero scalars and distinct canonical points.
+//!   pairs. A zero scalar and a repeated (or structurally different but canonically equal) base are
+//!   both accepted, and the result may itself be the identity point; an identity `VALUE` is
+//!   rejected as an MSM base by the current evaluator and lowering.
 //! - `EQ`: trapping equality predicate that evaluates to `Node::TRUE` only when both operands
 //!   reduce to the same canonical point.
 //!
@@ -674,8 +676,8 @@ impl CurvePrecompile {
     /// either side, so accumulating every term (including zero-valued ones)
     /// through the same fold naturally reaches `Identity` for an all-zero
     /// pair list. Only a malformed empty list or an identity base is
-    /// rejected — an identity base is out of scope for this precompile's
-    /// point-value domain.
+    /// rejected: identity is otherwise a valid canonical point `VALUE`, but
+    /// the current evaluator and lowering do not support it as an MSM base.
     fn evaluate_msm(
         pairs: &[(Digest, Digest)],
         context: &mut DeferredContext<'_>,
