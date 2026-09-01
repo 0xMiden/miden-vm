@@ -168,7 +168,9 @@ impl AnalysisContext {
 
     fn local_constant_name_for_path(&self, path: Span<&Path>) -> Option<Ident> {
         let (name, module_path) = path.split_last()?;
-        if module_path.to_relative() != self.module_path.as_path() {
+        let is_local = module_path == Path::new("self")
+            || (path.is_absolute() && module_path.to_relative() == self.module_path.as_path());
+        if !is_local {
             return None;
         }
         let name = Ident::new_with_span(path.span(), name).ok()?;
