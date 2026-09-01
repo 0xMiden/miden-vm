@@ -42,7 +42,9 @@ pub(crate) fn build(crate_dir: &Path) -> Result<Vec<u8>, Report> {
         )));
     }
 
-    let target_dir = crate_dir.join("target").join("wasm-event-handlers");
+    // The dedicated target directory carries the name of the metadata table that requested the
+    // build.
+    let target_dir = crate_dir.join("target").join(crate::config::TABLE);
     let output = Command::new(cargo())
         .current_dir(crate_dir)
         // An inherited `RUSTFLAGS` replaces the rustflags a `.cargo/config.toml` sets, and
