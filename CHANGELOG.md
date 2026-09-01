@@ -15,6 +15,7 @@
 
 #### Fixes
 
+- Hardened `ExecutionWitness` byte decoding with an input-sized budget, exact canonical payload checks, and an explicit trusted reader for sparse replay data ([#3303](https://github.com/0xMiden/miden-vm/issues/3303)).
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 
 ## v0.30.0 (2026-08-26)

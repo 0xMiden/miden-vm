@@ -9,7 +9,10 @@ use miden_air::{
 use miden_core::{
     deferred::{DeferredState, DeferredStateWire, Digest, TRUE_DIGEST},
     program::ExecutionClaim,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
 };
 
 use crate::{
@@ -109,7 +112,51 @@ impl ExecutionWitness {
     pub fn into_parts(self) -> (VmWitness, Option<PrecompileWitness>) {
         (self.vm, self.precompile)
     }
+
+    /// Decodes one execution witness from a potentially adversarial byte slice.
+    ///
+    /// The reader applies an input-proportional limit to byte consumption and collection
+    /// preallocation, rejects trailing bytes, and requires the payload to use the canonical
+    /// encoding produced by [`Serializable::to_bytes`]. These checks establish safe transport
+    /// syntax. They do not prove that the sparse MAST replay is a subset of a particular source
+    /// forest because the witness wire does not carry such a proof.
+    ///
+    /// Use [`Self::read_from_bytes_trusted`] for bytes retained inside a trusted prover system.
+    #[track_caller]
+    pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        let witness = <Self as Deserializable>::read_from(&mut reader)?;
+
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after execution witness payload".into(),
+            ));
+        }
+        if witness.to_bytes() != bytes {
+            return Err(DeserializationError::InvalidValue(
+                "execution witness bytes are not canonically encoded".into(),
+            ));
+        }
+
+        Ok(witness)
+    }
+
+    /// Decodes execution witness bytes retained inside a trusted prover system.
+    ///
+    /// This preserves the original permissive byte-slice behavior. It trusts sparse MAST replay
+    /// hashes, accepts trailing bytes, and uses a replay-sized byte budget. Use
+    /// [`Self::read_from_bytes`] for bytes received across a trust boundary.
+    #[track_caller]
+    pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        <Self as Deserializable>::read_from(&mut reader)
+    }
 }
+
+/// Covers nested replay length checks while keeping untrusted work proportional to input size.
+const EXECUTION_WITNESS_BYTE_READ_BUDGET_MULTIPLIER: usize = 4;
 
 /// Current wire format version for [`ExecutionWitness`] serialization.
 ///
@@ -176,6 +223,10 @@ impl Deserializable for ExecutionWitness {
             },
         };
         Ok(Self { vm, precompile })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        ExecutionWitness::read_from_bytes(bytes)
     }
 }
 
@@ -503,7 +554,7 @@ mod wire_tests {
     use miden_assembly::Assembler;
     use miden_core::deferred::TRUE_DIGEST;
 
-    use super::{Deserializable, ExecutionWitness, Serializable};
+    use super::{ExecutionWitness, Serializable};
     use crate::{DefaultHost, FastProcessor, StackInputs};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
@@ -543,6 +594,24 @@ mod wire_tests {
         assert!(
             format!("{err:?}").contains("unsupported execution witness wire version"),
             "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn witness_wire_rejects_trailing_bytes() {
+        let mut bytes = deferred_witness_bytes();
+        bytes.push(0);
+
+        let err = ExecutionWitness::read_from_bytes(&bytes)
+            .expect_err("witness payload with trailing bytes should be rejected");
+        assert!(
+            format!("{err:?}").contains("extra bytes after execution witness payload"),
+            "unexpected error: {err:?}"
+        );
+
+        assert!(
+            ExecutionWitness::read_from_bytes_trusted(&bytes).is_ok(),
+            "the explicit trusted reader should preserve the old permissive behavior"
         );
     }
 
