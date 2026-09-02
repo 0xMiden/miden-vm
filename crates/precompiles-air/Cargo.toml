@@ -27,6 +27,7 @@ std = [
     "miden-precompiles/std",
     "ruint/std",
 ]
+testing = []
 
 [dependencies]
 miden-air.workspace = true

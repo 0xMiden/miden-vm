@@ -77,7 +77,7 @@ const FN_PROLOGUE: &str = r"    let main = builder.main();
     let a1 = aux.next_slice();
     let _ = (&m1, &a0, &a1);";
 
-const PREPROCESSED_PROLOGUE: &str = r"    let preprocessed = builder.preprocessed();
+const PREPROCESSED_PROLOGUE: &str = r"    let preprocessed = builder.preprocessed().clone();
     let p0 = preprocessed.current_slice();
     let p1 = preprocessed.next_slice();
     let _ = &p1;";
@@ -412,6 +412,25 @@ mod tests {
             naive_base: OpCounts::default(),
             naive_ext: OpCounts::default(),
         }
+    }
+
+    #[test]
+    fn preprocessed_window_is_owned_before_assertions() {
+        let mut builder = GraphBuilder::new();
+        let preprocessed = builder.leaf(Leaf::Preprocessed { offset: 0, index: 0 });
+        let graph = builder.freeze();
+        let constraints = constraints(vec![(preprocessed, 0)], vec![]);
+        let out = emit_module(
+            "//! Test module.\n",
+            &[AirEvaluator {
+                name: "preprocessed_mock",
+                air_label: "MockAir::PREPROCESSED",
+                graph: &graph,
+                constraints: &constraints,
+            }],
+        );
+
+        assert!(out.contains("let preprocessed = builder.preprocessed().clone();"));
     }
 
     /// Base-class emission: every base leaf kind, each binary op, unary neg,

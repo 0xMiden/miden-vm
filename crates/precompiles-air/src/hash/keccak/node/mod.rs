@@ -9,25 +9,25 @@
 //!
 //! 1. Issues `KeccakSponge(sponge_seq_id_head, 4·chunk_seq_id_head, len_bytes)` — pins the
 //!    invocation's sponge anchor and chunk-tape base.
-//! 2. Consumes a `ChunkChain(chunk_seq_id_head, perm_seq_id_chunks)` provide from the chunk chiplet
-//!    — bundles the chunk chain's two foreign keys.
+//! 2. Consumes a `ChunkChain(chunk_seq_id_head, absorption_id_chunks)` provide from the chunk
+//!    chiplet — bundles the chunk chain's two foreign keys.
 //! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round chiplet's perm-N
 //!    digest-output addresses, mult 2 (matching the round chiplet's `dst_mult`).
-//! 4. Drives one Poseidon2 perm to hash `D[8 felts]` (rate0 = lanes 0-1, rate1 = lanes 2-3) under
-//!    VM `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
-//! 5. Reads `H_input_chunks` from `Poseidon2Out` at `perm_seq_id_chunks + n_chunks − 1` — the
-//!    chunks chain tail.
-//! 6. Drives a second Poseidon2 perm over `[H_input_chunks | H_digest_chunks]` (rate0 =
-//!    H_input_chunks, rate1 = H_digest_chunks) under the VM Keccak-256 assertion tag
-//!    `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
+//! 4. Drives one framed Eidos compression chain to hash `D[8 felts]` (block low = lanes 0-1, block
+//!    high = lanes 2-3) under VM `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
+//! 5. Reads `H_input_chunks` from `EidosOut` at `absorption_id_chunks + n_chunks − 1` — the chunks
+//!    chain tail.
+//! 6. Drives a second framed Eidos compression chain over `[H_input_chunks | H_digest_chunks]`
+//!    (block low = H_input_chunks, block high = H_digest_chunks) under the VM Keccak-256 assertion
+//!    tag `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
 //! on `sponge_seq_id_head`, gated on `act_next`) prevents per-namespace
 //! aliasing and gaps across invocations on the two single-producer
-//! namespaces (chunk-tape, sponge rows). `perm_seq_id_chunks` is
+//! namespaces (chunk-tape, sponge rows). `absorption_id_chunks` is
 //! bus-pinned per row (`ChunkChain`) but not constrained across rows —
-//! P2 is shared with other callers.
+//! Eidos is shared with other callers.
 //!
 //! See the design notes for the design and
 //! the design notes for the binding-bus model.
@@ -53,7 +53,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
+        eidos::{EidosChainInputMsg, EidosOutMsg},
     },
     utils::{current_main, next_main},
 };
@@ -65,8 +65,8 @@ use crate::{
 //
 // - Structural (1):     act.
 // - Heads / lengths (6): sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
-//   perm_seq_id_chunks, len_bytes.
-// - Internal P2 cycles (2): perm_seq_id_digest_chunks, perm_seq_id_keccak.
+//   absorption_id_chunks, len_bytes.
+// - Internal Eidos cycles (2): absorption_id_digest_chunks, absorption_id_keccak.
 // - Keccak digest (8):  D, interleaved as (lo, hi) per lane × 4 lanes.
 // - Computed hashes (12): H_input_chunks[4] || H_digest_chunks[4] || H_keccak[4].
 // - Consumer count (1): out_mult, a plain count pinned by Binding balance.
@@ -91,30 +91,30 @@ pub const COL_CHUNK_SEQ_ID_HEAD: usize = 3;
 /// `ChunkChain` bus balance + sponge's `chunk_ptr` chain pin it to
 /// `ceil(17·n_sponge_perms / 4)`.
 pub const COL_N_CHUNKS: usize = 4;
-/// P2 cycle at the head of this invocation's chunks-absorption chain.
+/// Eidos cycle at the head of this invocation's chunks-absorption chain.
 /// Pinned by the `ChunkChain` consume per row (the FK closes there);
 /// *not* constrained to be contiguous across keccak-node rows — other
-/// P2 callers (transcript-node hashing, the digest-chunks / keccak
+/// Eidos callers (transcript-node hashing, the digest-chunks / keccak
 /// one-shots this chiplet drives, …) interleave with chunk-content absorptions,
-/// so successive rows' `perm_seq_id_chunks` values can have gaps.
-pub const COL_PERM_SEQ_ID_CHUNKS: usize = 5;
+/// so successive rows' `absorption_id_chunks` values can have gaps.
+pub const COL_ABSORPTION_ID_CHUNKS: usize = 5;
 /// Invocation byte length. Pinned by the `KeccakSponge` provide.
-/// Folded into the Keccak-node hash's `param_a` cap slot.
+/// Folded into the Keccak-node hash's `param_a` chain-context slot.
 pub const COL_LEN_BYTES: usize = 6;
 
-/// P2 cycle used internally to hash `D` as a semantic one-chunk payload.
-/// Free witness; P2-bus balance pins it to a P2 chiplet cycle running a
+/// Eidos cycle used internally to hash `D` as a semantic one-chunk payload.
+/// Free witness; Eidos-bus balance pins it to an Eidos chiplet cycle running a
 /// 1-block absorption.
-pub const COL_PERM_SEQ_ID_DIGEST_CHUNKS: usize = 7;
-/// P2 cycle used internally to hash `[H_input_chunks | H_digest_chunks]`
+pub const COL_ABSORPTION_ID_DIGEST_CHUNKS: usize = 7;
+/// Eidos cycle used internally to hash `[H_input_chunks | H_digest_chunks]`
 /// into the Keccak node. Free witness; same pinning as
-/// `perm_seq_id_digest_chunks`.
-pub const COL_PERM_SEQ_ID_KECCAK: usize = 8;
+/// `absorption_id_digest_chunks`.
+pub const COL_ABSORPTION_ID_KECCAK: usize = 8;
 
 /// First of the 8 Keccak-digest content felts, laid out as
 /// `[lo_0, hi_0, lo_1, hi_1, lo_2, hi_2, lo_3, hi_3]`. Lane `j` is
-/// `(D[2j], D[2j+1])` on Memory64; `rate0 = D[0..4]` (lanes 0-1),
-/// `rate1 = D[4..8]` (lanes 2-3) on the digest-chunks P2 perm.
+/// `(D[2j], D[2j+1])` on Memory64. The digest-chunks Eidos compression uses
+/// `block_lo = D[0..4]` (lanes 0-1) and `block_hi = D[4..8]` (lanes 2-3).
 pub const COL_D_BEGIN: usize = 9;
 /// Number of digest-content felts.
 pub const NUM_D: usize = 8;
@@ -124,20 +124,20 @@ pub const COL_D_END: usize = COL_D_BEGIN + NUM_D;
 /// Number of felts in each 4-felt hash.
 pub const NUM_HASH: usize = 4;
 
-/// First felt of the input chunks-chain digest read out of `Poseidon2Out`
-/// at `perm_seq_id_chunks + n_chunks − 1`. Feeds the keccak-node P2 perm
-/// as `rate0`.
+/// First felt of the input chunks-chain digest read out of `EidosOut`
+/// at `absorption_id_chunks + n_chunks − 1`. Feeds the first block word of the
+/// Keccak-node Eidos compression.
 pub const COL_H_INPUT_CHUNKS_BEGIN: usize = COL_D_END;
 pub const COL_H_INPUT_CHUNKS_END: usize = COL_H_INPUT_CHUNKS_BEGIN + NUM_HASH;
 
-/// First felt of the digest-chunks hash (output of the digest-chunks P2
-/// perm). Read from `Poseidon2Out` at `perm_seq_id_digest_chunks`. Feeds
-/// the keccak-node P2 perm as `rate1`.
+/// First felt of the digest-chunks hash (output of the digest-chunks Eidos chain). Read from
+/// `EidosOut` at `absorption_id_digest_chunks`. Feeds the second block word of the Keccak-node
+/// Eidos compression.
 pub const COL_H_DIGEST_CHUNKS_BEGIN: usize = COL_H_INPUT_CHUNKS_END;
 pub const COL_H_DIGEST_CHUNKS_END: usize = COL_H_DIGEST_CHUNKS_BEGIN + NUM_HASH;
 
-/// First felt of the Keccak-node hash (output of the keccak P2 perm).
-/// Read from `Poseidon2Out` at `perm_seq_id_keccak`; provided as the
+/// First felt of the Keccak-node hash (output of the framed Eidos compression chain).
+/// Read from `EidosOut` at `absorption_id_keccak`; provided as the
 /// `h` key of `Binding(H_keccak, True, 0, 0)`.
 pub const COL_H_KECCAK_BEGIN: usize = COL_H_DIGEST_CHUNKS_END;
 pub const COL_H_KECCAK_END: usize = COL_H_KECCAK_BEGIN + NUM_HASH;
@@ -157,19 +157,18 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Nine aux columns, flattened via `frac_col!` so every closing
+/// Seven aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
 /// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
-/// - col 2: `Poseidon2Out(H_input_chunks)` consume alone (no partner left to pair).
+/// - col 2: `EidosOut(H_input_chunks)` consume alone (no partner left to pair).
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
-/// - col 5/6: digest-chunks P2 perm — `Poseidon2In` rate0+rate1, then cap +
-///   `Poseidon2Out(H_digest_chunks)`.
-/// - col 7/8: keccak-node P2 perm — `Poseidon2In` rate0+rate1, then cap + `Poseidon2Out(H_keccak)`.
-pub const NUM_AUX_COLS: usize = 9;
+/// - col 5: atomic digest-chunks `EidosIn` + `EidosOut(H_digest_chunks)`.
+/// - col 6: atomic keccak-node `EidosIn` + `EidosOut(H_keccak)`.
+pub const NUM_AUX_COLS: usize = 7;
 
-pub const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2, 2, 2];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2];
 
 // AIR
 // ================================================================================================
@@ -230,10 +229,10 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         let chunk_seq_id_head_next: AB::Expr = next[COL_CHUNK_SEQ_ID_HEAD].into();
         let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
 
-        // `perm_seq_id_chunks` is read only by the LookupAir below
+        // `absorption_id_chunks` is read only by the LookupAir below
         // (no local cross-row constraint — see the comment in the
         // namespace-continuity section).
-        let _ = next[COL_PERM_SEQ_ID_CHUNKS];
+        let _ = next[COL_ABSORPTION_ID_CHUNKS];
 
         // Boundary -----------------------------------------------
         // Pin `sponge_seq_id_head` and `chunk_seq_id_head` at row 0 to
@@ -268,14 +267,14 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         builder
             .when_transition()
             .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
-        // No P2 chunks-absorption namespace continuity. Other P2
+        // No Eidos chunks-absorption namespace continuity. Other Eidos
         // callers (transcript-node hashing, the digest-chunks / keccak
         // one-shots this chiplet drives, …) interleave with chunk-
-        // content absorptions, so `perm_seq_id_chunks` is *not*
+        // content absorptions, so `absorption_id_chunks` is *not*
         // contiguous across keccak-node rows. The `ChunkChain` bus
-        // pins each row's `(chunk_seq_id_head, perm_seq_id_chunks)`
+        // pins each row's `(chunk_seq_id_head, absorption_id_chunks)`
         // pair to a real chunk-side chain head, which is what closes
-        // the FK — see the chunk chiplet's `perm_seq_id` column doc
+        // the FK — see the chunk chiplet's `absorption_id` column doc
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
@@ -316,10 +315,10 @@ where
         let n_sponge_perms: LB::Expr = local[COL_N_SPONGE_PERMS].into();
         let chunk_seq_id_head: LB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].into();
         let n_chunks: LB::Expr = local[COL_N_CHUNKS].into();
-        let perm_seq_id_chunks: LB::Expr = local[COL_PERM_SEQ_ID_CHUNKS].into();
+        let absorption_id_chunks: LB::Expr = local[COL_ABSORPTION_ID_CHUNKS].into();
         let len_bytes: LB::Expr = local[COL_LEN_BYTES].into();
-        let perm_seq_id_digest_chunks: LB::Expr = local[COL_PERM_SEQ_ID_DIGEST_CHUNKS].into();
-        let perm_seq_id_keccak: LB::Expr = local[COL_PERM_SEQ_ID_KECCAK].into();
+        let absorption_id_digest_chunks: LB::Expr = local[COL_ABSORPTION_ID_DIGEST_CHUNKS].into();
+        let absorption_id_keccak: LB::Expr = local[COL_ABSORPTION_ID_KECCAK].into();
 
         let d: [LB::Expr; NUM_D] = array::from_fn(|i| local[COL_D_BEGIN + i].into());
         let h_input_chunks: [LB::Expr; NUM_HASH] =
@@ -340,9 +339,9 @@ where
         // chunk_ptr_head = 4·chunk_seq_id_head — the bus-side
         // conversion lives here, not in the chunk chiplet.
         let chunk_ptr_head: LB::Expr = LB::Expr::from(Felt::from(4u8)) * chunk_seq_id_head.clone();
-        // perm_seq_id_chunks_tail = perm_seq_id_chunks + n_chunks − 1.
-        let perm_seq_id_chunks_tail: LB::Expr =
-            perm_seq_id_chunks.clone() + n_chunks - LB::Expr::ONE;
+        // absorption_id_chunks_tail = absorption_id_chunks + n_chunks − 1.
+        let absorption_id_chunks_tail: LB::Expr =
+            absorption_id_chunks.clone() + n_chunks - LB::Expr::ONE;
         // Digest-lane Memory64 addresses. Sponge's `addr_squeeze =
         // 100·sponge_seq_id − 99·p_idx + 3072` at the last block's
         // digest rows (`p_idx ∈ [0, 4)` of the last period) reduces to
@@ -353,18 +352,14 @@ where
             + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
             - LB::Expr::from(Felt::from(128u8));
 
-        // Capacities.
-        let cap_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
-        let cap_keccak = [
+        // Eidos chain contexts.
+        let chain_context_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
+        let chain_context_keccak = [
             LB::Expr::from(Keccak256Precompile::id()),
             LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
             len_bytes.clone(),
             LB::Expr::ZERO,
         ];
-
-        // Rate splits.
-        let d_rate0 = [d[0].clone(), d[1].clone(), d[2].clone(), d[3].clone()];
-        let d_rate1 = [d[4].clone(), d[5].clone(), d[6].clone(), d[7].clone()];
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };
@@ -402,12 +397,12 @@ where
                 pos_act.clone(),
                 ChunkChainMsg {
                     chunk_seq_id_head: chunk_seq_id_head.clone(),
-                    perm_seq_id_head: perm_seq_id_chunks,
+                    absorption_id_head: absorption_id_chunks,
                 },
                 interaction_deg
             ),
         );
-        // col 2: Poseidon2Out(H_input_chunks) consume alone (no partner
+        // col 2: EidosOut(H_input_chunks) consume alone (no partner
         // left to pair).
         frac_col!(
             builder,
@@ -416,8 +411,8 @@ where
             (
                 "p2out-h-input-chunks",
                 pos_act.clone(),
-                Poseidon2OutMsg {
-                    perm_seq_id: perm_seq_id_chunks_tail,
+                EidosOutMsg {
+                    chain_step_id: absorption_id_chunks_tail,
                     digest: h_input_chunks.clone(),
                 },
                 interaction_deg
@@ -478,78 +473,60 @@ where
             ),
         );
 
-        // ---- col 5/6: digest-chunks P2 perm — 3 P2In + 1 P2Out, paired ----
+        // ---- col 5: one atomic digest-chunks input + its output -------------------------------
         frac_col!(
             builder,
-            "digest-chunks-p2",
+            "digest-chunks-eidos",
             pair_deg,
             (
-                "p2in-rate0",
+                "eidos-chain-input",
                 pos_act.clone(),
-                Poseidon2InMsg::rate0(perm_seq_id_digest_chunks.clone(), d_rate0),
+                EidosChainInputMsg::chunks(
+                    absorption_id_digest_chunks.clone(),
+                    LB::Expr::ONE,
+                    d,
+                    chain_context_digest_chunks,
+                ),
                 interaction_deg
             ),
             (
-                "p2in-rate1",
+                "eidos-chain-output",
                 pos_act.clone(),
-                Poseidon2InMsg::rate1(perm_seq_id_digest_chunks.clone(), d_rate1),
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "digest-chunks-p2",
-            pair_deg,
-            (
-                "p2in-cap",
-                pos_act.clone(),
-                Poseidon2InMsg::cap(perm_seq_id_digest_chunks.clone(), cap_digest_chunks),
-                interaction_deg
-            ),
-            (
-                "p2out-h-digest-chunks",
-                pos_act.clone(),
-                Poseidon2OutMsg {
-                    perm_seq_id: perm_seq_id_digest_chunks,
+                EidosOutMsg {
+                    chain_step_id: absorption_id_digest_chunks,
                     digest: h_digest_chunks.clone(),
                 },
                 interaction_deg
             ),
         );
 
-        // ---- col 7/8: keccak-node P2 perm — 3 P2In + 1 P2Out, paired ----
+        // ---- col 6: one atomic keccak-node input + its output ---------------------------------
         frac_col!(
             builder,
-            "keccak-p2",
+            "keccak-eidos",
             pair_deg,
             (
-                "p2in-rate0",
+                "eidos-chain-input",
                 pos_act.clone(),
-                Poseidon2InMsg::rate0(perm_seq_id_keccak.clone(), h_input_chunks),
+                EidosChainInputMsg::node(
+                    absorption_id_keccak.clone(),
+                    LB::Expr::ONE,
+                    array::from_fn(|idx| {
+                        if idx < 4 {
+                            h_input_chunks[idx].clone()
+                        } else {
+                            h_digest_chunks[idx - 4].clone()
+                        }
+                    }),
+                    chain_context_keccak,
+                ),
                 interaction_deg
             ),
             (
-                "p2in-rate1",
-                pos_act.clone(),
-                Poseidon2InMsg::rate1(perm_seq_id_keccak.clone(), h_digest_chunks),
-                interaction_deg
-            ),
-        );
-        frac_col!(
-            builder,
-            "keccak-p2",
-            pair_deg,
-            (
-                "p2in-cap",
-                pos_act.clone(),
-                Poseidon2InMsg::cap(perm_seq_id_keccak.clone(), cap_keccak),
-                interaction_deg
-            ),
-            (
-                "p2out-h-keccak",
+                "eidos-chain-output",
                 pos_act,
-                Poseidon2OutMsg {
-                    perm_seq_id: perm_seq_id_keccak,
+                EidosOutMsg {
+                    chain_step_id: absorption_id_keccak,
                     digest: h_keccak
                 },
                 interaction_deg

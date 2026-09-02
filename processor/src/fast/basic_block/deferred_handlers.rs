@@ -18,11 +18,12 @@ use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
-// `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
-// 12 felts directly into one `hperm` to compute the node's digest. `TAG` is one word (4 felts).
-// The eight payload felts are one 8-felt data chunk, `lhs || rhs` child digests for a join, or
-// one `lhs || rhs` pair for a pair-list node. Exact `Tag::CHUNKS` (`[2, 0, 0, 0]`) is
-// framework-owned opaque data; malformed id-2 tags are rejected.
+// `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]`; `TAG` is one word with layout
+// `[selector, arg0, arg1, 0]`. The selector, payload length, and arguments initialize the Eidos
+// chaining word, and the eight payload felts form its single compression block. The payload is one
+// 8-felt data chunk, `lhs || rhs` child digests for a join, or one `lhs || rhs` pair for a
+// pair-list node. Exact `Tag::CHUNKS` (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed
+// id-2 tags are rejected.
 
 /// Stack offset of the payload's low half below the event id.
 const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
@@ -61,7 +62,7 @@ const DATA_N_CHUNKS_OFFSET: usize = 6;
 
 /// Number of field elements occupied by a deferred node tag.
 const TAG_NUM_ELEMENTS: usize = 4;
-/// Number of field elements in one rate-sized deferred payload block.
+/// Number of field elements in one deferred payload block.
 const PAYLOAD_BLOCK_NUM_ELEMENTS: usize = 8;
 
 /// Returns the storage footprint of `tag || n` 8-felt payload blocks.
@@ -258,7 +259,7 @@ pub(super) fn handle_deferred_register_data(
     if end > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: end }.into());
     }
-    // Read `n` rate-sized payload blocks from memory.
+    // Read `n` eight-Felt payload blocks from memory.
     let ctx = processor.ctx;
     let mut chunks: Vec<DataChunk> = Vec::with_capacity(n as usize);
     for k in 0..n {

@@ -225,7 +225,8 @@ Deferred DAG details:
 
   `TRUE` is not accepted by this instruction. Tags that semantically require more data chunks or
   pairs fail during precompile evaluation. Code that later uses the node digest must compute it
-  inside the VM from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
+  inside the VM from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values with the Eidos framing
+  used by `miden::precompiles::digest_expr`.
 - `adv.register_deferred_data` accepts data, pair-list, and join tags. Its stack-supplied `TAG`,
   `ptr`, and `n_chunks` are visible in the VM execution trace, but the event does not AIR-bind the
   host-read contents to memory.
@@ -241,8 +242,7 @@ Deferred DAG details:
   `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack.
   `TRUE` emits only `Tag::TRUE`.
 - `adv.evaluate_deferred_tag` pushes only the canonical tag. `TRUE` emits `Tag::TRUE`.
-- `adv.evaluate_deferred_payload` is the payload-only compatibility event. It pushes only the
-  canonical payload to the advice stack.
+- `adv.evaluate_deferred_payload` pushes only the canonical payload to the advice stack.
   - Data payloads are arranged per 8-felt chunk as `HIGH` then `LOW` in advice-pop order, so
     `adv_pushw adv_pushw` leaves `LOW` above `HIGH` on the operand stack. Chunks preserve canonical
     chunk order.
@@ -259,9 +259,9 @@ _Insert into Advice Map:_
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
-| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
+| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`; `d` must fit in a u32. |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
-| `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
+| `adv.insert_compress` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `K ← Eidos::compress(CV, BLOCK_LO \|\| BLOCK_HI)`. `advice_map[K] ← [BLOCK_LO, BLOCK_HI]`. |
 
 ### Random Access Memory
 
@@ -277,7 +277,7 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
 | `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). Equivalent to `reversew mem_storew_le reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.  |
 | `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
-| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state.                                                                       |
+| `mem_stream`                             | `[BLOCK_LO, BLOCK_HI, CV, a, ...]` | `[D, E, CV, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing the block words while preserving the Eidos chaining word.                                                                       |
 
 #### Procedure Locals (Context-Specific)
 
@@ -294,20 +294,21 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ to
 
 ## Cryptographic Operations
 
-Common cryptographic operations, including hashing and Merkle tree manipulations using Poseidon2.
+Common cryptographic operations, including Eidos hashing, Eidos compression, and Merkle tree
+manipulations.
 
 ### Hashing and Merkle Trees
 
 | Instruction    | Stack Input          | Stack Output     | Cycles | Notes                                                                                                                                                                                                 |
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hash`         | `[A, ...]`           | `[B, ...]`       | 19     | `B ← hash(A)`. 1-to-1 Poseidon2 hash.                                                                                                                                                    |
-| `hperm`        | `[R0, R1, C, ...]`   | `[R0', R1', C', ...]` | 1      | Poseidon2 permutation. `R0,R1`=rate (R0 on top), `C`=capacity, `R0'`=digest.                                                                                                   |
-| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Poseidon2 hash.                                                                                                                                                  |
+| `hash`         | `[A, ...]`           | `[B, ...]`       | 18     | `B ← Eidos::hash_elements(A)`. The exact 4-element length is bound into the initial chaining value. |
+| `compress`    | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV', ...]` | 1 | Eidos compression. Preserves the 8-element block and replaces only the 4-element chaining value. |
+| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 15     | Canonical Eidos two-to-one merge. |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
-| `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
+| `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 15     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
-| `crypto_stream` | `[rate(8), cap(4), src_ptr, dst_ptr, ...]` | `[ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]` | 1 | Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces rate on stack with ciphertext, preserves capacity, increments both pointers by 8. Primitive used by `miden::core::crypto::aead`. |
+| `crypto_stream` | `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]` | `[K_CTR(4), counter+1, src_ptr+8, dst_ptr+16, remaining-1, ...]` | 1 | Derives an Eidos XOF block, XORs it bytewise with 8 plaintext field elements, and writes 16 u32 ciphertext limbs. Primitive used by `miden::core::crypto::aead_eidos`. |
 
 `mtree_get`, `mtree_set`, and `mtree_verify` require `1 <= d <= 64`; other depths are rejected.
 
@@ -382,7 +383,7 @@ Instructions for communicating with the host through events.
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Defined system events are reserved and use names in the `sys::` namespace.     |
 | `trace.<trace_id>` | `[...]`           | `[...]`           | 5      | Emits an optional, read-only trace event with the specified `trace_id`. Expands to `push.<trace_id> push.<sys::trace_event> emit drop drop`. Immediate `trace_id` must be defined via `const.ID=event("...")` or inlined as `trace.event("...")`. The instruction is stack-neutral. Example: `trace.event("foo")` or `trace.MY_TRACE`. If no handler is registered for the trace ID, the event is a no-op. |
 | `trace`            | `[trace_id, ...]` | `[trace_id, ...]` | 3      | Emits an optional, read-only trace event using the `trace_id` at the top of the stack without consuming it. Expands to `push.<sys::trace_event> emit drop`. Trace handlers can inspect processor state but cannot mutate VM state or the advice provider. If no handler is registered for the trace ID, the event is a no-op. |
-| `log_deferred`   | `[_, STMNT, _, ...]` | `[ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds `STMNT` from `stack[4..8]` into the VM's rolling deferred root via `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`, using the internally maintained previous root and the `Tag::AND` capacity word `[1, 0, 0, 0]`. `STMNT` must be a registered statement for a precompile claim that evaluates to `TRUE`. Writes three output words, normally dropped by wrappers. Core-library facades and internal support code normally wrap this low-level opcode when precompile claims need to be logged. |
+| `log_deferred`   | `[STMNT, ...]` | `[ROOT_NEW, ...]` | 1 | Folds `STMNT` into the rolling root with `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV \|\| STMNT)`. `STMNT` must be registered and evaluate to `TRUE`; precompile support code normally wraps this low-level opcode. |
 
 ## Debugging Operations
 

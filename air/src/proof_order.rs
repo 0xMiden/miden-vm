@@ -7,8 +7,12 @@ use crate::MidenAir;
 /// Supported AIRs in instance order.
 ///
 /// This order is used for per-AIR inputs and breaks proof-order ties when trace heights are equal.
-pub const AIRS: [MidenAir; 3] =
-    [MidenAir::Core, MidenAir::Chiplets, MidenAir::Poseidon2Permutation];
+pub const AIRS: [MidenAir; 4] = [
+    MidenAir::Core,
+    MidenAir::Chiplets,
+    MidenAir::EidosCompression,
+    MidenAir::And8Lookup,
+];
 
 pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 
@@ -161,8 +165,12 @@ mod tests {
     /// constants and a breaking changelog entry.
     #[test]
     fn air_instance_order_is_protocol_pinned() {
-        const PINNED: [MidenAir; MIDEN_AIR_COUNT] =
-            [MidenAir::Core, MidenAir::Chiplets, MidenAir::Poseidon2Permutation];
+        const PINNED: [MidenAir; MIDEN_AIR_COUNT] = [
+            MidenAir::Core,
+            MidenAir::Chiplets,
+            MidenAir::EidosCompression,
+            MidenAir::And8Lookup,
+        ];
         assert_eq!(
             AIRS, PINNED,
             "AIRS instance order moved; regenerate protocol constants for an intentional change"
@@ -212,27 +220,30 @@ mod tests {
     #[test]
     fn proof_order_sorts_by_height_then_instance_index() {
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 9, 10]),
+            ProofOrder::from_instance_log_heights(&[8, 9, 10, 11]),
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[9, 8, 10]),
+            ProofOrder::from_instance_log_heights(&[9, 8, 10, 11]),
             ProofOrder::from_airs(&[
                 MidenAir::Chiplets,
                 MidenAir::Core,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 8, 8]),
+            ProofOrder::from_instance_log_heights(&[8, 8, 8, 8]),
             ProofOrder::from_airs(&[
                 MidenAir::Core,
                 MidenAir::Chiplets,
-                MidenAir::Poseidon2Permutation,
+                MidenAir::EidosCompression,
+                MidenAir::And8Lookup,
             ])
         );
     }

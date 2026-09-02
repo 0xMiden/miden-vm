@@ -1,9 +1,10 @@
 mod dsa;
 mod falcon;
 
-mod aead;
+mod aead_eidos;
 mod blake3;
 mod circuit_evaluation;
+mod eidos;
+mod eidos_hashes;
 mod hashes;
-mod poseidon2;
 mod sha256;

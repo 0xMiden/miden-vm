@@ -469,4 +469,4 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 fuzz-seeds: ## Generate seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
 	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture
-	cargo test -p miden-vm --test miden-cli generate_execution_witness_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-vm --features internal --test miden-cli generate_execution_witness_fuzz_seeds -- --ignored --nocapture

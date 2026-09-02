@@ -31,21 +31,19 @@ use crate::{
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::poseidon2::trace::Poseidon2Requires,
+    transcript::eidos::trace::EidosRequires,
 };
 
-fn build_sponge_requires(
-    invs: &[Invocation],
-) -> (SpongeRequires, ChunkRequires, Poseidon2Requires) {
-    let mut p2 = Poseidon2Requires::new();
+fn build_sponge_requires(invs: &[Invocation]) -> (SpongeRequires, ChunkRequires, EidosRequires) {
+    let mut eidos = EidosRequires::new();
     let mut chunk = ChunkRequires::new();
     let mut round = RoundRequires::new();
     let mut bpl = BytePairLutRequires::new();
     let mut sponge = SpongeRequires::new();
     for inv in invs {
-        sponge.require(inv, &mut chunk, &mut round, &mut bpl, &mut p2);
+        sponge.require(inv, &mut chunk, &mut round, &mut bpl, &mut eidos);
     }
-    (sponge, chunk, p2)
+    (sponge, chunk, eidos)
 }
 
 fn check_invocation(_seed: u64, inv: Invocation) {

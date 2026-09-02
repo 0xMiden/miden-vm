@@ -679,7 +679,9 @@ begin
     swap
     assert
     adv.insert_hdword
+    adv.insert_compress
     adv.push_mapvaln
+    compress
     emit
     trace
     mem_load
@@ -1125,6 +1127,15 @@ end
     let err = parse_forms(source).expect_err("expected invalid instruction error");
 
     assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid instruction"));
+}
+
+#[test]
+fn parser_rejects_unsupported_compression_spellings() {
+    for spelling in ["bcompress", "adv.insert_bcompress"] {
+        let source = test_source_file(&format!("begin\n    {spelling}\nend\n"));
+        let err = parse_forms(source).expect_err("unsupported spelling must be rejected");
+        assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid instruction"));
+    }
 }
 
 #[test]

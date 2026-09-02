@@ -270,7 +270,7 @@ impl PrettyPrint for Instruction {
             // ----- cryptographic operations -----------------------------------------------------
             Self::Hash => const_text("hash"),
             Self::HMerge => const_text("hmerge"),
-            Self::HPerm => const_text("hperm"),
+            Self::Compress => const_text("compress"),
             Self::MTreeGet => const_text("mtree_get"),
             Self::MTreeSet => const_text("mtree_set"),
             Self::MTreeMerge => const_text("mtree_merge"),
@@ -417,7 +417,7 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 
 #[cfg(test)]
 mod tests {
-    use miden_core::crypto::hash::Poseidon2;
+    use miden_core::crypto::hash::Eidos;
     use miden_debug_types::Span;
 
     use crate::{
@@ -440,6 +440,12 @@ mod tests {
         let instruction = format!("{}", Instruction::ExpBitLength(32));
         assert_eq!("exp.u32", instruction);
 
+        assert_eq!(format!("{}", Instruction::Compress), "compress");
+        assert_eq!(
+            format!("{}", Instruction::SysEvent(SystemEventNode::InsertCompress)),
+            "adv.insert_compress"
+        );
+
         let instruction = format!(
             "{}",
             Instruction::PushFeltList(vec![
@@ -456,11 +462,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Poseidon2::hash(b"miden::core::math::u64::add");
+        let digest = Eidos::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x23796e2a4ee91a63c116e11dbbc2ea599461766d1fb7b6599ca387cab2c3e64c",
+            "exec.0x084d13700c55861f4d85d6898f3f7775bd38fbf314d651486b4c3758ed192e3a",
             instruction
         );
     }

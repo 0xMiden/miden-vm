@@ -17,8 +17,9 @@ use miden_lifted_stark::{
 use miden_precompiles_air::{
     ChipletMultiAir, preprocessed,
     stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config, observe_protocol_params,
-        poseidon2_config, precompile_pcs_params, rpo_config, rpx_config, test_challenger,
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        test_challenger,
     },
 };
 use serde::Serialize;
@@ -35,7 +36,7 @@ impl SessionTraces {
         ProverStatement::new(statement, mains).expect("chiplet trace shapes are valid")
     }
 
-    /// Checks each AIR and the cross chiplet assertion with the fast test configuration.
+    /// Checks each AIR and the cross-chiplet assertion with the lightweight test configuration.
     pub fn check(&self) {
         check_constraints(&self.prover_statement(), test_challenger());
     }
@@ -68,6 +69,11 @@ impl SessionTraces {
             HashFunction::Keccak => {
                 let config = keccak_config(params, PRECOMPILE_RELATION_DIGEST);
                 let preprocessed = preprocessed::keccak();
+                self.prove_stark_with_config(&config, &preprocessed, hash_fn)
+            },
+            HashFunction::Eidos => {
+                let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
+                let preprocessed = preprocessed::eidos();
                 self.prove_stark_with_config(&config, &preprocessed, hash_fn)
             },
         }

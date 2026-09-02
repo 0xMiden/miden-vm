@@ -15,9 +15,9 @@ from typing import Any
 
 DEFAULT_MIN_REGRESSION_MS = 5.0
 
-# CI collects both worktrees with this script. Normalize Falcon names emitted by a pre-rename
-# baseline so its fresh measurements intersect the current explicit names.
-LEGACY_FALCON_SCENARIO_ALIASES = {
+# Normalize generic Falcon scenario names to their explicit signing variants so collected result
+# sets use the same scenario keys.
+FALCON_SCENARIO_ALIASES = {
     "consume-single-p2id-note": "consume-single-p2id-note-with-falcon-signing",
     "consume-two-p2id-notes": "consume-two-p2id-notes-with-falcon-signing",
     "create-single-p2id-note": "create-single-p2id-note-with-falcon-signing",
@@ -127,7 +127,7 @@ def collect_criterion_metrics(repo_root: Path, *, estimate: str = "mean") -> dic
     for estimates_path in sorted(criterion_root.glob("**/new/estimates.json")):
         producer, scenario, axis = parse_criterion_estimate_path(criterion_root, estimates_path)
         if producer == "bench-tx":
-            scenario = LEGACY_FALCON_SCENARIO_ALIASES.get(scenario, scenario)
+            scenario = FALCON_SCENARIO_ALIASES.get(scenario, scenario)
         name = f"{producer}/{scenario}/{axis}"
         estimate_data = json.loads(estimates_path.read_text(encoding="utf-8"))[estimate]
         metrics[name] = {

@@ -6,8 +6,9 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, Tag, precompile_id,
+        PrecompileError, Tag,
     },
+    program::domain::UINT256_PRECOMPILE_SELECTOR,
 };
 
 use super::{Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, ZERO_LIMBS};
@@ -46,21 +47,13 @@ enum UintOp {
 }
 
 impl UintOp {
-    fn decode(args: [Felt; 3]) -> Option<Self> {
+    fn decode(args: [Felt; 2]) -> Option<Self> {
         match args[0].as_canonical_u64() {
-            UintPrecompile::VALUE_OP_ID if args[2] == ZERO => {
-                Some(Self::Value(domain_from_bound_ptr_arg(args[1])?))
-            },
-            UintPrecompile::ADD_OP_ID if args[1] == ZERO && args[2] == ZERO => {
-                Some(Self::Binary(UintBinaryOp::Add))
-            },
-            UintPrecompile::SUB_OP_ID if args[1] == ZERO && args[2] == ZERO => {
-                Some(Self::Binary(UintBinaryOp::Sub))
-            },
-            UintPrecompile::MUL_OP_ID if args[1] == ZERO && args[2] == ZERO => {
-                Some(Self::Binary(UintBinaryOp::Mul))
-            },
-            UintPrecompile::EQ_OP_ID if args[1] == ZERO && args[2] == ZERO => Some(Self::Eq),
+            UintPrecompile::VALUE_OP_ID => Some(Self::Value(domain_from_bound_ptr_arg(args[1])?)),
+            UintPrecompile::ADD_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Add)),
+            UintPrecompile::SUB_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Sub)),
+            UintPrecompile::MUL_OP_ID if args[1] == ZERO => Some(Self::Binary(UintBinaryOp::Mul)),
+            UintPrecompile::EQ_OP_ID if args[1] == ZERO => Some(Self::Eq),
             _ => None,
         }
     }
@@ -124,7 +117,7 @@ impl UintNode {
 pub struct UintPrecompile;
 
 impl UintPrecompile {
-    /// Stable precompile name used to derive this precompile's tag id.
+    /// Human-readable precompile name used for diagnostics.
     pub const NAME: &'static str = "uint256";
 
     /// Operation discriminants owned by this precompile.
@@ -134,15 +127,15 @@ impl UintPrecompile {
     pub const MUL_OP_ID: u64 = 3;
     pub const EQ_OP_ID: u64 = 4;
 
-    /// Stable precompile id derived from [`Self::NAME`].
+    /// Registered precompile selector.
     pub fn id() -> Felt {
-        precompile_id(Self::NAME)
+        UINT256_PRECOMPILE_SELECTOR
     }
 
     /// Builds a canonical uint `VALUE` tag for `domain`.
     pub fn value_tag(domain: UintDomain) -> Tag {
         let op_id = Felt::new(Self::VALUE_OP_ID).expect("uint VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, Felt::from(domain.bound_ptr()), ZERO])
+        Tag::precompile(Self::id(), [op_id, Felt::from(domain.bound_ptr())])
             .expect("uint precompile id is not framework-reserved")
     }
 
@@ -152,7 +145,7 @@ impl UintPrecompile {
     /// precompile rejects. Operand `VALUE` nodes carry the concrete domain.
     pub fn op_tag(op_id: u64) -> Tag {
         let op_id = Felt::new(op_id).expect("uint op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
+        Tag::precompile(Self::id(), [op_id, ZERO])
             .expect("uint precompile id is not framework-reserved")
     }
 
@@ -263,14 +256,14 @@ impl Precompile for UintPrecompile {
         nodes
     }
 
-    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+    fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
         let op = UintOp::decode(args)?;
         Some(op.node_type())
     }
 
     fn evaluate(
         &self,
-        args: [Felt; 3],
+        args: [Felt; 2],
         payload: &Payload,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
@@ -373,11 +366,10 @@ mod tests {
         assert_eq!(precompile.decode(add_with_bound), None);
         assert_eq!(precompile.decode(UintPrecompile::op_tag(99).args()), None);
 
-        assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99), ZERO]), None);
-        assert_eq!(precompile.decode([Felt::from_u32(0), ZERO, ZERO]), None);
-        assert_eq!(precompile.decode([Felt::from_u32(0), bound_ptr, Felt::from_u32(1)]), None);
+        assert_eq!(precompile.decode([Felt::from_u32(0), Felt::new_unchecked(99)]), None);
+        assert_eq!(precompile.decode([Felt::from_u32(0), ZERO]), None);
         assert_eq!(
-            precompile.decode([Felt::from_u32(0), Felt::new_unchecked(u32::MAX as u64 + 1), ZERO,]),
+            precompile.decode([Felt::from_u32(0), Felt::new_unchecked(u32::MAX as u64 + 1)]),
             None
         );
     }
@@ -430,7 +422,7 @@ mod tests {
             assert_eq!(UintPrecompile::decode_node(&node).unwrap(), Some(expected));
         }
 
-        let invalid_tag = Tag::precompile(UintPrecompile::id(), [Felt::from_u32(99), ZERO, ZERO])
+        let invalid_tag = Tag::precompile(UintPrecompile::id(), [Felt::from_u32(99), ZERO])
             .expect("tag is precompile-owned");
         let invalid = Node::join(invalid_tag, lhs.digest(), rhs.digest()).unwrap();
         assert!(matches!(

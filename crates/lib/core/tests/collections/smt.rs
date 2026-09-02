@@ -1,5 +1,5 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_crypto::merkle::smt::LEAF_DOMAIN;
+use miden_crypto::{hash::eidos::Eidos, merkle::smt::LEAF_DOMAIN};
 
 use super::*;
 
@@ -925,16 +925,14 @@ fn test_smt_leaf_hash_matches_merkle_store() {
 /// plain `merge([K, V])` that would be produced with domain 0.
 #[test]
 fn test_smt_single_leaf_hash_differs_from_plain_merge() {
-    use miden_utils_testing::crypto::Poseidon2;
-
     let (key, value) = LEAVES[0];
     let smt = build_smt_from_pairs(&[(key, value)]);
 
     let leaf = smt.leaves().next().map(|(_, leaf)| leaf).unwrap();
     let leaf_hash = leaf.hash();
 
-    let plain_merge = Poseidon2::merge(&[key, value]);
-    let domain_merge = Poseidon2::merge_in_domain(&[key, value], LEAF_DOMAIN);
+    let plain_merge = Eidos::merge(&[key, value]);
+    let domain_merge = Eidos::merge_in_domain(&[key, value], LEAF_DOMAIN);
 
     assert_ne!(
         leaf_hash, plain_merge,
@@ -951,8 +949,6 @@ fn test_smt_single_leaf_hash_differs_from_plain_merge() {
 /// domain 0 on either the Rust or MASM side.
 #[test]
 fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
-    use miden_utils_testing::crypto::Poseidon2;
-
     let smt = build_smt_from_pairs(&LEAVES_MULTI);
 
     // Find the leaf that contains multiple entries (same K[0] bucket).
@@ -966,8 +962,8 @@ fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
     let leaf_hash = multi_leaf.hash();
     let elements: Vec<Felt> = multi_leaf.to_elements().collect();
 
-    let plain_hash = Poseidon2::hash_elements(&elements);
-    let domain_hash = Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN);
+    let plain_hash = Eidos::hash_elements(&elements);
+    let domain_hash = Eidos::hash_elements_in_domain(&elements, LEAF_DOMAIN);
 
     assert_ne!(
         leaf_hash, plain_hash,
@@ -1020,14 +1016,14 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
 }
 
 fn build_custom_smt_root(entries: &[(Word, Word)]) -> (Word, MerkleStore, Vec<(Word, Vec<Felt>)>) {
-    use miden_utils_testing::crypto::{NodeIndex, Poseidon2};
+    use miden_utils_testing::crypto::NodeIndex;
 
     const SMT_DEPTH: u8 = 64;
 
     assert!(!entries.is_empty(), "custom SMT root requires at least one entry");
 
     let leaf_elements = build_leaf_advice_value(entries);
-    let leaf_hash = Poseidon2::hash_elements_in_domain(&leaf_elements, LEAF_DOMAIN);
+    let leaf_hash = Eidos::hash_elements_in_domain(&leaf_elements, LEAF_DOMAIN);
 
     let leaf_index = entries[0].0[3].as_canonical_u64();
     let empty_root = Smt::new().root();

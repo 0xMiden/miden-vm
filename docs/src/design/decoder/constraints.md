@@ -68,10 +68,10 @@ Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_lo
 > f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
 > $$
 
-When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
+When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $1$:
 
 > $$
-> f_{respan} \cdot (a' - a - 2) = 0 \text{ | degree} = 5
+> f_{respan} \cdot (a' - a - 1) = 0 \text{ | degree} = 5
 > $$
 
 When `END` operation is executed and we are exiting a *loop* block (i.e., `is_loop`, value which is stored in $h_5$, is $1$), the value at the top of the operand stack must be $0$:
@@ -139,63 +139,62 @@ When the value in `in_span` column is set to $1$, control flow operations cannot
 ## Block hash computation constraints
 As described [previously](./index.md#program-block-hashing), when the VM starts executing a new block, it also initiates computation of the block's hash. There are two separate methodologies for computing block hashes.
 
-For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element rate). For *dyn*, only the second half of the hasher registers ($h_4,\dots,h_7$) are forced to $0$, while the first half holds the callee digest read from memory; thus the input is not all zeros. The hasher is initialized using the hash chiplet, and we use the address of the controller input row as the block's ID. The result of the hash is then available in the paired controller output row at block ID plus $1$, and we read that result when the `END` operation is executed for the block.
+For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element block). For *dyn*, the first half holds the callee digest read from memory and the second half of the hasher registers ($h_4,\dots,h_7$) is constrained to $0$; the digest itself may be the zero word. The hasher is initialized using the hash controller, and we use the controller-row address as the block's ID. A controller row overlays both the compression input and its output chaining value; for these framed block-hash operations, that value is the block digest read by `END` at the same address.
 
-For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the first controller input row as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch starts at the next controller input row, so the batch address is incremented by $2$. We read the result from the controller output row corresponding to the final batch when the `END` operation is executed for the block.
+For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash controller at the start of the block, and we use the address of the first controller row as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch uses the next controller row, so the batch address is incremented by $1$. We read the result from that final controller row when the `END` operation is executed for the block.
 
 ### Chiplets bus constraints
 
 The decoder communicates with the hash chiplet via the [chiplets bus](../chiplets/index.md#chiplets-bus). This works by dividing values of the multiset check column $b_{chip}$ by the values of operations providing inputs to or reading outputs from the hash chiplet. A constraint to enforce this would look as $b_{chip}' \cdot u = b_{chip}$, where $u$ is the value which defines the operation.
 
-In constructing values for decoder bus requests, we use the hasher message format
-described in the [hasher chiplet](../chiplets/hasher.md#lookup-buses).
-For decoder requests, the node index is always $0$, so the message reduces to:
+In constructing values for decoder bus requests, we use the typed hasher message format
+described in the [hasher chiplet](../chiplets/hasher.md#lookup-buses). Let $P_k$ be the
+domain-separated prefix for message kind $k$. A message is reduced as
 
 $$
-H(label, addr, state) =
-\alpha_0 + \alpha_1 \cdot label + \alpha_2 \cdot addr
-+ \sum_{i=0}^{11} \alpha_{4+i} \cdot state_i
+H_k(addr, node, payload) =
+P_k + addr + \beta \cdot node + \sum_{i=0}^{|payload|-1} \beta^{i+2} \cdot payload_i.
 $$
 
-We use the following labels:
-
-* $L_{init} = \text{LINEAR\_HASH\_LABEL} + 16$
-* $L_{respan} = \text{LINEAR\_HASH\_LABEL} + 32$
-* $L_{end} = \text{RETURN\_HASH\_LABEL} + 32$
-
-Let $d = \sum_{i=0}^6(b_i \cdot 2^i)$ denote the opcode value, which is placed in the
-capacity domain lane (state index $9$).
+The message kind selects a distinct prefix for a full-state initialization, next-block absorption,
+or four-Felt result/CV return. Decoder block-hash messages use node index zero. Let
+$d = \sum_{i=0}^6(b_i \cdot 2^i)$ denote the opcode value. Let $CV(d)$ denote the Eidos
+two-to-one chaining word derived from that opcode, and let $CV_{span}(gc)$ denote the basic-block
+chaining word derived from its logical operation-group count.
 
 To simplify constraint description, we define the following values:
 
 $$
-h_{ctrl} =
-\alpha_0 + \alpha_1 \cdot L_{init} + \alpha_2 \cdot a'
-+ \sum_{i=0}^7(\alpha_{4+i} \cdot h_i) + \alpha_{13} \cdot d
+h_{ctrl} = H_{init}(a', 0, [h_0,\ldots,h_7,CV(d)])
 $$
 
 $$
-h_{span} =
-\alpha_0 + \alpha_1 \cdot L_{init} + \alpha_2 \cdot a'
-+ \sum_{i=0}^7(\alpha_{4+i} \cdot h_i)
+h_{span} = H_{init}(a', 0, [h_0,\ldots,h_7,CV_{span}(gc)])
 $$
 
 $$
-h_{respan} =
-\alpha_0 + \alpha_1 \cdot L_{respan} + \alpha_2 \cdot a'
-+ \sum_{i=0}^7(\alpha_{4+i} \cdot h_i)
+h_{respan} = H_{absorb}(a', 0, [h_0,\ldots,h_7])
 $$
 
 $$
-h_{end} =
-\alpha_0 + \alpha_1 \cdot L_{end} + \alpha_2 \cdot (a + 1)
-+ \sum_{i=0}^3(\alpha_{4+i} \cdot h_i)
+h_{end} = H_{return}(a, 0, [h_0,\ldots,h_3])
 $$
 
 $$
-h_{dyn} =
-\alpha_0 + \alpha_1 \cdot L_{init} + \alpha_2 \cdot a'
-+ \alpha_{13} \cdot d
+h_{dyn} = H_{init}(a', 0, [h_0,\ldots,h_3,0,\ldots,0,CV(d)])
+$$
+
+For the other typed chiplet messages below, write
+
+$$
+K_{call}(q) = P_{kernel\_call} + \sum_{i=0}^{3}\beta^i q_i
+$$
+
+and
+
+$$
+M_k(ctx, addr, clk, p) = P_k + ctx + \beta addr + \beta^2 clk
++ \sum_{i=0}^{|p|-1}\beta^{i+3}p_i.
 $$
 
 $$
@@ -208,7 +207,7 @@ Using the above variables, we define operation values as described below.
 
 When a control block initializer operation (`JOIN`, `SPLIT`, `LOOP`) is executed,
 a new hasher is initialized and the contents of $h_0, ..., h_7$ are absorbed into
-the hasher, with the opcode value $d$ placed in the capacity domain lane.
+the hasher, with the opcode-derived Eidos chaining word providing domain separation.
 
 $$
 u_{ctrli} = f_{ctrli} \cdot h_{ctrl} \text{ | degree} = 6
@@ -217,10 +216,10 @@ $$
 As mentioned previously, the value sent by the `SYSCALL` operation is defined separately, since in addition to communicating with the hash chiplet it must also send a kernel procedure access request to the kernel ROM chiplet. This value of this kernel procedure request is described by $k_{proc}$.
 
 $$
-k_{proc} = \alpha_0 + \alpha_1 \cdot op_{krom} + \sum_{i=0}^3 (\alpha_{i + 2} \cdot h_i)
+k_{proc} = K_{call}([h_0,\ldots,h_3])
 $$
 
-In the above, $op_{krom}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the kernel procedure call operation. The values $h_0, h_1, h_2, h_3$ contain the root hash of the procedure being called, which is the procedure that must be requested from the kernel ROM chiplet.
+The values $h_0, h_1, h_2, h_3$ contain the root hash of the procedure being called, which is the procedure that must be requested from the kernel ROM chiplet.
 
 $$
 u_{syscall} = f_{syscall} \cdot h_{ctrl} \cdot k_{proc} \text{ | degree} = 6
@@ -231,10 +230,10 @@ The above value sends both the hash initialization request and the kernel proced
 Similar to `SYSCALL`, `CALL` is handled separately, since in addition to communicating with the hash chiplet, it must also initialize the frame memory pointer (stored in memory at constant address `fmpaddr` with constant value `fmpinit`):
 
 $$
-m_{fmpwrite} = \alpha_0 + \alpha_1 \cdot m_{writeele} + \alpha_2 \cdot ctx' + \alpha_3 \cdot fmpaddr + \alpha_4 \cdot clk + \alpha_5 \cdot fmpinit
+m_{fmpwrite} = M_{write\_element}(ctx', fmpaddr, clk, [fmpinit])
 $$
 
-In the above, $m_{fmpwrite}$ represents a "write element" memory request equivalent to `mem[fmpaddr] = fmpinit` (in pseudo-code) in the new memory context (*i.e.* the memory context of the callee). Currently $fmpaddr = 2^{32} - 1$, and $fmpinit = 2^{31}$.
+In the above, $m_{fmpwrite}$ represents a "write element" memory request equivalent to `mem[fmpaddr] = fmpinit` (in pseudo-code) in the new memory context (*i.e.* the memory context of the callee). Currently $fmpaddr = 2^{32} - 2$, and $fmpinit = 2^{31}$.
 
 $$
 u_{call} = f_{call} \cdot h_{ctrl} \cdot m_{fmpwrite} \text{ | degree} = 6
@@ -247,8 +246,7 @@ h_{dynordyncall} = h_{dyn}
 $$
 
 $$
-m_{dynordyncall} = \alpha_0 + \alpha_1 \cdot m_{readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_0 + \alpha_4 \cdot clk
- + \sum_{i=0}^3(\alpha_{i + 5} \cdot h_i)
+m_{dynordyncall} = M_{read\_word}(ctx, s_0, clk, [h_0,\ldots,h_3])
 $$
 
 $$
@@ -258,13 +256,14 @@ $$
 u_{dyncall} = f_{dyncall} \cdot h_{dynordyncall} \cdot m_{dynordyncall} \cdot m_{fmpwrite} \text{ | degree} = 8
 $$
 
-In the above, $h_{dynordyncall}$ is the control-block request with a zeroed hasher
-state, and $m_{dynordyncall}$ represents a memory **word** read request from address
+In the above, $h_{dynordyncall}$ is the control-block request carrying the callee digest in its
+first block word, zero padding in its second block word, and the opcode-derived chaining word.
+$m_{dynordyncall}$ represents a memory **word** read request from address
 $s_0$, where the result is placed in the first half of the decoder hasher trace.
 Note that similar to `CALL`, `DYNCALL` also creates a new memory context, and hence
 must also initialize the `fmp`.
 
-When `SPAN` operation is executed, a new hasher is initialized and contents of $h_0, ..., h_7$ are absorbed into the hasher. The chiplets-bus message uses only the rate lanes; capacity lanes (state indices $8..11$) are zeroed for this request:
+When `SPAN` operation is executed, a new hasher is initialized and contents of $h_0, ..., h_7$ are absorbed into the hasher. The input CV is $CV_{span}(gc)$, which binds the logical operation-group count:
 
 $$
 u_{span} = f_{span} \cdot h_{span} \text{ | degree} = 6
@@ -522,7 +521,7 @@ When we are inside a *basic* block, values in block address columns (denoted as 
 > sp \cdot (a' - a) = 0 \text{ | degree} = 2
 > $$
 
-Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
+Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $1$, which is enforced by a constraint described previously.
 
 Notice also that this constraint implies that when the next operation is the `END` operation, the value in the $a$ column must also be copied over to the next row. This is exactly the behavior we want to enforce so that when the `END` operation is executed, the block address is set to the address of the current span batch.
 

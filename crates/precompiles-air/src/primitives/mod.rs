@@ -6,4 +6,5 @@
 //! particular serves non-bitwise consumers too, such as the uint store's
 //! 16-bit limb checks.
 
+pub(crate) mod byte_pair_and8;
 pub mod byte_pair_lut;

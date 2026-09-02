@@ -9,7 +9,7 @@
 //! The encoded stream concatenates constants (EF) followed by operations
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::field::ExtensionField;
 
 use crate::{
@@ -89,12 +89,12 @@ impl EncodedCircuit {
         self.instructions.len()
     }
 
-    /// Poseidon2 digest of the whole instruction stream.
+    /// Eidos digest of the whole instruction stream.
     ///
     /// Note this is not the recursive verifier's registry leaf: a factored circuit is committed
     /// as `merge(H(constants | shuffle), H(common))` over the two stream segments.
     pub fn circuit_hash(&self) -> Word {
-        Poseidon2::hash_elements(self.instructions())
+        Eidos::hash_elements(self.instructions())
     }
 }
 

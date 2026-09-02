@@ -15,10 +15,10 @@ use miden_precompiles_air::{
     ChipletMultiAir, preprocessed,
     security::{self, ProofSecurityParameters},
     stark_config::{
-        PRECOMPILE_RELATION_DIGEST, blake3_256_config, keccak_config, observe_protocol_params,
-        poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
+        PRECOMPILE_RELATION_DIGEST, blake3_256_config, eidos_config, keccak_config,
+        observe_protocol_params, poseidon2_config, precompile_pcs_params, rpo_config, rpx_config,
     },
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde::de::DeserializeOwned;
@@ -34,7 +34,7 @@ pub fn verify_deferred(
     proof: &StarkProof,
     public_root: DeferredRoot,
 ) -> Result<ProofSecurityParameters, VerifyError> {
-    let (log_max_height, alignment) = verify_stark(proof, P2Digest::from(public_root))?;
+    let (log_max_height, alignment) = verify_stark(proof, EidosDigest::from(public_root))?;
 
     Ok(security::proof_security_parameters(
         &precompile_pcs_params(),
@@ -44,7 +44,7 @@ pub fn verify_deferred(
     ))
 }
 
-fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(u32, usize), VerifyError> {
+fn verify_stark(proof: &StarkProof, public_root: EidosDigest) -> Result<(u32, usize), VerifyError> {
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
         return Err(VerifyError::ProofTooLarge {
             size: proof.bytes().len(),
@@ -79,6 +79,11 @@ fn verify_stark(proof: &StarkProof, public_root: P2Digest) -> Result<(u32, usize
             let preprocessed = preprocessed::keccak();
             verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
         },
+        HashFunction::Eidos => {
+            let config = eidos_config(params, PRECOMPILE_RELATION_DIGEST);
+            let preprocessed = preprocessed::eidos();
+            verify_stark_with_config(&config, &preprocessed, proof.bytes(), public_root)
+        },
     }
 }
 
@@ -86,7 +91,7 @@ fn verify_stark_with_config<SC>(
     config: &SC,
     preprocessed: &Preprocessed<Felt, SC::Lmcs>,
     proof_bytes: &[u8],
-    public_root: P2Digest,
+    public_root: EidosDigest,
 ) -> Result<(u32, usize), VerifyError>
 where
     SC: StarkConfig<Felt, QuadFelt>,

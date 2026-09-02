@@ -641,7 +641,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredContext, Payload, Precompile, precompile_id},
+        deferred::{DeferredContext, Payload, Precompile, precompile::test_precompile_selector},
         serde::{ByteWriter, Serializable},
     };
 
@@ -650,10 +650,10 @@ mod tests {
 
     impl PairListFixture {
         const NAME: &'static str = "wire-pair-list-fixture";
+        const SELECTOR: Felt = test_precompile_selector(1);
 
         fn tag() -> Tag {
-            Tag::precompile(precompile_id(Self::NAME), [ZERO; 3])
-                .expect("fixture id is precompile-owned")
+            Tag::precompile(Self::SELECTOR, [ZERO; 2]).expect("fixture id is precompile-owned")
         }
     }
 
@@ -663,16 +663,16 @@ mod tests {
         }
 
         fn id(&self) -> Felt {
-            precompile_id(Self::NAME)
+            Self::SELECTOR
         }
 
-        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            (args == [ZERO; 3]).then_some(NodeType::PairList)
+        fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
+            (args == [ZERO; 2]).then_some(NodeType::PairList)
         }
 
         fn evaluate(
             &self,
-            _args: [Felt; 3],
+            _args: [Felt; 2],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {

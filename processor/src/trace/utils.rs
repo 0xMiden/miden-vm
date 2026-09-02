@@ -1,7 +1,10 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air::{MIDEN_AIR_COUNT, PcsParams, memory, trace::MIN_TRACE_LEN};
+use miden_air::{
+    MIDEN_AIR_COUNT, PcsParams, memory,
+    trace::{MIN_TRACE_LEN, eidos_compression::EIDOS_COMPRESSION_CYCLE_LEN},
+};
 
 use super::chiplets::Chiplets;
 use crate::{Felt, ONE};
@@ -54,7 +57,7 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
 ///
 /// A chiplet occupies a contiguous band of rows and a contiguous band of columns
 /// `[col_start, col_start + num_cols)`. [`Self::copy_rows_from`] also writes the per-row
-/// `prefix_one_cols` selectors and, when there is room, the trailing `chip_clk` column.
+/// `prefix_one_cols` selectors and (when there's room) the trailing `chip_clk` column.
 pub struct ChipletTraceFragment<'a> {
     /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
     band: &'a mut [Felt],
@@ -64,10 +67,8 @@ pub struct ChipletTraceFragment<'a> {
     num_cols: usize,
     /// Global row offset of `band[0]` in the chiplets trace; used to compute `chip_clk`.
     row_offset: usize,
-    /// Columns to set to ONE on every row in this band.
+    /// Columns `< col_start` to set to ONE on every row in this band.
     prefix_one_cols: &'static [usize],
-    /// Whether to write `chip_clk` to the trailing column.
-    write_chip_clk: bool,
 }
 
 impl<'a> ChipletTraceFragment<'a> {
@@ -78,11 +79,11 @@ impl<'a> ChipletTraceFragment<'a> {
         col_start: usize,
         num_cols: usize,
     ) -> Self {
-        Self::new(band, stride, col_start, num_cols, 0, &[], false)
+        Self::with_overheads(band, stride, col_start, num_cols, 0, &[])
     }
 
     /// Adds the chiplets-trace overheads: per-row ONEs at `prefix_one_cols` and `chip_clk` at
-    /// column `stride - 1` when the fragment leaves a trailing column for it.
+    /// column `stride - 1` (when there's room), using `row_offset` as `band[0]`'s global row.
     pub fn with_overheads(
         band: &'a mut [Felt],
         stride: usize,
@@ -91,30 +92,10 @@ impl<'a> ChipletTraceFragment<'a> {
         row_offset: usize,
         prefix_one_cols: &'static [usize],
     ) -> Self {
-        Self::new(
-            band,
-            stride,
-            col_start,
-            num_cols,
-            row_offset,
-            prefix_one_cols,
-            stride > col_start + num_cols,
-        )
-    }
-
-    fn new(
-        band: &'a mut [Felt],
-        stride: usize,
-        col_start: usize,
-        num_cols: usize,
-        row_offset: usize,
-        prefix_one_cols: &'static [usize],
-        write_chip_clk: bool,
-    ) -> Self {
         debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
         debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
         debug_assert!(
-            prefix_one_cols.iter().all(|&col| col < col_start),
+            prefix_one_cols.iter().all(|&c| c < col_start),
             "prefix_one_cols must lie before col_start",
         );
         let num_rows = band.len() / stride;
@@ -126,7 +107,6 @@ impl<'a> ChipletTraceFragment<'a> {
             num_cols,
             row_offset,
             prefix_one_cols,
-            write_chip_clk,
         }
     }
 
@@ -143,6 +123,13 @@ impl<'a> ChipletTraceFragment<'a> {
         self.num_rows
     }
 
+    /// Mutable access to columns `[0..col_start)` of `row`, for chiplets whose prefix
+    /// selectors vary per row (e.g. the hasher's `s_ctrl`).
+    pub fn prefix_mut(&mut self, row: usize) -> &mut [Felt] {
+        let row_start = row * self.stride;
+        &mut self.band[row_start..row_start + self.col_start]
+    }
+
     // DATA MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -154,7 +141,7 @@ impl<'a> ChipletTraceFragment<'a> {
     }
 
     /// Copies `src.len() / num_cols` rows starting at `row_offset` into this fragment's band,
-    /// fusing the per-row prefix-selector ONEs and the `chip_clk` column when configured.
+    /// fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
     pub fn copy_rows_into(&mut self, row_offset: usize, src: &[Felt]) {
         debug_assert_eq!(src.len() % self.num_cols, 0, "source buffer size not row-aligned");
         let chunk_rows = src.len() / self.num_cols;
@@ -162,6 +149,7 @@ impl<'a> ChipletTraceFragment<'a> {
             row_offset + chunk_rows <= self.num_rows,
             "chunk overruns fragment row range",
         );
+        let write_chip_clk = self.stride > self.col_start + self.num_cols;
         let clk_col = self.stride - 1;
         for r in 0..chunk_rows {
             let dst_row = row_offset + r;
@@ -170,9 +158,9 @@ impl<'a> ChipletTraceFragment<'a> {
             for &col in self.prefix_one_cols {
                 row[col] = ONE;
             }
-            let src_row = &src[r * self.num_cols..(r + 1) * self.num_cols];
-            row[self.col_start..self.col_start + self.num_cols].copy_from_slice(src_row);
-            if self.write_chip_clk {
+            row[self.col_start..self.col_start + self.num_cols]
+                .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
+            if write_chip_clk {
                 row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
             }
         }
@@ -182,90 +170,122 @@ impl<'a> ChipletTraceFragment<'a> {
 // TRACE LENGTH SUMMARY
 // ================================================================================================
 
-/// Contains the unpadded lengths of the trace parts.
+/// Row counts for the AIR segments produced by trace generation.
 ///
-/// - `core_trace_len` contains the length of the core trace (system + decoder + stack).
-/// - `range_trace_len` contains the length of the range checker trace.
-/// - `chiplets_trace_len` contains the chiplets-trace component lengths.
-/// - `poseidon2_permutation_trace_len` contains the Poseidon2 permutation AIR length.
+/// Dynamic AIRs store their unpadded row counts. Use the `*_height()` accessors for their padded
+/// power-of-two AIR matrix heights. The byte-pair lookup stores its fixed physical row count.
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
-    core_trace_len: usize,
-    range_trace_len: usize,
-    chiplets_trace_len: ChipletsLengths,
-    poseidon2_permutation_trace_len: usize,
+    core_rows: usize,
+    chiplets: ChipletsLengths,
+    eidos_compression_rows: usize,
+    byte_pair_lookup_rows: usize,
     /// Set by the trace builder when known, in [`miden_air::AIRS`] order. `None` falls back to
-    /// deriving [`Self::padded_trace_len`] from the unpadded component lengths via
-    /// `next_power_of_two`.
+    /// deriving the four padded heights from the unpadded component row counts.
     padded_heights: Option<[usize; MIDEN_AIR_COUNT]>,
 }
 
 impl TraceLenSummary {
     pub fn new(
-        core_trace_len: usize,
-        range_trace_len: usize,
-        chiplets_trace_len: ChipletsLengths,
+        core_rows: usize,
+        chiplets: ChipletsLengths,
+        eidos_compression_rows: usize,
+        byte_pair_lookup_rows: usize,
     ) -> Self {
         TraceLenSummary {
-            core_trace_len,
-            range_trace_len,
-            chiplets_trace_len,
-            poseidon2_permutation_trace_len: 0,
+            core_rows,
+            chiplets,
+            eidos_compression_rows,
+            byte_pair_lookup_rows,
             padded_heights: None,
         }
     }
 
     /// Builds a summary after the trace builder has computed the padded per-AIR heights, in
-    /// [`miden_air::AIRS`] order.
+    /// [`miden_air::AIRS`] order: Core, Chiplets, Eidos compression, then And8 lookup.
     pub fn new_with_padded(
-        core_trace_len: usize,
-        range_trace_len: usize,
-        chiplets_trace_len: ChipletsLengths,
-        poseidon2_permutation_trace_len: usize,
+        core_rows: usize,
+        chiplets: ChipletsLengths,
+        eidos_compression_rows: usize,
+        byte_pair_lookup_rows: usize,
         padded_heights: [usize; MIDEN_AIR_COUNT],
     ) -> Self {
         TraceLenSummary {
-            core_trace_len,
-            range_trace_len,
-            chiplets_trace_len,
-            poseidon2_permutation_trace_len,
+            core_rows,
+            chiplets,
+            eidos_compression_rows,
+            byte_pair_lookup_rows,
             padded_heights: Some(padded_heights),
         }
     }
 
-    /// Returns length of the core trace (system + decoder + stack).
-    pub fn core_trace_len(&self) -> usize {
-        self.core_trace_len
+    /// Returns the unpadded core AIR rows (system + decoder + stack).
+    pub fn core_rows(&self) -> usize {
+        self.core_rows
     }
 
-    /// Returns length of the range checker trace.
-    pub fn range_trace_len(&self) -> usize {
-        self.range_trace_len
+    /// Returns the chiplet row-count breakdown.
+    pub fn chiplets(&self) -> ChipletsLengths {
+        self.chiplets
     }
 
-    /// Returns the chiplets-trace component lengths.
-    pub fn chiplets_trace_len(&self) -> ChipletsLengths {
-        self.chiplets_trace_len
+    /// Returns the unpadded chiplets AIR rows.
+    pub fn chiplets_rows(&self) -> usize {
+        self.chiplets.trace_len()
     }
 
-    /// Returns the Poseidon2 permutation AIR trace length.
-    pub fn poseidon2_permutation_trace_len(&self) -> usize {
-        self.poseidon2_permutation_trace_len
+    /// Returns the unpadded Eidos compression AIR rows.
+    pub fn eidos_compression_rows(&self) -> usize {
+        self.eidos_compression_rows
     }
 
-    /// Returns the maximum of all component lengths.
+    /// Returns the number of Eidos compression blocks represented by the standalone compression
+    /// AIR rows.
+    pub fn eidos_compression_count(&self) -> usize {
+        debug_assert_eq!(self.eidos_compression_rows % EIDOS_COMPRESSION_CYCLE_LEN, 0);
+        self.eidos_compression_rows / EIDOS_COMPRESSION_CYCLE_LEN
+    }
+
+    /// Returns the fixed byte-pair lookup AIR rows.
+    ///
+    /// This table has one row per byte pair, so its row count is already its physical AIR height.
+    pub fn byte_pair_lookup_rows(&self) -> usize {
+        self.byte_pair_lookup_rows
+    }
+
+    /// Returns the maximum unpadded row count among the four AIRs.
     pub fn trace_len(&self) -> usize {
-        self.range_trace_len
-            .max(self.core_trace_len)
-            .max(self.chiplets_trace_len.trace_len())
-            .max(self.poseidon2_permutation_trace_len)
+        self.core_rows
+            .max(self.chiplets_rows())
+            .max(self.eidos_compression_rows)
+            .max(self.byte_pair_lookup_rows)
     }
 
-    /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.
+    /// Returns the padded height of the core AIR.
+    pub fn core_height(&self) -> usize {
+        padded_height(self.core_rows)
+    }
+
+    /// Returns the padded height of the chiplets AIR.
+    pub fn chiplets_height(&self) -> usize {
+        padded_height(self.chiplets_rows())
+    }
+
+    /// Returns the padded height of the Eidos compression AIR.
+    pub fn eidos_compression_height(&self) -> usize {
+        padded_height(self.eidos_compression_rows)
+    }
+
+    /// Returns the greatest padded height among the four AIRs.
     pub fn padded_trace_len(&self) -> usize {
         self.padded_heights
             .map(|heights| heights.into_iter().max().expect("heights is non-empty"))
-            .unwrap_or_else(|| self.trace_len().next_power_of_two().max(MIN_TRACE_LEN))
+            .unwrap_or_else(|| {
+                self.core_height()
+                    .max(self.chiplets_height())
+                    .max(self.eidos_compression_height())
+                    .max(self.byte_pair_lookup_rows)
+            })
     }
 
     /// Returns the padded per-AIR heights, in [`miden_air::AIRS`] order, if known.
@@ -283,6 +303,50 @@ impl TraceLenSummary {
     pub fn padding_percentage(&self) -> usize {
         (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_len_summary_reports_eidos_compression_count() {
+        let summary =
+            TraceLenSummary::new(0, ChipletsLengths::default(), 3 * EIDOS_COMPRESSION_CYCLE_LEN, 0);
+
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.eidos_compression_count(), 3);
+    }
+
+    #[test]
+    fn trace_len_summary_records_four_air_heights_in_instance_order() {
+        let heights = [MIN_TRACE_LEN, 2 * MIN_TRACE_LEN, 4 * MIN_TRACE_LEN, 1 << 16];
+        let summary = TraceLenSummary::new_with_padded(
+            17,
+            ChipletsLengths::from_parts(19, 0, 0, 0, 0),
+            3 * EIDOS_COMPRESSION_CYCLE_LEN,
+            1 << 16,
+            heights,
+        );
+
+        assert_eq!(summary.core_rows(), 17);
+        // ChipletsLengths adds the mandatory connector-padding row.
+        assert_eq!(summary.chiplets_rows(), 20);
+        assert_eq!(summary.eidos_compression_rows(), 3 * EIDOS_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.byte_pair_lookup_rows(), 1 << 16);
+        assert_eq!(summary.padded_heights(), Some(&heights));
+        assert_eq!(summary.padded_trace_len(), 1 << 16);
+
+        let params = miden_air::config::pcs_params();
+        assert_eq!(
+            summary.prover_memory_bytes(&params),
+            memory::prover_peak_bytes(&heights, &params)
+        );
+    }
+}
+
+fn padded_height(rows: usize) -> usize {
+    rows.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 // CHIPLET LENGTHS
