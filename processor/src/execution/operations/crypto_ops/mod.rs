@@ -1,8 +1,13 @@
 use alloc::boxed::Box;
 
-use miden_air::trace::chiplets::hasher::{Hasher, MAX_MERKLE_DEPTH, STATE_WIDTH};
+use miden_air::trace::chiplets::hasher::{MAX_MERKLE_DEPTH, STATE_WIDTH};
 use miden_core::{
-    chiplets::eidos_compression, crypto::merkle::MerklePath, deferred::DEFERRED_AND_INIT_CV,
+    chiplets::{
+        eidos_compression,
+        hasher::{BLOCK_HI_RANGE, BLOCK_LO_RANGE, CV_RANGE},
+    },
+    crypto::merkle::MerklePath,
+    deferred::DEFERRED_AND_INIT_CV,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
@@ -58,9 +63,8 @@ pub(super) fn op_compress<P: Processor, T: Tracer>(
     let input_state = read_hasher_state(processor);
     let (addr, output_state) = processor.hasher().compress(input_state)?;
 
-    let cv_next: Word = output_state[Hasher::CV_RANGE]
-        .try_into()
-        .expect("chaining-value slice has length 4");
+    let cv_next: Word =
+        output_state[CV_RANGE].try_into().expect("chaining-value slice has length 4");
     processor.stack_mut().set_word(8, &cv_next);
 
     tracer.record_hasher_compress(input_state, output_state);
@@ -494,13 +498,13 @@ pub(super) fn op_log_deferred<P: Processor, T: Tracer>(
 
     // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[Hasher::BLOCK_LO_RANGE].copy_from_slice(state_prev.as_slice());
-    hasher_state[Hasher::BLOCK_HI_RANGE].copy_from_slice(statement_digest.as_slice());
-    hasher_state[Hasher::CV_RANGE].copy_from_slice(DEFERRED_AND_INIT_CV.as_slice());
+    hasher_state[BLOCK_LO_RANGE].copy_from_slice(state_prev.as_slice());
+    hasher_state[BLOCK_HI_RANGE].copy_from_slice(statement_digest.as_slice());
+    hasher_state[CV_RANGE].copy_from_slice(DEFERRED_AND_INIT_CV.as_slice());
 
     let (addr, output_state) = processor.hasher().compress(hasher_state)?;
 
-    let state_new: Word = output_state[Hasher::CV_RANGE].try_into().unwrap();
+    let state_new: Word = output_state[CV_RANGE].try_into().unwrap();
 
     processor.system_mut().log_deferred_statement(statement_digest, state_new)?;
 

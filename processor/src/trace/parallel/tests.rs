@@ -414,9 +414,9 @@ fn test_trace_generation_at_fragment_boundaries(
         chip_from_fragments,
         eidos_compression_from_fragments,
         and8_from_fragments,
-    ) = trace_from_fragments.main_trace().to_air_matrices();
+    ) = trace_from_fragments.main_trace().clone_air_matrices();
     let (core_from_single, chip_from_single, eidos_compression_from_single, and8_from_single) =
-        trace_from_single_fragment.main_trace().to_air_matrices();
+        trace_from_single_fragment.main_trace().clone_air_matrices();
 
     // Compare every committed main-trace cell exactly. The column-oriented check above provides
     // precise diagnostics for the Core and Chiplets matrices; these assertions extend the exact

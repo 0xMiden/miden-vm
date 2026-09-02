@@ -234,7 +234,7 @@ fn deduplicated_compress_keeps_unit_controller_multiplicity() {
         &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 10, 11, 12],
     );
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
     let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
     let (_, kernel_felts) = aux_inputs.split_at(2 * WORD_SIZE);
 
@@ -326,7 +326,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
     const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, eidos_compression_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
+    let (_, _, eidos_compression_matrix, and8_matrix) = trace.main_trace().clone_air_matrices();
 
     assert_eq!(
         eidos_compression_matrix.height() % EIDOS_COMPRESSION_CYCLE_LEN,
@@ -443,7 +443,7 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
     const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1127;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
-    let (_, _, eidos_compression_matrix, _) = trace.main_trace().to_air_matrices();
+    let (_, _, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();
     let raw = rand_array::<Felt, 4>();
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
@@ -488,7 +488,7 @@ fn eidos_compression_lookup_ledger_fits_narrow_slot_cap() {
 fn lookup_balance_rejects_tampered_aead_output_pair_lane() {
     let trace = aead_stream_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
 
     let first_stream_row = aead_stream_rows(&chip_matrix)
         .into_iter()
@@ -516,7 +516,7 @@ fn lookup_balance_rejects_tampered_aead_output_pair_lane() {
 fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
     let trace = aead_stream_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
 
     let stream_rows = aead_stream_rows(&chip_matrix);
     assert!(stream_rows.len() >= 3, "AEAD stream trace should contain low-second rows");
@@ -543,7 +543,7 @@ fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
 fn lookup_balance_rejects_tampered_merkle_start_flag() {
     let trace = mpverify_trace();
     let (core_matrix, mut chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
 
     let first_merkle_start = merkle_start_rows(&chip_matrix)
         .into_iter()
@@ -673,7 +673,7 @@ fn assert_eidos_compression_oracle_coverage(
 
 fn assert_global_lookup_balance(trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
     let residuals = global_lookup_residuals(
         trace,
         &core_matrix,
@@ -902,7 +902,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle_for_mixed_bitwise_aead_
 
 fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-        trace.main_trace().to_air_matrices();
+        trace.main_trace().clone_air_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns.
     let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);

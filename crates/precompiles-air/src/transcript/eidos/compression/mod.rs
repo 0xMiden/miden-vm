@@ -2,7 +2,8 @@
 //!
 //! The PVM embeds this core in a wider transcript trace and uses a digest footer instead of the
 //! Miden VM's controller and AEAD interface. It shares the compression primitive and byte-pair
-//! table semantics with the VM; a differential test pins the common witness cells.
+//! table semantics with the VM. A differential test evaluates the common constraints against the
+//! same witness rows in both AIRs.
 
 mod algebra;
 pub(crate) mod constraints;

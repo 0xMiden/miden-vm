@@ -500,7 +500,7 @@ impl VmTrace {
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
         let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
-            self.main_trace.to_air_matrices();
+            self.main_trace.clone_air_matrices();
         let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
         let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
@@ -517,7 +517,7 @@ impl VmTrace {
     }
 
     /// Clones the trace buffers into the per-AIR matrices consumed by the multi-AIR prover.
-    pub fn to_air_matrices(
+    pub fn clone_air_matrices(
         &self,
     ) -> (
         RowMajorMatrix<Felt>,
@@ -525,7 +525,7 @@ impl VmTrace {
         RowMajorMatrix<Felt>,
         RowMajorMatrix<Felt>,
     ) {
-        self.main_trace.to_air_matrices()
+        self.main_trace.clone_air_matrices()
     }
 
     /// Consuming variant for the proving hot path: moves the row-major buffers.
@@ -564,7 +564,7 @@ mod wire_tests {
         program::Program,
     };
 
-    use super::{Deserializable, ExecutionWitness, Serializable, build_trace};
+    use super::{ExecutionWitness, Serializable, build_trace};
     use crate::{DefaultHost, FastProcessor, Felt, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
@@ -691,7 +691,7 @@ mod wire_tests {
 
         assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
         assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
-        assert_eq!(restored_trace.to_air_matrices(), original_trace.to_air_matrices());
+        assert_eq!(restored_trace.clone_air_matrices(), original_trace.clone_air_matrices());
     }
 
     #[test]

@@ -25,6 +25,8 @@ end
 #!
 #! `ORDER_TAG` is the Lehmer rank of the proof-order permutation over
 #! [Core, Chiplets, EidosCompression, And8Lookup].
+#! The AIR set is fixed, so direct dispatch loads each height once instead of rescanning the
+#! height array for every output position.
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, log_3, ...]

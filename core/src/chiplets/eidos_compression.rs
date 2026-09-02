@@ -52,48 +52,18 @@ pub fn pack_word(cv: [u32; STATE_WORDS]) -> Word {
     eidos::encoding::output_cv_to_word(cv)
 }
 
-/// Construct the Eidos felt-sequence initial chaining word.
+/// Constructs the Eidos felt-sequence initial chaining word.
 #[inline]
 pub fn init_chaining_word(domain: u32, n: u32) -> Word {
     Eidos::init_chaining_word(domain, n)
 }
 
-/// Construct the chaining word for a two-word Eidos hash.
+/// Constructs the chaining word for a two-word Eidos hash.
 ///
 /// This is the switch point for the VM's 2-to-1/control-block framing.
 #[inline]
 pub fn two_to_one_chaining_word(domain: u32) -> Word {
     init_chaining_word(domain, BLOCK_LEN as u32)
-}
-
-#[inline]
-pub fn merge(values: &[Word; 2]) -> Word {
-    Eidos::merge(values)
-}
-
-#[inline]
-pub fn merge_many(values: &[Word]) -> Word {
-    Eidos::merge_many(values)
-}
-
-#[inline]
-pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
-    Eidos::merge_in_domain(values, domain)
-}
-
-#[inline]
-pub fn hash(bytes: &[u8]) -> Word {
-    Eidos::hash(bytes)
-}
-
-#[inline]
-pub fn hash_elements(elements: &[Felt]) -> Word {
-    Eidos::hash_elements(elements)
-}
-
-#[inline]
-pub fn hash_elements_in_domain(elements: &[Felt], domain: Felt) -> Word {
-    Eidos::hash_elements_in_domain(elements, domain)
 }
 
 /// Applies packed Eidos compression to a VM stack window.
