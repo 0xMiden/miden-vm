@@ -2,6 +2,7 @@
 //!
 //! This module benchmarks all DSA operations implemented in the library:
 //! - Falcon512-Poseidon2 (Falcon using Poseidon2 for hashing the message)
+//! - Falcon512-Eidos (Falcon using Eidos for hashing the message)
 //! - ECDSA over secp256k1 (using Keccak for hashing)
 //! - EdDSA (Ed25519 using SHA-512)
 //!
@@ -27,7 +28,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use miden_crypto::{
     Felt, Word,
     dsa::{
-        ecdsa_k256_keccak, eddsa_25519_sha512,
+        ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_eidos,
         falcon512_poseidon2::{
             self, PublicKey as Falcon512PublicKey, SecretKey as Falcon512SecretKey,
         },
@@ -172,6 +173,136 @@ benchmark_with_setup_data! {
         (public_keys, messages, signatures)
     },
     |b: &mut criterion::Bencher, (public_keys, messages, signatures): &(Vec<Falcon512PublicKey>, Vec<Word>, Vec<falcon512_poseidon2::Signature>)| {
+        b.iter(|| {
+            for ((public_key, message), signature) in
+                public_keys.iter().zip(messages.iter()).zip(signatures.iter())
+            {
+                let _result = public_key.verify(black_box(*message), signature);
+            }
+        })
+    },
+}
+
+// ================================================================================================
+// FALCON512-EIDOS BENCHMARKS
+// ================================================================================================
+
+benchmark_with_setup! {
+    falcon512_eidos_keygen_secret_default,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_keygen_secret",
+    || {},
+    |b: &mut criterion::Bencher| {
+        b.iter(|| {
+            let _secret_key = falcon512_eidos::SecretKey::new();
+        })
+    },
+}
+
+benchmark_with_setup_data! {
+    falcon512_eidos_keygen_secret_with_rng,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_keygen_secret_with_rng",
+    || {
+        rng()
+    },
+    |b: &mut criterion::Bencher, rng: &rand::rngs::ThreadRng| {
+        b.iter(|| {
+            let mut rng_clone = rng.clone();
+            let _secret_key = falcon512_eidos::SecretKey::with_rng(&mut rng_clone);
+        })
+    },
+}
+
+benchmark_with_setup_data! {
+    falcon512_eidos_keygen_public,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_keygen_public",
+    || {
+        let secret_keys: Vec<falcon512_eidos::SecretKey> =
+            (0..KEYGEN_ITERATIONS).map(|_| falcon512_eidos::SecretKey::new()).collect();
+        secret_keys
+    },
+    |b: &mut criterion::Bencher, secret_keys: &Vec<falcon512_eidos::SecretKey>| {
+        b.iter(|| {
+            for secret_key in secret_keys {
+                let _public_key = secret_key.public_key();
+            }
+        })
+    },
+}
+
+benchmark_with_setup_data! {
+    falcon512_eidos_sign_default,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_sign",
+    || {
+        let secret_keys: Vec<falcon512_eidos::SecretKey> =
+            (0..KEYGEN_ITERATIONS).map(|_| falcon512_eidos::SecretKey::new()).collect();
+        let messages: Vec<Word> =
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+        (secret_keys, messages)
+    },
+    |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<falcon512_eidos::SecretKey>, Vec<Word>)| {
+        b.iter(|| {
+            for (secret_key, message) in secret_keys.iter().zip(messages.iter()) {
+                let _signature = secret_key.sign(black_box(*message));
+            }
+        })
+    },
+}
+
+benchmark_with_setup_data! {
+    falcon512_eidos_sign_with_rng,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_sign_with_rng",
+    || {
+        let secret_keys: Vec<falcon512_eidos::SecretKey> =
+            (0..KEYGEN_ITERATIONS).map(|_| falcon512_eidos::SecretKey::new()).collect();
+        let messages: Vec<Word> =
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+        let rngs: Vec<_> = (0..KEYGEN_ITERATIONS).map(|_| rng()).collect();
+        (secret_keys, messages, rngs)
+    },
+    |b: &mut criterion::Bencher, (secret_keys, messages, rngs): &(Vec<falcon512_eidos::SecretKey>, Vec<Word>, Vec<_>)| {
+        b.iter(|| {
+            let mut rngs_local = rngs.clone();
+            for ((secret_key, message), rng) in
+                secret_keys.iter().zip(messages.iter()).zip(rngs_local.iter_mut())
+            {
+                let _signature = secret_key.sign_with_rng(black_box(*message), rng);
+            }
+        })
+    },
+}
+
+benchmark_with_setup_data! {
+    falcon512_eidos_verify,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "falcon512_eidos_verify",
+    || {
+        let mut rng = rand::rngs::ThreadRng::default();
+        let secret_keys: Vec<falcon512_eidos::SecretKey> = (0..KEYGEN_ITERATIONS)
+            .map(|_| falcon512_eidos::SecretKey::with_rng(&mut rng))
+            .collect();
+        let public_keys: Vec<falcon512_eidos::PublicKey> =
+            secret_keys.iter().map(falcon512_eidos::SecretKey::public_key).collect();
+        let messages: Vec<Word> =
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
+        let signatures: Vec<falcon512_eidos::Signature> = secret_keys
+            .iter()
+            .zip(messages.iter())
+            .map(|(sk, msg)| sk.sign_with_rng(black_box(*msg), &mut rng))
+            .collect();
+        (public_keys, messages, signatures)
+    },
+    |b: &mut criterion::Bencher, (public_keys, messages, signatures): &(Vec<falcon512_eidos::PublicKey>, Vec<Word>, Vec<falcon512_eidos::Signature>)| {
         b.iter(|| {
             for ((public_key, message), signature) in
                 public_keys.iter().zip(messages.iter()).zip(signatures.iter())
@@ -423,6 +554,13 @@ criterion_group!(
     falcon512_poseidon2_sign_default,
     falcon512_poseidon2_sign_with_rng,
     falcon512_poseidon2_verify,
+    // Falcon512-Eidos benchmarks
+    falcon512_eidos_keygen_secret_default,
+    falcon512_eidos_keygen_secret_with_rng,
+    falcon512_eidos_keygen_public,
+    falcon512_eidos_sign_default,
+    falcon512_eidos_sign_with_rng,
+    falcon512_eidos_verify,
 );
 
 criterion_main!(dsa_benchmark_group);

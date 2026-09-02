@@ -58,6 +58,84 @@ jobs:
       - name: Run crypto tests
         run: make test-crypto
 
+  eidos-x86-backends:
+    name: Eidos ${{ matrix.backend }} backend
+    runs-on: warp-ubuntu-latest-x64-8x
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: AVX2
+            target_features: +avx2,-avx512f
+            required_cpu_features: avx2
+            forbidden_target_features: avx512f
+          - backend: AVX-512
+            target_features: +avx2,+avx512f
+            required_cpu_features: avx2 avx512f
+            forbidden_target_features: ""
+    env:
+      RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify runner CPU features
+        env:
+          REQUIRED_CPU_FEATURES: ${{ matrix.required_cpu_features }}
+        run: |
+          set -euo pipefail
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::Eidos ${{ matrix.backend }} tests require an x86-64 runner"
+            exit 1
+          fi
+
+          lscpu
+          cpu_features=" $(awk -F: '/^flags[[:space:]]*:/{print $2; exit}' /proc/cpuinfo) "
+          for feature in ${REQUIRED_CPU_FEATURES}; do
+            if [[ "${cpu_features}" != *" ${feature} "* ]]; then
+              echo "::error::Runner does not expose required CPU feature '${feature}'"
+              exit 1
+            fi
+          done
+          echo "Runner supports Eidos ${{ matrix.backend }} execution"
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Install nextest
+        uses: taiki-e/install-action@b6b84cf49ebfe0176417bdce007c624f0db37f20 # v2.86.2
+        with:
+          tool: cargo-nextest
+      - name: Verify selected Rust backend
+        env:
+          FORBIDDEN_TARGET_FEATURES: ${{ matrix.forbidden_target_features }}
+          REQUIRED_TARGET_FEATURES: ${{ matrix.required_cpu_features }}
+          TARGET_FEATURES: ${{ matrix.target_features }}
+        run: |
+          set -euo pipefail
+
+          rust_cfg="$(rustc --print cfg -C "target-feature=${TARGET_FEATURES}")"
+          printf '%s\n' "${rust_cfg}"
+          for feature in ${REQUIRED_TARGET_FEATURES}; do
+            if ! grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+              echo "::error::Rust did not enable required target feature '${feature}'"
+              exit 1
+            fi
+          done
+          for feature in ${FORBIDDEN_TARGET_FEATURES}; do
+            if grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+              echo "::error::Rust unexpectedly enabled target feature '${feature}'"
+              exit 1
+            fi
+          done
+          echo "Selected Eidos backend: ${{ matrix.backend }}"
+      - name: Run Eidos backend equivalence and vector tests
+        run: cargo nextest run --profile ci -p miden-crypto --lib --no-tests=fail 'hash::eidos::'
+
   doc-tests:
     name: doc-tests
     runs-on: warp-ubuntu-latest-x64-8x
