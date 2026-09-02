@@ -281,13 +281,14 @@ fn crypto_selectors_are_distinct() {
     use super::framing::BYTE_STRING_SELECTOR;
     use crate::{
         aead::aead_eidos::{AEAD_CTR_SELECTOR, AEAD_MAC_SELECTOR},
-        dsa::falcon512_eidos::FALCON_HASH_TO_POINT_SELECTOR,
+        dsa::falcon512_eidos::{FALCON_HASH_TO_POINT_SELECTOR, FALCON_PRODUCT_CHECK_SELECTOR},
         rand::{RANDOM_COIN_OUTPUT_SELECTOR, RANDOM_COIN_STATE_SELECTOR},
     };
 
     let selectors = [
         BYTE_STRING_SELECTOR,
         FALCON_HASH_TO_POINT_SELECTOR,
+        FALCON_PRODUCT_CHECK_SELECTOR,
         AEAD_CTR_SELECTOR,
         AEAD_MAC_SELECTOR,
         RANDOM_COIN_STATE_SELECTOR,

@@ -109,6 +109,7 @@ The crypto-level allocations are:
 | --- | ---: | ---: | ---: |
 | Byte string | `0x000003` | `0x00000301` | 769 |
 | Falcon hash-to-point | `0x000004` | `0x00000401` | 1025 |
+| Falcon product-check transcript | `0x000005` | `0x00000501` | 1281 |
 | AEAD CTR-key derivation | `0x000006` | `0x00000601` | 1537 |
 | AEAD MAC-key derivation | `0x000007` | `0x00000701` | 1793 |
 | Random-coin state | `0x000008` | `0x00000801` | 2049 |
