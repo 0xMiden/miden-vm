@@ -325,10 +325,8 @@ fn test_eidos_recursive_verify_with_precompile_requests() {
         .expect("Proving failed");
 
     // The precompile request left non-trivial deferred material behind.
-    let ExecutionProof::Complete { vm, precompile: Some(_) } = &proof else {
-        panic!("expected a complete proof with STARK-backed precompile material");
-    };
-    assert_ne!(vm.precompile_root, miden_core::deferred::TRUE_DIGEST);
+    assert!(matches!(proof.precompile(), miden_vm::PrecompileStatus::Proven(_)));
+    assert_ne!(proof.vm().precompile_root, miden_core::deferred::TRUE_DIGEST);
 
     assert_recursive_verify(program.to_info(), stack_inputs, stack_outputs, &proof);
 
@@ -654,10 +652,7 @@ mod execution_witness_serialization {
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{
-        HashFunction, Prover,
-        serde::{Deserializable, Serializable},
-    };
+    use miden_prover::{Prover, serde::Serializable};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;

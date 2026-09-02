@@ -54,12 +54,7 @@ pub fn enforce_main<AB>(
     hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
 
     aead_stream::enforce_aead_stream_constraints(builder, local, next, selectors);
-    bitwise::enforce_bitwise_constraints(
-        builder,
-        local,
-        next,
-        selectors.stream_mode.normal_bitwise.clone(),
-    );
+    bitwise::enforce_bitwise_constraints(builder, local, next, selectors.bitwise.normal.clone());
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
 }

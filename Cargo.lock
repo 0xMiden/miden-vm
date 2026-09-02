@@ -2531,6 +2531,7 @@ dependencies = [
  "miden-lifted-stark",
  "miden-precompiles",
  "p3-security",
+ "rand 0.10.2",
  "ruint",
 ]
 
@@ -2538,7 +2539,9 @@ dependencies = [
 name = "miden-precompiles-prover"
 version = "0.31.0"
 dependencies = [
+ "insta",
  "k256",
+ "miden-ace-codegen",
  "miden-air",
  "miden-core",
  "miden-crypto",

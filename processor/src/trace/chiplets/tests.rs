@@ -247,7 +247,6 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
 
         // Non-selector hasher columns should be zero on padding rows, except the shared
         // controller discriminator. Controller constraints bind this cell to
-        // `is_merkle + is_padding`.
         // The trailing column (chip_clk, CHIPLETS_WIDTH - 1) is the chiplet-trace row counter
         // and is non-zero on every row by design; see `air/src/constraints/chiplets/chip_clk.rs`.
         for col in 4..CHIPLETS_WIDTH - 1 {

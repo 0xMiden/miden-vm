@@ -237,7 +237,7 @@ impl proptest::prelude::Arbitrary for DynNodeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chiplets::hasher::Hasher as VmHasher;
+    use crate::chiplets::hasher;
 
     /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
     /// domain.
@@ -248,14 +248,14 @@ mod tests {
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
-            VmHasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+            hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         let dyncall_node_id = forest.push_node(DynNodeBuilder::new_dyncall()).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
-            VmHasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
+            hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
         );
     }
 }

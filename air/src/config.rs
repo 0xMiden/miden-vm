@@ -52,8 +52,8 @@ const COMPRESSION_INPUTS: usize = 2;
 // PCS PARAMETERS
 // ================================================================================================
 
-/// Log2 of the FRI blowup factor (blowup = 8).
-pub(crate) const LOG_BLOWUP: u8 = 3;
+/// Base-two logarithm of the low-degree extension blowup used by canonical VM proofs.
+pub const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
