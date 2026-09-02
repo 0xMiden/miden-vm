@@ -27,8 +27,9 @@ use crate::{
 /// returned value to a security estimator and apply their own acceptance policy. Constructing a
 /// value directly does not authenticate it.
 ///
-/// These fields contain every input required by the conjectured estimator. A future proven-security
-/// estimator would require additional PCS and AIR data.
+/// These fields contain every input required by the conjectured estimator. `log_final_degree` and
+/// `num_ood_points` are also returned because they are additional inputs needed to model the
+/// current backend's proven security.
 ///
 /// Recursive MASM verifiers return an equivalent MASM-specific descriptor instead of this Rust
 /// type. It contains the proof-varying inputs and precomputed Q16 round bases for the fixed
@@ -39,10 +40,14 @@ use crate::{
 pub struct ProofSecurityParameters {
     /// Protocol parameters bound by the proof transcript.
     pub protocol_params: ProtocolParams,
+    /// Log2 of the configured final FRI polynomial degree.
+    pub log_final_degree: u32,
     /// Instance shape derived from the proof and its commitment scheme.
     pub instance_shape: InstanceShape,
     /// Security-relevant shape of the AIR relation and commitment scheme.
     pub air_shape: AirShape,
+    /// Number of out-of-domain points opened per committed column.
+    pub num_ood_points: u32,
     /// Lookup fractions consumed once per proof in addition to the per-row fractions.
     pub num_lookup_boundary_terms: u32,
 }
@@ -330,6 +335,7 @@ pub fn proof_security_parameters(
 ) -> ProofSecurityParameters {
     mvm_security_parameters_from_protocol(
         protocol_params(pcs_params),
+        u32::from(pcs_params.log_final_degree()),
         log_max_height,
         num_kernel_procedures,
         alignment,
@@ -339,6 +345,7 @@ pub fn proof_security_parameters(
 
 fn mvm_security_parameters_from_protocol(
     protocol_params: ProtocolParams,
+    log_final_degree: u32,
     log_max_height: u32,
     num_kernel_procedures: u32,
     alignment: usize,
@@ -346,6 +353,7 @@ fn mvm_security_parameters_from_protocol(
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params,
+        log_final_degree,
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
@@ -355,6 +363,7 @@ fn mvm_security_parameters_from_protocol(
             num_deep_terms: Some(num_deep_terms(alignment)),
             ..AIR_SHAPE
         },
+        num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures,
     }
 }
@@ -392,6 +401,7 @@ pub fn conjectured_security_level(
     };
     mvm_security_parameters_from_protocol(
         protocol,
+        u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
         num_kernel_procedures,
         COMMITMENT_ALIGNMENT,
@@ -430,6 +440,7 @@ pub fn conjectured_security_level_for_alignment(
     };
     mvm_security_parameters_from_protocol(
         protocol,
+        u32::from(config::pcs_params().log_final_degree()),
         log_max_height,
         num_kernel_procedures,
         alignment,
@@ -528,6 +539,8 @@ mod tests {
             security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 22, COLLISION_RESISTANCE, 255)
         );
+        assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
+        assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
     }
 
     /// The deployed preset's computed security level, per trace height, with the round that

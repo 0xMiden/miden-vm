@@ -309,6 +309,7 @@ pub fn proof_security_parameters(
 ) -> ProofSecurityParameters {
     ProofSecurityParameters {
         protocol_params: protocol_params(pcs_params),
+        log_final_degree: u32::from(pcs_params.log_final_degree()),
         instance_shape: InstanceShape {
             log_max_height,
             field_bits: CHALLENGE_FIELD_BITS,
@@ -318,6 +319,7 @@ pub fn proof_security_parameters(
             num_deep_terms: Some(num_deep_terms(alignment)),
             ..AIR_SHAPE
         },
+        num_ood_points: NUM_OOD_POINTS,
         num_lookup_boundary_terms: FIXED_BOUNDARY_LOOKUP_TERMS,
     }
 }
@@ -434,6 +436,8 @@ mod tests {
             security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 19)
         );
+        assert_eq!(security_parameters.log_final_degree, u32::from(pcs_params.log_final_degree()));
+        assert_eq!(security_parameters.num_ood_points, NUM_OOD_POINTS);
     }
 
     /// The deployed preset's computed security level, per trace height, with the round that
