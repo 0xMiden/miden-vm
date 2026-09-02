@@ -166,3 +166,69 @@ pub fn render_masm_constraints_eval(
         circuit_digest_3 = circuit_digest[3].as_canonical_u64(),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use miden_core::Felt;
+    use miden_crypto::stark::QuotientRecompositionInputs;
+
+    use super::{MasmConstraintsEvalConfig, render_masm_constraints_eval};
+
+    const STAGING_CALL: &str = "exec.constraints_eval_inputs::stage_air_fold_coefficients";
+
+    fn config(stages_fold_coefficients: bool) -> MasmConstraintsEvalConfig<'static> {
+        MasmConstraintsEvalConfig {
+            generated_by: "test",
+            layout_module: "miden::core::sys::test::layout",
+            num_inputs: 16,
+            num_eval_gates: 8,
+            stream_len: 64,
+            max_cycle_len_log: 5,
+            num_airs: 4,
+            stages_fold_coefficients,
+            quotient_inputs: QuotientRecompositionInputs {
+                shift_ratio: Felt::new_unchecked(2),
+                first_shift: Felt::new_unchecked(3),
+                first_weight: Felt::new_unchecked(5),
+            },
+            circuit_digest: [7, 11, 13, 17].map(Felt::new_unchecked).into(),
+        }
+    }
+
+    /// A relation whose READ layout has no fold-coefficient slots must get no staging call.
+    ///
+    /// The staged block sits immediately after the selectors, so emitting it for such a relation
+    /// would write past its `auxiliary_ace_inputs_ptr` region. Nothing downstream of the renderer
+    /// can tell the two cases apart, which is why the flag is checked here rather than only where
+    /// it is passed.
+    #[test]
+    fn fold_coefficient_staging_is_emitted_only_when_the_relation_asks_for_it() {
+        let staged = render_masm_constraints_eval(&config(true)).expect("renders");
+        assert!(staged.contains(STAGING_CALL), "the staging call is missing when requested");
+
+        let bare = render_masm_constraints_eval(&config(false)).expect("renders");
+        assert!(
+            !bare.contains(STAGING_CALL),
+            "the staging call leaked into a relation without fold-coefficient slots"
+        );
+
+        // Only the staging block may differ: both relations run the same setup, authentication,
+        // and evaluation.
+        for shared in [
+            "exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace",
+            "exec.load_and_authenticate_ace_circuit",
+            "assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH",
+        ] {
+            assert!(bare.contains(shared), "{shared} is missing from the unstaged evaluator");
+            assert!(staged.contains(shared), "{shared} is missing from the staged evaluator");
+        }
+    }
+
+    /// The single authenticated segment must be a whole number of `adv_pipe` blocks.
+    #[test]
+    fn a_misaligned_stream_is_refused() {
+        let mut config = config(true);
+        config.stream_len = 60;
+        assert!(render_masm_constraints_eval(&config).is_err());
+    }
+}

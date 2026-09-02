@@ -33,7 +33,7 @@ proc pipe_4
     repeat.4
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 
@@ -45,7 +45,7 @@ proc pipe_6
     repeat.6
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 
@@ -57,7 +57,7 @@ proc pipe_10
     repeat.10
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 
@@ -69,7 +69,7 @@ proc pipe_12
     repeat.12
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 
@@ -81,7 +81,7 @@ proc pipe_28
     repeat.28
         adv_pipe
         horner_eval_ext
-        bcompress
+        compress
     end
 end
 

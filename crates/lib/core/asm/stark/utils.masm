@@ -204,8 +204,7 @@ end
 #!
 #! Splitting the scan at k makes the stable tie-break explicit and needs one height comparison per
 #! other AIR. The loops are `while`-based so this procedure can serve any relation (repeat bounds
-#! would need compile-time counts). PVM uses this generic path. The VM uses a fixed-count
-#! specialization; tests pin both implementations to the shared Rust `order_tag` convention.
+#! would need compile-time counts). Tests pin it to the shared Rust `order_tag` convention.
 #!
 #! This procedure uses `tmp1..tmp3` as a twelve-entry factorial table and clobbers
 #! their previous contents. Once a factorial entry has contributed to the tag, it is replaced

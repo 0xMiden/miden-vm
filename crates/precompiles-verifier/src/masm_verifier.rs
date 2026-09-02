@@ -39,10 +39,7 @@ use miden_precompiles_air::{
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
 
-use crate::{
-    ace::{order_tag_from_log_heights, proof_order_from_log_heights},
-    ace_registry::{factory, pvm_ace_registry_path},
-};
+use crate::ace::{proof_order_from_log_heights, shared_pvm_recursive_circuit};
 
 type Challenge = QuadFelt;
 type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
@@ -153,7 +150,7 @@ fn build_verifier_advice(
 
     let config = eidos_config(
         precompile_pcs_params(),
-        crate::ace_registry::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
+        crate::ace_constants::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
     let preprocessed = preprocessed::eidos();
     let proof_encoding_config = wincode::config::Configuration::default()
@@ -202,9 +199,10 @@ fn build_advice(
             "unexpected number of aux-final groups",
         ));
     }
-    // The registry and MASM wrapper implement the same stable (height, instance-index) order as
+    // The MASM ingest scatters each chiplet's data from its proof position to the canonical
+    // address the circuit reads, using the same stable (height, instance-index) order as
     // lifted-stark. Make that coupling executable so a future proof-order convention change fails
-    // here rather than selecting a circuit for a different ordering.
+    // here rather than routing a chiplet's data to another chiplet's wires.
     let proof_order = proof_order_from_log_heights(&log_heights);
     let airs = ChipletAir::all();
     if stark.all_aux_values.iter().zip(proof_order).any(|(values, air_index)| {
@@ -221,7 +219,7 @@ fn build_advice(
         .ne(proof_order.iter().copied())
     {
         return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-            "proof ordering does not match the PVM registry convention",
+            "proof ordering does not match the PVM height-sorted convention",
         ));
     }
 
@@ -256,7 +254,7 @@ fn build_advice(
     advice_stack.extend(final_poly);
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(config, stark, &log_heights, &proof_order)?;
+    let (store, advice_map) = build_merkle_data(config, stark)?;
     Ok(AdviceInputs::default()
         .with_stack(advice_stack.into())
         .with_map(advice_map)
@@ -295,8 +293,6 @@ where
 fn build_merkle_data(
     config: &EidosConfig,
     stark: &StarkProof<Challenge, EidosLmcs>,
-    log_heights: &[u8; NUM_CHIPLETS],
-    proof_order: &[usize; NUM_CHIPLETS],
 ) -> Result<MerkleAdvice, PvmRecursiveVerifierInputsError> {
     let lmcs = config.lmcs();
     let mut store = MerkleStore::new();
@@ -310,27 +306,10 @@ fn build_merkle_data(
         advice_map.extend(entries);
     }
 
-    let order_tag = order_tag_from_log_heights(log_heights);
-    let (leaf, path) = pvm_ace_registry_path(order_tag).ok_or(
-        PvmRecursiveVerifierInputsError::InvalidProofShape(
-            "ACE registry has no slot for this order tag",
-        ),
-    )?;
-    store.add_merkle_path(u64::from(order_tag), leaf, path).map_err(|_| {
-        PvmRecursiveVerifierInputsError::InvalidProofShape("ACE registry path could not be stored")
-    })?;
-
-    let circuit = factory().circuit_for_order(proof_order).map_err(|_| {
-        PvmRecursiveVerifierInputsError::InvalidProofShape(
-            "failed to build the selected ACE circuit",
-        )
-    })?;
-    if circuit.commitment != leaf {
-        return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-            "selected ACE circuit does not match the registry leaf",
-        ));
-    }
-    advice_map.push((leaf, circuit.encoded.instructions().to_vec()));
+    // One canonical circuit serves every proof order, so the verifier authenticates it against the
+    // compiled-in circuit digest rather than reading a registry leaf.
+    let circuit = shared_pvm_recursive_circuit();
+    advice_map.push((circuit.commitment, circuit.instructions.clone()));
 
     Ok((store, advice_map))
 }

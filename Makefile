@@ -21,9 +21,9 @@ help:
 	@printf "  make test-core-lib               # Test core-lib crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "  make check-constraints           # Check core-lib constraint artifacts\n"
-	@printf "  make check-pvm-registry          # Check PVM registry and MASM artifacts\n"
+	@printf "  make check-pvm-constants         # Check PVM ACE constants and MASM artifacts\n"
 	@printf "  make regenerate-constraints      # Regenerate core-lib constraint artifacts\n"
-	@printf "  make regenerate-pvm-registry     # Regenerate PVM registry and MASM artifacts\n"
+	@printf "  make regenerate-pvm-constants    # Regenerate PVM ACE constants and MASM artifacts\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\" # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
@@ -40,7 +40,7 @@ DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,constants-tools
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -330,13 +330,13 @@ regenerate-constraints: ## Regenerate the checked-in constraint artifacts (MASM 
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write
 	cargo run --package miden-core-lib --features constraints-tools --bin regenerate-evaluator -- --write
 
-.PHONY: regenerate-pvm-registry
-regenerate-pvm-registry: ## Regenerate PVM registry and MASM artifacts (~2 min; protocol break)
-	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --write
+.PHONY: regenerate-pvm-constants
+regenerate-pvm-constants: ## Regenerate PVM ACE constants and MASM artifacts (protocol break)
+	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --write
 
-.PHONY: check-pvm-registry
-check-pvm-registry: ## Check PVM registry and MASM artifacts for drift (full recompute)
-	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --check
+.PHONY: check-pvm-constants
+check-pvm-constants: ## Check PVM ACE constants and MASM artifacts for drift
+	cargo run --release --package miden-precompiles-verifier --features constants-tools --bin pvm-constants-regen -- --check
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in constraint artifacts for drift

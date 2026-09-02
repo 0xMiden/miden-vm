@@ -1,12 +1,13 @@
-//! Ingest-time scatter for the out-of-domain row: correctness and mechanism-cost guard.
+//! Ingest-time scatter for the PVM out-of-domain row: correctness and mechanism-cost guard.
 //!
-//! The proof commits each AIR's trace in *proof order* (ascending log height, instance index
-//! breaking ties), while the order-invariant ACE circuit reads every AIR's trace at its
-//! *canonical* (instance-order) address. The verifier closes that gap at ingest: the transcript
-//! absorb and the DEEP Horner accumulation stay positional over the advice stream, and only the
-//! `adv_pipe` destination is retargeted at segment boundaries.
+//! The proof commits each chiplet's trace in *proof order* (ascending log height, instance index
+//! breaking ties), while the order-invariant ACE circuit reads every chiplet's trace at its
+//! *canonical* (instance-order) address. `process_row_ood_evaluations` closes that gap at ingest:
+//! the transcript absorb and the DEEP Horner accumulation stay positional over the advice stream,
+//! and only the `adv_pipe` destination is retargeted at segment boundaries.
 //!
-//! This file pins both halves of that mechanism:
+//! This file pins both halves of that mechanism at PVM scale — ten chiplets, 230 blocks, 22
+//! segments — against the checked-in generated hook:
 //!
 //! - the scatter is *transparent*: the full 16-slot working frame (sponge, pointer, alpha pointer,
 //!   Horner accumulator) after a scattered row is bit-identical to the flat row's, and every
@@ -15,27 +16,25 @@
 //!   fraction of the obvious per-block `while` loop over the destination pointer. The cycle
 //!   assertions below exist so that "simplification" is caught here rather than in a proof-cost
 //!   regression.
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
-use miden_air::{AIRS, BaseAir, Felt, LiftedAir, MIDEN_AIR_COUNT};
 use miden_core::{
-    Word,
+    Felt, Word,
     advice::AdviceStack,
     crypto::hash::Eidos,
     field::{BasedVectorSpace, QuadFelt},
 };
 
 use super::{
-    f1_sigma_scatter::{heights_for_order, permutations},
-    vm_layout_const,
+    pvm_layout_const,
+    pvm_sigma_scatter::{heights_for_order, structured_orders},
 };
 use crate::helpers::read_memory_felt;
 
-/// Per-AIR trace regions are padded to this width before concatenation into a commitment group.
-const LMCS_ALIGNMENT: usize = 8;
-/// Every out-of-domain evaluation is quadratic-extension valued.
-const EXT_DEGREE: usize = 2;
 /// Felts moved by one `adv_pipe`.
 const BLOCK_FELTS: u32 = 8;
+/// Chiplet instances in `ChipletAir::all()` order.
+const NUM_CHIPLETS: usize = 10;
 
 // HARNESS MEMORY MAP
 // ================================================================================================
@@ -55,13 +54,13 @@ const OOD_BASE: u32 = 16_384;
 
 /// Cycle ceiling for the checked-in hook's two-row ingest.
 ///
-/// Absorbing the row costs three cycles per block, so both rows are 2 x 80 x 3 = 480 cycles of
-/// unavoidable work; per-segment dispatch adds about 22 cycles to each of the 10 segments, twice
-/// (measured: 1,087). Guarding the destination pointer once per block instead would add at least
-/// ten cycles to every one of the 160 blocks, landing far above this ceiling - which is the point:
-/// this bound is what makes the mechanism, not merely the addresses, a tested property of the
-/// generated file.
-const MAX_TWO_ROW_INGEST_CYCLES: u64 = 1_300;
+/// Absorbing the row costs three cycles per block, so both rows are 2 x 230 x 3 = 1,380 cycles of
+/// unavoidable work; per-segment dispatch adds about 30 cycles to each of the 22 segments, twice
+/// (measured: 2,724). Guarding the destination pointer once per block instead would add at least
+/// ten cycles to every one of the 460 blocks — the per-block loop measures 3,765 cycles for a
+/// single row — landing far above this ceiling. That is the point: this bound is what makes the
+/// mechanism, not merely the addresses, a tested property of the generated file.
+const MAX_TWO_ROW_INGEST_CYCLES: u64 = 3_200;
 
 const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 const ALPHA: [u64; 2] = [3, 5];
@@ -70,20 +69,24 @@ const INITIAL_ACC: [u64; 2] = [7, 9];
 // ROW GEOMETRY
 // ================================================================================================
 
-/// Aligned per-AIR widths of one out-of-domain row, in canonical instance order.
+/// Aligned per-chiplet widths of one PVM out-of-domain row, in canonical instance order.
 ///
 /// Widths are counted in evaluation slots (one per committed base column, or per auxiliary
-/// coordinate); each slot is one extension-field value, hence [`EXT_DEGREE`] felts on the wire.
+/// coordinate); each slot is one extension-field value, hence two felts on the wire.
+///
+/// `ChipletAir` is not exported from `miden-precompiles-prover`, so these are read back out of the
+/// generated hook's own header rather than re-derived here; `pvm_row_geometry_is_the_one_the_hook
+/// _was_rendered_from` (in that crate) is what ties the header to the chiplet declarations.
 #[derive(Clone, Debug)]
-pub(super) struct RowGeometry {
+struct RowGeometry {
     preprocessed: Vec<usize>,
     main: Vec<usize>,
     aux: Vec<usize>,
-    /// Shared across AIRs: the quotient is one recomposed matrix, not a per-AIR one.
+    /// Shared across chiplets: the quotient is one recomposed matrix, not a per-chiplet one.
     quotient: usize,
 }
 
-/// One per-AIR segment of one commitment group, as it appears on the wire.
+/// One per-chiplet segment of one commitment group, as it appears on the wire.
 #[derive(Clone, Copy, Debug)]
 struct Segment {
     /// Canonical destination, in felts from the row base.
@@ -102,42 +105,46 @@ struct Dispatch {
     slot: Option<u32>,
 }
 
+const HOOK: &str = include_str!("../../asm/sys/pvm/ood_frames.masm");
+
+/// Reads a rendered `label: a + b + ... = total scalar evaluations` line as its parts.
+fn rendered_parts(label: &str) -> Vec<usize> {
+    let line = HOOK
+        .lines()
+        .map(|line| line.trim().trim_start_matches('#').trim())
+        .find(|line| line.starts_with(label))
+        .unwrap_or_else(|| panic!("the generated hook declares no {label} widths"));
+    let rest = line.strip_prefix(label).expect("prefix matched above");
+    let parts = rest.split('=').next().expect("split yields at least one part");
+    parts
+        .split('+')
+        .map(|part| {
+            part.split_whitespace()
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| panic!("could not read {label} widths from {line:?}"))
+        })
+        .collect()
+}
+
 impl RowGeometry {
-    /// Derive the current VM row geometry from the AIR set itself.
-    ///
-    /// This mirrors `miden_core_lib::constraints_regen::VmGeometry`, which is what renders the
-    /// checked-in `sys/vm/ood_frames.masm`; `vm_row_geometry_matches_the_generated_hook` pins the
-    /// two together.
-    pub(super) fn vm() -> Self {
-        let mut preprocessed = Vec::with_capacity(MIDEN_AIR_COUNT);
-        let mut main = Vec::with_capacity(MIDEN_AIR_COUNT);
-        let mut aux = Vec::with_capacity(MIDEN_AIR_COUNT);
-        for air in AIRS.iter() {
-            preprocessed
-                .push(BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT));
-            main.push(BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT));
-            aux.push(
-                (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
-                    .next_multiple_of(LMCS_ALIGNMENT),
-            );
+    fn pvm() -> Self {
+        Self {
+            preprocessed: rendered_parts("preprocessed:"),
+            main: rendered_parts("main:"),
+            aux: rendered_parts("aux:"),
+            quotient: rendered_parts("quotient:")[0],
         }
-        let max_log_quotient_degree = AIRS
-            .iter()
-            .map(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>)
-            .max()
-            .expect("the Miden AIR set is non-empty");
-        let quotient = (1usize << max_log_quotient_degree) * EXT_DEGREE;
-        Self { preprocessed, main, aux, quotient }
     }
 
     fn groups(&self) -> [&Vec<usize>; 3] {
         [&self.preprocessed, &self.main, &self.aux]
     }
 
-    pub(super) fn row_felts(&self) -> u32 {
+    fn row_felts(&self) -> u32 {
         let slots: usize =
             self.groups().iter().map(|g| g.iter().sum::<usize>()).sum::<usize>() + self.quotient;
-        (slots * EXT_DEGREE) as u32
+        (slots * 2) as u32
     }
 
     /// Felt offset of each commitment group from the row base, in emission order.
@@ -145,19 +152,19 @@ impl RowGeometry {
         let mut bases = [0u32; 4];
         let mut acc = 0usize;
         for (i, group) in self.groups().iter().enumerate() {
-            bases[i] = (acc * EXT_DEGREE) as u32;
+            bases[i] = (acc * 2) as u32;
             acc += group.iter().sum::<usize>();
         }
-        bases[3] = (acc * EXT_DEGREE) as u32;
+        bases[3] = (acc * 2) as u32;
         bases
     }
 
-    /// Canonical felt offsets of each AIR inside one group, relative to the group base.
+    /// Canonical felt offsets of each chiplet inside one group, relative to the group base.
     fn canonical_offsets(widths: &[usize]) -> Vec<u32> {
         let mut offsets = Vec::with_capacity(widths.len());
         let mut acc = 0usize;
         for width in widths {
-            offsets.push((acc * EXT_DEGREE) as u32);
+            offsets.push((acc * 2) as u32);
             acc += width;
         }
         offsets
@@ -179,20 +186,20 @@ impl RowGeometry {
                 }
                 segments.push(Segment {
                     dst: bases[group_index] + offsets[air],
-                    blocks: (widths[air] * EXT_DEGREE) as u32 / BLOCK_FELTS,
+                    blocks: (widths[air] * 2) as u32 / BLOCK_FELTS,
                 });
             }
         }
         segments.push(Segment {
             dst: bases[3],
-            blocks: (self.quotient * EXT_DEGREE) as u32 / BLOCK_FELTS,
+            blocks: (self.quotient * 2) as u32 / BLOCK_FELTS,
         });
         segments
     }
 
     /// The same table, annotated with which segments the proof order can move.
     ///
-    /// A group holding at most one non-empty segment has no proof-order freedom: whichever AIR
+    /// A group holding at most one non-empty segment has no proof-order freedom: whichever chiplet
     /// owns it is always alone on the wire and always lands at the same canonical address.
     fn scatter_plan(&self, order: &[usize]) -> Vec<Dispatch> {
         let bases = self.group_bases();
@@ -213,25 +220,34 @@ impl RowGeometry {
                 };
                 plan.push(Dispatch {
                     dst: bases[group_index] + offsets[air],
-                    blocks: (widths[air] * EXT_DEGREE) as u32 / BLOCK_FELTS,
+                    blocks: (widths[air] * 2) as u32 / BLOCK_FELTS,
                     slot: dispatch_slot,
                 });
             }
         }
         plan.push(Dispatch {
             dst: bases[3],
-            blocks: (self.quotient * EXT_DEGREE) as u32 / BLOCK_FELTS,
+            blocks: (self.quotient * 2) as u32 / BLOCK_FELTS,
             slot: None,
         });
         plan
     }
 }
 
-/// AIR indices ordered by ascending `(log height, instance index)`, i.e. the proof order.
-pub(super) fn proof_order(heights: &[u64]) -> Vec<usize> {
+/// Chiplet indices ordered by ascending `(log height, instance index)`, i.e. the proof order.
+fn proof_order(heights: &[u64]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..heights.len()).collect();
     order.sort_by_key(|&i| (heights[i], i));
     order
+}
+
+/// Height fixtures: the structured proof orders `pvm_sigma_scatter` already sweeps for the sigma
+/// scatter, plus a tie the instance order breaks.
+fn height_fixtures() -> Vec<Vec<u64>> {
+    let mut fixtures: Vec<Vec<u64>> =
+        structured_orders().iter().map(|order| heights_for_order(order)).collect();
+    fixtures.push(vec![18, 18, 16, 18, 18, 16, 18, 18, 18, 16]);
+    fixtures
 }
 
 // MASM GENERATION
@@ -308,7 +324,7 @@ begin
     )
 }
 
-/// Baseline: today's flat ingest, which stores the row in wire order.
+/// Baseline: the wire-order ingest, which stores the row exactly as it arrives.
 fn flat_source(row_felts: u32) -> String {
     let blocks = row_felts / BLOCK_FELTS;
     program("", "", &format!("        repeat.{blocks} {ABSORB} end"), row_felts)
@@ -348,7 +364,7 @@ fn while_source(segments: &[Segment], row_felts: u32) -> String {
     program("", &setup, &measured, row_felts)
 }
 
-/// The deployed mechanism, exactly as `constraints_regen.rs` renders it.
+/// The deployed mechanism, exactly as the PVM renderer emits it.
 ///
 /// One `pipe_k` procedure per distinct segment length, dispatched per stream position through a
 /// `(row-relative destination, digest address)` table. Groups holding at most one non-empty
@@ -376,7 +392,7 @@ fn production_source(geometry: &RowGeometry, order: &[usize], row_felts: u32) ->
         })
         .collect::<Vec<_>>();
     // Stands in for the MASM order pass, which derives these two cells per position from the
-    // absorbed AIR heights. The real pass is exercised through the generated hook itself.
+    // absorbed chiplet heights. The real pass is exercised through the generated hook itself.
     for dispatch in &plan {
         if let Some(slot) = dispatch.slot {
             setup.push(format!(
@@ -471,81 +487,47 @@ fn assert_scattered(flat: &Run, scattered: &Run, segments: &[Segment], label: &s
 // TESTS
 // ================================================================================================
 
-/// The AIR-derived row geometry must be the one the checked-in hook was rendered from.
+/// The header the segment table is read from must agree with the row the hook actually pipes.
 ///
-/// `sys/vm/ood_frames.masm` is generated by `constraints_regen.rs` from the same AIR widths, so a
-/// disagreement here means either the generated file is stale or this file's derivation drifted
-/// from the renderer's.
+/// A stale header would give every oracle below the wrong destinations while the hook itself was
+/// still self-consistent, so the sweep would compare two different geometries and pass.
 #[test]
-fn vm_row_geometry_matches_the_generated_hook() {
-    let geometry = RowGeometry::vm();
-    let hook = include_str!("../../asm/sys/vm/ood_frames.masm");
+fn pvm_row_geometry_matches_the_generated_hook() {
+    let geometry = RowGeometry::pvm();
+    assert_eq!(geometry.main.len(), NUM_CHIPLETS);
+    assert_eq!(geometry.aux.len(), NUM_CHIPLETS);
+    assert_eq!(geometry.preprocessed.len(), NUM_CHIPLETS);
 
-    /// Reads a rendered `label: a + b + ... = total scalar evaluations` line as its parts.
-    fn rendered_parts(hook: &str, label: &str) -> Vec<usize> {
-        let line = hook
-            .lines()
-            .map(|line| line.trim().trim_start_matches('#').trim())
-            .find(|line| line.starts_with(label))
-            .unwrap_or_else(|| panic!("generated hook declares no {label} widths"));
-        let rest = line.strip_prefix(label).expect("prefix matched above");
-        let parts = rest.split('=').next().expect("split yields at least one part");
-        parts
-            .split('+')
-            .map(|part| {
-                part.split_whitespace()
-                    .next()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or_else(|| panic!("could not read {label} widths from {line:?}"))
-            })
-            .collect()
-    }
-
-    assert_eq!(
-        rendered_parts(hook, "main:"),
-        geometry.main,
-        "generated per-AIR main widths disagree with the AIR set"
-    );
-    assert_eq!(
-        rendered_parts(hook, "aux:"),
-        geometry.aux,
-        "generated per-AIR auxiliary widths disagree with the AIR set"
-    );
-    assert_eq!(
-        rendered_parts(hook, "preprocessed:").iter().sum::<usize>(),
-        geometry.preprocessed.iter().sum::<usize>(),
-        "generated preprocessed width disagrees with the AIR set"
-    );
-    assert_eq!(
-        rendered_parts(hook, "quotient:"),
-        vec![geometry.quotient],
-        "generated quotient width disagrees with the AIR set"
-    );
-
-    let blocks: u32 = hook
+    let blocks: u32 = HOOK
         .lines()
         .find_map(|line| line.split_once("read as ")?.1.split_whitespace().next()?.parse().ok())
-        .expect("generated hook declares a block count");
-    assert_eq!(blocks, geometry.row_felts() / BLOCK_FELTS, "generated block count is stale");
+        .expect("the generated hook declares a block count");
+    assert_eq!(blocks, geometry.row_felts() / BLOCK_FELTS, "the declared block count is stale");
+
+    let plan = geometry.scatter_plan(&(0..NUM_CHIPLETS).collect::<Vec<_>>());
+    assert_eq!(plan.len(), 22, "the PVM row is 22 segments");
+    assert_eq!(
+        plan.iter().filter(|d| d.slot.is_some()).count(),
+        20,
+        "main and aux are the order-dependent groups"
+    );
+    assert_eq!(
+        HOOK.matches("\n    dynexec").count(),
+        20,
+        "the generated hook does not dispatch every order-dependent segment"
+    );
 }
 
 /// The scatter must be transparent to the transcript, the DEEP accumulator and the row pointer,
 /// and must place every wire block at its canonical address, for any proof order.
 #[test]
 fn scatter_preserves_the_working_frame_and_lands_blocks_canonically() {
-    let geometry = RowGeometry::vm();
+    let geometry = RowGeometry::pvm();
     let row_felts = geometry.row_felts();
     let row = synthetic_row(row_felts);
     let flat = run(&flat_source(row_felts), &row, row_felts);
 
-    // Identity, a full reversal, and two scrambles. And8's height is fixed verifier setup, so
-    // the live orders always move it; the fixtures move every AIR.
-    for heights in [
-        vec![10u64, 11, 12, 13],
-        vec![13u64, 12, 11, 10],
-        vec![20u64, 17, 14, 16],
-        vec![14u64, 20, 16, 17],
-    ] {
+    for heights in height_fixtures() {
         let order = proof_order(&heights);
         let segments = geometry.segments(&order);
 
@@ -567,14 +549,14 @@ fn scatter_preserves_the_working_frame_and_lands_blocks_canonically() {
 ///
 /// `dynexec` on a per-length `pipe_k` procedure keeps the retarget off the hot path; testing the
 /// destination pointer once per block does not. Under the Eidos transcript one absorbed block
-/// costs three cycles, so a per-block guard is not a small constant on top - it is the dominant
+/// costs three cycles, so a per-block guard is not a small constant on top — it is the dominant
 /// term. This test exists so that "simplifying" the dispatch back into a loop fails here.
 #[test]
 fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
-    let geometry = RowGeometry::vm();
+    let geometry = RowGeometry::pvm();
     let row_felts = geometry.row_felts();
     let row = synthetic_row(row_felts);
-    let order = proof_order(&[20u64, 17, 14, 16]);
+    let order = proof_order(&[20, 17, 14, 16, 11, 21, 13, 18, 12, 15]);
     let segments = geometry.segments(&order);
     let plan = geometry.scatter_plan(&order);
     let mut lengths: Vec<u32> = plan.iter().map(|dispatch| dispatch.blocks).collect();
@@ -587,8 +569,8 @@ fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
 
     let dispatched_slots = plan.iter().filter(|dispatch| dispatch.slot.is_some()).count();
     println!(
-        "VM out-of-domain row: {MIDEN_AIR_COUNT} AIRs, {} blocks, {} segments ({dispatched_slots} \
-         order-dependent), {} distinct segment lengths {lengths:?}",
+        "PVM out-of-domain row: {NUM_CHIPLETS} chiplets, {} blocks, {} segments \
+         ({dispatched_slots} order-dependent), {} distinct segment lengths {lengths:?}",
         row_felts / BLOCK_FELTS,
         plan.len(),
         lengths.len(),
@@ -621,9 +603,8 @@ fn dispatched_scatter_stays_far_cheaper_than_a_per_block_loop() {
 // GENERATED HOOK
 // ================================================================================================
 
-/// Drives the checked-in `sys/vm/ood_frames.masm` end to end: stage the table from the AIR
-/// heights, then ingest both out-of-domain rows exactly as `load_and_horner_eval_ood_frames`
-/// does.
+/// Drives the checked-in `sys/pvm/ood_frames.masm` end to end: stage the table from the chiplet
+/// heights, then ingest both out-of-domain rows exactly as the generic verifier does.
 fn generated_hook_source(heights: &[u64], ood_ptr: u32) -> String {
     let s = INITIAL_SPONGE;
     let stores = heights
@@ -639,11 +620,13 @@ fn generated_hook_source(heights: &[u64], ood_ptr: u32) -> String {
         .join("\n");
     format!(
         "use miden::core::stark::constants
-use miden::core::sys::vm::ood_frames
+use miden::core::sys::pvm
+use miden::core::sys::pvm::ood_frames
 
 begin
 {stores}
         clk mem_store.{CLK0_PTR}
+        exec.pvm::stage_proof_order_positions
         exec.ood_frames::stage_ood_scatter_table
         clk mem_store.{CLK2_PTR}
 
@@ -677,11 +660,7 @@ begin
 }
 
 /// The out-of-domain frame the wire stream must produce, laid out canonically.
-pub(super) fn expected_frame_memory(
-    geometry: &RowGeometry,
-    order: &[usize],
-    wire: &[Felt],
-) -> Vec<u64> {
+fn expected_frame_memory(geometry: &RowGeometry, order: &[usize], wire: &[Felt]) -> Vec<u64> {
     let row_felts = geometry.row_felts() as usize;
     let mut expected = vec![u64::MAX; 2 * row_felts];
     let mut consumed = 0usize;
@@ -699,18 +678,18 @@ pub(super) fn expected_frame_memory(
     expected
 }
 
-/// The checked-in hook must land every AIR's segment at its canonical address for both rows,
-/// while leaving the transcript, the DEEP accumulator and the monotone row pointer exactly where
-/// a flat wire-order ingest would.
+/// The checked-in hook must land every chiplet's segment at its canonical address for both rows,
+/// while leaving the transcript, the DEEP accumulator and the monotone row pointer exactly where a
+/// flat wire-order ingest would.
 ///
-/// The oracles are computed in Rust from the wire stream, so this does not merely compare the
-/// hook against another MASM rendering of the same idea.
+/// The oracles are computed in Rust from the wire stream, so this does not merely compare the hook
+/// against another MASM rendering of the same idea.
 #[test]
 fn generated_hook_scatters_both_rows_to_canonical_addresses() {
-    let geometry = RowGeometry::vm();
+    let geometry = RowGeometry::pvm();
     let row_felts = geometry.row_felts();
     let wire = synthetic_row(2 * row_felts);
-    let ood_ptr = vm_layout_const("OOD_EVALUATIONS_PTR");
+    let ood_ptr = pvm_layout_const("PREPROCESSED_CURRENT_PTR");
 
     let alpha = QuadFelt::new(ALPHA.map(Felt::new_unchecked));
     let expected_acc = wire
@@ -731,13 +710,8 @@ fn generated_hook_scatters_both_rows_to_canonical_addresses() {
             Eidos::compress(cv, *block)
         });
 
-    // Every one of the MIDEN_AIR_COUNT! proof orders, plus a tie the instance order must break.
-    let mut cases: Vec<Vec<u64>> = permutations(MIDEN_AIR_COUNT)
-        .iter()
-        .map(|order| heights_for_order(order))
-        .collect();
-    cases.push(vec![18u64, 18, 16, 18]);
-    for heights in cases {
+    let identity: Vec<usize> = (0..NUM_CHIPLETS).collect();
+    for heights in height_fixtures() {
         let order = proof_order(&heights);
         let mut advice = AdviceStack::new();
         advice.append_for_adv_pipe(&wire);
@@ -749,7 +723,7 @@ fn generated_hook_scatters_both_rows_to_canonical_addresses() {
         // Guards against a vacuous fixture: a proof order that moves nothing would pass every
         // assertion below even if the hook ignored the table entirely.
         let wire_order: Vec<u64> = wire.iter().map(Felt::as_canonical_u64).collect();
-        if order == (0..MIDEN_AIR_COUNT).collect::<Vec<_>>() {
+        if order == identity {
             assert_eq!(expected, wire_order, "the identity order must store the row flat");
         } else {
             assert_ne!(expected, wire_order, "fixture {heights:?} does not move any segment");
@@ -803,52 +777,4 @@ fn generated_hook_scatters_both_rows_to_canonical_addresses() {
              {ingested} ingesting both rows"
         );
     }
-}
-
-/// The checked-in hook must dispatch per segment through `dynexec`, with one `pipe_k` procedure
-/// per distinct segment length, and must contain no loop.
-///
-/// The cost comparison in `dispatched_scatter_stays_far_cheaper_than_a_per_block_loop` measures
-/// test-local renderings of each mechanism, so on its own it would stay green even if the
-/// renderer emitted a per-block loop. This reads the generated file itself.
-#[test]
-fn generated_hook_dispatches_per_segment_rather_than_looping_per_block() {
-    let geometry = RowGeometry::vm();
-    let plan = geometry.scatter_plan(&(0..MIDEN_AIR_COUNT).collect::<Vec<_>>());
-    let hook = include_str!("../../asm/sys/vm/ood_frames.masm");
-    let instructions: Vec<&str> = hook
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.starts_with('#'))
-        .flat_map(str::split_whitespace)
-        .collect();
-
-    let dispatched = plan.iter().filter(|dispatch| dispatch.slot.is_some()).count();
-    assert_eq!(
-        instructions.iter().filter(|word| **word == "dynexec").count(),
-        dispatched,
-        "the generated hook must dispatch each order-dependent segment through dynexec"
-    );
-    assert!(
-        !instructions.iter().any(|word| word.starts_with("while")),
-        "the generated hook must not loop: a per-block destination guard costs more than the \
-         absorb it guards"
-    );
-
-    let mut lengths: Vec<u32> = plan.iter().map(|dispatch| dispatch.blocks).collect();
-    lengths.sort_unstable();
-    lengths.dedup();
-    for blocks in &lengths {
-        assert!(
-            hook.contains(&format!("proc pipe_{blocks}\n"))
-                && hook.contains(&format!("repeat.{blocks}\n")),
-            "the generated hook is missing the pipe procedure for {blocks}-block segments"
-        );
-    }
-    // Fixed-destination segments are reached by a direct `exec`, one per non-dispatched entry.
-    assert_eq!(
-        instructions.iter().filter(|word| word.starts_with("exec.pipe_")).count(),
-        plan.len() - dispatched,
-        "segments whose place on the wire is fixed must be reached without the runtime table"
-    );
 }

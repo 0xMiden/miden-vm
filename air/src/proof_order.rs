@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use miden_ace_codegen::{ceil_log2, factorial, order_from_tag, order_tag};
+use miden_ace_codegen::{factorial, order_from_tag, order_tag};
 
 use crate::MidenAir;
 
@@ -20,15 +20,19 @@ pub const MIDEN_AIR_COUNT: usize = AIRS.len();
 pub const PROOF_ORDER_COUNT: usize = factorial(MIDEN_AIR_COUNT);
 const _: () = assert!(PROOF_ORDER_COUNT <= u32::MAX as usize, "proof-order tags must fit in u32");
 
-/// Smallest Merkle tree depth covering every proof-order tag.
-pub const PROOF_ORDER_REGISTRY_DEPTH: usize = ceil_log2(PROOF_ORDER_COUNT);
-
 /// Proof-order AIR permutation.
 ///
 /// The proof stores AIR commitments in ascending `(log_trace_height, instance_index)` order. That
-/// order can vary by statement, so the recursive verifier selects one ACE circuit from a small
-/// registry. The registry key is `tag`, the Lehmer rank of the AIR permutation relative to
-/// [`AIRS`].
+/// order can vary by statement, so the recursive verifier resolves each AIR's position in it when
+/// placing that AIR's data and weighting its contribution. `tag` is the Lehmer rank of the
+/// permutation relative to [`AIRS`].
+///
+/// The recursive verifier no longer routes by this rank: it derives each AIR's position directly
+/// from the committed heights (`proof_order_position_from_heights`) rather than looking up a
+/// registry leaf. `tag` and its associated API (`tag`, `from_tag`, `lehmer_rank`, `file_stem`) are
+/// kept as public surface for enumerating every possible order — `order_from_tag` drives
+/// [`ProofOrder::variants`], used by tests that sweep every proof order — and for bounding a
+/// relation's AIR count against [`miden_ace_codegen::MAX_ORDER_AIRS`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofOrder {
     airs: [MidenAir; MIDEN_AIR_COUNT],
@@ -183,7 +187,6 @@ mod tests {
     #[test]
     fn proof_order_constants_derive_from_air_count() {
         assert_eq!(PROOF_ORDER_COUNT, ProofOrder::variants().len());
-        assert_eq!(PROOF_ORDER_REGISTRY_DEPTH, ceil_log2(PROOF_ORDER_COUNT));
     }
 
     #[test]
@@ -193,15 +196,6 @@ mod tests {
         assert_eq!(factorial(2), 2);
         assert_eq!(factorial(3), 6);
         assert_eq!(factorial(4), 24);
-    }
-
-    #[test]
-    fn registry_depth_is_ceil_log2() {
-        assert_eq!(ceil_log2(1), 0);
-        assert_eq!(ceil_log2(2), 1);
-        assert_eq!(ceil_log2(3), 2);
-        assert_eq!(ceil_log2(6), 3);
-        assert_eq!(ceil_log2(24), 5);
     }
 
     #[test]
