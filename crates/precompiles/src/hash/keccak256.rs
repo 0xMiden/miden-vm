@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use miden_core::{Felt, program::domain::KECCAK256_PRECOMPILE_SELECTOR};
 use miden_crypto::hash::keccak::Keccak256;
 
 use super::{HashFunction, HashPrecompile};
@@ -12,6 +13,7 @@ pub struct Keccak256Hash;
 
 impl HashFunction for Keccak256Hash {
     const NAME: &'static str = "keccak256";
+    const SELECTOR: Felt = KECCAK256_PRECOMPILE_SELECTOR;
     const DIGEST_FELTS: usize = 8;
 
     fn hash(input: &[u8]) -> Vec<u8> {

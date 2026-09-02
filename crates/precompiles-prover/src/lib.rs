@@ -14,6 +14,7 @@ use alloc::string::{String, ToString};
 use miden_core::deferred::DeferredState;
 pub use miden_core::proof::{HashFunction, StarkProof};
 
+pub(crate) mod composite;
 pub(crate) mod ec;
 pub(crate) mod hash;
 pub(crate) mod logup;

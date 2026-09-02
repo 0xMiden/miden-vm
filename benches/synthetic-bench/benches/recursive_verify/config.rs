@@ -79,7 +79,7 @@ impl BenchConfig {
         let tx_masm_path = env_path("RECURSION_BENCH_MASM")?;
         let tx_masm_path = resolve_masm_path(tx_masm_path);
         let hash_name =
-            std::env::var("RECURSION_BENCH_HASH").unwrap_or_else(|_| "poseidon2".to_string());
+            std::env::var("RECURSION_BENCH_HASH").unwrap_or_else(|_| "eidos".to_string());
         let outer_hash_fn = HashFunction::try_from(hash_name.as_str())
             .unwrap_or_else(|_| panic!("unsupported RECURSION_BENCH_HASH={hash_name:?}"));
         let base_stack_values = stack_values_from_env("RECURSION_BENCH_STACK", "0,1");

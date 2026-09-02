@@ -1,10 +1,9 @@
 //! Crypto operation constraints.
 //!
-//! This module enforces the non-bus stack constraints for four crypto-related operations:
+//! This module enforces the non-bus stack constraints for crypto-related operations:
 //!
-//! - **CRYPTOSTREAM**: Encrypts memory words via XOR (i.e. addition in the prime field) with the
-//!   Poseidon2 sponge rate. Constraints here enforce pointer advancement and state stability; the
-//!   actual memory I/O and XOR happen via the chiplet bus (constrained elsewhere).
+//! - **AEADSTREAM**: Encrypts two plaintext words with an Eidos XOF keystream. Constraints here
+//!   enforce the stack transition; the AEAD stream chip handles memory I/O and byte-level XOR.
 //!
 //! - **HORNERBASE**: Evaluates a polynomial with base-field coefficients at an extension-field
 //!   point, processing 8 coefficients per row via Horner's method. Used during STARK verification
@@ -15,6 +14,8 @@
 //!
 //! - **FRIE2F4**: Performs FRI layer folding, combining 4 extension-field leaf values into 1, and
 //!   checking it against the previous layer's folded value.
+//!
+//! - **MPVERIFY / MRUPDATE**: Bind the Merkle node index to its canonical field representative.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::AirBuilder;
@@ -22,7 +23,7 @@ use miden_crypto::stark::air::AirBuilder;
 use crate::{
     CoreCols, MidenAirBuilder,
     constraints::{
-        constants::{F_2, F_3, F_8},
+        constants::{F_1, F_2, F_3, F_8, F_16, TWO_POW_16, TWO_POW_32, TWO_POW_48},
         ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
         op_flags::OpFlags,
     },
@@ -46,30 +47,52 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    enforce_cryptostream_constraints(builder, local, next, op_flags);
+    enforce_aead_stream_constraints(builder, local, next, op_flags);
+    enforce_merkle_index_canonicality(builder, local, op_flags);
     enforce_hornerbase_constraints(builder, local, next, op_flags);
     enforce_hornerext_constraints(builder, local, next, op_flags);
     enforce_frie2f4_constraints(builder, local, next, op_flags);
 }
 
+/// Enforces that the Merkle node index is represented canonically in the base field.
+///
+/// On MPVERIFY and MRUPDATE rows the six user helpers are `[addr, b, y0, y1, y2, y3]`, where
+/// `b` is the first Merkle direction bit and the `yi` are 16-bit limbs of
+///
+/// `y = (p - 1 - index - b) / 2`.
+///
+/// The lookup argument range-checks all four limbs and `2 * y3`, which proves `y < 2^63`.
+/// Together with the equation below and the controller-side binding of `b`, this rules out the
+/// non-canonical depth-64 alias `index + p` without consuming any hasher-controller columns.
+fn enforce_merkle_index_canonicality<AB>(
+    builder: &mut AB,
+    local: &CoreCols<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
+) where
+    AB: MidenAirBuilder,
+{
+    let helpers = local.decoder.user_op_helpers();
+    let bit: AB::Expr = helpers[1].into();
+    let y = Into::<AB::Expr>::into(helpers[2])
+        + AB::Expr::from(TWO_POW_16) * helpers[3]
+        + AB::Expr::from(TWO_POW_32) * helpers[4]
+        + AB::Expr::from(TWO_POW_48) * helpers[5];
+    let index: AB::Expr = local.stack.get(5).into();
+    let gate = op_flags.mpverify() + op_flags.mrupdate();
+    let merkle = &mut builder.when(gate);
+
+    merkle.assert_zero(bit.clone() * (bit.clone() - AB::Expr::ONE));
+    // `p - 1` is `-1` in the base field.
+    merkle.assert_zero(index + bit + AB::Expr::from(F_2) * y + AB::Expr::ONE);
+}
+
 // CONSTRAINT HELPERS
 // ================================================================================================
 
-/// CRYPTOSTREAM: encrypts two memory words via XOR with the Poseidon2 sponge rate.
-///
-/// The top 8 stack elements (rate/ciphertext) are updated by the chiplet bus, not
-/// constrained here. These constraints enforce only:
-/// - Capacity elements (s[8..12]) are preserved.
-/// - Source and destination pointers (s[12], s[13]) advance by 8 (two words).
-/// - Padding elements (s[14..16]) are preserved.
-///
-/// Stack layout:
-///   s[0..8]    rate / ciphertext  (updated via bus, unconstrained here)
-///   s[8..12]   capacity           (preserved)
-///   s[12]      source pointer     (incremented by 8)
-///   s[13]      destination pointer (incremented by 8)
-///   s[14..16]  padding            (preserved)
-fn enforce_cryptostream_constraints<AB>(
+/// AEADSTREAM stack transition:
+/// `[K_CTR(4), counter, src, dst, remaining, ...]`
+/// to `[K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]`.
+fn enforce_aead_stream_constraints<AB>(
     builder: &mut AB,
     local: &CoreCols<AB::Var>,
     next: &CoreCols<AB::Var>,
@@ -82,19 +105,18 @@ fn enforce_cryptostream_constraints<AB>(
     let s = &local.stack.top;
     let s_next = &next.stack.top;
 
-    // Capacity preserved.
-    builder.assert_eq(s_next[8], s[8]);
-    builder.assert_eq(s_next[9], s[9]);
-    builder.assert_eq(s_next[10], s[10]);
-    builder.assert_eq(s_next[11], s[11]);
+    for i in 0..4 {
+        builder.assert_eq(s_next[i], s[i]);
+    }
 
-    // Pointers advance by 8 (one memory word = 4 elements, two words per step).
-    builder.assert_eq(s_next[12], s[12].into() + F_8);
-    builder.assert_eq(s_next[13], s[13].into() + F_8);
+    builder.assert_eq(s_next[4], s[4].into() + F_1);
+    builder.assert_eq(s_next[5], s[5].into() + F_8);
+    builder.assert_eq(s_next[6], s[6].into() + F_16);
+    builder.assert_eq(s_next[7], s[7].into() - F_1);
 
-    // Padding preserved.
-    builder.assert_eq(s_next[14], s[14]);
-    builder.assert_eq(s_next[15], s[15]);
+    for i in 8..16 {
+        builder.assert_eq(s_next[i], s[i]);
+    }
 }
 
 /// HORNERBASE: degree-7 polynomial evaluation over the quadratic extension field.

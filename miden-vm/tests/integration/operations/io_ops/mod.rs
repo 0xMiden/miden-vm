@@ -1,4 +1,4 @@
-use miden_core::chiplets::hasher::apply_permutation;
+use miden_core::chiplets::hasher::compress_state;
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
@@ -18,7 +18,7 @@ fn mem_stream_pipe() {
     let source = "
         begin
             # pipe elements from advice to memory and hash them on the stack
-            adv_pipe hperm
+            adv_pipe compress
 
             # keep only the output elements from the adv_pipe hash
             dropw
@@ -32,8 +32,8 @@ fn mem_stream_pipe() {
                 push.0
             end
 
-            # use mem_stream and hperm to put the elements from memory on the stack and hash them
-            mem_stream hperm
+            # use mem_stream and compress to put the elements from memory on the stack and hash them
+            mem_stream compress
 
             # keep only the output elements from the mem_stream hash
             dropw
@@ -62,15 +62,14 @@ fn mem_stream_pipe() {
     let final_stack = test.get_last_stack_state();
     assert_eq!(final_stack[0..4], final_stack[4..8]);
 
-    // --- assert that the hashed output values are correct ---------------------------------------
-    // compute the expected result of hashing the elements in the advice stack inputs.
-    // Rate words come first in state, then capacity:
-    // state = [rate1_0-3, rate2_4-7, capacity_8-11]
+    // --- assert that the compression output is correct ------------------------------------------
+    // Compute the expected CV update for the two block words loaded from advice.
+    // state = [block_lo_0-3, block_hi_4-7, cv_8-11]
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0].to_elements().try_into().unwrap();
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
-    // The MASM code keeps state[4..8] (rate word 2) after the stack manipulation:
+    // The MASM code keeps state[4..8] (the high block word) after the stack manipulation:
     // dropw swapw dropw movup.4 drop
     let final_stack: Vec<u64> = state[4..8]
         .iter()

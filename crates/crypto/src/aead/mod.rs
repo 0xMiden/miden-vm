@@ -16,7 +16,6 @@ use crate::{
 };
 
 pub mod aead_eidos;
-pub mod aead_poseidon2;
 pub mod xchacha;
 
 /// Indicates whether encrypted data originated from field elements or raw bytes.
@@ -126,8 +125,6 @@ pub enum EncryptionError {
     MalformedCiphertext,
     #[error("malformed padding")]
     MalformedPadding,
-    #[error("ciphertext length, in field elements, is not a multiple of the encryption rate")]
-    CiphertextLenNotMultipleRate,
     #[error("invalid data type: expected {expected:?}, found {found:?}")]
     InvalidDataType { expected: DataType, found: DataType },
     #[error(

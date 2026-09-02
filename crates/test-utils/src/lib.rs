@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
+use miden_air::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
@@ -28,7 +28,7 @@ pub use miden_core::{
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
-    chiplets::hasher::apply_permutation,
+    chiplets::hasher::compress_state,
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::{Package, debug_info::PackageDebugInfo};
@@ -682,10 +682,7 @@ impl Test {
         .unwrap();
         let witness = processor.execute_for_proving_sync(&program, &mut host).unwrap();
         let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(miden_core::proof::HashFunction::Blake3_256)
-            .prove_full(witness)
-            .unwrap();
+        let proof = Prover::new().prove_full(witness).unwrap();
         let claim =
             ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
         if test_fail {
@@ -1011,25 +1008,24 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Given a hasher state, perform one permutation.
+/// Computes one expected COMPRESS state transition.
 ///
-/// This helper reconstructs that state, applies a permutation, and returns the resulting
-/// `[RATE0',RATE1',CAP']` back in stack order.
-pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
+/// The block lanes are preserved and the chaining-value lanes are replaced with the
+/// Eidos compression output.
+pub fn build_expected_compress(values: &[u64]) -> [Felt; STATE_WIDTH] {
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for compress test");
 
-    // Reconstruct the internal Poseidon2 state from the initial stack:
+    // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
-    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    // => state[0..12] = stack[0..12] in [BLOCK_LO, BLOCK_HI, CV] layout.
     let mut state = [ZERO; STATE_WIDTH];
     for i in 0..STATE_WIDTH {
         state[i] = Felt::new_unchecked(values[i]);
     }
 
-    // Apply the permutation
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
-    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    // Map internal state back to stack layout [BLOCK_LO, BLOCK_HI, CV'].
     let mut out = [ZERO; STATE_WIDTH];
     out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
 
@@ -1106,10 +1102,6 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         b0: "stack_b0",
         b1: "stack_b1",
         h0: "stack_h0",
-    },
-    range: RangeCols {
-        multiplicity: "range_check[0]",
-        value: "range_check[1]",
     },
 };
 

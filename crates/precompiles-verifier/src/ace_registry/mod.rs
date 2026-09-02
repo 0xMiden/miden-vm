@@ -53,9 +53,9 @@ pub const PVM_REGISTRY_ROW_DEPTH: usize = 12;
 ///
 /// The ACE registry binds the generated circuit, but not external multi-AIR assertions such as
 /// `ChipletMultiAir::eval_external`. Changes to those semantics require a protocol-version bump.
-/// The Miden VM currently uses the same version; distinct registry roots separate the relations.
+/// The Miden VM and PVM use distinct protocol versions and registry roots.
 #[cfg(any(test, feature = "registry-tools"))]
-pub(crate) const PVM_PROTOCOL_ID: u64 = 1;
+pub(crate) const PVM_PROTOCOL_ID: u64 = 2;
 
 /// Compute the relation digest binding a registry root into the Fiat-Shamir transcript.
 #[cfg(any(test, feature = "registry-tools"))]

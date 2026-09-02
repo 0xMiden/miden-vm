@@ -1,58 +1,11 @@
-//! Transcript node-tag registry.
+//! Selector-local operation discriminants used by transcript nodes.
 //!
-//! The transcript analog of [`relations`](crate::relations): a single
-//! source of truth for the transcript DAG's `tag_id` values. Every
-//! transcript node commits a 12-felt preimage whose capacity slot carries
-//! `(tag_id, param_a, param_b, reserved)`; producers of those nodes
-//! (the chunk chiplet today; uint / group / Keccak-eval chiplets
-//! soon) and the eval chip all read their tags from here.
-//!
-//! See the design notes for the full node-format spec and
-//! the design notes for how the tags are dispatched.
-//!
-//! ## Registry
-//!
-//! | tag_id | Variant            | Role                                       |
-//! |--------|--------------------|--------------------------------------------|
-//! | 0      | `Transcript`       | assertion-chain node (AND over children)   |
-//! | 1      | `Chunk`            | generic chunk capacity domain separator    |
-//! | 2      | `UintLeaf`         | reserved                                   |
-//! | 3      | `UintPinClaim`     | explicit uint pin claim                    |
-//! | 4      | `UintOp`           | reserved                                   |
-//! | 5      | `EcCreate`         | reserved; curve VALUE now uses VM tag      |
-//! | 6      | `EcBinOp`          | reserved; curve ops now use VM tags        |
-//! | 7      | `Keccak`           | `keccak(chunks) == digest` relation        |
-//! | 8      | `EcMsm`            | reserved; curve MSM now uses VM tag        |
-
-/// Capacity tag for explicit uint pin claims.
-///
-/// Pin claims commit `store[pin_ptr] = value` as explicit root inputs.
-pub const UINT_PIN_CLAIM_TAG: u8 = 3;
-
-/// Transcript node type, stamped into the `tag_id` capacity slot of a
-/// node's 12-felt hash preimage. `#[repr(u8)]` lets a variant cast
-/// directly (`NodeTag::Chunk as u8`) to the felt the slot holds —
-/// mirroring [`BusId`](crate::relations::BusId)'s `as usize`.
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum NodeTag {
-    Transcript = 0,
-    Chunk = 1,
-    UintLeaf = 2,
-    UintOp = 4,
-    EcCreate = 5,
-    EcBinOp = 6,
-    Keccak = 7,
-    /// Reserved local tag id for the multi-scalar-multiplication claim shape.
-    /// Curve MSM transcript caps use `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`;
-    /// the eval chip lays MSM as a variable-length VM PairList absorption. The
-    /// node *is* its value point (binds `Group`); see the design notes.
-    EcMsm = 8,
-}
+//! Eidos construction selectors come from the shared protocol registry or a concrete precompile;
+//! this module defines only the operation ids interpreted within those constructions.
 
 /// Operation discriminant for VM uint op rows.
 ///
-/// The cap is `[UintPrecompile::id(), op_id, 0, 0]`; operand/result pointers and
+/// The chain context is `[UintPrecompile::id(), op_id, 0, 0]`; operand/result pointers and
 /// `bound_ptr` are carried by `Binding` and relation witnesses.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
@@ -75,10 +28,10 @@ pub enum UintOpId {
 
 /// Operation discriminant of a curve binary-op node.
 ///
-/// The VM cap is `[CurvePrecompile::id(), op_id, 0, 0]`. The preimage rate is
+/// The VM chain context is `[CurvePrecompile::id(), op_id, 0, 0]`. The compression block is
 /// `lhs_hash ‖ rhs_hash` over two `Group` children; the result point rides
 /// the node's `Binding` as a nondeterministic ptr. The curve threads from
-/// the operands' curve VALUE caps.
+/// the operands' curve VALUE contexts.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
 /// |---|---|---|

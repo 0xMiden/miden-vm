@@ -8,13 +8,13 @@ execution proofs transport passive wire; the [deferred-proof semantics](../defer
 define hydration, proving, completion, and verification.
 
 Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
-modules are currently internal implementation detail used by core-library facades and tests.
+modules are internal implementation details used by core-library facades and tests.
 
-## Current data model
+## Data model
 
 - **`Tag`** — A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`,
-  semantic `AND`, and opaque framework `CHUNKS`. Precompile ids are derived from precompile names
-  and interpret the remaining three `args` felts locally.
+  semantic `AND`, and opaque framework `CHUNKS`. Every precompile has an explicitly registered
+  numeric selector and interprets two local argument felts. The final felt is reserved and zero.
 - **`Node`** — A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data
   chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework
   `TRUE` sentinel.
@@ -46,10 +46,11 @@ modules are currently internal implementation detail used by core-library facade
    `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
    relate that advice to values established independently of it, then log a statement digest that
    bundled hydration can re-evaluate before precompile proving.
-4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at stack offsets `4..8`.
-   `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
-   Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
-   host-side deferred state records the corresponding `AND` node.
+4. **`log_deferred` folds a statement** – The opcode expects `STMNT` at the top of the stack.
+   `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. One constrained
+   Eidos compression computes
+   `ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`, and host-side
+   deferred state records the corresponding `AND` node.
 
 ## Responsibilities
 
@@ -65,9 +66,10 @@ Proving, verification, transport, and resource policy are specified in the
 
 ## Conventions
 
-- Tag layout: `TAG = [precompile_id, arg0, arg1, arg2]`.
-  - `precompile_id` selects the framework or owning precompile.
-  - `arg0..arg2` are interpreted by the selected precompile.
+- Tag layout: `TAG = [registered_selector, arg0, arg1, 0]`.
+  - `registered_selector` selects the framework or owning precompile.
+  - `arg0` and `arg1` are interpreted by the selected precompile.
+  - The final lane is reserved and must be zero.
   - Framework id `0` is `Tag::TRUE`; framework id `1` is `Tag::AND`; framework id `2` is
     `Tag::CHUNKS`.
 - Payload shapes are declared by the selected precompile's `decode(args)`, but semantic lengths are
@@ -77,9 +79,8 @@ Proving, verification, transport, and resource policy are specified in the
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
   - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
     encode a pair count in tag arguments must check the actual payload length during evaluation.
-- `log_deferred` stack effect: `[_, STMNT, _, ...] -> [ROOT_NEW, OUT_RATE1, OUT_CAP, ...]` where
-  `STMNT` occupies stack offsets `4..8`. Wrappers usually drop the three output words after the root
-  transition has been constrained.
+- `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
+  `ROOT_NEW` after the root transition has been constrained.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats
   for hash facades and for arithmetic/curve support used by signature verification.
 

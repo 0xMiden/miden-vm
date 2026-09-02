@@ -15,7 +15,7 @@ use miden_crypto::{
 
 fn air_layout_for(air: MidenAir, layout: &InputLayout) -> AirLayout {
     AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: BaseAir::<Felt>::preprocessed_width(&air),
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
@@ -178,38 +178,56 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_fold_beta_slots() {
         .expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined main width is each per-AIR width aligned to the LMCS rate:
-    // aligned(51) + aligned(22) + aligned(16) = 56 + 24 + 16 = 96.
+    const LMCS_ALIGNMENT: usize = 8;
+    let expected_preprocessed_width = AIRS
+        .iter()
+        .map(|air| BaseAir::<Felt>::preprocessed_width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .sum::<usize>();
+    let expected_main_width = AIRS
+        .iter()
+        .map(|air| BaseAir::<Felt>::width(air).next_multiple_of(LMCS_ALIGNMENT))
+        .sum::<usize>();
+    // Aux-trace widths concatenate each per-AIR coordinate region after LMCS
+    // alignment, then convert back to extension-field columns.
+    let expected_aux_width = AIRS
+        .iter()
+        .map(|air| {
+            (LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXT_DEGREE)
+                .next_multiple_of(LMCS_ALIGNMENT)
+                / EXT_DEGREE
+        })
+        .sum::<usize>();
+    let expected_aux_boundary =
+        AIRS.iter().map(LiftedAir::<Felt, QuadFelt>::num_aux_values).sum::<usize>();
+
+    assert_eq!(layout.counts.preprocessed_width, expected_preprocessed_width);
     assert_eq!(
-        layout.counts.width, 96,
+        layout.counts.width, expected_main_width,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 12,
-        "combined aux_width = aligned(4) + aligned(3) + aligned(1) = 12 EFs"
+        layout.counts.aux_width, expected_aux_width,
+        "combined aux width must be sum of per-AIR LMCS-aligned widths"
     );
-    assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
+    assert_eq!(layout.counts.num_aux_boundary, expected_aux_boundary);
 
     let beta = layout
         .index(InputKey::MultiAirFoldBeta)
         .expect("multi-air layout exposes folding beta");
     assert!(beta < layout.total_inputs, "beta slot must be within layout bounds");
 
-    for key in [
-        InputKey::IsFirstAir(0),
-        InputKey::IsLastAir(0),
-        InputKey::IsTransitionAir(0),
-        InputKey::IsFirstAir(1),
-        InputKey::IsLastAir(1),
-        InputKey::IsTransitionAir(1),
-        InputKey::IsFirstAir(2),
-        InputKey::IsLastAir(2),
-        InputKey::IsTransitionAir(2),
-    ] {
-        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
-        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    for air_index in 0..MIDEN_AIR_COUNT {
+        for key in [
+            InputKey::IsFirstAir(air_index),
+            InputKey::IsLastAir(air_index),
+            InputKey::IsTransitionAir(air_index),
+        ] {
+            let idx =
+                layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
+            assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+        }
     }
-    assert!(layout.index(InputKey::IsFirstAir(3)).is_none());
+    assert!(layout.index(InputKey::IsFirstAir(MIDEN_AIR_COUNT)).is_none());
 }
 
 #[test]
@@ -223,7 +241,7 @@ fn multi_air_ace_circuit_emits_consistently() {
     };
 
     for order in ProofOrder::variants() {
-        // Check that the ACE encoding is well-formed and rate-aligned.
+        // Check that the ACE encoding is well-formed and block-aligned.
         let circuit = build_multi_air_ace_circuit_for_order(config, &order).expect("ACE circuit");
         let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
         assert!(
@@ -332,7 +350,7 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
         ProofOrder,
         ace::{RecursiveAceCircuitFactory, build_recursive_verifier_ace_circuit},
     };
-    use miden_core::crypto::hash::Poseidon2;
+    use miden_core::crypto::hash::Eidos;
 
     // The loader's two `repeat` counts are generated from this split, so pin it to the real
     // constants+shuffle boundary instead of trusting the value the struct reports.
@@ -369,11 +387,11 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
 
         // The registry leaf binds both segment digests.
         let (prefix, common) = circuit.instructions.split_at(circuit.shuffle_prefix_len);
-        assert_eq!(circuit.shuffle_commitment, Poseidon2::hash_elements(prefix));
-        assert_eq!(circuit.common_commitment, Poseidon2::hash_elements(common));
+        assert_eq!(circuit.shuffle_commitment, Eidos::hash_elements(prefix));
+        assert_eq!(circuit.common_commitment, Eidos::hash_elements(common));
         assert_eq!(
             circuit.commitment,
-            Poseidon2::merge(&[circuit.shuffle_commitment, circuit.common_commitment])
+            Eidos::merge(&[circuit.shuffle_commitment, circuit.common_commitment])
         );
 
         // The common section must be byte-identical across proof orders; only the
@@ -625,7 +643,10 @@ fn registry_entry_paths_authenticate_under_the_protocol_root() {
     use miden_air::{ProofOrder, ace::recursive_registry_entry, config::ACE_CIRCUIT_REGISTRY_ROOT};
 
     for order in ProofOrder::variants() {
-        let (circuit, path) = recursive_registry_entry(&order).expect("registry entry must build");
+        let (circuit, leaf, path) = recursive_registry_entry(&order)
+            .expect("registry entry must build")
+            .into_parts();
+        assert_eq!(leaf, circuit.commitment);
         assert_eq!(
             path.compute_root(u64::from(order.tag()), circuit.commitment)
                 .expect("path must fold to a root"),

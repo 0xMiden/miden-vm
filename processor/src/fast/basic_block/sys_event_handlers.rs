@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    crypto::hash::Poseidon2,
+    chiplets::hasher::{Hasher as VmHasher, compress_state},
     deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -20,6 +20,9 @@ use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::Fast
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
+
+/// The largest selector accepted by Eidos framing.
+const MAX_EIDOS_DOMAIN: u64 = u32::MAX as u64;
 
 // SYSTEM EVENT ERROR
 // ================================================================================================
@@ -69,7 +72,7 @@ pub fn handle_system_event(
             insert_hdword_into_adv_map(processor, domain)
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
-        SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
+        SystemEvent::CompressToMap => insert_compress_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
         SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
         SystemEvent::DeferredEvaluateTag => handle_deferred_evaluate_tag(processor),
@@ -149,12 +152,16 @@ fn insert_hdword_into_adv_map(
     processor: &mut FastProcessor,
     domain: Felt,
 ) -> Result<(), SystemEventError> {
+    if domain.as_canonical_u64() > MAX_EIDOS_DOMAIN {
+        return Err(OperationError::EidosDomainOutOfRange { domain }.into());
+    }
+
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
 
     // Hash as [A, B] to match `hmerge` behavior directly.
-    let key = Poseidon2::merge_in_domain(&[a, b], domain);
+    let key = VmHasher::merge_in_domain(&[a, b], domain);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -179,7 +186,7 @@ fn insert_hdword_into_adv_map(
 /// ```
 ///
 /// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
-/// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
+/// KEY is computed as the canonical Eidos hash of `[A, B, C, D]` (two compression blocks).
 fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
     let a = processor.stack_get_word(1);
@@ -188,7 +195,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
+    let key = VmHasher::hash_elements(&[*a, *b, *c, *d].concat());
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
@@ -201,23 +208,22 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     Ok(())
 }
 
-/// Reads three words from the operand stack and inserts the rate portion into the advice map
-/// under the key defined by applying a Poseidon2 permutation to all three words.
+/// Reads three words from the operand stack and inserts the two block words into the advice map
+/// under the key `Eidos::compress(CV, BLOCK_LO || BLOCK_HI)`.
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, RATE1, RATE2, CAP, ...]
+///   Operand stack: [event_id, BLOCK_LO, BLOCK_HI, CV, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [RATE1, RATE2]} (8 elements from rate portion)
+///   Advice map: {KEY: [BLOCK_LO, BLOCK_HI]} (8 block elements)
 /// ```
 ///
-/// Where `KEY` is computed by applying `hperm` to the 12-element state and extracting the digest.
-/// The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
-fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
+/// `KEY` is the updated chaining value.
+fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
-    // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
+    // State layout: [BLOCK_LO, BLOCK_HI, CV] where BLOCK_LO is at positions 1-4.
     let mut state = [
         processor.stack_get(1),
         processor.stack_get(2),
@@ -233,15 +239,15 @@ fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), System
         processor.stack_get(12),
     ];
 
-    // Extract the rate portion (first 8 elements) as values to store.
-    let values = state[Poseidon2::RATE_RANGE].to_vec();
+    // Preserve the two input block words (the first 8 elements) as the mapped values.
+    let values = state[..VmHasher::BLOCK_LEN].to_vec();
 
-    // Apply permutation and extract digest as the key.
-    Poseidon2::apply_permutation(&mut state);
+    // Apply one compression and extract the updated chaining value as the key.
+    compress_state(&mut state);
     let key = Word::new(
-        state[Poseidon2::DIGEST_RANGE]
+        state[VmHasher::CV_RANGE]
             .try_into()
-            .expect("failed to extract digest from state"),
+            .expect("failed to extract chaining value from state"),
     );
 
     processor.advice.insert_into_map(key, values)?;
@@ -547,19 +553,16 @@ fn push_transformed_stack_top(
 mod tests {
     use alloc::vec;
 
-    use miden_core::{
-        Felt, ZERO,
-        crypto::{hash::Poseidon2, merkle::MerkleStore},
-    };
+    use miden_core::{Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore};
+    use miden_utils_testing::build_test;
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
 
-    /// Tests that `insert_hperm_into_adv_map` produces the same key as applying
-    /// `Poseidon2::apply_permutation` directly to the same state, and stores the rate portion
-    /// (first 8 elements) as the values.
+    /// Tests that `insert_compress_into_adv_map` produces the same key as compressing the same
+    /// state directly, and stores the two block words (first 8 elements) as the values.
     #[test]
-    fn insert_hperm_into_adv_map_consistent_with_permutation() {
+    fn insert_compress_into_adv_map_consistent_with_compression() {
         // Build a 12-element state with distinct values.
         let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new_unchecked((i + 1) as u64));
 
@@ -572,16 +575,17 @@ mod tests {
         let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
 
         // Call the handler under test.
-        insert_hperm_into_adv_map(&mut processor).unwrap();
+        insert_compress_into_adv_map(&mut processor).unwrap();
 
-        // Compute expected key by applying the permutation to the same state.
-        let mut expected_state_after_perm = state_felts;
-        Poseidon2::apply_permutation(&mut expected_state_after_perm);
-        let expected_key =
-            Word::new(expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap());
+        // Compute the expected key by compressing the same state.
+        let mut expected_state_after_compression = state_felts;
+        compress_state(&mut expected_state_after_compression);
+        let expected_key = Word::new(
+            expected_state_after_compression[hasher::Hasher::CV_RANGE].try_into().unwrap(),
+        );
 
-        // The expected values are the rate portion (first 8 elements) of the *input* state.
-        let expected_values = state_felts[Poseidon2::RATE_RANGE].to_vec();
+        // The expected values are the two block words (first 8 elements) of the input state.
+        let expected_values = state_felts[..hasher::Hasher::BLOCK_LEN].to_vec();
 
         // Verify the advice map contains the correct entry.
         let stored_values = processor
@@ -606,6 +610,41 @@ mod tests {
             err,
             SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
                 if current == base && actual == added && max == base + added - 1
+        ));
+    }
+
+    #[test]
+    fn insert_hdword_with_domain_event_accepts_max_eidos_domain() {
+        let mut stack_values: Vec<u64> = (1..=8).collect();
+        stack_values.push(MAX_EIDOS_DOMAIN);
+        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN);
+
+        let (output, _) = build_test!("begin adv.insert_hdword_d end", &stack_values)
+            .execute_for_output()
+            .unwrap();
+
+        let a = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(1 + idx as u64)));
+        let b = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(5 + idx as u64)));
+        let key = VmHasher::merge_in_domain(&[a, b], domain);
+        let stored_values = output
+            .advice
+            .get_mapped_values(&key)
+            .expect("valid Eidos domain should insert the double word");
+        assert_eq!(stored_values, &(1..=8).map(Felt::new_unchecked).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn insert_hdword_with_domain_event_rejects_oversized_eidos_domain() {
+        let mut stack_values = vec![ZERO];
+        stack_values.extend((1..=8).map(Felt::new_unchecked));
+        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN + 1);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
+
+        let err = insert_hdword_into_adv_map(&mut processor, domain).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::Operation(OperationError::EidosDomainOutOfRange { domain: actual })
+                if actual == domain
         ));
     }
 

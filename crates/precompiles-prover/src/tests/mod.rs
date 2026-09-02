@@ -15,11 +15,11 @@ mod ec;
 mod ec_add;
 mod ec_dag;
 mod ec_msm;
+mod eidos;
 mod eval;
 mod keccak;
 mod keccak_node;
 mod keccak_sponge;
-mod poseidon2;
 mod uint;
 mod uint_add;
 mod uint_dag;
@@ -30,17 +30,29 @@ mod vm_uint;
 use std::{vec, vec::Vec};
 
 use miden_core::{
-    Felt,
-    deferred::DeferredRoot,
-    field::QuadFelt,
-    proof::{HashFunction, StarkProof},
-    utils::RowMajorMatrix,
+    Felt, deferred::DeferredRoot, field::QuadFelt, proof::StarkProof, utils::RowMajorMatrix,
 };
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;
 use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
 
-use crate::{session::SessionTraces, stark_config::test_challenger};
+use crate::{
+    session::SessionTraces,
+    stark_config::{DEFAULT_HASH_FUNCTION, test_challenger},
+};
+
+/// Clone the standalone transcript-eval main trace.
+pub(crate) fn transcript_eval_main(traces: &SessionTraces) -> RowMajorMatrix<Felt> {
+    traces.mains()[4].clone()
+}
+
+/// Return a replacement for the standalone transcript-eval main trace.
+pub(crate) fn with_transcript_eval_main(
+    _traces: &SessionTraces,
+    eval: RowMajorMatrix<Felt>,
+) -> RowMajorMatrix<Felt> {
+    eval
+}
 
 pub(crate) type SessionProof = (StarkProof, DeferredRoot);
 
@@ -52,7 +64,7 @@ impl SessionTracesTestExt for SessionTraces {
     fn prove(self) -> SessionProof {
         let public_root = self.public_root().as_array().into();
         let proof = self
-            .prove_stark(HashFunction::Blake3_256)
+            .prove_stark(DEFAULT_HASH_FUNCTION)
             .expect("prove precompile session with default hash function");
         (proof, public_root)
     }

@@ -5,6 +5,8 @@ extern crate alloc;
 extern crate std;
 
 pub mod air;
+#[doc(hidden)]
+pub mod composite;
 pub mod ec;
 pub mod fixed;
 pub mod hash;

@@ -32,7 +32,7 @@ use crate::{
     logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
     transcript::{
         binding::BindingMsg,
-        poseidon2::{Poseidon2InMsg, Poseidon2OutMsg},
+        eidos::{EidosChainInputMsg, EidosOutMsg},
     },
     utils::{current_main, next_main},
 };
@@ -82,8 +82,8 @@ where
 
         let chunk_seq_id: AB::Expr = local[chunk::COL_CHUNK_SEQ_ID].into();
         let chunk_seq_id_next: AB::Expr = next[chunk::COL_CHUNK_SEQ_ID].into();
-        let perm_seq_id: AB::Expr = local[chunk::COL_PERM_SEQ_ID].into();
-        let perm_seq_id_next: AB::Expr = next[chunk::COL_PERM_SEQ_ID].into();
+        let absorption_id: AB::Expr = local[chunk::COL_ABSORPTION_ID].into();
+        let absorption_id_next: AB::Expr = next[chunk::COL_ABSORPTION_ID].into();
         let act: AB::Expr = local[chunk::COL_ACT].into();
         let act_next: AB::Expr = next[chunk::COL_ACT].into();
         let is_head: AB::Expr = local[chunk::COL_IS_HEAD].into();
@@ -96,7 +96,7 @@ where
             .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
 
         builder.when_transition().assert_zero(
-            (AB::Expr::ONE - is_head_next) * (perm_seq_id_next - perm_seq_id - AB::Expr::ONE),
+            (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
         );
 
         builder.assert_bool(local[chunk::COL_ACT]);
@@ -125,7 +125,7 @@ where
         let chunk_seq_id_head_next: AB::Expr = next[node::COL_CHUNK_SEQ_ID_HEAD].into();
         let n_chunks: AB::Expr = local[node::COL_N_CHUNKS].into();
 
-        let _ = next[node::COL_PERM_SEQ_ID_CHUNKS];
+        let _ = next[node::COL_ABSORPTION_ID_CHUNKS];
 
         builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
         builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
@@ -161,7 +161,7 @@ where
     let local: [LB::Var; chunk::NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
 
     let chunk_seq_id: LB::Expr = local[chunk::COL_CHUNK_SEQ_ID].into();
-    let perm_seq_id: LB::Expr = local[chunk::COL_PERM_SEQ_ID].into();
+    let absorption_id: LB::Expr = local[chunk::COL_ABSORPTION_ID].into();
     let act: LB::Expr = local[chunk::COL_ACT].into();
     let is_head: LB::Expr = local[chunk::COL_IS_HEAD].into();
     let f: [LB::Expr; chunk::NUM_F] = array::from_fn(|i| local[chunk::COL_F_BEGIN + i].into());
@@ -176,11 +176,9 @@ where
     let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
 
     let pos_act: LB::Expr = act.clone();
-    let pos_act_head: LB::Expr = act * is_head;
+    let pos_act_head: LB::Expr = act * is_head.clone();
 
-    let rate0_chunk = [f[0].clone(), f[1].clone(), f[2].clone(), f[3].clone()];
-    let rate1_chunk = [f[4].clone(), f[5].clone(), f[6].clone(), f[7].clone()];
-    let cap_chunk = Tag::CHUNKS.as_word().map(LB::Expr::from);
+    let chunk_chain_context = Tag::CHUNKS.as_word().map(LB::Expr::from);
 
     let interaction_deg = Deg { v: 1, u: 1 };
     let provides_deg = Deg { v: 1, u: 2 };
@@ -241,26 +239,9 @@ where
             interaction_deg
         ),
         (
-            "rate0",
+            "eidos-chain-input",
             pos_act.clone(),
-            Poseidon2InMsg::rate0(perm_seq_id.clone(), rate0_chunk),
-            interaction_deg
-        ),
-    );
-    frac_col!(
-        builder,
-        "poseidon2-in",
-        pair_deg,
-        (
-            "rate1",
-            pos_act,
-            Poseidon2InMsg::rate1(perm_seq_id.clone(), rate1_chunk),
-            interaction_deg
-        ),
-        (
-            "cap",
-            pos_act_head.clone(),
-            Poseidon2InMsg::cap(perm_seq_id.clone(), cap_chunk),
+            EidosChainInputMsg::chunks(absorption_id.clone(), is_head, f, chunk_chain_context,),
             interaction_deg
         ),
     );
@@ -275,7 +256,7 @@ where
             neg_act_head,
             ChunkChainMsg {
                 chunk_seq_id_head: local[chunk::COL_CHUNK_SEQ_ID].into(),
-                perm_seq_id_head: perm_seq_id,
+                absorption_id_head: absorption_id,
             },
             interaction_deg
         ),
@@ -290,10 +271,10 @@ where
     let n_sponge_perms: LB::Expr = local[node::COL_N_SPONGE_PERMS].into();
     let chunk_seq_id_head: LB::Expr = local[node::COL_CHUNK_SEQ_ID_HEAD].into();
     let n_chunks: LB::Expr = local[node::COL_N_CHUNKS].into();
-    let perm_seq_id_chunks: LB::Expr = local[node::COL_PERM_SEQ_ID_CHUNKS].into();
+    let absorption_id_chunks: LB::Expr = local[node::COL_ABSORPTION_ID_CHUNKS].into();
     let len_bytes: LB::Expr = local[node::COL_LEN_BYTES].into();
-    let perm_seq_id_digest_chunks: LB::Expr = local[node::COL_PERM_SEQ_ID_DIGEST_CHUNKS].into();
-    let perm_seq_id_keccak: LB::Expr = local[node::COL_PERM_SEQ_ID_KECCAK].into();
+    let absorption_id_digest_chunks: LB::Expr = local[node::COL_ABSORPTION_ID_DIGEST_CHUNKS].into();
+    let absorption_id_keccak: LB::Expr = local[node::COL_ABSORPTION_ID_KECCAK].into();
 
     let d: [LB::Expr; node::NUM_D] = array::from_fn(|i| local[node::COL_D_BEGIN + i].into());
     let h_input_chunks: [LB::Expr; node::NUM_HASH] =
@@ -310,21 +291,19 @@ where
     let neg_out_mult: LB::Expr = LB::Expr::ZERO - out_mult;
 
     let chunk_ptr_head: LB::Expr = LB::Expr::from(Felt::from(4u8)) * chunk_seq_id_head.clone();
-    let perm_seq_id_chunks_tail: LB::Expr = perm_seq_id_chunks.clone() + n_chunks - LB::Expr::ONE;
+    let absorption_id_chunks_tail: LB::Expr =
+        absorption_id_chunks.clone() + n_chunks - LB::Expr::ONE;
     let digest_addr_base: LB::Expr = LB::Expr::from(Felt::from(100u8)) * sponge_seq_id_head
         + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
         - LB::Expr::from(Felt::from(128u8));
 
-    let cap_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
-    let cap_keccak = [
+    let digest_chunks_chain_context = Tag::CHUNKS.as_word().map(LB::Expr::from);
+    let keccak_chain_context = [
         LB::Expr::from(Keccak256Precompile::id()),
         LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
         len_bytes.clone(),
         LB::Expr::ZERO,
     ];
-
-    let d_rate0 = [d[0].clone(), d[1].clone(), d[2].clone(), d[3].clone()];
-    let d_rate1 = [d[4].clone(), d[5].clone(), d[6].clone(), d[7].clone()];
 
     frac_col!(
         builder,
@@ -356,7 +335,7 @@ where
             pos_act.clone(),
             ChunkChainMsg {
                 chunk_seq_id_head: chunk_seq_id_head.clone(),
-                perm_seq_id_head: perm_seq_id_chunks
+                absorption_id_head: absorption_id_chunks
             },
             interaction_deg
         ),
@@ -368,8 +347,8 @@ where
         (
             "p2out-h-input-chunks",
             pos_act.clone(),
-            Poseidon2OutMsg {
-                perm_seq_id: perm_seq_id_chunks_tail,
+            EidosOutMsg {
+                chain_step_id: absorption_id_chunks_tail,
                 digest: h_input_chunks.clone()
             },
             interaction_deg
@@ -431,36 +410,24 @@ where
 
     frac_col!(
         builder,
-        "digest-chunks-p2",
+        "digest-chunks-eidos",
         pair_deg,
         (
-            "p2in-rate0",
+            "eidos-chain-input",
             pos_act.clone(),
-            Poseidon2InMsg::rate0(perm_seq_id_digest_chunks.clone(), d_rate0),
+            EidosChainInputMsg::chunks(
+                absorption_id_digest_chunks.clone(),
+                LB::Expr::ONE,
+                d,
+                digest_chunks_chain_context,
+            ),
             interaction_deg
         ),
         (
-            "p2in-rate1",
+            "eidos-chain-output",
             pos_act.clone(),
-            Poseidon2InMsg::rate1(perm_seq_id_digest_chunks.clone(), d_rate1),
-            interaction_deg
-        ),
-    );
-    frac_col!(
-        builder,
-        "digest-chunks-p2",
-        pair_deg,
-        (
-            "p2in-cap",
-            pos_act.clone(),
-            Poseidon2InMsg::cap(perm_seq_id_digest_chunks.clone(), cap_digest_chunks),
-            interaction_deg
-        ),
-        (
-            "p2out-h-digest-chunks",
-            pos_act.clone(),
-            Poseidon2OutMsg {
-                perm_seq_id: perm_seq_id_digest_chunks,
+            EidosOutMsg {
+                chain_step_id: absorption_id_digest_chunks,
                 digest: h_digest_chunks.clone()
             },
             interaction_deg
@@ -469,36 +436,30 @@ where
 
     frac_col!(
         builder,
-        "keccak-p2",
+        "keccak-eidos",
         pair_deg,
         (
-            "p2in-rate0",
+            "eidos-chain-input",
             pos_act.clone(),
-            Poseidon2InMsg::rate0(perm_seq_id_keccak.clone(), h_input_chunks),
+            EidosChainInputMsg::node(
+                absorption_id_keccak.clone(),
+                LB::Expr::ONE,
+                array::from_fn(|idx| {
+                    if idx < 4 {
+                        h_input_chunks[idx].clone()
+                    } else {
+                        h_digest_chunks[idx - 4].clone()
+                    }
+                }),
+                keccak_chain_context,
+            ),
             interaction_deg
         ),
         (
-            "p2in-rate1",
-            pos_act.clone(),
-            Poseidon2InMsg::rate1(perm_seq_id_keccak.clone(), h_digest_chunks),
-            interaction_deg
-        ),
-    );
-    frac_col!(
-        builder,
-        "keccak-p2",
-        pair_deg,
-        (
-            "p2in-cap",
-            pos_act.clone(),
-            Poseidon2InMsg::cap(perm_seq_id_keccak.clone(), cap_keccak),
-            interaction_deg
-        ),
-        (
-            "p2out-h-keccak",
+            "eidos-chain-output",
             pos_act,
-            Poseidon2OutMsg {
-                perm_seq_id: perm_seq_id_keccak,
+            EidosOutMsg {
+                chain_step_id: absorption_id_keccak,
                 digest: h_keccak
             },
             interaction_deg
