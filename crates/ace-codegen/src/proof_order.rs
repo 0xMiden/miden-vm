@@ -1,9 +1,9 @@
 //! Proof-order ranking for a multi-AIR relation.
 //!
 //! A lifted STARK commits its AIR traces in ascending `(log height, instance index)` order, which
-//! varies per workload. That permutation is named by its Lehmer rank relative to the canonical
-//! instance order, so a relation, its MASM verifier, and their tests can all refer to one
-//! ordering by the same number.
+//! varies per workload. This module names that permutation by its Lehmer rank relative to the
+//! canonical instance order for exhaustive and reference tests. Production MASM verifiers derive
+//! each AIR's proof-order position directly from the committed heights and do not route by rank.
 
 /// Largest AIR count whose complete permutation set fits in the `u32` tag space.
 ///

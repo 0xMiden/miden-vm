@@ -152,6 +152,7 @@ impl PvmOodGeometry {
     /// These are base-field widths: auxiliary columns have already been expanded into extension
     /// coordinates above, while out-of-domain transport expands every evaluation once more in
     /// [`Self::row_felts`].
+    #[cfg(feature = "constants-tools")]
     pub(crate) fn deep_query_groups(&self) -> [(&'static str, &'static str, usize); 4] {
         [
             (
@@ -547,16 +548,16 @@ mod tests {
     fn pvm_row_geometry_is_the_one_the_hook_was_rendered_from() {
         let geometry = live_geometry();
         assert_eq!(geometry.preprocessed, vec![0, 0, 0, 8, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(geometry.main, vec![104, 128, 72, 8, 40, 48, 32, 24, 24, 48]);
+        assert_eq!(geometry.main, vec![104, 112, 72, 8, 40, 48, 32, 24, 24, 48]);
         assert_eq!(geometry.aux, vec![48, 40, 24, 8, 24, 56, 8, 16, 24, 32]);
         assert_eq!(geometry.quotient, 8);
-        assert_eq!(geometry.row_felts(), 1_648);
-        assert_eq!(geometry.row_blocks(), 206);
+        assert_eq!(geometry.row_felts(), 1_616);
+        assert_eq!(geometry.row_blocks(), 202);
 
         let plan = pvm_scatter_plan(&geometry).expect("scatter plan");
         assert_eq!(plan.dispatches.len(), 22, "one segment per occupied per-chiplet block");
         assert_eq!(plan.dispatched_slots(), 20, "main and aux are the order-dependent groups");
-        assert_eq!(plan.lengths, vec![2, 4, 6, 8, 10, 12, 14, 18, 26, 32]);
+        assert_eq!(plan.lengths, vec![2, 4, 6, 8, 10, 12, 14, 18, 26, 28]);
         assert_eq!(plan.digest_offset, 44);
     }
 
