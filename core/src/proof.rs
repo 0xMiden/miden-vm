@@ -26,13 +26,15 @@ pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
 const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
-const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
+/// The recursive VM verifier root declared by proofs from the current prover.
+pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
     crate::Felt::new_unchecked(4465259443638079335),
     crate::Felt::new_unchecked(17418505147041915588),
     crate::Felt::new_unchecked(17745366771765383900),
     crate::Felt::new_unchecked(5300166905943834781),
 ]);
-const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
+/// The recursive precompile verifier root declared by proofs from the current prover.
+pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
     crate::Felt::new_unchecked(2947623151120287659),
     crate::Felt::new_unchecked(14078382412112533261),
     crate::Felt::new_unchecked(16121817997513902205),

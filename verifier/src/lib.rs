@@ -12,7 +12,7 @@ use miden_core::{
     Felt,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST, fold_deferred_root},
     field::QuadFelt,
-    proof::MAX_STARK_PROOF_BYTES,
+    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
 use miden_crypto::stark::{
     StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
@@ -40,19 +40,6 @@ pub use exports::*;
 
 pub mod recursive;
 
-const VM_VERIFIER_ROOT_V1: Word = Word::new([
-    Felt::new_unchecked(4465259443638079335),
-    Felt::new_unchecked(17418505147041915588),
-    Felt::new_unchecked(17745366771765383900),
-    Felt::new_unchecked(5300166905943834781),
-]);
-const PVM_VERIFIER_ROOT_V1: Word = Word::new([
-    Felt::new_unchecked(2947623151120287659),
-    Felt::new_unchecked(14078382412112533261),
-    Felt::new_unchecked(16121817997513902205),
-    Felt::new_unchecked(3291147646890284397),
-]);
-
 struct VerifierSupport {
     format: u8,
     accepted_vm_roots: &'static [Word],
@@ -78,8 +65,8 @@ impl VerifierSupport {
 
 const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
     format: ExecutionProofCompatibility::FORMAT_V1,
-    accepted_vm_roots: &[VM_VERIFIER_ROOT_V1],
-    accepted_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
+    accepted_vm_roots: &[CURRENT_VM_VERIFIER_ROOT],
+    accepted_pvm_roots: &[CURRENT_PVM_VERIFIER_ROOT],
 };
 
 // VERIFIER
@@ -701,14 +688,14 @@ mod tests {
         ]);
         const SUPPORT: VerifierSupport = VerifierSupport {
             format: ExecutionProofCompatibility::FORMAT_V1,
-            accepted_vm_roots: &[OLD_VM_ROOT, VM_VERIFIER_ROOT_V1],
-            accepted_pvm_roots: &[OLD_PVM_ROOT, PVM_VERIFIER_ROOT_V1],
+            accepted_vm_roots: &[OLD_VM_ROOT, CURRENT_VM_VERIFIER_ROOT],
+            accepted_pvm_roots: &[OLD_PVM_ROOT, CURRENT_PVM_VERIFIER_ROOT],
         };
 
         let proof = complete(TRUE_DIGEST, None);
 
-        assert_eq!(proof.compatibility().vm_verifier_roots(), &[VM_VERIFIER_ROOT_V1]);
-        assert_eq!(proof.compatibility().pvm_verifier_roots(), &[PVM_VERIFIER_ROOT_V1]);
+        assert_eq!(proof.compatibility().vm_verifier_roots(), &[CURRENT_VM_VERIFIER_ROOT]);
+        assert_eq!(proof.compatibility().pvm_verifier_roots(), &[CURRENT_PVM_VERIFIER_ROOT]);
 
         let old_compatible = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]).unwrap(),
