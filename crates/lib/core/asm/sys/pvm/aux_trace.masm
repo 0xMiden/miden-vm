@@ -6,16 +6,23 @@ use miden::core::sys::pvm::layout
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18
+
+# Number of chiplet instances in the relation, each contributing one boundary value.
+const NUM_CHIPLETS = 10
+# Words spanned by the ten proof-ordered, two-felt normalized boundary sums.
 const NUM_AUX_VALUE_WORDS = 5
 
-#! Loads `(2^log_height - 1) * sigma_prime` for one normalized LogUp value. Adding this adjustment
-#! to the unweighted sum changes that value's coefficient from one to its trace length.
+#! Load one normalized committed LogUp sum and scale both extension coordinates by the chiplet's
+#! row count `n = 2^log_height`.
 #!
-#! Input:  [value_ptr, log_height, ...]
-#! Output: [adjustment_0, adjustment_1, ...]
-proc load_normalization_adjustment
-    swap pow2 sub.1
-    swap
+#! `boundary_offset` is `2k` for canonical instance index `k`, so the caller must have scattered
+#! the sums to their canonical addresses first.
+#!
+#! Input:  [boundary_offset, log_height, ...]
+#! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
+proc load_weighted_aux_sum
+    swap pow2
+    exec.layout::aux_bus_boundary_ptr movup.2 add
 
     dup mem_load
     dup.2 mul
@@ -24,35 +31,89 @@ proc load_normalization_adjustment
     movup.2 mul swap
 end
 
-#! Loads the `(n - 1) * sigma_prime` adjustment for one AIR.
+#! Reads the normalized boundary sum submitted at one position of the proof order.
 #!
-#! Input:  [air_index, ...]
-#! Output: [adjustment_0, adjustment_1, ...]
-proc load_air_normalization_adjustment
-    dup
-    exec.constants::air_trace_length_logs_ptr add mem_load
-    swap
-    exec.layout::aux_value_ptrs_ptr add mem_load
-    exec.load_normalization_adjustment
+#! Input:  [proof_order_position, ...]
+#! Output: [sigma_prime_0, sigma_prime_1, ...]
+proc load_boundary_pair
+    mul.2 exec.layout::aux_bus_boundary_ptr add
+
+    dup add.1 mem_load
+    swap mem_load
+end
+
+#! Moves each normalized boundary sum from its proof-order slot to its canonical instance-order
+#! slot.
+#!
+#! The proof submits one sum per chiplet ordered by trace height, so the absorb above stores them
+#! in that order. The constraint circuit instead reads chiplet `k`'s sum at
+#! `AUX_BUS_BOUNDARY_PTR + 2k`, the address `InputKey::AuxBusBoundary(k)` names, with `k` the
+#! canonical instance index. Positions come from the table `pvm::stage_proof_order_positions`
+#! stages once per proof, not from a per-call ranking of the heights.
+#!
+#! Every sum is read onto the operand stack before any is written back, so the region is permuted
+#! in place without scratch memory. The AIR heights and their proof-order positions must already
+#! be staged; the sums must already be absorbed.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc scatter_aux_bus_boundary
+    exec.layout::proof_order_positions_ptr add.9 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.8 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.7 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.6 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.5 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.4 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.3 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.2 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr add.1 mem_load
+    exec.load_boundary_pair
+
+    exec.layout::proof_order_positions_ptr mem_load
+    exec.load_boundary_pair
+    # => [sigma_prime_0, ..., sigma_prime_9, ...] in canonical instance order
+
+    exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
+    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
+    exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le dropw
+    exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le dropw
+    exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le dropw
 end
 
 #! Observes the PVM auxiliary trace commitment and its ten normalized LogUp values.
 #!
-#! The advice provider supplies the commitment followed by each AIR's exposed values in proof
-#! order. Every AIR exposes one `sigma_prime = sigma / n`, which is weighted by that AIR's trace
-#! length before closing the external LogUp identity.
+#! The advice provider supplies the commitment followed by each chiplet's exposed value in proof
+#! order. Every chiplet exposes one `sigma_prime = sigma / n`, which is weighted by that chiplet's
+#! trace length before closing the external LogUp identity.
 #!
 #! The stream is 24 base felts: the four-felt commitment followed by twenty LogUp-value
 #! coordinates. It fills three Eidos rate blocks exactly, matching the lifted-STARK transcript
 #! before it samples composition challenges.
 #!
+#! Once absorbed, the values are moved to the canonical addresses the constraint circuit reads
+#! them from.
+#!
 #! The hook also adds the verifier-side consumes for the fixed uint/curve environment and asserts
 #! `fixed_boundary_correction + sum_i(n_i * sigma_prime_i) == 0` coordinate-wise.
 #!
-#! Preconditions:
-#! - `pvm::load_air_context` populated the per-AIR heights and auxiliary-value pointers;
-#! - input_len=0 (the main commitment was flushed before this hook).
-#! Postcondition: input_len=0, output_len=0.
+#! Precondition:  input_len=0 (the main commitment was flushed before this hook).
+#! Postcondition: input_len=4, output_len=0.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -88,32 +149,45 @@ pub proc observe_aux_trace
     exec.random_coin::eidos_observe_word
 
     exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="PVM observe_aux_trace: boundary transcript framing drifted"
+    push.0 assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
     exec.constants::random_coin_output_len_ptr mem_load
     assertz.err="PVM observe_aux_trace: observed input exposed stale output"
 
-    # Start with the unweighted sum of all ten normalized values.
-    push.0.0
-    exec.layout::aux_bus_boundary_ptr movdn.2
-    # => [sum0, sum1, ptr]
-    repeat.NUM_AUX_VALUE_WORDS
-        padw dup.6 mem_loadw_le
-        ext2add ext2add
-        movup.2 add.4 movdn.2
-    end
-    movup.2 drop
+    # The transcript has now seen the wire order, so the sums may move to the canonical addresses
+    # the constraint circuit reads them from. Everything below indexes the region by canonical
+    # instance index, so this must precede the weighted sum, not follow it.
+    exec.scatter_aux_bus_boundary
 
-    # Add `(n_i - 1) * sigma_prime_i` once for every AIR.
-    push.0 exec.load_air_normalization_adjustment ext2add
-    push.1 exec.load_air_normalization_adjustment ext2add
-    push.2 exec.load_air_normalization_adjustment ext2add
-    push.3 exec.load_air_normalization_adjustment ext2add
-    push.4 exec.load_air_normalization_adjustment ext2add
-    push.5 exec.load_air_normalization_adjustment ext2add
-    push.6 exec.load_air_normalization_adjustment ext2add
-    push.7 exec.load_air_normalization_adjustment ext2add
-    push.8 exec.load_air_normalization_adjustment ext2add
-    push.9 exec.load_air_normalization_adjustment ext2add
+    # Scale chiplet k's normalized sum, now at offset 2k, by chiplet k's trace length. Each call
+    # produces its pair on top of the running sum, which sits undisturbed beneath it until folded.
+    exec.constants::air_trace_length_logs_ptr mem_load push.0 exec.load_weighted_aux_sum
+
+    exec.constants::air_trace_length_logs_ptr add.1 mem_load push.2 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.2 mem_load push.4 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.3 mem_load push.6 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.4 mem_load push.8 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.5 mem_load push.10 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.6 mem_load push.12 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.7 mem_load push.14 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.8 mem_load push.16 exec.load_weighted_aux_sum
+    ext2add
+
+    exec.constants::air_trace_length_logs_ptr add.9 mem_load push.18 exec.load_weighted_aux_sum
+    ext2add
 
     exec.layout::c_total_ptr add.1 mem_load
     exec.layout::c_total_ptr mem_load

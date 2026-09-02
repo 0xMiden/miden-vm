@@ -185,10 +185,9 @@ fn extract_ace_inputs(output: &ExecutionOutput, layout: &InputLayout) -> Vec<Qua
 
 /// The proof order the verifier's staged heights induce.
 ///
-/// Nothing in memory records the order any more: after F1 the verifier never ranks the AIRs into
-/// a tag, it resolves each AIR's proof position from the heights where it needs one. The heights
-/// are transcript-bound, so deriving the order from them here reads the same source the verifier
-/// itself uses.
+/// The order is not recorded anywhere in verifier memory: each site that needs a proof position
+/// resolves it from the per-AIR heights. Those heights are transcript-bound, so deriving the
+/// order from them here reads the same source the verifier itself does.
 fn extract_order(output: &ExecutionOutput) -> ProofOrder {
     let log_heights: Vec<u8> =
         staged_log_heights(output).into_iter().map(|height| height as u8).collect();

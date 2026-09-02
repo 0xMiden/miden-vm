@@ -233,9 +233,9 @@ fn the_scatter_moves_every_boundary_value_to_its_canonical_air() {
 /// every proof order and checks the two halves meet: slot `k` carries AIR `k`'s height, and
 /// offset `2k` carries the value AIR `k` submitted from wherever it sat on the wire.
 ///
-/// Reordering the scatter after the sum would leave offset `2k` holding proof position `k`'s
-/// value while slot `k` still carried AIR `k`'s height — a silent mispairing for every
-/// non-identity order, which is what this pins.
+/// Running the scatter after the sum instead would leave offset `2k` holding proof position `k`'s
+/// value while slot `k` carried AIR `k`'s height — a silent mispairing for every non-identity
+/// order, which is what this pins.
 #[test]
 fn the_weighted_sum_pairs_each_height_with_its_own_airs_boundary_value() {
     let wire = wire_values();

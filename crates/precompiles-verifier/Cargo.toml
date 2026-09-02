@@ -20,7 +20,7 @@ concurrent = [
     "dep:rayon",
     "miden-precompiles-air/concurrent",
 ]
-registry-tools = ["std", "dep:miden-air", "dep:rayon"]
+constants-tools = ["std", "dep:miden-air", "dep:rayon"]
 std = [
     "dep:miden-ace-codegen",
     "miden-core/std",
@@ -45,9 +45,9 @@ thiserror.workspace = true
 wincode.workspace = true
 
 [[bin]]
-name = "pvm-registry-regen"
-path = "src/bin/pvm_registry_regen.rs"
-required-features = ["registry-tools"]
+name = "pvm-constants-regen"
+path = "src/bin/pvm_constants_regen.rs"
+required-features = ["constants-tools"]
 
 [dev-dependencies]
 insta.workspace = true
