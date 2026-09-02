@@ -409,6 +409,23 @@ fn proof_order_position_from_heights_rejects_out_of_range_heights() {
     }
 }
 
+/// The MASM order-tag limit must match the shared ranking's supported AIR count.
+#[test]
+fn derive_order_tag_from_heights_matches_the_shared_air_limit() {
+    const PTR: u64 = 1000;
+    let max_airs = miden_ace_codegen::MAX_ORDER_AIRS;
+
+    let heights: Vec<u64> = (0..max_airs as u64).collect();
+    build_test!(derive_order_tag_source(), &[PTR, max_airs as u64], &heights)
+        .execute()
+        .expect("the shared ranking's maximum AIR count must be supported");
+
+    let oversized = max_airs + 1;
+    let heights: Vec<u64> = (0..oversized as u64).collect();
+    let test = build_test!(derive_order_tag_source(), &[PTR, oversized as u64], &heights);
+    expect_assert_error_code_from_msg!(test, "num_airs exceeds supported order-tag range");
+}
+
 // ---- canonical fold-coefficient staging ----
 //
 // The multi-AIR fold is a Horner accumulation over the height-sorted proof order, so the
@@ -582,28 +599,6 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
                 "canonical fold coefficient {k} of {num_airs} AIRs is staged off-slot"
             );
         }
-    }
-}
-
-/// A relation evaluator that still selects its circuit by proof-order tag must reject padding
-/// slots before opening its registry tree.
-///
-/// The VM evaluator no longer has a tag to reject: one circuit serves every proof order and the
-/// loader pins it to a compiled-in digest instead of opening a registry slot.
-#[test]
-fn relation_constraint_evaluators_reject_padding_order_tags() {
-    for (relation, order_count) in [("pvm", 3_628_800)] {
-        let source = format!(
-            "use miden::core::stark::constants
-             use miden::core::sys::{relation}::constraints_eval
-             begin
-                 push.{order_count} exec.constants::set_order_tag
-                 push.8 exec.constants::set_trace_length_log
-                 exec.constraints_eval::execute_constraint_evaluation_check
-             end"
-        );
-        let test = build_test!(source, &[]);
-        expect_assert_error_code_from_msg!(test, "invalid order tag");
     }
 }
 
