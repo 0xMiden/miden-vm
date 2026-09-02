@@ -36,6 +36,12 @@ pub const FALCON_HASH_TO_POINT_DOMAIN_ID: u32 = 0x000004;
 /// Registered Eidos selector for the Falcon hash-to-point construction.
 pub const FALCON_HASH_TO_POINT_SELECTOR: u32 = (FALCON_HASH_TO_POINT_DOMAIN_ID << 8) | 1;
 
+/// Registered Eidos domain ID for the Falcon product-check transcript.
+pub const FALCON_PRODUCT_CHECK_DOMAIN_ID: u32 = 0x000005;
+
+/// Registered Eidos selector for the Falcon product-check transcript.
+pub const FALCON_PRODUCT_CHECK_SELECTOR: u32 = (FALCON_PRODUCT_CHECK_DOMAIN_ID << 8) | 1;
+
 // CONSTANTS
 // ================================================================================================
 
