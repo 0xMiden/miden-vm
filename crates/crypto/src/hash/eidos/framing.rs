@@ -18,7 +18,7 @@ pub(super) const FELT_BLOCK_INIT_CV: [u32; 8] = init_cv_unchecked(0, [BLOCK_LEN 
 
 const FELT_INIT_CV: [u32; 8] = init_cv_unchecked(0, [0; 3]);
 
-/// Felt-sequence initial chaining word before absorbing the required zero block for empty input.
+/// Felt-sequence initial chaining word before compressing the required zero block for empty input.
 pub(super) const FELT_INIT_CV_U64: [u64; DIGEST_WIDTH] = [
     encoding::pack_output_pair_u64(FELT_INIT_CV[0], FELT_INIT_CV[1]),
     encoding::pack_output_pair_u64(FELT_INIT_CV[2], FELT_INIT_CV[3]),
