@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::DeferredState};
+use miden_core::{
+    Felt,
+    deferred::{DeferredState, TRUE_DIGEST},
+};
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::registry;
 use miden_processor::{
@@ -60,6 +63,32 @@ pub fn run_precompile_program_with_stack(
     }
 
     output
+}
+
+#[test]
+fn log_deferred_wrapper_consumes_digest_and_preserves_tail() {
+    let tail = [
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ];
+    let stack = TRUE_DIGEST.as_elements().iter().copied().chain(tail).collect::<Vec<_>>();
+    let source = "begin exec.::miden::core::precompiles::log_deferred end";
+
+    let output = run_precompile_program_with_stack(source, &stack)
+        .expect("log_deferred wrapper should accept TRUE_DIGEST");
+
+    assert_eq!(read_stack_felts(&output, tail.len()), tail);
+    assert_ne!(output.deferred_state.root(), TRUE_DIGEST);
 }
 
 pub fn expect_precompile_trap(source: &str) -> ExecutionError {

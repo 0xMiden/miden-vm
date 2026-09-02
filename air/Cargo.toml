@@ -21,7 +21,7 @@ doctest = false
 default = ["std"]
 arbitrary = ["std", "dep:proptest"]
 std = ["miden-core/std", "proptest?/std", "thiserror/std"]
-concurrent = ["std"]
+concurrent = ["std", "miden-crypto/concurrent"]
 testing = []
 
 [dependencies]

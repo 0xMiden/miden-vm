@@ -9,10 +9,9 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::{
-    Felt, ZERO,
+    Felt,
     deferred::{
         DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        precompile_id,
     },
 };
 
@@ -25,8 +24,10 @@ pub mod keccak256;
 
 /// The byte-level hash backing a [`HashPrecompile`].
 pub trait HashFunction: Default + Send + Sync + 'static {
-    /// Stable name hashed into the precompile id; renaming changes every tag it owns.
+    /// Human-readable name used for diagnostics.
     const NAME: &'static str;
+    /// Registered numeric selector for this hash precompile.
+    const SELECTOR: Felt;
     /// u32-packed-LE felts in the digest (8 for a 256-bit hash, 16 for 512-bit).
     const DIGEST_FELTS: usize;
     /// Hashes `input`, returning the digest as `DIGEST_FELTS * 4` bytes.
@@ -65,14 +66,14 @@ impl<H: HashFunction> HashPrecompile<H> {
     /// Local discriminant of the assertion tag.
     pub const ASSERT_TAG_ID: u32 = ASSERT_DISC;
 
-    /// Derives this precompile's id from its [`HashFunction::NAME`].
+    /// Returns this precompile's registered selector.
     pub fn id() -> Felt {
-        precompile_id(H::NAME)
+        H::SELECTOR
     }
 
     /// Tag for a hash assertion node carrying the preimage byte length.
     pub fn assert_tag(n_bytes: u32) -> Tag {
-        Self::tag([Felt::from_u32(ASSERT_DISC), Felt::from_u32(n_bytes), ZERO])
+        Self::tag([Felt::from_u32(ASSERT_DISC), Felt::from_u32(n_bytes)])
     }
 
     /// Builds a hash assertion predicate over generic chunk-list children.
@@ -95,7 +96,7 @@ impl<H: HashFunction> HashPrecompile<H> {
             u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
         let n_bytes =
             u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC || args[2] != ZERO {
+        if disc != ASSERT_DISC {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -118,7 +119,7 @@ impl<H: HashFunction> HashPrecompile<H> {
         }))
     }
 
-    fn tag(args: [Felt; 3]) -> Tag {
+    fn tag(args: [Felt; 2]) -> Tag {
         Tag::precompile(Self::id(), args).expect("hash precompile id is not framework-reserved")
     }
 
@@ -136,9 +137,9 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         Self::id()
     }
 
-    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+    fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
-        if disc != ASSERT_DISC || args[2] != ZERO {
+        if disc != ASSERT_DISC {
             return None;
         }
         u32::try_from(args[1].as_canonical_u64()).ok()?;
@@ -147,7 +148,7 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
 
     fn evaluate(
         &self,
-        args: [Felt; 3],
+        args: [Felt; 2],
         payload: &Payload,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
@@ -155,7 +156,7 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
             u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
         let n_bytes =
             u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC || args[2] != ZERO {
+        if disc != ASSERT_DISC {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -204,6 +205,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::{
+        ZERO,
         deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, Tag},
         utils::bytes_to_packed_u32_elements,
     };
@@ -255,30 +257,21 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
 
     let pc = HashPrecompile::<H>::default();
     assert_eq!(
-        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), Felt::from_u32(65), ZERO]),
+        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), Felt::from_u32(65)]),
         Some(NodeType::Join),
     );
-    assert!(pc.decode([Felt::from_u32(1), ZERO, ZERO]).is_none());
-    assert!(
-        pc.decode([
-            Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID),
-            Felt::from_u32(65),
-            Felt::from_u32(1),
-        ])
-        .is_none()
-    );
+    assert!(pc.decode([Felt::from_u32(1), ZERO]).is_none());
     let non_u32 = Felt::new_unchecked(u64::from(u32::MAX) + 1);
-    assert!(pc.decode([non_u32, ZERO, ZERO]).is_none());
+    assert!(pc.decode([non_u32, ZERO]).is_none());
     assert!(
-        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), non_u32, ZERO])
+        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), non_u32])
             .is_none()
     );
 
     let assert_tag = HashPrecompile::<H>::assert_tag(65);
     assert_eq!(HashPrecompile::<H>::decode_assert_tag(assert_tag).unwrap(), Some(65));
     assert_eq!(HashPrecompile::<H>::decode_assert_tag(Tag::CHUNKS).unwrap(), None);
-    let invalid_assert_tag =
-        HashPrecompile::<H>::tag([Felt::from_u32(1), Felt::from_u32(65), ZERO]);
+    let invalid_assert_tag = HashPrecompile::<H>::tag([Felt::from_u32(1), Felt::from_u32(65)]);
     assert!(matches!(
         HashPrecompile::<H>::decode_assert_tag(invalid_assert_tag),
         Err(PrecompileError::InvalidNode)

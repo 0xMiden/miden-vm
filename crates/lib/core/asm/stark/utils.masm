@@ -41,7 +41,6 @@ end
 #!
 #! Input: [log2(domain_size), ..]
 #! Output: [domain_gen, ..]
-#! Cycles: 63
 pub proc compute_lde_generator
     push.32
     swap
@@ -53,10 +52,29 @@ pub proc compute_lde_generator
     # => [domain_gen, ..]
 end
 
-#! Validates the inputs to the recursive verifier.
+#! Compute the canonical LDE coset shift from the log2 of its size.
 #!
-#! Checks security parameters from memory. Relation wrappers validate and store trace metadata
-#! before calling the generic verifier.
+#! This mirrors `LiftedDomain::canonical_lde_shift(log_lde_order)` on the Rust side:
+#! `Felt::GENERATOR^(2^(TWO_ADICITY - log_lde_order))`.
+#!
+#! Input: [log2(domain_size), ..]
+#! Output: [domain_shift, ..]
+pub proc compute_lde_shift
+    push.32
+    swap
+    sub
+    pow2
+    push.7
+    swap
+    # => [exponent, generator, ..]
+    exp.u32
+    # => [domain_shift, ..]
+end
+
+#! Validates generic security parameters for the recursive verifier.
+#!
+#! The instance-specific wrapper validates shape and stores these parameters before calling the
+#! generic verifier.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -99,7 +117,6 @@ end
 #!
 #! Input: [index, pow2_shift, ...]
 #! Output: [rev_index, ...]
-#! Cycles: 78
 pub proc bit_reverse_len_parallel
     u32wrapping_mul
 
@@ -280,6 +297,71 @@ pub proc derive_order_tag_from_heights
     # => [tag, num_airs, heights_ptr]
     swap drop swap drop
     # => [tag]
+end
+
+#! Returns one canonical AIR's position in the stable height-sorted proof order.
+#!
+#! This is the `pos_k` term used by `derive_order_tag_from_heights`, exposed separately for
+#! relation hooks whose proof stream contains a variable number of values per AIR. Earlier AIRs
+#! precede the target on equal heights; later AIRs precede it only on a strictly smaller height.
+#!
+#! Precondition: `target_index < num_airs <= MAX_ORDER_AIRS` and `num_airs >= 2`.
+#!
+#! Input:  [target_index, num_airs, heights_ptr]
+#! Output: [proof_order_position]
+pub proc proof_order_position_from_heights
+    dup.1 u32lte.MAX_ORDER_AIRS assert.err="num_airs exceeds supported proof-order range"
+    dup dup.2 u32lt assert.err="target AIR index exceeds relation size"
+
+    # Load the target height.
+    dup.2 dup.1 add mem_load
+    # => [h_k, k, num_airs, heights_ptr]
+
+    push.0.0
+    # => [m = 0, inv = 0, h_k, k, num_airs, heights_ptr]
+
+    # Count earlier AIRs that sort after the target.
+    dup.3 dup.1 u32gt
+    while.true
+        dup.5 dup.1 add mem_load
+        # => [h_m, m, inv, h_k, k, num_airs, heights_ptr]
+
+        dup dup.4 u32gt
+        movup.3 add movdn.2
+
+        drop add.1
+        dup.3 dup.1 u32gt
+    end
+    drop
+    # => [inv, h_k, k, num_airs, heights_ptr]
+
+    # Among the k earlier AIRs, exactly k - inv precede the target.
+    dup.2 dup.1 sub
+    swap
+    # => [inv, pos = k - inv, h_k, k, num_airs, heights_ptr]
+
+    # Count later AIRs with a strictly smaller height.
+    dup.3 add.1
+    dup.5 dup.1 u32gt
+    while.true
+        dup.6 dup.1 add mem_load
+        # => [h_m, m, inv, pos, h_k, k, num_airs, heights_ptr]
+
+        dup dup.5 u32lt
+        movup.4 add movdn.3
+
+        drop add.1
+        dup.5 dup.1 u32gt
+    end
+    drop
+    # => [inv, pos, h_k, k, num_airs, heights_ptr]
+
+    drop
+    # => [pos, h_k, k, num_airs, heights_ptr]
+    swap drop
+    swap drop
+    swap drop
+    swap drop
 end
 
 #! Computes x! for small x.

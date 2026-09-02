@@ -226,7 +226,7 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    /// Returns a commitment to the public key using the Poseidon2 hash function.
+    /// Returns a commitment to the public key using Eidos.
     ///
     /// The commitment is computed by first converting the public key to field elements (4 bytes
     /// per element), and then computing a sequential hash of the elements.

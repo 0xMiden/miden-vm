@@ -22,17 +22,17 @@ pub struct Prover {
 }
 
 impl Prover {
-    /// Default maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// VM execution trace.
+    /// Default maximum modelled peak memory, in bytes, for proving a VM execution trace.
     ///
-    /// This bounds only the lifted-STARK Miden VM proof modelled by `miden_air::memory`; it does
-    /// not cover the precompile prover's memory footprint.
+    /// This bounds only the lifted-STARK Miden VM allocations modelled by `miden_air::memory`; it
+    /// is not a total process-RSS or allocator cap. In particular, the model excludes the fixed
+    /// And8 preprocessed setup and the precompile prover's memory footprint.
     pub const DEFAULT_MAX_PROVER_MEMORY_BYTES: u64 = trace::DEFAULT_MAX_PROVER_MEMORY_BYTES;
 
     /// Creates a prover with the canonical proof-generation configuration.
     pub const fn new() -> Self {
         Self {
-            hash_fn: HashFunction::Blake3_256,
+            hash_fn: HashFunction::Eidos,
             max_prover_memory_bytes: Self::DEFAULT_MAX_PROVER_MEMORY_BYTES,
         }
     }
@@ -44,16 +44,16 @@ impl Prover {
         self
     }
 
-    /// Sets the maximum memory, in bytes, this prover is permitted to allocate for a proof over a
-    /// VM execution trace.
+    /// Sets the maximum modelled peak memory, in bytes, for proving a VM execution trace.
+    ///
+    /// See [`Self::DEFAULT_MAX_PROVER_MEMORY_BYTES`] for the model's scope and exclusions.
     #[must_use]
     pub const fn with_max_prover_memory_bytes(mut self, max_prover_memory_bytes: u64) -> Self {
         self.max_prover_memory_bytes = max_prover_memory_bytes;
         self
     }
 
-    /// Returns the maximum memory, in bytes, this prover is permitted to allocate for a proof
-    /// over a VM execution trace.
+    /// Returns the maximum modelled peak memory, in bytes, for proving a VM execution trace.
     pub const fn max_prover_memory_bytes(&self) -> u64 {
         self.max_prover_memory_bytes
     }
@@ -139,19 +139,20 @@ impl Prover {
         let params = config::pcs_params();
         tracing::event!(
             tracing::Level::INFO,
-            "Generated execution traces: core={}, range={}, chiplets={}, poseidon2={}, padded={}, \
+            "Generated execution traces: core={}, chiplets={}, eidos_compression={}, and8={}, padded={}, \
              estimated_prover_memory_bytes={:?}",
-            trace_len_summary.core_trace_len(),
-            trace_len_summary.range_trace_len(),
-            trace_len_summary.chiplets_trace_len().trace_len(),
-            trace_len_summary.poseidon2_permutation_trace_len(),
+            trace_len_summary.core_rows(),
+            trace_len_summary.chiplets_rows(),
+            trace_len_summary.eidos_compression_rows(),
+            trace_len_summary.byte_pair_lookup_rows(),
             trace_len_summary.padded_trace_len(),
             trace_len_summary.prover_memory_bytes(&params)
         );
 
         let precompile_root = trace.precompile_root();
         let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
-        let (core_matrix, chiplets_matrix, poseidon2_matrix) = trace.into_air_matrices();
+        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
+            trace.into_air_matrices();
 
         let proof_bytes = match self.hash_fn {
             HashFunction::Blake3_256 => {
@@ -160,7 +161,8 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    poseidon2_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
                     &public_values,
                     &aux_inputs,
                 )
@@ -171,7 +173,20 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    poseidon2_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
+                    &public_values,
+                    &aux_inputs,
+                )
+            },
+            HashFunction::Eidos => {
+                let config = config::eidos_config(params, config::RELATION_DIGEST);
+                prove_stark(
+                    &config,
+                    core_matrix,
+                    chiplets_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
                     &public_values,
                     &aux_inputs,
                 )
@@ -182,7 +197,8 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    poseidon2_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
                     &public_values,
                     &aux_inputs,
                 )
@@ -193,7 +209,8 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    poseidon2_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
                     &public_values,
                     &aux_inputs,
                 )
@@ -204,7 +221,8 @@ impl Prover {
                     &config,
                     core_matrix,
                     chiplets_matrix,
-                    poseidon2_matrix,
+                    eidos_compression_matrix,
+                    and8_matrix,
                     &public_values,
                     &aux_inputs,
                 )
@@ -304,7 +322,7 @@ mod tests {
     #[test]
     fn prover_uses_canonical_default_and_allows_hash_override() {
         let prover = Prover::new();
-        assert_eq!(prover.hash_fn, HashFunction::Blake3_256);
+        assert_eq!(prover.hash_fn, HashFunction::Eidos);
 
         let prover = prover.with_hash_fn(HashFunction::Poseidon2);
         assert_eq!(prover.hash_fn, HashFunction::Poseidon2);

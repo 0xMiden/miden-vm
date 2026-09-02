@@ -34,7 +34,7 @@ proptest! {
 
 /// The MASM `sys::vm::claim::claim_commitment` procedure must agree with the native
 /// `ExecutionClaim::commitment` on the same claim region (same encoding, same domain tag, same
-/// capacity layout).
+/// Eidos framing layout).
 #[test]
 fn masm_claim_commitment_matches_native() {
     use miden_core::{
@@ -98,18 +98,18 @@ fn masm_claim_commitment_matches_native() {
     build_test!(source.as_str(), &[]).expect_stack(&expected);
 }
 
-/// The MASM `poseidon2::hash_elements_in_domain` must agree with the native implementation for
-/// rate-aligned, unaligned, and empty inputs, exercising the kernel commitment's domain.
+/// The MASM `eidos::hash_elements_in_domain` must agree with the native implementation for
+/// block-aligned, unaligned, and empty inputs, exercising the kernel commitment's domain.
 #[test]
 fn hash_elements_in_domain_matches_native() {
     use miden_core::{Felt, chiplets::hasher};
 
-    let mut marked_rate_block = vec![0; 8];
-    marked_rate_block[0] = 1;
+    let mut marked_block = vec![0; 8];
+    marked_block[0] = 1;
     let cases = [
         vec![],
         vec![0; 8],
-        marked_rate_block,
+        marked_block,
         (1..=5).collect(),
         (1..=8).collect(),
         (1..=11).collect(),
@@ -140,14 +140,14 @@ fn hash_elements_in_domain_matches_native() {
         let source = format!(
             "
             use miden::core::sys
-            use miden::core::crypto::hashes::poseidon2
+            use miden::core::crypto::hashes::eidos
 
             begin
                 {store_ops}
                 push.{domain_int}
                 push.{num_elements}
                 push.{PTR}
-                exec.poseidon2::hash_elements_in_domain
+                exec.eidos::hash_elements_in_domain
                 exec.sys::truncate_stack
             end
             ",
@@ -174,16 +174,74 @@ fn element_hash_procedures_reject_non_u32_length() {
     let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
 
     let invocations = [
-        format!("push.0 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::prepare_hasher_state"),
-        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements"),
-        format!("push.1 push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::hash_elements_in_domain"),
-        format!("push.{NON_U32_LENGTH} push.{PTR} exec.poseidon2::pad_and_hash_elements"),
+        format!("push.0 push.{NON_U32_LENGTH} push.{PTR} exec.eidos::prepare_hasher_state"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.eidos::hash_elements"),
+        format!("push.1 push.{NON_U32_LENGTH} push.{PTR} exec.eidos::hash_elements_in_domain"),
+        format!("push.{NON_U32_LENGTH} push.{PTR} exec.eidos::pad_and_hash_elements"),
     ];
 
     for invocation in invocations {
-        let source = format!("use miden::core::crypto::hashes::poseidon2 begin {invocation} end");
+        let source = format!("use miden::core::crypto::hashes::eidos begin {invocation} end");
         let test = build_test!(source.as_str(), &[]);
         let err = test.execute().expect_err("a non-u32 length must be rejected");
+        match err {
+            ExecutionError::OperationError {
+                err: OperationError::U32AssertionFailed { err_code, .. },
+                ..
+            } => assert_eq!(err_code, expected_error_code),
+            err => panic!("expected a u32 assertion failure, got {err:?}"),
+        }
+    }
+}
+
+#[test]
+fn generic_eidos_initializer_matches_native_across_full_u32_inputs() {
+    use miden_core::Felt;
+    use miden_crypto::hash::eidos::Eidos;
+
+    for (selector, params) in [
+        (0, [0; 3]),
+        (u32::MAX, [u32::MAX; 3]),
+        (0x01000601, [8, 0, 17]),
+        (7, [42, 11, 9]),
+    ] {
+        let [param0, param1, param2] = params;
+        let source = format!(
+            "use miden::core::crypto::hashes::eidos use miden::core::sys \
+             begin push.{param2}.{param1}.{param0}.{selector} \
+             exec.eidos::init_chaining_word_with_params exec.sys::truncate_stack end"
+        );
+        let mut expected: Vec<u64> = Eidos::init_chaining_word_with_params(selector, params)
+            .as_elements()
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect();
+        expected.resize(16, 0);
+        build_test!(source.as_str(), &[]).expect_stack(&expected);
+    }
+}
+
+#[test]
+fn generic_eidos_initializer_rejects_two_pow_32_in_every_slot() {
+    use miden_processor::{ExecutionError, operation::OperationError};
+
+    const INVALID: u64 = 1 << 32;
+    const ERROR_MSG: &str = "Eidos init values must fit in u32";
+    let expected_error_code = miden_core::mast::error_code_from_msg(ERROR_MSG);
+
+    for invalid_slot in 0..4 {
+        let mut values = [1u64, 2, 3, 4];
+        values[invalid_slot] = INVALID;
+        let [selector, param0, param1, param2] = values;
+        let source = format!(
+            "use miden::core::crypto::hashes::eidos \
+             begin push.{param2}.{param1}.{param0}.{selector} \
+             exec.eidos::init_chaining_word_with_params end"
+        );
+
+        let err = build_test!(source.as_str(), &[])
+            .execute()
+            .expect_err("a non-u32 initializer value must be rejected");
         match err {
             ExecutionError::OperationError {
                 err: OperationError::U32AssertionFailed { err_code, .. },

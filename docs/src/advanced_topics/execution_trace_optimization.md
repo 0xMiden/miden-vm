@@ -8,53 +8,46 @@ draft: true
 
 ## Understanding cycle counts in Miden VM
 
-When we refer to "number of cycles" in most Miden VM documentation, we're specifically referring to the **stack rows** portion of the execution trace. However, the actual proving time is determined by what we call the "true number of cycles," which is the maximum of all trace segment lengths:
+The cycle count printed for a program is its **core row count**: one row per VM operation plus
+the required control-flow and padding rows. Proof cost, however, comes from four independently
+padded AIR matrices:
 
-- **Stack rows**: One row per VM operation (what `clk` outputs). This corresponds to the System, Program decoder and Operand Stack set of columns from the [execution trace diagram](../design/index.md#vm-execution-trace)
-- **Range checker rows**: Added for all u32 and memory operations (no more, no less)
-- **Chiplet rows**: Added when opcodes call specialized chiplets:
-  - `hperm` calls the hasher chiplet
-  - `and`, `or` (and other bitwise ops) call the bitwise chiplet
-  - memory operations call the memory chiplet
-  - syscalls call the kernel ROM chiplet
+| AIR | Purpose | Growth rule |
+| --- | --- | --- |
+| Core | System, decoder, and operand stack | Primarily one row per VM operation |
+| Chiplets | Hash controller, bitwise, memory, ACE, and kernel ROM | Rows added when operations use a chiplet |
+| Eidos compression | Native Eidos computations | One 32-row cycle per physical compression |
+| And8 lookup | Byte AND, Eidos compression rotations, and 16-bit range checks | Fixed at $2^{16}$ rows |
 
-The **true number of rows in the final trace** is precisely `max(stack_rows, range_checker_rows, chiplet_rows)`
+Core, Chiplets, and Eidos compression are each rounded up to an allowed power-of-two height. They do not have
+to share one height. The fixed And8 table always has height $2^{16}$; program-dependent work is
+represented by multiplicities rather than additional rows.
 
-Note: The maximum gets rounded up to the next power of 2, and the other 2 sets of columns get padded up to this maximum.
+This distinction matters when optimizing code. A program can reduce its VM operation count while
+increasing Eidos compression or chiplet work, and therefore make the proof more expensive. Conversely, many
+range-check requests increase And8 multiplicities but do not increase that AIR's height.
 
-In some cases, either the range checker or chiplets could end up requiring more rows than the stack rows, making the true cycle count higher than what the stack-based cycle counter reports.
+The runtime applies a hard `2^29`-row limit while building the variable-height traces. Execution
+stops with `TraceLenExceeded` rather than attempting an oversized allocation.
 
-The runtime also applies a hard trace limit of `2^29` rows in parallel trace building. If replayed core or chiplet rows would pass that limit, execution stops with `TraceLenExceeded` instead of trying to allocate a larger trace.
+## Inspecting trace utilization
 
-## Analyzing trace segments with miden-vm analyze
+`miden-vm run` reports the live row count and padded height for Core, Chiplets, and Eidos compression, the
+individual chiplet row counts, and the fixed byte-pair table height. These values identify which
+AIR is driving a workload rather than collapsing the statement into one misleading “true cycle”
+number.
 
-The `miden-vm analyze` command provides detailed information about trace segment utilization, showing:
-- Stack rows used
-- Range checker rows used  
-- Chiplet rows used
-- The resulting true number of cycles (maximum of the three)
+## Proving-cost boundaries
 
-This tool helps identify which trace segments are driving the ultimate trace length, and hence overall proving time for a given program.
+Each variable-height AIR is padded to its next supported power of two. Crossing a boundary in one
+AIR can therefore produce a discrete proving-cost jump even when the other AIR heights are
+unchanged. In particular:
 
-## Trace segment growth and proving performance
+- batching ordinary work affects the Core height;
+- memory, ACE, bitwise, and controller operations affect the stacked Chiplets height;
+- every native hash, Merkle step, or control-block compression contributes a 32-row Eidos compression cycle;
+- byte operations and range checks change lookup multiplicities, not the fixed And8 height.
 
-Even when two programs run the same number of VM cycles, their proving time can differ significantly because of how the execution trace is structured.
-
-| Trace segment      | Purpose                                              | Native growth rule                                     |
-| ------------------ | ---------------------------------------------------- | ------------------------------------------------------ |
-| Stack rows         | Core transition constraints; one row per opcode      | +1 row for every operation                             |
-| Range‑checker rows | Ensure selected values lie in \[0 .. 2¹⁶)            | Rows added for all u32 and memory operations |
-| Chiplet rows       | Bitwise, hash, memory and other accelerator circuits | Rows added only when an opcode calls a chiplet         |
-
-1. **Independent growth**
-   Each segment expands on its own. A pure arithmetic loop inflates only the stack segment, whereas repeated hashing inflates the chiplet segment.
-
-2. **Power‑of‑two padding**
-   After execution halts, the prover finds the largest trace segment length `L`, rounds it up to the next power of two `Lʹ = 2^ceil(log₂ L)`, and pads all segments until all trace segments reach `Lʹ`. The prover expects a square trace matrix of this size.
-
-> Padding doesn't simply mean "filling with zeros." Instead, padding means setting the cells to whatever values make the constraints work. While this can be intuitively thought of as "setting the cells to 0" in many cases, the actual padding values are determined by what satisfies the AIR constraints for each specific trace segment.
-
-3. **Cost driver**
-   Proving time grows roughly with `Lʹ`, not with the raw cycle count. Programs that rely heavily on chiplets might have the same cycle count but significantly longer proving times due to trace segment growth. Opcodes that touch only the stack keep every segment short, yielding faster proofs. Opcodes that generate many chiplet or range‑checker rows can push `L` past a power‑of‑two boundary, doubling every segment's length after padding and markedly increasing proving time. Mixing opcode types unevenly can thus produce a cycle‑efficient program that is still proving‑expensive.
-
-**Take‑away**: track which segment each opcode stresses, batch chiplet‑heavy work, and watch the next power‑of‑two boundary; staying below it can nearly halve proof time.
+Padding rows are constraint-valid trace rows, not necessarily all-zero rows. When comparing two
+implementations, inspect every reported AIR height and the chiplet breakdown, then watch the next
+power-of-two boundary for the matrix that actually grows.

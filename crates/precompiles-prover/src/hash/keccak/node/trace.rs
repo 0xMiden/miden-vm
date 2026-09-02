@@ -4,18 +4,18 @@
 //! input byte slices via [`KeccakNodeRequires::require`]. The
 //! accumulator dedupes by Keccak digest (`(content, len_bytes)`
 //! identity) — duplicate inputs bump `out_mult` on the existing row
-//! and lay no new sponge / chunk / P2 work. On miss it delegates to
+//! and lay no new sponge / chunk / Eidos work. On miss it delegates to
 //! the caller-supplied [`SpongeRequires`], computes the digest-chunk
 //! hash `H_digest_chunks` and the transcript-DAG hash `H_keccak` via
-//! [`Poseidon2Requires`], and records a [`KeccakNodeInvocation`]
+//! [`EidosRequires`], and records a [`KeccakNodeInvocation`]
 //! [`generate_trace`] later stamps into one row of the 30-column
 //! main trace.
 //!
 //! The fall-out wiring:
 //! - `chunk_seq_id_head` / `chunk_ptr` and `sponge_seq_id_head` come from the `SpongeOutput`.
-//! - `perm_seq_id_chunks` is the chunk-content P2 absorption head.
-//! - `perm_seq_id_digest_chunks` and `perm_seq_id_keccak` come from the two one-shot P2 absorptions
-//!   this layer drives.
+//! - `absorption_id_chunks` is the chunk-content Eidos absorption head.
+//! - `absorption_id_digest_chunks` and `absorption_id_keccak` come from the two one-shot Eidos
+//!   absorptions this layer drives.
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
@@ -42,9 +42,9 @@ use crate::{
     logup::build_logup_aux_trace,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
-    transcript::poseidon2::{
-        digest::{P2Cap, P2Digest},
-        trace::{PermSeqId, Poseidon2Requires},
+    transcript::eidos::{
+        digest::{EidosChainContext, EidosDigest},
+        trace::{AbsorptionId, EidosRequires},
     },
 };
 
@@ -52,7 +52,7 @@ use crate::{
 /// into one transcript-DAG node.
 ///
 /// `d` and `h_input_chunks` come from elsewhere (the sponge's reference and
-/// the chunk chiplet's Poseidon2 absorption respectively); see
+/// the chunk chiplet's Eidos absorption respectively); see
 /// the design notes for how they line up with the buses.
 #[derive(Debug, Clone)]
 pub struct KeccakNodeInvocation {
@@ -62,20 +62,20 @@ pub struct KeccakNodeInvocation {
     /// `[lo_0, hi_0, lo_1, hi_1, lo_2, hi_2, lo_3, hi_3]` (lane `j` =
     /// `(d[2j], d[2j+1])` as u32 halves on Memory64).
     pub d: [u32; 8],
-    /// The chunk chain's cumulative Poseidon2 digest at its tail (= the
-    /// `OutRate0` value read from the chunk chiplet's chain end).
+    /// The chunk chain's terminal Eidos digest, read from `EidosOut` at the chain end.
     pub h_input_chunks: [Felt; 4],
     /// Head of this invocation's chunk chain in the chunk chiplet's
     /// namespace ([`ChunkSeqId::ptr`] gives the word address the sponge
     /// sees).
     pub chunk_seq_id_head: ChunkSeqId,
-    /// P2 cycle at the head of the chunks-absorption chain.
-    pub perm_seq_id_chunks: PermSeqId,
-    /// P2 cycle for hashing the Keccak digest as a semantic chunk.
-    pub perm_seq_id_digest_chunks: PermSeqId,
-    /// P2 cycle for the keccak-node hashing
-    /// (= `Poseidon2(H_input_chunks || H_digest_chunks || cap_keccak256_assertion(len_bytes))`).
-    pub perm_seq_id_keccak: PermSeqId,
+    /// Eidos cycle at the head of the chunks-absorption chain.
+    pub absorption_id_chunks: AbsorptionId,
+    /// Eidos cycle for hashing the Keccak digest as a semantic chunk.
+    pub absorption_id_digest_chunks: AbsorptionId,
+    /// Eidos cycle for the keccak-node hashing
+    /// (= the framed Eidos Keccak-node digest of `H_input_chunks || H_digest_chunks`, under the
+    /// assertion context bound to `len_bytes`).
+    pub absorption_id_keccak: AbsorptionId,
     /// Sponge invocation start (the sponge's row at the first row of
     /// this invocation).
     pub sponge_seq_id_head: SpongeSeqId,
@@ -96,8 +96,8 @@ impl KeccakNodeInvocation {
 
     /// Chunks in this invocation's chain = `max(1, ceil(len_bytes / 32))`.
     /// Empty input still carries one canonical zero chunk so the
-    /// `H_input_chunks` tail read at `perm_seq_id_chunks + n_chunks − 1`
-    /// stays in range (= `perm_seq_id_chunks`).
+    /// `H_input_chunks` tail read at `absorption_id_chunks + n_chunks − 1`
+    /// stays in range (= `absorption_id_chunks`).
     pub fn n_chunks(&self) -> u64 {
         u64::from(self.len_bytes).div_ceil(Node::PACKED_BYTES_PER_CHUNK as u64).max(1)
     }
@@ -125,7 +125,7 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
 
 /// Older entry-point used by the standalone keccak-node tests, which
 /// build [`KeccakNodeInvocation`]s by hand without the chunk / sponge /
-/// P2 stack (the AIR's local constraints + LogUp σ recurrence are
+/// Eidos stack (the AIR's local constraints + LogUp σ recurrence are
 /// agnostic to where the digest bytes come from).
 pub fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
@@ -143,7 +143,7 @@ pub fn generate_trace_from_invocations(
 
 /// Append one invocation's row to `trace` in column order: act,
 /// sponge_seq_id_head, n_sponge_perms, chunk_seq_id_head, n_chunks,
-/// perm_seq_id_chunks, len_bytes, perm_seq_id_digest_chunks, perm_seq_id_keccak,
+/// absorption_id_chunks, len_bytes, absorption_id_digest_chunks, absorption_id_keccak,
 /// d[8], h_input_chunks[4], h_digest_chunks[4], h_keccak[4], out_mult.
 fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
     let len_bytes = Felt::from(inv.len_bytes);
@@ -166,10 +166,10 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
         Felt::new(inv.n_sponge_perms()).expect("n_sponge_perms fits"),
         Felt::from(inv.chunk_seq_id_head.seq()),
         Felt::new(inv.n_chunks()).expect("n_chunks fits"),
-        Felt::from(inv.perm_seq_id_chunks.seq()),
+        Felt::from(inv.absorption_id_chunks.as_u32()),
         len_bytes,
-        Felt::from(inv.perm_seq_id_digest_chunks.seq()),
-        Felt::from(inv.perm_seq_id_keccak.seq()),
+        Felt::from(inv.absorption_id_digest_chunks.as_u32()),
+        Felt::from(inv.absorption_id_keccak.as_u32()),
     ]);
     trace.extend(d_felts);
     trace.extend(inv.h_input_chunks);
@@ -188,14 +188,14 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
 #[derive(Debug, Clone)]
 pub struct KeccakNodeOutput {
     pub keccak_digest: KeccakDigest,
-    pub h_keccak: P2Digest,
+    pub h_keccak: EidosDigest,
     pub node_row: u32,
 }
 
 #[derive(Debug, Clone)]
 struct NodeRecord {
     invocation: KeccakNodeInvocation,
-    h_keccak: P2Digest,
+    h_keccak: EidosDigest,
     #[allow(dead_code)]
     keccak_digest: KeccakDigest,
 }
@@ -221,7 +221,7 @@ impl KeccakNodeRequires {
 
     /// Register a Keccak invocation. Empty input is supported: it absorbs
     /// one pad block (`keccak256("")`) and the chunk layer lays one
-    /// canonical zero chunk, so the chunk-content P2 chain tail this node
+    /// canonical zero chunk, so the chunk-content Eidos chain tail this node
     /// reads for `H_input_chunks` always exists. The zero chunk is consumed by
     /// the sponge as a full garbage-tail (the pad fires at byte 0), so it
     /// doesn't perturb the digest.
@@ -232,7 +232,7 @@ impl KeccakNodeRequires {
         chunk_req: &mut ChunkRequires,
         round_req: &mut RoundRequires,
         bpl_req: &mut BytePairLutRequires,
-        p2: &mut Poseidon2Requires,
+        eidos: &mut EidosRequires,
     ) -> KeccakNodeOutput {
         let keccak_digest = keccak_oracle(input);
 
@@ -249,48 +249,50 @@ impl KeccakNodeRequires {
             };
         }
 
-        // Miss path: full allocation through sponge + 2× P2 one-shots.
+        // Miss path: full allocation through sponge + 2× Eidos one-shots.
         let sponge_inv = SpongeInvocation { input: input.to_vec() };
-        let sponge_out = sponge_req.require(&sponge_inv, chunk_req, round_req, bpl_req, p2);
+        let sponge_out = sponge_req.require(&sponge_inv, chunk_req, round_req, bpl_req, eidos);
         debug_assert_eq!(sponge_out.keccak_digest, keccak_digest);
 
-        // h_input_chunks = the chunk-content P2 digest. The Keccak-node AIR
-        // reads it from `Poseidon2Out` at `perm_seq_id_chunks +
+        // h_input_chunks = the chunk-content Eidos digest. The Keccak-node AIR
+        // reads it from `EidosOut` at `absorption_id_chunks +
         // n_chunks − 1` (the chunks-absorption chain tail); we bump
-        // P2's out_mult on that range here so the bus closes.
+        // Eidos's out_mult on that range here so the bus closes.
         let h_input_chunks_digest = sponge_out.chunk_content_digest;
         let h_input_chunks: [Felt; NUM_HASH] = h_input_chunks_digest.as_array();
-        let _ = p2.require_digest(h_input_chunks_digest);
+        let _ = eidos.require_digest(h_input_chunks_digest);
 
-        // H_digest_chunks = Poseidon2(D || cap_chunk). This is a semantic
-        // one-chunk digest commitment, not a physical extra ChunkAir row.
+        // H_digest_chunks is the framed Eidos hash of D under the CHUNKS chain context. This is a
+        // semantic one-chunk digest commitment, not a physical extra ChunkAir row.
         let d_felts = sponge_out.keccak_digest.to_felts();
-        let d_rate0: [Felt; 4] = d_felts[0..4].try_into().expect("rate0 slice");
-        let d_rate1: [Felt; 4] = d_felts[4..8].try_into().expect("rate1 slice");
-        let digest_chunks_out = p2.require_one_shot(P2Cap::chunk(), d_rate0, d_rate1);
+        let digest_block_lo: [Felt; 4] = d_felts[0..4].try_into().expect("block-low slice");
+        let digest_block_hi: [Felt; 4] = d_felts[4..8].try_into().expect("block-high slice");
+        let digest_chunks_out =
+            eidos.require_one_shot(EidosChainContext::chunk(), digest_block_lo, digest_block_hi);
         let h_digest_chunks = digest_chunks_out.digest;
-        // OutRate0 read at perm_seq_id_digest_chunks — bump.
-        let _ = p2.require_digest(h_digest_chunks);
+        // Consume the terminal EidosOut value at absorption_id_digest_chunks.
+        let _ = eidos.require_digest(h_digest_chunks);
 
-        // H_keccak = Poseidon2(H_input_chunks || H_digest_chunks || cap_keccak)
+        // H_keccak is the framed Eidos hash of H_input_chunks || H_digest_chunks under the
+        // Keccak-assertion chain context.
         let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
-        let keccak_out = p2.require_one_shot(
-            P2Cap::keccak256_assertion(len_bytes),
+        let keccak_out = eidos.require_one_shot(
+            EidosChainContext::keccak256_assertion(len_bytes),
             h_input_chunks,
             h_digest_chunks.as_array(),
         );
         let h_keccak = keccak_out.digest;
-        // OutRate0 read at perm_seq_id_keccak — bump.
-        let _ = p2.require_digest(h_keccak);
+        // Consume the terminal EidosOut value at absorption_id_keccak.
+        let _ = eidos.require_digest(h_keccak);
 
         let invocation = KeccakNodeInvocation {
             len_bytes,
             d: sponge_out.keccak_digest.to_u32s(),
             h_input_chunks,
             chunk_seq_id_head: sponge_out.chunk_head,
-            perm_seq_id_chunks: sponge_out.chunk_content_perm_span.head(),
-            perm_seq_id_digest_chunks: digest_chunks_out.head(),
-            perm_seq_id_keccak: keccak_out.head(),
+            absorption_id_chunks: sponge_out.chunk_content_absorption_span.head(),
+            absorption_id_digest_chunks: digest_chunks_out.head(),
+            absorption_id_keccak: keccak_out.head(),
             sponge_seq_id_head: sponge_out.sponge_head,
             out_mult: 1,
         };

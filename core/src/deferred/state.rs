@@ -220,7 +220,7 @@ impl DeferredState {
 
     /// Logs a statement only if its constrained transition matches `expected_new_root`.
     ///
-    /// The VM constrains `log_deferred` as a Poseidon2 fold over the previous deferred root and
+    /// The VM constrains `log_deferred` as an Eidos fold over the previous deferred root and
     /// the statement digest. This helper binds the in-memory deferred DAG to that constrained
     /// transition: it validates the expected root before mutating `self`, then applies the same
     /// semantic checks as [`Self::log_statement`].
@@ -455,7 +455,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt, ZERO,
-        deferred::{Payload, Precompile, precompile_id},
+        deferred::{Payload, Precompile, precompile::test_precompile_selector},
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -467,16 +467,16 @@ mod tests {
         }
 
         fn id(&self) -> Felt {
-            precompile_id(self.name())
+            test_precompile_selector(2)
         }
 
-        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            (args == [ZERO; 3]).then_some(NodeType::Data)
+        fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
+            (args == [ZERO; 2]).then_some(NodeType::Data)
         }
 
         fn evaluate(
             &self,
-            _args: [Felt; 3],
+            _args: [Felt; 2],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -498,7 +498,7 @@ mod tests {
     fn register_eagerly_propagates_precompile_evaluation_errors() {
         let precompile = RejectingPrecompile;
         let tag =
-            Tag::precompile(precompile.id(), [ZERO; 3]).expect("fixture id is precompile-owned");
+            Tag::precompile(precompile.id(), [ZERO; 2]).expect("fixture id is precompile-owned");
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(precompile));
         let mut state = DeferredState::new(registry).unwrap();
         let node = Node::value(tag, [ZERO; 8]).unwrap();

@@ -8,7 +8,7 @@ use super::{
     EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word, smt::SMT_MAX_DEPTH,
 };
 use crate::{
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -166,7 +166,7 @@ impl SparseMerklePath {
             // Compute the node and move to the next iteration.
             let children = index.build_node(node, sibling);
             index.move_up();
-            Poseidon2::merge(&children)
+            Eidos::merge(&children)
         });
 
         Ok(root)
@@ -407,7 +407,7 @@ impl Iterator for InnerNodeIterator<'_> {
         let path_node = self.path.at_depth(index_depth).unwrap();
 
         let children = self.index.build_node(self.value, path_node);
-        self.value = Poseidon2::merge(&children);
+        self.value = Eidos::merge(&children);
         self.index.move_up();
 
         Some(InnerNodeInfo {

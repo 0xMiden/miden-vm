@@ -31,7 +31,7 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
     let mut suffixed_bytes = short_proof.proof.bytes().to_vec();
     suffixed_bytes.push(0xaa);
     let suffixed_proof = PrecompileProof {
-        proof: StarkProof::new(suffixed_bytes, HashFunction::Poseidon2),
+        proof: StarkProof::new(suffixed_bytes, HashFunction::Eidos),
         roots: short_proof.roots,
     };
     assert!(
@@ -145,7 +145,7 @@ fn prove_keccak_claim(input: &[u8]) -> PrecompileProof {
         .expect("matching Keccak assertion must register");
     let root = state.log_statement(assertion).expect("true statement must log");
 
-    let proof = prove_deferred_state(&state, HashFunction::Poseidon2)
+    let proof = prove_deferred_state(&state, HashFunction::Eidos)
         .expect("fixture must produce a PVM STARK proof");
     PrecompileProof { proof, roots: vec![root] }
 }

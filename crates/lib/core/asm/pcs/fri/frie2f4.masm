@@ -1,6 +1,11 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
+
+# Initial digest used by the Eidos LMCS leaf hasher. LMCS absorbs already-aligned
+# rows and does not use the length-bound `Eidos::hash_elements` framing.
+const FRI_ROW_HASH_INIT_CV = [4280581857092829184, 2688637132020383744, 1947077364412317696, 6620516959492505600]
+const FRI_LAYER_LEAF_DIGEST_MISMATCH = "FRI layer leaf hash mismatch"
 
 #! Checks that, for a query with index p at layer i, the folding procedure to create layer (i + 1)
 #! was performed correctly. This also advances layer_ptr by 8 to point to the next query layer.
@@ -37,35 +42,24 @@ pub proc verify_query_layer
     swapw
     # => [C, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # Hash the opened row. `adv_pipe` caches the row in tmp3/tmp4 and overwrites the
-    # first 8 stack elements.
+    # Hash the opened row with the Eidos LMCS initial chaining value. Keep the row on
+    # the stack: unlike a sponge permutation, Eidos compression preserves its block.
+    dropw
+    push.FRI_ROW_HASH_INIT_CV
+    # => [CV, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     exec.constants::tmp3
     movdn.4
-    padw
-    swapw
-    padw
+    # => [CV, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
+    padw padw
     adv_pipe
-    exec.poseidon2::permute
-    # => [T0, T1, T2, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
+    exec.eidos::compress
+    # => [v0, ..., v7, DIGEST, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
 
-    # Assert that the opened row hashes to the committed leaf.
-    swapw
-    swapw.3
-    drop
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
-    movup.9
-    assert_eq
-
-    # Load the opened row from memory.
-    exec.constants::tmp4
-    mem_loadw_le
-    swapw
-    exec.constants::tmp3
-    mem_loadw_le
+    # Assert that the opened row hashes to the committed leaf, preserving the row for folding.
+    movup.12 drop
+    movupw.2
+    movupw.3
+    assert_eqw.err=FRI_LAYER_LEAF_DIGEST_MISMATCH
     # => [v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     fri_ext2fold4
     # => [x, x, x, x, x, x, x, x, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]

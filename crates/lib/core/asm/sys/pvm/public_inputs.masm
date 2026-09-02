@@ -9,19 +9,8 @@ const MAX_AUX_INPUTS = 0
 const NUM_AUX_INPUTS = 0
 const NUM_CHIPLETS = 10
 
-# After two full rate blocks, `h4..h9` remain in the challenger input buffer.
+# After two complete Eidos blocks, `h4..h9` remain in the challenger input buffer.
 const BUFFERED_SHAPE_VALUE_COUNT = 6
-
-# Trusted setup commitment observed by the lifted STARK verifier before the statement.
-# Pinned against PVM_PREPROCESSED_COMMITMENT by a Rust/MASM oracle.
-const PREPROCESSED_COMMITMENT_0 = 7881474831680931516
-const PREPROCESSED_COMMITMENT_1 = 14394696689869899287
-const PREPROCESSED_COMMITMENT_2 = 1264609894509183924
-const PREPROCESSED_COMMITMENT_3 = 18313229530128768945
-
-pub proc preprocessed_commitment
-    push.PREPROCESSED_COMMITMENT_3.PREPROCESSED_COMMITMENT_2.PREPROCESSED_COMMITMENT_1.PREPROCESSED_COMMITMENT_0
-end
 
 #! Stores the deferred root as the PVM's four base-field public values.
 #!
@@ -48,57 +37,46 @@ end
 #!
 #! This mirrors the lifted verifier's exact order:
 #!
-#! 1. trusted preprocessed commitment;
-#! 2. default statement encoding `[4, D0, D1, D2, D3, 0, 0]`, where the final zeroes are
+#! 1. default statement encoding `[4, D0, D1, D2, D3, 0, 0]`, where the final zeroes are
 #!    `max_aux_inputs` and `aux_inputs.len()`;
-#! 3. instance shape `[10, h0, ..., h9]` in `ChipletAir::all()` order.
+#! 2. instance shape `[10, h0, ..., h9]` in `ChipletAir::all()` order.
 #!
-#! The resulting 22-felt stream performs two full-rate duplexes and leaves six felts buffered.
-#! The generic verifier appends the four-felt main commitment and flushes before sampling, exactly
-#! matching the Rust challenger. The four root values were staged by `stage_public_root`.
+#! The trusted preprocessed commitment is already buffered by `random_coin::init_seed`; with this
+#! 18-felt statement-and-shape stream, the combined 22 felts perform two Eidos compressions and
+#! leave six felts buffered. The generic verifier appends the main commitment and flushes before
+#! sampling, exactly matching the Rust challenger.
 #!
-#! Precondition: random-coin input_len is zero after protocol-parameter initialization.
+#! Precondition: random-coin input_len is four after protocol parameters and the trusted setup.
 #! Postcondition: random-coin input_len is six; output_len is zero.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
 pub proc process_public_inputs
     exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="PVM process_public_inputs: input buffer must be empty"
-
-    # The trusted setup commitment precedes every statement-owned observation.
-    exec.preprocessed_commitment
-    exec.layout::preprocessed_com_ptr mem_storew_le
-    exec.random_coin::observe_word
+    push.4 assert_eq.err="PVM process_public_inputs: preprocessed commitment is not buffered"
 
     # Publish the dense ACE READ public-input start through the generic verifier cell.
     push.NUM_PUBLIC_VALUES
     exec.layout::aux_rand_elem_ptr
     exec.public_inputs::compute_and_store_public_inputs_address
 
-    # Complete the first rate block with `[4, D0, D1, D2]`.
-    exec.layout::public_inputs_ptr add.4 mem_load
-    exec.layout::public_inputs_ptr add.2 mem_load
-    exec.layout::public_inputs_ptr mem_load
-    push.NUM_PUBLIC_VALUES
-    exec.random_coin::observe_word_and_flush_buffer
+    # Statement encoding: `[4, D0, D1, D2, D3, 0, 0]`.
+    push.NUM_PUBLIC_VALUES exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.2 mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.4 mem_load exec.random_coin::observe_felt
+    exec.layout::public_inputs_ptr add.6 mem_load exec.random_coin::observe_felt
+    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
+    push.NUM_AUX_INPUTS exec.random_coin::observe_felt
 
-    # The second block is `[D3, max_aux_inputs, aux_inputs.len(), 10, h0, ..., h3]`.
-    push.NUM_CHIPLETS
-    push.NUM_AUX_INPUTS
-    push.MAX_AUX_INPUTS
-    exec.layout::public_inputs_ptr add.6 mem_load
-    exec.random_coin::observe_word
-
-    padw exec.constants::air_trace_length_logs_ptr mem_loadw_le
-    exec.random_coin::observe_word_and_flush_buffer
-
-    # Buffer the remaining shape values `[h4, ..., h9]`.
-    padw exec.constants::air_trace_length_logs_ptr add.4 mem_loadw_le
-    exec.random_coin::observe_word
-    exec.constants::air_trace_length_logs_ptr add.9 mem_load
-    exec.constants::air_trace_length_logs_ptr add.8 mem_load
-    exec.random_coin::observe_pair
+    # Instance shape: `[10, h0, ..., h9]`.
+    push.NUM_CHIPLETS exec.random_coin::observe_felt
+    exec.constants::air_trace_length_logs_ptr
+    repeat.NUM_CHIPLETS
+        dup mem_load exec.random_coin::observe_felt
+        add.1
+    end
+    drop
 
     exec.constants::random_coin_input_len_ptr mem_load
     push.BUFFERED_SHAPE_VALUE_COUNT assert_eq.err="PVM process_public_inputs: transcript framing drifted"

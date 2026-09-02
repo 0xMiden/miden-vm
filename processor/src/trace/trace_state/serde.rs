@@ -275,17 +275,82 @@ impl Deserializable for BitwiseOp {
     }
 }
 
+impl Serializable for AeadStreamReplayEntry {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.ctx.write_into(target);
+        self.clk.write_into(target);
+        self.src_ptr.write_into(target);
+        self.dst_ptr.write_into(target);
+        self.lane_base.write_into(target);
+        self.plaintext.write_into(target);
+        self.keystream.write_into(target);
+        self.ciphertext.write_into(target);
+    }
+}
+
+impl Deserializable for AeadStreamReplayEntry {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            ctx: Felt::read_from(source)?,
+            clk: Felt::read_from(source)?,
+            src_ptr: Felt::read_from(source)?,
+            dst_ptr: Felt::read_from(source)?,
+            lane_base: Felt::read_from(source)?,
+            plaintext: <[Felt; 4]>::read_from(source)?,
+            keystream: <[Felt; 8]>::read_from(source)?,
+            ciphertext: <[Felt; 8]>::read_from(source)?,
+        })
+    }
+}
+
+impl Serializable for BitwiseReplayEntry {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::U32(op, a, b) => {
+                target.write_u8(0);
+                op.write_into(target);
+                a.write_into(target);
+                b.write_into(target);
+            },
+            Self::AeadStream(entry) => {
+                target.write_u8(1);
+                entry.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for BitwiseReplayEntry {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            0 => Ok(Self::U32(
+                BitwiseOp::read_from(source)?,
+                Felt::read_from(source)?,
+                Felt::read_from(source)?,
+            )),
+            1 => Ok(Self::AeadStream(Box::new(AeadStreamReplayEntry::read_from(source)?))),
+            tag => Err(DeserializationError::InvalidValue(format!(
+                "invalid bitwise replay entry tag {tag}"
+            ))),
+        }
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size()
+            + BitwiseOp::min_serialized_size()
+            + 2 * Felt::min_serialized_size()
+    }
+}
+
 impl Serializable for BitwiseReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.u32op_with_operands.write_into(target);
+        self.entries.write_into(target);
     }
 }
 
 impl Deserializable for BitwiseReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self {
-            u32op_with_operands: VecDeque::read_from(source)?,
-        })
+        Ok(Self { entries: VecDeque::read_from(source)? })
     }
 }
 
@@ -328,6 +393,10 @@ impl Serializable for RangeCheckReplayValues {
                 target.write_u8(1);
                 values.write_into(target);
             },
+            Self::Five(values) => {
+                target.write_u8(2);
+                values.write_into(target);
+            },
         }
     }
 }
@@ -337,6 +406,7 @@ impl Deserializable for RangeCheckReplayValues {
         Ok(match source.read_u8()? {
             0 => Self::Two(<[u16; 2]>::read_from(source)?),
             1 => Self::Four(<[u16; 4]>::read_from(source)?),
+            2 => Self::Five(<[u16; 5]>::read_from(source)?),
             tag => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid range check replay variant tag {tag}"
@@ -382,7 +452,7 @@ impl Deserializable for BlockAddressReplay {
 
 impl Serializable for HasherResponseReplay {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.permutation_operations.write_into(target);
+        self.compression_operations.write_into(target);
         self.build_merkle_root_operations.write_into(target);
         self.mrupdate_operations.write_into(target);
     }
@@ -391,7 +461,7 @@ impl Serializable for HasherResponseReplay {
 impl Deserializable for HasherResponseReplay {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            permutation_operations: VecDeque::read_from(source)?,
+            compression_operations: VecDeque::read_from(source)?,
             build_merkle_root_operations: VecDeque::read_from(source)?,
             mrupdate_operations: VecDeque::read_from(source)?,
         })
@@ -401,7 +471,7 @@ impl Deserializable for HasherResponseReplay {
 impl Serializable for HasherOp {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::Permute(state) => {
+            Self::Compress(state) => {
                 0u8.write_into(target);
                 state.write_into(target);
             },
@@ -431,6 +501,12 @@ impl Serializable for HasherOp {
                 path.write_into(target);
                 index.write_into(target);
             },
+            Self::AeadXof(ctx, clk, state) => {
+                5u8.write_into(target);
+                ctx.write_into(target);
+                clk.write_into(target);
+                state.write_into(target);
+            },
         }
     }
 }
@@ -438,13 +514,19 @@ impl Serializable for HasherOp {
 impl Deserializable for HasherOp {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         match u8::read_from(source)? {
-            0 => Ok(Self::Permute(<[Felt; STATE_WIDTH]>::read_from(source)?)),
-            1 => Ok(Self::HashControlBlock((
-                Word::read_from(source)?,
-                Word::read_from(source)?,
-                Felt::read_from(source)?,
-                Word::read_from(source)?,
-            ))),
+            0 => Ok(Self::Compress(<[Felt; STATE_WIDTH]>::read_from(source)?)),
+            1 => {
+                let h1 = Word::read_from(source)?;
+                let h2 = Word::read_from(source)?;
+                let domain = Felt::read_from(source)?;
+                if domain.as_canonical_u64() > u64::from(u32::MAX) {
+                    return Err(DeserializationError::InvalidValue(
+                        "control-block hash domain must fit in a u32".into(),
+                    ));
+                }
+                let expected_hash = Word::read_from(source)?;
+                Ok(Self::HashControlBlock((h1, h2, domain, expected_hash)))
+            },
             2 => Ok(Self::HashBasicBlock((
                 MastForestId::read_from(source)?,
                 MastNodeId::read_from(source)?,
@@ -461,6 +543,11 @@ impl Deserializable for HasherOp {
                 MerklePath::read_from(source)?,
                 Felt::read_from(source)?,
             ))),
+            5 => Ok(Self::AeadXof(
+                ContextId::read_from(source)?,
+                RowIndex::read_from(source)?,
+                <[Felt; STATE_WIDTH]>::read_from(source)?,
+            )),
             tag => Err(DeserializationError::InvalidValue(format!(
                 "invalid hasher replay op tag {tag}"
             ))),
@@ -536,5 +623,79 @@ impl Deserializable for ExecutionReplay {
             block_address: BlockAddressReplay::read_from(source)?,
             mast_forest_resolution: MastForestResolutionReplay::read_from(source)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_round_trip<T>(value: T)
+    where
+        T: Serializable + Deserializable + PartialEq + core::fmt::Debug,
+    {
+        let restored = T::read_from_bytes(&value.to_bytes()).unwrap();
+        assert_eq!(restored, value);
+    }
+
+    #[test]
+    fn five_limb_range_check_replay_round_trips() {
+        assert_round_trip(RangeCheckReplayValues::Five([1, 2, 3, 4, 8]));
+    }
+
+    #[test]
+    fn eidos_bitwise_replay_variants_round_trip() {
+        let mut replay = BitwiseReplay::default();
+        replay.record_u32and(Felt::new_unchecked(1), Felt::new_unchecked(2));
+        replay.record_aead_stream(AeadStreamReplayEntry {
+            ctx: Felt::new_unchecked(3),
+            clk: Felt::new_unchecked(4),
+            src_ptr: Felt::new_unchecked(5),
+            dst_ptr: Felt::new_unchecked(6),
+            lane_base: Felt::new_unchecked(7),
+            plaintext: [Felt::new_unchecked(8); 4],
+            keystream: [Felt::new_unchecked(9); 8],
+            ciphertext: [Felt::new_unchecked(10); 8],
+        });
+        assert_round_trip(replay);
+    }
+
+    #[test]
+    fn eidos_hasher_replay_variants_round_trip() {
+        let compression = HasherOp::Compress([Felt::new_unchecked(11); STATE_WIDTH]);
+        assert_eq!(compression.to_bytes()[0], 0, "compression replay tag is wire-pinned");
+
+        for op in [
+            compression,
+            HasherOp::AeadXof(
+                ContextId::root(),
+                RowIndex::from(12u32),
+                [Felt::new_unchecked(13); STATE_WIDTH],
+            ),
+        ] {
+            assert_round_trip(op);
+        }
+
+        let mut replay = HasherResponseReplay::default();
+        replay.record_compression(Felt::new_unchecked(14), [Felt::new_unchecked(15); STATE_WIDTH]);
+        assert_round_trip(replay);
+    }
+
+    #[test]
+    fn hash_control_block_rejects_non_u32_domain() {
+        let op = HasherOp::HashControlBlock((
+            Word::new([ZERO; 4]),
+            Word::new([ZERO; 4]),
+            Felt::new_unchecked(u64::from(u32::MAX) + 1),
+            Word::new([ZERO; 4]),
+        ));
+
+        let error = HasherOp::read_from_bytes(&op.to_bytes())
+            .expect_err("a control-block hash domain above u32::MAX must be rejected");
+        assert!(matches!(
+            error,
+            DeserializationError::InvalidValue(message)
+                if message == "control-block hash domain must fit in a u32"
+        ));
     }
 }

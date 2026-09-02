@@ -22,18 +22,18 @@ use crate::{
         chunk::trace::ChunkSeqId,
         keccak::{
             node::{
-                COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN, COL_H_DIGEST_CHUNKS_BEGIN,
-                COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN, COL_LEN_BYTES, COL_N_CHUNKS,
-                COL_N_SPONGE_PERMS, COL_PERM_SEQ_ID_CHUNKS, COL_PERM_SEQ_ID_DIGEST_CHUNKS,
-                COL_PERM_SEQ_ID_KECCAK, COL_SPONGE_SEQ_ID_HEAD, KeccakNodeAir, NUM_AUX_COLS,
-                NUM_HASH, NUM_MAIN_COLS,
+                COL_ABSORPTION_ID_CHUNKS, COL_ABSORPTION_ID_DIGEST_CHUNKS,
+                COL_ABSORPTION_ID_KECCAK, COL_ACT, COL_CHUNK_SEQ_ID_HEAD, COL_D_BEGIN,
+                COL_H_DIGEST_CHUNKS_BEGIN, COL_H_INPUT_CHUNKS_BEGIN, COL_H_KECCAK_BEGIN,
+                COL_LEN_BYTES, COL_N_CHUNKS, COL_N_SPONGE_PERMS, COL_SPONGE_SEQ_ID_HEAD,
+                KeccakNodeAir, NUM_AUX_COLS, NUM_HASH, NUM_MAIN_COLS,
                 trace::{KeccakNodeInvocation, generate_trace_from_invocations},
             },
             sponge::trace::SpongeSeqId,
         },
     },
     logup::{NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
-    transcript::poseidon2::trace::PermSeqId,
+    transcript::eidos::trace::AbsorptionId,
 };
 
 // HELPERS
@@ -56,16 +56,16 @@ fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
         d: core::array::from_fn(|_| rng.random()),
         h_input_chunks: core::array::from_fn(|_| Felt::new(rng.random()).unwrap()),
         chunk_seq_id_head: ChunkSeqId::forged(0),
-        perm_seq_id_chunks: PermSeqId::forged(0),
-        perm_seq_id_digest_chunks: PermSeqId::forged(100),
-        perm_seq_id_keccak: PermSeqId::forged(101),
+        absorption_id_chunks: AbsorptionId::forged(0),
+        absorption_id_digest_chunks: AbsorptionId::forged(100),
+        absorption_id_keccak: AbsorptionId::forged(101),
         sponge_seq_id_head: SpongeSeqId::forged(0),
         out_mult: 1,
     }
 }
 
 /// Append a follow-on invocation whose head columns satisfy the
-/// orchestrator's continuity equations against `prev`. P2 digest-chunks /
+/// orchestrator's continuity equations against `prev`. Eidos digest-chunks /
 /// keccak cycles are free witnesses (the orchestrator's continuity
 /// doesn't constrain them); we just pick fresh cycles per invocation.
 fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
@@ -77,11 +77,13 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
         chunk_seq_id_head: ChunkSeqId::forged(
             prev.chunk_seq_id_head.seq() + prev.n_chunks() as u32,
         ),
-        perm_seq_id_chunks: PermSeqId::forged(
-            prev.perm_seq_id_chunks.seq() + prev.n_chunks() as u32,
+        absorption_id_chunks: AbsorptionId::forged(
+            prev.absorption_id_chunks.as_u32() + prev.n_chunks() as u32,
         ),
-        perm_seq_id_digest_chunks: PermSeqId::forged(prev.perm_seq_id_digest_chunks.seq() + 1000),
-        perm_seq_id_keccak: PermSeqId::forged(prev.perm_seq_id_keccak.seq() + 1000),
+        absorption_id_digest_chunks: AbsorptionId::forged(
+            prev.absorption_id_digest_chunks.as_u32() + 1000,
+        ),
+        absorption_id_keccak: AbsorptionId::forged(prev.absorption_id_keccak.as_u32() + 1000),
         sponge_seq_id_head: SpongeSeqId::forged(
             prev.sponge_seq_id_head.seq() + 32 * prev.n_sponge_perms() as u32,
         ),
@@ -100,10 +102,10 @@ fn main_column_layout_partitions_30_indices() {
     assert_eq!(COL_N_SPONGE_PERMS, 2);
     assert_eq!(COL_CHUNK_SEQ_ID_HEAD, 3);
     assert_eq!(COL_N_CHUNKS, 4);
-    assert_eq!(COL_PERM_SEQ_ID_CHUNKS, 5);
+    assert_eq!(COL_ABSORPTION_ID_CHUNKS, 5);
     assert_eq!(COL_LEN_BYTES, 6);
-    assert_eq!(COL_PERM_SEQ_ID_DIGEST_CHUNKS, 7);
-    assert_eq!(COL_PERM_SEQ_ID_KECCAK, 8);
+    assert_eq!(COL_ABSORPTION_ID_DIGEST_CHUNKS, 7);
+    assert_eq!(COL_ABSORPTION_ID_KECCAK, 8);
     assert_eq!(COL_D_BEGIN, 9);
     assert_eq!(COL_H_INPUT_CHUNKS_BEGIN, 17);
     assert_eq!(COL_H_DIGEST_CHUNKS_BEGIN, 21);
@@ -251,7 +253,7 @@ fn corruption_chunk_continuity() {
     });
 }
 
-// `perm_seq_id_chunks` is no longer constrained for cross-row
+// `absorption_id_chunks` is no longer constrained for cross-row
 // continuity (it's bus-pinned per row by `ChunkChain`); a single-cell
 // corruption is caught by the `ChunkChain` bus going out of balance,
 // not by a local AIR constraint, and bus-balance falsification

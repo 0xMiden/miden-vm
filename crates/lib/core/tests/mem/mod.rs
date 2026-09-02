@@ -4,7 +4,7 @@ use miden_processor::{
     trace::RowIndex,
 };
 use miden_utils_testing::{
-    AdviceStack, build_expected_hash, build_expected_perm, felt_slice_to_ints,
+    AdviceStack, build_expected_compress, build_expected_hash, felt_slice_to_ints,
 };
 
 #[test]
@@ -234,8 +234,22 @@ fn test_pipe_double_words_to_memory() {
 
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
-    let mut expected_stack =
-        felt_slice_to_ints(&build_expected_perm(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]));
+    let compressed = build_expected_compress(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]);
+    let expected_state = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+        compressed[8],
+        compressed[9],
+        compressed[10],
+        compressed[11],
+    ];
+    let mut expected_stack = felt_slice_to_ints(&expected_state);
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,
@@ -250,14 +264,14 @@ fn test_pipe_words_to_memory() {
     let one_word = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::poseidon2
+        use miden::core::crypto::hashes::eidos
 
         begin
             push.{mem_addr} # target address
             push.1  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.poseidon2::squeeze_digest
+            exec.eidos::digest
 
             # truncate stack
             swapdw dropw dropw
@@ -277,14 +291,14 @@ fn test_pipe_words_to_memory() {
     let three_words = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::poseidon2
+        use miden::core::crypto::hashes::eidos
 
         begin
             push.{mem_addr} # target address
             push.3  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.poseidon2::squeeze_digest
+            exec.eidos::digest
 
             # truncate stack
             swapdw dropw dropw
@@ -299,6 +313,40 @@ fn test_pipe_words_to_memory() {
         &expected_stack,
         mem_addr,
         data,
+    );
+}
+
+#[test]
+fn pipe_words_to_memory_hashes_empty_input_canonically() {
+    use miden_core::chiplets::hasher;
+
+    const MEM_ADDR: u64 = 1000;
+    const CANARY: [u64; 4] = [41, 42, 43, 44];
+    let source = format!(
+        "
+        use miden::core::mem
+        use miden::core::crypto::hashes::eidos
+        use miden::core::sys
+
+        begin
+            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+
+            push.{MEM_ADDR} push.0
+            exec.mem::pipe_words_to_memory
+            exec.eidos::digest
+            movup.4 eq.{MEM_ADDR} assert
+            exec.sys::truncate_stack
+        end
+        "
+    );
+
+    let digest = hasher::hash_elements(&[]);
+    let mut expected_stack = felt_slice_to_ints(digest.as_elements());
+    expected_stack.resize(16, 0);
+    build_test!(source.as_str(), &[]).expect_stack_and_memory(
+        &expected_stack,
+        MEM_ADDR as u32,
+        &CANARY,
     );
 }
 
@@ -334,7 +382,7 @@ fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
         let source = format!(
             "
             use miden::core::mem
-            use miden::core::crypto::hashes::poseidon2
+            use miden::core::crypto::hashes::eidos
 
             begin
                 push.[91,92,93,94] push.{guard_addr} mem_storew_le dropw
@@ -345,7 +393,7 @@ fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
 
                 dupw
                 push.{domain} push.{num_felts} push.{MEM_ADDR}
-                exec.poseidon2::hash_elements_in_domain
+                exec.eidos::hash_elements_in_domain
                 assert_eqw
 
                 swapw dropw
@@ -438,6 +486,37 @@ fn test_pipe_double_words_preimage_to_memory() {
         &[mem_addr + (4u64 * 4u64)],
         mem_addr as u32,
         data,
+    );
+}
+
+#[test]
+fn pipe_double_words_preimage_to_memory_accepts_canonical_empty_hash() {
+    use miden_core::chiplets::hasher;
+
+    const MEM_ADDR: u64 = 1000;
+    const CANARY: [u64; 4] = [41, 42, 43, 44];
+    let source = format!(
+        "
+        use miden::core::mem
+
+        begin
+            push.[41,42,43,44] push.{MEM_ADDR} mem_storew_le dropw
+
+            padw adv_loadw
+            push.{MEM_ADDR}
+            push.0
+            exec.mem::pipe_double_words_preimage_to_memory
+            swap drop
+        end
+        "
+    );
+
+    let mut advice_stack = AdviceStack::new();
+    advice_stack.append_word(hasher::hash_elements(&[]));
+    build_test!(source.as_str(), &[], advice_stack).expect_stack_and_memory(
+        &[MEM_ADDR],
+        MEM_ADDR as u32,
+        &CANARY,
     );
 }
 
