@@ -27,9 +27,14 @@ use crate::{
 /// returned value to a security estimator and apply their own acceptance policy. Constructing a
 /// value directly does not authenticate it.
 ///
-/// Recursive MASM verifiers return a compact descriptor containing the normalized inputs required
-/// by the in-VM estimator instead of this Rust type. Both APIs leave estimation and acceptance
-/// policy to the caller.
+/// These fields contain every input required by the conjectured estimator. A future proven-security
+/// estimator would require additional PCS and AIR data.
+///
+/// Recursive MASM verifiers return an equivalent MASM-specific descriptor instead of this Rust
+/// type. It contains the proof-varying inputs and precomputed Q16 round bases for the fixed
+/// relation shape. Within the recursive verifiers' documented parameter ranges, the in-VM estimator
+/// matches the native conjectured estimator exactly while avoiding expensive runtime logarithms.
+/// Both APIs leave estimation and acceptance policy to the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProofSecurityParameters {
     /// Protocol parameters bound by the proof transcript.
@@ -285,28 +290,30 @@ fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityR
     SecurityReport::new(terms)
 }
 
-/// Computes the conjectured round budget for a verified proof.
-///
-/// The same estimator handles MVM and PVM proofs because `params` contains the verified protocol,
-/// instance, and AIR shapes. Callers must use parameters returned by the verifier that
-/// authenticated the proof rather than values assembled independently.
-pub fn conjectured_security_report(parameters: &ProofSecurityParameters) -> SecurityReport {
-    let report = p3_security::budget::security_report(
-        &parameters.protocol_params,
-        &parameters.instance_shape,
-        &parameters.air_shape,
-    );
-    let correction = lookup_boundary_correction(
-        parameters.num_lookup_boundary_terms,
-        parameters.air_shape.lookup.fractions_per_row,
-        parameters.instance_shape.log_max_height,
-    );
-    apply_lookup_correction(report, correction)
-}
+impl ProofSecurityParameters {
+    /// Computes the conjectured round budget for the verified proof.
+    ///
+    /// The same estimator handles MVM and PVM proofs because the parameters include the protocol,
+    /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
+    /// authenticated the proof rather than values assembled independently.
+    pub fn conjectured_security_report(&self) -> SecurityReport {
+        let report = p3_security::budget::security_report(
+            &self.protocol_params,
+            &self.instance_shape,
+            &self.air_shape,
+        );
+        let correction = lookup_boundary_correction(
+            self.num_lookup_boundary_terms,
+            self.air_shape.lookup.fractions_per_row,
+            self.instance_shape.log_max_height,
+        );
+        apply_lookup_correction(report, correction)
+    }
 
-/// Returns the conjectured security level for a verified proof.
-pub fn conjectured_security_level_from_parameters(parameters: &ProofSecurityParameters) -> u32 {
-    conjectured_security_report(parameters).security_level()
+    /// Returns the conjectured security level for the verified proof.
+    pub fn conjectured_security_level(&self) -> u32 {
+        self.conjectured_security_report().security_level()
+    }
 }
 
 /// Builds MVM security parameters from values obtained during proof verification.
@@ -321,7 +328,7 @@ pub fn proof_security_parameters(
     alignment: usize,
     collision_resistance: u32,
 ) -> ProofSecurityParameters {
-    proof_security_parameters_from_protocol(
+    mvm_security_parameters_from_protocol(
         protocol_params(pcs_params),
         log_max_height,
         num_kernel_procedures,
@@ -330,7 +337,7 @@ pub fn proof_security_parameters(
     )
 }
 
-fn proof_security_parameters_from_protocol(
+fn mvm_security_parameters_from_protocol(
     protocol_params: ProtocolParams,
     log_max_height: u32,
     num_kernel_procedures: u32,
@@ -383,13 +390,14 @@ pub fn conjectured_security_level(
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
     };
-    conjectured_security_level_from_parameters(&proof_security_parameters_from_protocol(
+    mvm_security_parameters_from_protocol(
         protocol,
         log_max_height,
         num_kernel_procedures,
         COMMITMENT_ALIGNMENT,
         COLLISION_RESISTANCE,
-    ))
+    )
+    .conjectured_security_level()
 }
 
 /// Computes a deployed Miden VM proof's conjectured security level, in whole bits, for a proof
@@ -420,13 +428,14 @@ pub fn conjectured_security_level_for_alignment(
         folding_pow_bits,
         lookup_pow_bits: LOOKUP_POW_BITS,
     };
-    conjectured_security_level_from_parameters(&proof_security_parameters_from_protocol(
+    mvm_security_parameters_from_protocol(
         protocol,
         log_max_height,
         num_kernel_procedures,
         alignment,
         COLLISION_RESISTANCE,
-    ))
+    )
+    .conjectured_security_level()
 }
 
 /// Maps PCS parameters onto the protocol parameters the round budget reads.
@@ -516,7 +525,7 @@ mod tests {
         );
 
         assert_eq!(
-            conjectured_security_report(&security_parameters),
+            security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 22, COLLISION_RESISTANCE, 255)
         );
     }

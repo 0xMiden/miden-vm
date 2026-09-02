@@ -13,17 +13,15 @@ use miden_utils_testing::{
 use miden_vm::{
     DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
     StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
-    conjectured_security_level_from_parameters,
 };
 
 /// Applies the integration tests' policy to all STARK components in a verification outcome.
 fn minimum_conjectured_security_level(outcome: &VerificationOutcome) -> u32 {
-    let vm_security_level =
-        conjectured_security_level_from_parameters(outcome.vm_security_parameters());
+    let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
     outcome
         .precompile_security_parameters()
         .map_or(vm_security_level, |precompile_parameters| {
-            vm_security_level.min(conjectured_security_level_from_parameters(precompile_parameters))
+            vm_security_level.min(precompile_parameters.conjectured_security_level())
         })
 }
 
@@ -266,7 +264,7 @@ mod prover_api_lifecycle {
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileWitness, Program, Prover,
         StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
-        conjectured_security_level_from_parameters, precompile_witness_from_wire, prove_sync,
+        precompile_witness_from_wire, prove_sync,
     };
 
     use super::minimum_conjectured_security_level;
@@ -462,12 +460,12 @@ mod prover_api_lifecycle {
         let root_one_security_parameters = verifier
             .verify_precompile(&shared_precompile, one_root)
             .expect("shared precompile proof should directly verify root one");
-        assert_eq!(conjectured_security_level_from_parameters(&root_one_security_parameters), 96);
+        assert_eq!(root_one_security_parameters.conjectured_security_level(), 96);
 
         let root_two_security_parameters = verifier
             .verify_precompile(&shared_precompile, two_root)
             .expect("compatible extra roots should directly verify root two");
-        assert_eq!(conjectured_security_level_from_parameters(&root_two_security_parameters), 96);
+        assert_eq!(root_two_security_parameters.conjectured_security_level(), 96);
 
         let mut reordered_precompile = shared_precompile.clone();
         reordered_precompile.roots.swap(1, 2);

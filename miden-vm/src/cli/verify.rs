@@ -92,14 +92,11 @@ impl VerifyCmd {
                 "Program proof is valid but incomplete; outstanding precompile root: {root}"
             )));
         }
-        let vm_security_level =
-            miden_vm::conjectured_security_level_from_parameters(outcome.vm_security_parameters());
+        let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
         let security_level = outcome.precompile_security_parameters().map_or(
             vm_security_level,
             |precompile_parameters| {
-                vm_security_level.min(miden_vm::conjectured_security_level_from_parameters(
-                    precompile_parameters,
-                ))
+                vm_security_level.min(precompile_parameters.conjectured_security_level())
             },
         );
 

@@ -27,7 +27,6 @@ pub use miden_processor::{
 pub use miden_prover::{InputError, Prover, ProverError, StackOutputs, Word, prove_sync};
 pub use miden_verifier::{
     ProofSecurityParameters, VerificationError, VerificationOutcome, Verifier,
-    conjectured_security_level_from_parameters, conjectured_security_report,
 };
 
 /// Hydrates a passive deferred-state wire using the standard bundled precompile registry.

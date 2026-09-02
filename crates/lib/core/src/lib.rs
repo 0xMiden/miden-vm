@@ -244,15 +244,4 @@ mod tests {
 
         assert!(exists);
     }
-
-    #[test]
-    fn conjectured_security_estimator_root_matches_exported_procedure() {
-        let core_lib = CoreLibrary::default();
-        let path = "::miden::core::stark::security::compute_conjectured_security_level";
-        assert_eq!(
-            Some(core_lib.conjectured_security_estimator_root()),
-            core_lib.package.get_procedure_root_by_path(path),
-            "estimator accessor must return the exported procedure root"
-        );
-    }
 }

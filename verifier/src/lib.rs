@@ -34,10 +34,7 @@ mod exports {
     }
 }
 pub use exports::*;
-pub use miden_air::security::{
-    ProofSecurityParameters, conjectured_security_level_from_parameters,
-    conjectured_security_report,
-};
+pub use miden_air::security::ProofSecurityParameters;
 
 pub mod recursive;
 
@@ -56,12 +53,17 @@ impl Verifier {
 
     /// Verifies a deferred or complete execution proof against its public claim.
     ///
-    /// The VM STARK authenticates the carried precompile root in either state. Deferred wire data
-    /// is neither hydrated nor validated by the verifier. Complete proofs additionally verify the
-    /// aggregate precompile STARK when the VM authenticated outstanding work. The outcome reports
-    /// the authenticated security parameters of the components actually verified and any
-    /// precompile root that remains outstanding. The caller chooses an estimator and acceptance
-    /// policy for those parameters.
+    /// The VM STARK authenticates the carried precompile root in either state. For a deferred
+    /// proof, the verifier does not inspect the carried `DeferredStateWire`; it verifies the VM
+    /// STARK and returns the authenticated root as an outstanding obligation. The wire is
+    /// prover-side data and is validated separately when converted into a precompile witness.
+    /// Complete proofs additionally verify the aggregate precompile STARK against the
+    /// VM-authenticated root.
+    ///
+    /// The outcome reports the authenticated security parameters of the components actually
+    /// verified and any precompile root that remains outstanding. Callers can use
+    /// [`ProofSecurityParameters::conjectured_security_level`] to estimate each verified proof's
+    /// conjectured security level, then apply their own acceptance policy.
     ///
     /// # Errors
     ///

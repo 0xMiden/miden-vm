@@ -1,17 +1,5 @@
 use miden::core::stark::constants
 
-# Fixed-point (16 fractional bits) conjectured security bits per FRI query for the shared
-# log_blowup = 3 Goldilocks/QuadFelt PCS, per the random-words formula
-# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
-# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
-const CONJECTURED_BITS_PER_QUERY_FP = 193382
-
-# Number of fractional bits in CONJECTURED_BITS_PER_QUERY_FP.
-const CONJECTURED_SECURITY_FP_SHIFT = 16
-
-# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
-const MAX_SECURITY_LEVEL = 128
-
 # Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
 # also define the domain over which its returned descriptor may be passed to the common estimator.
 const NUM_QUERIES_MIN = 7
@@ -47,28 +35,6 @@ pub proc load_security_params
     adv_push exec.constants::set_query_pow_bits
     adv_push exec.constants::set_deep_pow_bits
     adv_push exec.constants::set_folding_pow_bits
-end
-
-#! Computes the legacy query-only conjectured security estimate, in bits.
-#!
-#! Evaluates `min(((num_queries * 193382) >> 16) + query_pow_bits, 128)`. The fixed-point
-#! coefficient is specific to the shared log_blowup = 3 Goldilocks/QuadFelt PCS. This procedure
-#! does not account for the AIR-dependent algebraic rounds. New recursive-verifier consumers should
-#! instead pass the complete descriptor returned by their verifier unchanged to
-#! `stark::security::compute_conjectured_security_level`.
-#!
-#! PRECONDITION: `num_queries` is in `7..=150` and `query_pow_bits` is in `0..=31`, matching
-#! `validate_inputs`. The query product then fits in a u32, as required by `u32shr`. This procedure
-#! applies no acceptance policy.
-#!
-#! Inputs:  [num_queries, query_pow_bits, ...]
-#! Outputs: [level, ...]
-pub proc conjectured_security_level
-    push.CONJECTURED_BITS_PER_QUERY_FP mul
-    u32shr.CONJECTURED_SECURITY_FP_SHIFT
-    add
-    push.MAX_SECURITY_LEVEL u32min
-    # => [level, ...]
 end
 
 #! Compute the LDE domain generator from the log2 of its size.

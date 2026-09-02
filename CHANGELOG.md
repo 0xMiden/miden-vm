@@ -15,7 +15,7 @@
 
 #### Fixes
 
-- [BREAKING] Made native MVM and PVM verifiers return proof security parameters and recursive verifiers return a common security descriptor, leaving estimation and policy to callers ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
+- [BREAKING] Made native MVM and PVM verifiers return proof security parameters, recursive verifiers return a common descriptor, and removed the legacy query-only estimator, leaving estimation and policy to callers ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
 - Hardened `ExecutionWitness` byte decoding with an input-sized budget and rejection of trailing bytes. Added an explicit trusted reader for sparse replay data ([#3758](https://github.com/0xMiden/miden-vm/pull/3758)).
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 

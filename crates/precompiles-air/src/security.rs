@@ -8,9 +8,7 @@
 //! `air_shape_matches_symbolic`, matching how the VM side does it.
 
 pub use miden_air::security::ProofSecurityParameters;
-use miden_air::security::{
-    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, conjectured_security_report,
-};
+use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -342,13 +340,8 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    conjectured_security_report(&proof_security_parameters(
-        params,
-        log_max_height,
-        COMMITMENT_ALIGNMENT,
-        COLLISION_RESISTANCE,
-    ))
-    .security_level()
+    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
+        .conjectured_security_level()
 }
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
@@ -364,13 +357,8 @@ pub fn conjectured_security_level_for_alignment(
     log_max_height: u32,
     alignment: usize,
 ) -> u32 {
-    conjectured_security_report(&proof_security_parameters(
-        params,
-        log_max_height,
-        alignment,
-        COLLISION_RESISTANCE,
-    ))
-    .security_level()
+    proof_security_parameters(params, log_max_height, alignment, COLLISION_RESISTANCE)
+        .conjectured_security_level()
 }
 
 #[cfg(test)]
@@ -443,7 +431,7 @@ mod tests {
             proof_security_parameters(&pcs_params, 19, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE);
 
         assert_eq!(
-            conjectured_security_report(&security_parameters),
+            security_parameters.conjectured_security_report(),
             security_report(&expected_protocol_params, 19)
         );
     }
