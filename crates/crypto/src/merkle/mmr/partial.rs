@@ -1464,7 +1464,11 @@ mod tests {
         bad_bytes.extend_from_slice(&0usize.to_bytes());
 
         let result = PartialMmr::read_from_bytes(&bad_bytes);
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(DeserializationError::InvalidValue(message))
+                if message == "InOrderIndex must be nonzero"
+        ));
     }
 
     #[test]

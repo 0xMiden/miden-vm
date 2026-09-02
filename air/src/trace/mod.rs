@@ -29,7 +29,9 @@ pub const STACK_TRACE_WIDTH: usize = 19;
 pub mod log_deferred {
     use core::ops::Range;
 
-    use super::chiplets::hasher::{CV_LEN, Hasher};
+    use miden_core::chiplets::hasher::BLOCK_LO_RANGE;
+
+    use super::chiplets::hasher::CV_LEN;
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
@@ -53,9 +55,9 @@ pub mod log_deferred {
     //     - stack[0..4] = STATE_NEW.
 
     /// Stack range containing the precomputed statement word on opcode entry.
-    pub const STACK_STMNT_RANGE: Range<usize> = Hasher::BLOCK_LO_RANGE;
+    pub const STACK_STMNT_RANGE: Range<usize> = BLOCK_LO_RANGE;
     /// Stack range that receives the new transcript state on opcode exit.
-    pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::BLOCK_LO_RANGE;
+    pub const STACK_STATE_NEW_RANGE: Range<usize> = BLOCK_LO_RANGE;
 }
 
 // Chiplets trace

@@ -49,12 +49,12 @@ pub fn enforce_aead_stream_constraints<AB>(
 
     let cols = local.aead_stream();
     let cols_next = next.aead_stream();
-    let stream = selectors.stream_mode.aead_stream.clone();
+    let stream = selectors.bitwise.aead_stream.clone();
     let stream_next = aead_stream_active_next::<AB>(next);
 
     // Align stream entry boundaries with the eight-row phase cycle.
     builder
-        .when(selectors.bitwise.next_is_first.clone() * stream_next.clone())
+        .when(selectors.bitwise.region.next_is_first.clone() * stream_next.clone())
         .assert_one(phases[7].clone());
 
     builder.when(stream.not() * stream_next.clone()).assert_one(phases[7].clone());
