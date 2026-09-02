@@ -48,7 +48,8 @@
 //! - `quotient_next` is included in the READ layout and is mapped via
 //!   `InputKey::QuotientChunkCoord` with `offset = 1`.
 //! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs. Multi-AIR layouts append
-//!   one beta slot plus three selector slots per AIR instance.
+//!   one beta slot plus three selector slots per AIR instance; canonical compositions further
+//!   append one fold-coefficient slot per AIR instance, immediately after the selector block.
 
 pub(crate) const SELECTORS_PER_AIR: usize = 3;
 
