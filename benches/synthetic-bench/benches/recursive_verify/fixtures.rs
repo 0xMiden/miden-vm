@@ -13,14 +13,14 @@ use miden_core::{
     deferred::DeferredState,
     field::QuotientMap,
     program::ExecutionClaim,
-    proof::PrecompileProof,
+    proof::{PrecompileProof, PrecompileStatus},
     serde::{Deserializable, Serializable},
     utils::to_hex,
 };
 use miden_core_lib::CoreLibrary;
 use miden_precompiles_verifier::masm_verifier::PvmRecursiveVerifierInputs;
 use miden_processor::{ExecutionOptions, FastProcessor};
-use miden_verifier::{Verifier, VersionedProof, recursive::RecursiveVerifierInputs};
+use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
 use miden_vm::{
     Assembler, ExecutionProof, HashFunction, PrecompileWitness, ProgramInfo, Prover, StackInputs,
     StackOutputs, internal::InputFile, prove_sync, trace::build_trace,
@@ -129,16 +129,16 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    let proof = match VersionedProof::read_from_bytes(&proof_bytes) {
+    let proof = match ExecutionProof::read_from_bytes(&proof_bytes) {
         Ok(proof) => proof,
         Err(err) => {
             eprintln!("ignoring undecodable cached proof {}: {err}", proof_path.display());
             return None;
         },
     };
-    let vm_proof = match proof.proof() {
-        ExecutionProof::Complete { vm, precompile: None } => vm,
-        ExecutionProof::Complete { precompile: Some(_), .. } | ExecutionProof::Deferred { .. } => {
+    let vm_proof = match proof.precompile_status() {
+        PrecompileStatus::Empty => proof.vm(),
+        PrecompileStatus::Proven(_) | PrecompileStatus::Deferred(_) => {
             eprintln!(
                 "ignoring cached transaction proof with precompile data {}",
                 proof_path.display()
@@ -176,7 +176,7 @@ fn load_cached_tx_proof(
         return None;
     }
 
-    Some((stack_outputs, proof.into_parts().1))
+    Some((stack_outputs, proof))
 }
 
 fn store_cached_tx_proof(
@@ -190,7 +190,6 @@ fn store_cached_tx_proof(
         .unwrap_or_else(|err| panic!("create proof cache {}: {err}", cache_dir.display()));
     let (proof_path, outputs_path) = tx_proof_cache_paths(cache_dir, proof_index, cache_key);
 
-    let proof = Verifier::wrap_proof(proof.clone());
     std::fs::write(&proof_path, proof.to_bytes())
         .unwrap_or_else(|err| panic!("write cached proof {}: {err}", proof_path.display()));
 
@@ -475,11 +474,11 @@ pub(super) fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<
                 (stack_outputs, proof, "miss")
             };
             assert!(
-                matches!(&proof, ExecutionProof::Complete { precompile: None, .. }),
+                matches!(proof.precompile_status(), PrecompileStatus::Empty),
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
                  this benchmark expects precompile-free fixtures"
             );
-            let proof_bytes = Verifier::wrap_proof(proof.clone()).to_bytes();
+            let proof_bytes = proof.to_bytes();
             let proof_bytes_len = proof_bytes.len();
             let proof_digest: [u8; 32] = Blake3_256::hash(&proof_bytes).into();
             let proof_prefix = hex_prefix(&proof_bytes);

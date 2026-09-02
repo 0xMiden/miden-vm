@@ -381,7 +381,6 @@ fn bench_one_scenario(
             StackInputs::default(),
             stack_outputs,
         );
-        let proof = Verifier::wrap_proof(proof);
         group.bench_function("verify", |b| {
             b.iter(|| {
                 let outcome = Verifier::new().verify(&claim, &proof).expect("verify");

@@ -51,9 +51,8 @@ impl Host for YieldingAsyncHost {
 }
 
 fn verify_generated_proof(claim: &ExecutionClaim, proof: &ExecutionProof) {
-    let proof = Verifier::wrap_proof(proof.clone());
     let outcome = Verifier::new()
-        .verify(claim, &proof)
+        .verify(claim, proof)
         .expect("generated proof should verify against its execution claim");
     assert!(outcome.is_complete());
 }

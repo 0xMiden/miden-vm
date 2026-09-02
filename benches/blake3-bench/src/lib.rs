@@ -165,7 +165,6 @@ pub fn prove_and_verify_once(fixture: &Blake3Fixture) {
     let witness = execute_for_proving(fixture);
     let claim = witness.claim();
     let (_, proof) = prove_trace_outputs(witness);
-    let proof = Verifier::wrap_proof(proof);
     let outcome = Verifier::new()
         .verify(&claim, &proof)
         .expect("failed to verify Blake3 benchmark proof");

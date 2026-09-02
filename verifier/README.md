@@ -7,7 +7,7 @@ appropriate for projects that only need verification.
 
 ## Usage
 
-Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `VersionedProof`
+Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `ExecutionProof`
 against its `ExecutionClaim`. The claim contains the program information and public stack inputs and
 outputs. The VM STARK authenticates the precompile root in either state. For a deferred proof, the
 passive wire is neither hydrated nor validated. The outcome exposes only the authenticated root.

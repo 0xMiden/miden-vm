@@ -117,7 +117,6 @@ pub fn verify_once(
         fixture.stack_inputs,
         stack_outputs,
     );
-    let proof = Verifier::wrap_proof(proof);
     let outcome = Verifier::new()
         .verify(&claim, &proof)
         .expect("failed to verify precompile benchmark proof");

@@ -44,7 +44,7 @@ use miden_processor::{
     event::{EventHandler, TraceHandler},
 };
 pub use miden_prover::Prover;
-pub use miden_verifier::{Verifier, VersionedProof};
+pub use miden_verifier::Verifier;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -688,7 +688,6 @@ impl Test {
             .unwrap();
         let claim =
             ExecutionClaim::from_program_info(program.to_info(), stack_inputs, stack_outputs);
-        let proof = Verifier::wrap_proof(proof);
         if test_fail {
             let mut elements = [ZERO; MIN_STACK_DEPTH];
             elements.copy_from_slice(&*stack_outputs);

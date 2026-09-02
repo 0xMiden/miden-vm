@@ -119,9 +119,7 @@ fn build_verifier_inputs(
     proof: &ExecutionProof,
     claim: &ExecutionClaim,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let vm = match proof {
-        ExecutionProof::Deferred { vm, .. } | ExecutionProof::Complete { vm, .. } => vm,
-    };
+    let vm = proof.vm();
     let stark = &vm.proof;
     if stark.hash_fn() != HashFunction::Poseidon2 {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
@@ -455,7 +453,7 @@ mod tests {
     use miden_core::{
         crypto::merkle::InnerNodeInfo,
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{StarkProof as CoreStarkProof, VmProof},
+        proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
 
     use super::*;
@@ -464,13 +462,13 @@ mod tests {
     /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
     #[test]
     fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
-        let proof = ExecutionProof::Complete {
-            vm: VmProof {
+        let proof = ExecutionProof::new(
+            VmProof {
                 proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
                 precompile_root: Word::default(),
             },
-            precompile: None,
-        };
+            PrecompileStatus::Empty,
+        );
         let claim = ExecutionClaim::from_program_info(
             ProgramInfo::new(Word::default(), KernelDescriptor::default()),
             StackInputs::default(),

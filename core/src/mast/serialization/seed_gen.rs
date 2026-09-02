@@ -13,7 +13,7 @@ use crate::{
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
     proof::{
-        ExecutionProof, ExecutionProofCompatibility, HashFunction, StarkProof, VersionedProof,
+        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileStatus, StarkProof,
         VmProof,
     },
     serde::{ByteWriter, Serializable},
@@ -284,10 +284,12 @@ fn generate_fuzz_seeds() {
             proof: stark,
             precompile_root: TRUE_DIGEST,
         };
-        let proof = ExecutionProof::Complete { vm, precompile: None };
-        let proof =
-            VersionedProof::new(ExecutionProofCompatibility::new(Vec::new(), Vec::new()), proof)
-                .to_bytes();
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()),
+            vm,
+            PrecompileStatus::Empty,
+        )
+        .to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
     }
 

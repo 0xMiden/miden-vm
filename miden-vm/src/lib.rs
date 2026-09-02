@@ -16,7 +16,7 @@ pub use miden_core::{
     program::ExecutionClaim,
     proof::{
         ExecutionProof, ExecutionProofCompatibility, ExecutionProofError, HashFunction,
-        PrecompileProof, StarkProof, VersionedProof, VmProof,
+        PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
 };
 pub use miden_processor::{

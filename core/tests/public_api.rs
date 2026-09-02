@@ -5,7 +5,7 @@ fn mast_forest_public_api_is_immutable_after_creation() {
 }
 
 #[test]
-fn execution_proof_transport_is_versioned() {
+fn execution_proof_is_the_versioned_transport() {
     let tests = trybuild::TestCases::new();
-    tests.compile_fail("tests/ui/execution_proof_transport/direct_serialize.rs");
+    tests.pass("tests/ui/execution_proof_transport/direct_serialize.rs");
 }

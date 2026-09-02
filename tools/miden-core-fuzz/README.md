@@ -1,6 +1,6 @@
 # Miden core fuzzing
 
-This crate tests Miden core deserialization surfaces against bad inputs. It covers `MastForest` and `VersionedProof` as well as deferred-state proof wire formats.
+This crate tests Miden core deserialization surfaces against bad inputs. It covers `MastForest` and `ExecutionProof` as well as deferred-state proof wire formats.
 
 ## Prerequisites
 
@@ -101,7 +101,7 @@ The **`operation_serde_deserialize`** target tests `Operation` JSON deserializat
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-The **`execution_proof_deserialize`** target tests registry-free canonical `VersionedProof` decoding,
+The **`execution_proof_deserialize`** target tests canonical `ExecutionProof` decoding without a registry,
 including its passive deferred-state proof wire.
 
 ```bash

@@ -220,12 +220,11 @@ The low-level deferred-state transport format is `DeferredStateWire`, not the in
 `to_wire` emits a deterministic child-first DFS of the root-reachable closure, so unreferenced
 orphans are dropped.
 
-`VersionedProof::to_bytes` is infallible, and `VersionedProof::read_from_bytes` decodes canonical
-transport without a registry or hydration. When precompile proving is required, the caller splits
-the envelope with `into_parts` and keeps its compatibility declaration. The caller passes the raw
-deferred proof's wire to `miden_vm::precompile_witness_from_wire`. After completion, the caller wraps
-the proof with the same declaration before verification. The hydration step uses the bundled
-registry and validates the wire's implicit root.
+`ExecutionProof::to_bytes` is infallible, and `ExecutionProof::read_from_bytes` decodes canonical
+transport without a registry or hydration. When precompile proving is required, the caller passes
+the deferred status wire to `miden_vm::precompile_witness_from_wire`. Completing the proof preserves
+its compatibility declaration. The hydration step uses the bundled registry and validates the
+wire's implicit root.
 
 Hydration performs structural decoding, a canonicality check, and root evaluation:
 
