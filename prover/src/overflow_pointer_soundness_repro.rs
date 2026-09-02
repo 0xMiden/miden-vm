@@ -80,7 +80,7 @@ fn verifier_rejects_forged_overflow_pop_order() {
     );
 
     let (mut core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
-        main.to_air_matrices();
+        main.clone_air_matrices();
 
     // Redirect the first DROP to consume the older overflow record R1.
     core_row_mut(&mut core_matrix, drop_rows[0]).stack.b1 = first_record_clk;
