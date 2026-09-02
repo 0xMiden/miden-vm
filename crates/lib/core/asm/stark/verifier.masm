@@ -23,11 +23,11 @@ use miden::core::stark::utils
 #! Before calling this procedure, a relation wrapper must:
 #!
 #! - store the transcript-bound security parameters, which this procedure validates;
-#! - store its relation digest, registry root, canonical AIR heights, and proof-order tag;
+#! - store its relation digest and canonical AIR heights;
 #! - stage its fixed OOD and query-row addresses in the generic context cells; and
 #! - supply the five hooks listed above in the documented ABI order.
 #!
-#! Relation-dependent constants live under `sys/<relation>`. Registry geometry and circuit shape
+#! Relation-dependent constants live under `sys/<relation>`. The circuit digest and circuit shape
 #! must be derived by regeneration, while any hand-written copy must be pinned to that source.
 #!
 #! Hardcoded protocol parameters:
