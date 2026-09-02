@@ -75,29 +75,10 @@ fn setup_masm(log_heights: &LogHeights) -> String {
         .expect("write height setup");
     }
 
-    let mut value_ptrs = [0_u32; 10];
-    let mut next_value_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
-    for air_index in proof_order(log_heights) {
-        value_ptrs[air_index] = next_value_ptr;
-        next_value_ptr += u32::try_from(2 * AUX_VALUE_WIDTHS[air_index])
-            .expect("test auxiliary-value width must fit in u32");
-    }
-    let value_ptrs_base = pvm_layout_const("AUX_VALUE_PTRS_PTR");
-    let mut value_ptr_setup = String::new();
-    for (air_index, value_ptr) in value_ptrs.into_iter().enumerate() {
-        writeln!(
-            value_ptr_setup,
-            "push.{value_ptr} push.{} mem_store",
-            value_ptrs_base + u32::try_from(air_index).expect("AIR index must fit in u32")
-        )
-        .expect("write auxiliary-value pointer setup");
-    }
-
     format!(
         r#"
         {random_coin_setup}
         {heights}
-        {value_ptr_setup}
         "#,
         random_coin_setup = direct_random_coin_setup_masm(),
     )
@@ -122,39 +103,17 @@ fn hook_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
         use miden::core::stark::constants
-        use miden::core::sys::pvm::aux_trace
-
-        begin
-            {}
-            exec.aux_trace::observe_aux_trace
-        end
-        "#,
-        setup_masm(log_heights)
-    )
-}
-
-fn production_hook_source() -> String {
-    format!(
-        r#"
-        use miden::core::stark::constants
         use miden::core::sys::pvm
         use miden::core::sys::pvm::aux_trace
 
         begin
             {}
-            exec.pvm::load_air_context
+            exec.pvm::stage_proof_order_positions
             exec.aux_trace::observe_aux_trace
         end
         "#,
-        random_coin_setup_masm()
+        setup_masm(log_heights)
     )
-}
-
-fn air_context_source() -> &'static str {
-    "use miden::core::sys::pvm
-     begin
-         exec.pvm::load_air_context
-     end"
 }
 
 /// Reference transcript path using the public buffered word API for the same six advice words.
@@ -411,10 +370,18 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 2), Felt::ZERO);
         assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 3), Felt::ZERO);
 
+        // The hook absorbs the values in proof order and then scatters them, so the region the
+        // constraint circuit reads must end up in the canonical numbering: `ChipletAir::all()`
+        // order.
         let aux_bus_boundary_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
-        for (i, value) in
-            proof_ordered_normalized_sums(&normalized_sums, &log_heights).iter().enumerate()
-        {
+        let canonical: Vec<QuadFelt> =
+            normalized_sums.iter().flat_map(|values| values.iter().copied()).collect();
+        assert_ne!(
+            canonical,
+            proof_ordered_normalized_sums(&normalized_sums, &log_heights),
+            "{case}: the fixture heights must induce a non-identity proof order"
+        );
+        for (i, value) in canonical.iter().enumerate() {
             let coefficients: &[Felt] = value.as_basis_coefficients_slice();
             for (coord, expected) in coefficients.iter().enumerate() {
                 assert_eq!(
@@ -423,7 +390,8 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
                         aux_bus_boundary_ptr + 2 * i as u32 + coord as u32,
                     ),
                     *expected,
-                    "{case}: normalized LogUp value {i} coordinate {coord} was not stored in proof order"
+                    "{case}: canonical normalized LogUp value {i} coordinate {coord} is not at \
+                     the address the circuit reads"
                 );
             }
         }
@@ -434,47 +402,6 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
                 "{case}: aux commitment coordinate {i} mismatch"
             );
         }
-    }
-}
-
-#[test]
-fn pvm_aux_hook_uses_value_ptrs_materialized_by_air_context() {
-    for (case, log_heights) in PROOF_ORDER_CASES {
-        let (alpha, beta) = sampled_challenges(&log_heights);
-        let normalized_sums =
-            balanced_normalized_sums(fixed_boundary_correction(alpha, beta), &log_heights);
-        let proof_advice = advice(&normalized_sums, &log_heights);
-        let height_advice: Vec<u64> = log_heights.into_iter().map(u64::from).collect();
-
-        let (context_output, _) = build_test!(air_context_source(), &[], &height_advice)
-            .execute_for_output()
-            .unwrap_or_else(|error| panic!("{case}: PVM context load failed: {error}"));
-        let mut next_value_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
-        let mut expected_value_ptrs = [0_u32; 10];
-        for air_index in proof_order(&log_heights) {
-            expected_value_ptrs[air_index] = next_value_ptr;
-            next_value_ptr += u32::try_from(2 * AUX_VALUE_WIDTHS[air_index])
-                .expect("test auxiliary-value width must fit in u32");
-        }
-        let value_ptrs_base = pvm_layout_const("AUX_VALUE_PTRS_PTR");
-        for (air_index, expected) in expected_value_ptrs.into_iter().enumerate() {
-            assert_eq!(
-                read_memory_felt(&context_output, value_ptrs_base + air_index as u32),
-                Felt::from_u32(expected),
-                "{case}: AIR {air_index} auxiliary-value pointer is wrong"
-            );
-        }
-
-        let combined_advice: Vec<u64> =
-            height_advice.into_iter().chain(proof_advice.iter().copied()).collect();
-
-        build_test!(&production_hook_source(), &[], &combined_advice)
-            .execute()
-            .unwrap_or_else(|error| {
-                panic!(
-                    "{case}: production PVM context + aux hook rejected balanced boundary: {error}"
-                )
-            });
     }
 }
 
