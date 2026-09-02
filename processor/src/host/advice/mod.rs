@@ -6,7 +6,7 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap, AdviceStack},
-    chiplets::hasher::Hasher as VmHasher,
+    chiplets::hasher,
     crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
 };
 #[cfg(test)]
@@ -660,7 +660,7 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        let root = VmHasher::merge(&[lhs, rhs]);
+        let root = hasher::merge(&[lhs, rhs]);
         let added = self.store.new_internal_node_count([root]);
         self.check_merkle_store_node_addition(added)?;
 

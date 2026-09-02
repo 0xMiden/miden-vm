@@ -38,3 +38,6 @@ miden-lifted-stark.workspace = true
 miden-precompiles.workspace = true
 p3-security.workspace = true
 ruint.workspace = true
+
+[dev-dependencies]
+rand = { workspace = true, features = ["std_rng"] }

@@ -4,6 +4,7 @@ use miden_air::{
     config,
     security::{self, ProofSecurityParameters},
 };
+use miden_core::program::KernelDescriptor;
 use p3_security::{
     budget::{
         AirShape, LookupShape, ProtocolParams, SecurityReport,
@@ -101,12 +102,22 @@ fn lookup_slack_bound_is_conservative_at_every_transition() {
     let mvm_shape = security::AIR_SHAPE.lookup;
     let mvm_coefficient =
         (u64::from(mvm_shape.max_message_width) + 2) * u64::from(mvm_shape.fractions_per_row);
-    let (mvm_q, _, mvm_bound) = bound(mvm_coefficient);
-    assert_eq!(
-        mvm_bound,
-        mvm_q * security::FIXED_POINT_ONE - fixed::ceil_log2(mvm_coefficient),
-        "the slack bound must be tight for the MVM lookup coefficient"
-    );
+    let (_, _, mvm_bound) = bound(mvm_coefficient);
+    for log_height in 6..=29 {
+        for num_kernel_procedures in 0..=KernelDescriptor::MAX_NUM_PROCEDURES as u64 {
+            let boundary_terms =
+                u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures;
+            let correction = (boundary_terms * security::LOG2_E)
+                .div_ceil(u64::from(mvm_shape.fractions_per_row))
+                .div_ceil(1 << log_height);
+            let remainder = correction % security::FIXED_POINT_ONE;
+            assert!(
+                mvm_bound >= remainder + 2,
+                "MVM lookup decision is inconclusive at height {log_height} with \
+                 {num_kernel_procedures} kernel procedures"
+            );
+        }
+    }
 
     let pvm_shape = pvm::AIR_SHAPE.lookup;
     let pvm_coefficient =

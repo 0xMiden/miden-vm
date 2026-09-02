@@ -12,7 +12,8 @@
 
 use core::ops::Range;
 
-pub use miden_core::{Word, chiplets::hasher::Hasher};
+pub use miden_core::Word;
+use miden_core::chiplets::hasher as core_hasher;
 
 use super::{Felt, ONE, ZERO};
 
@@ -32,7 +33,7 @@ pub type HasherState = [Felt; STATE_WIDTH];
 /// Number of field elements in the hasher state.
 ///
 /// Eidos compression interprets the state as `[block_lo(4), block_hi(4), cv(4)]`.
-pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
+pub const STATE_WIDTH: usize = core_hasher::STATE_WIDTH;
 
 /// Number of field elements in one compression block.
 pub const BLOCK_LEN: usize = 8;
@@ -44,7 +45,7 @@ pub const CV_LEN: usize = STATE_WIDTH - BLOCK_LEN;
 pub const DIGEST_LEN: usize = 4;
 
 /// The output portion of the hash state, located in the final chaining-value word.
-pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
+pub const DIGEST_RANGE: Range<usize> = core_hasher::DIGEST_RANGE;
 
 /// Number of transitions in one Eidos compression trace block.
 pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;

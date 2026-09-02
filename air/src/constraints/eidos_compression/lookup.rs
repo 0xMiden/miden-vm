@@ -14,6 +14,7 @@ use miden_crypto::stark::air::WindowAccess;
 use super::{
     algebra::{missing_rotation_result, pack_u32_le, universal_cv_word, xor_from_and},
     layout::*,
+    narrow::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields},
     selectors::EidosCompressionSelectors,
 };
 #[cfg(test)]
@@ -165,19 +166,12 @@ impl<T> Borrow<EidosCompressionCols<T>> for [T] {
 /// Number of lookup fractions grouped into each Eidos compression auxiliary column.
 pub(crate) const EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE: [usize; AUX_COLS] = [2; AUX_COLS];
 
-pub(crate) const NARROW_BATCH_COLUMNS: usize = 18;
+pub(crate) const NARROW_BATCH_COLUMNS: usize = NARROW_SLOTS.len() / 2;
 pub(crate) const FOOTER_INPUT_COLUMN: usize = 18;
 pub(crate) const FOOTER_OUTPUT_COLUMN: usize = 19;
 
-#[cfg(test)]
-const FOOTER_HIGH_AND8_LOOKUPS: usize = 2 * BYTES_PER_WORD;
-#[cfg(test)]
-const FOOTER_LOW_AND8_LOOKUPS: usize = 2 * BYTES_PER_WORD;
-#[cfg(test)]
-const FOOTER_TOP_BIT_AND8_LOOKUPS: usize = 1;
-#[cfg(test)]
-const FOOTER_AND8_LOOKUPS: usize =
-    FOOTER_HIGH_AND8_LOOKUPS + FOOTER_LOW_AND8_LOOKUPS + FOOTER_TOP_BIT_AND8_LOOKUPS;
+const _: () = assert!(FOOTER_INPUT_COLUMN == NARROW_BATCH_COLUMNS);
+const _: () = assert!(FOOTER_OUTPUT_COLUMN == FOOTER_INPUT_COLUMN + 1);
 
 const FOOTER_INPUT_DEG: Deg = Deg { v: 3, u: 2 };
 const FOOTER_OUTPUT_BATCH2_DEG: Deg = Deg { v: 3, u: 2 };
@@ -375,13 +369,15 @@ where
 {
     let fused = is_fused::<LB>(selectors);
     let footer = selectors.is_footer();
+    let spec = NARROW_SLOTS[slot];
 
-    match slot {
-        0..=17 => -(fused + footer),
-        18..=21 | 27 | 30..=31 => -fused,
-        22..=26 | 28..=29 => -(fused + footer),
-        32..=35 => fused - LB::Expr::from_u64(7) * footer,
-        _ => unreachable!("32-row EidosCompression narrow slot out of range"),
+    match (spec.fused_bus, spec.footer_bus) {
+        (NarrowSlotBus::MessageWord, Some(NarrowSlotBus::MessageWord)) => {
+            fused - LB::Expr::from_u64(7) * footer
+        },
+        (NarrowSlotBus::MessageWord, None) => fused,
+        (_, Some(_)) => -(fused + footer),
+        (_, None) => -fused,
     }
 }
 
@@ -396,58 +392,62 @@ where
     LB: EidosCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
+    let spec = NARROW_SLOTS[slot];
+    let fused = is_fused::<LB>(selectors);
+    let footer = selectors.is_footer();
     let mut encoded = G::ExprEF::ZERO;
 
-    if slot <= 15 {
-        // These byte slots carry And8 relations on fused and footer rows.
-        encoded += group.bus_prefix(BusId::And8Lookup as usize) * is_fused::<LB>(selectors);
-        encoded += group.bus_prefix(BusId::And8Lookup as usize) * selectors.is_footer();
-    } else if slot <= 31 {
-        // Fused rows use these slots for rotations; footer rows reuse them for And8 and range
-        // relations.
-        let byte = slot % BYTES_PER_WORD;
-        encoded += group.bus_prefix(eidos_compression_rot12_bus(byte) as usize) * selectors.is_ab();
-        encoded += group.bus_prefix(eidos_compression_rot7_bus(byte) as usize) * selectors.is_cd();
+    match spec.fused_bus {
+        NarrowSlotBus::And8 => {
+            encoded += group.bus_prefix(BusId::And8Lookup as usize) * fused.clone();
+        },
+        NarrowSlotBus::Rotation(byte) => {
+            let byte = byte as usize;
+            encoded +=
+                group.bus_prefix(eidos_compression_rot12_bus(byte) as usize) * selectors.is_ab();
+            encoded +=
+                group.bus_prefix(eidos_compression_rot7_bus(byte) as usize) * selectors.is_cd();
+        },
+        NarrowSlotBus::MessageWord => {
+            let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
+                fused.clone() + footer.clone()
+            } else {
+                fused.clone()
+            };
+            encoded += group.bus_prefix(BusId::EidosCompressionMessageWord as usize) * activity;
+        },
+        NarrowSlotBus::RangeCheck => {
+            unreachable!("range checks are not used on fused rows")
+        },
+    }
 
-        let footer = selectors.is_footer();
-        match slot {
-            16 => {
-                encoded += group.bus_prefix(BusId::And8Lookup as usize) * footer;
-            },
-            17 | 22..=26 | 28..=29 => {
-                encoded += group.bus_prefix(BusId::RangeCheck as usize) * footer;
-            },
-            _ => {},
-        }
-    } else if slot <= 35 {
-        encoded += group.bus_prefix(BusId::EidosCompressionMessageWord as usize)
-            * (is_fused::<LB>(selectors) + selectors.is_footer());
-    } else {
-        unreachable!("32-row EidosCompression narrow slot out of range");
+    match spec.footer_bus {
+        Some(NarrowSlotBus::And8) => {
+            encoded += group.bus_prefix(BusId::And8Lookup as usize) * footer.clone();
+        },
+        Some(NarrowSlotBus::RangeCheck) => {
+            encoded += group.bus_prefix(BusId::RangeCheck as usize) * footer.clone();
+        },
+        Some(NarrowSlotBus::MessageWord) => {},
+        Some(NarrowSlotBus::Rotation(_)) => {
+            unreachable!("rotations are not used on footer rows")
+        },
+        None => {},
     }
 
     // Route every inactive slot to the range-check bus.
-    let activity = narrow_slot_activity::<LB>(slot, selectors);
+    let activity = fused
+        + if spec.footer_bus.is_some() {
+            footer
+        } else {
+            LB::Expr::ZERO
+        };
     encoded += group.bus_prefix(BusId::RangeCheck as usize) * (LB::Expr::ONE - activity);
     let fields = narrow_slot_fields::<LB>(local, next, selectors, slot);
     for (idx, field) in fields.into_iter().enumerate() {
         encoded += group.beta_powers()[idx].clone() * field;
     }
     encoded
-}
-
-fn narrow_slot_activity<LB>(
-    slot: usize,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-) -> LB::Expr
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    match slot {
-        0..=17 | 22..=26 | 28..=29 | 32..=35 => is_fused::<LB>(selectors) + selectors.is_footer(),
-        18..=21 | 27 | 30..=31 => is_fused::<LB>(selectors),
-        _ => unreachable!("32-row EidosCompression narrow slot out of range"),
-    }
 }
 
 fn footer_block<LB>(local: &EidosCompressionCols<LB::Var>) -> [LB::Expr; 8]
@@ -544,16 +544,16 @@ fn narrow_slot_fields<LB>(
 where
     LB: EidosCompressionLookupBuilder,
 {
-    match slot {
-        0..=30 => {
-            let base = byte_slot_base(0, slot);
+    match NARROW_SLOTS[slot].fields {
+        NarrowSlotFields::StoredByte(stored_slot) => {
+            let base = byte_slot_base(0, stored_slot as usize);
             [
                 LB::Expr::from(local.columns[base]),
                 LB::Expr::from(local.columns[base + 1]),
                 LB::Expr::from(local.columns[base + 2]),
             ]
         },
-        31 => [
+        NarrowSlotFields::MissingRotation => [
             LB::Expr::from(
                 local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 0)],
             ),
@@ -565,15 +565,14 @@ where
                 |col| LB::Expr::from(next.columns[col]),
             ),
         ],
-        32..=35 => {
-            let g = slot - 32;
+        NarrowSlotFields::MessageWord(g) => {
+            let g = g as usize;
             [
                 message_index::<LB>(selectors, g),
                 LB::Expr::from(local.columns[g_msg_word_col(g)]),
                 LB::Expr::from(local.columns[G_COMPRESSION_CYCLE_ID_COL]),
             ]
         },
-        _ => unreachable!("32-row EidosCompression narrow slot out of range"),
     }
 }
 
@@ -624,16 +623,36 @@ pub fn lookup_plan(row: usize, mode: EidosCompressionMode) -> LookupPlan {
 
 #[cfg(test)]
 fn add_fused_g_lookups(plan: &mut LookupPlan, rotation_kind: NarrowLookupKind) {
-    push_narrow(plan, NarrowLookupKind::And8, -1, BYTE_SLOTS_PER_STEP);
-    push_narrow(plan, rotation_kind, -1, BYTE_SLOTS_PER_STEP);
-    push_narrow(plan, NarrowLookupKind::MessageWord, 1, NUM_G);
+    plan.narrow.extend(NARROW_SLOTS.map(|spec| match spec.fused_bus {
+        NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
+        NarrowSlotBus::Rotation(_) => NarrowLookup { kind: rotation_kind, sign: -1 },
+        NarrowSlotBus::MessageWord => NarrowLookup {
+            kind: NarrowLookupKind::MessageWord,
+            sign: 1,
+        },
+        NarrowSlotBus::RangeCheck => unreachable!("range checks are not used on fused rows"),
+    }));
 }
 
 #[cfg(test)]
 fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: EidosCompressionMode) {
-    push_narrow(plan, NarrowLookupKind::And8, -1, FOOTER_AND8_LOOKUPS);
-    push_narrow(plan, NarrowLookupKind::MessageWord, -7, F_MSG_WORD_SLOTS);
-    push_narrow(plan, NarrowLookupKind::RangeCheck, -1, F_RANGE_SLOTS);
+    plan.narrow.extend(NARROW_SLOTS.into_iter().filter_map(|spec| {
+        let bus = spec.footer_bus?;
+        Some(match bus {
+            NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
+            NarrowSlotBus::RangeCheck => NarrowLookup {
+                kind: NarrowLookupKind::RangeCheck,
+                sign: -1,
+            },
+            NarrowSlotBus::MessageWord => NarrowLookup {
+                kind: NarrowLookupKind::MessageWord,
+                sign: -7,
+            },
+            NarrowSlotBus::Rotation(_) => {
+                unreachable!("rotations are not used on footer rows")
+            },
+        })
+    }));
 
     if footer == FOOTER_ROWS - 1 {
         plan.overlay_relations.push(OverlayRelation {
@@ -668,9 +687,4 @@ fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: EidosCompressi
             });
         },
     }
-}
-
-#[cfg(test)]
-fn push_narrow(plan: &mut LookupPlan, kind: NarrowLookupKind, sign: i8, count: usize) {
-    plan.narrow.extend((0..count).map(|_| NarrowLookup { kind, sign }));
 }
