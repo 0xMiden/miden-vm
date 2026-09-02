@@ -79,6 +79,117 @@ fn prove_rejects_missing_inferred_inputs_file() {
 }
 
 #[test]
+fn prove_writes_outputs_next_to_a_custom_proof_file() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+
+    let proof_dir = working_dir.path().join("out");
+    fs::create_dir(&proof_dir).unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&program_path)
+        .arg("--proof")
+        .arg(proof_dir.join("custom.proof"));
+    cmd.assert().success();
+
+    assert!(proof_dir.join("custom.proof").exists(), "the proof belongs where --proof asked");
+    assert!(
+        proof_dir.join("custom.outputs").exists(),
+        "the outputs belong next to the proof, which is where `verify` looks for them"
+    );
+    assert!(
+        !working_dir.path().join("program.outputs").exists(),
+        "the outputs should not be left behind next to the program"
+    );
+}
+
+#[test]
+fn prove_rejects_a_proof_file_that_the_outputs_would_overwrite() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    let proof_path = working_dir.path().join("custom.outputs");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path).arg("--proof").arg(&proof_path);
+    cmd.assert()
+        .failure()
+        // The diagnostic renderer hard-wraps long messages, so match single words that cannot
+        // be split across lines (the same reason the tests above match the path in fragments).
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
+}
+
+#[test]
+fn prove_accepts_an_outputs_shaped_proof_file_when_output_is_explicit() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    let proof_path = working_dir.path().join("custom.outputs");
+    let output_path = working_dir.path().join("elsewhere.outputs");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&program_path)
+        .arg("--proof")
+        .arg(&proof_path)
+        .arg("--output")
+        .arg(&output_path);
+    cmd.assert().success();
+
+    assert!(proof_path.exists(), "the proof should survive an explicit --output");
+    assert!(output_path.exists(), "the outputs should go where --output asked");
+}
+
+#[test]
+fn prove_rejects_a_proof_file_that_collides_only_by_extension_case() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    let proof_path = working_dir.path().join("custom.OUTPUTS");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path).arg("--proof").arg(&proof_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
+}
+
+#[test]
+fn prove_rejects_an_explicit_output_that_repeats_the_proof_path() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    let proof_path = working_dir.path().join("custom.proof");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&program_path)
+        .arg("--proof")
+        .arg(&proof_path)
+        .arg("--output")
+        .arg(&proof_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
+}
+
+#[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("miden-vm-cli-invalid-prove-extension-test.txt");
