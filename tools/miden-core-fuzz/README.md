@@ -1,13 +1,13 @@
 # Miden core fuzzing
 
-This crate tests Miden core deserialization surfaces against bad inputs, including `MastForest`, `ExecutionProof`, and deferred-state proof wire formats.
+This crate tests Miden core deserialization surfaces against bad inputs. It covers `MastForest` and `ExecutionProof` as well as deferred-state proof wire formats.
 
 ## Prerequisites
 
 - Rust nightly toolchain
 - cargo-fuzz: `cargo install cargo-fuzz`
 
-## Quick Start
+## Quick start
 
 List all fuzz targets:
 
@@ -21,146 +21,147 @@ Run all targets (5 minutes each):
 make fuzz-all
 ```
 
-## Fuzz Targets
+## Fuzz targets
 
-### High-Level Targets
+### High-level targets
 
-**`mast_forest_deserialize`** — Tests `MastForest::read_from_bytes` with arbitrary bytes.
+The **`mast_forest_deserialize`** target tests `MastForest::read_from_bytes` with arbitrary bytes.
 
 ```bash
 cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`mast_forest_serde_deserialize`** — Tests `MastForest` JSON deserialization via `serde_json`.
+The **`mast_forest_serde_deserialize`** target tests `MastForest` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run mast_forest_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`mast_forest_validate`** — Tests the full untrusted pipeline: deserialize then validate.
+The **`mast_forest_validate`** target tests the full untrusted pipeline from decoding through validation.
 
 ```bash
 cargo +nightly fuzz run mast_forest_validate --fuzz-dir tools/miden-core-fuzz
 ```
 
-### Core Deserialization Targets
+### Core deserialization targets
 
 These targets exercise core deserializers directly.
 
-**`program_deserialize`** — Tests `Program::read_from_bytes`.
+The **`program_deserialize`** target tests `Program::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run program_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`program_serde_deserialize`** — Tests `Program` JSON deserialization via `serde_json`.
+The **`program_serde_deserialize`** target tests `Program` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run program_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`kernel_deserialize`** — Tests `KernelDescriptor::read_from_bytes`.
+The **`kernel_deserialize`** target tests `KernelDescriptor::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run kernel_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`kernel_serde_deserialize`** — Tests `KernelDescriptor` JSON deserialization via `serde_json`.
+The **`kernel_serde_deserialize`** target tests `KernelDescriptor` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run kernel_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`stack_io_deserialize`** — Tests `StackInputs` and `StackOutputs` deserialization.
+The **`stack_io_deserialize`** target tests `StackInputs` and `StackOutputs` deserialization.
 
 ```bash
 cargo +nightly fuzz run stack_io_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`advice_inputs_deserialize`** — Tests `AdviceInputs` and `AdviceMap` deserialization.
+The **`advice_inputs_deserialize`** target tests `AdviceInputs` and `AdviceMap` deserialization.
 
 ```bash
 cargo +nightly fuzz run advice_inputs_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`advice_map_serde_deserialize`** — Tests `AdviceMap` JSON deserialization via `serde_json`.
+The **`advice_map_serde_deserialize`** target tests `AdviceMap` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run advice_map_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`operation_deserialize`** — Tests `Operation::read_from_bytes`.
+The **`operation_deserialize`** target tests `Operation::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run operation_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`operation_serde_deserialize`** — Tests `Operation` JSON deserialization via `serde_json`.
+The **`operation_serde_deserialize`** target tests `Operation` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`execution_proof_deserialize`** — Tests registry-free canonical `ExecutionProof` decoding,
-including its passive deferred-state proof wire.
+The **`execution_proof_deserialize`** target tests canonical `ExecutionProof` decoding without a
+registry, including its passive deferred-state proof wire. Successful decodes must encode to the
+same bytes and decode to the same proof.
 
 ```bash
-cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir tools/miden-core-fuzz
+make fuzz-execution-proof
 ```
 
-**`execution_proof_serde_deserialize`** — Exercises derived-Serde parser robustness for
-`ExecutionProof`, `Vec<ExecutionProof>`, and `Option<ExecutionProof>`. It does not establish proof
-validity or claim allocation-bounded generic Serde.
+The **`execution_proof_serde_deserialize`** target exercises the derived Serde parsers for
+`ExecutionProof` and its `Vec` and `Option` containers. It does not establish proof validity or
+claim allocation-bounded generic Serde.
 
 ```bash
 cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`deferred_state_wire_deserialize`** — Tests `DeferredStateWire::read_from_bytes`.
+The **`deferred_state_wire_deserialize`** target tests `DeferredStateWire::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`deferred_state_wire_serde_deserialize`** — Tests `DeferredStateWire` JSON deserialization via `serde_json`.
+The **`deferred_state_wire_serde_deserialize`** target tests `DeferredStateWire` JSON deserialization via `serde_json`.
 
 ```bash
 cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-### Package Deserialization Targets
+### Package deserialization targets
 
 These targets exercise package deserializers used by `.masp`.
 
-**`package_deserialize`** — Tests `Package::read_from_bytes`.
+The **`package_deserialize`** target tests `Package::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run package_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-### Component Targets
+### Component targets
 
 These fuzz internal structures through the MastForest deserialization path:
 
-**`basic_block_data`** — Operation batches (indptr, padding, group data).
+The **`basic_block_data`** target covers operation batches, including their index pointer and padded group data.
 
 ```bash
 cargo +nightly fuzz run basic_block_data --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`debug_info`** — Debug info string tables, CSR structures, and error codes.
+The **`debug_info`** target covers debug string tables and CSR structures with their error codes.
 
 ```bash
 cargo +nightly fuzz run debug_info --fuzz-dir tools/miden-core-fuzz
 ```
 
-**`mast_node_info`** — Node type discriminants and digests (40-byte fixed structure).
+The **`mast_node_info`** target covers node type discriminants and digests in a fixed 40-byte structure.
 
 ```bash
 cargo +nightly fuzz run mast_node_info --fuzz-dir tools/miden-core-fuzz
 ```
 
-## Seed Corpus
+## Seed corpus
 
 Generate seed files from valid serializations:
 
@@ -194,21 +195,19 @@ Example:
 cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir tools/miden-core-fuzz artifacts/mast_forest_deserialize/crash-da39a3ee5e6b4b0d
 ```
 
-## Attack Surfaces
+## Attack surfaces
 
 Where we expect malicious inputs to cause problems:
 
-- Header parsing (magic, flags, version)
+- Header magic and metadata parsing
 - Node count bounds (rejection of excessive allocations)
 - Procedure roots deserialization
-- Basic block data (operation batches, padding, groups)
-- MastNodeInfo (type discriminants, child IDs, digests)
-- DebugInfo (decorators, strings, CSR structures)
+- Basic block operation batches and padded groups
+- MastNodeInfo type discriminants and child data
+- DebugInfo decorators and string-table CSR data
 - Hash verification in validation
 - Deferred-state proof wire parsing and JSON deserialization
 
-## What We're Testing
+## Safety properties
 
-1. **No panics** — Deserialization never panics on any input
-2. **No crashes** — No undefined behavior, buffer overflows, or memory corruption
-3. **Validation completeness** — `UntrustedMastForest::validate()` catches all invalid forests
+Deserialization must never panic on any input. Fuzzing also checks for memory safety bugs and undefined behavior. `UntrustedMastForest::validate()` must reject every invalid forest.

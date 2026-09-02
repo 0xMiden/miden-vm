@@ -12,7 +12,7 @@ use miden_core::{
     Felt,
     deferred::{DeferredRoot, MAX_PRECOMPILE_ROOTS, TRUE_DIGEST, fold_deferred_root},
     field::QuadFelt,
-    proof::MAX_STARK_PROOF_BYTES,
+    proof::{CURRENT_PVM_VERIFIER_ROOT, CURRENT_VM_VERIFIER_ROOT, MAX_STARK_PROOF_BYTES},
 };
 use miden_crypto::stark::{
     StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
@@ -27,7 +27,10 @@ mod exports {
     pub use miden_core::{
         Word,
         program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
-        proof::{ExecutionProof, HashFunction, PrecompileProof, StarkProof, VmProof},
+        proof::{
+            ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+            HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
+        },
     };
     pub mod math {
         pub use miden_core::Felt;
@@ -37,6 +40,35 @@ pub use exports::*;
 pub use miden_air::security::ProofSecurityParameters;
 
 pub mod recursive;
+
+struct VerifierSupport {
+    format: u8,
+    accepted_vm_roots: &'static [Word],
+    accepted_pvm_roots: &'static [Word],
+}
+
+impl VerifierSupport {
+    fn check(&self, proof: &ExecutionProof) -> Result<(), VerificationError> {
+        let compatibility = proof.compatibility();
+        if compatibility.format() != self.format {
+            return Err(VerificationError::UnsupportedProofFormat(compatibility.format()));
+        }
+        if !roots_overlap(compatibility.vm_verifier_roots(), self.accepted_vm_roots) {
+            return Err(VerificationError::IncompatibleVmVerifier);
+        }
+        if !roots_overlap(compatibility.pvm_verifier_roots(), self.accepted_pvm_roots) {
+            return Err(VerificationError::IncompatiblePvmVerifier);
+        }
+
+        Ok(())
+    }
+}
+
+const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
+    format: ExecutionProofCompatibility::FORMAT_V1,
+    accepted_vm_roots: &[CURRENT_VM_VERIFIER_ROOT],
+    accepted_pvm_roots: &[CURRENT_PVM_VERIFIER_ROOT],
+};
 
 // VERIFIER
 // ================================================================================================
@@ -51,7 +83,12 @@ impl Verifier {
         Self
     }
 
-    /// Verifies a deferred or complete execution proof against its public claim.
+    /// Returns the compatibility declared by proofs produced by the current prover.
+    pub fn proof_compatibility() -> ExecutionProofCompatibility {
+        ExecutionProofCompatibility::current()
+    }
+
+    /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
     /// The VM STARK authenticates the carried precompile root in either state. For a deferred
     /// proof, the verifier does not inspect the carried `DeferredStateWire`; it verifies the VM
@@ -73,24 +110,40 @@ impl Verifier {
         claim: &ExecutionClaim,
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
-        let (vm, outstanding_root, precompile) = match proof {
-            ExecutionProof::Deferred { vm, .. } => {
+        match proof.compatibility().format() {
+            ExecutionProofCompatibility::FORMAT_V1 => {
+                VERIFIER_SUPPORT_V1.check(proof)?;
+                self.verify_v1(claim, proof)
+            },
+            format => Err(VerificationError::UnsupportedProofFormat(format)),
+        }
+    }
+
+    /// Verifies an execution proof encoded with transport format 1.
+    fn verify_v1(
+        &self,
+        claim: &ExecutionClaim,
+        proof: &ExecutionProof,
+    ) -> Result<VerificationOutcome, VerificationError> {
+        let vm = proof.vm();
+        let (outstanding_root, precompile) = match proof.precompile() {
+            PrecompileStatus::Deferred(_) => {
                 let root = vm.precompile_root;
                 if root == TRUE_DIGEST {
                     return Err(VerificationError::DeferredTrueRoot);
                 }
-                (vm, Some(root), None)
+                (Some(root), None)
             },
-            ExecutionProof::Complete { vm, precompile } => {
+            PrecompileStatus::Empty => {
                 let vm_root = vm.precompile_root;
-                match precompile {
-                    None if vm_root != TRUE_DIGEST => {
-                        return Err(VerificationError::MissingPrecompileProof);
-                    },
-                    None => {},
-                    Some(precompile) => self.validate_precompile(precompile, vm_root)?,
+                if vm_root != TRUE_DIGEST {
+                    return Err(VerificationError::MissingPrecompileProof);
                 }
-                (vm, None, precompile.as_ref())
+                (None, None)
+            },
+            PrecompileStatus::Proven(precompile) => {
+                self.validate_precompile(precompile, vm.precompile_root)?;
+                (None, Some(precompile))
             },
         };
 
@@ -371,6 +424,12 @@ impl VerificationOutcome {
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
+    #[error("execution proof format {0} is not supported")]
+    UnsupportedProofFormat(u8),
+    #[error("execution proof does not name a compatible VM verifier")]
+    IncompatibleVmVerifier,
+    #[error("execution proof does not name a compatible PVM verifier")]
+    IncompatiblePvmVerifier,
     #[error("failed to verify VM STARK proof for program with hash {0}")]
     StarkVerificationError(Word, #[source] Box<StarkVerificationError>),
     #[error("a deferred execution proof cannot authenticate TRUE_DIGEST")]
@@ -401,6 +460,16 @@ pub enum StarkVerificationError {
     #[error(transparent)]
     Verifier(#[from] VerifierError),
 }
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
+    proof_roots.iter().any(|root| accepted_roots.contains(root))
+}
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {
@@ -443,10 +512,11 @@ mod tests {
     }
 
     fn complete(vm_root: Word, roots: Option<Vec<Word>>) -> ExecutionProof {
-        ExecutionProof::Complete {
-            vm: vm_proof(vm_root),
-            precompile: roots.map(precompile_proof),
-        }
+        let precompile = match roots {
+            Some(roots) => PrecompileStatus::Proven(precompile_proof(roots)),
+            None => PrecompileStatus::Empty,
+        };
+        ExecutionProof::new(vm_proof(vm_root), precompile)
     }
 
     #[test]
@@ -456,10 +526,10 @@ mod tests {
         let required = root(1);
         let cases: Vec<(ExecutionProof, CheckError)> = vec![
             (
-                ExecutionProof::Deferred {
-                    vm: vm_proof(TRUE_DIGEST),
-                    precompile: DeferredStateWire::default(),
-                },
+                ExecutionProof::new(
+                    vm_proof(TRUE_DIGEST),
+                    PrecompileStatus::Deferred(DeferredStateWire::default()),
+                ),
                 |error| matches!(error, VerificationError::DeferredTrueRoot),
             ),
             (complete(required, Some(vec![])), |error| {
@@ -528,13 +598,13 @@ mod tests {
     #[test]
     fn oversized_precompile_stark_is_rejected_before_vm_stark_verification() {
         let required = root(1);
-        let proof = ExecutionProof::Complete {
-            vm: vm_proof(required),
-            precompile: Some(PrecompileProof {
+        let proof = ExecutionProof::new(
+            vm_proof(required),
+            PrecompileStatus::Proven(PrecompileProof {
                 proof: StarkProof::new(vec![0; MAX_STARK_PROOF_BYTES + 1], HashFunction::Poseidon2),
                 roots: vec![required],
             }),
-        };
+        );
 
         let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
         assert!(matches!(
@@ -560,16 +630,16 @@ mod tests {
 
     #[test]
     fn verifier_rejects_oversized_directly_constructed_vm_proof() {
-        let proof = ExecutionProof::Complete {
-            vm: VmProof {
+        let proof = ExecutionProof::new(
+            VmProof {
                 proof: StarkProof::new(
                     vec![0; MAX_STARK_PROOF_BYTES + 1],
                     HashFunction::Blake3_256,
                 ),
                 precompile_root: TRUE_DIGEST,
             },
-            precompile: None,
-        };
+            PrecompileStatus::Empty,
+        );
 
         let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
         let VerificationError::StarkVerificationError(_, source) = error else {
@@ -591,5 +661,70 @@ mod tests {
 
         let error = Verifier::new().verify(&claim(), &proof).unwrap_err();
         assert!(matches!(error, VerificationError::StarkVerificationError(..)));
+    }
+
+    #[test]
+    fn verifier_requires_compatible_vm_and_pvm_roots() {
+        let proof = complete(TRUE_DIGEST, None);
+        let incompatible_vm = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(
+                vec![root(100)],
+                VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
+            )
+            .unwrap(),
+            proof.vm().clone(),
+            proof.precompile().clone(),
+        );
+        let incompatible_pvm = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(
+                VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
+                vec![root(200)],
+            )
+            .unwrap(),
+            proof.vm().clone(),
+            proof.precompile().clone(),
+        );
+
+        assert!(matches!(
+            Verifier::new().verify(&claim(), &incompatible_vm),
+            Err(VerificationError::IncompatibleVmVerifier)
+        ));
+        assert!(matches!(
+            Verifier::new().verify(&claim(), &incompatible_pvm),
+            Err(VerificationError::IncompatiblePvmVerifier)
+        ));
+    }
+
+    #[test]
+    fn current_proof_compatibility_excludes_verifier_history() {
+        const OLD_VM_ROOT: Word = Word::new([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+        ]);
+        const OLD_PVM_ROOT: Word = Word::new([
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+            Felt::new_unchecked(0),
+        ]);
+        const SUPPORT: VerifierSupport = VerifierSupport {
+            format: ExecutionProofCompatibility::FORMAT_V1,
+            accepted_vm_roots: &[OLD_VM_ROOT, CURRENT_VM_VERIFIER_ROOT],
+            accepted_pvm_roots: &[OLD_PVM_ROOT, CURRENT_PVM_VERIFIER_ROOT],
+        };
+
+        let proof = complete(TRUE_DIGEST, None);
+
+        assert_eq!(proof.compatibility().vm_verifier_roots(), &[CURRENT_VM_VERIFIER_ROOT]);
+        assert_eq!(proof.compatibility().pvm_verifier_roots(), &[CURRENT_PVM_VERIFIER_ROOT]);
+
+        let old_compatible = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]).unwrap(),
+            proof.vm().clone(),
+            proof.precompile().clone(),
+        );
+        assert!(SUPPORT.check(&old_compatible).is_ok());
     }
 }
