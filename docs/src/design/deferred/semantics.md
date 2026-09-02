@@ -174,7 +174,8 @@ an expected outstanding root and returns its authenticated security parameters. 
 checks the proof's compatibility declaration and execution lifecycle before it verifies the VM
 STARK. It reuses `verify_precompile` for complete proofs. A successful deferred verification returns
 the authenticated VM security parameters and outstanding root. A successful complete verification
-also returns the PVM security parameters and has no outstanding obligation.
+has no outstanding obligation and, when it includes a precompile proof, also returns the PVM
+security parameters.
 
 
 ## Transport and limits

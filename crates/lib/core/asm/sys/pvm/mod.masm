@@ -208,12 +208,11 @@ end
 #! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the common security
 #! descriptor.
 #!
-#! The deferred root is the relation's four public base-field values. The caller supplies it as
-#! the obligation being settled; all proof data and security/shape metadata are read from advice.
-#! Successful verification authenticates the root, and the returned descriptor records that
-#! proof's parameters and relation shape. The four proof parameters and maximum trace height are
-#! transcript-bound; the remaining descriptor fields are fixed by this verifier's relation. The
-#! caller passes all twelve elements unchanged to
+#! The deferred root is the relation's four public base-field values, supplied by the caller as the
+#! obligation being settled. The advice stream provides the proof data, four security parameters,
+#! and AIR heights. Successful verification authenticates the root. The returned descriptor
+#! combines those transcript-bound parameters and the maximum AIR height with relation-shape
+#! constants compiled into this verifier. The caller passes all twelve elements unchanged to
 #! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
 #! Changing only the formula therefore changes the estimator root without changing this verifier's
 #! root. A change to the proof format or to any value supplied by the verifier still changes this

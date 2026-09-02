@@ -69,13 +69,12 @@ pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
 /// Mirrors `miden_air::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
-/// relying on the core VM's defaults. Every chiplet AIR in
-/// [`ChipletAir`](crate::ChipletAir) closes at a `log_quotient_degree`
-/// well under the core VM's degree-8 constraints (see the
-/// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), so `log_blowup` could be
-/// lowered in principle. The MASM verifier compiles the current PCS geometry,
-/// so changing it requires a coordinated MASM update and a dedicated security
-/// review; it is not an independently mutable runtime configuration.
+/// relying on the core VM's defaults. Every chiplet AIR in [`ChipletAir`](crate::ChipletAir)
+/// requires at most four quotient chunks (see the
+/// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), below the eight chunks
+/// permitted by `log_blowup = 3`. The blowup could therefore be lowered in principle. The MASM
+/// verifier compiles the current PCS geometry, so changing it requires a coordinated MASM update
+/// and a dedicated security review; it is not an independently mutable runtime configuration.
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
         LOG_BLOWUP, // must be >= log_quotient_degree
@@ -133,7 +132,7 @@ pub type TestConfig = Poseidon2Config;
 /// Test PCS parameters (fast but insecure — for testing only).
 ///
 /// Uses small values to keep proofs small and proving fast:
-/// - log_blowup: 3 (blowup = 8, supports degree-8 constraints)
+/// - log_blowup: 3 (blowup = 8, permits up to eight quotient chunks)
 /// - log_folding_arity: 1 (arity = 2)
 /// - log_final_degree: 3 (final poly = 8)
 /// - num_queries: 4

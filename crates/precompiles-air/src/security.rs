@@ -1,11 +1,12 @@
 //! Conjectured security level computation for the precompile chiplet stack.
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
-//! Both statements use the round-budget formulas in [`p3_security::budget`] and share the same
-//! challenge field and commitment hash.
+//! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
+//! field. Their recursive verifiers both use Poseidon2. Native verification derives alignment and
+//! collision resistance from the commitment scheme used for each proof.
 //!
-//! [`AIR_SHAPE`] stores the values used during verification, while `air_shape_matches_symbolic`
-//! checks them against the shape obtained from the chiplet AIRs.
+//! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
+//! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 pub use miden_air::security::ProofSecurityParameters;
 use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
@@ -129,7 +130,8 @@ fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usiz
 
 /// Pads a committed width up to the commitment scheme's column alignment.
 ///
-/// The DEEP reduction runs over the rows the LMCS committed, so padding takes batching slots too.
+/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
+/// contributes batching slots.
 fn aligned(width: usize, alignment: usize) -> usize {
     width.next_multiple_of(alignment)
 }
@@ -151,28 +153,28 @@ pub const FIXED_POINT_ONE: u64 = fixed::ONE;
 /// Conjectured security contributed per FRI query, in fixed point.
 pub const BITS_PER_QUERY: u64 = fixed::bits_per_query(LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
 
-/// Ceiling any reported level is capped at, in fixed point.
+/// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
-/// `log2` of the lookup round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the lookup round's error coefficient.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
     (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
 );
 
-/// `log2` of the constraint-composition round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
 pub const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
-/// `log2` of the out-of-domain round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
 pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
 
-/// `log2` of the DEEP round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
 pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
     Some(n) => n as u64,
     None => 0,
 });
 
-/// `log2` of the FRI folding round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
 
 /// Lookup grinding applied before the lookup challenges are sampled.
@@ -188,23 +190,26 @@ pub const LOOKUP_POW_BITS: u32 = 0;
 /// that the descriptor constant remains equal to the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
-/// `log2|E|` less the lookup round's coefficient, in fixed point.
+/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
 
-/// `log2|E|` less the constraint-composition round's coefficient, in fixed point.
+/// The configured challenge-field bound less the constraint-composition round's coefficient, in
+/// fixed point.
 pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
 
-/// `log2|E|` less the out-of-domain round's coefficient, in fixed point.
+/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
+/// point.
 pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 
-/// `log2|E|` less the DEEP round's coefficient, in fixed point.
+/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// `log2|E|` less the FRI folding round's coefficient and the fixed blowup, in fixed point.
+/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
+/// blowup, in fixed point.
 ///
-/// The MASM estimator compares the whole-bit floor of this value with the lookup term to show that
-/// the FRI folding term cannot determine the final level. The drift test checks that the two
-/// values remain equal.
+/// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
+/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
+/// with this value.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
@@ -327,11 +332,12 @@ pub fn proof_security_parameters(
     }
 }
 
-/// Computes a chiplet-stack proof's conjectured security level, per protocol round.
+/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, per protocol round.
 ///
 /// `log_max_height` is the largest chiplet trace height bound by the proof transcript. The lookup
 /// term includes the additional fractions added by the fixed `UintVal` and `EcGroup`
 /// boundary messages.
+///
 /// The recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits,
 /// fixed zero lookup grinding, and a maximum log trace height in `16..=29`. This native function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive

@@ -499,8 +499,9 @@ pub fn security_masm_matches_air() -> Result<(), String> {
     }
 
     // The estimator omits five native security terms only while the MVM shape and the generic
-    // verifier's parameter ranges satisfy its documented bounds. Parse those bounds from the MASM
-    // source so this test fails as soon as an AIR or verifier change invalidates that assumption.
+    // verifier's parameter ranges satisfy its documented bounds. `air_shape_matches_symbolic`
+    // checks the stored shape against the AIRs; the checks below fail if that shape leaves the
+    // estimator envelope. This function also pins the generic verifier bounds directly.
     let wrapper = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
     let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
     let air_shape = miden_air::security::AIR_SHAPE;

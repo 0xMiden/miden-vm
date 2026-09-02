@@ -577,8 +577,8 @@ mod tests {
         }
 
         // The estimator omits five native security terms only while the PVM shape satisfies these
-        // bounds. A change to a chiplet AIR must fail this test before its descriptor can fall
-        // outside the estimator's supported range.
+        // bounds. `air_shape_matches_symbolic` checks the stored shape against the chiplet AIRs;
+        // the checks below fail if that shape leaves the estimator envelope.
         let air_shape = pvm_security::AIR_SHAPE;
         let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
             * u64::from(air_shape.lookup.fractions_per_row);

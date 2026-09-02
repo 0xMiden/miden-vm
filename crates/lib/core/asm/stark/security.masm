@@ -1,9 +1,10 @@
 # Shared constants for the conjectured security calculation and its Q16 arithmetic.
 #
 # The MVM and PVM recursive verifiers use the same PCS and security model. None of these constants
-# describes a particular AIR; relation-specific values arrive in the descriptor. The challenge
-# field is the quadratic extension of Goldilocks, whose size in Q16 is `128 * 65536 - 2` after
-# rounding down.
+# describes a particular AIR; relation-specific values arrive in the descriptor. The native
+# estimator represents the challenge-field size with a conservative Q16 bound. It obtains that
+# bound by rounding down the Goldilocks base-field value before doubling it, which gives
+# `128 * 65536 - 2`.
 const FP_SHIFT = 16
 const FP_ONE = 65536
 const MAX_Q16_FRACTION = 65535
@@ -24,7 +25,9 @@ const MIN_LOG_HEIGHT = 6
 const MAX_LOG_HEIGHT = 29
 const MAX_NUM_QUERIES = 150
 const MAX_POW_BITS = 31
-const MAX_CONSTRAINT_DEGREE = 9         # largest AIR degree accepted with log_blowup = 3
+# With log_blowup = 3, the PCS permits at most eight quotient chunks and therefore a symbolic
+# constraint degree of at most nine.
+const MAX_CONSTRAINT_DEGREE = 9
 const MAX_COMPOSED_CONSTRAINTS = 8192
 const MAX_DEEP_TERMS = 8192
 const MIN_LOOKUP_COEFFICIENT = 257
@@ -64,12 +67,13 @@ end
 #! `lookup`.
 #!
 #! Six of the twelve descriptor fields are used in those two calculations. The remaining fields
-#! are still validated because the proof that their terms cannot be the minimum depends on their
-#! bounds. Lifted STARK currently applies grinding before the DEEP challenge, before each FRI
-#! folding challenge, and before query sampling. It does not apply grinding before sampling the
-#! lookup challenges, so both verifiers return `lookup_pow_bits = 0` and this procedure requires
-#! that value. Keeping the field in the descriptor avoids changing the descriptor layout when
-#! lookup grinding is added to the backend.
+#! are validated before they are discarded. The AIR-shape bounds are assumptions in the proof
+#! below, while the grinding bounds match the range accepted by the generic verifier. Lifted STARK
+#! currently applies grinding before the DEEP challenge, before each FRI folding challenge, and
+#! before query sampling. It does not apply grinding before sampling the lookup challenges, so
+#! both verifiers return `lookup_pow_bits = 0` and this procedure requires that value. Keeping the
+#! field in the descriptor avoids changing the descriptor layout when lookup grinding is added to
+#! the backend.
 #!
 #! # Query term
 #!
@@ -93,12 +97,14 @@ end
 #!
 #!   lookup = (127 - q - height - r_w) + delta.
 #!
-#! The bounds constrain the product `A`, not the two factors separately. The current MVM value is
-#! `(16 + 2) * 28 = 504`; the current PVM value is `(18 + 2) * 247 = 4940`. These values are well
-#! inside the accepted range of 257 through 65536. For example, a message width of 12 needs only 19
-#! fractions per row to exceed the lower limit. At the current message widths, the upper limit
-#! allows 3640 MVM fractions or 3276 PVM fractions. The verifier-specific drift tests derive both
-#! factors from the AIRs and check their product against these limits.
+#! The dominance argument constrains the product `A`. Each factor is also limited to 65536 so the
+#! multiplication cannot wrap, but the estimator imposes no tighter bound on either factor by
+#! itself. The current MVM value is `(16 + 2) * 28 = 504`; the current PVM value is
+#! `(18 + 2) * 247 = 4940`. These values are well inside the accepted range of 257 through 65536.
+#! For example, a message width of 12 needs only 19 fractions per row to exceed the lower limit.
+#! At the current message widths, the upper limit allows 3640 MVM fractions or 3276 PVM fractions.
+#! The verifier-specific drift tests derive both factors from the AIRs and check their product
+#! against these limits.
 #!
 #! The value `delta` accounts for the fractional part discarded when the lookup term is converted
 #! from Q16 to whole bits. Set `P = 2^q`, `g = P - A`, and
@@ -107,8 +113,9 @@ end
 #!     = floor(FP_ONE * -log2(1 - g/P)).
 #!
 #! Here `s` is the Q16 difference between `log2(A)` and the next whole bit. The lookup term's Q16
-#! remainder is `FP_ONE - CHALLENGE_FIELD_OFFSET_FP + s - r_f`, where
-#! `CHALLENGE_FIELD_OFFSET_FP = 128 * FP_ONE - log2|E|`. Consequently,
+#! remainder is `FP_ONE - CHALLENGE_FIELD_OFFSET_FP + s - r_f`. Here
+#! `CHALLENGE_FIELD_OFFSET_FP = 2` is the difference between `128 * FP_ONE` and the conservative
+#! Q16 challenge-field bound used by the native estimator. Consequently,
 #!
 #!   delta = +1 if s >= r_f + CHALLENGE_FIELD_OFFSET_FP  (the remainder reaches FP_ONE)
 #!   delta = -1 if s = 0 and r_f = MAX_Q16_FRACTION     (the remainder falls below zero)
@@ -166,12 +173,12 @@ end
 #!
 #! # Contract
 #!
-#! Every descriptor field is checked before it is used or discarded. The height and lower
-#! coefficient bounds keep the lookup subtraction nonnegative; the explicit `base >= 2` check also
-#! limits the boundary correction. The coefficient bounds keep the slack calculation within u32,
-#! and the boundary bound does the same for the correction numerator. Requiring zero lookup
-#! grinding keeps the native cap irrelevant to the lookup term. An unsupported input traps instead
-#! of returning a security level.
+#! Every descriptor field is checked before it is used or discarded. The lower bounds on height
+#! and the lookup coefficient support the proof that the other terms cannot determine the result.
+#! The upper bounds on height, coefficient, and boundary terms keep the arithmetic in range, and
+#! the explicit `base >= 2` check validates the lookup subtraction after applying the correction.
+#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. An
+#! unsupported input traps instead of returning a security level.
 #!
 #! This is not a general-purpose estimator for caller-assembled parameters. Its input must be the
 #! descriptor returned by a successful MVM or PVM recursive verifier, without modification. The

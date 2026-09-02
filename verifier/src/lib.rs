@@ -94,8 +94,8 @@ impl Verifier {
     /// proof, the verifier does not inspect the carried `DeferredStateWire`; it verifies the VM
     /// STARK and returns the authenticated root as an outstanding obligation. The wire is
     /// prover-side data and is validated separately when converted into a precompile witness.
-    /// Complete proofs additionally verify the aggregate precompile STARK against the
-    /// VM-authenticated root.
+    /// Complete proofs that contain precompile work additionally verify the aggregate precompile
+    /// STARK against the VM-authenticated root.
     ///
     /// The outcome reports the authenticated security parameters of the components actually
     /// verified and any precompile root that remains outstanding. Callers can use

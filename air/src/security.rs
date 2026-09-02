@@ -25,15 +25,6 @@ use crate::{
 /// commitment scheme used to verify it, and the AIR relation selected by the verifier. Callers
 /// pass the returned value to a security estimator and apply their own acceptance policy.
 /// Constructing this type directly does not authenticate its contents.
-///
-/// These fields contain every input required by the conjectured estimator. `log_final_degree` and
-/// `num_ood_points` are also returned because they are additional inputs needed to model the
-/// current backend's proven security.
-///
-/// Recursive MASM verifiers return a descriptor containing the inputs needed by the conjectured
-/// estimator rather than this Rust type. `log_final_degree` and `num_ood_points` are currently
-/// native-only because the MASM estimator does not compute proven security. Both APIs leave
-/// estimation and acceptance policy to the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProofSecurityParameters {
     /// Protocol parameters bound by the proof transcript.
@@ -50,11 +41,11 @@ pub struct ProofSecurityParameters {
     pub num_lookup_boundary_terms: u32,
 }
 
-/// Log2 of the challenge field size, in fixed point, rounded down.
+/// Conservative Q16 lower bound on the log2 of the challenge-field cardinality.
 ///
-/// The challenge field is the quadratic extension of the Goldilocks base field, so this is
-/// `2 · log2(p)` — a shade under 128, and rounded down so no round is credited a bit it does not
-/// have.
+/// The challenge field is the quadratic extension of the Goldilocks base field. This value doubles
+/// the rounded-down Q16 value for the base field. Rounding before doubling keeps the result
+/// conservative.
 pub const CHALLENGE_FIELD_BITS: u64 = EXTENSION_DEGREE as u64 * fixed::floor_log2(Felt::ORDER_U64);
 
 /// Number of out-of-domain points opened per committed column.
@@ -157,7 +148,8 @@ fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usiz
 
 /// Pads a committed width up to the commitment scheme's column alignment.
 ///
-/// The DEEP reduction runs over the rows the LMCS committed, so padding takes batching slots too.
+/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
+/// contributes batching slots.
 fn aligned(width: usize, alignment: usize) -> usize {
     width.next_multiple_of(alignment)
 }
@@ -183,28 +175,28 @@ pub const BITS_PER_QUERY: u64 =
 /// Collision resistance of the Poseidon2 commitment used by the recursive verifier.
 pub const COLLISION_RESISTANCE: u32 = Poseidon2::COLLISION_RESISTANCE;
 
-/// Ceiling any reported level is capped at, in fixed point.
+/// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
 
-/// `log2` of the lookup round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the lookup round's error coefficient.
 pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
     (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
 );
 
-/// `log2` of the constraint-composition round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
 pub const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
-/// `log2` of the out-of-domain round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
 pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
 
-/// `log2` of the DEEP round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
 pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
     Some(n) => n as u64,
     None => 0,
 });
 
-/// `log2` of the FRI folding round's error coefficient, in fixed point.
+/// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
 pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOLDING_ARITY) - 1));
 
 /// Lookup grinding applied before the lookup challenges are sampled.
@@ -213,23 +205,26 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOL
 /// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// `log2|E|` less the lookup round's coefficient, in fixed point.
+/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
 
-/// `log2|E|` less the constraint-composition round's coefficient, in fixed point.
+/// The configured challenge-field bound less the constraint-composition round's coefficient, in
+/// fixed point.
 pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
 
-/// `log2|E|` less the out-of-domain round's coefficient, in fixed point.
+/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
+/// point.
 pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 
-/// `log2|E|` less the DEEP round's coefficient, in fixed point.
+/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// `log2|E|` less the FRI folding round's coefficient and the fixed blowup, in fixed point.
+/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
+/// blowup, in fixed point.
 ///
-/// The MASM estimator compares the whole-bit floor of this value with the lookup term to show that
-/// the FRI folding term cannot determine the final level. The drift test checks that the two
-/// values remain equal.
+/// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
+/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
+/// with this value.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
 

@@ -484,7 +484,7 @@ fn slack_bound_never_overstates_and_loses_at_most_one_bit() {
     }
 }
 
-/// Checks that every unsupported input is rejected.
+/// Checks that each unsupported-input condition is rejected.
 ///
 /// The arithmetic and the proof that five native terms may be omitted both rely on these bounds.
 /// Returning a level outside them would make one of those arguments invalid.
