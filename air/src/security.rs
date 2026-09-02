@@ -5,7 +5,7 @@
 //! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
 use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
-use miden_crypto::{hash::poseidon2::Poseidon2, stark::pcs::PcsParams};
+use miden_crypto::stark::pcs::PcsParams;
 use p3_security::{
     budget::{
         AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
@@ -67,11 +67,11 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 427,
+    num_composed_constraints: 680,
     max_constraint_degree: 9,
-    num_deep_terms: Some(138),
+    num_deep_terms: Some(322),
     lookup: LookupShape {
-        fractions_per_row: 28,
+        fractions_per_row: 81,
         max_message_width: 16,
     },
 };
@@ -117,7 +117,7 @@ pub fn derive_air_shape() -> AirShape {
 /// `AIR_SHAPE::max_constraint_degree` for the quotient group's chunk count. A native verifier
 /// computing the security level of a proof committed under a different LMCS (Blake3, alignment 1;
 /// Keccak, alignment 17) calls this instead of using the alignment-8 [`AIR_SHAPE`], which is fixed
-/// for the Poseidon2-only recursive verifier.
+/// for the Eidos-only recursive verifier.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in AIRS {
@@ -172,8 +172,10 @@ pub const FIXED_POINT_ONE: u64 = fixed::ONE;
 pub const BITS_PER_QUERY: u64 =
     fixed::bits_per_query(config::LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
 
-/// Collision resistance of the Poseidon2 commitment used by the recursive verifier.
-pub const COLLISION_RESISTANCE: u32 = Poseidon2::COLLISION_RESISTANCE;
+/// Collision resistance of the canonical Eidos commitment hash, in whole bits.
+///
+/// Eidos exposes a 252-bit packed digest, so birthday collisions cost 126 bits.
+pub const COLLISION_RESISTANCE: u32 = miden_core::proof::HashFunction::Eidos.collision_resistance();
 
 /// Upper bound on every reported level, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
@@ -355,7 +357,7 @@ fn mvm_security_parameters_from_protocol(
     }
 }
 
-/// Computes a Poseidon2 Miden VM proof's conjectured security level, in whole bits.
+/// Computes an Eidos Miden VM proof's conjectured security level, in whole bits.
 ///
 /// The Fiat-Shamir transcript binds the PCS parameters and AIR log heights. The authenticated
 /// kernel witness determines the kernel procedure count. The remaining inputs are fixed by the
@@ -399,13 +401,13 @@ pub fn conjectured_security_level(
 /// committed under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Poseidon2
+/// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Eidos
 /// proofs, which `conjectured_security_level` computes at alignment
 /// [`COMMITMENT_ALIGNMENT`] (and this function is identical at that alignment, since
 /// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
-/// `num_deep_terms_matches_the_pinned_alignment` checks it). This helper assumes the commitment
-/// scheme has [`COLLISION_RESISTANCE`] bits; verification returns [`ProofSecurityParameters`] built
-/// with the collision resistance of the proof's actual hash function.
+/// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
+/// every hash function, including the non-algebraic ones the recursive verifier never sees, and
+/// supplies that hash function's collision resistance separately.
 pub fn conjectured_security_level_for_alignment(
     num_queries: u32,
     query_pow_bits: u32,
@@ -414,6 +416,7 @@ pub fn conjectured_security_level_for_alignment(
     log_max_height: u32,
     num_kernel_procedures: u32,
     alignment: usize,
+    collision_resistance: u32,
 ) -> u32 {
     let protocol = ProtocolParams {
         log_blowup: config::LOG_BLOWUP as u32,
@@ -430,7 +433,7 @@ pub fn conjectured_security_level_for_alignment(
         log_max_height,
         num_kernel_procedures,
         alignment,
-        COLLISION_RESISTANCE,
+        collision_resistance,
     )
     .conjectured_security_level()
 }
@@ -493,7 +496,7 @@ mod tests {
 
     /// `num_deep_terms` at [`COMMITMENT_ALIGNMENT`] (algebraic sponges) must reproduce
     /// [`AIR_SHAPE`]'s stored `num_deep_terms` exactly, so
-    /// `conjectured_security_level_for_alignment` computes the same level for a Poseidon2 proof
+    /// `conjectured_security_level_for_alignment` computes the same level for an Eidos proof
     /// as `conjectured_security_level`.
     ///
     /// The other two are the deployed non-algebraic configurations' actual alignments: Blake3's
@@ -502,9 +505,9 @@ mod tests {
     #[test]
     fn num_deep_terms_matches_the_pinned_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 123, "Blake3 (alignment 1) DEEP term count moved");
-        assert_eq!(num_deep_terms(8), 138, "algebraic (alignment 8) DEEP term count moved");
-        assert_eq!(num_deep_terms(17), 172, "Keccak (alignment 17) DEEP term count moved");
+        assert_eq!(num_deep_terms(1), 296, "Blake3 (alignment 1) DEEP term count moved");
+        assert_eq!(num_deep_terms(8), 322, "algebraic (alignment 8) DEEP term count moved");
+        assert_eq!(num_deep_terms(17), 376, "Keccak (alignment 17) DEEP term count moved");
     }
 
     /// Parameters built for an MVM proof must reproduce the independent MVM security report.
@@ -539,9 +542,9 @@ mod tests {
 
         for (log_height, expected_level, expected_binding) in [
             (20, 96, p3_security::budget::report::QUERY_LABEL),
-            (22, 96, p3_security::budget::report::QUERY_LABEL),
-            (24, 95, LOOKUP_LABEL),
-            (29, 90, LOOKUP_LABEL),
+            (22, 95, LOOKUP_LABEL),
+            (24, 93, LOOKUP_LABEL),
+            (29, 88, LOOKUP_LABEL),
         ] {
             let report = security_report(&params, log_height, 128, 0);
             assert_eq!(
@@ -566,11 +569,11 @@ mod tests {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_388_606;
-        const LOOKUP_BASE_FP: u64 = 7_800_270;
-        const COMPOSITION_TERM_FP: u64 = 7_815_946;
+        const SECURITY_CAP_FP: u64 = 8_257_536;
+        const LOOKUP_BASE_FP: u64 = 7_699_837;
+        const COMPOSITION_TERM_FP: u64 = 7_771_952;
         const OOD_BASE_FP: u64 = 8_170_900;
-        const DEEP_BASE_FP: u64 = 7_922_741;
+        const DEEP_BASE_FP: u64 = 7_842_631;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -602,33 +605,33 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_406_895, 7_815_946, 7_777_684, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_306_566, 7_771_952, 7_777_684, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_489_549, 7_815_946, 6_860_180, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
+                [6_389_116, 7_771_952, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_292_941, 7_815_946, 6_663_572, 8_388_606, 6_777_405, 6_335_399, 8_388_606],
-                96,
+                [6_192_508, 7_771_952, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
+                94,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_899_725, 7_815_946, 6_270_356, 8_388_606, 6_384_189, 6_335_399, 8_388_606],
-                90,
+                [5_799_292, 7_771_952, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
+                88,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_489_549, 7_815_946, 6_860_180, 7_922_741, 6_711_869, 1_353_667, 8_388_606],
+                [6_389_116, 7_771_952, 6_860_180, 7_842_631, 6_711_869, 1_353_667, 8_257_536],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_899_725, 7_815_946, 6_270_356, 8_388_606, 8_153_661, 8_388_606, 8_388_606],
-                90,
+                [5_799_292, 7_771_952, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
+                88,
             ),
         ];
 
@@ -674,7 +677,7 @@ mod tests {
             })
             .expect("the lookup round must bind at some supported height");
 
-        assert_eq!(crossover, 23, "lookup/query crossover moved");
+        assert_eq!(crossover, 21, "lookup/query crossover moved");
     }
 
     /// A proof with the maximum kernel witness reports a lower lookup-round bound than a bare one

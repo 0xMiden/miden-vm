@@ -6,7 +6,9 @@ mod signing_key {
     use miden_serde_utils::{Deserializable, Serializable};
 
     use crate::{
+        SequentialCommit,
         dsa::eddsa_25519_sha512::{PublicKey, SigningKey, UncheckedVerificationError},
+        hash::eidos::Eidos,
         rand::test_utils::seeded_rng,
     };
 
@@ -40,6 +42,14 @@ mod signing_key {
         let serialized_pk = PublicKey::read_from_bytes(&pk_bytes)
             .expect("deserialization of valid public key bytes should succeed");
         assert_eq!(pk, serialized_pk);
+    }
+
+    #[test]
+    fn public_key_commitment_uses_eidos() {
+        let mut rng = seeded_rng([5u8; 32]);
+        let public_key = SigningKey::with_rng(&mut rng).public_key();
+
+        assert_eq!(public_key.to_commitment(), Eidos::hash_elements(&public_key.to_elements()));
     }
 
     #[test]

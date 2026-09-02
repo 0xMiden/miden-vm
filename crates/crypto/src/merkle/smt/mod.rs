@@ -9,7 +9,7 @@ use core::{
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
     EMPTY_WORD, Map, Set, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -405,7 +405,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8>: SparseMerkleTreeReader<DEPTH
             } else {
                 (node_hash, right)
             };
-            node_hash = Poseidon2::merge(&[left, right]);
+            node_hash = Eidos::merge(&[left, right]);
 
             if node_hash == *EmptySubtreeRoots::entry(DEPTH, node_depth) {
                 // If a subtree is empty, then can remove the inner node, since it's equal to the
@@ -580,7 +580,7 @@ pub struct InnerNode {
 
 impl InnerNode {
     pub fn hash(&self) -> Word {
-        Poseidon2::merge(&[self.left, self.right])
+        Eidos::merge(&[self.left, self.right])
     }
 }
 

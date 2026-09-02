@@ -1,9 +1,8 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! The Miden VM's LogUp buses are emitted per AIR: 4 columns for Core, 3 for Chiplets, and 1 for
-//! Poseidon2Permutation. Most columns host a single bus, but several host two or more
-//! linearly-independent buses sharing one running accumulator via distinct `bus_prefix[bus]`
-//! additive bases (see per-bus module docs for the merges).
+//! The Miden VM's LogUp buses are emitted across 8 columns — most host a single bus, but
+//! several host two or more linearly-independent buses sharing one running accumulator via
+//! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
 //! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
 //! opens a single [`super::LookupBuilder::column`] closure and describes the bus's
 //! interactions via [`super::LookupColumn::group`] or
@@ -25,9 +24,10 @@
 //!   `LookupAir` impl.
 //! - [`super::chiplet_air::emit_chiplet_lookup_columns`] for the chiplet-trace columns, driven by
 //!   [`crate::ChipletsAir`]'s `LookupAir` impl.
-//! - [`super::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns`] for the
-//!   Poseidon2-permutation trace column, driven by [`crate::Poseidon2PermutationAir`]'s `LookupAir`
-//!   impl.
+//! - [`crate::constraints::eidos_compression::lookup`] for the standalone Eidos compression
+//!   columns, driven by [`crate::EidosCompressionAir`]'s `LookupAir` impl.
+//! - [`crate::constraints::and8_lookup`] for the fixed byte-table columns, driven by
+//!   [`crate::And8LookupAir`]'s `LookupAir` impl.
 //!
 //! ## Shared precompute contexts
 //!
@@ -53,6 +53,7 @@ pub(in crate::constraints::lookup) mod block_stack_and_range_logcap;
 pub(in crate::constraints::lookup) mod chiplet_requests;
 pub(in crate::constraints::lookup) mod chiplet_responses;
 pub(in crate::constraints::lookup) mod hash_kernel;
+pub(in crate::constraints::lookup) mod hasher_returns;
 pub(in crate::constraints::lookup) mod lookup_op_flags;
 pub(in crate::constraints::lookup) mod stack_overflow;
 pub(in crate::constraints::lookup) mod wiring;
@@ -73,10 +74,12 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
 pub(crate) struct ChipletActiveFlags<E> {
-    /// `is_active` for the hasher controller sub-chiplet (= `1 - s0`).
+    /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
-    /// `is_active` for the bitwise chiplet (= `s0 - s01`).
+    /// `is_active` for normal bitwise rows.
     pub bitwise: E,
+    /// `is_active` for AEAD stream rows inside the bitwise selector region.
+    pub aead_stream: E,
     /// `is_active` for the memory chiplet (= `s01 - s012`).
     pub memory: E,
     /// `is_active` for the ACE chiplet (= `s012 - s0123`).
@@ -93,37 +96,44 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s0 = chiplets[0]`
+    /// - `s_ctrl = chiplets[0]`
+    /// - virtual `s0 = 1 - s_ctrl`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
-    /// - `is_controller = 1 - s0`
-    /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
-    ///   = s0123 - s01234`
+    /// - `is_bitwise = s0 - s01`
+    /// - `aead_stream = is_bitwise * stream_mode`
+    /// - `normal_bitwise = is_bitwise - aead_stream`
+    /// - `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom = s0123 - s01234`
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
         V: Copy,
         E: Algebra<V>,
     {
-        let s0: E = local.chiplets[0].into();
+        let s_ctrl: E = local.chiplets[0].into();
         let s1: E = local.chiplets[1].into();
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();
         let s4: E = local.chiplets[4].into();
+        let stream_mode: E = local.bitwise_stream_mode().into();
 
-        let controller = E::ONE - s0.clone();
+        // Virtual non-hasher selector and prefix products.
+        let s0 = E::ONE - s_ctrl.clone();
         let s01 = s0.clone() * s1;
         let s012 = s01.clone() * s2;
         let s0123 = s012.clone() * s3;
         let s01234 = s0123.clone() * s4;
 
-        // Active flags are prefix * (1 - section_selector).
-        let bitwise = s0 - s01.clone();
+        // Active flags via the subtraction trick.
+        let is_bitwise = s0 - s01.clone();
+        let aead_stream = is_bitwise.clone() * stream_mode;
+        let bitwise = is_bitwise - aead_stream.clone();
         let memory = s01 - s012.clone();
         let ace = s012 - s0123.clone();
         let kernel_rom = s0123 - s01234;
 
         Self {
-            controller,
+            controller: s_ctrl,
             bitwise,
+            aead_stream,
             memory,
             ace,
             kernel_rom,

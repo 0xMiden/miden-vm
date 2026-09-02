@@ -6,8 +6,8 @@
 //! in the target core/chiplets/total padded brackets.
 //!
 //! The snapshot schema has two tiers:
-//! - `trace`: hard totals (`core_rows`, `chiplets_rows`, `poseidon2_permutation_rows`,
-//!   `range_rows`)
+//! - `trace`: hard totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`,
+//!   `byte_pair_lookup_rows`)
 //! - `shape`: advisory per-chiplet breakdown used by the solver
 //!
 //! See `README.md` for design rationale.

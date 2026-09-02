@@ -17,6 +17,7 @@
 use alloc::vec::Vec;
 
 use miden_lifted_air::{BaseAir, MultiAir, ProverStatement, Statement, log2_strict_u8};
+use miden_stark_transcript::{ProverTranscript, VerifierChannel, VerifierTranscript};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -26,7 +27,7 @@ use tracing::info_span;
 use crate::{
     StarkConfig,
     domain::LiftedDomain,
-    lmcs::{Lmcs, LmcsTree},
+    lmcs::{Lmcs, LmcsError, LmcsTree, tree_indices::TreeIndices},
     order::TraceOrder,
     prover::commit::Committed,
 };
@@ -135,6 +136,41 @@ where
     /// verifier via [`VerifierInstance::new`](crate::VerifierInstance::new).
     pub fn commitment(&self) -> L::Commitment {
         self.committed.root()
+    }
+
+    /// Build an LMCS batch opening for setup-fixed preprocessed rows.
+    ///
+    /// The returned proof opens the queried rows against [`Self::commitment`].
+    /// Callers that need standalone row authentication can pair this proof with
+    /// the preprocessed commitment supplied to their verifier instance.
+    pub fn batch_proof<EF, C>(
+        &self,
+        config: &C,
+        query_indices: impl IntoIterator<Item = usize>,
+        query_log_height: u8,
+    ) -> Result<L::BatchProof, LmcsError>
+    where
+        EF: ExtensionField<F>,
+        C: StarkConfig<F, EF, Lmcs = L>,
+    {
+        let tree = self.committed.tree();
+        let tree_log_height = log2_strict_u8(tree.height());
+        let indices = TreeIndices::new(query_indices, query_log_height)?;
+        indices.fold_to_depth(tree_log_height)?;
+
+        let mut prover_channel = ProverTranscript::new(config.challenger());
+        tree.prove_lifted_batch(&indices, &mut prover_channel);
+        let (_, transcript) = prover_channel.finalize();
+
+        let mut verifier_channel = VerifierTranscript::from_data(config.challenger(), &transcript);
+        let proof = config.lmcs().read_lifted_batch_proof(
+            &tree.aligned_widths(),
+            &indices,
+            tree_log_height,
+            &mut verifier_channel,
+        )?;
+        debug_assert!(verifier_channel.is_empty());
+        Ok(proof)
     }
 
     /// The committed LDE tree, for opening and per-AIR quotient-domain views.

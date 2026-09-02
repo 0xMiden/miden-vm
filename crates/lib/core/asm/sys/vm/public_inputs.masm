@@ -1,7 +1,6 @@
 use miden::core::stark::constants
 use miden::core::stark::public_inputs
 use miden::core::stark::random_coin
-use miden::core::crypto::hashes::poseidon2
 use miden::core::sys::vm::layout
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
@@ -42,9 +41,9 @@ use miden::core::sys::vm::layout
 # Fiat-Shamir absorption order (`MidenMultiAir::observe`): one statement block
 #   1. CLAIM_HASH + deferred_root                     (4 + 4 = 8 felts)
 # where CLAIM_HASH is the caller-provided execution-claim commitment, authenticated against
-# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs. With
-# RELATION_DIGEST pre-loaded in the transcript capacity by `init_seed`, the state after this block
-# realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
+# `program_digest ‖ kernel_H ‖ stack_inputs ‖ stack_outputs` before this procedure runs.
+# `init_seed` folds RELATION_DIGEST into the initial transcript chaining word, so the state after
+# this block realizes `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`.
 # The raw stack i/o and kernel digests remain public values for the constraint checks and the
 # LogUp boundary without being separately absorbed.
 #
@@ -65,7 +64,7 @@ use miden::core::sys::vm::layout
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
 # Number of AIR instances in the Miden VM statement.
-const NUM_MIDEN_AIRS = 3
+const NUM_MIDEN_AIRS = 4
 
 # Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
@@ -92,18 +91,14 @@ end
 #!
 #! See the module banner for the memory layout and canonical Fiat-Shamir schedule.
 #!
-#! Precondition:  random coin input_len=0 (guaranteed by `init_seed`, which absorbs the
-#!                protocol parameters as one full rate block).
+#! Precondition:  the transcript buffer contains the trusted preprocessed-trace commitment
+#!                observed by `init_seed`.
 #! Postcondition: the transcript input buffer holds the AIR-shape values. The generic verifier
 #!                observes the main-trace commitment next and flushes before sampling.
 #!
 #! Input:  [...]
 #! Output: [...]
 pub proc process_public_inputs
-    # Assert precondition: the rate-aligned absorption below bypasses the buffered duplex.
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="process_public_inputs: input buffer must be empty"
-
     # 1) Store the ACE public-input pointer.
     exec.get_num_fixed_len_public_inputs
     exec.layout::aux_rand_elem_ptr
@@ -342,35 +337,17 @@ pub proc compute_outer_logup_correction
     # => [...]
 end
 
-#! Absorbs the single statement block `[CLAIM_HASH | D]` into the FS transcript, mirroring
-#! `MidenMultiAir::observe`. With RELATION_DIGEST pre-loaded in the transcript capacity
-#! (`init_seed`), the resulting state realizes the factored statement binding
-#! `H(RELATION_DIGEST ‖ CLAIM_HASH ‖ D)`. `D` is read from the boundary-inputs window.
-#!
-#! POSTCONDITION: random coin input_len=0, output_len=8 on return.
+#! Observes `[CLAIM_HASH | D]` through the FS stream, mirroring `MidenMultiAir::observe` after the
+#! framework-bound preprocessed commitment. `D` is read from the boundary-inputs window.
 #!
 #! Input:  [CLAIM_HASH, ...]
 #! Output: [...]
 proc absorb_claim_and_deferred_into_fs
-    # D from the boundary-inputs window
+    exec.random_coin::eidos_observe_word
+
+    # D from the boundary-inputs window.
     padw exec.layout::boundary_inputs_ptr add.BOUNDARY_INPUTS_DEFERRED_OFFSET mem_loadw_le
-    # => [D, CLAIM_HASH, ...]
-
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    # Duplex overwrite mode: the stale rate words are never read, so load only the capacity
-    # and build the rate from [CLAIM_HASH | D] already on the stack.
-    exec.random_coin::get_capacity
-    # => [C, D, CLAIM_HASH, ...]
-    swapw.2
-    # => [CLAIM_HASH, D, C, ...]
-
-    # Bind the absorbed length (8) into the capacity before the absorb permutation.
-    movup.8 add.8 movdn.8
-    exec.poseidon2::permute
-    # => [R1', R2', C', ...]
-
-    exec.random_coin::store_random_coin_state
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    exec.random_coin::eidos_observe_word
     # => [...]
 end
 
@@ -409,10 +386,9 @@ end
 #! Input:  [...]
 #! Output: [...]
 proc observe_miden_air_shape
-    exec.layout::get_poseidon2_permutation_trace_length_log
-    exec.layout::get_chiplets_trace_length_log
-    exec.layout::get_core_trace_length_log
-    push.NUM_MIDEN_AIRS
-    # => [NUM_MIDEN_AIRS, core_log, chiplets_log, poseidon2_log, ...]
-    exec.random_coin::observe_word
+    push.NUM_MIDEN_AIRS exec.random_coin::observe_felt
+    exec.layout::get_core_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_chiplets_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_eidos_compression_trace_length_log exec.random_coin::observe_felt
+    exec.layout::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
 end

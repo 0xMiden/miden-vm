@@ -1,6 +1,6 @@
 //! Message structs for LogUp bus interactions.
 //!
-//! Each struct represents a reduced denominator encoding: `α + Σ βⁱ · field_i`.
+//! Each struct represents a reduced denominator encoding: `alpha + sum(beta^i * field_i)`.
 //! Fields are named for readability; the [`super::lookup::LookupMessage`] trait
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
@@ -11,23 +11,22 @@
 //!
 //! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
 
-use core::array;
-
 use miden_core::{
     WORD_SIZE,
+    chiplets::eidos_compression,
     field::{Algebra, PrimeCharacteristicRing},
 };
 
 use crate::{
     lookup::{Challenges, message::LookupMessage},
-    trace::chiplets::hasher::{RATE_LEN, STATE_WIDTH},
+    trace::chiplets::hasher::{BLOCK_LEN, STATE_WIDTH},
 };
 
 // MESSAGE PAYLOAD ALIASES
 // ================================================================================================
 
-type SpongeState<E> = [E; STATE_WIDTH];
-type Rate<E> = [E; RATE_LEN];
+type CompressionState<E> = [E; STATE_WIDTH];
+type Block<E> = [E; BLOCK_LEN];
 type WordFields<E> = [E; WORD_SIZE];
 
 // BUS IDENTIFIERS
@@ -43,9 +42,6 @@ type WordFields<E> = [E; WORD_SIZE];
 /// MASM-side computation in lockstep, or the build fails here.
 pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
 
-// Tripwire for the MASM-side `gamma = beta^16` hardcoding in
-// `crates/lib/core/asm/sys/vm/public_inputs.masm:239-251` (4 sequential squarings).
-// If this width ever changes, that MASM must change in lockstep.
 const _: () = assert!(
     MIDEN_MAX_MESSAGE_WIDTH == 16,
     "MIDEN_MAX_MESSAGE_WIDTH is hardcoded as 16 by the MASM recursive verifier (4 squarings to reach gamma = beta^16). Update `crates/lib/core/asm/sys/vm/public_inputs.masm` before changing this constant.",
@@ -60,7 +56,7 @@ const _: () = assert!(
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
-    // --- Out-of-circuit (boundary correction / eval_external) ---
+    // --- Out-of-circuit (boundary correction / reduced_aux_values) ---
     /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
     KernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.
@@ -71,7 +67,8 @@ pub enum BusId {
     // --- In-circuit buses ---
     KernelRomCall = 3,
     HasherLinearHashInit = 4,
-    HasherReturnState = 5,
+    /// Reserved hasher bus id. One-row controller rows use `HasherReturnHash`.
+    ReservedHasherBus5 = 5,
     HasherAbsorption = 6,
     HasherReturnHash = 7,
     HasherMerkleVerifyInit = 8,
@@ -95,10 +92,39 @@ pub enum BusId {
     RangeCheck = 21,
     /// ACE wiring bus (LogUp).
     AceWiring = 22,
-    /// Hasher perm-link input bus: pairs controller-input rows with perm-cycle row 0.
-    HasherPermLinkInput = 23,
-    /// Hasher perm-link output bus: pairs controller-output rows with perm-cycle row 15.
-    HasherPermLinkOutput = 24,
+    /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
+    HasherCompressionLink = 23,
+    /// Eidos compression internal full chaining-value bus: `[compression_cycle_id, h[0..8]]`.
+    EidosCompressionInputCv = 24,
+    /// Byte-pair lookup table: ordinary `[a, b, a & b]` for byte-sized operands.
+    And8Lookup = 25,
+    /// Eidos compression rot12 contribution for byte position 0: `[a, b, contribution]`.
+    EidosCompressionRot12Pos0 = 26,
+    /// Eidos compression rot12 contribution for byte position 1: `[a, b, contribution]`.
+    EidosCompressionRot12Pos1 = 27,
+    /// Eidos compression rot12 contribution for byte position 2: `[a, b, contribution]`.
+    EidosCompressionRot12Pos2 = 28,
+    /// Eidos compression rot12 contribution for byte position 3: `[a, b, contribution]`.
+    EidosCompressionRot12Pos3 = 29,
+    /// Eidos compression rot7 contribution for byte position 0: `[a, b, contribution]`.
+    EidosCompressionRot7Pos0 = 30,
+    /// Eidos compression rot7 contribution for byte position 1: `[a, b, contribution]`.
+    EidosCompressionRot7Pos1 = 31,
+    /// Eidos compression rot7 contribution for byte position 2: `[a, b, contribution]`.
+    EidosCompressionRot7Pos2 = 32,
+    /// Eidos compression rot7 contribution for byte position 3: `[a, b, contribution]`.
+    EidosCompressionRot7Pos3 = 33,
+    /// Eidos compression internal chaining-value pair bus:
+    /// `[4 * compression_cycle_id + pair_index, word_even, word_odd]`.
+    EidosCompressionInputWord = 34,
+    /// Eidos compression internal message-word bus: `[word_index, word, compression_cycle_id]`.
+    EidosCompressionMessageWord = 35,
+    /// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+    AeadStreamRequest = 36,
+    /// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
+    AeadEidosCompressionInput = 37,
+    /// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
+    AeadEidosCompressionOutputPair = 38,
 }
 
 impl BusId {
@@ -106,22 +132,22 @@ impl BusId {
     /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
     /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
     /// discriminant isn't contiguous).
-    pub const COUNT: usize = Self::HasherPermLinkOutput as usize + 1;
+    pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
 }
 
-// Per-variant discriminant locks. `BusId::COUNT` only catches gaps — a *reorder* that
+// Per-variant discriminant locks. `BusId::COUNT` only catches gaps. A *reorder* that
 // kept the high watermark would silently swap which `bus_prefix[i]` each variant resolves
 // to, breaking domain separation across every emitter and consumer. These per-variant
 // asserts pin the entire layout so any reorder fails at compile time.
 //
-// If a new bus is added: append it after the current tail, bump `HasherPermLinkOutput`'s
-// expected index here only if necessary, and add a matching assert for the new variant.
+// If a new bus is added: append it after the current tail and add a matching assert for the new
+// variant. Renumbering existing entries is a protocol change and requires regenerated bindings.
 const _: () = assert!(BusId::KernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
 const _: () = assert!(BusId::LogDeferredRoot as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
 const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
-const _: () = assert!(BusId::HasherReturnState as usize == 5);
+const _: () = assert!(BusId::ReservedHasherBus5 as usize == 5);
 const _: () = assert!(BusId::HasherAbsorption as usize == 6);
 const _: () = assert!(BusId::HasherReturnHash as usize == 7);
 const _: () = assert!(BusId::HasherMerkleVerifyInit as usize == 8);
@@ -139,8 +165,22 @@ const _: () = assert!(BusId::StackOverflowTable as usize == 19);
 const _: () = assert!(BusId::SiblingTable as usize == 20);
 const _: () = assert!(BusId::RangeCheck as usize == 21);
 const _: () = assert!(BusId::AceWiring as usize == 22);
-const _: () = assert!(BusId::HasherPermLinkInput as usize == 23);
-const _: () = assert!(BusId::HasherPermLinkOutput as usize == 24);
+const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
+const _: () = assert!(BusId::EidosCompressionInputCv as usize == 24);
+const _: () = assert!(BusId::And8Lookup as usize == 25);
+const _: () = assert!(BusId::EidosCompressionRot12Pos0 as usize == 26);
+const _: () = assert!(BusId::EidosCompressionRot12Pos1 as usize == 27);
+const _: () = assert!(BusId::EidosCompressionRot12Pos2 as usize == 28);
+const _: () = assert!(BusId::EidosCompressionRot12Pos3 as usize == 29);
+const _: () = assert!(BusId::EidosCompressionRot7Pos0 as usize == 30);
+const _: () = assert!(BusId::EidosCompressionRot7Pos1 as usize == 31);
+const _: () = assert!(BusId::EidosCompressionRot7Pos2 as usize == 32);
+const _: () = assert!(BusId::EidosCompressionRot7Pos3 as usize == 33);
+const _: () = assert!(BusId::EidosCompressionInputWord as usize == 34);
+const _: () = assert!(BusId::EidosCompressionMessageWord as usize == 35);
+const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
+const _: () = assert!(BusId::AeadEidosCompressionInput as usize == 37);
+const _: () = assert!(BusId::AeadEidosCompressionOutputPair as usize == 38);
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -160,37 +200,23 @@ pub struct HasherMsg<E> {
 /// Payload for a [`HasherMsg`]; width varies per interaction kind.
 #[derive(Clone, Debug)]
 pub enum HasherPayload<E> {
-    /// 12-lane sponge state.
-    State(SpongeState<E>),
-    /// 8-lane rate.
-    Rate(Rate<E>),
+    /// 12-lane Eidos compression state.
+    State(CompressionState<E>),
+    /// 8-Felt compression block.
+    Block(Block<E>),
     /// 4-element word/digest.
     Word(WordFields<E>),
-}
-
-/// AIR-side Merkle-init message selected from the controller sub-selectors and rate halves.
-///
-/// On controller rows, `s1` and `s2` are independently constrained to be boolean. The three
-/// Merkle encodings are `(s1, s2) = (0, 1)` for MP, `(1, 0)` for MV, and `(1, 1)` for MU.
-/// `direction_bit` selects the rate half containing the leaf word.
-#[derive(Clone, Debug)]
-pub(super) struct MerkleInitFromSelectorsMsg<E> {
-    pub s1: E,
-    pub s2: E,
-    pub direction_bit: E,
-    pub addr: E,
-    pub node_index: E,
-    pub rate_0: WordFields<E>,
-    pub rate_1: WordFields<E>,
+    /// Merkle direction bit followed by a 4-element leaf word.
+    MerkleWord { direction_bit: E, word: WordFields<E> },
 }
 
 impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     // --- State messages (14 payload elements: [addr, node_index, state[12]]) ---
 
-    /// Linear hash / control block init: full 12-lane sponge state.
+    /// Linear hash / control block init: full 12-lane Eidos compression state.
     ///
-    /// Used by: HPERM input, LOGDEFERRED input.
-    pub fn linear_hash_init(addr: E, state: SpongeState<E>) -> Self {
+    /// Used by: COMPRESS input, LOGDEFERRED input.
+    pub fn linear_hash_init(addr: E, state: CompressionState<E>) -> Self {
         Self {
             kind: BusId::HasherLinearHashInit,
             addr,
@@ -199,23 +225,25 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    /// Control block init: 8 rate lanes + opcode at `capacity[1]`, zeros elsewhere.
+    /// Control block init: one 8-Felt block + Eidos chaining word initialized from `opcode`.
     ///
-    /// Used by: JOIN, SPLIT, LOOP, SPAN, CALL, SYSCALL, DYN, DYNCALL.
-    pub fn control_block(addr: E, rate: &Rate<E>, opcode: u8) -> Self {
+    /// Used by: JOIN, SPLIT, LOOP, CALL, SYSCALL, DYN, DYNCALL.
+    pub fn control_block(addr: E, block: &[E; 8], opcode: u8) -> Self {
+        let cv = eidos_compression::two_to_one_chaining_word(opcode as u32);
+        let cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
         let state = [
-            rate[0].clone(),
-            rate[1].clone(),
-            rate[2].clone(),
-            rate[3].clone(),
-            rate[4].clone(),
-            rate[5].clone(),
-            rate[6].clone(),
-            rate[7].clone(),
-            E::ZERO,
-            E::from_u16(opcode as u16),
-            E::ZERO,
-            E::ZERO,
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
+            cv[0].clone(),
+            cv[1].clone(),
+            cv[2].clone(),
+            cv[3].clone(),
         ];
         Self {
             kind: BusId::HasherLinearHashInit,
@@ -225,37 +253,54 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    /// Return full sponge state after permutation.
-    ///
-    /// Used by: HPERM output, LOGDEFERRED output.
-    pub fn return_state(addr: E, state: SpongeState<E>) -> Self {
+    /// Basic-block hash init: one 8-Felt block + Eidos chaining word initialized from the
+    /// logical number of operation groups in the block.
+    pub fn basic_block_init(addr: E, block: &[E; 8], num_groups: E) -> Self {
+        let cv = eidos_compression::init_chaining_word(0, 0);
+        let mut cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
+        cv[1] = cv[1].clone() + num_groups;
+        let state = [
+            block[0].clone(),
+            block[1].clone(),
+            block[2].clone(),
+            block[3].clone(),
+            block[4].clone(),
+            block[5].clone(),
+            block[6].clone(),
+            block[7].clone(),
+            cv[0].clone(),
+            cv[1].clone(),
+            cv[2].clone(),
+            cv[3].clone(),
+        ];
         Self {
-            kind: BusId::HasherReturnState,
+            kind: BusId::HasherLinearHashInit,
             addr,
             node_index: E::ZERO,
             payload: HasherPayload::State(state),
         }
     }
 
-    // --- Rate messages (10 payload elements: [addr, node_index, rate[8]]) ---
+    // --- Block messages (10 payload elements: [addr, node_index, block[8]]) ---
 
-    /// Absorb new rate into running hash.
+    /// Absorb the next block into a running hash.
     ///
     /// Used by: RESPAN.
-    pub fn absorption(addr: E, rate: Rate<E>) -> Self {
+    pub fn absorption(addr: E, block: Block<E>) -> Self {
         Self {
             kind: BusId::HasherAbsorption,
             addr,
             node_index: E::ZERO,
-            payload: HasherPayload::Rate(rate),
+            payload: HasherPayload::Block(block),
         }
     }
 
     // --- Word messages (6 payload elements: [addr, node_index, word[4]]) ---
 
-    /// Return digest only (node_index = 0).
+    /// Return one four-Felt hash result or updated chaining value (`node_index = 0`).
     ///
-    /// Used by: END, MPVERIFY output, MRUPDATE output.
+    /// `COMPRESS` returns an updated CV; the framed hash operations return completed digests.
+    /// Used by: COMPRESS output, LOGDEFERRED output, END, MPVERIFY output, MRUPDATE output.
     pub fn return_hash(addr: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherReturnHash,
@@ -268,36 +313,41 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Start Merkle path verification (with explicit node_index).
     ///
     /// Used by: MPVERIFY input.
-    pub fn merkle_verify_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_verify_init(
+        addr: E,
+        node_index: E,
+        direction_bit: E,
+        word: WordFields<E>,
+    ) -> Self {
         Self {
             kind: BusId::HasherMerkleVerifyInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 
     /// Start Merkle update, old path (with explicit node_index).
     ///
     /// Used by: MRUPDATE old input.
-    pub fn merkle_old_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_old_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleOldInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 
     /// Start Merkle update, new path (with explicit node_index).
     ///
     /// Used by: MRUPDATE new input.
-    pub fn merkle_new_init(addr: E, node_index: E, word: WordFields<E>) -> Self {
+    pub fn merkle_new_init(addr: E, node_index: E, direction_bit: E, word: WordFields<E>) -> Self {
         Self {
             kind: BusId::HasherMerkleNewInit,
             addr,
             node_index,
-            payload: HasherPayload::Word(word),
+            payload: HasherPayload::MerkleWord { direction_bit, word },
         }
     }
 }
@@ -329,7 +379,7 @@ pub enum MemoryMsg<E> {
     /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
     ///
     /// `#[non_exhaustive]` forces external construction through the typed
-    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers — see
+    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers. See
     /// [`MemoryMsg::Element`] for rationale.
     #[non_exhaustive]
     Word {
@@ -429,10 +479,10 @@ impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
 
 /// Block stack message: `[block_id, parent_id, is_loop, ctx, fmp, depth, fn_hash[4]]`.
 ///
-/// `Simple` — for blocks that don't save context (JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN/END-simple).
+/// `Simple`: for blocks that don't save context (JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN/END-simple).
 /// Context fields are encoded as zeros.
 ///
-/// `Full` — for blocks that save/restore the caller's execution context
+/// `Full`: for blocks that save/restore the caller's execution context
 /// (CALL/SYSCALL/DYNCALL/END-call).
 #[derive(Clone, Debug)]
 pub enum BlockStackMsg<E> {
@@ -455,10 +505,10 @@ pub enum BlockStackMsg<E> {
 /// Block hash queue message (7 elements):
 /// `[child_hash[4], parent, is_first_child, is_loop_body]`.
 ///
-/// `FirstChild` — first child of a JOIN (is_first_child = 1, is_loop_body = 0).
-/// `Child` — non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
-/// `LoopBody` — loop body entry (is_first_child = 0, is_loop_body = 1).
-/// `End` — removal at END; both flags are computed expressions.
+/// `FirstChild`: first child of a JOIN (is_first_child = 1, is_loop_body = 0).
+/// `Child`: non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
+/// `LoopBody`: loop body entry (is_first_child = 0, is_loop_body = 1).
+/// `End`: removal at END; both flags are computed expressions.
 #[derive(Clone, Debug)]
 pub enum BlockHashMsg<E> {
     FirstChild {
@@ -517,24 +567,108 @@ pub struct StackOverflowMsg<E> {
     pub prev: E,
 }
 
-// HASHER PERM-LINK MESSAGE
+// HASHER COMPRESSION-LINK MESSAGE
 // ================================================================================================
 
-/// Beta-power offset at which the Poseidon2 state starts in a perm-link denominator.
+/// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
 ///
-/// Offset 2 aligns the state lanes with full-state hasher messages; beta^1 is unused.
-const HASHER_PERM_LINK_STATE_OFFSET: usize = 2;
-const _: () = assert!(HASHER_PERM_LINK_STATE_OFFSET + STATE_WIDTH <= MIDEN_MAX_MESSAGE_WIDTH);
-
-/// Hasher perm-link message: `perm_id` plus the full Poseidon2 state.
-///
-/// The id ties a controller input/output row pair to the corresponding Poseidon2 permutation
-/// instance. `state` is encoded at `HASHER_PERM_LINK_STATE_OFFSET` to match full-state hasher
-/// messages.
+/// Binds one hasher controller row to one Eidos compression block.
 #[derive(Clone, Debug)]
-pub enum HasherPermLinkMsg<E> {
-    Input { perm_id: E, state: SpongeState<E> },
-    Output { perm_id: E, state: SpongeState<E> },
+pub struct HasherCompressionLinkMsg<E> {
+    pub block: [E; 8],
+    pub cv_in: [E; 4],
+    pub cv_out: [E; 4],
+}
+
+// BYTE-PAIR LOOKUP MESSAGE
+// ================================================================================================
+
+/// Byte-pair lookup message (3 elements): `[a, b, result]`.
+///
+/// Ordinary AND uses `result = a & b`. Eidos compression B/D rotation buses use
+/// `result` as the 32-bit contribution of this byte pair to the rotated word.
+#[derive(Clone, Debug)]
+pub struct And8Msg<E> {
+    pub bus: BusId,
+    pub a: E,
+    pub b: E,
+    pub result: E,
+}
+
+impl<E: PrimeCharacteristicRing> And8Msg<E> {
+    /// Ordinary `a & b` lookup.
+    pub fn new(a: E, b: E, result: E) -> Self {
+        Self { bus: BusId::And8Lookup, a, b, result }
+    }
+
+    /// Eidos compression rot12 contribution at byte position `pos`.
+    pub fn eidos_compression_rot12(pos: usize, a: E, b: E, result: E) -> Self {
+        Self {
+            bus: eidos_compression_rot12_bus(pos),
+            a,
+            b,
+            result,
+        }
+    }
+
+    /// Eidos compression rot7 contribution at byte position `pos`.
+    pub fn eidos_compression_rot7(pos: usize, a: E, b: E, result: E) -> Self {
+        Self {
+            bus: eidos_compression_rot7_bus(pos),
+            a,
+            b,
+            result,
+        }
+    }
+}
+
+pub const fn eidos_compression_rot12_bus(pos: usize) -> BusId {
+    match pos {
+        0 => BusId::EidosCompressionRot12Pos0,
+        1 => BusId::EidosCompressionRot12Pos1,
+        2 => BusId::EidosCompressionRot12Pos2,
+        3 => BusId::EidosCompressionRot12Pos3,
+        _ => panic!("EidosCompression rot12 byte position must be in 0..4"),
+    }
+}
+
+pub const fn eidos_compression_rot7_bus(pos: usize) -> BusId {
+    match pos {
+        0 => BusId::EidosCompressionRot7Pos0,
+        1 => BusId::EidosCompressionRot7Pos1,
+        2 => BusId::EidosCompressionRot7Pos2,
+        3 => BusId::EidosCompressionRot7Pos3,
+        _ => panic!("EidosCompression rot7 byte position must be in 0..4"),
+    }
+}
+
+// AEAD STREAM MESSAGES
+// ================================================================================================
+
+/// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+#[derive(Clone, Debug)]
+pub struct AeadStreamRequestMsg<E> {
+    pub ctx: E,
+    pub clk: E,
+    pub src_ptr: E,
+    pub dst_ptr: E,
+    pub lane_base: E,
+}
+
+/// AEAD-XOF Eidos compression input request: `[state[0..12], clk, 0, 0, 0]`.
+#[derive(Clone, Debug)]
+pub struct AeadEidosCompressionInputMsg<E> {
+    pub clk: E,
+    pub state: CompressionState<E>,
+}
+
+/// AEAD-XOF Eidos compression output pair: `[clk, first_lane_idx, value0, value1]`.
+#[derive(Clone, Debug)]
+pub struct AeadEidosCompressionOutputPairMsg<E> {
+    pub clk: E,
+    pub first_lane_idx: E,
+    pub value0: E,
+    pub value1: E,
 }
 
 // KERNEL ROM MESSAGE
@@ -581,7 +715,7 @@ pub struct AceInitMsg<E> {
 
 /// Range check message (1 element): `[value]`.
 ///
-/// The denominator is `α + β⁰ · value`.
+/// The denominator is `alpha + beta^0 * value`.
 #[derive(Clone, Debug)]
 pub struct RangeMsg<E> {
     pub value: E,
@@ -648,41 +782,21 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[self.kind as usize].clone();
         acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
-        let payload = match &self.payload {
-            HasherPayload::State(state) => state.as_slice(),
-            HasherPayload::Rate(rate) => rate.as_slice(),
-            HasherPayload::Word(word) => word.as_slice(),
-        };
-        acc += challenges.inner_product_at(2, payload);
-        acc
-    }
-}
-
-impl<E, EF> LookupMessage<E, EF> for MerkleInitFromSelectorsMsg<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let s1 = self.s1.clone();
-        let s2 = self.s2.clone();
-        let not_s1 = E::ONE - s1.clone();
-        let not_s2 = E::ONE - s2.clone();
-        let f_mp = not_s1 * s2.clone();
-        let f_mv = s1.clone() * not_s2;
-        let f_mu = s1 * s2;
-
-        let mut acc = challenges.bus_prefix[BusId::HasherMerkleVerifyInit as usize].clone() * f_mp
-            + challenges.bus_prefix[BusId::HasherMerkleOldInit as usize].clone() * f_mv
-            + challenges.bus_prefix[BusId::HasherMerkleNewInit as usize].clone() * f_mu;
-        acc += challenges.inner_product_at(0, &[self.addr.clone(), self.node_index.clone()]);
-
-        let bit = self.direction_bit.clone();
-        let one_minus_bit = E::ONE - bit.clone();
-        let word: WordFields<E> = array::from_fn(|i| {
-            self.rate_0[i].clone() * one_minus_bit.clone() + self.rate_1[i].clone() * bit.clone()
-        });
-        acc += challenges.inner_product_at(2, &word);
+        match &self.payload {
+            HasherPayload::State(state) => {
+                acc += challenges.inner_product_at(2, state.as_slice());
+            },
+            HasherPayload::Block(block) => {
+                acc += challenges.inner_product_at(2, block.as_slice());
+            },
+            HasherPayload::Word(word) => {
+                acc += challenges.inner_product_at(2, word.as_slice());
+            },
+            HasherPayload::MerkleWord { direction_bit, word } => {
+                acc += challenges.inner_product_at(2, core::slice::from_ref(direction_bit));
+                acc += challenges.inner_product_at(3, word.as_slice());
+            },
+        }
         acc
     }
 }
@@ -730,6 +844,75 @@ where
     }
 }
 
+// --- AEAD stream messages -----------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for AeadStreamRequestMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadStreamRequest as usize,
+            [
+                self.ctx.clone(),
+                self.clk.clone(),
+                self.src_ptr.clone(),
+                self.dst_ptr.clone(),
+                self.lane_base.clone(),
+            ],
+        )
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionInputMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let fields: [E; 16] = core::array::from_fn(|i| {
+            if i < 12 {
+                self.state[i].clone()
+            } else if i == 12 {
+                self.clk.clone()
+            } else {
+                E::ZERO
+            }
+        });
+        challenges.encode(BusId::AeadEidosCompressionInput as usize, fields)
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadEidosCompressionOutputPairMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadEidosCompressionOutputPair as usize,
+            [
+                self.clk.clone(),
+                self.first_lane_idx.clone(),
+                self.value0.clone(),
+                self.value1.clone(),
+            ],
+        )
+    }
+}
+
+// --- And8Msg -------------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for And8Msg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(self.bus as usize, [self.a.clone(), self.b.clone(), self.result.clone()])
+    }
+}
 // --- BlockStackMsg -------------------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BlockStackMsg<E>
@@ -740,7 +923,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
         match self {
-            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `β^k · 0 = 0` so
+            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `beta^k * 0 = 0` so
             // they are elided from the loop.
             Self::Simple { block_id, parent_id, is_loop } => {
                 acc += challenges
@@ -897,22 +1080,24 @@ where
     }
 }
 
-// --- HasherPermLinkMsg ---------------------------------------------------------------------------
+// --- HasherCompressionLinkMsg --------------------------------------------------------------------
 
-impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
+impl<E, EF> LookupMessage<E, EF> for HasherCompressionLinkMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let (bus, perm_id, state) = match self {
-            Self::Input { perm_id, state } => (BusId::HasherPermLinkInput, perm_id, state),
-            Self::Output { perm_id, state } => (BusId::HasherPermLinkOutput, perm_id, state),
-        };
-        let mut acc = challenges.bus_prefix[bus as usize].clone();
-        acc += perm_id.clone();
-        acc += challenges.inner_product_at(HASHER_PERM_LINK_STATE_OFFSET, state.as_slice());
-        acc
+        let payload: [E; 16] = core::array::from_fn(|i| {
+            if i < 8 {
+                self.block[i].clone()
+            } else if i < 12 {
+                self.cv_in[i - 8].clone()
+            } else {
+                self.cv_out[i - 12].clone()
+            }
+        });
+        challenges.encode(BusId::HasherCompressionLink as usize, payload)
     }
 }
 
@@ -957,7 +1142,7 @@ where
         let is_element: E = E::ONE - is_word.clone();
 
         // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared. Factored
-        // as a read/write select per access width so the four (read/write × element/word)
+        // as a read/write select per access width so the four (read/write x element/word)
         // cases stay audit-visible without blowing the polynomial degree.
         let prefix_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
             * is_read.clone()
@@ -981,16 +1166,17 @@ where
 // SIBLING MESSAGES
 // ================================================================================================
 //
-// [`SiblingMsg<E>`] carries an already selected rate half and a [`SiblingBit`] tag.
-// [`SiblingFromRatesMsg<E>`] receives both rate halves and makes the same selection inside the AIR
-// encoding. Both use the sparse β layout expected by the hasher chiplet.
+// [`SiblingMsg<E>`] carries an already selected block half and a [`SiblingBit`] tag. It uses the
+// sparse beta layout expected by the hasher chiplet. Lookup-message encoders may touch sparse beta
+// positions; contiguity is a convention, not a requirement.
 
 /// Sibling-table message for the Merkle sibling bus.
 ///
-/// The Merkle direction bit picks which half of the hasher rate block holds the sibling:
-/// `bit = 0` → sibling at `h[4..8]`, payload lands in β positions `[1, 2, 7, 8, 9, 10]`
-/// (mrupdate_id at β¹, node_index at β², rate1 at β⁷..β¹⁰); `bit = 1` → sibling at
-/// `h[0..4]`, payload lands in β positions `[1, 2, 3, 4, 5, 6]`.
+/// The Merkle direction bit picks which half of the Eidos block holds the sibling:
+/// `bit = 0` puts the sibling at `h[4..8]`, with payload in beta positions
+/// `[1, 2, 7, 8, 9, 10]` (mrupdate_id at beta^1, node_index at beta^2,
+/// high block word at beta^7..beta^10). `bit = 1` puts the sibling at `h[0..4]`,
+/// with payload in beta positions `[1, 2, 3, 4, 5, 6]`.
 #[derive(Clone, Debug)]
 pub struct SiblingMsg<E> {
     pub bit: SiblingBit,
@@ -999,12 +1185,12 @@ pub struct SiblingMsg<E> {
     pub h: WordFields<E>,
 }
 
-/// Which half of the hasher rate block holds the sibling word for this row.
+/// Which half of the Eidos block holds the sibling word for this row.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SiblingBit {
-    /// `bit = 0` — sibling lives in the high rate half (`h[4..8]`).
+    /// `bit = 0`: sibling lives in the high block word (`h[4..8]`).
     Zero,
-    /// `bit = 1` — sibling lives in the low rate half (`h[0..4]`).
+    /// `bit = 1`: sibling lives in the low block word (`h[0..4]`).
     One,
 }
 
@@ -1025,147 +1211,44 @@ where
     }
 }
 
-/// AIR-side sibling message that selects the sibling from the two hasher rate halves.
-///
-/// For a boolean `direction_bit`, this encodes the same value as [`SiblingMsg`]. The Merkle input
-/// constraints enforce booleanity. Selecting the rate here lets one signed interaction handle both
-/// MRUPDATE legs and both directions.
-#[derive(Clone, Debug)]
-pub(super) struct SiblingFromRatesMsg<E> {
-    pub direction_bit: E,
-    pub mrupdate_id: E,
-    pub node_index: E,
-    pub rate_0: WordFields<E>,
-    pub rate_1: WordFields<E>,
-}
-
-impl<E, EF> LookupMessage<E, EF> for SiblingFromRatesMsg<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
-        acc += challenges.inner_product_at(1, &[self.mrupdate_id.clone(), self.node_index.clone()]);
-        let bit = self.direction_bit.clone();
-        let one_minus_bit = E::ONE - bit.clone();
-        let selected_rate_0: WordFields<E> =
-            array::from_fn(|i| self.rate_0[i].clone() * bit.clone());
-        let selected_rate_1: WordFields<E> =
-            array::from_fn(|i| self.rate_1[i].clone() * one_minus_bit.clone());
-        acc += challenges.inner_product_at(3, &selected_rate_0);
-        acc += challenges.inner_product_at(7, &selected_rate_1);
-        acc
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use miden_core::Felt;
+    use miden_core::{Felt, chiplets::eidos_compression, field::QuadFelt};
 
-    use super::{
-        BusId, HasherMsg, MIDEN_MAX_MESSAGE_WIDTH, MerkleInitFromSelectorsMsg, SiblingBit,
-        SiblingFromRatesMsg, SiblingMsg,
-    };
+    use super::{And8Msg, BusId, HasherMsg, HasherPayload, MIDEN_MAX_MESSAGE_WIDTH};
     use crate::lookup::{Challenges, message::LookupMessage};
 
-    /// The tests compare each combined encoder with the simpler messages it replaces. Several
-    /// deterministic challenge pairs exercise different coefficients; boolean selector
-    /// constraints provide the algebraic equivalence.
-    const CHALLENGE_POINTS: [(u64, u64); 3] = [
-        (29, 31),
-        (0x0123_4567_89ab_cdef, 0xa5a5_5a5a_0f0f_1111),
-        (1 << 40, (1 << 50) + 33),
-    ];
+    #[test]
+    fn basic_block_init_uses_eidos_length_slot() {
+        let block = [Felt::from(0_u32); 8];
+        let num_groups = 17_u32;
+        let msg = HasherMsg::basic_block_init(Felt::from(1_u32), &block, Felt::from(num_groups));
+        let HasherPayload::State(state) = msg.payload else {
+            panic!("basic-block initialization must carry a compression state");
+        };
+        let expected = eidos_compression::init_chaining_word(0, num_groups);
 
-    fn challenge_points() -> impl Iterator<Item = Challenges<Felt>> {
-        CHALLENGE_POINTS.into_iter().map(|(alpha, beta)| {
-            Challenges::new(
-                Felt::new_unchecked(alpha),
-                Felt::new_unchecked(beta),
-                MIDEN_MAX_MESSAGE_WIDTH,
-                BusId::COUNT,
-            )
-        })
+        assert_eq!(&state[8..], expected.as_slice());
     }
 
     #[test]
-    fn sibling_from_rates_matches_selected_sibling_for_boolean_directions() {
-        let mrupdate_id = Felt::from_u32(37);
-        let node_index = Felt::from_u32(41);
-        let rate_0 = [43, 47, 53, 59].map(Felt::from_u32);
-        let rate_1 = [61, 67, 71, 73].map(Felt::from_u32);
+    fn eidos_compression_rotation_positions_are_domain_separated() {
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::new([Felt::new_unchecked(3), Felt::new_unchecked(5)]),
+            QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
 
-        for challenges in challenge_points() {
-            for (direction_bit, bit, sibling) in
-                [(Felt::ZERO, SiblingBit::Zero, rate_1), (Felt::ONE, SiblingBit::One, rate_0)]
-            {
-                let from_rates = SiblingFromRatesMsg {
-                    direction_bit,
-                    mrupdate_id,
-                    node_index,
-                    rate_0,
-                    rate_1,
-                };
-                let selected = SiblingMsg { bit, mrupdate_id, node_index, h: sibling };
+        let a = Felt::new_unchecked(19);
+        let b = Felt::new_unchecked(23);
+        let result = Felt::new_unchecked(29);
 
-                assert_eq!(
-                    <SiblingFromRatesMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
-                        &from_rates,
-                        &challenges,
-                    ),
-                    <SiblingMsg<Felt> as LookupMessage<Felt, Felt>>::encode(&selected, &challenges,),
-                );
-            }
-        }
-    }
+        let rot12_pos0 = And8Msg::eidos_compression_rot12(0, a, b, result).encode(&challenges);
+        let rot12_pos1 = And8Msg::eidos_compression_rot12(1, a, b, result).encode(&challenges);
+        assert_ne!(rot12_pos0, rot12_pos1);
 
-    #[test]
-    fn merkle_init_from_selectors_matches_typed_messages() {
-        let addr = Felt::from_u32(37);
-        let node_index = Felt::from_u32(41);
-        let rate_0 = [43, 47, 53, 59].map(Felt::from_u32);
-        let rate_1 = [61, 67, 71, 73].map(Felt::from_u32);
-
-        for challenges in challenge_points() {
-            for (s1, s2, kind) in [
-                (Felt::ZERO, Felt::ONE, BusId::HasherMerkleVerifyInit),
-                (Felt::ONE, Felt::ZERO, BusId::HasherMerkleOldInit),
-                (Felt::ONE, Felt::ONE, BusId::HasherMerkleNewInit),
-            ] {
-                for direction_bit in [Felt::ZERO, Felt::ONE] {
-                    let from_selectors = MerkleInitFromSelectorsMsg {
-                        s1,
-                        s2,
-                        direction_bit,
-                        addr,
-                        node_index,
-                        rate_0,
-                        rate_1,
-                    };
-                    let word = if direction_bit == Felt::ZERO { rate_0 } else { rate_1 };
-                    let typed = match kind {
-                        BusId::HasherMerkleVerifyInit => {
-                            HasherMsg::merkle_verify_init(addr, node_index, word)
-                        },
-                        BusId::HasherMerkleOldInit => {
-                            HasherMsg::merkle_old_init(addr, node_index, word)
-                        },
-                        BusId::HasherMerkleNewInit => {
-                            HasherMsg::merkle_new_init(addr, node_index, word)
-                        },
-                        _ => unreachable!("test cases contain only Merkle-init bus ids"),
-                    };
-
-                    assert_eq!(
-                        <MerkleInitFromSelectorsMsg<Felt> as LookupMessage<Felt, Felt>>::encode(
-                            &from_selectors,
-                            &challenges,
-                        ),
-                        <HasherMsg<Felt> as LookupMessage<Felt, Felt>>::encode(&typed, &challenges,),
-                    );
-                }
-            }
-        }
+        let rot7_pos0 = And8Msg::eidos_compression_rot7(0, a, b, result).encode(&challenges);
+        assert_ne!(rot12_pos0, rot7_pos0);
     }
 }

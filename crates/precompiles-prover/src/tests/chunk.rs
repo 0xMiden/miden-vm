@@ -18,7 +18,7 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 use crate::{
     hash::{
         chunk::{
-            COL_ACT, COL_CHUNK_SEQ_ID, COL_F_BEGIN, COL_F_END, COL_IS_HEAD, COL_PERM_SEQ_ID,
+            COL_ABSORPTION_ID, COL_ACT, COL_CHUNK_SEQ_ID, COL_F_BEGIN, COL_F_END, COL_IS_HEAD,
             ChunkAir, ChunkChainMsg, NUM_AUX_COLS, NUM_MAIN_COLS,
             trace::{ChunkRequires, Invocation, generate_trace},
         },
@@ -26,16 +26,16 @@ use crate::{
     },
     logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::poseidon2::trace::Poseidon2Requires,
+    transcript::eidos::trace::EidosRequires,
 };
 
-fn build_chunk_requires(invocations: &[Invocation]) -> (ChunkRequires, Poseidon2Requires) {
-    let mut p2 = Poseidon2Requires::new();
+fn build_chunk_requires(invocations: &[Invocation]) -> (ChunkRequires, EidosRequires) {
+    let mut eidos = EidosRequires::new();
     let mut chunk = ChunkRequires::new();
     for inv in invocations {
-        chunk.require(inv, &mut p2);
+        chunk.require(inv, &mut eidos);
     }
-    (chunk, p2)
+    (chunk, eidos)
 }
 
 fn check_with_seed(_seed: u64, invocations: &[Invocation]) {
@@ -61,17 +61,17 @@ fn chunk_chain_msg_encodes_with_chunk_chain_bus_prefix() {
     let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
     let chunk_seq_id_head = Felt::from(13u32);
-    let perm_seq_id_head = Felt::from(17u32);
-    let msg = ChunkChainMsg { chunk_seq_id_head, perm_seq_id_head };
+    let absorption_id_head = Felt::from(17u32);
+    let msg = ChunkChainMsg { chunk_seq_id_head, absorption_id_head };
     let enc = msg.encode(&challenges);
 
     // Expected: bus_prefix[ChunkChain] + β⁰·chunk_seq_id_head +
-    // β¹·perm_seq_id_head.
+    // β¹·absorption_id_head.
     let bus_prefix = alpha
         + beta.exp_u64(MAX_MESSAGE_WIDTH as u64)
             * QuadFelt::from_u64((BusId::ChunkChain as u64) + 1);
     let expected =
-        bus_prefix + QuadFelt::from(chunk_seq_id_head) + beta * QuadFelt::from(perm_seq_id_head);
+        bus_prefix + QuadFelt::from(chunk_seq_id_head) + beta * QuadFelt::from(absorption_id_head);
 
     assert_eq!(enc, expected);
 }
@@ -90,7 +90,7 @@ fn chunk_chain_bus_has_disjoint_prefix() {
     let b = Felt::from(11u32);
     let enc_chunk_chain = ChunkChainMsg {
         chunk_seq_id_head: a,
-        perm_seq_id_head: b,
+        absorption_id_head: b,
     }
     .encode(&challenges);
     let enc_memory64 = Memory64Msg { addr: a, lo: b, hi: Felt::ZERO }.encode(&challenges);
@@ -104,7 +104,7 @@ fn chunk_chain_bus_has_disjoint_prefix() {
 #[test]
 fn main_column_layout_partitions_12_indices() {
     assert_eq!(COL_CHUNK_SEQ_ID, 0);
-    assert_eq!(COL_PERM_SEQ_ID, 1);
+    assert_eq!(COL_ABSORPTION_ID, 1);
     assert_eq!(COL_ACT, 2);
     assert_eq!(COL_IS_HEAD, 3);
     assert_eq!(COL_F_BEGIN, 4);
@@ -181,24 +181,24 @@ fn constraints_hold_on_pad_block_tail() {
 #[test]
 fn constraints_hold_on_multiple_invocations() {
     // Back-to-back invocations: is_head fires on each first chunk;
-    // the chunk_seq_id / perm_seq_id chains run across the seam.
+    // the chunk_seq_id / absorption_id chains run across the seam.
     check_with_seed(0x5ea, &[inv(33, 0xa1), inv(40, 0xb2), inv(129, 0xc3)]);
 }
 
 #[test]
-fn constraints_hold_with_perm_seq_id_jump_at_head() {
+fn constraints_hold_with_absorption_id_jump_at_head() {
     // Exercise the within-chain `+1` relaxation: shift the second
-    // invocation's perm_seq_id by a gap (modelling P2 cycles
+    // invocation's absorption_id by a gap (modelling Eidos cycles
     // interleaved with another caller). The jump lands on a chain
     // head (is_head_next = 1), so the chain gate vanishes and the
     // constraints still hold.
     let (chunk_req, _p2) = build_chunk_requires(&[inv(33, 0xa1), inv(40, 0xb2)]);
     let mut main = generate_trace(chunk_req);
     // inv0 = 2 chunks (rows 0,1), inv1 = 2 chunks (rows 2,3). Row 2 is
-    // a head (is_head = 1). Bump perm_seq_id on rows 2,3 by a gap.
+    // a head (is_head = 1). Bump absorption_id on rows 2,3 by a gap.
     let gap = Felt::from(7u8);
     for row in 2..4 {
-        let cell = &mut main.values[row * NUM_MAIN_COLS + COL_PERM_SEQ_ID];
+        let cell = &mut main.values[row * NUM_MAIN_COLS + COL_ABSORPTION_ID];
         *cell += gap;
     }
     crate::tests::check_local(ChunkAir, &main);
@@ -244,12 +244,12 @@ fn corruption_chunk_seq_id_breaks_chain() {
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn corruption_perm_seq_id_jump_mid_chain() {
+fn corruption_absorption_id_jump_mid_chain() {
     // 200 bytes → 7 chunks in one invocation (rows 0..7). Row 3 is
     // interior (is_head_next = 0 at the 2→3 and 3→4 transitions), so
-    // bumping perm_seq_id there breaks the within-chain +1.
+    // bumping absorption_id there breaks the within-chain +1.
     corrupt_and_check(0xc4, &[inv(200, 0xc8)], |main| {
-        let cell = &mut main.values[3 * NUM_MAIN_COLS + COL_PERM_SEQ_ID];
+        let cell = &mut main.values[3 * NUM_MAIN_COLS + COL_ABSORPTION_ID];
         *cell += Felt::from(5u8);
     });
 }

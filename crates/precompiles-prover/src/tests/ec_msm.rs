@@ -298,7 +298,7 @@ fn glv_joint_wnaf_with_tables_reused_across_scalars() {
 
 /// In-circuit resolve of the 1-term claim `R = 1·G` (`R = G`): `msm_intro`
 /// then `msm_resolve` lays the eval `EcMsm` node (a single absorb row, the
-/// IV its cap) binding the value, and the `Is` ties it to `G`. The claim
+/// IV as its chain context) binding the value, and the `Is` ties it to `G`. The claim
 /// folds into the transcript root — the real DAG consumer of the MSM.
 fn msm_resolve_one_term_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
@@ -333,8 +333,8 @@ fn msm_resolve_one_term_proves() {
 
 /// In-circuit resolve of the 2-term claim `R = 1·G + 1·Q` (`R = G + Q`):
 /// `msm_combine` builds `⟨G×1, Q×1⟩`, `msm_resolve` lays the **two-row**
-/// absorb sponge (the second row's cap chained from the first's digest),
-/// and the `Is` ties the value to `G + Q`. Exercises the capacity-threading
+/// compression chain (the second row's CV chained from the first's output),
+/// and the `Is` ties the value to `G + Q`. Exercises the CV-threading
 /// constraint across rows.
 fn msm_resolve_two_term_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
@@ -885,7 +885,7 @@ fn msm_resolve_balanced_tree_five_terms_proves() {
 #[should_panic(expected = "constraint not satisfied")]
 fn msm_resolve_run_expr_must_be_constant() {
     let traces = msm_resolve_two_term_traces();
-    let eval = traces.mains()[4]; // the transcript-eval main
+    let eval = crate::tests::transcript_eval_main(&traces);
     let ncols = eval.width();
 
     // The first absorb row of a 2-term run is non-boundary.
@@ -896,7 +896,7 @@ fn msm_resolve_run_expr_must_be_constant() {
         })
         .expect("a non-boundary absorb row");
 
-    let mut forged = eval.clone();
+    let mut forged = eval;
     let here = forged.values[row * ncols + COL_MSM_EXPR];
     forged.values[row * ncols + COL_MSM_EXPR] = here + Felt::ONE;
 

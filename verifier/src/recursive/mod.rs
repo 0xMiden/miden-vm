@@ -41,7 +41,7 @@ use miden_core::{
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
-        StarkConfig, VerifierInstance,
+        PreprocessedValidationError, StarkConfig, VerifierInstance,
         lmcs::{Lmcs, proof::BatchProofView},
         pcs::{PcsParams, PcsProof},
         proof::{StarkProof, StarkProofData},
@@ -51,15 +51,18 @@ use miden_crypto::{
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::{SerdeCompat, wincode};
 
-use crate::MAX_STARK_PROOF_BYTES;
+use crate::{MAX_STARK_PROOF_BYTES, eidos_preprocessed_commitment};
 
 // TYPES
 // ================================================================================================
 
 type Challenge = QuadFelt;
-type P2Config = config::Poseidon2Config;
-type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
-type P2ProofData = StarkProofData<Felt, Challenge, P2Config>;
+type RecursiveConfig = config::EidosConfig;
+type RecursiveLmcs = <RecursiveConfig as StarkConfig<Felt, Challenge>>::Lmcs;
+type RecursiveProofData = StarkProofData<Felt, Challenge, RecursiveConfig>;
+
+/// The And8 lookup trace is the verifier-fixed full byte-pair table.
+const AND8_LOOKUP_LOG_HEIGHT: usize = 16;
 
 /// Request-packaged inputs for MASM recursive verification.
 ///
@@ -74,8 +77,8 @@ pub struct RecursiveVerifierInputs {
 impl RecursiveVerifierInputs {
     /// Builds a proof package addressed by the verifier and claim commitments.
     ///
-    /// The VM component must be a Poseidon2 proof because the recursive verifier supports only
-    /// Poseidon2 STARKs.
+    /// The VM component must be an Eidos proof because the recursive verifier supports only
+    /// Eidos STARKs.
     ///
     /// # Errors
     ///
@@ -121,7 +124,7 @@ fn build_verifier_inputs(
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
     let vm = proof.vm();
     let stark = &vm.proof;
-    if stark.hash_fn() != HashFunction::Poseidon2 {
+    if stark.hash_fn() != HashFunction::Eidos {
         return Err(RecursiveVerifierInputsError::UnsupportedHashFunction(stark.hash_fn()));
     }
     let pub_inputs = PublicInputs::new(
@@ -158,7 +161,9 @@ pub enum RecursiveVerifierInputsError {
     InvalidProofShape(&'static str),
     #[error("statement assembly error: {0}")]
     StatementAssembly(String),
-    #[error("recursive verification supports only Poseidon2 proofs, got {0:?}")]
+    #[error("preprocessed-trace validation failed: {0}")]
+    Preprocessed(#[from] PreprocessedValidationError),
+    #[error("recursive verification supports only Eidos proofs, got {0:?}")]
     UnsupportedHashFunction(HashFunction),
     #[error("transcript error: {0}")]
     Transcript(#[from] CryptoVerifierError),
@@ -182,7 +187,7 @@ fn build_from_proof_bytes(
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
 ) -> Result<RecursiveVerifierInputs, RecursiveVerifierInputsError> {
-    let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
+    let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
 
     let proof = deserialize_proof(proof_bytes)?;
 
@@ -193,8 +198,8 @@ fn build_from_proof_bytes(
     let statement =
         Statement::<Felt, Challenge, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
             .map_err(|e| RecursiveVerifierInputsError::StatementAssembly(e.to_string()))?;
-    let verifier_instance = VerifierInstance::new(&config, &statement, None)
-        .expect("Miden AIRs declare no preprocessed columns");
+    let preprocessed_commitment = Some(eidos_preprocessed_commitment());
+    let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
 
     let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
 
@@ -203,9 +208,11 @@ fn build_from_proof_bytes(
     build_advice(&config, &stark, heights, pub_inputs, claim_commitment)
 }
 
-/// Deserializes a wincode-encoded Poseidon2 STARK proof, enforcing the total byte limit,
+/// Deserializes a wincode-encoded Eidos STARK proof, enforcing the total byte limit,
 /// bounding preallocation, and rejecting trailing bytes.
-fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveVerifierInputsError> {
+fn deserialize_proof(
+    proof_bytes: &[u8],
+) -> Result<RecursiveProofData, RecursiveVerifierInputsError> {
     if proof_bytes.len() > MAX_STARK_PROOF_BYTES {
         return Err(RecursiveVerifierInputsError::ProofTooLarge {
             size: proof_bytes.len(),
@@ -215,12 +222,12 @@ fn deserialize_proof(proof_bytes: &[u8]) -> Result<P2ProofData, RecursiveVerifie
 
     let encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    deserialize_schema_exact::<SerdeCompat<P2ProofData>, _>(proof_bytes, encoding_config)
+    deserialize_schema_exact::<SerdeCompat<RecursiveProofData>, _>(proof_bytes, encoding_config)
         .map_err(|e| RecursiveVerifierInputsError::ProofDeserialization(e.to_string()))
 }
 
 fn miden_trace_heights(
-    stark: &StarkProof<Challenge, P2Lmcs>,
+    stark: &StarkProof<Challenge, RecursiveLmcs>,
 ) -> Result<MidenTraceHeights, RecursiveVerifierInputsError> {
     let log_heights = stark.log_trace_heights();
     let Ok(log_heights): Result<[u8; MIDEN_AIR_COUNT], _> = log_heights.try_into() else {
@@ -236,8 +243,8 @@ fn miden_trace_heights(
 
 /// Packs the parsed STARK transcript into the advice-stack stream, Merkle store, and advice map.
 fn build_advice(
-    config: &P2Config,
-    stark: &StarkProof<Challenge, P2Lmcs>,
+    config: &RecursiveConfig,
+    stark: &StarkProof<Challenge, RecursiveLmcs>,
     heights: MidenTraceHeights,
     pub_inputs: &PublicInputs,
     claim_commitment: Word,
@@ -261,7 +268,14 @@ fn build_advice(
     // Final deferred root, loaded by `public_inputs::stage_boundary_inputs`.
     advice_stack.extend_from_slice(pub_inputs.deferred_root().as_ref());
 
-    for height in heights.instance_log_heights {
+    if heights.instance_log_heights[3] != AND8_LOOKUP_LOG_HEIGHT {
+        return Err(RecursiveVerifierInputsError::InvalidProofShape(
+            "unexpected And8Lookup log height",
+        ));
+    }
+    // The MASM wrapper hardcodes the trusted And8 table height and consumes only the three
+    // execution-dependent heights from advice.
+    for &height in &heights.instance_log_heights[..3] {
         advice_stack.push(Felt::new_unchecked(height as u64));
     }
 
@@ -362,8 +376,8 @@ where
 /// entries (for the advice map). The verifier fetches authentication paths with `mtree_get` and
 /// leaf data with `adv.push_mapval`.
 fn build_merkle_data(
-    config: &P2Config,
-    stark: &StarkProof<Challenge, P2Lmcs>,
+    config: &RecursiveConfig,
+    stark: &StarkProof<Challenge, RecursiveLmcs>,
     proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
@@ -383,10 +397,11 @@ fn build_merkle_data(
     // One factory serves the evaluated circuit and its registry authentication: the
     // verifier reads one registry leaf, and seeding the complete registry would not
     // scale to the precompile relation's `10!` orders.
-    let (circuit, path) = recursive_registry_entry(proof_order).map_err(|_| {
-        RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-    })?;
-    let leaf = circuit.commitment;
+    let (circuit, leaf, path) = recursive_registry_entry(proof_order)
+        .map_err(|_| {
+            RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
+        })?
+        .into_parts();
     store.add_merkle_path(u64::from(proof_order.tag()), leaf, path).map_err(|_| {
         RecursiveVerifierInputsError::InvalidProofShape("ACE registry path could not be stored")
     })?;
@@ -403,7 +418,7 @@ fn batch_proof_to_merkle<L>(
 ) -> Result<(PartialMerkleTree, Vec<(Word, Vec<Felt>)>), RecursiveVerifierInputsError>
 where
     L: Lmcs<F = Felt>,
-    L::Commitment: Copy + PartialEq + Into<[Felt; 4]>,
+    L::Commitment: Copy + PartialEq + Into<[u64; 4]>,
     L::BatchProof: BatchProofView<Felt, L::Commitment>,
 {
     let mut paths = Vec::new();
@@ -419,11 +434,12 @@ where
         let siblings = batch_proof.path(index).ok_or(
             RecursiveVerifierInputsError::InvalidProofShape("missing Merkle path for query index"),
         )?;
+        validate_non_hiding_lmcs_salt(batch_proof.salt(index))?;
 
         let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
-        let leaf_word: Word = Word::new(lmcs.hash(rows.iter_rows()).into());
+        let leaf_word = Word::new(commitment_felts(lmcs.hash(rows.iter_rows())));
         let merkle_path =
-            MerklePath::new(siblings.into_iter().map(|c| Word::new(c.into())).collect());
+            MerklePath::new(siblings.into_iter().map(|c| Word::new(commitment_felts(c))).collect());
 
         paths.push((index as u64, leaf_word, merkle_path));
         advice_entries.push((leaf_word, leaf_data));
@@ -435,8 +451,26 @@ where
     Ok((tree, advice_entries))
 }
 
-fn commitment_felts<C: Copy + Into<[Felt; 4]>>(commitment: C) -> [Felt; 4] {
-    commitment.into()
+fn validate_non_hiding_lmcs_salt(
+    salt: Option<&[Felt]>,
+) -> Result<(), RecursiveVerifierInputsError> {
+    let salt = salt.ok_or(RecursiveVerifierInputsError::InvalidProofShape(
+        "missing LMCS salt for query index",
+    ))?;
+    if !salt.is_empty() {
+        return Err(RecursiveVerifierInputsError::InvalidProofShape(
+            "hiding LMCS openings are unsupported by the MASM adapter",
+        ));
+    }
+    Ok(())
+}
+
+fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
+    // Eidos LMCS masks every packed high limb, so current commitments are already canonical.
+    // Reduce explicitly anyway: this adapter is generic over the concrete commitment wrapper,
+    // and advice words must never retain Goldilocks' permitted non-canonical representation if a
+    // future backend supplies an arbitrary u64 limb.
+    commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
 }
 
 fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
@@ -455,13 +489,13 @@ mod tests {
         program::{KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{PrecompileStatus, StarkProof as CoreStarkProof, VmProof},
     };
+    use miden_crypto::stark::Preprocessed;
 
     use super::*;
 
-    /// The top-level entry rejects non-Poseidon2 proofs up front, before touching the proof
-    /// bytes — the recursive verifier verifies only Poseidon2 STARKs.
+    /// The top-level entry rejects non-Eidos proofs up front, before touching the proof bytes.
     #[test]
-    fn recursive_verifier_inputs_reject_non_poseidon2_proofs() {
+    fn recursive_verifier_inputs_reject_non_eidos_proofs() {
         let proof = ExecutionProof::new(
             VmProof {
                 proof: CoreStarkProof::new(Vec::new(), HashFunction::Blake3_256),
@@ -483,6 +517,15 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn commitment_limbs_are_canonicalized_before_entering_advice() {
+        let felts = commitment_felts([Felt::ORDER + 7, u64::MAX, 0, Felt::ORDER - 1]);
+        assert_eq!(
+            felts.map(|felt| felt.as_canonical_u64()),
+            [7, u32::MAX as u64 - 1, 0, Felt::ORDER - 1]
+        );
+    }
+
     /// The proof-package header must describe the supplied PCS parameters rather than the Miden
     /// VM's current defaults; otherwise its transcript and MASM security checks can disagree.
     #[test]
@@ -490,6 +533,24 @@ mod tests {
         let params = PcsParams::new(4, 3, 6, 5, 11, 19, 13).expect("valid distinct PCS params");
 
         assert_eq!(security_parameter_words(&params), [19, 13, 11, 5].map(Felt::new_unchecked),);
+    }
+
+    #[test]
+    fn eidos_preprocessed_commitment_matches_recursive_verifier_constant() {
+        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
+        let statement = Statement::<Felt, Challenge, _>::new(
+            MidenMultiAir::new(),
+            vec![Felt::ZERO; miden_air::NUM_PUBLIC_VALUES],
+            vec![],
+        )
+        .expect("valid Miden statement shape");
+        let commitment: [u64; 4] = Preprocessed::build(&statement, &config)
+            .expect("And8 declares a preprocessed table")
+            .commitment()
+            .into();
+
+        let fixed: [u64; 4] = eidos_preprocessed_commitment().into();
+        assert_eq!(commitment, fixed);
     }
 
     #[test]
@@ -503,6 +564,27 @@ mod tests {
                 size,
                 max: MAX_STARK_PROOF_BYTES,
             } if size == proof_bytes.len()
+        ));
+    }
+
+    #[test]
+    fn recursive_masm_adapter_rejects_hiding_lmcs_salt() {
+        assert!(validate_non_hiding_lmcs_salt(Some(&[])).is_ok());
+
+        let err = validate_non_hiding_lmcs_salt(Some(&[Felt::ONE]))
+            .expect_err("hiding LMCS salt must be rejected");
+        assert!(matches!(
+            err,
+            RecursiveVerifierInputsError::InvalidProofShape(
+                "hiding LMCS openings are unsupported by the MASM adapter"
+            )
+        ));
+
+        let err = validate_non_hiding_lmcs_salt(None)
+            .expect_err("a missing LMCS salt view must be rejected");
+        assert!(matches!(
+            err,
+            RecursiveVerifierInputsError::InvalidProofShape("missing LMCS salt for query index")
         ));
     }
 

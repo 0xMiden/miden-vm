@@ -5,7 +5,10 @@ sidebar_position: 4
 
 # Performance
 
-The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons that many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
+The first two benchmark tables below are historical, pre-Eidos measurements retained as a rough
+guide. They have not been rerun against the current four-AIR Eidos VM and must not be cited
+as current performance. Fresh measurements will replace them after the matching transaction and
+benchmark producers are ported.
 
 A few general notes on performance:
 
@@ -14,9 +17,11 @@ A few general notes on performance:
 - Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
 - Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
 
-## Single-core prover performance
+## Historical single-core prover performance
 
-When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.
+In this pre-cutover capture, Miden VM operated at around 20 - 25 KHz on one CPU core. The benchmark
+executed a [Blake3 example](https://github.com/0xMiden/miden-vm/tree/next/miden-vm/masm-examples/hashing/blake3_1to1)
+program on an Apple M4 Max CPU in a single thread. The generated proofs targeted 96-bit security.
 
 |   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
 | :------------: | :------------: | :----------: | :----------: | :--------: |
@@ -27,9 +32,11 @@ When executed on a single CPU core, the current version of Miden VM operates at 
 
 As can be seen from the above, proving time roughly doubles with every doubling in the number of cycles, but proof size grows much slower.
 
-## Multi-core prover performance
+## Historical multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
+STARK proof generation is massively parallelizable. In the same pre-cutover capture, the VM
+operated at around 170 KHz on a 16-core Apple M4 Max and around 200 KHz on a 64-core Amazon
+Graviton 4.
 
 In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
 
@@ -44,9 +51,15 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ## Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3. While BLAKE3 is fast on conventional
+processors, it is not efficient to execute inside the VM. The VM-native Eidos construction—its
+framed transcript and underlying compression—is designed for recursive proof verification. The
+prover also retains optional proof-hash configurations, including Poseidon2, for experiments and
+comparative testing.
 
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+The historical comparison below runs the same Blake3 example for 2<sup>20</sup> cycles at a 96-bit
+target security level using the optional Poseidon2 STARK proof-hash configuration instead of
+BLAKE3. It predates the native Eidos cutover and should not be read as the current VM hash topology:
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |

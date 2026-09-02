@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 
 pub mod pvm
 pub mod vm
@@ -6,11 +6,13 @@ pub mod vm
 # CONSTANTS
 # =================================================================================================
 
-# Domain tag for proof-request keys: the registered selector
-# (PROOF_REQUEST_DOMAIN_ID << 8) | version = (0x010002 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
-# Must match miden_core::program::PROOF_REQUEST_DOMAIN_TAG (enforced by cross-tests).
-const PROOF_REQUEST_DOMAIN_TAG = 0x01000201
+# Eidos chaining word for one proof-request key block under the registered selector 0x01000201.
+const PROOF_REQUEST_INIT_CV = [
+    4280581857109606913,
+    2688637132020383752,
+    1947077364412317696,
+    6620516959492505600
+]
 
 # SYSTEM PROCEDURES
 # =================================================================================================
@@ -52,8 +54,8 @@ end
 
 #! Computes the advice-map key addressing a proof package under a verifier.
 #!
-#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one rate
-#! block, so a single permutation with no memory). It is a lookup address, not a trust anchor: the
+#! The key is the domain-tagged hash of `claim_commitment ‖ verifier_root` (exactly one Eidos
+#! block, so a single compression with no memory). It is a lookup address, not a trust anchor: the
 #! verifier re-checks the retrieved package, so a wrong package fails verification. Both inputs are
 #! program-owned: the verifier's MAST root comes from `procref`, while the claim commitment
 #! comes from an authenticated verifier output or the program's own inputs. Mirrors
@@ -62,14 +64,9 @@ end
 #! Inputs:  [VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
 #! Outputs: [PROOF_REQUEST_KEY, ...]
 pub proc build_proof_request_key
-    # Capacity word [0, PROOF_REQUEST_DOMAIN_TAG, 0, 0]: first element 8 % 8 = 0, domain in the
-    # second. Pushed on top, then swapped to the capacity position (state word 2) so the two
-    # input words become the rate; absorbing claim ‖ verifier keeps this to a single swap.
-    push.0.0.PROOF_REQUEST_DOMAIN_TAG.0
-    # => [CAP, VERIFIER_ROOT, CLAIM_COMMITMENT, ...]
-    swapw.2
-    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, CAP, ...] = [R0, R1, C]
-    hperm
-    exec.poseidon2::squeeze_digest
+    swapw
+    # => [CLAIM_COMMITMENT, VERIFIER_ROOT, ...]
+    push.PROOF_REQUEST_INIT_CV
+    exec.eidos::merge_with_chaining_word
     # => [PROOF_REQUEST_KEY, ...]
 end

@@ -98,7 +98,7 @@ fn prove_deferred_ecdsa_execution(
     .expect("ECDSA execution must produce a proving witness");
     let claim = witness.claim();
     let proof = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove(witness)
         .expect("ECDSA execution must produce a deferred MVM proof");
     let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
@@ -274,7 +274,7 @@ impl Host for PvmSettlementHost {
             let witness = PrecompileWitness::new(self.deferred_state.clone())
                 .map_err(SettlementEventError::Witness)?;
             let precompile_proof = Prover::new()
-                .with_hash_fn(HashFunction::Poseidon2)
+                .with_hash_fn(HashFunction::Eidos)
                 .prove_precompile(&witness)
                 .map_err(SettlementEventError::Proving)?;
             let package = PvmRecursiveVerifierInputs::for_request(verifier_root, &precompile_proof)

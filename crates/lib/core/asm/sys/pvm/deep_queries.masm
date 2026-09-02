@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::stark::constants
 use miden::core::stark::deep_queries
 use miden::core::sys::pvm::layout
@@ -10,16 +10,25 @@ const PREPROCESSED_TREE_DEPTH = 19
 const PREPROCESSED_INDEX_MASK = 524287
 
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
-# Each double word is eight base-field felts, the Poseidon2 rate/alignment.
-const PREPROCESSED_ROW_DOUBLE_WORDS = 1
-const MAIN_ROW_DOUBLE_WORDS = 55
-const AUX_ROW_DOUBLE_WORDS = 39
+# Each double word is one eight-felt Eidos compression block.
+const PREPROCESSED_ROW_DOUBLE_WORDS = 2
+const MAIN_ROW_DOUBLE_WORDS = 68
+const AUX_ROW_DOUBLE_WORDS = 44
 const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS
 # =================================================================================================
 
-const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value from the Merkle tree"
+const PREPROCESSED_LEAF_VALUE_MISMATCH = "preprocessed query leaf hash mismatch"
+const MAIN_LEAF_VALUE_MISMATCH = "main query leaf hash mismatch"
+const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
+const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
+
+# Eidos::init_chaining_word(0, 0).
+const EIDOS_LMCS_INIT_CV_0 = 4280581857092829184
+const EIDOS_LMCS_INIT_CV_1 = 2688637132020383744
+const EIDOS_LMCS_INIT_CV_2 = 1947077364412317696
+const EIDOS_LMCS_INIT_CV_3 = 6620516959492505600
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -97,19 +106,22 @@ proc process_preprocessed_trace
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
 
-    padw swapw padw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
     exec.load_preprocessed_trace
 
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
+    dropw
 end
 
 proc load_preprocessed_trace
     repeat.PREPROCESSED_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end
 
@@ -124,19 +136,23 @@ proc process_main_trace
     exec.constants::tmp3 mem_storew_le
     adv.push_mapval
 
-    padw swapw.2
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
     exec.load_main_trace
 
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
+    dropw
 end
 
 proc load_main_trace
     repeat.MAIN_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end
 
@@ -151,19 +167,23 @@ proc process_aux_trace
     exec.constants::tmp3 mem_storew_le
     adv.push_mapval
 
-    padw swapw.2
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
     exec.load_aux_trace
 
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
+    dropw
 end
 
 proc load_aux_trace
     repeat.AUX_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end
 
@@ -178,19 +198,22 @@ proc process_quotient_trace
     exec.constants::tmp3 mem_storew_le
     adv.push_mapval
 
-    padw
-    swapw.2
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
     exec.load_quotient_trace
 
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
+    dropw
 end
 
 proc load_quotient_trace
     repeat.QUOTIENT_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end

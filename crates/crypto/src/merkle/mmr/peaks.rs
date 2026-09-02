@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::{
     Felt, Word, ZERO,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::mmr::{Forest, MmrError, MmrProof},
 };
 
@@ -133,7 +133,7 @@ impl MmrPeaks {
         ]);
         elements.extend_from_slice(&padded_peaks);
 
-        Poseidon2::hash_elements(&elements)
+        Eidos::hash_elements(&elements)
     }
 
     /// Verifies the Merkle opening proof.
@@ -155,8 +155,8 @@ impl MmrPeaks {
     ///
     /// The procedure will:
     /// - Flatten the vector of Words into a vector of Felts.
-    /// - Pad the peaks with ZERO to an even number of words, this removes the need to handle
-    ///   Poseidon2 padding.
+    /// - Pad the peaks with ZERO to an even number of words, keeping every Eidos absorption on a
+    ///   whole two-word block boundary.
     /// - Pad the peaks to a minimum length of 16 words, which reduces the constant cost of hashing.
     pub fn flatten_and_pad_peaks(&self) -> Vec<Felt> {
         let num_peaks = self.peaks.len();

@@ -10,8 +10,8 @@ use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
-    bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH, TRACE_WIDTH},
+    bitwise::NUM_U32_BYTES,
+    hasher::{DIGEST_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -43,101 +43,87 @@ macro_rules! impl_borrow_for_chiplet_cols {
 // CONTROLLER COLUMNS
 // ================================================================================================
 
-/// Controller chiplet columns.
+/// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
-/// Logical overlay for controller rows. The controller-internal `s0` distinguishes input rows
-/// (`s0 = 1`) from output/padding rows (`s0 = 0`).
+/// Logical overlay for controller rows (`s_ctrl = 1`). The `s0/s1/s2` columns select the
+/// controller row kind; see `hasher_control::flags` for the encoding.
 ///
-/// `chiplets[0]` belongs to the top-level chiplet selector system and is not part of this overlay.
-/// The controller-internal `s0` defined here starts at `chiplets[1]`.
+/// `s_ctrl` (= `chiplets[0]`) and the shared mode cell are not part of this overlay. Controller
+/// code reads that shared cell through `ChipletCols::controller_merkle_or_padding()`.
 ///
-/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
-/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
-/// sub-views into the state array.
+/// The controller uses a row-kind-dependent overlay to fit one compression request in one row:
+///
+/// - hash rows: `state = block[8] || cv_in[4]`, `row_data = cv_out[4]`;
+/// - Merkle rows: `state = block[8] || digest_out[4]`, `row_data = [node_index, node_index_next,
+///   is_start, 0]`.
+///
+/// Merkle input CV is the fixed domain-0 two-to-one chaining word, so it does not need trace
+/// columns. Hash rows need both `cv_in` and `cv_out`, so they place the output CV in `row_data`.
 ///
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 | state[12]                                    | extra cols          |
-/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                     |
-/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir  p  |
+/// | s0 s1 s2 | state[12]                                       | row_data[4]   |
+/// |          | block_lo[4]      | block_hi[4] | cv/digest[4]    | row-kind data |
 /// ```
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ControllerCols<T> {
-    /// Hasher-internal sub-selector: `s0 = 1` on controller input rows, 0 on output/padding.
+    /// Hasher-internal row-kind selector.
     pub s0: T,
-    /// Operation sub-selector s1.
+    /// Hasher-internal row-kind selector.
     pub s1: T,
-    /// Operation sub-selector s2.
+    /// Hasher-internal row-kind selector.
     pub s2: T,
-    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
+    /// Eidos compression row payload. See the row-kind overlay documented above.
     pub state: [T; STATE_WIDTH],
-    /// Merkle tree node index.
-    pub node_index: T,
-    /// Domain separator for sibling table across MRUPDATE ops.
-    pub mrupdate_id: T,
-    /// 1 on boundary rows (first input or last output of each permutation).
-    pub is_boundary: T,
-    /// Direction bit for Merkle path verification.
-    pub direction_bit: T,
-    /// Poseidon2 permutation cycle id.
-    pub perm_id: T,
+    /// Row-kind-dependent payload. See the row-kind overlay documented above.
+    pub row_data: [T; DIGEST_LEN],
 }
 
 impl<T: Copy> ControllerCols<T> {
-    /// Returns the rate portion of the state (state[0..8]).
-    pub fn rate(&self) -> [T; RATE_LEN] {
-        [
-            self.state[0],
-            self.state[1],
-            self.state[2],
-            self.state[3],
-            self.state[4],
-            self.state[5],
-            self.state[6],
-            self.state[7],
-        ]
-    }
-
-    /// Returns the capacity portion of the state (state[8..12]).
-    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
+    /// Returns the state tail (`state[8..12]`).
+    ///
+    /// On hash rows this is the input CV. On Merkle rows this is the output digest.
+    pub fn state_tail(&self) -> [T; DIGEST_LEN] {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
     }
 
-    /// Returns the digest portion of the state (state[0..4]).
-    pub fn digest(&self) -> [T; DIGEST_LEN] {
+    /// Returns the hash-row output chaining value (`row_data[0..4]`).
+    ///
+    /// A terminal row of a framed hash interprets this value as the completed digest.
+    pub fn hash_cv(&self) -> [T; DIGEST_LEN] {
+        self.row_data
+    }
+
+    /// Returns the Merkle-row output digest (`state[8..12]`).
+    pub fn merkle_digest(&self) -> [T; DIGEST_LEN] {
+        self.state_tail()
+    }
+
+    /// Merkle current node index (`row_data[0]`).
+    pub fn merkle_node_index(&self) -> T {
+        self.row_data[0]
+    }
+
+    /// Merkle next node index (`row_data[1]`).
+    pub fn merkle_node_index_next(&self) -> T {
+        self.row_data[1]
+    }
+
+    /// Merkle operation start flag (`row_data[2]`).
+    pub fn merkle_is_start(&self) -> T {
+        self.row_data[2]
+    }
+
+    /// Returns the low block word (`state[0..4]`).
+    pub fn block_lo(&self) -> [T; DIGEST_LEN] {
         [self.state[0], self.state[1], self.state[2], self.state[3]]
     }
 
-    /// Returns rate0 (state[0..4]).
-    pub fn rate0(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
-    }
-
-    /// Returns rate1 (state[4..8]).
-    pub fn rate1(&self) -> [T; DIGEST_LEN] {
+    /// Returns the high block word (`state[4..8]`).
+    pub fn block_hi(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
-    }
-
-    /// Merkle-update new-path flag: `s0 * s1 * s2`.
-    ///
-    /// Active on controller input rows that remove siblings for the new Merkle path.
-    pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
-    where
-        T: Into<E>,
-    {
-        self.s0.into() * self.s1.into() * self.s2.into()
-    }
-
-    /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
-    ///
-    /// Active on controller input rows that insert siblings for the old Merkle path.
-    pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
-    where
-        T: Into<E>,
-    {
-        self.s0.into() * self.s1.into() * (E::ONE - self.s2.into())
     }
 }
 
@@ -146,25 +132,128 @@ impl<T: Copy> ControllerCols<T> {
 
 /// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
 ///
-/// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
-/// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
+/// Normal bitwise rows store one full u32 operation. The byte arrays are little-endian:
+/// `value = b0 + 2^8*b1 + 2^16*b2 + 2^24*b3`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct BitwiseCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.
     pub op_flag: T,
-    /// Aggregated input a.
-    pub a: T,
-    /// Aggregated input b.
-    pub b: T,
-    /// 4-bit decomposition of a.
-    pub a_bits: [T; NUM_DECOMP_BITS],
-    /// 4-bit decomposition of b.
-    pub b_bits: [T; NUM_DECOMP_BITS],
-    /// Previous aggregated output.
-    pub prev_output: T,
-    /// Current aggregated output.
-    pub output: T,
+    /// Little-endian bytes of input `a`.
+    pub a_bytes: [T; NUM_U32_BYTES],
+    /// Little-endian bytes of input `b`.
+    pub b_bytes: [T; NUM_U32_BYTES],
+    /// Bytewise `a & b` witnesses.
+    pub and_bytes: [T; NUM_U32_BYTES],
+}
+
+/// AEAD stream overlay (20 columns), viewed from `chiplets[2..22]`.
+///
+/// One stream entry spans eight rows. Each row proves one u32 XOR as four AND8 byte lookups;
+/// row-specific overlays define the remaining cells.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AeadStreamCols<T> {
+    pub payload: [T; 20],
+}
+
+impl<T> AeadStreamCols<T> {
+    /// Plaintext-read + low-limb rows (`r0`, `r4`).
+    pub fn read(&self) -> &AeadStreamReadCols<T> {
+        self.payload.as_slice().borrow()
+    }
+
+    /// Mutable plaintext-read + low-limb rows (`r0`, `r4`).
+    pub fn read_mut(&mut self) -> &mut AeadStreamReadCols<T> {
+        self.payload.as_mut_slice().borrow_mut()
+    }
+
+    /// High-limb rows of the first felt in a pair (`r1`, `r5`).
+    pub fn high_first(&self) -> &AeadStreamHighFirstCols<T> {
+        self.payload.as_slice().borrow()
+    }
+
+    /// Mutable high-limb rows of the first felt in a pair (`r1`, `r5`).
+    pub fn high_first_mut(&mut self) -> &mut AeadStreamHighFirstCols<T> {
+        self.payload.as_mut_slice().borrow_mut()
+    }
+
+    /// Low-limb rows of the second felt in a pair (`r2`, `r6`).
+    pub fn low_second(&self) -> &AeadStreamLowSecondCols<T> {
+        self.payload.as_slice().borrow()
+    }
+
+    /// Mutable low-limb rows of the second felt in a pair (`r2`, `r6`).
+    pub fn low_second_mut(&mut self) -> &mut AeadStreamLowSecondCols<T> {
+        self.payload.as_mut_slice().borrow_mut()
+    }
+
+    /// High-limb rows of the second felt in a pair (`r3`, `r7`).
+    pub fn high_second(&self) -> &AeadStreamHighSecondCols<T> {
+        self.payload.as_slice().borrow()
+    }
+
+    /// Mutable high-limb rows of the second felt in a pair (`r3`, `r7`).
+    pub fn high_second_mut(&mut self) -> &mut AeadStreamHighSecondCols<T> {
+        self.payload.as_mut_slice().borrow_mut()
+    }
+}
+
+/// AEAD stream rows `r0` and `r4`.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AeadStreamReadCols<T> {
+    pub ctx: T,
+    pub clk: T,
+    pub src_ptr: T,
+    pub lane_base: T,
+    pub plaintext: [T; WORD_SIZE],
+    pub bytes: [T; 12],
+}
+
+/// AEAD stream rows `r1` and `r5`.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AeadStreamHighFirstCols<T> {
+    pub ctx: T,
+    pub clk: T,
+    pub src_ptr: T,
+    pub lane_base: T,
+    pub next_plaintext: T,
+    pub c_prev0: T,
+    pub hi_quotient: T,
+    pub bytes: [T; 12],
+    pub spare: T,
+}
+
+/// AEAD stream rows `r2` and `r6`.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AeadStreamLowSecondCols<T> {
+    pub ctx: T,
+    pub clk: T,
+    pub src_ptr: T,
+    pub dst_ptr: T,
+    pub lane_base: T,
+    pub active_plaintext: T,
+    pub c_prev0: T,
+    pub c_prev1: T,
+    pub bytes: [T; 12],
+}
+
+/// AEAD stream rows `r3` and `r7`.
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct AeadStreamHighSecondCols<T> {
+    pub ctx: T,
+    pub clk: T,
+    pub dst_ptr: T,
+    pub lane_base: T,
+    pub c_prev0: T,
+    pub c_prev1: T,
+    pub c_prev2: T,
+    pub hi_quotient: T,
+    pub bytes: [T; 12],
 }
 
 // MEMORY COLUMNS
@@ -335,13 +424,6 @@ pub struct AceEvalCols<T> {
 // ACE COLUMN INDEX MAPS
 // ================================================================================================
 
-/// Compile-time index map for the top-level ACE chiplet columns (16 columns).
-#[allow(dead_code)]
-pub const ACE_COL_MAP: AceCols<usize> = {
-    assert!(size_of::<AceCols<u8>>() == 16);
-    unsafe { core::mem::transmute(indices_arr::<{ size_of::<AceCols<u8>>() }>()) }
-};
-
 /// Compile-time index map for the READ overlay (relative to `mode`).
 pub const ACE_READ_COL_MAP: AceReadCols<usize> = {
     assert!(size_of::<AceReadCols<u8>>() == 4);
@@ -353,10 +435,6 @@ pub const ACE_EVAL_COL_MAP: AceEvalCols<usize> = {
     assert!(size_of::<AceEvalCols<u8>>() == 4);
     unsafe { core::mem::transmute(indices_arr::<{ size_of::<AceEvalCols<u8>>() }>()) }
 };
-
-/// Offset of the `mode` array within the ACE chiplet columns.
-#[allow(dead_code)]
-pub const MODE_OFFSET: usize = ACE_COL_MAP.mode[0];
 
 const _: () = {
     assert!(size_of::<AceCols<u8>>() == 16);
@@ -387,71 +465,61 @@ pub struct KernelRomCols<T> {
 // PERIODIC COLUMNS
 // ================================================================================================
 
-/// All chiplet periodic columns.
+/// Chiplets periodic columns.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct PeriodicCols<T> {
-    pub bitwise: BitwisePeriodicCols<T>,
+    /// AEAD stream phase columns.
+    pub aead_stream: AeadStreamPeriodicCols<T>,
 }
 
-/// Bitwise chiplet periodic columns (2 columns, period = 8 rows).
+/// AEAD stream periodic columns (8 columns, period = 8 rows).
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct BitwisePeriodicCols<T> {
-    /// Marks first row of 8-row cycle: `[1, 0, 0, 0, 0, 0, 0, 0]`.
-    pub k_first: T,
-    /// Marks non-last rows of 8-row cycle: `[1, 1, 1, 1, 1, 1, 1, 0]`.
-    pub k_transition: T,
+pub struct AeadStreamPeriodicCols<T> {
+    pub r0: T,
+    pub r1: T,
+    pub r2: T,
+    pub r3: T,
+    pub r4: T,
+    pub r5: T,
+    pub r6: T,
+    pub r7: T,
 }
 
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-impl Default for BitwisePeriodicCols<Vec<Felt>> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BitwisePeriodicCols<Vec<Felt>> {
-    /// Generate periodic columns for the bitwise chiplet.
+#[allow(clippy::new_without_default)]
+impl AeadStreamPeriodicCols<Vec<Felt>> {
+    /// Generate one-hot phase selectors for the 8-row AEAD stream schedule.
     pub fn new() -> Self {
-        let k_first = vec![
-            Felt::ONE,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-        ];
+        let phases: [Vec<Felt>; 8] = core::array::from_fn(|phase| {
+            let mut col = vec![Felt::ZERO; 8];
+            col[phase] = Felt::ONE;
+            col
+        });
 
-        let k_transition = vec![
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ZERO,
-        ];
-
-        Self { k_first, k_transition }
-    }
-
-    /// Returns bitwise periodic columns in `BitwisePeriodicCols` layout order.
-    pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        let BitwisePeriodicCols { k_first, k_transition } = Self::new();
-        vec![k_first, k_transition]
+        Self {
+            r0: phases[0].clone(),
+            r1: phases[1].clone(),
+            r2: phases[2].clone(),
+            r3: phases[3].clone(),
+            r4: phases[4].clone(),
+            r5: phases[5].clone(),
+            r6: phases[6].clone(),
+            r7: phases[7].clone(),
+        }
     }
 }
 
 impl PeriodicCols<Vec<Felt>> {
     /// Returns chiplet periodic columns in `PeriodicCols` layout order.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        BitwisePeriodicCols::periodic_columns()
+        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
+            AeadStreamPeriodicCols::new();
+
+        vec![r0, r1, r2, r3, r4, r5, r6, r7]
     }
 }
 
@@ -468,10 +536,16 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
 }
 
 const _: () = {
-    assert!(size_of::<PeriodicCols<u8>>() == 2);
-    assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
+    assert!(size_of::<PeriodicCols<u8>>() == 8);
+    assert!(size_of::<AeadStreamPeriodicCols<u8>>() == 8);
 
-    assert!(size_of::<ControllerCols<u8>>() == TRACE_WIDTH);
+    assert!(size_of::<ControllerCols<u8>>() == 19);
+    assert!(size_of::<BitwiseCols<u8>>() == 13);
+    assert!(size_of::<AeadStreamCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamReadCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamHighFirstCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamLowSecondCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamHighSecondCols<u8>>() == 20);
 };
 
 // BORROW IMPLS
@@ -483,6 +557,11 @@ const _: () = {
 
 impl_borrow_for_chiplet_cols!(ControllerCols);
 impl_borrow_for_chiplet_cols!(BitwiseCols);
+impl_borrow_for_chiplet_cols!(AeadStreamCols);
+impl_borrow_for_chiplet_cols!(AeadStreamReadCols);
+impl_borrow_for_chiplet_cols!(AeadStreamHighFirstCols);
+impl_borrow_for_chiplet_cols!(AeadStreamLowSecondCols);
+impl_borrow_for_chiplet_cols!(AeadStreamHighSecondCols);
 impl_borrow_for_chiplet_cols!(MemoryCols);
 impl_borrow_for_chiplet_cols!(AceCols);
 impl_borrow_for_chiplet_cols!(AceReadCols);
@@ -500,6 +579,17 @@ mod tests {
 
         for col in &cols {
             assert_eq!(col.len(), 8);
+        }
+    }
+
+    #[test]
+    fn aead_stream_phase_columns_are_one_hot() {
+        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
+            AeadStreamPeriodicCols::new();
+
+        for (phase, col) in [r0, r1, r2, r3, r4, r5, r6, r7].into_iter().enumerate() {
+            assert_eq!(col[phase], Felt::ONE);
+            assert_eq!(col.iter().filter(|&&v| v == Felt::ONE).count(), 1);
         }
     }
 }

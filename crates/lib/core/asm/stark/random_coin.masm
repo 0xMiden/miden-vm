@@ -1,137 +1,315 @@
-#! Random coin for the STARK verifier, built on a Poseidon2 sponge.
+#! Random coin procedures for the STARK verifier.
 #!
-#! The sponge state is stored in memory as three words: rate R1 (r1_ptr), rate R2 (r2_ptr),
-#! and capacity C (c_ptr). R1 and R2 are contiguous (r2_ptr = r1_ptr + 4), so rate elements
-#! 0..7 can be addressed as r1_ptr + index.
+#! The `eidos_*` procedures implement the Eidos challenger. Unprefixed sampling and observe
+#! helpers are recursive-verifier entry points over that state machine.
+#! The `eidos_absorb_*` block helpers require an empty absorb buffer. Use `eidos_observe_*` to
+#! append to buffered input.
 #!
-#! Sampling uses an output_len counter that tracks how many rate elements remain. Each
-#! permutation sets output_len=8; each sample_felt decrements it by 1 and reads
-#! rate[output_len - 1].
-#!
-#! Two absorption paths are provided:
-#!   - `observe_felt`/`observe_word`/`observe_pair`/`observe_word_and_flush_buffer`/`flush_buffer`:
-#!     a faithful buffered duplex matching p3's `DuplexChallenger` (append to
-#!     `rate[input_len]`, permute only once the rate fills, flush a partial buffer lazily). The
-#!     batched helpers cover common aligned cases without changing the transcript stream.
-#!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that build a complete
-#!     rate and permute immediately. Valid only when the input buffer is empty (the stream is known
-#!     to start and end on a rate boundary).
+#! Eidos challenger memory layout:
+#!   random_coin_cv_ptr          - 4-felt chaining value
+#!   random_coin_output_word_ptr - 4-felt output cache
+#!   random_coin_block_ptr       - 8-felt absorb block
+#!   random_coin_buffer_len_ptr  - position in the absorb block, 0..8
+#!   random_coin_counter_ptr     - 0 = absorbing; otherwise next counter-mode block index
+#!   random_coin_output_len_ptr  - felts left in the output cache, 0..4
 
-use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::utils
 
-# SPONGE STATE ACCESS
+# Eidos transcript-local root labels. These helper procs are available for typed
+# transcript events even when the main recursive verifier uses the generic stream.
+const MAIN_TRACE_ROOT_LABEL = 1
+const AUX_TRACE_ROOT_LABEL = 2
+const QUOTIENT_ROOT_LABEL = 3
+
+# Eidos::transcript_init_cv(0x00000201), using the registered Miden VM STARK transcript selector.
+const EIDOS_TRANSCRIPT_INIT_CV_0 = 4361500420518448919
+const EIDOS_TRANSCRIPT_INIT_CV_1 = 3539038439026260303
+const EIDOS_TRANSCRIPT_INIT_CV_2 = 6615246172502583955
+const EIDOS_TRANSCRIPT_INIT_CV_3 = 6225836997093344009
+
+# Eidos challenger
 # =============================================================================================
 
-#! Return the first half of the rate portion of the random coin state.
+#! Enter absorbing mode after an Eidos absorb.
 #!
 #! Input: [...]
-#! Output: [R1, ...]
-#! Cycles: 6
-pub proc get_rate_1
-    padw exec.constants::r1_ptr mem_loadw_le
-end
-
-#! Store the first half of the rate portion of the random coin state.
-#!
-#! Input: [R1, ...]
 #! Output: [...]
-#! Cycles: 6
-pub proc set_rate_1
-    exec.constants::r1_ptr mem_storew_le dropw
+pub proc eidos_enter_absorbing
+    push.0 exec.constants::random_coin_counter_ptr mem_store
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
 end
 
-#! Return the second half of the rate portion of the random coin state.
+#! Clear the generic Eidos absorb buffer.
 #!
 #! Input: [...]
-#! Output: [R2, ...]
-#! Cycles: 6
-pub proc get_rate_2
-    padw exec.constants::r2_ptr mem_loadw_le
-end
-
-#! Store the second half of the rate portion of the random coin state.
-#!
-#! Input: [R2, ...]
 #! Output: [...]
-#! Cycles: 6
-pub proc set_rate_2
-    exec.constants::r2_ptr mem_storew_le dropw
+pub proc eidos_clear_buffer
+    padw exec.constants::random_coin_block_ptr mem_storew_le
+    exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+    push.0 exec.constants::random_coin_buffer_len_ptr mem_store
 end
 
-#! Return the capacity portion of the random coin state.
+#! Compress the block stored at `random_coin_block_ptr` into the Eidos chaining value.
 #!
 #! Input: [...]
-#! Output: [C, ...]
-#! Cycles: 6
-pub proc get_capacity
-    padw exec.constants::c_ptr mem_loadw_le
-end
-
-#! Set the capacity portion of the random coin state.
-#!
-#! Input: [C, ...]
 #! Output: [...]
-#! Cycles: 6
-pub proc set_capacity
-    exec.constants::c_ptr mem_storew_le dropw
+pub proc eidos_compress_block
+    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    padw exec.constants::random_coin_block_ptr add.4 mem_loadw_le
+    padw exec.constants::random_coin_block_ptr mem_loadw_le
+    compress
+    swapw.2
+    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+    dropw dropw
 end
 
-#! Load the random coin state on the stack.
+#! Absorb a fully specified 8-felt Eidos block.
+#!
+#! The absorb buffer must be empty.
+#!
+#! Input: [block_lo, block_hi, ...]
+#! Output: [...]
+pub proc eidos_absorb_block
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    assertz.err="eidos_absorb_block: buffer must be empty"
+
+    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    swapw.2
+    swapw
+    compress
+    swapw.2
+    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+    dropw dropw
+    exec.eidos_clear_buffer
+    exec.eidos_enter_absorbing
+end
+
+#! Observe one felt through the generic Eidos streaming interface.
+#!
+#! Input: [value, ...]
+#! Output: [...]
+pub proc eidos_observe_felt
+    exec.eidos_enter_absorbing
+
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    dup push.8 u32lt assert.err="eidos_observe_felt: buffer_len exceeds block width"
+    swap
+    dup.1
+    exec.constants::random_coin_block_ptr add mem_store
+    add.1
+    dup exec.constants::random_coin_buffer_len_ptr mem_store
+    push.8 eq
+    if.true
+        exec.eidos_compress_block
+        exec.eidos_clear_buffer
+    end
+end
+
+#! Observe one word through the generic Eidos streaming interface.
+#!
+#! Word-aligned transcript state (`buffer_len` 0 or 4) uses a direct memory fast path. Other
+#! prefixes fall back to four scalar observations so this remains equivalent to observing the
+#! word's felts individually.
+#!
+#! Input: [word, ...]
+#! Output: [...]
+pub proc eidos_observe_word
+    exec.eidos_enter_absorbing
+
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    dup push.0 eq
+    if.true
+        drop
+        exec.constants::random_coin_block_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+        push.4 exec.constants::random_coin_buffer_len_ptr mem_store
+    else
+        dup push.4 eq
+        if.true
+            drop
+            exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+            exec.eidos_compress_block
+            exec.eidos_clear_buffer
+        else
+            drop
+            exec.eidos_observe_felt
+            exec.eidos_observe_felt
+            exec.eidos_observe_felt
+            exec.eidos_observe_felt
+        end
+    end
+end
+
+#! Observe the top two stack words as one Eidos block without changing the stack.
+#!
+#! Intended for `adv_pipe` loops that must keep both piped words available.
+pub proc eidos_observe_piped_words
+    dupw
+    exec.eidos_observe_word
+    swapw
+    dupw
+    exec.eidos_observe_word
+    swapw
+end
+
+#! Absorb one word as `[word, 0, 0, 0, 0]`.
+#!
+#! Input: [word, ...]
+#! Output: [...]
+pub proc eidos_absorb_word
+    padw
+    swapw
+    exec.eidos_absorb_block
+end
+
+#! Absorb the main trace commitment root.
+#!
+#! Input: [root, ...]
+#! Output: [...]
+pub proc eidos_absorb_main_trace_root
+    push.0.0.0.MAIN_TRACE_ROOT_LABEL
+    swapw
+    exec.eidos_absorb_block
+end
+
+#! Absorb the auxiliary trace commitment root.
+#!
+#! Input: [root, ...]
+#! Output: [...]
+pub proc eidos_absorb_aux_trace_root
+    push.0.0.0.AUX_TRACE_ROOT_LABEL
+    swapw
+    exec.eidos_absorb_block
+end
+
+#! Absorb the quotient commitment root.
+#!
+#! Input: [root, ...]
+#! Output: [...]
+pub proc eidos_absorb_quotient_root
+    push.0.0.0.QUOTIENT_ROOT_LABEL
+    swapw
+    exec.eidos_absorb_block
+end
+
+#! Initialize the Eidos challenger from a transcript-init CV and relation digest.
+#!
+#! Input: [relation_digest, transcript_init_cv, ...]
+#! Output: [...]
+pub proc eidos_init_challenger
+    swapw
+    exec.constants::random_coin_cv_ptr mem_storew_le dropw
+
+    exec.eidos_clear_buffer
+    padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+    exec.eidos_absorb_word
+end
+
+#! Refill the 4-felt Eidos output word.
 #!
 #! Input: [...]
-#! Output: [R1, R2, C, ...]
-#! Cycles: 18
-pub proc load_random_coin_state
-    exec.get_capacity
-    exec.get_rate_2
-    exec.get_rate_1
-end
-
-#! Store the random coin state to memory.
-#!
-#! Input: [R1, R2, C, ...]
 #! Output: [...]
-#! Cycles: 18
-pub proc store_random_coin_state
-    exec.set_rate_1
-    exec.set_rate_2
-    exec.set_capacity
+pub proc eidos_refill_output_word
+    exec.constants::random_coin_counter_ptr mem_load
+    dup push.0 eq
+    if.true
+        drop
+        exec.constants::random_coin_buffer_len_ptr mem_load
+        dup push.8 u32lt assert.err="eidos_refill_output_word: buffer_len exceeds block width"
+        exec.constants::random_coin_cv_ptr add.3 mem_load
+        swap add.1 add
+        exec.constants::random_coin_cv_ptr add.3 mem_store
+        exec.eidos_compress_block
+        exec.eidos_clear_buffer
+        push.1 exec.constants::random_coin_counter_ptr mem_store
+    else
+        dup add.1 exec.constants::random_coin_counter_ptr mem_store
+        push.0.0.0
+        movup.3
+        exec.constants::random_coin_block_ptr mem_storew_le
+        drop push.0
+        exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
+        exec.constants::random_coin_cv_ptr add.3 mem_load
+        push.9 add
+        exec.constants::random_coin_cv_ptr add.3 mem_store
+        exec.eidos_compress_block
+        exec.eidos_clear_buffer
+    end
+
+    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    exec.constants::random_coin_output_word_ptr mem_storew_le dropw
+    push.4 exec.constants::random_coin_output_len_ptr mem_store
 end
 
-#! Add the absorbed-length tag to the first capacity element (sponge state element 8).
+#! Sample one base field element from the Eidos transcript.
 #!
-#! Mirrors p3's `DuplexChallenger::duplexing`, which makes every absorb prefix-free by
-#! binding the number of absorbed elements into the capacity before permuting. Squeeze-only
-#! permutations (empty input buffer) carry no tag.
-#!
-#! Input:  [n, ...]
-#! Output: [...]
-pub proc add_absorb_length_tag
-    exec.constants::c_ptr mem_load add
-    exec.constants::c_ptr mem_store
+#! Input: [...]
+#! Output: [x, ...]
+pub proc eidos_sample_felt
+    exec.constants::random_coin_output_len_ptr mem_load
+    dup push.0 eq
+    if.true
+        drop
+        exec.eidos_refill_output_word
+        push.4
+    end
+
+    dup push.4 u32lte assert.err="eidos_sample_felt: output_len exceeds word width"
+    sub.1
+    dup exec.constants::random_coin_output_len_ptr mem_store
+
+    push.3 swap sub
+    exec.constants::random_coin_output_word_ptr add mem_load
 end
 
+#! Sample one quadratic extension element from the Eidos transcript.
+#!
+#! Input: [...]
+#! Output: [x0, x1, ...]
+pub proc eidos_sample_ext
+    exec.eidos_sample_felt
+    exec.eidos_sample_felt
+    swap
+end
 
-# SAMPLING
-# =============================================================================================
+#! Sample bits from the Eidos transcript.
+#!
+#! Input: [bits, ...]
+#! Output: [value, ...]
+pub proc eidos_sample_bits
+    dup
+    pow2
+    u32assert u32overflowing_sub.1 assertz
+    exec.eidos_sample_felt
+    u32split
+    swap
+    drop
+    u32and
+    swap
+    drop
+end
+
+#! Return the next full Eidos output word.
+#!
+#! Input: [...]
+#! Output: [word, ...]
+pub proc eidos_squeeze_word
+    exec.constants::random_coin_output_len_ptr mem_load
+    push.0 assert_eq
+    exec.eidos_refill_output_word
+    padw exec.constants::random_coin_output_word_ptr mem_loadw_le
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+end
 
 #! Sample a single base field element from the transcript.
-#!
-#! SAFETY: Requires output_len > 0. All call sites in the recursive verifier guarantee this
-#! invariant because every sponge permutation sets output_len=8 and at most 8 elements are
-#! consumed before the next permutation. An assertion guards against caller bugs.
 #!
 #! Input: [...]
 #! Output: [x, ...]
 pub proc sample_felt
-    exec.constants::random_coin_output_len_ptr mem_load
-    dup push.0 neq assert.err="sample_felt: output buffer is empty"
-    sub.1
-    dup exec.constants::random_coin_output_len_ptr mem_store
-
-    exec.constants::r1_ptr add mem_load
+    exec.eidos_sample_felt
 end
 
 #! Sample a quadratic extension field element from the transcript.
@@ -139,9 +317,7 @@ end
 #! Input: [...]
 #! Output: [x0, x1, ...]
 pub proc sample_ext
-    exec.sample_felt
-    exec.sample_felt
-    swap
+    exec.eidos_sample_ext
 end
 
 #! Sample a number of bits from the transcript.
@@ -149,277 +325,89 @@ end
 #! Input: [bits, ...]
 #! Output: [value, ...]
 pub proc sample_bits
-    dup
-    pow2
-    u32assert u32overflowing_sub.1 assertz
-    # => [mask, bits, ...]
-
-    exec.sample_felt
-    u32split
-    swap
-    drop
-    # => [lo, mask, bits, ...]
-    u32and
-    swap
-    drop
+    exec.eidos_sample_bits
 end
 
-
-# BUFFERED ABSORPTION
-# =============================================================================================
-
-#! Absorb a single base field element into the transcript via the buffered duplex.
+#! Observe a single felt through the transcript stream.
 #!
-#! Mirrors p3's `DuplexChallenger::observe`: invalidates any buffered rate output
-#! (`output_len = 0`), appends the element at `rate[input_len]`, and permutes only once the buffer
-#! fills (`input_len == 8`). A partial buffer is duplexed lazily by `flush_buffer`, which callers
-#! must run before sampling; until then `sample_felt`'s `output_len > 0` assertion fails loudly
-#! rather than returning a stale rate element.
-#!
-#! Input:  [felt, ...]
+#! Input: [value, ...]
 #! Output: [...]
 pub proc observe_felt
-    # Invalidate any buffered rate output (p3's `output_buffer.clear()`): a partial buffer left here
-    # leaves output_len = 0, so an unflushed `sample_felt` trips its assertion instead of reading a
-    # stale rate. The full-buffer branch below restores output_len = 8 after permuting.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-
-    # Load input_len once and derive the write address rate[input_len] (rate elements 0..7 are
-    # addressed as r1_ptr + index), keeping input_len on the stack for the increment below.
-    exec.constants::random_coin_input_len_ptr mem_load
-    # => [input_len, felt, ...]
-    dup exec.constants::r1_ptr add
-    # => [rate_addr, input_len, felt, ...]
-    movup.2 swap mem_store
-    # => [input_len, ...]
-
-    # input_len += 1; permute and reset the buffer once the rate is full.
-    add.1
-    dup eq.8
-    if.true
-        drop
-        push.8 exec.add_absorb_length_tag
-        exec.load_random_coin_state
-        exec.poseidon2::permute
-        exec.store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
-    else
-        exec.constants::random_coin_input_len_ptr mem_store
-    end
+    exec.eidos_observe_felt
 end
 
-#! Absorb one word into an empty input buffer.
+#! Observe one word through the Eidos transcript stream.
 #!
-#! This is equivalent to four `observe_felt` calls, but updates the random coin counters once and
-#! stores the word directly in rate[0..3]. It does not permute.
-#!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. On exit: input_len=4, output_len=0.
-#!
-#! Input:  [w0, w1, w2, w3, ...]
+#! Input: [word, ...]
 #! Output: [...]
 pub proc observe_word
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="observe_word: input buffer must be empty"
-    # => [w0, w1, w2, w3, ...]
-
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    exec.set_rate_1
-    push.4 exec.constants::random_coin_input_len_ptr mem_store
+    exec.eidos_observe_word
 end
 
-#! Absorb two elements after one word is already buffered.
-#!
-#! This is equivalent to two `observe_felt` calls from `input_len=4`, but updates the random coin
-#! counters once and stores the pair directly in rate[4..6]. It does not permute.
-#!
-#! SAFETY:
-#!   1. input_len=4 (asserted).
-#!   2. On exit: input_len=6, output_len=0.
-#!
-#! Input:  [x0, x1, ...]
-#! Output: [...]
-pub proc observe_pair
-    exec.constants::random_coin_input_len_ptr mem_load
-    push.4 assert_eq.err="observe_pair: input buffer must contain one word"
-    # => [x0, x1, ...]
-
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    exec.constants::r2_ptr mem_store
-    exec.constants::r2_ptr add.1 mem_store
-    push.6 exec.constants::random_coin_input_len_ptr mem_store
-end
-
-#! Absorb the second buffered word into rate[4..7] and flush the full input buffer.
-#!
-#! This is equivalent to four `observe_felt` calls which fill the rate and trigger the buffered
-#! duplex permutation.
-#!
-#! SAFETY:
-#!   1. input_len=4 (asserted).
-#!   2. On exit: input_len=0, output_len=8.
-#!
-#! Input:  [w0, w1, w2, w3, ...]
-#! Output: [...]
-proc observe_second_word_and_flush
-    exec.constants::random_coin_input_len_ptr mem_load
-    push.4 assert_eq.err="observe_second_word_and_flush: input buffer must contain one word"
-    # => [w0, w1, w2, w3, ...]
-
-    exec.get_capacity
-    add.8
-    # => [C, R2, ...]
-    swapw
-    # => [R2, C, ...]
-    exec.get_rate_1
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
-    exec.store_random_coin_state
-
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-end
-
-#! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
-#!
-#! When the input buffer is non-empty, permute the sponge: the buffered prefix already occupies
-#! `rate[0..input_len]`; `rate[input_len..8]` is zeroed and the absorbed length is bound into
-#! the capacity, exactly as p3's prefix-free absorb does before permuting. Exposes a fresh
-#! output (output_len=8) and empties the buffer. No-op when the buffer is already empty.
-#!
-#! Input:  [...]
-#! Output: [...]
+#! Flush a partially absorbed Eidos block so subsequent sampling sees it.
+#! This is a no-op when the absorb buffer is empty.
 pub proc flush_buffer
-    exec.constants::random_coin_input_len_ptr mem_load
-    dup push.0 neq
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    push.0 neq
     if.true
-        # Zero the rate slots the buffered inputs did not overwrite: rate[input_len..8].
-        dup
-        dup push.8 neq
-        while.true
-            push.0 dup.1 exec.constants::r1_ptr add mem_store
-            add.1
-            dup push.8 neq
-        end
-        drop
-        # => [input_len, ...]
-
-        exec.add_absorb_length_tag
-        exec.load_random_coin_state
-        exec.poseidon2::permute
-        exec.store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
-    else
-        drop
+        exec.eidos_refill_output_word
     end
 end
 
-#! Absorb one word into the buffered transcript stream and flush it before sampling.
+#! Observe one word and flush the resulting transcript prefix before sampling.
 #!
-#! This is equivalent to four `observe_felt` calls followed by `flush_buffer`. It uses word-sized
-#! paths for the two aligned cases: empty buffer and one word already buffered.
-#!
-#! Input:  [w0, w1, w2, w3, ...]
+#! Input: [word, ...]
 #! Output: [...]
 pub proc observe_word_and_flush_buffer
-    exec.constants::random_coin_input_len_ptr mem_load
-    dup eq.4
-    if.true
-        drop
-        exec.observe_second_word_and_flush
-    else
-        dup eq.0
-        if.true
-            drop
-            exec.reseed_direct
-        else
-            drop
-            exec.observe_felt
-            exec.observe_felt
-            exec.observe_felt
-            exec.observe_felt
-            exec.flush_buffer
-        end
-    end
+    exec.eidos_observe_word
+    exec.eidos_refill_output_word
 end
 
-
-# TRANSCRIPT INITIALIZATION
-# =============================================================================================
-
-#! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
-#! then derives trace domain parameters.
+#! Initializes the Eidos Fiat-Shamir transcript, then derives trace domain parameters.
 #!
-#! Implements the transcript initialization:
+#! The instance-specific wrapper stores the relation digest in memory before calling the generic
+#! verifier.
 #!
-#!   Use the memory-resident RELATION_DIGEST as initial sponge capacity,
-#!   absorb PCS parameters into the rate, and permute.
-#!   Rate layout: R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
-#!                R2 = [log_blowup, log_final_degree, fold_arity, 0]
+#! Currently assumes a blowup factor equal to 8.
 #!
-#! The relation wrapper stores RELATION_DIGEST before calling the generic verifier.
-#!
-#! The blowup factor is fixed to 8.
-#!
-#! Precondition: security parameters, relation digest, and trace-height metadata must already be
-#! stored in memory before calling this procedure.
+#! Precondition: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, relation digest,
+#! and trace-height metadata must already be stored in memory before calling this procedure.
 #!
 #! Input: [...]
 #! Output: [...]
 pub proc init_seed
-    # Initialize the zero word and buffers to zero.
+    # Initialize the zero word.
     padw
     exec.constants::zero_word_ptr mem_storew_le
     dropw
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
     #=> [...]
 
-    # ---- RELATION_DIGEST + PCS_PARAMS ----
+    # ---- Relation digest + PCS params ----
 
-    # Build the sponge state [R1, R2, C] for hperm:
-    #   R1 = [nq, query_pow_bits, deep_pow_bits, folding_pow_bits]
-    #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
-    #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
+    push.EIDOS_TRANSCRIPT_INIT_CV_3.EIDOS_TRANSCRIPT_INIT_CV_2.EIDOS_TRANSCRIPT_INIT_CV_1.EIDOS_TRANSCRIPT_INIT_CV_0
     padw exec.constants::relation_digest_ptr mem_loadw_le
-    #=> [rd0, rd1, rd2, rd3, ...]
+    exec.eidos_init_challenger
 
-    # Build R1 from security parameters stored in memory.
+    # Absorb PCS parameters as one full Eidos block:
+    # [nq, query_pow_bits, deep_pow_bits, folding_pow_bits,
+    #  log_blowup, log_final_degree, fold_arity, 0].
     exec.constants::get_folding_pow_bits
     exec.constants::get_deep_pow_bits
     exec.constants::get_query_pow_bits
     exec.constants::get_number_queries
-    #=> [nq, query_pow, deep_pow, folding_pow, rd0, rd1, rd2, rd3, ...]
-    #    ^-- R1                                 ^-- C (digest)
 
-    # Build R2 = [log_blowup, log_final_degree, fold_arity, 0]
     push.0
     exec.constants::get_fri_fold_arity
     exec.constants::get_log_final_degree
     exec.constants::get_blowup_factor_log
-    #=> [log_blowup, log_final_deg, fold_arity, 0, nq, query_pow, deep_pow, folding_pow, rd0, rd1, rd2, rd3, ...]
-    #    ^-- R2                                     ^-- R1                                 ^-- C
-
     swapw
-    #=> [nq, query_pow, deep_pow, folding_pow, log_blowup, log_final_deg, fold_arity, 0, rd0, rd1, rd2, rd3, ...]
-    #    ^-- R1                                ^-- R2                                     ^-- C
-
-    # Bind the absorbed length (8 PCS parameters) into the first capacity element.
-    movup.8 add.8 movdn.8
-
-    # Permute and store the transcript state after absorbing protocol parameters.
-    exec.poseidon2::permute
-    #=> [R1', R2', C', ...]
-
-    exec.store_random_coin_state
+    exec.eidos_absorb_block
     #=> [...]
 
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [...]
+    # Bind the trusted preprocessed-trace commitment before statement-owned inputs, matching
+    # `StarkProof::from_data`. It remains buffered until the claim commitment completes the block.
+    padw exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    exec.eidos_observe_word
 
     # ---- Derive trace domain parameters ----
     #
@@ -445,25 +433,6 @@ pub proc init_seed
     add
     #=> [log(lde_size), trace_length, ...]
 
-    ## Compute the LDE coset offset = g^(2^(TWO_ADICITY - log_lde)), with g = 7 the field
-    ## generator and TWO_ADICITY = 32, by squaring g `32 - log_lde` times. Used (with its
-    ## inverse) for the DEEP/FRI query x-coordinates.
-    dup push.32 swap sub
-    #=> [32 - log_lde, log(lde_size), trace_length, ...]
-    push.7 swap
-    #=> [count, offset = 7, log(lde_size), trace_length, ...]
-    dup push.0 neq
-    while.true
-        swap dup mul swap
-        sub.1
-        dup push.0 neq
-    end
-    drop
-    #=> [offset, log(lde_size), trace_length, ...]
-    dup exec.constants::set_domain_offset
-    inv exec.constants::set_domain_offset_inv
-    #=> [log(lde_size), trace_length, ...]
-
     ## Compute size of LDE domain
     dup
     pow2
@@ -473,6 +442,14 @@ pub proc init_seed
     dup.1
     exec.utils::compute_lde_generator
     movdn.2
+    #=> [lde_size, log(lde_size), lde_g, trace_length, ...]
+
+    # Store the LDE coset shift used by the lifted domains. It depends on LDE size and is used
+    # by quotient recomposition and DEEP query points.
+    dup.1
+    exec.utils::compute_lde_shift
+    dup exec.constants::set_domain_offset
+    inv exec.constants::set_domain_offset_inv
     #=> [lde_size, log(lde_size), lde_g, trace_length, ...]
 
     push.0
@@ -501,156 +478,128 @@ pub proc init_seed
     drop drop
 end
 
-
-# RATE-ALIGNED ABSORPTION
-# =============================================================================================
-
-#! Absorb `[word, felt, 0, 0, 0]` and permute.
+#! Observe the main-trace commitment after statement shape binding.
 #!
-#! The felt is on top of the operand stack, but the absorbed rate order is word first, then felt.
-#!
-#! Input: [felt, w0, w1, w2, w3, ...]
-#! Output: [R1, R2, C, ...]
-proc absorb_word_and_felt
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="absorb_word_and_felt: input buffer must be empty"
-    # => [felt, w0, w1, w2, w3, ...]
-
-    push.0.0.0 movup.3
-    # => [felt, 0, 0, 0, w0, w1, w2, w3, ...]
-    exec.get_capacity
-    add.5
-    # => [C, R2, R1, ...]
-    swapw
-    # => [R2, C, R1, ...]
-    movupw.2
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
+#! Input: [c0, c1, c2, c3, ...]
+#! Output: [...]
+pub proc reseed_main_after_shape
+    exec.eidos_observe_felt
+    exec.eidos_observe_felt
+    exec.eidos_observe_felt
+    exec.eidos_observe_felt
 end
 
-#! Reseed with a commitment word and an additional single felt, then permute.
-#!
-#! Absorbs `[commitment, felt, 0, 0, 0]`, binds the absorbed length (5) into the capacity,
-#! then permutes.
-#!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. On exit: input_len=0, output_len=8 (fresh permutation output).
+#! Observe a commitment word and stage the per-round PoW witness.
 #!
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_with_felt
-    exec.absorb_word_and_felt
-    exec.store_random_coin_state
-
-    # Mark output buffer as full.
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    exec.constants::tmp3 mem_store
+    exec.eidos_observe_word
 end
 
-#! Reseed by absorbing a word directly and permuting.
-#!
-#! Absorbs `[word, 0, 0, 0, 0]`, binds the absorbed length (4) into the capacity, then
-#! permutes. This is the standard absorb-and-permute pattern for a single word.
-#!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. The word to absorb is on top of the stack.
-#!   3. On exit: input_len=0, output_len=8 (fresh permutation output).
+#! Observe one commitment word.
 #!
 #! Input: [w0, w1, w2, w3, ...]
 #! Output: [...]
 pub proc reseed_direct
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="reseed_direct: input buffer must be empty"
-    # => [w0, w1, w2, w3, ...]
-
-    padw
-    # => [0, 0, 0, 0, w0, w1, w2, w3, ...]
-    exec.get_capacity
-    add.4
-    # => [C, R2, R1, ...]
-    swapw
-    # => [R2, C, R1, ...]
-    movupw.2
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
-    exec.store_random_coin_state
-
-    # Fresh output available.
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    exec.eidos_observe_word
 end
 
-#! Reseed with a FRI layer commitment, check folding PoW, and sample folding alpha.
+#! Verify per-round FRI folding proof-of-work and sample one extension field element.
 #!
-#! Equivalent to `reseed_with_felt; get_folding_pow_bits sample_bits assertz; sample_ext`, but it
-#! keeps the fresh rate on the stack.
+#! The folding PoW bit count is read from memory (set by load_security_params).
+#! When folding_pow_bits=0 the check is trivially satisfied (mask=0).
 #!
-#! On exit, output_len=5 because rate[7] is used for grinding and rate[6..5] for alpha.
+#! Equivalent to: `get_folding_pow_bits sample_bits assertz; sample_ext`
 #!
-#! Input: [pow_witness, w0, w1, w2, w3, ...]
+#! Must be called immediately after `reseed_with_felt`; the witness is staged in `tmp3`.
+#!
+#! Input: [...]
 #! Output: [a0, a1, ...]
-pub proc reseed_check_folding_pow_and_sample_alpha
-    exec.absorb_word_and_felt
-    # => [R1, R2, C, ...]
-
-    # Store the sponge state, but keep R2 on the stack for the samples consumed below.
-    exec.set_rate_1
-    # => [R2, C, ...]
-    dupw exec.set_rate_2
-    swapw exec.set_capacity
-    # => [R2, ...]
-
-    # Check rate[7] for the folding PoW and return rate[6], rate[5] as the challenge.
-    movup.3
-    u32split swap drop
-    # => [lo, rate4, rate5, rate6, ...]
+pub proc sample_folding_pow_and_ext
     exec.constants::get_folding_pow_bits
-    pow2
-    u32assert u32overflowing_sub.1 assertz
-    u32and
-    assertz.err="per-round FRI folding grinding check failed"
-    # => [rate4, rate5, rate6, ...]
+    dup push.0 neq
+    if.true
+        exec.constants::tmp3 mem_load
+        exec.eidos_observe_felt
+        exec.eidos_sample_bits
+        assertz.err="per-round FRI folding grinding check failed"
+    else
+        drop
+        exec.constants::tmp3 mem_load
+        assertz.err="FRI folding proof-of-work nonce must be zero when grinding factor is zero"
+    end
 
-    drop swap
-    # => [a0, a1, ...]
-
-    push.5 exec.constants::random_coin_output_len_ptr mem_store
+    exec.eidos_sample_ext
 end
 
-#! Absorb a nonzero proof-of-work nonce from advice and permute.
+#! Observe a FRI layer commitment and folding PoW witness, then sample the folding challenge.
 #!
-#! The caller has already established `pow_bits != 0`; the zero-PoW path consumes a zero nonce
-#! without changing the transcript.
+#! For nonzero folding PoW this specializes the sequence:
+#! `reseed_with_felt; sample_folding_pow_and_ext`.
+#! The absorb buffer must be empty when the folding PoW bit count is nonzero.
 #!
-#! Input: [pow_bits, ...]
-#! Output: [R2, pow_bits, ...]
-proc absorb_pow_nonce
-    adv_push
-    # => [nonce, pow_bits, ...]
-    exec.constants::random_coin_input_len_ptr mem_load
-    assertz.err="absorb_pow_nonce: input buffer must be empty"
-    # => [nonce, pow_bits, ...]
+#! Input: [pow_witness, commitment, ...]
+#! Output: [alpha0, alpha1, ...]
+pub proc reseed_with_folding_pow_and_ext
+    exec.constants::get_folding_pow_bits
+    dup push.0 neq
+    if.true
+        exec.constants::random_coin_buffer_len_ptr mem_load
+        assertz.err="reseed_with_folding_pow_and_ext: buffer must be empty"
+        exec.eidos_enter_absorbing
 
-    push.0.0.0 movup.3
-    # => [nonce, 0, 0, 0, pow_bits, ...]
-    padw
-    # => [0, 0, 0, 0, nonce, 0, 0, 0, pow_bits, ...]
-    exec.get_capacity
-    add.1
-    # => [C, R2, R1, pow_bits, ...]
-    swapw
-    # => [R2, C, R1, pow_bits, ...]
-    movupw.2
-    # => [R1, R2, C, pow_bits, ...]
-    exec.poseidon2::permute
-    # => [R1, R2, C, pow_bits, ...]
+        # Build the absorbed block `[commitment, pow_witness, 0, 0, 0]`, keeping pow_bits below it.
+        movdn.5
+        movdn.4
+        push.0.0.0
+        movup.7
+        swapw
 
-    # Store the sponge state, but keep R2 on the stack for direct sampling.
-    exec.set_rate_1
-    # => [R2, C, pow_bits, ...]
-    dupw exec.set_rate_2
-    swapw exec.set_capacity
-    # => [R2, pow_bits, ...]
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        movup.3 add.6 movdn.3
+        swapw.2
+        swapw
+        compress
+
+        swapw.2
+        exec.constants::random_coin_output_word_ptr mem_storew_le
+        exec.constants::random_coin_cv_ptr mem_storew_le
+        dropw dropw dropw
+
+        push.0 exec.constants::random_coin_buffer_len_ptr mem_store
+        push.1 exec.constants::random_coin_counter_ptr mem_store
+        push.1 exec.constants::random_coin_output_len_ptr mem_store
+
+        # Consume output[0] for the grinding check and output[1], output[2] for alpha, leaving
+        # output[3] cached as the next transcript sample.
+        dup
+        pow2
+        u32assert u32overflowing_sub.1 assertz
+        exec.constants::random_coin_output_word_ptr mem_load
+        u32split
+        swap
+        drop
+        u32and
+        assertz.err="per-round FRI folding grinding check failed"
+        drop
+        exec.constants::random_coin_output_word_ptr add.1 mem_load
+        exec.constants::random_coin_output_word_ptr add.2 mem_load
+        swap
+    else
+        drop
+        exec.reseed_with_felt
+        exec.sample_folding_pow_and_ext
+    end
+end
+
+#! Canonical verifier-framework spelling for the Eidos FRI folding reseed.
+#!
+#! Input: [pow_witness, commitment, ...]
+#! Output: [alpha0, alpha1, ...]
+pub proc reseed_check_folding_pow_and_sample_alpha
+    exec.reseed_with_folding_pow_and_ext
 end
 
 # COEFFICIENT GENERATION
@@ -662,30 +611,28 @@ end
 #! Draws alpha and beta for the LogUp multiset hash
 #! `h(m) = alpha + \sum_{i=0}^{|m| - 1} m_i * beta^i`.
 #!
-#! `aux_rand_ptr` is relation-local because the ACE READ section is one dense vector whose
-#! boundaries depend on the relation's AIR widths and quotient arity.
-#!
-#! Input: [aux_rand_ptr, ...]
+#! Input: [...]
 #! Output: [...]
 pub proc generate_aux_randomness
 
     exec.sample_ext
     exec.sample_ext
-    # => [beta0, beta1, alpha0, alpha1, aux_rand_ptr, ...]
+    # => [beta0, beta1, alpha0, alpha1, ...]
 
-    movup.4 mem_storew_le
+    exec.constants::get_aux_rand_elem_address mem_storew_le
     dropw
-    # => [...]
+    #=> [...]
 end
 
 #! Draw the constraint-composition challenges.
+#!
 #! Stores `[alpha0, alpha1, beta0, beta1]` at `composition_coef_ptr`. The generic verifier uses
-#! `alpha` for constraint folding. Relation-specific code may use `beta` for its own folding
-#! layout.
+#! `alpha` for constraint folding; each relation copies `beta` into its own multi-AIR fold slot.
 #!
 #! Input: [...]
 #! Output: [...]
 pub proc generate_constraint_composition_coefficients
+    # Sample alpha (constraint folding challenge), then beta (proof-order Horner folding).
     exec.sample_ext
     exec.sample_ext
     # => [beta0, beta1, alpha0, alpha1, ...]
@@ -728,67 +675,6 @@ pub proc generate_deep_composition_random_coefficients
     #=> [...]
 end
 
-#! Check a nonzero DEEP PoW and sample the DEEP coefficients from the same fresh rate.
-#!
-#! Equivalent to `check_deep_pow; generate_deep_composition_random_coefficients` when
-#! `deep_pow_bits != 0`. It avoids routing the four sampled coefficient elements through
-#! `sample_felt` one at a time.
-#!
-#! Input: [pow_bits, ...]
-#! Output: [...]
-proc check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients
-    exec.absorb_pow_nonce
-    # => [R2, pow_bits, ...]
-
-    # Check rate[7] for the DEEP PoW.
-    movup.3
-    u32split swap drop
-    # => [lo, rate4, rate5, rate6, pow_bits, ...]
-    movup.4 pow2 u32assert u32overflowing_sub.1 assertz
-    # => [mask, lo, rate4, rate5, rate6, ...]
-    u32and
-    assertz.err="proof-of-work check failed"
-    # => [rate4, rate5, rate6, ...]
-
-    # rate[6], rate[5] are deep alpha; they must match the advice-provided alpha used
-    # while processing OOD frames.
-    dup.2 exec.constants::deep_rand_alpha_nd_ptr mem_load
-    assert_eq
-    # => [rate4, rate5, rate6, ...]
-    dup.1 exec.constants::deep_rand_alpha_nd_ptr add.1 mem_load
-    assert_eq
-    # => [rate4, rate5, rate6, ...]
-    dup.2 exec.constants::deep_rand_coef_ptr add.2 mem_store
-    dup.1 exec.constants::deep_rand_coef_ptr add.3 mem_store
-    # => [rate4, rate5, rate6, ...]
-
-    # rate[4], rate[3] are deep beta.
-    movdn.2 drop drop
-    # => [rate4, ...]
-    exec.constants::deep_rand_coef_ptr mem_store
-    exec.constants::r1_ptr add.3 mem_load
-    exec.constants::deep_rand_coef_ptr add.1 mem_store
-
-    # PoW consumed rate[7], alpha consumed rate[6..5], and beta consumed rate[4..3].
-    push.3 exec.constants::random_coin_output_len_ptr mem_store
-end
-
-#! Check DEEP PoW and draw DEEP composition coefficients.
-#!
-#! The nonzero-PoW path consumes the needed samples directly from the fresh permutation. The
-#! zero-PoW path leaves the transcript unchanged before using the generic sampler.
-pub proc check_deep_pow_and_generate_deep_composition_random_coefficients
-    exec.constants::get_deep_pow_bits
-    dup push.0 neq
-    if.true
-        exec.check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients
-    else
-        drop
-        exec.check_deep_pow
-        exec.generate_deep_composition_random_coefficients
-    end
-end
-
 
 # OOD POINT GENERATION
 # =============================================================================================
@@ -800,7 +686,6 @@ end
 #! Input: [X, ...]
 #! Output: [...]
 #! Note: The top word on the stack is consumed by this procedure.
-#! Cycles: 21 + 10 * log(N)
 pub proc generate_z_zN
     # Sample z and load log trace length N
     exec.sample_ext
@@ -833,16 +718,36 @@ end
 # INDEX GENERATION
 # =============================================================================================
 
+#! Store one sampled query index word and advance the query pointer.
+#!
+#! Input: [sample, query_ptr, depth, index_mask, ...]
+#! Output: [query_ptr + 4, depth, index_mask, ...]
+proc store_query_index
+    u32split swap drop
+    dup.3 u32and
+    #=> [index, query_ptr, depth, index_mask, ...]
+
+    movdn.3
+    #=> [query_ptr, depth, index_mask, index, ...]
+
+    push.0
+    dup.4
+    dup.3
+    dup.6
+    #=> [index, depth, index, 0, query_ptr, depth, index_mask, index, ...]
+
+    dup.4 mem_storew_le dropw
+    #=> [query_ptr, depth, index_mask, index, ...]
+
+    add.4
+    movup.3 drop
+    #=> [query_ptr + 4, depth, index_mask, ...]
+end
+
 #! Generate a list of `num_queries` number of random indices in the range
 #! [0, lde_size) and store it in memory starting from `query_ptr`.
 #! The list is stored as `(index, depth, index, 0)` where `index` is the sampled domain-order
 #! index and `depth` is `log(lde_domain_size)`, which is needed when computing the DEEP queries.
-#!
-#! Reads rate elements directly from memory (decrementing from output_len-1 down to 0),
-#! permuting when the rate is exhausted, rather than calling sample_felt per query.
-#!
-#! The caller must run the query PoW check first. This procedure starts from the current
-#! `output_len`, so it also supports the zero-PoW case where no fresh output element is consumed.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -852,101 +757,54 @@ pub proc generate_list_indices
     #=> [query_ptr, num_queries, ...]
 
     exec.constants::get_lde_domain_depth
-    #=> [depth, query_ptr, num_queries, ...]
+    swap movup.2 swap
+    #=> [query_ptr, num_queries, depth, ...]
 
-    # mask = 2^depth - 1. Depth is at most 32; use the u32 all-ones mask at that boundary.
-    dup eq.32
+    dup.2 eq.32
     if.true
         push.0xffffffff
     else
-        dup pow2 u32assert u32overflowing_sub.1 assertz
+        dup.2 pow2 u32assert u32overflowing_sub.1 assertz
     end
-    #=> [mask, depth, query_ptr, num_queries, ...]
+    movdn.3
+    #=> [query_ptr, num_queries, depth, index_mask, ...]
 
-    # Rearrange to loop layout: [query_ptr, num_queries, mask, depth, ...]
-    movup.2 movup.3 swap
-    #=> [query_ptr, num_queries, mask, depth, ...]
-
-    # Load current output_len from random coin state.
-    exec.constants::random_coin_output_len_ptr mem_load
-    dup push.0 neq assert.err="generate_list_indices: output_len must be nonzero"
-    #=> [output_len, query_ptr, num_queries, mask, depth, ...]
-
-    # Stack layout during loop:
-    # pos 0: output_len (rate elements remaining before next permute)
-    # pos 1: query_ptr (advances by 4 each iteration)
-    # pos 2: num_queries (decrements to 0)
-    # pos 3: mask (constant)
-    # pos 4: depth (constant, needed for inclusion in the stored word)
-
-    dup.2 push.0 neq
+    dup.1 push.0 neq
     while.true
-        # --- Ensure rate has an element; permute if exhausted ---
-        dup push.0 eq
-        if.true
-            drop
-            exec.load_random_coin_state
-            exec.poseidon2::permute
-            exec.store_random_coin_state
-            push.8
-        end
-        #=> [output_len, query_ptr, num_queries, mask, depth, ...]
-
-        # --- Read rate element at index (output_len - 1) ---
-        sub.1
-        #=> [idx, query_ptr, num_queries, mask, depth, ...]
-        # R1 and R2 are contiguous in memory (R1_PTR, R1_PTR+4 = R2_PTR), so
-        # rate[idx] is at R1_PTR + idx.
-        dup exec.constants::r1_ptr add mem_load
-        #=> [felt, idx, query_ptr, num_queries, mask, depth, ...]
-
-        # --- Extract masked index: lo 32 bits AND mask ---
+        exec.eidos_sample_felt
         u32split swap drop
-        #=> [lo, idx, query_ptr, num_queries, mask, depth, ...]
         dup.4 u32and
-        #=> [natural_index, idx, query_ptr, num_queries, mask, depth, ...]
+        #=> [index, query_ptr, num_queries, depth, index_mask, ...]
 
-        # --- Prepare domain-order query word ---
-        # 0.24 LMCS trees are indexed by domain order, so the Merkle index and the DEEP
-        # evaluation index are both the sampled natural index.
-        dup.5 swap dup movdn.2
-        #=> [natural_index, depth, natural_index, idx, query_ptr, num_queries, mask, depth, ...]
+        movdn.4
+        #=> [query_ptr, num_queries, depth, index_mask, index, ...]
 
-        # --- Store [index, depth, index, 0] at query_ptr ---
-        push.0 movdn.3
-        #=> [natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, ...]
+        push.0
         dup.5
-        #=> [query_ptr, natural_index, depth, natural_index, 0, idx, query_ptr, num_queries, mask, depth, ...]
-        mem_storew_le
-        dropw
-        #=> [idx, query_ptr, num_queries, mask, depth, ...]
+        dup.4
+        dup.1
+        #=> [index, depth, index, 0, query_ptr, num_queries, depth, index_mask, index, ...]
 
-        # --- Advance query_ptr, decrement num_queries ---
-        swap add.4 swap
-        #=> [idx, query_ptr', num_queries, mask, depth, ...]
-        movup.2 sub.1 movdn.2
-        #=> [idx, query_ptr', num_queries-1, mask, depth, ...]
+        dup.4 mem_storew_le dropw
+        #=> [query_ptr, num_queries, depth, index_mask, index, ...]
 
-        # --- Check loop condition ---
-        # idx is our output_len for next iteration (already decremented).
-        dup.2 push.0 neq
+        add.4
+        movup.4 drop
+        #=> [query_ptr + 4, num_queries, depth, index_mask, ...]
+
+        swap sub.1 swap
+        #=> [query_ptr + 4, num_queries - 1, depth, index_mask, ...]
+
+        dup.1 push.0 neq
     end
 
-    # --- Restore random coin output_len so subsequent operations see correct state ---
-    # pos 0 = output_len (remaining), store it back.
-    exec.constants::random_coin_output_len_ptr mem_store
-    #=> [query_ptr, num_queries, mask, depth, ...]
-
-    # No transcript input remains buffered while sampling indices.
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-
-    dropw
+    drop drop drop drop
 end
 
-#! Check query PoW and generate the query index list.
+#! Check query PoW and generate the configured query index list.
 #!
-#! The generic query generator starts from the output buffer left by the PoW check. For a nonzero
-#! PoW this is `output_len = 7`; for a zero-PoW configuration, the transcript is unchanged.
+#! Input: [...]
+#! Output: [...]
 pub proc check_query_pow_and_generate_list_indices
     exec.check_query_pow
     exec.generate_list_indices
@@ -958,16 +816,13 @@ end
 
 #! Verify a proof-of-work witness given pow_bits on the stack.
 #!
-#! When pow_bits != 0, reads the nonce from advice, absorbs `[nonce, 0, 0, 0, 0, 0, 0, 0]`,
-#! binds the absorbed length (1) into the capacity, permutes, and checks that the low pow_bits
-#! of the output are zero.
+#! When pow_bits != 0, reads the nonce from advice, observes it, and checks that the next
+#! sampled bits are zero.
 #! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
 #!
 #! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
-#! FRI folding PoW uses `reseed_check_folding_pow_and_sample_alpha` because the witness is bundled
-#! with the commitment reseed.
-#!
-#! SAFETY: Requires input_len=0.
+#! FRI folding PoW uses a separate path (sample_folding_pow_and_ext) because the
+#! witness is bundled with the commitment reseed.
 #!
 #! Input: [pow_bits, ...]
 #! Output: [...]
@@ -975,19 +830,10 @@ proc check_pow
     dup
     push.0 neq
     if.true
-        exec.absorb_pow_nonce
-        # => [R2, pow_bits, ...]
-
-        movup.3
-        u32split swap drop
-        # => [lo, rate4, rate5, rate6, pow_bits, ...]
-        movup.4 pow2 u32assert u32overflowing_sub.1 assertz
-        # => [mask, lo, rate4, rate5, rate6, ...]
-        u32and
+        adv_push
+        exec.eidos_observe_felt
+        exec.eidos_sample_bits
         assertz.err="proof-of-work check failed"
-        # => [rate4, rate5, rate6, ...]
-        drop drop drop
-        push.7 exec.constants::random_coin_output_len_ptr mem_store
     else
         # Consume witness to keep advice layout, but do not affect transcript.
         adv_push
@@ -1000,8 +846,6 @@ end
 #!
 #! Called before sampling DEEP composition polynomial challenges.
 #!
-#! SAFETY: Requires input_len=0.
-#!
 #! Input: [...]
 #! Output: [...]
 pub proc check_deep_pow
@@ -1009,11 +853,15 @@ pub proc check_deep_pow
     exec.check_pow
 end
 
+#! Check DEEP PoW and then sample the DEEP composition challenges.
+pub proc check_deep_pow_and_generate_deep_composition_random_coefficients
+    exec.check_deep_pow
+    exec.generate_deep_composition_random_coefficients
+end
+
 #! Check the query proof-of-work.
 #!
 #! Called after loading the FRI remainder, before sampling query indices.
-#!
-#! SAFETY: Requires input_len=0 (guaranteed after load_and_verify_remainder).
 #!
 #! Input: [...]
 #! Output: [...]

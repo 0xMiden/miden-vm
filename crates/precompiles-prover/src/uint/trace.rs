@@ -38,7 +38,7 @@ use crate::{
 pub struct UintPtr(u32);
 
 impl UintPtr {
-    /// The raw store address (trace cells, cap fields, diagnostics).
+    /// The raw store address (trace cells, chain-context fields, diagnostics).
     pub fn addr(self) -> u32 {
         self.0
     }
