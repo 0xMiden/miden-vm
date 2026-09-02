@@ -285,7 +285,7 @@ fn generate_fuzz_seeds() {
             precompile_root: TRUE_DIGEST,
         };
         let proof = ExecutionProof::from_parts(
-            ExecutionProofCompatibility::new(Vec::new(), Vec::new()),
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
             vm,
             PrecompileStatus::Empty,
         )

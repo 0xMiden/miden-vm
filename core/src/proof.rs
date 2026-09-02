@@ -1,4 +1,5 @@
 use alloc::{
+    collections::BTreeSet,
     string::{String, ToString},
     vec::Vec,
 };
@@ -246,17 +247,32 @@ impl ExecutionProofCompatibility {
     pub const FORMAT_V1: u8 = 1;
 
     /// Creates a proof compatibility declaration for format `1`.
-    pub fn new(vm_verifier_roots: Vec<Word>, pvm_verifier_roots: Vec<Word>) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either verifier root list contains duplicates.
+    pub fn new(
+        vm_verifier_roots: Vec<Word>,
+        pvm_verifier_roots: Vec<Word>,
+    ) -> Result<Self, ExecutionProofCompatibilityError> {
+        if has_duplicate(&vm_verifier_roots) {
+            return Err(ExecutionProofCompatibilityError::DuplicateVmVerifierRoot);
+        }
+        if has_duplicate(&pvm_verifier_roots) {
+            return Err(ExecutionProofCompatibilityError::DuplicatePvmVerifierRoot);
+        }
+
+        Ok(Self {
             format: Self::FORMAT_V1,
             vm_verifier_roots,
             pvm_verifier_roots,
-        }
+        })
     }
 
     /// Returns the compatibility declared by proofs produced by the current prover.
     pub fn current() -> Self {
         Self::new(alloc::vec![CURRENT_VM_VERIFIER_ROOT], alloc::vec![CURRENT_PVM_VERIFIER_ROOT])
+            .expect("current execution proof compatibility must not contain duplicate roots")
     }
 
     /// Returns the transport format.
@@ -266,7 +282,8 @@ impl ExecutionProofCompatibility {
 
     /// Returns the VM verifier roots which can be used to verify this proof.
     ///
-    /// The roots are listed in chronological order with the most recent verifier listed last.
+    /// The roots are unique and listed in chronological order with the most recent verifier listed
+    /// last.
     pub fn vm_verifier_roots(&self) -> &[Word] {
         &self.vm_verifier_roots
     }
@@ -274,10 +291,27 @@ impl ExecutionProofCompatibility {
     /// Returns the precompile VM verifier roots which can be used to verify the precompile proof
     /// associated with this execution proof, if any.
     ///
-    /// The roots are listed in chronological order with the most recent verifier listed last.
+    /// The roots are unique and listed in chronological order with the most recent verifier listed
+    /// last.
     pub fn pvm_verifier_roots(&self) -> &[Word] {
         &self.pvm_verifier_roots
     }
+}
+
+fn has_duplicate(roots: &[Word]) -> bool {
+    let mut unique = BTreeSet::new();
+    roots.iter().any(|root| !unique.insert(*root))
+}
+
+/// Errors returned while constructing execution proof compatibility metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ExecutionProofCompatibilityError {
+    /// The VM verifier root list contains a duplicate.
+    #[error("VM verifier roots must not contain duplicates")]
+    DuplicateVmVerifierRoot,
+    /// The precompile VM verifier root list contains a duplicate.
+    #[error("PVM verifier roots must not contain duplicates")]
+    DuplicatePvmVerifierRoot,
 }
 
 /// The state of precompile work associated with an execution proof.
@@ -405,11 +439,8 @@ impl Deserializable for ExecutionProof {
 
         let vm_verifier_roots = Vec::<Word>::read_from(source)?;
         let pvm_verifier_roots = Vec::<Word>::read_from(source)?;
-        let compatibility = ExecutionProofCompatibility {
-            format,
-            vm_verifier_roots,
-            pvm_verifier_roots,
-        };
+        let compatibility = ExecutionProofCompatibility::new(vm_verifier_roots, pvm_verifier_roots)
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))?;
 
         Self::read_from_v1(source, compatibility)
     }
@@ -587,7 +618,7 @@ mod tests {
 
     fn versioned(vm: VmProof, precompile: PrecompileStatus) -> ExecutionProof {
         ExecutionProof::from_parts(
-            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]),
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap(),
             vm,
             precompile,
         )
@@ -595,7 +626,7 @@ mod tests {
 
     fn version_prefix() -> Vec<u8> {
         let compatibility =
-            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]);
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap();
         let mut bytes = vec![compatibility.format()];
         compatibility.vm_verifier_roots().to_vec().write_into(&mut bytes);
         compatibility.pvm_verifier_roots().to_vec().write_into(&mut bytes);
@@ -665,6 +696,43 @@ mod tests {
 
         let error = ExecutionProof::read_from_bytes(&bytes).unwrap_err();
         assert!(matches!(error, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn compatibility_constructor_rejects_duplicate_roots() {
+        assert_eq!(
+            ExecutionProofCompatibility::new(vec![root(1), root(1)], vec![]),
+            Err(ExecutionProofCompatibilityError::DuplicateVmVerifierRoot)
+        );
+        assert_eq!(
+            ExecutionProofCompatibility::new(vec![], vec![root(2), root(2)]),
+            Err(ExecutionProofCompatibilityError::DuplicatePvmVerifierRoot)
+        );
+    }
+
+    #[test]
+    fn versioned_proof_decoder_rejects_duplicate_roots() {
+        let proof = versioned(vm_proof(TRUE_DIGEST), PrecompileStatus::Empty);
+        let proof_bytes = proof.to_bytes();
+        let body = &proof_bytes[version_prefix().len()..];
+
+        let mut duplicate_vm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        vec![root(1), root(1)].write_into(&mut duplicate_vm);
+        Vec::<Word>::new().write_into(&mut duplicate_vm);
+        duplicate_vm.extend_from_slice(body);
+        let error = ExecutionProof::read_from_bytes(&duplicate_vm).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("VM verifier roots must not contain duplicates"))
+        );
+
+        let mut duplicate_pvm = vec![ExecutionProofCompatibility::FORMAT_V1];
+        Vec::<Word>::new().write_into(&mut duplicate_pvm);
+        vec![root(2), root(2)].write_into(&mut duplicate_pvm);
+        duplicate_pvm.extend_from_slice(body);
+        let error = ExecutionProof::read_from_bytes(&duplicate_pvm).unwrap_err();
+        assert!(
+            matches!(error, DeserializationError::InvalidValue(message) if message.contains("PVM verifier roots must not contain duplicates"))
+        );
     }
 
     #[test]
@@ -782,7 +850,7 @@ mod tests {
         };
         assert_eq!(
             completed_compatibility,
-            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)])
+            ExecutionProofCompatibility::new(vec![root(11), root(12)], vec![root(21)]).unwrap()
         );
         assert_eq!(completed_vm.to_bytes(), vm.to_bytes());
         assert_eq!(completed_precompile.to_bytes(), precompile.to_bytes());

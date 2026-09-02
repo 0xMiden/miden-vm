@@ -28,8 +28,8 @@ mod exports {
         Word,
         program::{ExecutionClaim, KernelDescriptor, ProgramInfo, StackInputs, StackOutputs},
         proof::{
-            ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
-            PrecompileStatus, StarkProof, VmProof,
+            ExecutionProof, ExecutionProofCompatibility, ExecutionProofCompatibilityError,
+            HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
         },
     };
     pub mod math {
@@ -657,7 +657,8 @@ mod tests {
             ExecutionProofCompatibility::new(
                 vec![root(100)],
                 VERIFIER_SUPPORT_V1.accepted_pvm_roots.to_vec(),
-            ),
+            )
+            .unwrap(),
             proof.vm().clone(),
             proof.precompile_status().clone(),
         );
@@ -665,7 +666,8 @@ mod tests {
             ExecutionProofCompatibility::new(
                 VERIFIER_SUPPORT_V1.accepted_vm_roots.to_vec(),
                 vec![root(200)],
-            ),
+            )
+            .unwrap(),
             proof.vm().clone(),
             proof.precompile_status().clone(),
         );
@@ -706,7 +708,7 @@ mod tests {
         assert_eq!(proof.compatibility().pvm_verifier_roots(), &[PVM_VERIFIER_ROOT_V1]);
 
         let old_compatible = ExecutionProof::from_parts(
-            ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]),
+            ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]).unwrap(),
             proof.vm().clone(),
             proof.precompile_status().clone(),
         );
