@@ -641,12 +641,18 @@ fn msm_resolve_absorb_order_is_caller_declared() {
     t_qg.check();
 }
 
-/// Fully-merged precondition: resolving with a duplicate base node (here both
-/// slots are `G`, so `Q`'s term goes uncovered) is rejected at recording —
-/// the canonical claim has one node per distinct base, which keeps the root a
-/// function of the term *set*.
+/// A claim naming the same base twice (here both slots are `G`, so `Q`'s
+/// term goes uncovered) is rejected at recording when `expr` was built with
+/// ordinary [`Session::msm_combine`], which merges `G`'s two `intro`s into
+/// one row: the claim's terms must match `expr`'s own rows as an exact
+/// multiset, and this claim over-consumes the single `G` row while never
+/// naming `Q`. A genuinely repeated declared base is supported — see
+/// [`msm_resolve_repeated_base_via_terms_preserving_combine`] — but only
+/// when `expr` is built with
+/// [`Session::msm_combine_terms_preserving`] so the repeat survives as its
+/// own row.
 #[test]
-#[should_panic(expected = "duplicate base")]
+#[should_panic(expected = "not a term of this MSM expression")]
 fn msm_resolve_duplicate_base_rejected() {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);
@@ -661,8 +667,210 @@ fn msm_resolve_duplicate_base_rejected() {
     let expr = s.msm_combine(ga, qb);
 
     let one = s.uint_leaf(from_hex("1"), SN_PTR);
-    // Two G slots, no Q — a non-canonical (unmerged-shaped) base list.
+    // Two G slots, no Q — `expr`'s rows were merged, so this over-consumes.
     let _ = s.ec_msm(expr, &[(g_pt, one), (g_pt, one)]);
+}
+
+/// The counterpart to [`msm_resolve_duplicate_base_rejected`].
+fn msm_resolve_repeated_base_via_terms_preserving_combine_traces() -> crate::session::SessionTraces
+{
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+    let (rx, ry) = k256_coords(&(g + g));
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let r_pt = create(&mut s, rx, ry);
+    let ga = s.msm_intro(&g_pt);
+    let expr = s.msm_combine_terms_preserving(ga, ga);
+
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, one), (g_pt, one)]);
+    let claim = s.ec_is(&value, &r_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_repeated_base_via_terms_preserving_combine_checks() {
+    let traces = msm_resolve_repeated_base_via_terms_preserving_combine_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_repeated_base_via_terms_preserving_combine_proves() {
+    verify_deferred(&msm_resolve_repeated_base_via_terms_preserving_combine_traces().prove())
+        .expect("EcMsm repeated-base term-preserving-combine round-trip must verify");
+}
+
+/// The zero-scalar leaf resolved directly: `⟨G × 0⟩` (via
+/// [`Session::msm_intro_zero`]) claims the single term `(G, 0)` and resolves
+/// to the point at infinity.
+fn msm_resolve_zero_scalar_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let (gx, gy) = k256_coords(&g);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let expr = s.msm_intro_zero(&g_pt);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero)]);
+    let pai_pt = s.ec_sub(&g_pt, &g_pt);
+    let claim = s.ec_is(&value, &pai_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_zero_scalar_checks() {
+    let traces = msm_resolve_zero_scalar_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_zero_scalar_proves() {
+    verify_deferred(&msm_resolve_zero_scalar_traces().prove())
+        .expect("EcMsm zero-scalar resolve round-trip must verify");
+}
+
+/// A mixed zero/nonzero-term claim: `⟨G×0⟩ ⊕ ⟨Q×1⟩` (term-preserving —
+/// though nothing merges here since the bases already differ) resolves to
+/// `Q` alone, the zero term contributing nothing.
+fn msm_resolve_mixed_zero_and_nonzero_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let za = s.msm_intro_zero(&g_pt);
+    let qb = s.msm_intro(&q_pt);
+    let expr = s.msm_combine_terms_preserving(za, qb);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero), (q_pt, one)]);
+    let claim = s.ec_is(&value, &q_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_mixed_zero_and_nonzero_checks() {
+    let traces = msm_resolve_mixed_zero_and_nonzero_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_mixed_zero_and_nonzero_proves() {
+    verify_deferred(&msm_resolve_mixed_zero_and_nonzero_traces().prove())
+        .expect("EcMsm mixed zero/nonzero resolve round-trip must verify");
+}
+
+/// Multiple all-zero terms: `⟨G×0⟩ ⊕ ⟨Q×0⟩` resolves to the point at
+/// infinity.
+fn msm_resolve_all_zero_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+    let za = s.msm_intro_zero(&g_pt);
+    let zb = s.msm_intro_zero(&q_pt);
+    let expr = s.msm_combine_terms_preserving(za, zb);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let value = s.ec_msm(expr, &[(g_pt, zero), (q_pt, zero)]);
+    let pai_pt = s.ec_sub(&g_pt, &g_pt);
+    let claim = s.ec_is(&value, &pai_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_all_zero_checks() {
+    let traces = msm_resolve_all_zero_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_all_zero_proves() {
+    verify_deferred(&msm_resolve_all_zero_traces().prove())
+        .expect("EcMsm all-zero resolve round-trip must verify");
+}
+
+/// A 5-term term-preserving fallback, combined through the same balanced
+/// binary-tree shape `msm_term_preserving_expr` builds for an odd term
+/// count: two level-1 pairs, a level-2 pair of those results, and a final
+/// pair against the term that carried through both levels unpaired.
+/// `⟨G×1⟩ ⊕ ⟨G×0⟩ ⊕ ⟨Q×1⟩ ⊕ ⟨G×1⟩ ⊕ ⟨Q×0⟩` resolves to `2G + Q = 4G` (`Q =
+/// 2G`), the two zero terms contributing nothing.
+fn msm_resolve_balanced_tree_five_terms_traces() -> crate::session::SessionTraces {
+    let g = ProjectivePoint::GENERATOR;
+    let q = g + g;
+    let (gx, gy) = k256_coords(&g);
+    let (qx, qy) = k256_coords(&q);
+
+    let mut s = Session::new();
+
+    let g_pt = create(&mut s, gx, gy);
+    let q_pt = create(&mut s, qx, qy);
+
+    // Level 0 leaves, in declared term order.
+    let l1 = s.msm_intro(&g_pt);
+    let l2 = s.msm_intro_zero(&g_pt);
+    let l3 = s.msm_intro(&q_pt);
+    let l4 = s.msm_intro(&g_pt);
+    let l5 = s.msm_intro_zero(&q_pt);
+
+    // Level 1: pair up; `l5` has no partner and carries through unpaired.
+    let a = s.msm_combine_terms_preserving(l1, l2);
+    let b = s.msm_combine_terms_preserving(l3, l4);
+    // Level 2: pair the level-1 results; `l5` carries through again.
+    let c = s.msm_combine_terms_preserving(a, b);
+    // Level 3: the final pair.
+    let expr = s.msm_combine_terms_preserving(c, l5);
+
+    let zero = s.uint_leaf(from_hex("0"), SN_PTR);
+    let one = s.uint_leaf(from_hex("1"), SN_PTR);
+    let value =
+        s.ec_msm(expr, &[(g_pt, one), (g_pt, zero), (q_pt, one), (g_pt, one), (q_pt, zero)]);
+    let expected_pt = s.ec_add(&q_pt, &q_pt);
+    let claim = s.ec_is(&value, &expected_pt);
+
+    let root = s.assert_and_fold([claim]);
+    s.finish(root)
+}
+
+#[test]
+fn msm_resolve_balanced_tree_five_terms_checks() {
+    let traces = msm_resolve_balanced_tree_five_terms_traces();
+    traces.check();
+}
+
+#[test]
+#[ignore = "full prove/verify round-trip; run explicitly"]
+fn msm_resolve_balanced_tree_five_terms_proves() {
+    verify_deferred(&msm_resolve_balanced_tree_five_terms_traces().prove())
+        .expect("EcMsm balanced-tree 5-term fallback resolve round-trip must verify");
 }
 
 /// An absorb run must name **one** expression on every row. The boundary

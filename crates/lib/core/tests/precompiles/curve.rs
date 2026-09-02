@@ -27,10 +27,16 @@ fn supported_curves_satisfy_public_contract() {
         assert_constant_digests(curve);
         assert_arithmetic_assertions(curve.module);
         assert_scalar_mul_wrappers(curve);
-        assert_zero_scalar_mul_rejected(curve);
+        assert_zero_scalar_mul_evaluates_to_identity(curve);
         assert_eval_generator(curve);
         assert_predicates_have_expected_polarity(curve.module);
         assert_identity_assertions_have_expected_polarity(curve.module);
+        assert_msm2_zero_scalar_expression_term(curve);
+        assert_msm2_all_zero_scalar_terms(curve);
+        assert_msm2_duplicate_base(curve);
+        assert_msm2_structurally_different_equal_bases(curve);
+        assert_msm2_rejects_identity_base(curve);
+        assert_msm_mem_multi_term_with_zero_scalar_and_duplicate_base(curve);
     }
 }
 
@@ -90,7 +96,7 @@ fn assert_scalar_mul_wrappers(curve: CurveCase) {
     });
 }
 
-fn assert_zero_scalar_mul_rejected(curve: CurveCase) {
+fn assert_zero_scalar_mul_evaluates_to_identity(curve: CurveCase) {
     let module = curve.module;
     let scalar_module = curve.scalar_module;
     let source = format!(
@@ -101,11 +107,222 @@ fn assert_zero_scalar_mul_rejected(curve: CurveCase) {
             exec.{scalar_module}::push_zero_digest
             exec.{module}::push_generator
             exec.{module}::mul_scalar
-            exec.{module}::eval
+            exec.{module}::push_identity
+            exec.{module}::assert_eq
         end
         ",
     );
-    expect_precompile_trap(&source);
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!("{module} zero-scalar multiplication must evaluate to the identity: {err:?}");
+    });
+}
+
+/// Builds an `msm2` call from four snippets, each pushing the digest named in `msm2`'s own
+/// `Input:` comment (`POINT0`, `SCALAR0`, `POINT1`, `SCALAR1`), and reorders them so `POINT0`
+/// ends up on top as `msm2` expects.
+fn msm2_call(point0: &str, scalar0: &str, point1: &str, scalar1: &str, module: &str) -> String {
+    format!(
+        "
+        {scalar1}
+        {point1}
+        {scalar0}
+        {point0}
+        exec.{module}::msm2
+        "
+    )
+}
+
+fn assert_msm2_zero_scalar_expression_term(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    // `1 - 1`: a scalar EXPRESSION that evaluates to zero, distinct from the literal
+    // `push_zero_digest` VALUE already covered by `assert_zero_scalar_mul_evaluates_to_identity`.
+    let zero_scalar_expr = format!(
+        "exec.{scalar_module}::push_one_digest exec.{scalar_module}::push_one_digest exec.{scalar_module}::sub"
+    );
+    let source = format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        use miden::core::precompiles::fields::{scalar_module}
+        begin
+            {msm2}
+            exec.{module}::push_generator
+            exec.{module}::double
+            exec.{module}::assert_eq
+        end
+        ",
+        msm2 = msm2_call(
+            &format!("exec.{module}::push_generator"),
+            &zero_scalar_expr,
+            &format!("exec.{module}::push_generator"),
+            &format!("exec.{scalar_module}::push_two_digest"),
+            module,
+        ),
+    );
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!("{module} msm2 with a zero-scalar expression term must succeed: {err:?}");
+    });
+}
+
+fn assert_msm2_all_zero_scalar_terms(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    let zero_scalar_expr = format!(
+        "exec.{scalar_module}::push_one_digest exec.{scalar_module}::push_one_digest exec.{scalar_module}::sub"
+    );
+    let source = format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        use miden::core::precompiles::fields::{scalar_module}
+        begin
+            {msm2}
+            exec.{module}::push_identity
+            exec.{module}::assert_eq
+        end
+        ",
+        msm2 = msm2_call(
+            &format!("exec.{module}::push_generator"),
+            &format!("exec.{scalar_module}::push_zero_digest"),
+            &format!("exec.{module}::push_generator"),
+            &zero_scalar_expr,
+            module,
+        ),
+    );
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!("{module} msm2 with every scalar zero must evaluate to the identity: {err:?}");
+    });
+}
+
+fn assert_msm2_duplicate_base(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    let source = format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        use miden::core::precompiles::fields::{scalar_module}
+        begin
+            {msm2}
+            exec.{module}::push_generator
+            exec.{module}::double
+            exec.{module}::push_generator
+            exec.{module}::add
+            exec.{module}::assert_eq
+        end
+        ",
+        msm2 = msm2_call(
+            &format!("exec.{module}::push_generator"),
+            &format!("exec.{scalar_module}::push_two_digest"),
+            &format!("exec.{module}::push_generator"),
+            &format!("exec.{scalar_module}::push_one_digest"),
+            module,
+        ),
+    );
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!("{module} msm2 with a duplicate canonical base must combine scalars: {err:?}");
+    });
+}
+
+fn assert_msm2_structurally_different_equal_bases(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    // `G + O`: an ADD-expression digest that is structurally different from the plain
+    // `push_generator` constant but canonically evaluates to the same point.
+    let generator_via_add_identity =
+        format!("exec.{module}::push_generator exec.{module}::push_identity exec.{module}::add");
+    let source = format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        use miden::core::precompiles::fields::{scalar_module}
+        begin
+            {msm2}
+            exec.{module}::push_generator
+            exec.{module}::double
+            exec.{module}::assert_eq
+        end
+        ",
+        msm2 = msm2_call(
+            &format!("exec.{module}::push_generator"),
+            &format!("exec.{scalar_module}::push_one_digest"),
+            &generator_via_add_identity,
+            &format!("exec.{scalar_module}::push_one_digest"),
+            module,
+        ),
+    );
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!(
+            "{module} msm2 with structurally different but canonically equal bases must combine scalars: {err:?}"
+        );
+    });
+}
+
+fn assert_msm2_rejects_identity_base(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+
+    let literal_identity = format!("exec.{module}::push_identity");
+    let identity_via_expression =
+        format!("exec.{module}::push_generator exec.{module}::push_generator exec.{module}::sub");
+    let nonzero_scalar = format!("exec.{scalar_module}::push_one_digest");
+    let other_point = format!("exec.{module}::push_generator");
+
+    for identity_base in [literal_identity, identity_via_expression] {
+        let source = format!(
+            "
+            use miden::core::precompiles::curves::{module}
+            use miden::core::precompiles::fields::{scalar_module}
+            begin
+                {msm2}
+            end
+            ",
+            msm2 =
+                msm2_call(&identity_base, &nonzero_scalar, &other_point, &nonzero_scalar, module),
+        );
+        expect_precompile_trap(&source);
+    }
+}
+
+fn assert_msm_mem_multi_term_with_zero_scalar_and_duplicate_base(curve: CurveCase) {
+    let module = curve.module;
+    let scalar_module = curve.scalar_module;
+    let ptr: u32 = 1000;
+    let stage = |addr: u32, push: &str| format!("{push}\nmem_storew_le.{addr}\ndropw");
+
+    // A 3-pair PairList over `msm_mem`: `G` appears twice (a duplicate canonical base) and the
+    // middle pair carries a zero scalar. Expected sum: `1*G + 0*G + 2*G = 3*G`.
+    let source = format!(
+        "
+        use miden::core::precompiles::curves::{module}
+        use miden::core::precompiles::fields::{scalar_module}
+        begin
+            {pair0_point}
+            {pair0_scalar}
+            {pair1_point}
+            {pair1_scalar}
+            {pair2_point}
+            {pair2_scalar}
+
+            push.3 push.{ptr}
+            exec.{module}::msm_mem
+
+            exec.{module}::push_generator
+            exec.{module}::double
+            exec.{module}::push_generator
+            exec.{module}::add
+            exec.{module}::assert_eq
+        end
+        ",
+        pair0_point = stage(ptr, &format!("exec.{module}::push_generator")),
+        pair0_scalar = stage(ptr + 4, &format!("exec.{scalar_module}::push_one_digest")),
+        pair1_point = stage(ptr + 8, &format!("exec.{module}::push_generator")),
+        pair1_scalar = stage(ptr + 12, &format!("exec.{scalar_module}::push_zero_digest")),
+        pair2_point = stage(ptr + 16, &format!("exec.{module}::push_generator")),
+        pair2_scalar = stage(ptr + 20, &format!("exec.{scalar_module}::push_two_digest")),
+    );
+    run_precompile_program(&source).unwrap_or_else(|err| {
+        panic!(
+            "{module} msm_mem with a zero-scalar term and a duplicate base across 3 pairs must succeed: {err:?}"
+        );
+    });
 }
 
 fn assert_eval_generator(curve: CurveCase) {

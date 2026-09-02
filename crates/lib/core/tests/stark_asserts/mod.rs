@@ -547,7 +547,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     const GENERIC_FRAME_END: u64 = 3_223_322_764;
     const VM_FRAME_END: u64 = 3_223_323_864;
     const PVM_FRAME_START: u64 = 3_225_426_416;
-    const PVM_FRAME_END: u64 = 3_225_444_180;
+    const PVM_FRAME_END: u64 = 3_225_444_212;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
@@ -564,7 +564,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
         ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13792),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13824),
         ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),

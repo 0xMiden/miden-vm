@@ -54,7 +54,7 @@ end
 #!   `0..=31` bits.
 #! - MVM: lookup grinding 0, maximum log trace height in `6..=29`, 28 lookup fractions per row,
 #!   and `3..=258` one-time boundary terms (three fixed terms plus 0..=255 kernel procedures).
-#! - PVM: lookup grinding 0, maximum log trace height in `16..=29`, 244 lookup fractions per row,
+#! - PVM: lookup grinding 0, maximum log trace height in `16..=29`, 247 lookup fractions per row,
 #!   and eight fixed one-time boundary terms.
 #!
 #! The verifiers validate the variable fields and supply the normalized relation constants.
