@@ -215,7 +215,9 @@ The MVM instance order is protocol-pinned as:
 ```
 
 Proof commitments are sorted by trace height, with instance order as the tie-breaker. The recursive
-verifier selects the corresponding generated constraint circuit by the proof-order tag.
+verifier evaluates one order-invariant generated constraint circuit: it scatters each AIR's
+proof-ordered data to that AIR's canonical circuit address on ingest, so the proof order never
+reaches the circuit itself.
 
 ## Implementation map
 

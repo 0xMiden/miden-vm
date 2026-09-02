@@ -409,23 +409,6 @@ fn proof_order_position_from_heights_rejects_out_of_range_heights() {
     }
 }
 
-/// The MASM order-tag limit must match the shared ranking's supported AIR count.
-#[test]
-fn derive_order_tag_from_heights_matches_the_shared_air_limit() {
-    const PTR: u64 = 1000;
-    let max_airs = miden_ace_codegen::MAX_ORDER_AIRS;
-
-    let heights: Vec<u64> = (0..max_airs as u64).collect();
-    build_test!(derive_order_tag_source(), &[PTR, max_airs as u64], &heights)
-        .execute()
-        .expect("the shared ranking's maximum AIR count must be supported");
-
-    let oversized = max_airs + 1;
-    let heights: Vec<u64> = (0..oversized as u64).collect();
-    let test = build_test!(derive_order_tag_source(), &[PTR, oversized as u64], &heights);
-    expect_assert_error_code_from_msg!(test, "num_airs exceeds supported order-tag range");
-}
-
 // ---- canonical fold-coefficient staging ----
 //
 // The multi-AIR fold is a Horner accumulation over the height-sorted proof order, so the

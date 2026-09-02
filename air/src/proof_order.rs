@@ -67,7 +67,7 @@ impl ProofOrder {
         (0..PROOF_ORDER_COUNT).map(Self::from_rank).collect()
     }
 
-    /// Decode a registry tag into a proof order.
+    /// Decode a Lehmer tag into a proof order.
     pub fn from_tag(tag: u32) -> Option<Self> {
         let rank = tag as usize;
         (rank < PROOF_ORDER_COUNT).then(|| Self::from_rank(rank))
@@ -95,7 +95,7 @@ impl ProofOrder {
         &self.airs
     }
 
-    /// Registry tag for this proof order.
+    /// Lehmer tag for this proof order.
     pub fn tag(&self) -> u32 {
         self.tag
     }
@@ -135,10 +135,10 @@ fn assert_is_air_permutation(airs: [MidenAir; MIDEN_AIR_COUNT]) {
     }
 }
 
-/// Return the registry tag of an AIR permutation relative to [`AIRS`].
+/// Return the Lehmer tag of an AIR permutation relative to [`AIRS`].
 ///
-/// Delegates to the shared Lehmer ranking so this registry and the precompile VM registry
-/// index their leaves by exactly the same rule.
+/// Delegates to the shared Lehmer ranking so the VM and PVM relations encode proof orders by
+/// exactly the same rule.
 fn lehmer_rank(airs: [MidenAir; MIDEN_AIR_COUNT]) -> u32 {
     let instance_order: Vec<usize> = airs.iter().map(|air| air.instance_index()).collect();
     order_tag(&instance_order)
@@ -164,9 +164,9 @@ mod tests {
         }
     }
 
-    /// `AIRS` fixes proof-order tie-breaks, registry tags, and the relation digest. Pin it
-    /// independently of `instance_index`; intentional changes require regenerated protocol
-    /// constants and a breaking changelog entry.
+    /// `AIRS` fixes proof-order tie-breaks and the relation digest. Pin it independently of
+    /// `instance_index`; intentional changes require regenerated protocol constants and a
+    /// breaking changelog entry.
     #[test]
     fn air_instance_order_is_protocol_pinned() {
         const PINNED: [MidenAir; MIDEN_AIR_COUNT] = [

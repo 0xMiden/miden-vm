@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_ace_codegen::{AceConfig, AceError, InputLayout, LayoutKind};
-use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt};
 
 use super::multi_air::build_canonical_multi_air_ace_circuit;
 use crate::{AIRS, MIDEN_AIR_COUNT};
@@ -74,7 +74,7 @@ pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, Ace
         });
     }
 
-    let commitment = Eidos::hash_elements(instructions);
+    let commitment = encoded.circuit_hash();
 
     Ok(RecursiveAceCircuit {
         num_inputs: encoded.num_vars(),
