@@ -27,11 +27,14 @@ struct LayoutPolicy {
     end_align: Option<Alignment>,
 }
 
-/// Whether the layout includes the slots needed to combine multiple AIR instances.
+/// Whether the layout includes the slots needed to combine multiple AIR instances, and whether
+/// fold coefficients get a real READ slot (`MultiCanonical`) or are baked into the circuit's
+/// gates for one fixed proof order (`Multi`, the per-order oracle composition).
 #[derive(Clone, Copy)]
 enum AirComposition {
     Single,
     Multi { air_count: NonZeroUsize },
+    MultiCanonical { air_count: NonZeroUsize },
 }
 
 impl AirComposition {
@@ -41,10 +44,19 @@ impl AirComposition {
         Self::Multi { air_count }
     }
 
+    fn canonical_multi_air(air_count: usize) -> Self {
+        let air_count =
+            NonZeroUsize::new(air_count).expect("multi-AIR layout requires at least one AIR");
+        Self::MultiCanonical { air_count }
+    }
+
     fn extra_stark_slots(self) -> usize {
         match self {
             Self::Single => 0,
             Self::Multi { air_count } => 1 + air_count.get() * SELECTORS_PER_AIR,
+            Self::MultiCanonical { air_count } => {
+                1 + air_count.get() * SELECTORS_PER_AIR + air_count.get()
+            },
         }
     }
 
@@ -55,7 +67,18 @@ impl AirComposition {
                 air_count,
                 fold_beta: stark_start + base_slots,
                 selector_start: stark_start + base_slots + 1,
+                fold_coeff_start: None,
             }),
+            Self::MultiCanonical { air_count } => {
+                let selector_start = stark_start + base_slots + 1;
+                let fold_coeff_start = selector_start + air_count.get() * SELECTORS_PER_AIR;
+                Some(MultiAirIndices {
+                    air_count,
+                    fold_beta: stark_start + base_slots,
+                    selector_start,
+                    fold_coeff_start: Some(fold_coeff_start),
+                })
+            },
         }
     }
 }
@@ -130,6 +153,26 @@ impl InputLayout {
     /// Build the MASM-compatible layout for a multi-AIR relation.
     pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
         Self::build_with_policy(counts, LayoutPolicy::masm(), AirComposition::multi_air(num_airs))
+    }
+
+    /// Build a native layout for a multi-AIR relation with canonical (proof-order-independent)
+    /// fold-coefficient slots.
+    pub fn new_canonical_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::native(),
+            AirComposition::canonical_multi_air(num_airs),
+        )
+    }
+
+    /// Build the MASM-compatible layout for a multi-AIR relation with canonical fold-coefficient
+    /// slots.
+    pub fn new_masm_canonical_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(
+            counts,
+            LayoutPolicy::masm(),
+            AirComposition::canonical_multi_air(num_airs),
+        )
     }
 
     fn build_with_policy(
@@ -253,5 +296,54 @@ mod tests {
     #[should_panic(expected = "multi-AIR layout requires at least one AIR")]
     fn multi_air_layout_rejects_zero_airs() {
         let _ = InputLayout::new_masm_multi_air(test_counts(), 0);
+    }
+
+    #[test]
+    fn canonical_multi_air_layout_adds_fold_coefficient_slots_after_selectors() {
+        let layout = InputLayout::new_masm_canonical_multi_air(test_counts(), 3);
+
+        let beta = layout.index(InputKey::MultiAirFoldBeta).unwrap();
+        let first_selector = layout.index(InputKey::IsFirstAir(0)).unwrap();
+        assert_eq!(first_selector, beta + 1);
+
+        // Selectors occupy 3 AIRs * 3 selectors = 9 EF slots after the beta slot.
+        let last_selector = layout.index(InputKey::IsTransitionAir(2)).unwrap();
+        assert_eq!(last_selector, first_selector + 8);
+
+        // Fold coefficients start right after the selector block. Like beta and the selectors,
+        // each fold coefficient is a single EF-valued slot (one index unit), not a coordinate
+        // pair — it carries no `coord` field and is consumed as one DAG input node.
+        let coeff0 = layout.index(InputKey::MultiAirFoldCoeff(0)).unwrap();
+        assert_eq!(coeff0, last_selector + 1);
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(1)), Some(coeff0 + 1));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), Some(coeff0 + 2));
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(3)), None);
+
+        // Cross-check against the live MASM contract in
+        // `crates/lib/core/asm/stark/constraints_eval_inputs.masm`: FIRST_SELECTOR_OFFSET = 22,
+        // SELECTOR_STRIDE = 6 felts per AIR. The fold-coefficient block starts right after the
+        // selector block, at felt offset FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs.
+        let stark_base = layout.regions.stark_vars.offset;
+        assert_eq!((coeff0 - stark_base) * crate::EXT_DEGREE, 22 + 6 * 3);
+
+        layout.validate();
+    }
+
+    #[test]
+    fn canonical_multi_air_native_layout_has_fold_coefficient_slots() {
+        let layout = InputLayout::new_canonical_multi_air(test_counts(), 2);
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(0)).is_some());
+        assert!(layout.index(InputKey::MultiAirFoldCoeff(1)).is_some());
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(2)), None);
+        layout.validate();
+    }
+
+    #[test]
+    fn per_order_multi_air_layout_has_no_fold_coefficient_slot() {
+        // The per-order oracle layout must be unaffected: MultiAirFoldCoeff has no READ slot
+        // there, since `build_multi_air_ace_circuit` bakes each AIR's fold coefficient into
+        // that order's circuit gates directly.
+        let layout = InputLayout::new_masm_multi_air(test_counts(), 3);
+        assert_eq!(layout.index(InputKey::MultiAirFoldCoeff(0)), None);
     }
 }

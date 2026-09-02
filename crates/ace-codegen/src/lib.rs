@@ -84,7 +84,8 @@ pub use crate::{
     masm::{MasmConstraintsEvalConfig, render_masm_constraints_eval},
     pipeline::{
         AceArtifacts, AceConfig, FactoredMultiAirCircuit, LayoutKind, build_ace_circuit_for_air,
-        build_ace_dag_for_air, build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit,
+        build_ace_dag_for_air, build_canonical_multi_air_ace_circuit,
+        build_factored_multi_air_ace_circuit, build_multi_air_ace_circuit,
     },
     registry::{
         MAX_REGISTRY_AIRS, RegistryLayout, ceil_log2, factorial, fold_row_to_root, order_from_tag,
