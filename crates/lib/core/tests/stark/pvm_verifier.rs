@@ -48,9 +48,9 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         .expect("host adapter must parse the long proof");
 
     assert_ne!(
-        pvm_order_tag(&short),
-        pvm_order_tag(&long),
-        "fixtures must exercise distinct registry leaves",
+        pvm_proof_order(&short),
+        pvm_proof_order(&long),
+        "fixtures must exercise distinct proof orders",
     );
     let short_output =
         run_pvm_verifier(&short).expect("PVM MASM verifier must accept the short proof");
@@ -75,11 +75,40 @@ fn pvm_verifies_distinct_orders_and_coexists_with_the_vm() {
         "the proof must not authenticate a different deferred root",
     );
 
-    let mut wrong_shape = short.advice().clone();
-    mutate_proof_stream(&short, &mut wrong_shape, |stream| stream[4] += Felt::ONE);
+    // The ten heights are the sole carrier of proof order into the OOD scatter table, the sigma
+    // scatter, and fold staging. Chiplet 3's height is verifier-fixed (its stream slot must equal
+    // a constant, so forging it fails a shape check rather than exercising order binding); every
+    // other chiplet's height is advice-supplied and must be transcript-bound.
+    const SECURITY_PARAM_COUNT: usize = 4;
+    const NUM_CHIPLETS: usize = 10;
+    const FIXED_CHIPLET: usize = 3;
+
+    let honest_order = pvm_proof_order(&short);
+    let mut reordering_forgeries = 0usize;
+    for chiplet in (0..NUM_CHIPLETS).filter(|&chiplet| chiplet != FIXED_CHIPLET) {
+        let mut wrong_shape = short.advice().clone();
+        mutate_proof_stream(&short, &mut wrong_shape, |stream| {
+            stream[SECURITY_PARAM_COUNT + chiplet] += Felt::ONE;
+        });
+
+        let mut forged_heights: Vec<Felt> = self::proof_stream(&short)
+            [SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS]
+            .to_vec();
+        forged_heights[chiplet] += Felt::ONE;
+        let mut forged_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
+        forged_order.sort_by_key(|&i| (forged_heights[i].as_canonical_u64(), i));
+        if forged_order != honest_order {
+            reordering_forgeries += 1;
+        }
+
+        assert!(
+            run_pvm_verifier_with_advice(&wrong_shape, short.claim_commitment()).is_err(),
+            "the proof must not authenticate a forged height for chiplet {chiplet}",
+        );
+    }
     assert!(
-        run_pvm_verifier_with_advice(&wrong_shape, short.claim_commitment()).is_err(),
-        "the proof must not authenticate different trace-shape metadata",
+        reordering_forgeries > 0,
+        "no forged height moved the proof order, so this fixture cannot cover order binding"
     );
 
     for index in 0..4 {
@@ -219,14 +248,16 @@ fn assert_pvm_security_params(inputs: &PvmRecursiveVerifierInputs, output: &Exec
     );
 }
 
-fn pvm_order_tag(inputs: &PvmRecursiveVerifierInputs) -> u32 {
+/// The chiplet instances in committed-trace order: ascending log height, instance index breaking
+/// ties.
+fn pvm_proof_order(inputs: &PvmRecursiveVerifierInputs) -> Vec<usize> {
     const SECURITY_PARAM_COUNT: usize = 4;
     const NUM_CHIPLETS: usize = 10;
 
     let heights = &proof_stream(inputs)[SECURITY_PARAM_COUNT..SECURITY_PARAM_COUNT + NUM_CHIPLETS];
     let mut proof_order: Vec<usize> = (0..NUM_CHIPLETS).collect();
     proof_order.sort_by_key(|&i| (heights[i].as_canonical_u64(), i));
-    miden_ace_codegen::order_tag(&proof_order)
+    proof_order
 }
 
 fn run_interleaved_verifiers(

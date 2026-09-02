@@ -1,9 +1,9 @@
-//! Checks or regenerates the PVM ACE registry and its generated MASM artifacts.
+//! Checks or regenerates the PVM ACE constants and their generated MASM artifacts.
 //!
-//! Usage: `cargo run -p miden-precompiles-verifier --features registry-tools --release \
-//!         --bin pvm-registry-regen -- [--check | --write]`
+//! Usage: `cargo run -p miden-precompiles-verifier --features constants-tools --release \
+//!         --bin pvm-constants-regen -- [--check | --write]`
 
-use miden_precompiles_verifier::ace_registry_regen::{Mode, run};
+use miden_precompiles_verifier::ace_constants_regen::{Mode, run};
 
 fn parse_mode(args: Vec<String>) -> Result<Mode, Vec<String>> {
     match args.as_slice() {
@@ -17,7 +17,7 @@ fn main() {
     let mode = match parse_mode(std::env::args().skip(1).collect()) {
         Ok(mode) => mode,
         Err(args) => {
-            eprintln!("usage: pvm-registry-regen [--check | --write] (got {args:?})");
+            eprintln!("usage: pvm-constants-regen [--check | --write] (got {args:?})");
             std::process::exit(2);
         },
     };
@@ -25,7 +25,7 @@ fn main() {
         eprintln!("failed: {err}");
         if mode == Mode::Check {
             eprintln!(
-                "if this protocol change is intentional, run `make regenerate-pvm-registry` \
+                "if this protocol change is intentional, run `make regenerate-pvm-constants` \
                  and record the break; otherwise inspect the unexpected drift before updating \
                  constants"
             );
