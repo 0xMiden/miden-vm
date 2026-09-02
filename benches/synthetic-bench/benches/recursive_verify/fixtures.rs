@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use miden_air::config::RELATION_DIGEST;
 use miden_assembly::Linkage;
 use miden_core::{
     Felt, Word,
@@ -28,16 +29,16 @@ use miden_vm::{
 
 use super::{
     config::{BenchConfig, workspace_root},
-    measurements::print_bench_shape,
+    measurements::{print_bench_shape, trace_shape_summary_for},
     recursive_host,
 };
 
-const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v3";
-const PVM_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-pvm-proof-cache-v3";
-const INNER_PROOF_HASH: HashFunction = HashFunction::Poseidon2;
+const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v4-eidos";
+const PVM_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-pvm-proof-cache-v4-eidos";
+const INNER_PROOF_HASH: HashFunction = HashFunction::Eidos;
 const PVM_WORKLOAD_CONTENT_DIGEST: [u8; 32] = [
-    0x60, 0xf6, 0xb0, 0x95, 0xf9, 0xd0, 0xae, 0x76, 0xd1, 0xaf, 0xf3, 0x18, 0x9b, 0xca, 0x21, 0x2d,
-    0x6b, 0xcd, 0xda, 0xe9, 0x33, 0x55, 0x1c, 0x26, 0x76, 0x67, 0x02, 0xa4, 0xc0, 0x95, 0xcd, 0x28,
+    0xf5, 0x14, 0xef, 0xe5, 0x71, 0x1a, 0xc5, 0x6c, 0x85, 0x5a, 0x2e, 0xb4, 0x92, 0xa3, 0x89, 0xcb,
+    0x90, 0x3e, 0x8f, 0xc6, 0x0f, 0x53, 0x63, 0x30, 0x7a, 0xe6, 0x09, 0x33, 0x8d, 0x49, 0x3b, 0xdc,
 ];
 
 pub(super) struct TxProofFixture {
@@ -83,11 +84,21 @@ fn tx_proof_cache_key(
     for value in stack_values {
         stack_bytes.extend_from_slice(&value.to_le_bytes());
     }
+    let mut relation_digest_bytes = [0_u8; 32];
+    for (chunk, element) in relation_digest_bytes
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip(RELATION_DIGEST.iter())
+    {
+        chunk.copy_from_slice(&element.as_canonical_u64().to_le_bytes());
+    }
     let hash_fn_byte = [hash_fn as u8];
     let digest: [u8; 32] = Blake3_256::hash_iter(
         [
             TX_PROOF_CACHE_KEY_VERSION,
             env!("CARGO_PKG_VERSION").as_bytes(),
+            relation_digest_bytes.as_slice(),
             program_bytes.as_slice(),
             stack_bytes.as_slice(),
             hash_fn_byte.as_slice(),
@@ -264,7 +275,7 @@ fn load_cached_pvm_proof(
             return None;
         },
     };
-    if proof.proof.hash_fn() != HashFunction::Poseidon2 {
+    if proof.proof.hash_fn() != HashFunction::Eidos {
         eprintln!("ignoring cached PVM proof with the wrong hash function {}", path.display());
         return None;
     }
@@ -324,11 +335,11 @@ fn execute_pvm_workload(workload_path: &Path) -> DeferredState {
 }
 
 fn generate_pvm_proof(deferred_state: &DeferredState) -> PrecompileProof {
-    eprintln!("proving canonical deferred state with Poseidon2...");
+    eprintln!("proving canonical deferred state with Eidos...");
     let witness = PrecompileWitness::new(deferred_state.clone())
         .expect("canonical workload must produce a precompile witness");
     let proof = Prover::new()
-        .with_hash_fn(HashFunction::Poseidon2)
+        .with_hash_fn(HashFunction::Eidos)
         .prove_precompile(&witness)
         .expect("prove canonical deferred state");
     Verifier::new()
@@ -402,7 +413,8 @@ fn print_tx_fixture_shape(
     let trace = build_trace(vm_witness).expect("build transaction fixture trace");
     let summary = trace.trace_len_summary();
     let record = format!("BENCH_TX_SHAPE index={proof_index}");
-    print_bench_shape(&record, summary);
+    let shape = trace_shape_summary_for(summary);
+    print_bench_shape(&record, &shape);
 }
 
 pub(super) fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<TxProofFixture> {

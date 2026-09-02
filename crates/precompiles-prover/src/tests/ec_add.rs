@@ -13,7 +13,10 @@
 use std::{collections::HashMap, format, string::String, vec, vec::Vec};
 
 use k256::{ProjectivePoint, Scalar, elliptic_curve::sec1::ToSec1Point};
-use miden_air::lookup::Challenges;
+use miden_air::{
+    lookup::Challenges,
+    trace::and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
+};
 use miden_core::{
     Felt,
     field::QuadFelt,
@@ -25,8 +28,9 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 // `sigma_sum` closes the subset `MultiAir`'s cross-AIR bus identity for the
 // (ignored) prove round-trip.
-use crate::logup::{NUM_PUBLIC_VALUES, sigma_sum};
+use crate::logup::NUM_PUBLIC_VALUES;
 use crate::{
+    composite::extract_band,
     ec::{
         COL_IS_CERT, EcRequire,
         add::{
@@ -43,7 +47,7 @@ use crate::{
     math::{U256, from_hex},
     primitives::byte_pair_lut::{BytePairLutAir, BytePairLutRequires, generate_trace as bpl_trace},
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    session::ChipletAir,
+    session::{ChipletAir, byte_pair_and8_trace},
     stark_config::{test_challenger, test_config},
     tests::bus_balance::fold_balance,
     uint::{
@@ -143,7 +147,13 @@ impl EcStack {
         let ec_add = ec_add_trace(self.ec_add, &mut self.ec, &mut bpl);
         let uint = uint_store_mul_trace(self.store, self.muls, &mut bpl);
         let ec_points_groups = ec_points_groups_trace(self.ec);
-        EcStackTraces([bpl_trace(bpl), uint, add, ec_points_groups, ec_add])
+        let bpl = bpl_trace(bpl);
+        let and8 = RowMajorMatrix::new(
+            vec![Felt::ZERO; AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS],
+            NUM_AND8_LOOKUP_COLS,
+        );
+        let byte_pair_and8 = byte_pair_and8_trace(bpl, and8);
+        EcStackTraces([byte_pair_and8, uint, add, ec_points_groups, ec_add])
     }
 }
 
@@ -154,7 +164,7 @@ struct EcStackTraces([RowMajorMatrix<Felt>; NUM_STACK]);
 /// The subset's AIRs as [`ChipletAir`] variants, in [`NUM_STACK`] order.
 fn stack_airs() -> [ChipletAir; NUM_STACK] {
     [
-        ChipletAir::BytePairLut,
+        ChipletAir::BytePairAnd8,
         ChipletAir::UintStoreMul,
         ChipletAir::UintAdd,
         ChipletAir::EcPointStoreGroups,
@@ -192,9 +202,14 @@ impl MultiAir<Felt, QuadFelt> for EcStackMultiAir {
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values)])
+        let and8_height = Felt::new_unchecked(1u64 << log_trace_heights[0]);
+        let mut sigma = aux_values[0][0] + aux_values[0][1] * and8_height;
+        for values in &aux_values[1..] {
+            sigma += values[0];
+        }
+        Ok(vec![sigma])
     }
 }
 
@@ -278,7 +293,8 @@ impl EcStackTraces {
 fn stack_residual(mains: &[&RowMajorMatrix<Felt>; NUM_STACK], rng: &mut impl Rng) -> usize {
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
     let mut net: HashMap<QuadFelt, (Felt, String)> = HashMap::new();
-    fold_balance(&BytePairLutAir, mains[0], &challenges, &mut net);
+    let bpl = extract_band(mains[0], 0..crate::primitives::byte_pair_lut::NUM_MAIN_COLS);
+    fold_balance(&BytePairLutAir, &bpl, &challenges, &mut net);
     fold_balance(&UintStoreMulAir, mains[1], &challenges, &mut net);
     fold_balance(&UintAddAir, mains[2], &challenges, &mut net);
     fold_balance(&EcPointStoreGroupsAir, mains[3], &challenges, &mut net);

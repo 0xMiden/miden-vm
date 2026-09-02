@@ -8,26 +8,43 @@ In this section we describe the AIR constraints for Miden VM cryptographic opera
 
 Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chiplets/hasher.md). Communication between the stack and the hash chiplet is accomplished via the chiplet bus $b_{chip}$. To make requests to and to read results from the chiplet bus we need to divide its current value by the value representing the request.
 
-Thus, to describe AIR constraints for the cryptographic operations, we need to define how to compute these input and output values within the stack. We do this in the following sections.
-
-## HPERM
-The `HPERM` operation applies a Poseidon2 permutation to the top $12$ elements of the stack. The stack is arranged in LE state order `[RATE0, RATE1, CAPACITY]`, with $s_0$ at the top and mapping to the first rate lane. The diagram below illustrates this graphically.
-
-![hperm](../../img/design/stack/crypto_ops/HPERM.png)
-
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
-
-For the `HPERM` operation, we define input and output values as follows:
+Hasher interactions use typed, domain-separated LogUp messages. For message kind $k$, controller
+address $a$, node index $n$, and payload $p$, write
 
 $$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j)
+H_k(a,n,p) = P_k + a + \beta n + \sum_{i=0}^{|p|-1}\beta^{i+2}p_i,
+$$
+
+where $P_k$ is the fixed bus prefix for that semantic message kind. The separate prefixes prevent
+equal payloads from satisfying different relations.
+
+## COMPRESS
+
+The `COMPRESS` operation applies one Eidos compression to the top 12 stack elements, arranged as
+`[BLOCK_LO, BLOCK_HI, CV]`. The 8-element message block is preserved and the 4-element chaining
+value is replaced with the updated chaining value:
+
+```text
+Before: [BLOCK_LO, BLOCK_HI, CV,  ...]
+After:  [BLOCK_LO, BLOCK_HI, CV', ...]
+```
+
+The prover supplies the hasher-controller row address in helper register $h_0$. The controller row
+commits the input state and returned chaining value to one physical 32-row block in the standalone
+Eidos compression AIR. The decoder removes both typed messages from the chiplet bus.
+
+For `COMPRESS`, define the input and output values as follows:
+
+$$
+v_{input} = H_{linear\_init}(h_0, 0, [s_0,\ldots,s_{11}])
 $$
 
 $$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j')
+v_{output} = H_{return}(h_0, 0, [s'_8,\ldots,s'_{11}])
 $$
 
-In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Poseidon2 permutation computation the index column is expected to be set to $0$.
+The one-row controller overlays its input and output at the same address; the compression AIR
+enforces the 32-row computation behind that controller row.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
@@ -35,10 +52,11 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region. These controller rows are consecutive, so their addresses differ by exactly $1$.
+The constraint enforces that the input state and returned chaining value occur together in the
+hasher controller and are backed by a valid Eidos compression.
 
 The effect of this operation on the rest of the stack is:
-* **No change** starting from position $12$.
+* **No change** in positions $0$ through $7$ and from position $12$ onward.
 
 ## MPVERIFY
 The `MPVERIFY` operation verifies that a Merkle path from the specified node resolves to the specified root. This operation can be used to prove that the prover knows a path in the specified Merkle tree which starts with the specified node.
@@ -58,14 +76,14 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `MPVERIFY` operation, we define input and output values as follows:
 
 $$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{mpver} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3 \alpha_{j + 4} \cdot s_{j}
+v_{input} = H_{merkle\_verify}(h_0, s_5, [s_0,\ldots,s_3])
 $$
 
 $$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
+v_{output} = H_{return}(h_0 + s_4 - 1, 0, [s_6,\ldots,s_9])
 $$
 
-In the above, $op_{mpver}$ and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a Merkle path verification computation and reading the hash result respectively. The sum expression for inputs computes the value of the leaf node, while the sum expression for the output computes the value of the tree root.
+The input carries the leaf node and its Merkle index; the output carries the resulting root.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
@@ -73,7 +91,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
+The above constraint enforces that the specified input and output controller rows must be present in the hash-controller region, and that they must be exactly $d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller row; that row overlays its input and output messages.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -97,30 +115,28 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `MRUPDATE` operation, we define input and output values as follows:
 
 $$
-v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}
+v_{inputold} = H_{merkle\_old}(h_0, s_5, [s_0,\ldots,s_3])
 $$
 
 $$
-v_{outputold} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
+v_{outputold} = H_{return}(h_0 + s_4 - 1, 0, [s_6,\ldots,s_9])
 $$
 
 $$
-v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 2 \cdot s_4) + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{10 + j}
+v_{inputnew} = H_{merkle\_new}(h_0 + s_4, s_5, [s_{10},\ldots,s_{13}])
 $$
 
 $$
-v_{outputnew} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 4 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}'
+v_{outputnew} = H_{return}(h_0 + 2 \cdot s_4 - 1, 0, [s'_0,\ldots,s'_3])
 $$
 
 In the above, the first two expressions correspond to inputs and outputs for verifying the Merkle path between the old node value and the old tree root, while the last two expressions correspond to inputs and outputs for verifying the Merkle path between the new node value and the new tree root. The hash chiplet ensures the same set of sibling nodes are used in both of these computations.
-
-The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) used by the above computations.
 
 > $$
 > b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
 > $$
 
-The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the hash-controller region. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the hash-controller region. The old-path output is $d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $d$, and the new-path output is $2 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
@@ -130,8 +146,8 @@ The effect of this operation on the rest of the stack is:
 `MPVERIFY` and `MRUPDATE` request 16-bit range checks for $d$ and
 $1024(d - 1)$. Together, the checks accept exactly $1 \le d \le 64$.
 
-The hasher controller must also show that the path bits describe the canonical
-integer represented by the node-index field element. At each level it enforces
+The path bits must also describe the canonical integer represented by the node-index field
+element. At each controller row, the hash controller enforces
 
 $$
 i_k = 2i_{k+1} + b_k
@@ -141,115 +157,68 @@ where $b_k$ is a boolean direction bit. This is a field equality modulo
 $Q = 2^{64} - 2^{32} + 1$. By itself, it does not distinguish an integer
 index from that index plus $Q$.
 
-The stack/hasher lookup addresses bind the computation to exactly $d$ levels,
-and the controller ends with $i_d = 0$. Working backwards, $i_1$ is built from
-at most $d - 1 \le 63$ direction bits. Therefore $0 \le i_1 < 2^{63} < Q$,
-so this suffix cannot wrap in the field.
+The stack/hasher lookup addresses bind the computation to exactly $d$ levels, and the controller
+ends with $i_d = 0$. To prevent a wrapped 64-bit bit string from representing the same field
+element, `CoreAir` uses the six decoder helpers
 
-The complete index is $n = 2i_1 + b_0$, which may use all 64 bits. Let
-$M = (Q - 1)/2$. Because $b_0$ is boolean,
+```text
+[addr, b, y0, y1, y2, y3]
+```
 
-$$
-n < Q \quad\Longleftrightarrow\quad i_1 + b_0 \le M.
-$$
-
-For $b_0 = 0$, both bounds require $i_1 \le M$. For $b_0 = 1$, both
-require $i_1 \le M - 1$.
-
-The controller proves this inequality with a non-negative slack $y$:
-
-$$
-i_1 + b_0 + y = M,
-$$
-
-where
+on each `MPVERIFY` and `MRUPDATE` row. Here $b$ is the first direction bit and
 
 $$
 y = y_0 + 2^{16}y_1 + 2^{32}y_2 + 2^{48}y_3.
 $$
 
-The range bus checks all four limbs and also checks $2y_3$. The first four
-checks give $y_j < 2^{16}$. Since doubling $y_3$ cannot wrap modulo $Q$, the
-extra check gives $y_3 < 2^{15}$. Hence $0 \le y < 2^{63}$. The five requests
-are spread across the chiplet-responses, wiring, and hash-kernel columns to fit
-the existing per-row interaction budgets without adding another lookup column.
-All target the same `RangeCheck` bus, so only their combined multiset matters.
+For the stack node index $n$, Core enforces $b$ to be boolean and constrains
 
-The slack equation is checked in the field, but its left-hand side is at most
-$2^{64} - 1$, which is less than $M + Q$. In this interval, $M$ is the only
-integer congruent to $M$ modulo $Q$. The equation therefore also holds over the
-integers, proving $n < Q$. Conversely, every canonical index has the slack
-$y = M - i_1 - b_0$; when $n = Q - 1$, the slack is zero.
+$$
+n + b + 2y = Q - 1.
+$$
 
-The four slack limbs reuse the controller's capacity columns on the level-0
-Merkle input row. The permutation-link lookup sends zeros in those positions,
-so the Poseidon2 input and the resulting Merkle root do not change.
+The typed Merkle-init request carries $b$. Its matching controller response derives the first bit
+as $i_0 - 2i_1$, so the lookup binds the Core helper to the actual path direction. The `RangeCheck`
+bus checks all four limbs and also checks $2y_3$. The limb checks give $y_j < 2^{16}$, and the
+additional check gives $y_3 < 2^{15}$, hence $0 \le y < 2^{63}$. Together with the equation and the
+controller binding of $b$, this rules out the non-canonical depth-64 alias.
+
+All seven Merkle range requests are emitted from existing Core lookup columns:
+
+- the stack-overflow column checks $y_0$, $y_1$, and $y_2$ for both operations;
+- for `MPVERIFY`, the chiplet-request column checks $y_3$, while the
+  block-stack/range/log-deferred column checks $d$, $1024(d - 1)$, and $2y_3$;
+- for `MRUPDATE`, the block-stack/range/log-deferred column checks $d$, $1024(d - 1)$, $y_3$, and
+  $2y_3$.
+
+The execution tracer replays the corresponding requests into the fixed And8 range-table
+multiplicities. No canonical-index witness is stored in the native hash controller.
 
 ## CRYPTOSTREAM
-The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
-top 8 stack elements (the rate), writes the resulting ciphertext back to memory,
-and replaces the top 8 stack elements with the ciphertext. The source and
-destination pointers are stored in stack positions $12$ and $13$, respectively.
 
-Let $r_i = s_i$ be the rate values and $c_i = s_i'$ be the ciphertext values on
-the stack after the operation. We define plaintext values as $p_i = c_i - r_i$.
+`CRYPTOSTREAM` encrypts two words from memory using one Eidos XOF counter block. Its stack
+transition is
 
-The source and destination pointers advance by two words:
+```text
+Before: [K_CTR(4), counter, src,   dst,    remaining, ...]
+After:  [K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]
+```
 
-$$
-s_{12}' = s_{12} + 8
-$$
+The Eidos compression input is `[counter, 0, 0, 0, 0, 0, 0, 0, K_CTR]`. The raw XOF result supplies sixteen
+u32 keystream lanes. Each of the eight plaintext field elements is unpacked into low and high u32
+limbs, XORed with the corresponding lanes byte by byte, and written as two field elements. This is
+why eight input elements advance `dst` by sixteen elements.
 
-$$
-s_{13}' = s_{13} + 8
-$$
+The AIR binds three parts of the operation through typed LogUp relations:
 
-The capacity and tail elements are unchanged:
+- the core row supplies the clock-tagged Eidos XOF input consumed by the compression trace;
+- two 8-row AEAD-stream trace entries prove the two four-element source reads and four
+  two-element destination writes;
+- the And8 lookup table proves every byte-level XOR used to form the expanded ciphertext limbs.
 
-$$
-s_i' - s_i = 0 \text{ for } i \in \{8,9,10,11,14,15\}
-$$
-
-We define the two read requests and two write requests as follows:
-
-$$
-u_{read,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot s_{12} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot p_j
-$$
-
-$$
-u_{read,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot (s_{12} + 4) + \alpha_4 \cdot clk +
-\sum_{j=0}^3 \alpha_{j+5} \cdot p_{j+4}
-$$
-
-$$
-u_{write,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot c_j
-$$
-
-$$
-u_{write,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot (s_{13} + 4) + \alpha_4 \cdot clk +
-\sum_{j=0}^3 \alpha_{j+5} \cdot c_{j+4}
-$$
-
-$$
-u_{mem} = u_{read,1} \cdot u_{read,2} \cdot u_{write,1} \cdot u_{write,2}
-$$
-
-In the above, $op_{mem\_readword}$ and $op_{mem\_writeword}$ are the unique
-[operation labels](../chiplets/index.md#operation-labels) for the memory read
-and write word operations.
-
-Using the above value, the chiplet bus constraint is:
-
-$$
-b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 5
-$$
-
-The effect of this operation on the rest of the stack is:
-* **No change** starting from position $8$, except for the pointer updates above.
+The core constraints preserve `K_CTR` and stack positions $8$ through $15$, increment the counter
+and pointers by their fixed amounts, and decrement `remaining`. Address validation requires
+word-aligned, non-overlapping source and destination blocks.
 
 ## FRIE2F4
 The `FRIE2F4` operation performs one factor-4 FRI layer fold over the quadratic extension field. It also checks consistency with the previous folded layer and writes the loop state consumed by the next FRI layer.
@@ -439,39 +408,33 @@ $$
 ## LOG_DEFERRED
 
 The `log_deferred` operation folds a verified statement digest `STMNT` into the rolling deferred
-root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
-merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
-`ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The VM STARK authenticates the final
-root as one public value.
+root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as one Eidos
+compression using the fixed chaining value derived from the registered deferred-AND domain:
+`ROOT_NEW = Eidos::compress(DEFERRED_AND_INIT_CV, ROOT_PREV || STMNT)`. The VM STARK
+authenticates the final root as one public value.
 
 ### Operation Overview
 
-The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
-4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
-opcode entry. `STMNT` must already be present in the processor's deferred state and evaluate to
-`TRUE`; otherwise execution fails when the opcode attempts to log it. Core-library and precompile
-support code wrap this low-level opcode by registering nodes and logging statement digests.
+The stack is expected to be arranged as `[STMNT, ...]`. `STMNT` must already be present in the
+processor's deferred state and evaluate to `TRUE`; otherwise execution fails when the opcode
+attempts to log it. Core-library and precompile support code wrap this low-level opcode by
+registering nodes and logging statement digests.
 
 Additionally, the processor maintains a persistent rolling deferred root that is updated with each
 `LOG_DEFERRED` invocation. The previous root is provided non‑deterministically via helper
-registers and is denoted `ROOT_PREV`. The hasher bus links the constrained Poseidon2 permutation to
+registers and is denoted `ROOT_PREV`. The hasher bus links the constrained Eidos compression to
 the stack transition, while the deferred state enforces that the logged statement evaluates to
 `TRUE`.
 
-The operation evaluates
-`[ROOT_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]])`, with the following
-stack transition:
+The operation has the following stack transition:
 
 ```
-Before:  [_,        STMNT,      _,       ...]
-After:   [ROOT_NEW, OUT_RATE1,  OUT_CAP, ...]
+Before:  [STMNT,    ...]
+After:   [ROOT_NEW, ...]
 ```
 
-`STMNT` placement on rate1 lets the chiplet bus's β⁶..β⁹ products coincide with HPERM's rate1
-products, so they share gates after circuit memoization. The output uses the identity HPERM
-lane→slot mapping: `rate0_out -> stack[0..4]` (= `ROOT_NEW`), `rate1_out -> stack[4..8]`,
-`cap_out -> stack[8..12]`. `OUT_RATE1` and `OUT_CAP` are unused and are typically dropped by
-the caller immediately.
+The top word is replaced with `ROOT_NEW`; the remaining stack is preserved. Wrappers usually drop
+`ROOT_NEW` after the opcode.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
@@ -484,43 +447,40 @@ root internally between invocations.
 
 #### Hasher chiplet
 
-The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting
-permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
+The following two messages are sent to the hasher controller, ensuring the validity of the
+compression. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
 elements appearing on the bus are:
 
 $$
 \begin{aligned}
 \mathsf{ROOT}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
-\mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-\mathsf{ANDTAG}_i              &= \bigl([1,0,0,0]\bigr)_i &&\text{(`Tag::AND` capacity word)}
+\mathsf{STMNT}_i               &= s_i         &&\text{(stack slots 0..3)}\\
+\mathsf{CV}_i                  &= \mathsf{DEFERRED\_AND\_INIT\_CV}_i
+&&\text{(registered Eidos chaining value)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message reduces the Poseidon2 state in the canonical order
-`[ROOT_PREV, STMNT, [1,0,0,0]]`:
+The input message reduces the Eidos compression state in the canonical order
+`[ROOT_PREV, STMNT, DEFERRED_AND_INIT_CV]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{ROOT}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{ANDTAG}_i.
+v_{\text{input}} = H_{linear\_init}(h_0, 0,
+[\mathsf{ROOT}^{\text{prev}}, \mathsf{STMNT}, \mathsf{CV}]).
 $$
 
-One controller row later, the `op_retstate` response provides the permuted state
-`[ROOT_NEW, OUT_RATE1, OUT_CAP]`. Denote the stack after the instruction by $s'_i$; the top
-twelve elements are `[ROOT_NEW, OUT_RATE1, OUT_CAP]`. Thus
+The same one-row controller entry returns the updated chaining word with a typed return message.
+Denote the stack after the instruction by $s'_i$:
 
 $$
-\begin{aligned}
-\mathsf{ROOT}^{\text{new}}_i &= s'_{i},
-\mathsf{OUT\_RATE1}_i         &= s'_{4+i},\\
-\mathsf{OUT\_CAP}_i           &= s'_{8+i},
-\end{aligned}
-\qquad i \in \{0,1,2,3\},
+\mathsf{ROOT}^{\text{new}}_i = s'_{i}
+\qquad i \in \{0,1,2,3\}.
 $$
 
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{ROOT}^{\text{new}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{OUT\_RATE1}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{OUT\_CAP}_i.
+v_{\text{output}} = H_{return}(h_0, 0, \mathsf{ROOT}^{\text{new}}).
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -529,9 +489,8 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present
-in the hash-controller region. These two controller rows are consecutive, so their addresses differ
-by exactly 1.
+The constraint enforces that both messages occur on one hasher-controller row backed by the same
+physical Eidos compression cycle.
 
 
 
@@ -540,14 +499,15 @@ by exactly 1.
 Inside the VM, the deferred root is tracked via the virtual-table bus: each `log_deferred` update
 removes the previous root before inserting the next one.
 
-We denote the messages for removing and inserting the root as
+Let $D(r) = P_{log\_deferred} + \sum_{j=0}^{3}\beta^j r_j$. We denote the messages for
+removing and inserting the root as
 
 $$
-v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_PREV}_j
+v_{rem} = D(\mathsf{ROOT\_PREV})
 $$
 
 $$
-v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_NEW}_j
+v_{ins} = D(\mathsf{ROOT\_NEW})
 $$
 
 The bus constraint is applied to the virtual table column as follows.
@@ -568,13 +528,13 @@ $$
 The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
 $$
-v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred},
+v_{ins,init} = D([0,0,0,0]),
 $$
 
 $$
-v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{ROOT\_FINAL}_j.
+v_{rem,last} = D(\mathsf{ROOT\_FINAL}).
 $$
 
-Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
-itself the digest at every step. The final deferred root is a fixed four-field-element value
-committed by `VmProof`, not a variable-length request transcript.
+Because this compression uses the domain-derived `DEFERRED_AND_INIT_CV` and outputs an updated chaining
+word directly, that word is the deferred root at every step. The final deferred root is a fixed
+four-field-element value committed by `VmProof`, not a variable-length request transcript.

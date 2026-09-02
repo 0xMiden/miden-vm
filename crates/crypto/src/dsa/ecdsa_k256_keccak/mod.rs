@@ -233,7 +233,7 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    /// Returns a commitment to the public key using the Poseidon2 hash function.
+    /// Returns a commitment to the public key using the Eidos hash function.
     ///
     /// Public key serialization remains compressed SEC1. The commitment preimage is not the
     /// compressed SEC1 encoding; it is `qx || qy`, where each secp256k1 affine coordinate is

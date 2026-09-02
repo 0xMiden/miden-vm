@@ -365,13 +365,12 @@ fn advice_insert_hdword() {
         adv.insert_hdword_d
 
         # manually compute the hash of the two words with domain
-        # Set up state for hperm: [W0, W1, CAP] where CAP = [0, domain, 0, 0]
-        # (domain goes in state[9], not state[8])
-        push.0 push.0 movup.10 push.0 movdnw.2
-        # => [W0, W1, [0, domain, 0, 0], ...]
-        hperm
-        # Extract hash from R0 (state[0..4]) after permutation
-        swapw.2 dropw dropw
+        # Eidos init chaining word for domain 9 and 8 input felts.
+        movup.8 drop
+        push.6620516959492505600.1947077364412317696.2688637132020383752.4280581857092829193
+        movdnw.2
+        compress
+        dropw dropw
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
@@ -390,6 +389,32 @@ fn advice_insert_hdword() {
 }
 
 #[test]
+fn advice_insert_compress() {
+    let source: &str = "
+    begin
+        # stack: [BLOCK_LO, BLOCK_HI, CV]
+
+        # Store the two block words under the raw compression output CV.
+        adv.insert_compress
+
+        # Recompute that key from the unchanged input state.
+        compress
+        swapw.2
+        # => [CV', BLOCK_HI, BLOCK_LO]
+
+        # Load the inserted block words and remove the compression state.
+        adv.push_mapval
+        dropw dropw dropw
+
+        # Reconstruct [BLOCK_LO, BLOCK_HI] from the advice stack.
+        adv_loadw swapw adv_loadw swapw
+    end";
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+    build_test!(source, &stack_inputs).expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+}
+
+#[test]
 fn advice_insert_hqword() {
     let source: &str = "
     begin
@@ -398,27 +423,14 @@ fn advice_insert_hqword() {
         # hash and insert top four words into the advice map
         adv.insert_hqword
 
-        # manually compute the hash of the four words
-        # hash_elements([A || B || C || D]) absorbs in two rounds:
-        # Round 1: absorb A, B with zero capacity
-        # Round 2: absorb C, D with capacity from round 1
-
-        # First absorption: [A, B, cap=0]
-        # Stack: [A, B, C, D, ...]
-        padw movdnw.2
-
-        hperm
-        # => [RATE1', RATE2', CAP', C, D, ...]
-
-        # Second absorption: use CAP' as new capacity, absorb C, D
-        dropw dropw
-        # => [CAP', C, D, ...]
+        # Hash the four words with Eidos length binding for 16 input felts.
+        push.6620516959492505600.1947077364412317696.2688637132020383760.4280581857092829184
         movdnw.2
-        hperm
-        # => [RATE1'', RATE2'', CAP'', ...]
-
-        # Extract hash
-        swapw.2 dropw dropw
+        compress
+        dropw dropw
+        movdnw.2
+        compress
+        dropw dropw
         # => [KEY]
 
         # load the advice stack with values from the advice map and drop the key

@@ -1,13 +1,15 @@
 //! Chiplet-trace LogUp lookup AIR.
 //!
-//! Chiplet-trace side of the Miden VM's LogUp argument: three columns, one per
-//! `emit_*` function in [`super::buses`]. A single [`ChipletBusContext`] carries the
-//! two-row window plus a shared [`ChipletActiveFlags`] snapshot.
+//! Owns the chiplet-trace side of the Miden VM's LogUp argument: four lookup columns, one
+//! per `emit_*` function in [`super::buses`]. This module wires them together
+//! via a single [`ChipletBusContext`] that carries the two-row window plus a shared
+//! [`ChipletActiveFlags`] snapshot.
 //!
 //! Columns (in emission order):
 //! - chiplet responses (memory / bitwise / hasher replies).
 //! - hash-kernel virtual table.
-//! - shared wiring column: ACE wiring + hasher perm-link.
+//! - shared wiring column: ACE wiring + hasher compression link.
+//! - four-Felt hasher result and chaining-value returns.
 //!
 //! [`ChipletLookupBuilder`] builds the shared active flags for this AIR. All current adapters use
 //! the default path, which reads the chiplet selector columns; the hook exists so a future adapter
@@ -17,6 +19,7 @@ use super::buses::{
     ChipletActiveFlags,
     chiplet_responses::{self, emit_chiplet_responses},
     hash_kernel::{self, emit_hash_kernel_table},
+    hasher_returns::{self, emit_hasher_returns},
     wiring::{self, emit_v_wiring},
 };
 use crate::{ChipletCols, Felt, lookup::LookupBuilder};
@@ -47,7 +50,7 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 // CHIPLET BUS CONTEXT
 // ================================================================================================
 
-/// Shared context for the three chiplet-trace bus emitters.
+/// Shared context for the chiplet-trace bus emitters.
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
 /// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
@@ -85,14 +88,14 @@ where
 // ================================================================================================
 
 /// Per-column fraction stride, in emission order (see [`emit_chiplet_lookup_columns`]).
-pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 3] = [
+pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 4] = [
     chiplet_responses::MAX_INTERACTIONS_PER_ROW,
     hash_kernel::MAX_INTERACTIONS_PER_ROW,
     wiring::MAX_INTERACTIONS_PER_ROW,
+    hasher_returns::MAX_INTERACTIONS_PER_ROW,
 ];
 
-/// Emit the three chiplet-trace LogUp columns (responses, hash-kernel virtual table,
-/// wiring).
+/// Emit the chiplet-trace LogUp columns.
 ///
 /// Driven by `ChipletsAir`'s [`LookupAir`] impl.
 pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
@@ -104,4 +107,5 @@ pub(crate) fn emit_chiplet_lookup_columns<LB: ChipletLookupBuilder>(
     emit_chiplet_responses::<LB>(builder, &ctx);
     emit_hash_kernel_table::<LB>(builder, &ctx);
     emit_v_wiring::<LB>(builder, &ctx);
+    emit_hasher_returns::<LB>(builder, &ctx);
 }

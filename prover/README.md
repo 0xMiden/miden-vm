@@ -72,10 +72,9 @@ verifier, ensuring consistency across the system.
 
 ### Hash Function Selection
 
-Different hash functions offer different tradeoffs:
-
-BLAKE3 and Keccak provide faster proving, but they are not efficient for recursion. RPO256,
-Poseidon2, and RPX256 prove more slowly but support efficient recursive verification in Miden VM.
+Different hash functions offer different tradeoffs. BLAKE3 and Keccak provide faster proving but
+are not efficient for recursion. RPO256, Poseidon2, and RPX256 remain selectable for non-recursive
+proofs. Eidos is the VM-native hash and the only hash accepted by recursive Miden VM verification.
 
 ## Crate features
 Miden prover can be compiled with the following features:

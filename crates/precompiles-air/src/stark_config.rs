@@ -1,28 +1,21 @@
 //! STARK configuration for proving/verifying custom chiplet AIRs.
 //!
-//! This module provides both:
-//! - production-style configuration factories matching the Miden VM hash-function surface and
-//!   PCS/security parameters; and
-//! - the legacy fast Poseidon2 test configuration used by local examples/tests.
+//! This module provides production-style configuration factories matching the Miden VM
+//! hash-function surface, along with a smaller Eidos configuration for local tests.
 //!
 //! Production configs delegate to `miden_air::config`; callers pass the relation digest
 //! explicitly. Callers should observe protocol parameters with [`observe_protocol_params`]
 //! before proving or verifying.
 
 pub use miden_air::config::{
-    Blake3Config, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
-    blake3_256_config, keccak_config, observe_protocol_params, poseidon2_config, rpo_config,
-    rpx_config,
+    Blake3Config, EidosConfig, KeccakConfig, Poseidon2Config, RelationDigest, RpoConfig, RpxConfig,
+    blake3_256_config, eidos_config, keccak_config, observe_protocol_params, poseidon2_config,
+    rpo_config, rpx_config,
 };
 use miden_core::Felt;
 use miden_crypto::{
-    field::Field,
-    hash::poseidon2::Poseidon2Permutation256,
-    stark::{
-        GenericStarkConfig, challenger::DuplexChallenger, dft::Radix2DitParallel,
-        hasher::StatefulSponge, lmcs::config::LmcsConfig, pcs::PcsParams,
-        symmetric::TruncatedPermutation,
-    },
+    hash::eidos::MidenEidosChallenger,
+    stark::{StarkConfig, pcs::PcsParams},
 };
 
 // SHARED TYPES
@@ -30,12 +23,6 @@ use miden_crypto::{
 
 /// Precompile prover STARK configuration with pre-filled common type parameters.
 pub type PrecompileStarkConfig<L, Ch> = miden_air::config::MidenStarkConfig<L, Ch>;
-
-/// Packed field type for SIMD.
-pub type PackedFelt = <Felt as Field>::Packing;
-
-/// Number of inputs to the Merkle compression function.
-const COMPRESSION_INPUTS: usize = 2;
 
 /// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.
 ///
@@ -51,9 +38,9 @@ pub const PRECOMPILE_RELATION_DIGEST: RelationDigest = {
     ]
 };
 
-/// Default hash function for compatibility APIs.
+/// Default commitment hash for precompile proofs.
 pub const DEFAULT_HASH_FUNCTION: miden_core::proof::HashFunction =
-    miden_core::proof::HashFunction::Poseidon2;
+    miden_core::proof::HashFunction::Eidos;
 
 // PRECOMPILE PCS PARAMETERS
 // ================================================================================================
@@ -88,46 +75,11 @@ pub fn precompile_pcs_params() -> PcsParams {
     .expect("invalid precompile PCS parameters")
 }
 
-// LEGACY TEST CONFIG
+// TEST CONFIG
 // ================================================================================================
 
-/// Sponge state width in field elements.
-const WIDTH: usize = 12;
-/// Sponge rate (absorbable elements per permutation).
-const RATE: usize = 8;
-/// Sponge digest width in field elements.
-const DIGEST: usize = 4;
-
-/// Poseidon2 permutation type.
-pub type Perm = Poseidon2Permutation256;
-
-/// Stateful sponge for LMCS hashing.
-pub type Sponge = StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
-
-/// Compression function for Merkle tree construction.
-pub type Compress = TruncatedPermutation<Perm, COMPRESSION_INPUTS, DIGEST, WIDTH>;
-
-/// Duplex challenger for Fiat-Shamir.
-pub type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
-
-/// Algebraic LMCS for the Poseidon2 test/default config.
-type AlgLmcs<P> = LmcsConfig<
-    PackedFelt,
-    PackedFelt,
-    StatefulSponge<P, WIDTH, RATE, DIGEST>,
-    TruncatedPermutation<P, COMPRESSION_INPUTS, DIGEST, WIDTH>,
-    WIDTH,
-    DIGEST,
->;
-
-/// LMCS configuration for the Poseidon2 test/default config.
-pub type Lmcs = AlgLmcs<Perm>;
-
-/// DFT implementation.
-pub type Dft = Radix2DitParallel<Felt>;
-
-/// Full legacy test STARK configuration type.
-pub type TestConfig = Poseidon2Config;
+/// Eidos STARK configuration with reduced PCS parameters for tests.
+pub type TestConfig = EidosConfig;
 
 /// Test PCS parameters (fast but insecure — for testing only).
 ///
@@ -149,18 +101,12 @@ pub fn test_pcs_params() -> PcsParams {
     .expect("invalid test PCS params")
 }
 
-/// Create a fresh challenger for proving/verification under the legacy test
-/// config.
-pub fn test_challenger() -> Challenger {
-    DuplexChallenger::new(Poseidon2Permutation256)
+/// Creates a fresh challenger for the Eidos test configuration.
+pub fn test_challenger() -> MidenEidosChallenger {
+    test_config().challenger()
 }
 
-/// Create the LMCS instance for the legacy test config.
-pub fn test_lmcs() -> Lmcs {
-    LmcsConfig::new(Sponge::new(Poseidon2Permutation256), Compress::new(Poseidon2Permutation256))
-}
-
-/// Create the full legacy test STARK configuration.
+/// Creates an Eidos STARK configuration with reduced PCS parameters.
 pub fn test_config() -> TestConfig {
-    GenericStarkConfig::new(test_pcs_params(), test_lmcs(), Dft::default(), test_challenger())
+    eidos_config(test_pcs_params(), PRECOMPILE_RELATION_DIGEST)
 }

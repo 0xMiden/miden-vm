@@ -13,7 +13,7 @@ use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 
 /// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
@@ -61,7 +61,10 @@ pub(crate) enum DeferredSessionError {
     UnsupportedMsm { digest: Digest, reason: &'static str },
 
     #[error("translated root mismatch: expected {expected:?}, got {actual:?}")]
-    RootMismatch { expected: P2Digest, actual: P2Digest },
+    RootMismatch {
+        expected: EidosDigest,
+        actual: EidosDigest,
+    },
 }
 
 pub(crate) fn session_from_deferred_state(
@@ -77,7 +80,7 @@ pub(crate) fn session_from_deferred_state(
     };
 
     let root = builder.translate(state.root())?;
-    let expected = P2Digest::from(state.root());
+    let expected = EidosDigest::from(state.root());
     let actual = root.hash();
     if actual != expected {
         return Err(DeferredSessionError::RootMismatch { expected, actual });
@@ -233,7 +236,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                         Translated::Uint(value) => value.node.hash(),
                         Translated::Ec(value) => value.node.hash(),
                     };
-                    debug_assert_eq!(hash, P2Digest::from(digest));
+                    debug_assert_eq!(hash, EidosDigest::from(digest));
                     self.translated.insert(digest, value);
                 },
             }
@@ -427,7 +430,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         let (actual, claim) = self.session.keccak(&input);
         let actual = actual.to_u32s().into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
         debug_assert_eq!(expected, actual);
-        debug_assert_eq!(claim.hash(), P2Digest::from(digest));
+        debug_assert_eq!(claim.hash(), EidosDigest::from(digest));
         Ok(claim)
     }
 

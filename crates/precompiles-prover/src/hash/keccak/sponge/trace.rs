@@ -3,10 +3,10 @@
 //! Callers hold a [`SpongeRequires`] accumulator and submit
 //! [`Invocation`]s to it via [`SpongeRequires::require`]. Each call
 //! delegates to the caller-supplied [`ChunkRequires`] (which lays the
-//! invocation's chunk-tape segment via [`Poseidon2Requires`]), runs
+//! invocation's chunk-tape segment via [`EidosRequires`]), runs
 //! the Keccak-f permutations as a trace-gen oracle, allocates a
 //! fresh `sponge_seq_id` range, and returns a [`SpongeOutput`]
-//! (Keccak digest + chunk-content P2 digest + range stamps).
+//! (Keccak digest + chunk-content Eidos digest + range stamps).
 //!
 //! No dedup at this layer — sponge is a pure allocator. The Keccak-
 //! node chiplet above dedupes by Keccak digest (`(content,
@@ -41,9 +41,9 @@ use crate::{
     },
     logup::build_logup_aux_trace,
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, require_logic64},
-    transcript::poseidon2::{
-        digest::P2Digest,
-        trace::{PermSpan, Poseidon2Requires},
+    transcript::eidos::{
+        digest::EidosDigest,
+        trace::{AbsorptionSpan, EidosRequires},
     },
     utils::split_u64,
 };
@@ -141,17 +141,17 @@ impl SpongeSeqId {
 }
 
 /// What a `SpongeRequires::require` call returns: the Keccak digest
-/// of this invocation, the chunk-content P2 digest, the chunk-content
-/// P2 absorption span (so the Keccak-node layer can read OutRate0 at
-/// its tail), the invocation's sponge-row head, and its chunk-chain
+/// of this invocation, the chunk-content Eidos digest, the chunk-content
+/// Eidos absorption span (so the Keccak-node layer can consume the terminal
+/// `EidosOut` value at its tail), the invocation's sponge-row head, and its chunk-chain
 /// head. Empty input still lays one canonical zero chunk, so the span
-/// is non-empty and `chunk_content_digest` binds that chunk's P2
+/// is non-empty and `chunk_content_digest` binds that chunk's Eidos
 /// digest.
 #[derive(Debug, Clone)]
 pub struct SpongeOutput {
     pub keccak_digest: KeccakDigest,
-    pub chunk_content_digest: P2Digest,
-    pub chunk_content_perm_span: PermSpan,
+    pub chunk_content_digest: EidosDigest,
+    pub chunk_content_absorption_span: AbsorptionSpan,
     pub sponge_head: SpongeSeqId,
     pub chunk_head: ChunkSeqId,
 }
@@ -198,7 +198,7 @@ impl SpongeRequires {
     /// one pad block (`keccak256("")`) and one canonical zero chunk,
     /// consumed by the block loop as a full garbage-tail (the pad fires
     /// at byte 0), so the digest is unperturbed while `H_input_chunks`
-    /// still binds a real P2 chain tail.
+    /// still binds a real Eidos chain tail.
     ///
     /// Drives the supplied `round_req` for the 24 rounds of each
     /// block's Keccak permutation, and `bpl_req` for the per-row
@@ -210,16 +210,16 @@ impl SpongeRequires {
         chunk_req: &mut ChunkRequires,
         round_req: &mut RoundRequires,
         bpl_req: &mut BytePairLutRequires,
-        p2: &mut Poseidon2Requires,
+        eidos: &mut EidosRequires,
     ) -> SpongeOutput {
         // Always lay a chunk segment. Empty input yields one canonical
         // zero chunk (see `ChunkInvocation::num_chunks`), which the block
         // loop below consumes as a full garbage-tail (pad at byte 0), so
         // the keccak digest is `keccak256("")` while `H_input_chunks`
-        // still binds a real P2 chain tail.
-        let chunk_out = chunk_req.require(&ChunkInvocation { input: inv.input.clone() }, p2);
-        let (chunk_head, chunk_content_digest, chunk_content_perm_span) =
-            (chunk_out.chunk_head, chunk_out.digest, chunk_out.perm_span);
+        // still binds a real Eidos chain tail.
+        let chunk_out = chunk_req.require(&ChunkInvocation { input: inv.input.clone() }, eidos);
+        let (chunk_head, chunk_content_digest, chunk_content_absorption_span) =
+            (chunk_out.chunk_head, chunk_out.digest, chunk_out.absorption_span);
 
         let layout = InvocationLayout::of(inv);
         let blocks = compute_block_snapshots_driving(inv, &layout, round_req, bpl_req);
@@ -240,7 +240,7 @@ impl SpongeRequires {
         SpongeOutput {
             keccak_digest,
             chunk_content_digest,
-            chunk_content_perm_span,
+            chunk_content_absorption_span,
             sponge_head,
             chunk_head,
         }
@@ -312,7 +312,7 @@ fn compute_block_snapshots_driving(
             }
 
             // 24 round submissions per block, evolving state via the
-            // reference round function so the chunk-content P2 layer
+            // reference round function so the chunk-content Eidos layer
             // sees identical state_ins to what round.generate_trace
             // will replay.
             for &rc in &KECCAK_RC[..NUM_ROUNDS] {

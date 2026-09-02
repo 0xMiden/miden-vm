@@ -39,18 +39,6 @@ impl ConstraintEvalBuilder {
             transition: Felt::ONE,
         }
     }
-
-    pub(in crate::constraints) fn with_row_flags(
-        mut self,
-        first_row: bool,
-        last_row: bool,
-        transition: bool,
-    ) -> Self {
-        self.first_row = Felt::from_bool(first_row);
-        self.last_row = Felt::from_bool(last_row);
-        self.transition = Felt::from_bool(transition);
-        self
-    }
 }
 
 impl AirBuilder for ConstraintEvalBuilder {
@@ -80,6 +68,11 @@ impl AirBuilder for ConstraintEvalBuilder {
 
     fn is_transition(&self) -> Self::Expr {
         self.transition
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        assert_eq!(size, 2, "stack tests use two-row transition windows");
+        self.is_transition()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

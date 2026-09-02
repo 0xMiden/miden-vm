@@ -1,7 +1,8 @@
 //! [`LookupBuilder`] adapter for concrete prover rows.
 //!
 //! The prover path evaluates an AIR against base-field row values and appends one
-//! `(multiplicity, encoded_denominator)` entry for each active lookup interaction to
+//! `(multiplicity, encoded_denominator)` entry for each active lookup interaction with nonzero
+//! multiplicity to
 //! [`LookupFractions`].
 
 use alloc::{vec, vec::Vec};
@@ -30,6 +31,7 @@ where
     EF: ExtensionField<F>,
 {
     main: RowWindow<'a, F>,
+    preprocessed: RowWindow<'a, F>,
     periodic_values: &'a [F],
     challenges: &'a Challenges<EF>,
     /// Dense per-column fraction buffers shared across all rows.
@@ -42,7 +44,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Create a new prover-path adapter for one row pair.
+    /// Create a prover-path adapter for one row pair.
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
@@ -58,6 +60,7 @@ where
     /// Panics in debug builds if `fractions.num_columns() != air.num_columns()`.
     pub fn new<A>(
         main: RowWindow<'a, F>,
+        preprocessed: RowWindow<'a, F>,
         periodic_values: &'a [F],
         challenges: &'a Challenges<EF>,
         air: &A,
@@ -73,6 +76,7 @@ where
         );
         Self {
             main,
+            preprocessed,
             periodic_values,
             challenges,
             fractions,
@@ -108,6 +112,7 @@ where
 pub fn build_lookup_fractions<A, F, EF>(
     air: &A,
     main_trace: &RowMajorMatrix<F>,
+    preprocessed_trace: Option<&RowMajorMatrix<F>>,
     periodic_columns: &[Vec<F>],
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
@@ -120,6 +125,16 @@ where
     let num_rows = main_trace.height();
     let width = main_trace.width();
     let flat: &[F] = main_trace.values.borrow();
+    let (preprocessed_width, preprocessed_flat): (usize, &[F]) =
+        preprocessed_trace.map_or((0, &[][..]), |trace| {
+            assert_eq!(
+                trace.height(),
+                num_rows,
+                "lookup-fraction collection expects preprocessed and main traces to have equal height"
+            );
+            (trace.width(), trace.values.borrow())
+        });
+    let empty_row: &[F] = &[];
 
     let shape = air.column_shape().to_vec();
 
@@ -134,11 +149,25 @@ where
             let nxt_idx = (r + 1) % num_rows;
             let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
             let window = RowWindow::from_two_rows(curr, next);
+            let preprocessed_window = if preprocessed_width == 0 {
+                RowWindow::from_two_rows(empty_row, empty_row)
+            } else {
+                let curr = &preprocessed_flat[r * preprocessed_width..(r + 1) * preprocessed_width];
+                let next = &preprocessed_flat
+                    [nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
+                RowWindow::from_two_rows(curr, next)
+            };
             for (i, col) in periodic_columns.iter().enumerate() {
                 periodic_row[i] = col[r % col.len()];
             }
-            let mut lb =
-                ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut chunk);
+            let mut lb = ProverLookupBuilder::new(
+                window,
+                preprocessed_window,
+                &periodic_row,
+                challenges,
+                air,
+                &mut chunk,
+            );
             air.eval(&mut lb);
         }
         chunk
@@ -168,12 +197,42 @@ where
             .collect();
 
         let total_fractions: usize = chunks.iter().map(|c| c.fractions.len()).sum();
-        let mut fractions_vec: Vec<(F, EF)> = Vec::with_capacity(total_fractions);
-        let mut counts_vec: Vec<usize> = Vec::with_capacity(num_rows * num_cols);
-        for chunk in chunks {
-            fractions_vec.extend(chunk.fractions);
-            counts_vec.extend(chunk.counts);
-        }
+        let (fractions_vec, counts_vec) = if current_num_threads() == 1 {
+            let mut fractions_vec = Vec::with_capacity(total_fractions);
+            let mut counts_vec = Vec::with_capacity(num_rows * num_cols);
+            for chunk in chunks {
+                fractions_vec.extend(chunk.fractions);
+                counts_vec.extend(chunk.counts);
+            }
+            (fractions_vec, counts_vec)
+        } else {
+            let (fraction_chunks, count_chunks): (Vec<_>, Vec<_>) =
+                chunks.into_iter().map(|chunk| (chunk.fractions, chunk.counts)).unzip();
+
+            // Initialize the contiguous destinations in parallel, then copy each ordered chunk
+            // into its disjoint destination slice. This keeps the public flat layout while
+            // avoiding a single-threaded first-touch and copy of the complete lookup buffer.
+            let mut fractions_vec: Vec<(F, EF)> =
+                (0..total_fractions).into_par_iter().map(|_| (F::ZERO, EF::ZERO)).collect();
+            let mut counts_vec: Vec<usize> =
+                (0..num_rows * num_cols).into_par_iter().map(|_| 0).collect();
+
+            let fraction_outputs =
+                split_by_lengths_mut(&mut fractions_vec, fraction_chunks.iter().map(Vec::len));
+            let count_outputs =
+                split_by_lengths_mut(&mut counts_vec, count_chunks.iter().map(Vec::len));
+
+            fraction_outputs
+                .into_par_iter()
+                .zip(fraction_chunks.into_par_iter())
+                .for_each(|(output, chunk)| output.copy_from_slice(&chunk));
+            count_outputs
+                .into_par_iter()
+                .zip(count_chunks.into_par_iter())
+                .for_each(|(output, chunk)| output.copy_from_slice(&chunk));
+
+            (fractions_vec, counts_vec)
+        };
 
         LookupFractions::from_parts(shape, num_rows, fractions_vec, counts_vec)
     };
@@ -184,6 +243,23 @@ where
         "counts buffer should have exactly num_rows * num_cols entries after collection",
     );
     fractions
+}
+
+#[cfg(feature = "concurrent")]
+fn split_by_lengths_mut<T>(
+    output: &mut [T],
+    lengths: impl IntoIterator<Item = usize>,
+) -> Vec<&mut [T]> {
+    let lengths = lengths.into_iter();
+    let mut remaining = output;
+    let mut parts = Vec::with_capacity(lengths.size_hint().0);
+    for len in lengths {
+        let (part, tail) = core::mem::take(&mut remaining).split_at_mut(len);
+        parts.push(part);
+        remaining = tail;
+    }
+    assert!(remaining.is_empty(), "chunk lengths must cover the complete output buffer");
+    parts
 }
 
 impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>
@@ -202,6 +278,7 @@ where
     type PeriodicVar = F;
 
     type MainWindow = RowWindow<'a, F>;
+    type PreprocessedWindow = RowWindow<'a, F>;
 
     type Column<'c>
         = ProverColumn<'c, F, EF>
@@ -210,6 +287,10 @@ where
 
     fn main(&self) -> Self::MainWindow {
         self.main
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -346,7 +427,7 @@ where
         M: LookupMessage<F, EF>,
     {
         // The prover path short-circuits on `flag == F::ZERO`, while the constraint path
-        // evaluates the encode unconditionally. The two agree only when `flag ∈ {0, 1}`.
+        // evaluates the encode unconditionally. The two agree only when `flag in {0, 1}`.
         // Every Miden bus emitter today drives `flag` as a product of decoder/op selectors
         // pinned boolean by the AIR. This debug assertion catches regressions at test time.
         debug_assert!(
@@ -354,7 +435,7 @@ where
             "ProverGroup::insert flag must be in {{0, 1}}; non-boolean flag would diverge \
              from the constraint path",
         );
-        if flag == F::ZERO {
+        if flag == F::ZERO || multiplicity == F::ZERO {
             return;
         }
         let v = msg().encode(self.challenges);
@@ -374,7 +455,7 @@ where
             "ProverGroup::batch flag must be in {{0, 1}}; non-boolean flag would diverge \
              from the constraint path",
         );
-        // When `active == false` every push inside the batch is a no-op — the
+        // When `active == false` every push inside the batch is a no-op - the
         // `msg.encode()` call is skipped too. The `build` closure still runs so
         // it can produce its `R` return value without requiring `R: Default`.
         let active = flag != F::ZERO;
@@ -385,6 +466,32 @@ where
         };
         build(&mut batch)
     }
+
+    fn beta_powers(&self) -> &[EF] {
+        &self.challenges.beta_powers
+    }
+
+    fn bus_prefix(&self, bus_id: usize) -> EF {
+        self.challenges.bus_prefix[bus_id]
+    }
+
+    fn selected_batch2_encoded(
+        &mut self,
+        _name: &'static str,
+        _slot0_name: &'static str,
+        slot0_multiplicity: F,
+        slot0_encoded: impl FnOnce() -> EF,
+        _slot1_name: &'static str,
+        slot1_multiplicity: F,
+        slot1_encoded: impl FnOnce() -> EF,
+    ) {
+        if slot0_multiplicity != F::ZERO {
+            self.fractions.push((slot0_multiplicity, slot0_encoded()));
+        }
+        if slot1_multiplicity != F::ZERO {
+            self.fractions.push((slot1_multiplicity, slot1_encoded()));
+        }
+    }
 }
 
 // PROVER BATCH
@@ -394,12 +501,10 @@ where
 ///
 /// Holds the same mutable borrow of the column's fraction `Vec` as the
 /// enclosing [`ProverGroup`], plus an `active` flag copied from the
-/// outer `batch(flag, …)` call. When `active == false` every push is a
-/// no-op — the `msg.encode()` call is skipped too, so inactive batches
-/// do essentially no work.
+/// outer `batch(flag, ...)` call. Inactive batches skip message encoding and do not push.
 ///
-/// Each push appends one fraction entry when active. There's no `(N, D)` state
-/// inside the batch — LogUp's aux-trace builder handles the combination downstream.
+/// Each push appends one fraction entry when active and its multiplicity is nonzero. There's no
+/// `(N, D)` state inside the batch - LogUp's aux-trace builder handles the combination downstream.
 pub struct ProverBatch<'b, F, EF>
 where
     F: Field,
@@ -422,7 +527,7 @@ where
     where
         M: LookupMessage<F, EF>,
     {
-        if !self.active {
+        if !self.active || multiplicity == F::ZERO {
             return;
         }
         let v = msg.encode(self.challenges);
@@ -436,7 +541,7 @@ where
         encoded: impl FnOnce() -> EF,
         _deg: Deg,
     ) {
-        if !self.active {
+        if !self.active || multiplicity == F::ZERO {
             return;
         }
         let v = encoded();
@@ -454,7 +559,7 @@ mod tests {
     use std::{vec, vec::Vec};
 
     use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
-    use miden_crypto::stark::air::RowWindow;
+    use miden_crypto::stark::air::{RowWindow, WindowAccess};
 
     use super::*;
     use crate::{
@@ -463,7 +568,7 @@ mod tests {
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
-    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
+    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + beta^0*value`, which is
     /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
     /// without blowing up).
     #[derive(Clone, Copy, Debug)]
@@ -478,7 +583,7 @@ mod tests {
     }
 
     /// Two-column stand-in for the real Miden lookup AIR, with a handcrafted `eval` body
-    /// that respects its own shape on **every** row — no mutual-exclusion assumptions, so
+    /// that respects its own shape on **every** row - no mutual-exclusion assumptions, so
     /// random (non-trace) input data drives it without tripping the shape debug_assert.
     ///
     /// - Column 0 always pushes 2 fractions (one `add`, one `remove`) with shape 2.
@@ -564,17 +669,17 @@ mod tests {
 
         let air = SmokeAir;
 
-        // Any reasonable non-zero challenges — SmokeMsg encodes to `bus_prefix[0] + v`
+        // Any reasonable non-zero challenges - SmokeMsg encodes to `bus_prefix[0] + v`
         // which is non-zero as long as the challenges are.
         let alpha = QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]);
         let beta = QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]);
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
-        // `LookupAir` impl — the trait-method path can't be called directly because
+        // `LookupAir` impl - the trait-method path can't be called directly because
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
         let challenges = Challenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
         // `SmokeAir::eval` never touches the main trace, periodic columns, or public
-        // values — pass dummy zero-length slices.
+        // values - pass dummy zero-length slices.
         let empty_row: Vec<Felt> = vec![];
         let periodic_values: Vec<Felt> = vec![];
 
@@ -585,8 +690,10 @@ mod tests {
 
         for _row in 0..NUM_ROWS {
             let window = RowWindow::from_two_rows(&empty_row, &empty_row);
+            let preprocessed = RowWindow::from_two_rows(&empty_row, &empty_row);
             let mut lb = ProverLookupBuilder::new(
                 window,
+                preprocessed,
                 &periodic_values,
                 &challenges,
                 &air,
@@ -640,6 +747,89 @@ mod tests {
         // Column 1 stores the per-row fraction on every row.
         for &entry in &aux[1] {
             assert_eq!(entry, delta1);
+        }
+    }
+
+    struct RowTaggedAir;
+
+    const ROW_TAGGED_SHAPE: [usize; 1] = [1];
+
+    impl<LB> LookupAir<LB> for RowTaggedAir
+    where
+        LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, Var = Felt, ExprEF = QuadFelt>,
+    {
+        fn num_columns(&self) -> usize {
+            1
+        }
+
+        fn column_shape(&self) -> &[usize] {
+            &ROW_TAGGED_SHAPE
+        }
+
+        fn max_message_width(&self) -> usize {
+            1
+        }
+
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+
+        fn eval(&self, builder: &mut LB) {
+            let row_tag = builder.main().current_slice()[0];
+            let active = builder.main().current_slice()[1];
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "row_tagged",
+                        |group| {
+                            group.add(
+                                "row_tag",
+                                active,
+                                || SmokeMsg { value: row_tag },
+                                Deg { v: 0, u: 0 },
+                            );
+                        },
+                        Deg { v: 0, u: 0 },
+                    );
+                },
+                Deg { v: 0, u: 0 },
+            );
+        }
+    }
+
+    #[test]
+    fn multi_chunk_collection_preserves_row_order() {
+        const NUM_ROWS: usize = 2 * crate::lookup::aux_builder::ACCUMULATE_ROWS_PER_CHUNK + 1;
+
+        let mut trace_values = Vec::with_capacity(2 * NUM_ROWS);
+        let mut expected_counts = Vec::with_capacity(NUM_ROWS);
+        let mut expected_tags = Vec::with_capacity(NUM_ROWS);
+        for row in 0..NUM_ROWS {
+            let row_tag = Felt::from_usize(row + 1);
+            let active = row % 3 != 0;
+            trace_values.extend([row_tag, if active { Felt::ONE } else { Felt::ZERO }]);
+            expected_counts.push(usize::from(active));
+            if active {
+                expected_tags.push(row_tag);
+            }
+        }
+        let trace = RowMajorMatrix::new(trace_values, 2);
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]),
+            QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]),
+            1,
+            1,
+        );
+
+        let fractions = build_lookup_fractions(&RowTaggedAir, &trace, None, &[], &challenges);
+
+        assert_eq!(fractions.counts(), expected_counts);
+        assert_eq!(fractions.fractions().len(), expected_tags.len());
+        for (&row_tag, &(multiplicity, denominator)) in
+            expected_tags.iter().zip(fractions.fractions())
+        {
+            assert_eq!(multiplicity, Felt::ONE);
+            assert_eq!(denominator, SmokeMsg { value: row_tag }.encode(&challenges));
         }
     }
 }

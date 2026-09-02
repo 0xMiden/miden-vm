@@ -1,85 +1,71 @@
-use miden_core::{Felt, ZERO, events::SystemEvent, operations::Operation::*};
+use miden_core::{
+    ZERO, chiplets::eidos_compression, events::SystemEvent, operations::Operation::*,
+};
 
 use super::BasicBlockBuilder;
 
 // HASHING
 // ================================================================================================
 
-/// Appends HPERM and stack manipulation operations to compute a 1-to-1 Poseidon2 hash.
+/// Appends Eidos compression and stack manipulation operations to compute a 1-to-1 hash.
 ///
 /// - Input:   the top 4 elements are the word `A` to be hashed.
-/// - Output:  the middle 4 elements are the digest word.
+/// - Output:  the top 4 elements are the digest word.
 ///
-/// Internally, this prepares the top 12 elements as a Poseidon2 state in `[RATE0, RATE1, CAPACITY]`
-/// layout, calls `hperm`, and then extracts the digest using squeeze_digest pattern.
-///
-/// This operation takes 19 VM cycles.
+/// Internally, this compresses `[A, ZERO]` under the selector-zero Eidos CV for four elements.
 pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
+    let cv = eidos_compression::init_chaining_word(0, 4);
     #[rustfmt::skip]
     let ops = [
-        // Add a zero word to serve as RATE1.
+        // Add the zero high block word.
         // => [0, A, ...]
         Pad, Pad, Pad, Pad,
 
-        // Add capacity word [4, 0, 0, 0] on top.
-        // => [[4,0,0,0], 0, A, ...]  i.e. [CAP, RATE1, RATE0]
-        Pad, Pad, Pad, Push(Felt::from_u32(4_u32)),
+        // Add the initial chaining value.
+        // => [CV, 0, A, ...]
+        Push(cv[3]), Push(cv[2]), Push(cv[1]), Push(cv[0]),
 
-        // Reorder to [RATE0, RATE1, CAP] required by hperm:
-        // => [A, 0, [4,0,0,0], ...]
+        // Reorder to the compress state [A, 0, CV].
+        // => [A, 0, CV, ...]
         SwapW2,
 
-        // Apply hperm.
-        // => [RATE0', RATE1', CAP', ...]
-        HPerm,
+        // Compress and extract the digest.
+        // => [A, 0, DIGEST, ...]
+        Compress,
 
-        // Extract digest (RATE0')
-        // => [CAP', RATE1', RATE0', ...]
-        SwapW2,
-        // => [RATE1', RATE0', ...]
+        // => [0, DIGEST, ...]
         Drop, Drop, Drop, Drop,
-        // => [RATE0', ...]  (the digest)
+        // => [DIGEST, ...]
         Drop, Drop, Drop, Drop,
     ];
     block_builder.push_ops(ops);
 }
 
-/// Appends HPERM and stack manipulation operations to the span block as required to compute a
-/// 2-to-1 Poseidon2 hash using the canonical `[RATE0, RATE1, CAPACITY]` state layout.
+/// Appends Eidos compression and stack manipulation operations to compute a 2-to-1 hash.
 ///
 /// - Input:   the top 8 elements form the 2-word preimage `[A, B]` in stack order (A on top).
-/// - Output:  the middle 4 elements are the digest word, which is `hash(A, B)`.
-///
-/// Internally, this:
-/// 1. Pads a zero capacity word so the top 12 elements are `[CAP, A, B]`.
-/// 2. Reorders words to `[A, B, CAP]` required by `hperm`.
-/// 3. Applies `hperm` (Poseidon2 permutation) on the top 12 elements.
-/// 4. Extracts the digest.
-///
-/// This operation takes 16 VM cycles.
+/// - Output:  the top 4 elements are the digest word, which is `hash(A, B)`.
 pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
+    let cv = eidos_compression::two_to_one_chaining_word(0);
     #[rustfmt::skip]
     let ops = [
-        // Add a zero word to serve as CAPACITY.
-        // => [0, A, B, ...]
-        Pad, Pad, Pad, Pad,
+        // Add the initial chaining value.
+        // => [CV, A, B, ...]
+        Push(cv[3]), Push(cv[2]), Push(cv[1]), Push(cv[0]),
 
-        // Reorder [CAP, A, B] to [A, B, CAP] required by hperm:
-        // => [B, A, 0, ...]
+        // Reorder to the compress state [A, B, CV].
+        // => [B, A, CV, ...]
         SwapW2,
-        // => [A, B, 0, ...]
+        // => [A, B, CV, ...]
         SwapW,
 
-        // Apply hperm.
-        // => [A', B', CAP', ...]  where A' contains the digest
-        HPerm,
+        // Compress and extract the digest.
+        // => [A, B, DIGEST, ...]
+        Compress,
 
-        // Extract digest (A')
-        // => [CAP', B', A', ...]
-        SwapW2,
-        // => [B', A', ...]
+        // => [B, DIGEST, ...]
         Drop, Drop, Drop, Drop,
-        // => [A', ...]  (the digest)
+        // => [DIGEST, ...]
         Drop, Drop, Drop, Drop,
     ];
     block_builder.push_ops(ops);
@@ -149,7 +135,7 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) {
 ///
 /// It is not checked whether the provided roots exist as Merkle trees in the advide providers.
 ///
-/// This operation takes 16 VM cycles.
+/// This operation takes 15 VM cycles.
 pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
     // stack input:  [R_lhs, R_rhs, ...]
     // stack output: [R_merged, ...]

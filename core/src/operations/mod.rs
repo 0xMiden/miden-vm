@@ -100,7 +100,7 @@ pub mod opcodes {
     pub const U32ADD3: u8        = 0b0100_1100;
     pub const U32MADD: u8        = 0b0100_1110;
 
-    pub const HPERM: u8          = 0b0101_0000;
+    pub const COMPRESS: u8      = 0b0101_0000;
     pub const MPVERIFY: u8       = 0b0101_0001;
     pub const PIPE: u8           = 0b0101_0010;
     pub const MSTREAM: u8        = 0b0101_0011;
@@ -481,32 +481,23 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = opcodes::PIPE,
 
-    /// Encrypts data from source memory to destination memory using the Poseidon2 sponge keystream.
-    ///
-    /// Two consecutive words (8 elements) are loaded from source memory, each element is added
-    /// to the corresponding element in the rate (top 8 stack elements), and the resulting
-    /// ciphertext is written to destination memory and replaces the rate. Source and destination
-    /// addresses are incremented by 8.
+    /// Encrypts two memory words with an Eidos XOF keystream.
     ///
     /// Stack transition:
     /// ```text
-    /// [rate(8), cap(4), src, dst, ...]
+    /// [K_CTR(4), counter, src, dst, remaining, ...]
     ///     ↓
-    /// [ct(8), cap(4), src+8, dst+8, ...]
+    /// [K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]
     /// ```
-    /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
-    ///
-    /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
     CryptoStream = opcodes::CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
-    /// Performs a Poseidon2 permutation on the top 3 words of the operand stack,
-    /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
-    /// A), and the digest output is the middle word E.
+    /// Performs a block-preserving Eidos compression on the top 3 words of the operand
+    /// stack.
     ///
     /// Stack transition:
-    /// [C, B, A, ...] -> [F, E, D, ...]
-    HPerm = opcodes::HPERM,
+    /// [block(8), cv(4), ...] -> [block(8), cv'(4), ...]
+    Compress = opcodes::COMPRESS,
 
     /// Verifies that a Merkle path from the specified node resolves to the specified root. This
     /// operation can be used to prove that the prover knows a path in the specified Merkle tree
@@ -551,13 +542,13 @@ pub enum Operation {
     /// This operation:
     /// - Folds 4 query values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1)
     /// - Computes new value of the domain generator power: poe' = poe^4
-    /// - Increments layer pointer (cptr) by 2
+    /// - Increments layer pointer (cptr) by 8
     /// - Checks that the previous folding was done correctly
     /// - Shifts the stack to move an item from the overflow table to stack position 15
     ///
     /// Stack transition:
-    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
-    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0,
+    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, coset, poe, pe1, pe0, a1, a0, cptr, ...]
+    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+8, f_pos, poe^4, ne1, ne0,
     /// eptr, ...] where eptr is moved from the stack overflow table and is the address of the
     /// final FRI layer.
     FriE2F4 = opcodes::FRIE2F4,
@@ -789,7 +780,7 @@ impl fmt::Display for Operation {
             Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
-            Self::HPerm => write!(f, "hperm"),
+            Self::Compress => write!(f, "compress"),
             Self::MpVerify(err_code) => write!(f, "mpverify({err_code})"),
             Self::MrUpdate => write!(f, "mrupdate"),
 
@@ -889,7 +880,7 @@ impl Serializable for Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -983,7 +974,7 @@ impl Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::Compress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -1075,7 +1066,7 @@ impl Deserializable for Operation {
             opcodes::U32ADD3 => Self::U32add3,
             opcodes::U32MADD => Self::U32madd,
 
-            opcodes::HPERM => Self::HPerm,
+            opcodes::COMPRESS => Self::Compress,
             opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             opcodes::PIPE => Self::Pipe,
             opcodes::MSTREAM => Self::MStream,
