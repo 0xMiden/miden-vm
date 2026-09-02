@@ -1,7 +1,7 @@
 //! Fiat-Shamir challenger built from Eidos compression.
 //!
-//! The challenger keeps a 4-felt chaining value. Absorbs compress 8-felt blocks
-//! into that value; squeezes use a transition tag and counter blocks.
+//! The challenger keeps a four-Felt chaining value. It compresses observations in eight-Felt
+//! blocks and uses a transition tag and counter blocks to generate outputs.
 
 use alloc::vec::Vec;
 
