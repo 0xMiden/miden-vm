@@ -1,7 +1,4 @@
-//! Deprecated compatibility surface for handlers written against `miden-processor`.
-//!
-//! Explicit-context methods intentionally read the context supplied by the caller. This differs
-//! from the abandoned precursor to this interface, which silently read the active context.
+//! Deprecated v0.31 compatibility methods for handlers written against `miden-processor`.
 
 use alloc::vec::Vec;
 

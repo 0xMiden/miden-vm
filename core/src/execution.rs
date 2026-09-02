@@ -1,4 +1,7 @@
-use core::fmt::{self, Display, LowerHex};
+use core::{
+    fmt::{self, Display, LowerHex},
+    num::TryFromIntError,
+};
 
 use crate::{
     Felt,
@@ -99,6 +102,14 @@ impl MemoryAddress {
 impl From<u32> for MemoryAddress {
     fn from(address: u32) -> Self {
         Self(address)
+    }
+}
+
+impl TryFrom<u64> for MemoryAddress {
+    type Error = TryFromIntError;
+
+    fn try_from(address: u64) -> Result<Self, Self::Error> {
+        u32::try_from(address).map(Self)
     }
 }
 

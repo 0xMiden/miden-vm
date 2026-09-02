@@ -695,21 +695,18 @@ impl EventContextProvider for FastProcessor {
         FastProcessor::stack_depth(self)
     }
 
-    #[inline(always)]
-    fn stack_item(&self, position: u64) -> Felt {
-        if position < self.stack_size() as u64 {
-            self.stack_get(position as usize)
-        } else {
-            ZERO
-        }
-    }
-
     fn read_stack(&self, start: u64, output: &mut [Felt]) {
-        output.fill(ZERO);
         let depth = self.stack_size();
         let Ok(start) = usize::try_from(start) else {
+            output.fill(ZERO);
             return;
         };
+        if let [target] = output {
+            *target = if start < depth { self.stack_get(start) } else { ZERO };
+            return;
+        }
+
+        output.fill(ZERO);
         if start >= depth {
             return;
         }
@@ -723,49 +720,13 @@ impl EventContextProvider for FastProcessor {
     }
 
     #[inline(always)]
-    fn stack_word(&self, start: u64) -> Word {
-        let mut elements = [ZERO; WORD_SIZE];
-        self.read_stack(start, &mut elements);
-        elements.into()
-    }
-
-    fn stack_snapshot(&self) -> Vec<Felt> {
-        self.stack().iter().rev().copied().collect()
-    }
-
-    #[inline(always)]
     fn read_memory(
         &self,
         context_id: ContextId,
-        start: u32,
+        start: MemoryAddress,
         output: &mut [Felt],
     ) -> Result<(), EventContextError> {
         self.memory.read_range_for_event(context_id, start, output)
-    }
-
-    #[inline(always)]
-    fn memory_value(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Felt>, EventContextError> {
-        Ok(self.memory.read_element_impl(context_id, address))
-    }
-
-    #[inline(always)]
-    fn memory_word(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Word>, EventContextError> {
-        if !address.is_multiple_of(WORD_SIZE as u32) {
-            return Err(EventContextError::UnalignedWord { context_id, address });
-        }
-
-        Ok(self
-            .memory
-            .read_word_impl(context_id, address)
-            .expect("an aligned address satisfies the processor memory read contract"))
     }
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)> {
@@ -788,14 +749,6 @@ impl EventContextProvider for FastProcessor {
 
     fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
         self.advice.get_merkle_path_at(root, index).map_err(Into::into)
-    }
-
-    fn has_merkle_path(&self, root: Word, index: NodeIndex) -> bool {
-        self.advice.has_merkle_path_at(root, index)
-    }
-
-    fn has_merkle_root(&self, root: Word) -> bool {
-        self.advice.has_merkle_root(root)
     }
 }
 

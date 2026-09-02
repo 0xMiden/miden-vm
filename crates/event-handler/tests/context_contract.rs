@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use miden_core::{
     ContextId, Felt, MemoryAddress, Word,
     advice::{AdviceMap, AdviceStack},
-    crypto::merkle::{MerklePath, NodeIndex},
+    crypto::merkle::{MerkleError, MerklePath, NodeIndex},
     deferred::{Digest, Node, PrecompileError},
     events::EventId,
 };
@@ -32,20 +32,23 @@ impl EventContextProvider for FakeProvider {
         self.stack.len() as u32
     }
 
-    fn stack_item(&self, position: u64) -> Felt {
-        usize::try_from(position)
-            .ok()
-            .and_then(|position| self.stack.get(position))
-            .copied()
-            .unwrap_or(Felt::ZERO)
+    fn read_stack(&self, start: u64, output: &mut [Felt]) {
+        output.fill(Felt::ZERO);
+        let Some(values) = usize::try_from(start).ok().and_then(|start| self.stack.get(start..))
+        else {
+            return;
+        };
+        let count = output.len().min(values.len());
+        output[..count].copy_from_slice(&values[..count]);
     }
 
     fn read_memory(
         &self,
         context_id: ContextId,
-        start: u32,
+        start: MemoryAddress,
         output: &mut [Felt],
     ) -> Result<(), EventContextError> {
+        let start = start.as_u32();
         let mut pending = Vec::with_capacity(output.len());
         for offset in 0..output.len() {
             let address = start + offset as u32;
@@ -78,21 +81,21 @@ impl EventContextProvider for FakeProvider {
     }
 
     fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
-        assert_eq!((root, index), (self.merkle_root, self.merkle_index));
-        Ok(self.merkle_node)
+        if root != self.merkle_root {
+            return Err(MerkleError::RootNotInStore(root).into());
+        }
+        if index == NodeIndex::root() {
+            Ok(root)
+        } else if index == self.merkle_index {
+            Ok(self.merkle_node)
+        } else {
+            Err(MerkleError::NodeIndexNotFoundInStore(root, index).into())
+        }
     }
 
     fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
         assert_eq!((root, index), (self.merkle_root, self.merkle_index));
         Ok(self.merkle_path.clone())
-    }
-
-    fn has_merkle_path(&self, root: Word, index: NodeIndex) -> bool {
-        (root, index) == (self.merkle_root, self.merkle_index)
-    }
-
-    fn has_merkle_root(&self, root: Word) -> bool {
-        root == self.merkle_root
     }
 }
 
@@ -231,8 +234,7 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     let context =
         EventContext::new(&provider, &builtins, Invocation::event(EventId::from_u64(1), 2, active));
 
-    // `FakeProvider` only implements the canonical buffer read, so scalar and word reads exercise
-    // the provider defaults derived from it.
+    // Scalar and word reads derive from the canonical buffer read.
     assert_eq!(context.memory_value(4).unwrap(), Some(felt(21)));
     assert_eq!(context.memory_value_in_context(other, 4).unwrap(), Some(felt(31)));
     assert_eq!(context.memory_value(u64::from(u32::MAX)).unwrap(), Some(felt(25)));
@@ -400,6 +402,8 @@ fn advice_and_merkle_reads_are_borrowed_typed_and_atomic() {
     );
     assert!(context.has_merkle_path(provider.merkle_root, merkle_index));
     assert!(context.has_merkle_root(provider.merkle_root));
+    assert!(!context.has_merkle_path(provider.merkle_root, NodeIndex::new(2, 2).unwrap()));
+    assert!(!context.has_merkle_root(Word::default()));
 }
 
 #[test]

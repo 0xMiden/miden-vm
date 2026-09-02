@@ -91,67 +91,20 @@ impl From<MerkleError> for MerkleReadError {
 /// Read-only capabilities an execution engine provides to [`EventContext`].
 ///
 /// This object-safe interface is public only so execution-engine adapters can implement it.
-/// Handler implementations should use [`EventContext`]. Implementations must leave `output`
-/// unchanged when [`Self::read_memory`] returns an error.
+/// Handler implementations should use [`EventContext`]. Implementations must zero-extend
+/// [`Self::read_stack`] and leave `output` unchanged when [`Self::read_memory`] returns an error.
 #[doc(hidden)]
 pub trait EventContextProvider: Sync {
     fn stack_depth(&self) -> u32;
 
-    fn stack_item(&self, position: u64) -> Felt;
-
-    fn read_stack(&self, start: u64, output: &mut [Felt]) {
-        for (offset, value) in output.iter_mut().enumerate() {
-            *value = u64::try_from(offset)
-                .ok()
-                .and_then(|offset| start.checked_add(offset))
-                .map_or(ZERO, |position| self.stack_item(position));
-        }
-    }
-
-    fn stack_word(&self, start: u64) -> Word {
-        let mut elements = [ZERO; WORD_SIZE];
-        self.read_stack(start, &mut elements);
-        elements.into()
-    }
-
-    fn stack_snapshot(&self) -> Vec<Felt> {
-        let mut snapshot = vec![ZERO; self.stack_depth() as usize];
-        self.read_stack(0, &mut snapshot);
-        snapshot
-    }
+    fn read_stack(&self, start: u64, output: &mut [Felt]);
 
     fn read_memory(
         &self,
         context_id: ContextId,
-        start: u32,
+        start: MemoryAddress,
         output: &mut [Felt],
     ) -> Result<(), EventContextError>;
-
-    fn memory_value(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Felt>, EventContextError> {
-        let mut value = [ZERO];
-        match self.read_memory(context_id, address, &mut value) {
-            Ok(()) => Ok(Some(value[0])),
-            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    fn memory_word(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Word>, EventContextError> {
-        let mut elements = [ZERO; WORD_SIZE];
-        match self.read_memory(context_id, address, &mut elements) {
-            Ok(()) => Ok(Some(elements.into())),
-            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)>;
 
@@ -162,10 +115,6 @@ pub trait EventContextProvider: Sync {
     fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError>;
 
     fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError>;
-
-    fn has_merkle_path(&self, root: Word, index: NodeIndex) -> bool;
-
-    fn has_merkle_root(&self, root: Word) -> bool;
 }
 
 /// Internal capabilities needed only by Miden's built-in handlers.
@@ -246,7 +195,9 @@ impl<'a> EventContext<'a> {
 
     /// Returns an operand-stack element, or zero when `position` is beyond the current depth.
     pub fn stack_item(&self, position: u64) -> Felt {
-        self.provider.stack_item(position)
+        let mut value = [ZERO];
+        self.read_stack(position, &mut value);
+        value[0]
     }
 
     /// Reads stack positions into `output`, zero-extending beyond the current depth.
@@ -256,7 +207,9 @@ impl<'a> EventContext<'a> {
 
     /// Returns four stack elements beginning at `start`, zero-extending when necessary.
     pub fn stack_word(&self, start: u64) -> Word {
-        self.provider.stack_word(start)
+        let mut elements = [ZERO; WORD_SIZE];
+        self.read_stack(start, &mut elements);
+        elements.into()
     }
 
     /// Allocates a stack slice by start and element count, zero-extending when necessary.
@@ -276,7 +229,9 @@ impl<'a> EventContext<'a> {
 
     /// Allocates a snapshot of the complete operand stack, top first.
     pub fn stack_snapshot(&self) -> Vec<Felt> {
-        self.provider.stack_snapshot()
+        let mut values = vec![ZERO; self.stack_depth() as usize];
+        self.read_stack(0, &mut values);
+        values
     }
 
     /// Returns a memory value from the active execution context, or `None` when its word is
@@ -293,7 +248,12 @@ impl<'a> EventContext<'a> {
         address: u64,
     ) -> Result<Option<Felt>, EventContextError> {
         let address = check_memory_address(address)?;
-        self.provider.memory_value(context_id, address)
+        let mut value = [ZERO];
+        match self.provider.read_memory(context_id, address, &mut value) {
+            Ok(()) => Ok(Some(value[0])),
+            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Returns an aligned memory word from the active execution context, or `None` when it is
@@ -309,12 +269,20 @@ impl<'a> EventContext<'a> {
         context_id: ContextId,
         address: u64,
     ) -> Result<Option<Word>, EventContextError> {
-        let address_u32 = check_memory_address(address)?;
-        if !address_u32.is_multiple_of(WORD_SIZE as u32) {
-            return Err(EventContextError::UnalignedWord { context_id, address: address_u32 });
+        let memory_address = check_memory_address(address)?;
+        if !memory_address.as_u32().is_multiple_of(WORD_SIZE as u32) {
+            return Err(EventContextError::UnalignedWord {
+                context_id,
+                address: memory_address.as_u32(),
+            });
         }
 
-        self.provider.memory_word(context_id, address_u32)
+        let mut elements = [ZERO; WORD_SIZE];
+        match self.provider.read_memory(context_id, memory_address, &mut elements) {
+            Ok(()) => Ok(Some(elements.into())),
+            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Strictly reads a memory range from the active context into `output`.
@@ -470,14 +438,14 @@ impl<'a> EventContext<'a> {
         self.provider.merkle_path(root, index)
     }
 
-    /// Returns true when the advice Merkle store contains the requested path.
+    /// Returns true when traversal from `root` to the indexed node succeeds.
     pub fn has_merkle_path(&self, root: Word, index: NodeIndex) -> bool {
-        self.provider.has_merkle_path(root, index)
+        self.merkle_node(root, index).is_ok()
     }
 
     /// Returns true when the advice Merkle store contains `root`.
     pub fn has_merkle_root(&self, root: Word) -> bool {
-        self.provider.has_merkle_root(root)
+        self.merkle_node(root, NodeIndex::root()).is_ok()
     }
 
     /// Returns the narrow capability view reserved for Miden's built-in handlers.
@@ -538,13 +506,11 @@ fn felt_vec_len(start: u64, count: u64) -> Result<usize, EventContextError> {
     Ok(count_usize)
 }
 
-fn check_memory_address(address: u64) -> Result<u32, EventContextError> {
-    address
-        .try_into()
-        .map_err(|_| EventContextError::AddressOutOfBounds { address })
+fn check_memory_address(address: u64) -> Result<MemoryAddress, EventContextError> {
+    MemoryAddress::try_from(address).map_err(|_| EventContextError::AddressOutOfBounds { address })
 }
 
-fn check_memory_range(start: u64, count: u64) -> Result<Option<u32>, EventContextError> {
+fn check_memory_range(start: u64, count: u64) -> Result<Option<MemoryAddress>, EventContextError> {
     const EXCLUSIVE_END: u64 = u32::MAX as u64 + 1;
 
     if start > EXCLUSIVE_END {

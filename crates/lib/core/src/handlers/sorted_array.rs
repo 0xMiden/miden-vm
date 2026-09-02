@@ -2,7 +2,7 @@ use alloc::{vec, vec::Vec};
 use core::ops::Range;
 
 use miden_core::{Felt, Word, events::EventName, field::PrimeCharacteristicRing};
-use miden_event_handler::{AdviceMutation, EventContext, EventError};
+use miden_event_handler::{AdviceMutation, EventContext, EventContextError, EventError};
 
 /// Event name for the lowerbound_array operation.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =
@@ -156,24 +156,17 @@ fn push_lowerbound_result(
     ])])
 }
 
-fn memory_range_from_stack(
-    context: &EventContext,
-) -> Result<Range<u32>, miden_event_handler::EventContextError> {
-    use miden_event_handler::EventContextError;
-
-    let start = context.stack_item(START_ADDR_OFFSET).as_canonical_u64();
-    let end = context.stack_item(END_ADDR_OFFSET).as_canonical_u64();
-    if start > u64::from(u32::MAX) {
-        return Err(EventContextError::AddressOutOfBounds { address: start });
-    }
-    if end > u64::from(u32::MAX) {
-        return Err(EventContextError::AddressOutOfBounds { address: end });
-    }
+fn memory_range_from_stack(context: &EventContext) -> Result<Range<u32>, EventContextError> {
+    let address = |position| {
+        let address = context.stack_item(position).as_canonical_u64();
+        u32::try_from(address).map_err(|_| EventContextError::AddressOutOfBounds { address })
+    };
+    let start = address(START_ADDR_OFFSET)?;
+    let end = address(END_ADDR_OFFSET)?;
     if start > end {
-        return Err(EventContextError::InvalidRange { start, end });
+        return Err(EventContextError::InvalidRange { start: start.into(), end: end.into() });
     }
-
-    Ok(start as u32..end as u32)
+    Ok(start..end)
 }
 
 /// Selectively zeroizes the felts in a [`Word`] based on the provided [`KeySize`].

@@ -47,10 +47,8 @@ pub(crate) fn read_memory_region(
     start_ptr: u64,
     len: u64,
 ) -> Option<Vec<Felt>> {
-    if !start_ptr.is_multiple_of(4) {
-        return None;
-    }
-    context.memory_slice(start_ptr, len).ok()
+    let range = memory_region_range(start_ptr, len)?;
+    context.memory_range(range.start, range.end).ok()
 }
 
 /// Reads a contiguous region of memory elements, treating addresses that were never written to as
@@ -81,9 +79,5 @@ fn memory_region_range(start_ptr: u64, len: u64) -> Option<Range<u64>> {
 
     // Calculate end address with overflow check
     let end_addr = start_ptr.checked_add(len)?;
-    if end_addr > u64::from(u32::MAX) + 1 {
-        return None;
-    }
-
-    Some(start_ptr..end_addr)
+    (end_addr <= u64::from(u32::MAX) + 1).then_some(start_ptr..end_addr)
 }

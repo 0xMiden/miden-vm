@@ -77,8 +77,7 @@ pub mod advice {
 
 /// Compatibility facade for common handler-facing types.
 ///
-/// New handlers should import these types directly from `miden_event_handler`. Deprecated
-/// compatibility types remain here for v0.31 and will be removed in v0.32.
+/// New handlers should import these types directly from `miden_event_handler`.
 pub mod event {
     pub use miden_core::events::*;
     pub use miden_event_handler::{

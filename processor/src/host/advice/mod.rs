@@ -644,11 +644,6 @@ impl AdviceProvider {
         self.store.get_path(root, index).map(|value| value.path)
     }
 
-    /// Returns true when a path addressed by a typed index exists.
-    pub(crate) fn has_merkle_path_at(&self, root: Word, index: NodeIndex) -> bool {
-        self.store.has_path(root, index)
-    }
-
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;
     /// returns the Merkle path from the updated node to the new root, together with the new root.
     ///

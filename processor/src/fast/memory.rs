@@ -219,9 +219,10 @@ impl Memory {
     pub(crate) fn read_range_for_event(
         &self,
         ctx: ContextId,
-        start: u32,
+        start: MemoryAddress,
         output: &mut [Felt],
     ) -> Result<(), EventContextError> {
+        let start = start.as_u32();
         let count = output.len();
         let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
         let end = u64::from(start).saturating_add(count_u64);
@@ -232,6 +233,24 @@ impl Memory {
             });
         }
         if output.is_empty() {
+            return Ok(());
+        }
+
+        // Scalar and aligned-word reads are the common paths behind EventContext's derived
+        // `memory_value` and `memory_word` operations. Handle them with one map lookup while
+        // preserving the buffer on an uninitialized read.
+        if output.len() == 1 {
+            let value = self.read_element_impl(ctx, start).ok_or(
+                EventContextError::UninitializedMemory { context_id: ctx, address: start },
+            )?;
+            output[0] = value;
+            return Ok(());
+        }
+        if output.len() == WORD_SIZE && start.is_multiple_of(WORD_SIZE as u32) {
+            let word = self.memory.get(&(ctx, start)).copied().ok_or(
+                EventContextError::UninitializedMemory { context_id: ctx, address: start },
+            )?;
+            output.copy_from_slice(word.as_elements());
             return Ok(());
         }
 

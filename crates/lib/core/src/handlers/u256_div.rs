@@ -65,13 +65,13 @@ pub fn handle_u256_div(context: &EventContext) -> Result<Vec<AdviceMutation>, Ev
 /// Returned as a `(lo, hi)` pair of u128s.
 fn read_u256_from_stack(
     context: &EventContext,
-    start: u64,
+    start: usize,
     name: &'static str,
 ) -> Result<(u128, u128), EventError> {
     let mut lo: u128 = 0;
     let mut hi: u128 = 0;
     for i in (0..8).rev() {
-        let limb = context.stack_item(start + i as u64).as_canonical_u64();
+        let limb = context.stack_item((start + i) as u64).as_canonical_u64();
         if limb > u32::MAX as u64 {
             return Err(U256DivError::NotU32Value {
                 value: limb,
