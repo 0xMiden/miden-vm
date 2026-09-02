@@ -88,7 +88,7 @@ pub fn pcs_params() -> PcsParams {
 /// Relation digest absorbed into the Fiat-Shamir transcript domain separator.
 pub type RelationDigest = [Felt; 4];
 
-/// Bind a protocol version and the commitment to the accepted ACE circuits into a relation digest.
+/// Bind a protocol version and the canonical ACE circuit commitment into a relation digest.
 pub fn relation_digest(protocol_id: u64, circuit_digest: &Word) -> RelationDigest {
     let input = [
         Felt::new_unchecked(protocol_id),

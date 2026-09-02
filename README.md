@@ -89,7 +89,7 @@ The workspace contains the main crates below. Internal support and benchmark cra
 | Precompiles | [precompiles](crates/precompiles) | Defines deferred computations and the precompile registry. |
 | Precompiles | [precompiles-air](crates/precompiles-air) | Defines precompile AIRs and common proof setup. |
 | Precompiles | [precompiles-prover](crates/precompiles-prover) | Builds precompile proof data during proving. |
-| Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs and registry data. |
+| Precompiles | [precompiles-verifier](crates/precompiles-verifier) | Verifies precompile proofs. |
 | Packages and tools | [core-lib](crates/lib/core) | Provides the standard Miden Assembly library. |
 | Packages and tools | [mast-package](crates/mast-package) | Stores compiled MAST artifacts with their dependencies and exports. |
 | Packages and tools | [project](crates/project) | Loads and builds Miden projects. |

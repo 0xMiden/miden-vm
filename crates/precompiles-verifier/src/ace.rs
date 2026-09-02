@@ -1079,8 +1079,8 @@ mod tests {
         assert_eq!(
             ChipletAir::all(),
             pinned,
-            "chiplet instance order moved; regenerate the PVM ACE constants for an intentional \
-             protocol break"
+            "chiplet instance order moved; run `make regenerate-pvm-constants` for an \
+             intentional protocol break"
         );
     }
 }
