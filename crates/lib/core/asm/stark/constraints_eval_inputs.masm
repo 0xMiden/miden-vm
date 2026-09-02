@@ -1,4 +1,5 @@
 use miden::core::stark::constants
+use miden::core::stark::utils
 
 # Base-field offsets from the relation's `stark_vars_ptr` into the stark-vars block. The
 # fixed prologue occupies EF slots 0-9 (base offsets 0-19); slot 10 (offset 20) is the
@@ -19,7 +20,11 @@ const SELECTOR_STRIDE = 6
 #!   Word 4 (slots 8-9): f, s0
 #!
 #! The multi-AIR layout then appends:
-#!   slot 10: multi-air fold beta (sampled by the generic random coin)
+#!   slot 10: multi-air fold beta (sampled by the generic random coin). Staged for every relation,
+#!            but the canonical circuit folds with the per-AIR MultiAirFoldCoeff slots below
+#!            instead of this challenge directly; it stays a READ slot because AIR k's selector
+#!            triple is pinned at FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * k, and removing it
+#!            would shift every selector offset and re-mint both relation digests.
 #!   slots 11 + 3k .. 13 + 3k: AIR k's lifted selectors, canonical instance order
 #!
 #! `heights_ptr` addresses the relation's `num_airs` consecutive per-AIR log-height
@@ -177,6 +182,87 @@ pub proc set_up_auxiliary_inputs_ace
         # => [k, num_airs, heights_ptr]
         add.1
         dup.1 dup.1 u32gt
+    end
+    drop drop drop
+end
+
+#! Stages each AIR's multi-air fold coefficient in the ACE input region.
+#!
+#! AIR `k`'s coefficient is `beta^(num_airs - 1 - pos_k)`, where `pos_k` is that AIR's position in
+#! the height-sorted proof order. The fold is a Horner accumulation over proof order, so the AIR
+#! opened last carries `beta^0` and the AIR opened first carries `beta^(num_airs - 1)`. Keying the
+#! exponent by proof position rather than by instance index is what makes the staged block
+#! order-invariant; the two agree only for the identity order.
+#!
+#! `beta` is the same multi-air fold challenge `set_up_auxiliary_inputs_ace` stages at
+#! MULTI_AIR_FOLD_BETA_OFFSET.
+#!
+#! Coefficient `k` lands at base offset `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k`,
+#! immediately after the selector block. That base is derived from `num_airs` rather than passed
+#! in: this module is shared by every relation verifier, so a separate input would be a second
+#! encoding of a value it must already equal.
+#!
+#! Precondition: `num_airs >= 2`. Counts above `MAX_ORDER_AIRS` trap on the first AIR, in
+#! `utils::proof_order_position_from_heights`.
+#!
+#! Input:  [num_airs, heights_ptr, stark_vars_ptr, ...]
+#! Output: [...]
+@locals(4)
+pub proc stage_air_fold_coefficients
+    # => [num_airs, heights_ptr, stark_vars_ptr, ...]
+    movup.2 loc_store.0
+    swap loc_store.1
+    dup loc_store.2
+    # => [num_airs, ...]
+
+    # Address of coefficient 0, one felt past the last selector triple.
+    mul.SELECTOR_STRIDE push.FIRST_SELECTOR_OFFSET add
+    loc_load.0 add loc_store.3
+    # => [...]
+
+    padw exec.constants::composition_coef_ptr mem_loadw_le
+    # => [alpha0, alpha1, beta0, beta1, ...]
+    drop drop
+    # => [beta0, beta1, ...]
+
+    push.0
+    # => [k = 0, beta0, beta1, ...]
+    loc_load.2 dup.1 u32gt
+    while.true
+        # => [k, beta0, beta1, ...]
+        loc_load.1 loc_load.2 dup.2
+        # => [k, num_airs, heights_ptr, k, beta0, beta1, ...]
+        exec.utils::proof_order_position_from_heights
+        # => [pos_k, k, beta0, beta1, ...]
+        loc_load.2 sub.1 swap sub
+        # => [exponent = num_airs - 1 - pos_k, k, beta0, beta1, ...]
+
+        # beta^exponent by repeated multiplication. The exponent is below MAX_ORDER_AIRS, so a
+        # linear loop is cheaper than a square-and-multiply ladder.
+        push.0.1
+        # => [c0 = 1, c1 = 0, exponent, k, beta0, beta1, ...]
+        dup.2 neq.0
+        while.true
+            dup.5 dup.5
+            # => [beta0, beta1, c0, c1, exponent, k, beta0, beta1, ...]
+            ext2mul
+            # => [c0, c1, exponent, k, beta0, beta1, ...]
+            movup.2 sub.1 movdn.2
+            dup.2 neq.0
+        end
+        movup.2 drop
+        # => [c0, c1, k, beta0, beta1, ...]
+
+        dup.2 mul.2 loc_load.3 add
+        # => [coeff_ptr, c0, c1, k, beta0, beta1, ...]
+        dup movdn.2
+        # => [coeff_ptr, c0, coeff_ptr, c1, k, beta0, beta1, ...]
+        mem_store
+        add.1 mem_store
+        # => [k, beta0, beta1, ...]
+
+        add.1
+        loc_load.2 dup.1 u32gt
     end
     drop drop drop
 end

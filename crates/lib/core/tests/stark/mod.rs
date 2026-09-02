@@ -1770,6 +1770,87 @@ fn quotient_recomposition_constants_match_derivation() {
     assert_eq!(first_weight, expected.first_weight, "QUOTIENT_FIRST_WEIGHT is stale");
 }
 
+/// A relation may stage per-AIR fold coefficients only once its ACE input region holds them.
+///
+/// `stage_air_fold_coefficients` writes one extension-field coefficient per AIR immediately after
+/// the selector block, at base offsets `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k`
+/// from the relation's stark-vars base. Only the felts below `ACE_CIRCUIT_STREAM_PTR` belong to
+/// that region; a coefficient past its end lands in the circuit-stream region, where the loader's
+/// next `adv_pipe` silently overwrites it. The memory-map test cannot see this — it compares
+/// *declared* extents, and both regions stay dense and disjoint whether or not the writes stay
+/// inside them — so the bound is asserted here instead, against the procedure's real offsets.
+#[test]
+fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
+    const STAGING_PROC: &str = "stage_air_fold_coefficients";
+    const ENTRY_PROC: &str = "set_up_auxiliary_inputs_ace";
+    /// Base felts per staged coefficient (one quadratic-extension element).
+    const COEFFICIENT_STRIDE: u32 = 2;
+
+    let staging = include_str!("../../asm/stark/constraints_eval_inputs.masm");
+    let masm_const = |source: &str, name: &str, what: &str| -> u32 {
+        let prefix = format!("const {name} = ");
+        source
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("missing {what} constant {name}"))
+    };
+
+    let first_selector_offset = masm_const(staging, "FIRST_SELECTOR_OFFSET", "staging");
+    let selector_stride = masm_const(staging, "SELECTOR_STRIDE", "staging");
+
+    // Walk the procedure declarations rather than the raw text so a rename of either procedure
+    // fails here instead of turning this guard into a silent no-op.
+    let mut declares_staging = false;
+    let mut in_entry = false;
+    let mut stages_coefficients = false;
+    for line in staging.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) =
+            trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
+        {
+            let name = rest.split(['(', ' ']).next().unwrap_or(rest);
+            declares_staging |= name == STAGING_PROC;
+            in_entry = name == ENTRY_PROC;
+        }
+        stages_coefficients |= in_entry && trimmed.contains(&format!("exec.{STAGING_PROC}"));
+    }
+    assert!(declares_staging, "{STAGING_PROC} is no longer declared");
+
+    for (relation, layout_const, evaluator) in [
+        (
+            "vm",
+            vm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/vm/constraints_eval.masm"),
+        ),
+        (
+            "pvm",
+            pvm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+        ),
+    ] {
+        let num_airs = masm_const(evaluator, "NUM_AIRS", relation);
+        let region_felts =
+            layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
+
+        let selectors_end = first_selector_offset + selector_stride * num_airs;
+        assert!(
+            selectors_end <= region_felts,
+            "{relation}: {num_airs} selector triples end at felt {selectors_end}, past the \
+             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region"
+        );
+
+        if stages_coefficients {
+            let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
+            assert!(
+                coefficients_end <= region_felts,
+                "{relation}: {ENTRY_PROC} stages {num_airs} fold coefficients ending at felt \
+                 {coefficients_end}, past the {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR \
+                 region; enlarge the region before wiring the staging call in"
+            );
+        }
+    }
+}
+
 // HELPERS
 // ===============================================================================================
 

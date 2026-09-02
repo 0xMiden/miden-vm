@@ -348,7 +348,7 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
 fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
     use miden_air::{
         ProofOrder,
-        ace::{RecursiveAceCircuitFactory, build_recursive_verifier_ace_circuit},
+        ace::{RecursiveAceCircuitFactory, build_factored_recursive_verifier_ace_circuit},
     };
     use miden_core::crypto::hash::Eidos;
 
@@ -372,7 +372,8 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
     let factory = RecursiveAceCircuitFactory::new().expect("factory");
     let mut reference: Option<(usize, Vec<_>)> = None;
     for order in ProofOrder::variants() {
-        let circuit = build_recursive_verifier_ace_circuit(&order).expect("recursive ACE circuit");
+        let circuit =
+            build_factored_recursive_verifier_ace_circuit(&order).expect("recursive ACE circuit");
         let resumed = factory.circuit_for_order(&order).expect("factory circuit");
         assert_eq!(resumed, circuit, "factory diverges for {}", order.file_stem());
 
@@ -409,6 +410,47 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
             },
         }
     }
+}
+
+/// The recursive verifier's canonical entry point must be a thin wrapper over the canonical
+/// builder: same encoding, same commitment, and no dependence on the proof order.
+///
+/// The order-invariance itself is established by the cross-order fold sweep below; what this pins
+/// is that the production entry point evaluates the very circuit that sweep reasons about, rather
+/// than a separately assembled one that happens to agree today.
+#[test]
+fn recursive_verifier_circuit_matches_the_canonical_builder() {
+    use miden_air::ace::{
+        build_canonical_multi_air_ace_circuit, build_recursive_verifier_ace_circuit,
+    };
+    use miden_core::crypto::hash::Eidos;
+
+    let produced = build_recursive_verifier_ace_circuit().expect("recursive ACE circuit");
+
+    let canonical = build_canonical_multi_air_ace_circuit(AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    })
+    .expect("canonical circuit");
+    let encoded = canonical.to_ace().expect("encode canonical circuit");
+
+    assert_eq!(produced.num_inputs, encoded.num_vars());
+    assert_eq!(produced.num_eval_gates, encoded.num_eval_rows());
+    assert_eq!(produced.stream_len, encoded.size_in_felt());
+    assert_eq!(produced.instructions, encoded.instructions());
+    assert_eq!(produced.commitment, Eidos::hash_elements(encoded.instructions()));
+
+    // The stream is loaded with `adv_pipe`, which consumes eight felts per iteration.
+    assert!(produced.stream_len.is_multiple_of(8));
+
+    // Calling it twice must be deterministic.
+    let produced_again = build_recursive_verifier_ace_circuit().expect("recursive ACE circuit");
+    assert_eq!(produced, produced_again);
+
+    // The cached circuit is what the advice builder serves, and it is reachable across crates.
+    #[cfg(feature = "std")]
+    assert_eq!(*miden_air::ace::shared_recursive_circuit(), produced);
 }
 
 /// Recompute each AIR's aligned block widths in the combined READ layout.
@@ -632,6 +674,140 @@ fn factored_circuits_reproduce_the_canonical_fold_for_every_proof_order() {
                 "{} does not reproduce the canonical accumulators folded in proof order",
                 order.file_stem()
             );
+        }
+    }
+}
+
+/// The canonical circuit is order-invariant: a proof order is carried entirely by its READ
+/// inputs, with each AIR's trace values at their canonical (instance-order) offset and its fold
+/// coefficient staged as `beta^(N - 1 - proof position)`. Pin that against the per-order builder
+/// for every VM order, since end-to-end tests only ever produce a couple of them.
+#[test]
+fn canonical_circuit_matches_every_vm_proof_order() {
+    use miden_air::{
+        AIRS, MIDEN_AIR_COUNT, ProofOrder,
+        ace::{build_canonical_multi_air_ace_circuit, build_multi_air_ace_circuit_for_order},
+    };
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        layout: LayoutKind::Masm,
+        num_airs: MIDEN_AIR_COUNT,
+    };
+    let canonical = build_canonical_multi_air_ace_circuit(config).expect("canonical circuit");
+    let canonical_layout = canonical.layout().clone();
+
+    let widths = air_block_widths();
+    let canonical_offsets = air_block_offsets(&widths, &ProofOrder::instance_order());
+
+    // Random per-AIR trace values, keyed by canonical (instance-order) physical position.
+    let mut base: Vec<QuadFelt> = fill_inputs(&canonical_layout);
+    for chunk in 0..canonical_layout.counts.num_quotient_chunks {
+        for offset in 0..2 {
+            for coord in 0..EXT_DEGREE {
+                let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
+                base[canonical_layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
+            }
+        }
+    }
+
+    let beta = QuadFelt::from_u64(97);
+    let mut canonical_roots: Vec<QuadFelt> = Vec::new();
+    for order in ProofOrder::variants() {
+        // Canonical circuit: trace values stay put, only the fold coefficients move. The AIR at
+        // proof position `k` carries `beta^(N - 1 - k)`, matching the one-shot Horner fold.
+        let mut canonical_inputs = base.clone();
+        for (position, air) in order.airs().iter().copied().enumerate() {
+            let idx = canonical_layout
+                .index(InputKey::MultiAirFoldCoeff(air.instance_index()))
+                .expect("coeff slot");
+            canonical_inputs[idx] = beta.exp_u64((MIDEN_AIR_COUNT - 1 - position) as u64);
+        }
+        let canonical_root = canonical.eval(&canonical_inputs).expect("canonical eval");
+
+        let one_shot =
+            build_multi_air_ace_circuit_for_order(config, &order).expect("one-shot circuit");
+        let one_shot_layout = one_shot.layout().clone();
+        let proof_offsets = air_block_offsets(&widths, &order);
+
+        let mut inputs: Vec<QuadFelt> = fill_inputs(&one_shot_layout);
+        for chunk in 0..one_shot_layout.counts.num_quotient_chunks {
+            for offset in 0..2 {
+                for coord in 0..EXT_DEGREE {
+                    let key = InputKey::QuotientChunkCoord { offset, chunk, coord };
+                    inputs[one_shot_layout.index(key).expect("quotient slot")] = QuadFelt::ZERO;
+                }
+            }
+        }
+
+        // Copy each AIR's canonical trace values into this order's proof-ordered slots. Every
+        // other key is left to `fill_inputs`: the canonical layout only appends its
+        // fold-coefficient slots after the per-AIR selectors, at the tail of the last region, so
+        // both layouts agree index-for-index on everything that precedes them. Preprocessed
+        // columns need no routing while only one AIR declares any, which pins its block at
+        // offset zero under every order.
+        for air in AIRS {
+            let i = air.instance_index();
+            let (main_w, aux_w, boundary_w) = widths[i];
+            let (canonical_main, canonical_aux, canonical_boundary) = canonical_offsets[i];
+            let (proof_main, proof_aux, proof_boundary) = proof_offsets[i];
+            for offset in 0..2 {
+                for column in 0..main_w {
+                    let src = canonical_layout
+                        .index(InputKey::Main { offset, index: canonical_main + column })
+                        .expect("canonical main slot");
+                    let dst = one_shot_layout
+                        .index(InputKey::Main { offset, index: proof_main + column })
+                        .expect("proof main slot");
+                    inputs[dst] = base[src];
+                }
+                for column in 0..aux_w {
+                    for coord in 0..EXT_DEGREE {
+                        let src = canonical_layout
+                            .index(InputKey::AuxCoord {
+                                offset,
+                                index: canonical_aux + column,
+                                coord,
+                            })
+                            .expect("canonical aux slot");
+                        let dst = one_shot_layout
+                            .index(InputKey::AuxCoord { offset, index: proof_aux + column, coord })
+                            .expect("proof aux slot");
+                        inputs[dst] = base[src];
+                    }
+                }
+            }
+            for value in 0..boundary_w {
+                let src = canonical_layout
+                    .index(InputKey::AuxBusBoundary(canonical_boundary + value))
+                    .expect("canonical boundary slot");
+                let dst = one_shot_layout
+                    .index(InputKey::AuxBusBoundary(proof_boundary + value))
+                    .expect("proof boundary slot");
+                inputs[dst] = base[src];
+            }
+        }
+
+        // The one-shot circuit folds via a single shared beta slot (Horner over proof order),
+        // not per-AIR coefficient slots.
+        let beta_idx = one_shot_layout.index(InputKey::MultiAirFoldBeta).expect("beta slot");
+        inputs[beta_idx] = beta;
+
+        let one_shot_root = one_shot.eval(&inputs).expect("one-shot eval");
+        assert_eq!(
+            canonical_root,
+            one_shot_root,
+            "{} does not reproduce the canonical fold for the same trace values and beta",
+            order.file_stem()
+        );
+        canonical_roots.push(canonical_root);
+    }
+
+    // A circuit that dropped either the placement or the coefficients would fold to the same
+    // value under every order, and the sweep above would hold vacuously.
+    for (i, left) in canonical_roots.iter().enumerate() {
+        for (j, right) in canonical_roots.iter().enumerate().skip(i + 1) {
+            assert_ne!(left, right, "orders {i} and {j} fold identically; the sweep is vacuous");
         }
     }
 }

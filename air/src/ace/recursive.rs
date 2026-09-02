@@ -6,7 +6,10 @@ use miden_ace_codegen::{
 use miden_core::{Felt, Word, crypto::hash::Eidos, field::QuadFelt};
 use miden_crypto::merkle::MerklePath;
 
-use super::multi_air::{FactoredMultiAirCircuit, build_factored_multi_air_ace_circuit};
+use super::multi_air::{
+    FactoredMultiAirCircuit, build_canonical_multi_air_ace_circuit,
+    build_factored_multi_air_ace_circuit,
+};
 use crate::{AIRS, MIDEN_AIR_COUNT, ProofOrder};
 
 /// Number of quotient chunks the recursive verifier and its ACE circuit consume.
@@ -33,7 +36,77 @@ fn recursive_verifier_ace_config() -> AceConfig {
     }
 }
 
+// CANONICAL CIRCUIT
+// ================================================================================================
+
 /// Encoded recursive-verifier ACE circuit and the metadata consumed by MASM.
+///
+/// One circuit serves every proof order: proof-order dependence lives entirely in the MASM
+/// verifier's ingest scatter and fold-coefficient staging, not in the circuit itself. The stream
+/// is therefore a single `adv_pipe`-aligned segment with one digest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecursiveAceCircuit {
+    /// Number of ACE READ variables.
+    pub num_inputs: usize,
+    /// Number of ACE EVAL rows.
+    pub num_eval_gates: usize,
+    /// Encoded instruction stream length in base-field elements.
+    pub stream_len: usize,
+    /// Eidos digest of the full instruction stream: the advice-map key and the value pinned by
+    /// the compiled-in circuit digest.
+    pub commitment: Word,
+    /// Encoded ACE instruction stream consumed by `eval_circuit`.
+    pub instructions: Vec<Felt>,
+}
+
+/// Builds and encodes the order-invariant recursive-verifier ACE circuit.
+///
+/// The circuit does not depend on the proof order, so there is nothing to cache across calls
+/// beyond what [`build_canonical_multi_air_ace_circuit`] itself does; a caller that needs the
+/// circuit repeatedly should hold [`shared_recursive_circuit`] rather than call this per proof.
+pub fn build_recursive_verifier_ace_circuit() -> Result<RecursiveAceCircuit, AceError> {
+    let circuit = build_canonical_multi_air_ace_circuit(recursive_verifier_ace_config())?;
+    let encoded = circuit.to_ace()?;
+    let instructions = encoded.instructions();
+    let stream_len = encoded.size_in_felt();
+    if stream_len != instructions.len() {
+        return Err(AceError::InvalidInputLayout {
+            message: format!(
+                "ACE circuit stream length ({stream_len}) does not match instruction count ({})",
+                instructions.len()
+            ),
+        });
+    }
+    if !stream_len.is_multiple_of(8) {
+        return Err(AceError::InvalidInputLayout {
+            message: "ACE circuit stream must be 8-felt aligned for adv_pipe".into(),
+        });
+    }
+
+    let commitment = Eidos::hash_elements(instructions);
+
+    Ok(RecursiveAceCircuit {
+        num_inputs: encoded.num_vars(),
+        num_eval_gates: encoded.num_eval_rows(),
+        stream_len,
+        commitment,
+        instructions: instructions.to_vec(),
+    })
+}
+
+/// The process-wide canonical circuit. There is exactly one, for every proof order.
+#[cfg(feature = "std")]
+pub fn shared_recursive_circuit() -> &'static RecursiveAceCircuit {
+    static CIRCUIT: std::sync::OnceLock<RecursiveAceCircuit> = std::sync::OnceLock::new();
+    CIRCUIT.get_or_init(|| {
+        build_recursive_verifier_ace_circuit().expect("recursive-verifier ACE circuit must build")
+    })
+}
+
+// FACTORED CIRCUIT AND REGISTRY
+// ================================================================================================
+
+/// Encoded per-order recursive-verifier ACE circuit and the metadata consumed by MASM.
 ///
 /// The instruction stream is factored into two `adv_pipe`-aligned segments:
 /// - the per-order prefix `[constants | shuffle ops]` of `shuffle_prefix_len` felts, hashed into
@@ -44,7 +117,7 @@ fn recursive_verifier_ace_config() -> AceConfig {
 /// The registry leaf and advice-map key is
 /// `commitment = Eidos::merge(shuffle_commitment, common_commitment)`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecursiveAceCircuit {
+pub struct FactoredRecursiveAceCircuit {
     /// Number of ACE READ variables.
     pub num_inputs: usize,
     /// Number of ACE EVAL rows.
@@ -63,11 +136,12 @@ pub struct RecursiveAceCircuit {
     pub instructions: Vec<Felt>,
 }
 
-/// Factory for the recursive-verifier ACE circuits.
+/// Factory for the per-order recursive-verifier ACE circuits.
 ///
 /// Builds the order-invariant factored composition once and reuses it while assembling the
-/// order-specific circuits. Use this over [`build_recursive_verifier_ace_circuit`] whenever more
-/// than one order is needed so registry construction does not rebuild the composition per leaf.
+/// order-specific circuits. Use this over [`build_factored_recursive_verifier_ace_circuit`]
+/// whenever more than one order is needed so registry construction does not rebuild the
+/// composition per leaf.
 pub struct RecursiveAceCircuitFactory {
     /// The generic factory owns all order-invariant caching (post-constants chaining
     /// state, common-section digest) and the construction cross-checks; this type only
@@ -119,9 +193,12 @@ impl RecursiveAceCircuitFactory {
     ///
     /// Only the shuffle section is hashed live; the order-invariant common-section Eidos
     /// digest is reused.
-    pub fn circuit_for_order(&self, order: &ProofOrder) -> Result<RecursiveAceCircuit, AceError> {
+    pub fn circuit_for_order(
+        &self,
+        order: &ProofOrder,
+    ) -> Result<FactoredRecursiveAceCircuit, AceError> {
         let circuit = self.inner.circuit_for_order(&Self::order_indices(order))?;
-        Ok(RecursiveAceCircuit {
+        Ok(FactoredRecursiveAceCircuit {
             num_inputs: circuit.encoded.num_vars(),
             num_eval_gates: circuit.encoded.num_eval_rows(),
             stream_len: circuit.encoded.size_in_felt(),
@@ -151,14 +228,14 @@ pub(crate) fn shared_recursive_factory() -> &'static RecursiveAceCircuitFactory 
 /// Fields are private so an entry only exists once the constructor's leaf-equals-commitment check
 /// has passed; consume it with [`Self::into_parts`].
 pub struct RecursiveRegistryEntry {
-    circuit: RecursiveAceCircuit,
+    circuit: FactoredRecursiveAceCircuit,
     leaf: Word,
     path: MerklePath,
 }
 
 impl RecursiveRegistryEntry {
     /// Consumes the entry into `(circuit, leaf, path)`.
-    pub fn into_parts(self) -> (RecursiveAceCircuit, Word, MerklePath) {
+    pub fn into_parts(self) -> (FactoredRecursiveAceCircuit, Word, MerklePath) {
         (self.circuit, self.leaf, self.path)
     }
 }
@@ -195,24 +272,24 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
     }
 }
 
-/// Builds and encodes the recursive-verifier ACE circuit for one proof order.
+/// Builds and encodes the factored recursive-verifier ACE circuit for one proof order.
 ///
 /// Callers that need several orders should hold a [`RecursiveAceCircuitFactory`] instead;
 /// this rebuilds the composition every call.
 ///
 /// This path builds a fresh factored composition and hashes both stream segments from scratch. It
 /// is retained as a determinism oracle for the reusable factory path.
-pub fn build_recursive_verifier_ace_circuit(
+pub fn build_factored_recursive_verifier_ace_circuit(
     order: &ProofOrder,
-) -> Result<RecursiveAceCircuit, AceError> {
+) -> Result<FactoredRecursiveAceCircuit, AceError> {
     let factored = build_factored_multi_air_ace_circuit(recursive_verifier_ace_config())?;
-    encode_recursive_circuit(&factored, order)
+    encode_factored_circuit(&factored, order)
 }
 
-fn encode_recursive_circuit(
+fn encode_factored_circuit(
     factored: &FactoredMultiAirCircuit,
     order: &ProofOrder,
-) -> Result<RecursiveAceCircuit, AceError> {
+) -> Result<FactoredRecursiveAceCircuit, AceError> {
     let circuit = factored.circuit_for_order(order)?;
     let encoded = circuit.to_ace()?;
     let instructions = encoded.instructions();
@@ -246,7 +323,7 @@ fn encode_recursive_circuit(
     let common_commitment = Eidos::hash_elements(&instructions[shuffle_prefix_len..]);
     let commitment = Eidos::merge(&[shuffle_commitment, common_commitment]);
 
-    Ok(RecursiveAceCircuit {
+    Ok(FactoredRecursiveAceCircuit {
         num_inputs: encoded.num_vars(),
         num_eval_gates: encoded.num_eval_rows(),
         stream_len,

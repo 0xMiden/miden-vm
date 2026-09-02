@@ -969,3 +969,124 @@ fn encode_shuffle_section_rejects_layouts_the_encoder_rejects() {
         "the encode-only path must reject exactly what to_ace rejects"
     );
 }
+
+#[test]
+fn canonical_multi_air_folds_by_per_air_read_coefficients() {
+    use crate::pipeline::build_canonical_multi_air_ace_circuit;
+
+    // Same fixture as `multi_air_uses_proof_order_offsets_and_stable_selectors`, so the
+    // per-AIR accumulators below are the ones hand-computed there.
+    let airs = [
+        TestAir {
+            preprocessed: 1,
+            main: 1,
+            aux: 1,
+            boundaries: 1,
+            selector: Selector::First,
+            ..TestAir::simple()
+        },
+        TestAir {
+            preprocessed: 2,
+            main: 3,
+            aux: 2,
+            boundaries: 2,
+            selector: Selector::Last,
+            ..TestAir::simple()
+        },
+        TestAir {
+            preprocessed: 3,
+            main: 5,
+            aux: 3,
+            boundaries: 1,
+            selector: Selector::Transition,
+            ..TestAir::simple()
+        },
+    ];
+    let circuit = build_canonical_multi_air_ace_circuit(
+        &airs,
+        AceConfig {
+            num_quotient_chunks: 1,
+            layout: LayoutKind::Masm,
+            num_airs: 3,
+        },
+        4,
+    )
+    .unwrap();
+
+    assert_eq!(
+        (
+            circuit.layout().counts.preprocessed_width,
+            circuit.layout().counts.width,
+            circuit.layout().counts.aux_width,
+            circuit.layout().counts.num_aux_boundary,
+        ),
+        (12, 16, 8, 4)
+    );
+
+    // Trace regions sit at canonical (instance-order) offsets: preprocessed blocks start at
+    // 0/4/8, main blocks at 0/4/8, so the last column of each AIR lands where indexed below.
+    // The values are chosen to reproduce the stable accumulators 10, 33 and 65.
+    let values = [
+        (InputKey::Alpha, 1),
+        (InputKey::IsFirstAir(0), 2),
+        (InputKey::IsLastAir(1), 3),
+        (InputKey::IsTransitionAir(2), 5),
+        (InputKey::Preprocessed { offset: 0, index: 0 }, 3),
+        (InputKey::Main { offset: 0, index: 0 }, 2),
+        (InputKey::Preprocessed { offset: 0, index: 5 }, 4),
+        (InputKey::Main { offset: 0, index: 6 }, 7),
+        (InputKey::Preprocessed { offset: 0, index: 10 }, 7),
+        (InputKey::Main { offset: 0, index: 12 }, 6),
+    ];
+
+    // The proof order lives entirely in the fold coefficients: the AIR at proof position `k`
+    // carries `beta^(N - 1 - k)`. With beta = 10, proof order [2, 0, 1] weights instances
+    // 0/1/2 by 10/1/100 and proof order [0, 1, 2] by 100/10/1. Both expectations are the
+    // Horner folds `build_multi_air_ace_circuit` produces for those orders on the same
+    // accumulators.
+    for (coefficients, expected) in [([10, 1, 100], 6_633), ([100, 10, 1], 1_395)] {
+        let mut inputs = vec![EF::ZERO; circuit.layout().total_inputs];
+        for (key, value) in values {
+            set_input(&circuit, &mut inputs, key, ef(value));
+        }
+        for (air_index, coefficient) in coefficients.into_iter().enumerate() {
+            set_input(
+                &circuit,
+                &mut inputs,
+                InputKey::MultiAirFoldCoeff(air_index),
+                ef(coefficient),
+            );
+        }
+        assert_eq!(circuit.eval(&inputs).unwrap(), ef(expected));
+    }
+
+    circuit.to_ace().expect("canonical multi-AIR root must be MASM encodable");
+}
+
+#[test]
+fn canonical_multi_air_circuit_evaluates_without_panic() {
+    use crate::{pipeline::build_canonical_multi_air_ace_circuit, testing::fill_inputs};
+
+    let airs: [TestAir; 5] = core::array::from_fn(|i| TestAir {
+        main: 2 + i,
+        aux: 1 + (i % 2),
+        boundaries: 1,
+        ..TestAir::simple()
+    });
+    let circuit = build_canonical_multi_air_ace_circuit(
+        &airs,
+        AceConfig {
+            num_quotient_chunks: 8,
+            layout: LayoutKind::Masm,
+            num_airs: 5,
+        },
+        8,
+    )
+    .expect("canonical circuit");
+
+    // Fill every slot — including the fold-coefficient slots — with deterministic non-zero
+    // values. The circuit is not expected to evaluate to zero; this only checks that every
+    // DAG input reference is in range.
+    let inputs = fill_inputs(circuit.layout());
+    let _root = circuit.eval(&inputs).expect("canonical circuit eval must not panic");
+}
