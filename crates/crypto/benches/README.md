@@ -4,7 +4,7 @@
 
 ### Hash Functions
 
-In the Miden VM, we make use of different hash functions. Some of these are "traditional" hash functions, like `BLAKE3`, which are optimized for out-of-STARK performance, while others are algebraic hash functions, like `Rescue Prime`, and are more optimized for a better performance inside the STARK. In what follows, we benchmark several such hash functions and compare against other constructions that are used by other proving systems. More precisely, we benchmark:
+The `miden-crypto` crate provides several hash functions. Some are "traditional" hash functions, like `BLAKE3`, which are optimized for out-of-STARK performance, while others are algebraic hash functions, like `Rescue Prime`, and are optimized for use inside a STARK. We benchmark these functions alongside constructions used by other proving systems:
 
 * **BLAKE3** as specified [here](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and implemented [here](https://github.com/BLAKE3-team/BLAKE3) (with a wrapper exposed via this crate).
 * **SHA3** as specified [here](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf) and implemented [here](https://github.com/novifinancial/winterfell/blob/46dce1adf0/crypto/src/hash/sha/mod.rs).
@@ -12,8 +12,9 @@ In the Miden VM, we make use of different hash functions. Some of these are "tra
 * **Rescue Prime Optimized (RPO)** as specified [here](https://eprint.iacr.org/2022/1577) and implemented in this crate.
 * **Rescue Prime Extended (RPX)** a variant of the [xHash](https://eprint.iacr.org/2023/1045) hash function as implemented in this crate.
 * **Poseidon2** as specified [here](https://eprint.iacr.org/2023/323) and implemented in this crate.
+* **Eidos** as implemented in this crate.
 
-We benchmark the above hash functions using two scenarios. The first is a 2-to-1 $(a,b)\mapsto h(a,b)$ hashing where both $a$, $b$ and $h(a,b)$ are the digests corresponding to each of the hash functions. The second scenario is that of sequential hashing where we take a sequence of length $100$ field elements and hash these to produce a single digest. The digests are $4$ field elements in a prime field with modulus $2^{64} - 2^{32} + 1$ (i.e., 32 bytes) for Poseidon2, RPO, and RPX, and an array `[u8; 32]` for SHA3, BLAKE3, and Keccak256.
+We benchmark the above hash functions using two scenarios. The first is a 2-to-1 $(a,b)\mapsto h(a,b)$ hashing where both $a$, $b$ and $h(a,b)$ are the digests corresponding to each of the hash functions. The second scenario is that of sequential hashing where we take a sequence of length $100$ field elements and hash these to produce a single digest. The digests are $4$ field elements in a prime field with modulus $2^{64} - 2^{32} + 1$ (i.e., 32 bytes) for Poseidon2, Eidos, RPO, and RPX, and an array `[u8; 32]` for SHA3, BLAKE3, and Keccak256.
 
 ### Scenario 1: 2-to-1 hashing `h(a,b)`
 
@@ -45,15 +46,17 @@ We benchmark the above hash functions using two scenarios. The first is a 2-to-1
 
 Notes:
 - Measurements marked with an `*` are obsolete and need to be re-run.
+- Eidos is included in the benchmark harness but not in these result tables.
 - On Graviton 3 and 4, RPO256 and RPX256 are run with SVE acceleration enabled.
 - On AMD Ryzen 9 9950X, benchmarks are run with AVX512 acceleration enabled.
 - On AMD EPYC 9R14, RPO256 and RPX256 are run with AVX2 acceleration enabled.
 
 ### Digital Signature Algorithms (DSA)
 
-We benchmark the performance of digital signature algorithms used in the Miden VM. These include:
+We benchmark the digital signature algorithms provided by `miden-crypto`:
 
 * **Falcon512-Poseidon2** - Falcon512 signature scheme using Poseidon2 for message hashing
+* **Falcon512-Eidos** - Falcon512 signature scheme using Eidos for message hashing
 * **ECDSA over secp256k1** - Elliptic Curve Digital Signature Algorithm using Keccak256 for message hashing
 * **EdDSA over Ed25519** - Edwards-curve Digital Signature Algorithm using SHA-512 for message hashing
 
@@ -124,7 +127,7 @@ Before you can run the benchmarks, you'll need to make sure you have Rust [insta
 
 #### Hash Function Benchmarks
 
-To run the benchmarks for RPO, Poseidon2, BLAKE3 and Keccak256, clone the current repository, and from the root directory of the repo run:
+To run the benchmarks for RPO, RPX, Poseidon2, Eidos, BLAKE3 and Keccak256, clone the current repository, and from the root directory of the repo run:
 
  ```
  cargo bench hash
@@ -138,7 +141,7 @@ cargo bench hash
 
 #### Digital Signature Algorithm (DSA) Benchmarks
 
-To run the benchmarks for all DSA implementations (Falcon512-Poseidon2, ECDSA k256, and EdDSA), from the root directory run:
+To run the benchmarks for all DSA implementations (Falcon512-Poseidon2, Falcon512-Eidos, ECDSA k256, and EdDSA), from the root directory run:
 
 ```
 cargo bench dsa
