@@ -3,8 +3,9 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
-    BaseHost, LoadedMastForest, ProcessorState, SyncHost, Word, advice::AdviceMutation,
-    event::EventError,
+    BaseHost, LoadedMastForest, SyncHost, Word,
+    advice::AdviceMutation,
+    event::{EventContext, EventError},
 };
 
 /// A minimal testing host that records regular events.
@@ -59,8 +60,8 @@ impl SyncHost for NonTracingTestHost {
         None
     }
 
-    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = process.get_stack_item(0).as_canonical_u64();
+    fn on_event(&mut self, context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = context.id().as_u64();
         self.events.push(event_id);
         Ok(Vec::new())
     }

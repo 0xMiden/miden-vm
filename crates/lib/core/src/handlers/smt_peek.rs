@@ -7,15 +7,12 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    Felt, WORD_SIZE, Word,
-    crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
+    WORD_SIZE, Word,
+    advice::AdviceStack,
+    crypto::merkle::{EmptySubtreeRoots, NodeIndex, SMT_DEPTH, Smt},
     events::EventName,
 };
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 
 /// Event name for the smt_peek operation.
 pub const SMT_PEEK_EVENT_NAME: EventName =
@@ -50,22 +47,24 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 ///
 /// # Panics
 /// Will panic as unimplemented if the target depth is `64`.
-pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_smt_peek(context: &EventContext) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
     // Stack at emit: [event_id, KEY, ROOT, ...] where KEY and ROOT are structural words.
-    let key = process.get_stack_word(1);
-    let root = process.get_stack_word(5);
+    let key = context.stack_word(1);
+    let root = context.stack_word(5);
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
     // K[3] is used as the leaf index (most significant in BE ordering)
-    let node = process
-        .advice_provider()
-        .get_tree_node(root, Felt::new_unchecked(SMT_DEPTH as u64), key[3])
-        .map_err(|err| SmtPeekError::AdviceProviderError {
-            message: format!("Failed to get tree node: {err}"),
-        })?;
+    let index = NodeIndex::new(SMT_DEPTH, key[3].as_canonical_u64())
+        .expect("every u64 position is valid at depth 64");
+    let node =
+        context
+            .merkle_node(root, index)
+            .map_err(|err| SmtPeekError::AdviceProviderError {
+                message: format!("Failed to get tree node: {err}"),
+            })?;
 
     if node == *empty_leaf {
         // if the node is a root of an empty subtree, then there is no value associated with
@@ -73,7 +72,7 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
         let mutation = advice_stack_word_mutation(Smt::EMPTY_VALUE);
         Ok(vec![mutation])
     } else {
-        let leaf_preimage = get_smt_leaf_preimage(process, node)?;
+        let leaf_preimage = get_smt_leaf_preimage(context, node)?;
 
         for (key_in_leaf, value_in_leaf) in leaf_preimage {
             if key == key_in_leaf {
@@ -95,13 +94,10 @@ pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
 
 /// Retrieves the preimage of an SMT leaf node from the advice provider.
 fn get_smt_leaf_preimage(
-    process: &ProcessorState,
+    context: &EventContext,
     node: Word,
 ) -> Result<Vec<(Word, Word)>, SmtPeekError> {
-    let kv_pairs = process
-        .advice_provider()
-        .get_mapped_values(&node)
-        .ok_or(SmtPeekError::SmtNodeNotFound { node })?;
+    let kv_pairs = context.advice_map_entry(&node).ok_or(SmtPeekError::SmtNodeNotFound { node })?;
 
     if kv_pairs.len() % (WORD_SIZE * 2) != 0 {
         return Err(SmtPeekError::InvalidSmtNodePreimage { node, preimage_len: kv_pairs.len() });

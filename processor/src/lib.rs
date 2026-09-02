@@ -9,11 +9,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
-use core::{
-    fmt::{self, Display, LowerHex},
-    ops::ControlFlow,
-};
+use core::ops::ControlFlow;
 
 use miden_mast_package::debug_info::DebugSourceNodeId;
 
@@ -27,17 +23,12 @@ mod host;
 mod processor;
 mod tracer;
 
-use miden_core::{
-    deferred::{Digest, Node, PrecompileError},
-    mast::ExecutableMastForest,
-    serde::{Deserializable, Serializable},
-};
+use miden_core::mast::ExecutableMastForest;
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
-    processor::{Processor, SystemInterface},
     trace::RowIndex,
 };
 
@@ -68,7 +59,7 @@ pub use host::{
     default::{DefaultHost, HostLibrary},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
+    ContextId, EMPTY_WORD, Felt, MemoryAddress, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     program::{
         ExecutionClaim, InputError, KernelDescriptor, MIN_STACK_DEPTH, Program, ProgramInfo,
         StackInputs, StackOutputs,
@@ -79,21 +70,27 @@ pub use trace::{ExecutionWitness, PrecompileWitness, VmWitness};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStack};
+    pub use miden_event_handler::AdviceMutation;
 
-    pub use super::host::{
-        AdviceMutation,
-        advice::{AdviceError, AdviceProvider},
-    };
+    pub use super::host::advice::{AdviceError, AdviceProvider};
 }
 
 pub mod event {
     pub use miden_core::events::*;
-
-    pub use crate::host::handlers::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
-        TraceHandlerRegistry,
+    #[allow(deprecated)]
+    pub use miden_event_handler::{
+        AdviceProviderView, AdviceReadError, BuiltinEventContext, EventContext,
+        EventContextProvider, EventError, EventHandler, Invocation, InvocationKind,
+        MemoryReadError, MerkleReadError, NoopEventHandler, NoopTraceHandler, TraceError,
+        TraceHandler,
     };
+
+    pub use crate::host::handlers::{EventHandlerRegistry, TraceHandlerRegistry};
 }
+
+/// Compatibility alias for the context passed to host callbacks.
+#[deprecated(note = "use miden_event_handler::EventContext")]
+pub type ProcessorState<'a> = miden_event_handler::EventContext<'a>;
 
 pub mod operation {
     pub use miden_core::operations::*;
@@ -102,165 +99,6 @@ pub mod operation {
 }
 
 pub mod trace;
-
-// PROCESSOR STATE
-// ===============================================================================================
-
-/// A view into the current state of the processor.
-///
-/// This struct provides read access to the processor's state, including the stack, memory,
-/// advice provider, and execution context information.
-#[derive(Debug)]
-pub struct ProcessorState<'a> {
-    processor: &'a FastProcessor,
-}
-
-impl<'a> ProcessorState<'a> {
-    /// Returns a reference to the advice provider.
-    #[inline(always)]
-    pub fn advice_provider(&self) -> &AdviceProvider {
-        self.processor.advice_provider()
-    }
-
-    /// Returns the execution options.
-    #[inline(always)]
-    pub fn execution_options(&self) -> &ExecutionOptions {
-        self.processor.execution_options()
-    }
-
-    /// Returns the current clock cycle of a process.
-    #[inline(always)]
-    pub fn clock(&self) -> RowIndex {
-        self.processor.clock()
-    }
-
-    /// Returns the current execution context ID.
-    #[inline(always)]
-    pub fn ctx(&self) -> ContextId {
-        self.processor.ctx()
-    }
-
-    /// Returns the value located at the specified position on the stack at the current clock cycle.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    #[inline(always)]
-    pub fn get_stack_item(&self, pos: usize) -> Felt {
-        self.processor.stack_get_safe(pos)
-    }
-
-    /// Returns a word starting at the specified element index on the stack.
-    ///
-    /// The word is formed by taking 4 consecutive elements starting from the specified index.
-    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
-    /// a word from elements 1-4, etc.
-    ///
-    /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
-    /// and N+3 at position 3. `word[0]` corresponds to the top of the stack.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    /// Creating a word does not change the state of the stack.
-    #[inline(always)]
-    pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        self.processor.stack_get_word_safe(start_idx)
-    }
-
-    /// Returns stack state at the current clock cycle. This includes the top 16 items of the
-    /// stack + overflow entries.
-    #[inline(always)]
-    pub fn get_stack_state(&self) -> Vec<Felt> {
-        self.processor.stack().iter().rev().copied().collect()
-    }
-
-    /// Returns the current depth of the stack, including overflow entries.
-    #[inline(always)]
-    pub fn stack_depth(&self) -> u32 {
-        self.processor.stack_depth()
-    }
-
-    /// Returns the element located at the specified context/address, or None if the address hasn't
-    /// been accessed previously.
-    #[inline(always)]
-    pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        self.processor.memory().read_element_impl(ctx, addr)
-    }
-
-    /// Returns the batch of elements starting at the specified context/address.
-    ///
-    /// # Errors
-    /// - If the address is not word aligned.
-    #[inline(always)]
-    pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        self.processor.memory().read_word_impl(ctx, addr)
-    }
-
-    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
-    /// without modifying the state of the stack), and verifies that memory range is valid.
-    ///
-    /// The range is half-open `[start, end)`; both `start` and `end` must be `<= u32::MAX`.
-    pub fn get_mem_addr_range(
-        &self,
-        start_idx: usize,
-        end_idx: usize,
-    ) -> Result<core::ops::Range<u32>, MemoryError> {
-        let start_addr = self.get_stack_item(start_idx).as_canonical_u64();
-        let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
-
-        if start_addr > u32::MAX as u64 {
-            return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
-        }
-        if end_addr > u32::MAX as u64 {
-            return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
-        }
-
-        if start_addr > end_addr {
-            return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
-        }
-
-        Ok(start_addr as u32..end_addr as u32)
-    }
-
-    /// Returns the entire memory state for the specified execution context at the current clock
-    /// cycle.
-    ///
-    /// The state is returned as a vector of (address, value) tuples, and includes addresses which
-    /// have been accessed at least once.
-    #[inline(always)]
-    pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        self.processor.memory().get_memory_state(ctx)
-    }
-
-    /// Returns the already-memoized canonical deferred digest for `digest`, if present.
-    ///
-    /// This is a read-only lookup: it does not evaluate `digest`, register helper nodes, or mutate
-    /// deferred state.
-    #[inline(always)]
-    pub fn get_canonical_deferred_digest(&self, digest: Digest) -> Option<Digest> {
-        self.processor.deferred_state().get_canonical_digest(digest)
-    }
-
-    /// Returns the already-memoized canonical deferred node for `digest`, if present.
-    ///
-    /// This is a read-only lookup and returns only canonical results that were already memoized in
-    /// deferred state; it never evaluates or mutates deferred state.
-    #[inline(always)]
-    pub fn get_canonical_deferred_node(&self, digest: Digest) -> Option<(Digest, &Node)> {
-        self.processor.deferred_state().get_canonical_node(digest)
-    }
-
-    /// Returns the already-memoized canonical deferred node for `digest`.
-    ///
-    /// This is a read-only lookup and never evaluates or mutates deferred state.
-    ///
-    /// # Errors
-    /// Returns [`PrecompileError::MissingNode`] if no memoized canonical node is available.
-    #[inline(always)]
-    pub fn require_canonical_deferred_node(
-        &self,
-        digest: Digest,
-    ) -> Result<(Digest, &Node), PrecompileError> {
-        self.processor.deferred_state().require_canonical_node(digest)
-    }
-}
 
 // STOPPER
 // ===============================================================================================
@@ -302,125 +140,6 @@ pub trait Stopper {
             Option<DebugSourceNodeId>,
         )>,
     ) -> ControlFlow<BreakReason<Self::Forest>>;
-}
-
-// EXECUTION CONTEXT
-// ================================================================================================
-
-/// Represents the ID of an execution context
-#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-pub struct ContextId(u32);
-
-impl ContextId {
-    /// Returns the root context ID
-    pub fn root() -> Self {
-        Self(0)
-    }
-
-    /// Returns true if the context ID represents the root context
-    pub fn is_root(&self) -> bool {
-        self.0 == 0
-    }
-}
-
-impl From<RowIndex> for ContextId {
-    fn from(value: RowIndex) -> Self {
-        Self(value.as_u32())
-    }
-}
-
-impl From<u32> for ContextId {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<ContextId> for u32 {
-    fn from(context_id: ContextId) -> Self {
-        context_id.0
-    }
-}
-
-impl From<ContextId> for u64 {
-    fn from(context_id: ContextId) -> Self {
-        context_id.0.into()
-    }
-}
-
-impl From<ContextId> for Felt {
-    fn from(context_id: ContextId) -> Self {
-        Felt::from_u32(context_id.0)
-    }
-}
-
-impl Serializable for ContextId {
-    fn write_into<W: serde::ByteWriter>(&self, target: &mut W) {
-        Serializable::write_into(&self.0, target);
-    }
-}
-
-impl Deserializable for ContextId {
-    fn read_from<R: serde::ByteReader>(
-        source: &mut R,
-    ) -> Result<Self, serde::DeserializationError> {
-        Ok(Self(<u32 as Deserializable>::read_from(source)?))
-    }
-
-    fn min_serialized_size() -> usize {
-        <u32 as Deserializable>::min_serialized_size()
-    }
-}
-
-impl Display for ContextId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// MEMORY ADDRESS
-// ================================================================================================
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MemoryAddress(u32);
-
-impl From<u32> for MemoryAddress {
-    fn from(addr: u32) -> Self {
-        MemoryAddress(addr)
-    }
-}
-
-impl From<MemoryAddress> for u32 {
-    fn from(value: MemoryAddress) -> Self {
-        value.0
-    }
-}
-
-impl Display for MemoryAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl LowerHex for MemoryAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LowerHex::fmt(&self.0, f)
-    }
-}
-
-impl core::ops::Add<MemoryAddress> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: MemoryAddress) -> Self::Output {
-        MemoryAddress(self.0 + rhs.0)
-    }
-}
-
-impl core::ops::Add<u32> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: u32) -> Self::Output {
-        MemoryAddress(self.0 + rhs)
-    }
 }
 
 // HELPERS

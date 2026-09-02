@@ -32,8 +32,9 @@ use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
-    ContextId, ExecutionError, ProcessorState,
+    ContextId, ExecutionError,
     advice::{AdviceInputs, AdviceProvider, AdviceStack},
+    event::EventContext,
     trace::VmTrace,
 };
 use miden_processor::{
@@ -924,10 +925,11 @@ mod tests {
 
         let invocations = Arc::new(AtomicUsize::new(0));
         let handler_invocations = invocations.clone();
-        let handler = move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
-            handler_invocations.fetch_add(1, Ordering::SeqCst);
-            Ok(Vec::new())
-        };
+        let handler =
+            move |_context: &EventContext<'_>| -> Result<Vec<AdviceMutation>, EventError> {
+                handler_invocations.fetch_add(1, Ordering::SeqCst);
+                Ok(Vec::new())
+            };
 
         let source = alloc::format!(
             r#"

@@ -11,10 +11,10 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
+    DefaultHost, ExecutionError, FastProcessor, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     crypto::random::RandomCoin,
-    event::EventError,
+    event::{EventContext, EventError},
     operation::OperationError,
 };
 #[cfg(feature = "arbitrary")]
@@ -72,13 +72,14 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(1);
-    let msg = process.get_stack_word(5);
+pub fn push_falcon_signature(
+    context: &EventContext<'_>,
+) -> Result<Vec<AdviceMutation>, EventError> {
+    let pub_key = context.stack_word(1);
+    let msg = context.stack_word(5);
 
-    let pk_sk_felts = process
-        .advice_provider()
-        .get_mapped_values(&pub_key)
+    let pk_sk_felts = context
+        .advice_map_entry(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     // Convert felts back to bytes (each felt was a single byte stored as u64)
@@ -359,9 +360,9 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Malicious event handler that always returns remainder = 0.
     // Signature matches the event-handler callback contract.
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = context.stack_item(1).as_canonical_u64();
+        let a_lo = context.stack_item(2).as_canonical_u64();
         let a = (a_hi << 32) | a_lo;
 
         let q = a.wrapping_mul(M_INV);
@@ -417,7 +418,9 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn malicious_falcon_div(
+        _context: &EventContext<'_>,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
 
@@ -459,9 +462,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
     #[allow(clippy::unnecessary_wraps)]
-    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let a_hi = process.get_stack_item(1).as_canonical_u64();
-        let a_lo = process.get_stack_item(2).as_canonical_u64();
+    fn malicious_falcon_div(context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = context.stack_item(1).as_canonical_u64();
+        let a_lo = context.stack_item(2).as_canonical_u64();
         let dividend = (a_hi << 32) | a_lo;
         let quotient = dividend / M;
 

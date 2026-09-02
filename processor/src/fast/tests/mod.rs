@@ -38,16 +38,16 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
-    SyncHost,
+    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProgramExecutor, SyncHost,
     advice::AdviceMutation,
-    event::EventError,
+    event::{EventContext, EventError},
     operation::OperationError,
     processor::{StackInterface, SystemInterface},
 };
 
 mod advice_provider;
 mod all_ops;
+mod event_context;
 mod masm_consistency;
 mod memory;
 
@@ -1526,7 +1526,7 @@ impl SyncHost for MalformedExternalHost {
         Some(self.loaded_mast_forest.clone())
     }
 
-    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, _context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }

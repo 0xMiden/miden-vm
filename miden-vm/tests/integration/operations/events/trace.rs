@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use miden_assembly::Assembler;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, ProcessorState, Program, StackInputs,
-    StackOutputs,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, Program, StackInputs, StackOutputs,
     advice::AdviceInputs,
-    event::{EventName, SystemEvent, TraceError},
+    event::{EventContext, EventName, SystemEvent, TraceError},
 };
 
 use super::TestHost;
@@ -105,8 +104,8 @@ fn test_trace_handler_registry() {
     let recorded: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = {
         let recorded = recorded.clone();
-        move |process: &ProcessorState| -> Result<(), TraceError> {
-            recorded.lock().unwrap().push(process.get_stack_item(1).as_canonical_u64());
+        move |context: &EventContext| -> Result<(), TraceError> {
+            recorded.lock().unwrap().push(context.id().as_u64());
             Ok(())
         }
     };

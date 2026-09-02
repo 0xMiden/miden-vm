@@ -2226,6 +2226,7 @@ dependencies = [
  "miden-core-lib-codegen",
  "miden-crypto",
  "miden-debug-types",
+ "miden-event-handler",
  "miden-lifted-stark",
  "miden-mast-package",
  "miden-package-registry",
@@ -2355,6 +2356,14 @@ dependencies = [
  "serde_spanned",
  "thiserror",
  "zerocopy",
+]
+
+[[package]]
+name = "miden-event-handler"
+version = "0.31.0"
+dependencies = [
+ "miden-core",
+ "thiserror",
 ]
 
 [[package]]
@@ -2633,6 +2642,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
+ "miden-event-handler",
  "miden-mast-package",
  "miden-precompiles",
  "miden-test-utils",
@@ -2891,6 +2901,7 @@ dependencies = [
  "criterion",
  "miden-assembly",
  "miden-crypto",
+ "miden-event-handler",
  "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",

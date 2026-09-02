@@ -4,9 +4,9 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, Word,
+    LoadedMastForest, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
-    event::{EventError, EventName, TraceError},
+    event::{EventContext, EventError, EventName, TraceError},
 };
 
 struct YieldingAsyncHost {
@@ -39,7 +39,7 @@ impl Host for YieldingAsyncHost {
 
     fn on_event(
         &mut self,
-        _process: &ProcessorState<'_>,
+        _context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         self.event_calls += 1;
         async {
@@ -50,7 +50,7 @@ impl Host for YieldingAsyncHost {
 
     fn on_trace(
         &mut self,
-        _process: &ProcessorState<'_>,
+        _context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<(), TraceError>> {
         async move {
             tokio::task::yield_now().await;

@@ -6,10 +6,9 @@ use miden_debug_types::{
 };
 
 use crate::{
-    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    Word,
+    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, SyncHost, Word,
     advice::AdviceMutation,
-    event::{EventError, TraceError},
+    event::{EventContext, EventError, TraceError},
     mast::MastForest,
 };
 
@@ -23,19 +22,19 @@ pub struct ProcessorStateSnapshot {
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
 }
 
-impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
-    fn from(state: &ProcessorState) -> Self {
+impl From<&EventContext<'_>> for ProcessorStateSnapshot {
+    fn from(state: &EventContext<'_>) -> Self {
         ProcessorStateSnapshot {
-            clk: state.clock().into(),
-            ctx: state.ctx().into(),
-            stack_state: state.get_stack_state(),
+            clk: state.clock(),
+            ctx: state.context_id().into(),
+            stack_state: state.stack_snapshot(),
             stack_words: [
-                state.get_stack_word(0),
-                state.get_stack_word(4),
-                state.get_stack_word(8),
-                state.get_stack_word(12),
+                state.stack_word(0),
+                state.stack_word(4),
+                state.stack_word(8),
+                state.stack_word(12),
             ],
-            mem_state: state.get_mem_state(state.ctx()),
+            mem_state: state.memory_snapshot(),
         }
     }
 }
@@ -47,23 +46,23 @@ impl ProcessorStateSnapshot {
     /// event ID at the top of the stack. The checkpoint snapshot skips that synthetic stack item to
     /// match the state after the trailing `drop`, and to preserve the old trace-decorator test
     /// shape.
-    fn from_emit_checkpoint(state: &ProcessorState) -> Self {
-        let mut stack_state = state.get_stack_state();
+    fn from_emit_checkpoint(state: &EventContext<'_>) -> Self {
+        let mut stack_state = state.stack_snapshot();
         if !stack_state.is_empty() {
             stack_state.remove(0);
         }
 
         ProcessorStateSnapshot {
-            clk: state.clock().into(),
-            ctx: state.ctx().into(),
+            clk: state.clock(),
+            ctx: state.context_id().into(),
             stack_state,
             stack_words: [
-                state.get_stack_word(1),
-                state.get_stack_word(5),
-                state.get_stack_word(9),
-                state.get_stack_word(13),
+                state.stack_word(1),
+                state.stack_word(5),
+                state.stack_word(9),
+                state.stack_word(13),
             ],
-            mem_state: state.get_mem_state(state.ctx()),
+            mem_state: state.memory_snapshot(),
         }
     }
 
@@ -73,23 +72,23 @@ impl ProcessorStateSnapshot {
     /// drop`, so the host observes the `SystemEvent::TraceEvent` id at the top of the stack  and
     /// the trace id below it (position 1). The checkpoint snapshot skips both synthetic stack items
     /// to match the state after the trailing `drop drop`.
-    fn from_trace_checkpoint(state: &ProcessorState) -> Self {
-        let mut stack_state = state.get_stack_state();
+    fn from_trace_checkpoint(state: &EventContext<'_>) -> Self {
+        let mut stack_state = state.stack_snapshot();
         if stack_state.len() >= 2 {
             stack_state.drain(0..2);
         }
 
         ProcessorStateSnapshot {
-            clk: state.clock().into(),
-            ctx: state.ctx().into(),
+            clk: state.clock(),
+            ctx: state.context_id().into(),
             stack_state,
             stack_words: [
-                state.get_stack_word(2),
-                state.get_stack_word(6),
-                state.get_stack_word(10),
-                state.get_stack_word(14),
+                state.stack_word(2),
+                state.stack_word(6),
+                state.stack_word(10),
+                state.stack_word(14),
             ],
-            mem_state: state.get_mem_state(state.ctx()),
+            mem_state: state.memory_snapshot(),
         }
     }
 }
@@ -183,23 +182,23 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = process.get_stack_item(0).as_canonical_u64();
+    fn on_event(&mut self, context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = context.id().as_u64();
         self.event_handler.push(event_id);
         self.snapshots
             .entry(event_id)
             .or_default()
-            .push(ProcessorStateSnapshot::from_emit_checkpoint(process));
+            .push(ProcessorStateSnapshot::from_emit_checkpoint(context));
         Ok(Vec::new())
     }
 
-    fn on_trace(&mut self, process: &ProcessorState) -> Result<(), TraceError> {
-        let trace_id = process.get_stack_item(1).as_canonical_u64();
+    fn on_trace(&mut self, context: &EventContext<'_>) -> Result<(), TraceError> {
+        let trace_id = context.id().as_u64();
         self.trace_handler.push(trace_id);
         self.trace_snapshots
             .entry(trace_id)
             .or_default()
-            .push(ProcessorStateSnapshot::from_trace_checkpoint(process));
+            .push(ProcessorStateSnapshot::from_trace_checkpoint(context));
         Ok(())
     }
 }

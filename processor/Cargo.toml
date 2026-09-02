@@ -24,6 +24,7 @@ default = ["std"]
 std = [
     "miden-core/std",
     "miden-debug-types/std",
+    "miden-event-handler/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
@@ -38,6 +39,7 @@ bus-debugger = ["miden-air/std"]
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+miden-event-handler.workspace = true
 miden-mast-package.workspace = true
 miden-precompiles.workspace = true
 miden-utils-diagnostics.workspace = true

@@ -193,7 +193,7 @@ fn stack_item_echoed_to_advice_stack() {
     );
     let module = load(&wat_src);
     let processor = processor_with_stack(&[5, 7]);
-    let expected = processor.state().get_stack_item(1);
+    let expected = processor.state().stack_item(1);
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with([expected])]);
@@ -207,7 +207,7 @@ fn stack_word_inserted_into_advice_map() {
     );
     let module = load(&wat_src);
     let processor = processor_with_stack(&[1, 2, 3, 4, 5]);
-    let word = processor.state().get_stack_word(1);
+    let word = processor.state().stack_word(1);
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     let mut expected = AdviceMap::default();
@@ -225,7 +225,7 @@ fn stack_read_batches_elements() {
     let module = load(&wat_src);
     let processor = processor_with_stack(&[9, 8]);
     let state = processor.state();
-    let expected = [state.get_stack_item(1), state.get_stack_item(2), state.get_stack_item(3)];
+    let expected = [state.stack_item(1), state.stack_item(2), state.stack_item(3)];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
     assert_eq!(mutations, vec![AdviceMutation::extend_advice_stack_with(expected)]);
@@ -265,8 +265,8 @@ fn clk_ctx_and_depth_are_visible() {
     let state = processor.state();
     let expected = [
         Felt::new_unchecked(u64::from(state.clock())),
-        Felt::new_unchecked(u64::from(u32::from(state.ctx()))),
-        Felt::new_unchecked(u64::from(state.stack_depth())),
+        Felt::new_unchecked(u64::from(u32::from(state.context_id()))),
+        Felt::new_unchecked(u64::try_from(state.stack_depth()).unwrap()),
     ];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
@@ -349,7 +349,7 @@ fn advice_stack_roundtrip() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_stack(advice_stack))
         .expect("advice inputs fit");
-    let expected = processor.state().advice_provider().stack();
+    let expected = processor.state().advice_stack().iter().copied().collect::<Vec<_>>();
     assert_eq!(expected.len(), 3);
 
     let mutations = run(&module, &processor).expect("handler succeeds");

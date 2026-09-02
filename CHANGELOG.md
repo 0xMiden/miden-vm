@@ -14,6 +14,11 @@
 
 #### Changes
 
+- [BREAKING] Added the processor-independent `miden-event-handler` crate and migrated native event
+  and trace callbacks from concrete `ProcessorState` access to an explicit `EventContext`
+  capability interface. `miden-processor` retains deprecated paths and accessors for one release;
+  callers naming the concrete `AdviceProvider`, reading all `ExecutionOptions`, or expecting a
+  `RowIndex` clock must migrate ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
 - Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
 

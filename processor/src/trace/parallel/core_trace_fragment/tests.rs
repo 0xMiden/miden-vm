@@ -34,8 +34,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, ProcessorState,
-    event::{NoopEventHandler, TraceError},
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor,
+    event::{EventContext, NoopEventHandler, TraceError},
     trace::{VmTrace, build_trace},
 };
 
@@ -1630,7 +1630,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
     host.register_trace_handler(
         TRACE_EVENT,
-        Arc::new(|_: &ProcessorState| -> Result<(), TraceError> { Ok(()) }),
+        Arc::new(|_: &EventContext<'_>| -> Result<(), TraceError> { Ok(()) }),
     )
     .unwrap();
 

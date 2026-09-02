@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
+use miden_event_handler::MemoryReadError;
 
 use crate::{ContextId, ExecutionOptions, MemoryAddress, MemoryError, processor::MemoryInterface};
 
@@ -212,6 +213,60 @@ impl Memory {
         let word = self.memory.get(&(ctx, addr)).copied();
 
         Ok(word)
+    }
+
+    /// Reads an aligned word for the processor-independent event context.
+    pub(crate) fn read_word_for_event(
+        &self,
+        ctx: ContextId,
+        addr: u32,
+    ) -> Result<Option<Word>, MemoryReadError> {
+        if !addr.is_multiple_of(WORD_SIZE as u32) {
+            return Err(MemoryReadError::UnalignedWord { context_id: ctx, address: addr });
+        }
+        Ok(self.memory.get(&(ctx, addr)).copied())
+    }
+
+    /// Strictly reads a contiguous range without modifying `output` when validation fails.
+    pub(crate) fn read_range_for_event(
+        &self,
+        ctx: ContextId,
+        start: u32,
+        output: &mut [Felt],
+    ) -> Result<(), MemoryReadError> {
+        let count = output.len();
+        let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
+        let end = u64::from(start).saturating_add(count_u64);
+        if end > u64::from(u32::MAX) + 1 {
+            return Err(MemoryReadError::RangeOverflow { start, count });
+        }
+        if output.is_empty() {
+            return Ok(());
+        }
+
+        let last = (end - 1) as u32;
+        let mut word_addr = start - start % WORD_SIZE as u32;
+        let last_word_addr = last - last % WORD_SIZE as u32;
+        loop {
+            if !self.memory.contains_key(&(ctx, word_addr)) {
+                return Err(MemoryReadError::Uninitialized {
+                    context_id: ctx,
+                    address: word_addr.max(start),
+                });
+            }
+            if word_addr == last_word_addr {
+                break;
+            }
+            word_addr += WORD_SIZE as u32;
+        }
+
+        for (offset, target) in output.iter_mut().enumerate() {
+            let address = start + offset as u32;
+            *target = self
+                .read_element_impl(ctx, address)
+                .expect("all words touched by the range were validated above");
+        }
+        Ok(())
     }
 
     // TEST HELPERS

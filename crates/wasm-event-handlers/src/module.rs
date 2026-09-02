@@ -7,13 +7,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_event_handler::{AdviceMutation, EventContext, EventError, EventHandler};
 use miden_event_handler_abi::{ABI_VERSION, IMPORT_MODULE, MEMORY_EXPORT, host_fn};
 use miden_mast_package::{MAX_MODULE_BYTES, MIN_ABI_VERSION, validate_manifest_entries};
-use miden_processor::{
-    ProcessorState,
-    advice::AdviceMutation,
-    event::{EventError, EventHandler, EventName},
-};
+use miden_processor::event::EventName;
 use wasmi::{CompilationMode, Config, EnforcedLimits, Engine, Instance, Linker, Module, Store};
 
 use crate::{
@@ -324,7 +321,7 @@ impl WasmHandlerModule {
 
     /// Creates a fresh store for one call, with the resource limiter installed and the fuel
     /// budget set.
-    fn new_store(&self, state: *const ProcessorState<'static>) -> Store<HostCtx> {
+    fn new_store(&self, state: *const EventContext<'static>) -> Store<HostCtx> {
         let mut store = Store::new(&self.engine, HostCtx::new(state, &self.limits));
         store.limiter(|ctx| &mut ctx.limits);
         store
@@ -333,17 +330,17 @@ impl WasmHandlerModule {
         store
     }
 
-    /// Runs one handler export against the given processor state and returns the mutations it
+    /// Runs one handler export against the given event context and returns the mutations it
     /// buffered.
     fn call(
         &self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
         export: &str,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         // Erase the lifetime for storage in the store data. The pointer stays valid for this
         // whole function, which outlives the store; see `host::StatePtr` for the safety
         // contract.
-        let state_ptr = core::ptr::from_ref(process).cast::<ProcessorState<'static>>();
+        let state_ptr = core::ptr::from_ref(context).cast::<EventContext<'static>>();
         let mut store = self.new_store(state_ptr);
 
         // `instantiate_and_start` runs no guest code here: modules with a start section are
@@ -628,7 +625,7 @@ pub struct WasmEventHandler {
 }
 
 impl EventHandler for WasmEventHandler {
-    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        self.module.call(process, &self.export)
+    fn on_event(&self, context: &EventContext) -> Result<Vec<AdviceMutation>, EventError> {
+        self.module.call(context, &self.export)
     }
 }

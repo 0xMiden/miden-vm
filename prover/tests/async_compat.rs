@@ -4,9 +4,9 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, Word,
+    LoadedMastForest, Word,
     advice::AdviceMutation,
-    event::{EventError, EventName},
+    event::{EventContext, EventError, EventName},
 };
 use miden_prover::{AdviceInputs, ExecutionClaim, ExecutionProof, Prover, StackInputs};
 use miden_verifier::Verifier;
@@ -40,7 +40,7 @@ impl Host for YieldingAsyncHost {
 
     fn on_event(
         &mut self,
-        _process: &ProcessorState<'_>,
+        _context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         self.event_calls += 1;
         async {
