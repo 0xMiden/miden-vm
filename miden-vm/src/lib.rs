@@ -19,6 +19,7 @@ pub use miden_core::{
         ExecutionProofError, HashFunction, PrecompileProof, PrecompileStatus, StarkProof, VmProof,
     },
 };
+pub use miden_core_lib::conjectured_security_estimator_root;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, ExecutionWitness,
     FastProcessor, FutureMaybeSend, Host, KernelDescriptor, PrecompileWitness, Program,
