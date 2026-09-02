@@ -213,11 +213,21 @@ impl Default for CoreLibrary {
     }
 }
 
+/// Returns the MAST root of the in-VM conjectured security estimator.
+pub fn conjectured_security_estimator_root() -> Word {
+    CoreLibrary::default()
+        .package
+        .get_procedure_root_by_path("::miden::core::sys::vm::compute_conjectured_security_level")
+        .expect("compute_conjectured_security_level is exported from the core library")
+}
+
 // TESTS
 // ================================================================================================
 
 #[cfg(test)]
 mod tests {
+    use miden_verifier::Verifier;
+
     use super::*;
 
     #[test]
@@ -243,5 +253,25 @@ mod tests {
             .is_some();
 
         assert!(exists);
+    }
+
+    #[test]
+    fn proof_compatibility_roots_match_the_embedded_core_library() {
+        let core_lib = CoreLibrary::default();
+        let compatibility = Verifier::proof_compatibility();
+
+        assert_eq!(
+            compatibility.vm_verifier_roots().last(),
+            Some(&core_lib.recursive_verifier_root()),
+        );
+        assert_eq!(
+            compatibility.pvm_verifier_roots().last(),
+            Some(&core_lib.pvm_recursive_verifier_root()),
+        );
+    }
+
+    #[test]
+    fn conjectured_security_estimator_is_exported_by_the_embedded_core_library() {
+        conjectured_security_estimator_root();
     }
 }

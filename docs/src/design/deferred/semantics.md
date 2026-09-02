@@ -138,10 +138,10 @@ wire nodes.
 
 ## Proof obligations and composition
 
-`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields `ExecutionProof::Complete`
-without a precompile proof; any other root yields `ExecutionProof::Deferred` with the `VmProof` and
-passive
-`DeferredStateWire`. Canonical proof decoding is registry-free and does not hydrate that wire.
+`Prover::prove` proves the VM first. A `TRUE_DIGEST` root yields
+`PrecompileStatus::Empty`. Any other root yields `PrecompileStatus::Deferred` with a passive
+`DeferredStateWire`. Canonical proof decoding does not need a registry and does not hydrate that
+wire.
 `Prover::prove_full` proves both stages directly from the in-memory execution witness.
 
 For delegated proving, call `miden_vm::precompile_witness_from_wire` explicitly. It applies the
@@ -164,24 +164,27 @@ compatible deferred proof independently; sequence order and duplicates still det
 statement.
 
 `VmProof` and `PrecompileProof` are unvalidated transport records with public fields. `StarkProof`
-retains private fields and its existing constructor/accessor interface. `ExecutionProof::complete`
-only performs the `Deferred` to `Complete` transition and rejects an already-complete artifact.
-Public variants, canonical decoding, encoding, Serde, and completion may represent inconsistent
-artifacts; none establishes validity. `Verifier::verify_precompile` validates precompile-proof shape,
-expected-root membership, ordered aggregate folding, and the precompile STARK. It can validate a
-precompile artifact independently against an expected outstanding root and returns the artifact's
-security level. `Verifier::verify` owns execution-lifecycle validity, verifies the VM STARK, and
+retains private fields and its existing constructor and accessor interface. `ExecutionProof` is the
+canonical binary transport. Its constructor, Serde representation, and `complete` method may
+represent inconsistent artifacts. None of these operations establishes validity.
+
+`Verifier::verify_precompile` validates the precompile proof shape, expected root membership,
+ordered aggregate folding, and the precompile STARK. It can validate a precompile artifact against
+an expected outstanding root and returns the artifact's security level. `Verifier::verify` checks
+the proof's compatibility declaration and execution lifecycle before it verifies the VM STARK. It
 reuses `verify_precompile` for complete proofs. A successful deferred verification returns only the
-authenticated outstanding VM root; a successful complete verification has no outstanding
+authenticated outstanding VM root. A successful complete verification has no outstanding
 obligation.
 
 
 ## Transport and limits
 
 `ExecutionProof::to_bytes` is infallible. `ExecutionProof::read_from_bytes` checks canonical syntax,
-rejects trailing bytes, and remains registry-free. It preserves the represented lifecycle variant
-without validating cross-artifact consistency. `DeferredStateWire` is likewise passive until the
-bundled façade hydration step.
+rejects trailing bytes, and does not need a registry. The proof stores the transport format and the
+compatible VM and PVM verifier root histories. Decoding selects the format-specific proof decoder.
+Native verification requires a shared VM root and a shared PVM root with the verifier's private
+support policy. Transport preserves the precompile state without validating consistency between
+artifacts. `DeferredStateWire` is passive until the bundled façade hydration step.
 
 Canonical binary decoders enforce fixed hard ceilings before allocating declared collections:
 `MAX_STARK_PROOF_BYTES` per inner STARK, `MAX_PRECOMPILE_ROOTS` per ordered root list, and

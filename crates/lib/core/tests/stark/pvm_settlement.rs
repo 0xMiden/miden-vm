@@ -8,7 +8,7 @@ use miden_core::{
     deferred::{DeferredState, PrecompileWitness, PrecompileWitnessError},
     events::{EventId, EventName},
     program::{ExecutionClaim, proof_request_key},
-    proof::{ExecutionProof, HashFunction, PrecompileProof},
+    proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus},
 };
 use miden_core_lib::{CoreLibrary, PVM_PROOF_REQUEST_EVENT_NAME};
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -101,7 +101,7 @@ fn prove_deferred_ecdsa_execution(
         .with_hash_fn(HashFunction::Poseidon2)
         .prove(witness)
         .expect("ECDSA execution must produce a deferred MVM proof");
-    let ExecutionProof::Deferred { precompile, .. } = &proof else {
+    let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
         panic!("ECDSA execution must retain deferred precompile work")
     };
     let deferred_state =

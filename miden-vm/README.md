@@ -109,15 +109,14 @@ let output = FastProcessor::new_with_options(
 ### Proving program execution
 
 Execute with `FastProcessor` to produce an `ExecutionWitness`, and read its public claim before
-proving consumes it. `Prover::prove` proves the VM portion and returns `Complete` when no deferred
-work exists, or `Deferred` containing a passive `DeferredStateWire`. Use `Prover::prove_full` to
-complete all proof work in the local process.
+proving consumes it. `Prover::prove` proves the VM portion. The returned `ExecutionProof` has an
+empty precompile status when no deferred work exists, or a deferred status with a passive
+`DeferredStateWire`. Use `Prover::prove_full` to complete all proof work in the local process.
 
-For delegated precompile proving, transport `proof.to_bytes()`, decode with the registry-free
-`ExecutionProof::read_from_bytes`, match `ExecutionProof::Deferred`, and pass its wire to
-`precompile_witness_from_wire`. Optionally merge hydrated singleton witnesses, call
-`Prover::prove_precompile`, transition each deferred proof with `complete`, and establish validity
-with `Verifier::verify`.
+For delegated precompile proving, transport the proof with `ExecutionProof::to_bytes`, then decode
+it with `ExecutionProof::read_from_bytes`. Pass the deferred status wire to
+`precompile_witness_from_wire`. After precompile proving, call `complete` and then
+`Verifier::verify`. Completion preserves the compatibility declaration.
 
 `ExecutionOptions` configure execution, while `Prover::with_hash_fn` selects the proof hash
 function. The FastProcessor-backed `prove_sync(&Prover, ...)` function executes and fully proves in

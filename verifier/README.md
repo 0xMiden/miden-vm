@@ -10,8 +10,8 @@ appropriate for projects that only need verification.
 Use `Verifier::new().verify(&claim, &proof)` to verify a deferred or complete `ExecutionProof`
 against its `ExecutionClaim`. The claim contains the program information and public stack inputs and
 outputs. The VM STARK authenticates the precompile root in either state. For a deferred proof, the
-passive wire is neither hydrated nor validated and the outcome exposes only the authenticated root;
-for a complete proof, the aggregate precompile STARK is also verified when present.
+passive wire is neither hydrated nor validated. The outcome exposes only the authenticated root.
+For a complete proof, the verifier also checks the aggregate precompile STARK when present.
 
 Use `Verifier::new().verify_precompile(&proof, expected_root)` to validate a `PrecompileProof`
 without first attaching it to an execution proof. It checks the expected-root membership and full
@@ -22,9 +22,9 @@ first value is on top).
 
 `Verifier::verify` returns a `VerificationOutcome`. Its `security_level()` is the minimum security
 level among the STARK components actually verified. Deferred verification exposes the authenticated
-obligation through `outstanding_precompile_root()`; complete verification returns no outstanding
-root. See the [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for artifact,
-transport, and fixed-limit policy.
+obligation through `outstanding_precompile_root()`. Complete verification returns no outstanding
+root. See the [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for the full proof
+policy.
 
 ## Crate features
 
