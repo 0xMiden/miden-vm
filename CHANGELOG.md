@@ -1,25 +1,25 @@
 # Changelog
 
-## v0.31.0 (TBD)
+## v0.31.0 (2026-09-02)
 
 #### Features
 
-- [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
 - Added `has_precompiles()` to `ExecutionWitness` and `ExecutionProof` so callers can check for precompile work without consuming the witness or inspecting proof variants ([#3757](https://github.com/0xMiden/miden-vm/pull/3757)).
+- [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
 
 #### Changes
 
-- [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
-- [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
-- [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
-- [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
 - Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
+- [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
+- [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
+- [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
+- [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
 
 #### Fixes
 
-- Hardened `ExecutionWitness` byte decoding with an input-sized budget and rejection of trailing bytes. Added an explicit trusted reader for sparse replay data ([#3758](https://github.com/0xMiden/miden-vm/pull/3758)).
 - [BREAKING] Limited bare `exp` to 63 exponent bits. It now lowers to `exp.u63` (72 cycles) and fails for exponents greater than or equal to `2^63`. Existing MAST artifacts containing the previous bare-`exp` lowering must be reassembled to use the new bound ([#3712](https://github.com/0xMiden/miden-vm/pull/3712)).
 - [BREAKING] Relaxes the deferred MSM contract to accept valid edge cases ([#3740](https://github.com/0xMiden/miden-vm/pull/3740)).
+- Hardened `ExecutionWitness` byte decoding with an input-sized budget and rejection of trailing bytes. Added an explicit trusted reader for sparse replay data ([#3758](https://github.com/0xMiden/miden-vm/pull/3758)).
 
 ## v0.30.0 (2026-08-26)
 
