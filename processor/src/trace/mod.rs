@@ -218,6 +218,9 @@ impl Deserializable for ExecutionWitness {
 /// proving operations. Its binary form is trusted replay data: sparse MAST node and digest maps
 /// inside the trace replay are not checked against a source `MastForest` commitment; see
 /// <https://github.com/0xMiden/miden-vm/issues/3303>.
+///
+/// Its direct [`Serializable`] encoding is an unversioned implementation detail. Use the
+/// versioned [`ExecutionWitness`] envelope for transport or persistence.
 #[derive(Debug)]
 pub struct VmWitness {
     program_info: ProgramInfo,
@@ -304,7 +307,7 @@ impl Deserializable for VmWitness {
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Per-AIR trace matrices for Core, Chiplets, and Poseidon2Permutation.
+/// - Per-AIR main traces for Core, Chiplets, Eidos compression, and byte-pair lookup.
 /// - Information about the program (program hash and the kernel).
 /// - Information about the initial and final stack states and authenticated precompile root.
 /// - Summary of trace lengths of the main trace components.
@@ -428,7 +431,7 @@ impl VmTrace {
         self.get_trace_len()
     }
 
-    /// Returns a summary of the per-component trace lengths.
+    /// Returns a summary of the per-AIR trace lengths.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
     }
@@ -447,35 +450,44 @@ impl VmTrace {
     ///
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
-        let public_inputs = self.public_inputs();
-        let (core_matrix, chiplets_matrix, poseidon2_matrix) = self.main_trace.to_air_matrices();
+        let (core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix) =
+            self.main_trace.to_air_matrices();
+        let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
-        let (public_values, aux_inputs) = public_inputs.to_air_inputs();
+        let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
+            Statement::new(MidenMultiAir::new(), public_values, kernel_felts)
+                .expect("statement construction failed");
+        let prover_statement = ProverStatement::new(
+            statement,
+            vec![core_matrix, chiplets_matrix, eidos_compression_matrix, and8_lookup_matrix],
+        )
+        .expect("prover statement construction failed");
 
-        let statement =
-            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
-                .expect("valid statement inputs");
-        let prover_statement =
-            ProverStatement::new(statement, vec![core_matrix, chiplets_matrix, poseidon2_matrix])
-                .expect("valid trace shapes");
-
-        // A deterministic challenger seeds the debug constraint check; this is a local
-        // constraint debugger, not a full proof transcript, so any fixed challenge set works.
-        let config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
+        let config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
         debug::check_constraints(&prover_statement, config.challenger());
     }
 
-    /// Splits the trace into the per-AIR matrices consumed by the multi-AIR proving path.
+    /// Clones the trace buffers into the per-AIR matrices consumed by the multi-AIR prover.
     pub fn to_air_matrices(
         &self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         self.main_trace.to_air_matrices()
     }
 
-    /// Consuming variant for the proving hot path.
+    /// Consuming variant for the proving hot path: moves the row-major buffers.
     pub fn into_air_matrices(
         self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         self.main_trace.into_air_matrices()
     }
 
@@ -496,10 +508,15 @@ impl VmTrace {
 #[cfg(test)]
 mod wire_tests {
     use miden_assembly::Assembler;
-    use miden_core::deferred::TRUE_DIGEST;
+    use miden_core::{
+        deferred::TRUE_DIGEST,
+        mast::{BasicBlockNodeBuilder, MastForest},
+        operations::Operation,
+        program::Program,
+    };
 
-    use super::{ExecutionWitness, Serializable};
-    use crate::{DefaultHost, FastProcessor, StackInputs, mast::MastNodeId};
+    use super::{Deserializable, ExecutionWitness, Serializable, build_trace};
+    use crate::{DefaultHost, FastProcessor, Felt, StackInputs, mast::MastNodeId};
 
     fn execution_witness(source: &str) -> ExecutionWitness {
         let program = Assembler::default()
@@ -529,10 +546,34 @@ mod wire_tests {
         assert!(deferred.has_precompiles());
     }
 
+    fn aead_stream_witness() -> ExecutionWitness {
+        let mut mast_forest = MastForest::new();
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::CryptoStream])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        mast_forest.make_root(basic_block_id);
+        let program = Program::new(mast_forest.into(), basic_block_id);
+
+        let stack = [
+            1, 2, 3, 4, // K_CTR
+            0, // counter
+            0, // src_ptr
+            8, // dst_ptr
+            1, // remaining
+            0, 0, 0, 0, 0, 0, 0, 0, // tail
+        ]
+        .map(Felt::new_unchecked);
+        let mut host = DefaultHost::default();
+        FastProcessor::new(StackInputs::new(&stack).unwrap())
+            .execute_for_proving_sync(&program, &mut host)
+            .expect("AEAD stream execution should produce a witness")
+    }
+
     #[test]
     fn witness_wire_rejects_unsupported_version() {
         let mut bytes = deferred_witness_bytes();
         assert!(ExecutionWitness::read_from_bytes(&bytes).is_ok());
+        assert_eq!(bytes[0], 2, "Eidos witnesses must use wire version 2");
 
         // Rejected versions are checked before decoding replay or witness payloads.
         for version in [0, 1, super::EXECUTION_WITNESS_WIRE_VERSION + 1] {
@@ -580,6 +621,27 @@ mod wire_tests {
             .expect("valid witness should fit its input-proportional allocation budget");
 
         assert_eq!(restored.to_bytes(), bytes);
+    }
+
+    #[test]
+    fn aead_stream_witness_round_trip_rebuilds_the_same_trace() {
+        let witness = aead_stream_witness();
+        let bytes = witness.to_bytes();
+        let claim = witness.claim();
+        let (original_vm, original_precompile) = witness.into_parts();
+        assert!(original_precompile.is_none());
+        let original_trace = build_trace(original_vm).expect("original trace should build");
+
+        let restored =
+            ExecutionWitness::read_from_bytes(&bytes).expect("witness should round trip");
+        assert_eq!(restored.claim(), claim);
+        let (restored_vm, restored_precompile) = restored.into_parts();
+        assert!(restored_precompile.is_none());
+        let restored_trace = build_trace(restored_vm).expect("restored trace should build");
+
+        assert_eq!(restored_trace.public_inputs(), original_trace.public_inputs());
+        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
+        assert_eq!(restored_trace.to_air_matrices(), original_trace.to_air_matrices());
     }
 
     #[test]

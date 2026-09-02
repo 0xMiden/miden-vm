@@ -1,0 +1,26 @@
+---
+source: processor/src/fast/tests/all_ops.rs
+expression: fast_stack_outputs
+---
+Ok(
+    StackOutputs {
+        elements: [
+            1,
+            2,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            4743544379302195070,
+            6821129813963810905,
+            829239957159713600,
+            86678419849249469,
+            0,
+            0,
+            0,
+            0,
+        ],
+    },
+)

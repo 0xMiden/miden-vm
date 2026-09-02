@@ -1,7 +1,7 @@
 use alloc::{string::String, vec::Vec};
 use core::{fmt, slice};
 
-use super::{InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Poseidon2, Word};
+use super::{Eidos, InnerNodeInfo, MerkleError, MerklePath, NodeIndex, Word};
 use crate::utils::{assume_init_vec, uninit_vector, word_to_hex};
 
 // MERKLE TREE
@@ -50,7 +50,7 @@ impl MerkleTree {
             // nodes[2 * i] and nodes[2 * i + 1] have already been written.
             let left = unsafe { nodes[2 * i].assume_init_read() };
             let right = unsafe { nodes[2 * i + 1].assume_init_read() };
-            nodes[i].write(Poseidon2::merge(&[left, right]));
+            nodes[i].write(Eidos::merge(&[left, right]));
         }
 
         // SAFETY: all elements were written above.
@@ -166,7 +166,7 @@ impl MerkleTree {
         for _ in 0..index.depth() {
             index.move_up();
             let pos = index.to_scalar_index()? as usize;
-            let value = Poseidon2::merge(&pairs[pos]);
+            let value = Eidos::merge(&pairs[pos]);
             self.nodes[pos] = value;
         }
 
@@ -424,9 +424,9 @@ mod tests {
     // --------------------------------------------------------------------------------------------
 
     fn compute_internal_nodes() -> (Word, Word, Word) {
-        let node2 = Poseidon2::hash_elements(&[*LEAVES4[0], *LEAVES4[1]].concat());
-        let node3 = Poseidon2::hash_elements(&[*LEAVES4[2], *LEAVES4[3]].concat());
-        let root = Poseidon2::merge(&[node2, node3]);
+        let node2 = Eidos::hash_elements(&[*LEAVES4[0], *LEAVES4[1]].concat());
+        let node3 = Eidos::hash_elements(&[*LEAVES4[2], *LEAVES4[3]].concat());
+        let root = Eidos::merge(&[node2, node3]);
 
         (root, node2, node3)
     }

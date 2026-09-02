@@ -36,6 +36,7 @@ fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
     acc
 }
 
+#[allow(clippy::iter_skip_zero)]
 fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt; 8]) {
     let mut deg7 = [ZERO; 64];
     let mut deg6 = [ZERO; 8];
@@ -45,6 +46,7 @@ fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt;
     for (opcode, slot) in deg7
         .iter_mut()
         .enumerate()
+        .skip(DEGREE_7_OPCODE_STARTS)
         .take(DEGREE_7_OPCODE_ENDS - DEGREE_7_OPCODE_STARTS + 1)
     {
         *slot = naive_flag(&bits, opcode as u8);
@@ -89,8 +91,6 @@ fn naive_composites(
     let prefix_011 = not_6 * bit_5 * bit_4;
     let add3_madd_prefix = bit_6 * not_5 * not_4 * bit_3 * bit_2;
 
-    // Under do-while semantics, LOOP (deg5[5]) does not shift the stack — only SPLIT (deg5[4])
-    // contributes here.
     let split_flag = deg5[4];
     let shift_left_on_end = deg4[4] * is_loop_end;
 
@@ -142,7 +142,7 @@ fn test_get_op_index_degree6() {
 #[test]
 fn test_get_op_index_degree5() {
     // Degree 5 operations have opcodes 80-95
-    assert_eq!(get_op_index(opcodes::HPERM), 0);
+    assert_eq!(get_op_index(opcodes::COMPRESS), 0);
     assert_eq!(get_op_index(opcodes::MPVERIFY), 1);
     assert_eq!(get_op_index(opcodes::SPLIT), 4);
     assert_eq!(get_op_index(opcodes::LOOP), 5);
@@ -405,36 +405,54 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests HPERM flags (top three words are overwritten, the tail is preserved).
+/// Tests COMPRESS, which preserves the block and tail while updating the CV.
 #[test]
-fn composite_hperm_flags() {
-    let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
+fn composite_compress_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::COMPRESS.into());
 
-    for i in 0..12 {
-        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO for HPERM");
+    for i in 0..8 {
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE");
+    }
+    for i in 8..12 {
+        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO");
     }
     for i in 12..16 {
-        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for HPERM");
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE");
     }
 
     assert_eq!(op_flags.right_shift(), ZERO);
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite flags for LOGDEFERRED (hasher output rewrites positions 0..12, no shift from
-/// position 12 onwards).
+/// Tests CALLER flags (top word is overwritten, the rest is preserved).
+#[test]
+fn composite_caller_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::CALLER.into());
+
+    for i in 0..4 {
+        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO for CALLER");
+    }
+    for i in 4..16 {
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for CALLER");
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
+/// Tests composite flags for LOGDEFERRED (the top word is replaced and the tail is preserved).
 #[test]
 fn composite_log_deferred_flags() {
     let op_flags = op_flags_for_opcode(opcodes::LOGDEFERRED.into());
 
-    for i in 0..12 {
+    for i in 0..4 {
         assert_eq!(
             op_flags.no_shift_at(i),
             ZERO,
             "no_shift_at({i}) should be ZERO for LOGDEFERRED"
         );
     }
-    for i in 12..16 {
+    for i in 4..16 {
         assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOGDEFERRED");
     }
 
@@ -455,15 +473,66 @@ fn composite_log_deferred_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite shift flags for LOOP operation. Under do-while semantics LOOP reads no stack
-/// input, so it is classified as no-shift at every depth.
+/// Tests MSTREAM/PIPE flags (top two words and cursor change, the rest is preserved).
+#[test]
+fn composite_stream_word_flags() {
+    for opcode in [opcodes::MSTREAM, opcodes::PIPE] {
+        let op_flags = op_flags_for_opcode(opcode.into());
+
+        for i in 0..8 {
+            assert_eq!(
+                op_flags.no_shift_at(i),
+                ZERO,
+                "no_shift_at({i}) should be ZERO for opcode {opcode}"
+            );
+        }
+        for i in [8, 9, 10, 11, 13, 14, 15] {
+            assert_eq!(
+                op_flags.no_shift_at(i),
+                ONE,
+                "no_shift_at({i}) should be ONE for opcode {opcode}"
+            );
+        }
+        assert_eq!(op_flags.no_shift_at(12), ZERO, "no_shift_at(12) should be ZERO");
+
+        assert_eq!(op_flags.right_shift(), ZERO);
+        assert_eq!(op_flags.left_shift(), ZERO);
+    }
+}
+
+/// Tests left shift composite flags for REPEAT.
+#[test]
+fn composite_loop_left_shift() {
+    for opcode in [opcodes::REPEAT] {
+        let op_flags = op_flags_for_opcode(opcode.into());
+
+        assert_eq!(op_flags.left_shift_at(0), ZERO);
+        for i in 1..16 {
+            assert_eq!(
+                op_flags.left_shift_at(i),
+                ONE,
+                "left_shift_at({i}) should be ONE for opcode {opcode}"
+            );
+        }
+        for i in 0..16 {
+            assert_eq!(op_flags.no_shift_at(i), ZERO);
+        }
+
+        assert_eq!(op_flags.left_shift(), ONE);
+        assert_eq!(op_flags.right_shift(), ZERO);
+        assert_eq!(op_flags.control_flow(), ONE);
+    }
+}
+
+/// Tests LOOP, which enters the loop body without consuming a stack item.
 #[test]
 fn composite_loop_no_shift() {
     let op_flags = op_flags_for_opcode(opcodes::LOOP.into());
 
     for i in 0..16 {
-        assert_eq!(op_flags.left_shift_at(i), ZERO, "left_shift_at({i}) should be ZERO for LOOP");
         assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOOP");
+        assert_eq!(op_flags.left_shift_at(i), ZERO, "left_shift_at({i}) should be ZERO for LOOP");
+        assert_eq!(op_flags.right_shift_at(i), ZERO, "right_shift_at({i}) should be ZERO for LOOP");
     }
 
     assert_eq!(op_flags.left_shift(), ZERO);
@@ -575,6 +644,22 @@ fn composite_swapw2_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
+/// Tests SWAPW3 flags (positions 4-11 remain, top and fourth words swap).
+#[test]
+fn composite_swapw3_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::SWAPW3.into());
+
+    for i in [0, 1, 2, 3, 12, 13, 14, 15] {
+        assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({i}) should be ZERO for SWAPW3");
+    }
+    for i in [4, 5, 6, 7, 8, 9, 10, 11] {
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for SWAPW3");
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
 /// Tests control flow flag.
 #[test]
 fn control_flow_flag() {
@@ -604,7 +689,7 @@ fn control_flow_flag() {
         Operation::Swap,
         Operation::Dup0,
         Operation::U32add,
-        Operation::HPerm,
+        Operation::Compress,
         Operation::MpVerify(ZERO),
     ];
 

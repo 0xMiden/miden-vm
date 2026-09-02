@@ -28,11 +28,12 @@ use crate::{
     prove_precompiles, prove_precompiles_with_budget,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces},
+    stark_config::DEFAULT_HASH_FUNCTION,
     tests::{
         SessionTracesTestExt, batch_witness::WitnessFixture, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 
 /// A raw Keccak-only portable fixture and the prover-typed view of its root.
@@ -43,7 +44,7 @@ struct SyntheticKeccakWitness {
     expected_digest: Digest,
     assertion_digest: Digest,
     vm_root: Digest,
-    root: P2Digest,
+    root: EidosDigest,
 }
 
 /// Builds the Keccak-only committed graph for `input`:
@@ -77,7 +78,7 @@ fn synthetic_keccak_state(input: &[u8]) -> SyntheticKeccakWitness {
         expected_digest,
         assertion_digest,
         vm_root,
-        root: P2Digest::from(vm_root),
+        root: EidosDigest::from(vm_root),
     }
 }
 
@@ -233,7 +234,7 @@ fn all_node_vm_state() -> WitnessFixture {
 
 fn translated_traces_check(state: &WitnessFixture) {
     let traces = session_from_witnesses(vec![state.witness()]).unwrap().finish();
-    assert_eq!(traces.public_root(), P2Digest::from(state.root()));
+    assert_eq!(traces.public_root(), EidosDigest::from(state.root()));
     traces.check();
 }
 
@@ -254,7 +255,7 @@ fn shared_truthy_dag_from_wire_proves_and_verifies() {
     let bytes = state.witness().to_bytes();
     let witness = PrecompileWitness::read_from_bytes(&bytes).unwrap();
     let traces = session_from_witnesses(vec![witness]).unwrap().finish();
-    assert_eq!(traces.public_root(), P2Digest::from(state.root()));
+    assert_eq!(traces.public_root(), EidosDigest::from(state.root()));
     traces.check();
     let verified = verify_session(&traces.prove()).expect("shared truthy DAG proof must verify");
     assert_eq!(verified, state.root());
@@ -270,7 +271,7 @@ fn synthetic_keccak_deferred_state_reconstructs_root() {
         synthetic.vm_root,
         VmNode::and(VM_TRUE_DIGEST, synthetic.assertion_digest).digest(),
     );
-    assert_eq!(synthetic.root, P2Digest::from(synthetic.vm_root));
+    assert_eq!(synthetic.root, EidosDigest::from(synthetic.vm_root));
     assert!(synthetic.state.get_node(&synthetic.input_digest).is_some());
     assert!(synthetic.state.get_node(&synthetic.expected_digest).is_some());
     assert!(synthetic.state.get_node(&synthetic.assertion_digest).is_some());
@@ -300,6 +301,11 @@ fn session_public_root_matches_synthetic_deferred_state_for_keccak_inputs() {
 #[test]
 fn session_public_root_matches_synthetic_deferred_state_for_all_supported_node_types() {
     translated_traces_check(&all_node_vm_state());
+}
+
+#[test]
+fn empty_deferred_state_translates_to_true_root() {
+    translated_traces_check(&WitnessFixture::new());
 }
 
 #[test]
@@ -388,11 +394,11 @@ fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
     assert_eq!(traces.public_root(), synthetic.root);
 
     let proof = traces.prove();
-    assert_eq!(P2Digest::from(proof.1), synthetic.root);
+    assert_eq!(EidosDigest::from(proof.1), synthetic.root);
     verify_session(&proof).expect("Keccak deferred-state proof should verify");
 
     // The proof encoding is exact: an otherwise-valid proof with a trailing byte is rejected.
-    let stark = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
+    let stark = prove_fixture(&synthetic.state, DEFAULT_HASH_FUNCTION)
         .expect("Keccak deferred state should prove");
     let mut proof_bytes = stark.bytes().to_vec();
     proof_bytes.push(0);
@@ -409,7 +415,7 @@ fn keccak_deferred_state_proof_verifies_and_rejects_trailing_bytes() {
 fn prove_deferred_state_proves_non_empty_root() {
     let synthetic = synthetic_keccak_state(b"abc");
 
-    let proof = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
+    let proof = prove_fixture(&synthetic.state, DEFAULT_HASH_FUNCTION)
         .expect("Keccak deferred state should prove");
 
     verify_deferred(&proof, synthetic.vm_root).expect("Keccak deferred-state proof should verify");
@@ -516,6 +522,7 @@ fn prove_precompiles_with_budget_corner_cases() {
 fn prove_deferred_state_round_trips_for_every_hash_function() {
     let synthetic = synthetic_keccak_state(b"abc");
     let hash_fns = [
+        HashFunction::Eidos,
         HashFunction::Blake3_256,
         HashFunction::Rpo256,
         HashFunction::Rpx256,
@@ -590,7 +597,7 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
 #[ignore = "full prove/verify round-trip; run explicitly"]
 fn prove_deferred_state_round_trips_for_multi_block_keccak() {
     let synthetic = synthetic_keccak_state(&(0u8..200).collect::<Vec<u8>>());
-    let proof = prove_fixture(&synthetic.state, HashFunction::Blake3_256)
+    let proof = prove_fixture(&synthetic.state, DEFAULT_HASH_FUNCTION)
         .expect("multi-block keccak session should prove");
     verify_deferred(&proof, synthetic.vm_root).expect("multi-block keccak session should verify");
 }

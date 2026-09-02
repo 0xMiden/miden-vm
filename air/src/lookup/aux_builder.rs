@@ -51,6 +51,24 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
+    let preprocessed = air.preprocessed_trace();
+    build_logup_aux_trace_with_preprocessed(air, main, preprocessed.as_ref(), challenges)
+}
+
+/// [`build_logup_aux_trace`] with the preprocessed trace supplied by the caller instead of taken
+/// from the AIR. Callers whose preprocessed columns are already part of `main` pass `None`.
+pub fn build_logup_aux_trace_with_preprocessed<A, F, EF>(
+    air: &A,
+    main: &RowMajorMatrix<F>,
+    preprocessed: Option<&RowMajorMatrix<F>>,
+    challenges: &[EF],
+) -> (RowMajorMatrix<EF>, Vec<EF>)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: LiftedAir<F, EF>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+{
     let _span = tracing::info_span!("build_aux_trace_logup").entered();
 
     debug_assert!(
@@ -83,6 +101,7 @@ where
         let chunk = build_lookup_fraction_chunk(
             air,
             main,
+            preprocessed,
             &periodic,
             &lookup_challenges,
             row_lo..row_lo + totals.len(),
@@ -139,7 +158,7 @@ where
     EF: ExtensionField<F>,
 {
     /// Allocate a fresh buffer sized to hold every fraction an AIR can emit across
-    /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
+    /// `num_rows` rows. The flat fraction capacity is `num_rows * sum shape`, so the row loop
     /// does not re-allocate as long as each row stays within its declared bound. The flat
     /// count capacity is `num_rows * shape.len()`.
     pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
@@ -192,7 +211,7 @@ where
     }
 
     /// Full flat fraction buffer, packed in builder write order. Length equals
-    /// `Σ counts()` — i.e. the total number of fractions actually pushed.
+    /// `sum counts()` - i.e. the total number of fractions actually pushed.
     pub fn fractions(&self) -> &[(F, EF)] {
         &self.fractions
     }
@@ -298,8 +317,8 @@ where
 ///
 /// **Phase 1 (parallel).** Split rows into fixed-size chunks.
 /// Each chunk independently: batch-inverts its denominators (Montgomery trick), computes
-/// `fᵢ(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
-/// records the row total `t(r) = Σᵢ fᵢ(r)` into a side buffer.
+/// `f_i(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
+/// records the row total `t(r) = sum_i f_i(r)` into a side buffer.
 ///
 /// **Phase 2.** Compute `sigma_prime`, then fill the accumulator with centered prefix sums.
 /// Concurrent builds scan multiple chunks independently; a single chunk or serial build uses
@@ -470,7 +489,7 @@ fn write_centered_accumulator<EF: Field>(
 ///
 /// Returns a `Vec<usize>` of length `num_rows + 1` where `offsets[r]` is the starting index
 /// of row `r`'s fractions in the flat `fractions.fractions()` buffer and `offsets[num_rows]`
-/// equals the total fraction count. Sequential (O(num_rows · num_cols) `usize` adds).
+/// equals the total fraction count. Sequential (O(num_rows * num_cols) `usize` adds).
 fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: usize) -> Vec<usize> {
     debug_assert_eq!(flat_counts.len(), num_rows * num_cols);
     let mut offsets = Vec::with_capacity(num_rows + 1);
@@ -485,11 +504,11 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
     offsets
 }
 
-/// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = mⱼ · dⱼ⁻¹`
+/// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = m_j * d_j^-1`
 /// using one field inversion + O(N) multiplications.
 ///
-/// The backward sweep multiplies each inverse by `mⱼ` (an `EF × F` mul, cheaper than
-/// `EF × EF`) so the caller gets ready-to-sum fraction values without a second pass.
+/// The backward sweep multiplies each inverse by `m_j`, so the caller gets ready-to-sum
+/// fraction values without a second pass.
 ///
 /// # Panics
 ///
@@ -502,7 +521,7 @@ where
     debug_assert_eq!(scratch.len(), chunk_fracs.len());
     debug_assert!(!chunk_fracs.is_empty());
 
-    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ (prefix products of denominators).
+    // Forward pass: scratch[i] = d_0 * d_1 * ... * d_i.
     let mut acc = chunk_fracs[0].1;
     scratch[0] = acc;
     for i in 1..chunk_fracs.len() {
@@ -510,29 +529,27 @@ where
         scratch[i] = acc;
     }
 
-    // One field inversion — amortised over the whole chunk.
+    // One field inversion, amortized over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
         .expect("LogUp denominator product must be non-zero");
 
-    // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
+    // Backward sweep: scratch[i] = m_i * d_i^-1.
     //
     // Loop invariant (entering iteration i, for i = n-1 down to 1):
     //     running_inv = (d₀ · d₁ · … · dᵢ)⁻¹
     //     scratch[i-1] = d₀ · d₁ · … · dᵢ₋₁  (left over from the forward pass)
     //
     // Then:
-    //     dᵢ⁻¹ = scratch[i-1] · running_inv
-    //     (prefix-product cancels every factor except dᵢ⁻¹ inside running_inv).
-    // We scale by mᵢ (EF × F, cheaper than EF × EF) to yield the fraction directly, then
-    // fold dᵢ into running_inv so the invariant holds for iteration i-1.
-    // After the loop: running_inv = d₀⁻¹, ready for the i = 0 case below.
+    //     d_i^-1 = scratch[i-1] * running_inv
+    // We scale by m_i and fold d_i into running_inv for the next iteration.
+    // After the loop: running_inv = d_0^-1.
     for i in (1..chunk_fracs.len()).rev() {
         let (m_i, d_i) = chunk_fracs[i];
         scratch[i] = scratch[i - 1] * running_inv * m_i;
         running_inv *= d_i;
     }
-    // i = 0: running_inv = d₀⁻¹.
+    // i = 0: running_inv = d_0^-1.
     scratch[0] = running_inv * chunk_fracs[0].0;
 }
 
@@ -552,7 +569,7 @@ mod tests {
         lookup::{LookupAir, LookupBuilder},
     };
 
-    // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
+    // Small deterministic LCG for random-fixture cross-check tests.
     // We don't need cryptographic quality, just determinism.
     struct Lcg(u64);
     impl Lcg {
@@ -590,8 +607,7 @@ mod tests {
                 let count = (rng.next() as usize) % (max_count + 1);
                 for _ in 0..count {
                     let m = rng.felt();
-                    // Rejection sample until we get a non-zero denominator. With a 64-bit
-                    // Goldilocks field and random draws, this basically never loops.
+                    // Rejection sample until we get a non-zero denominator.
                     let d = loop {
                         let candidate = rng.quad();
                         if candidate != QuadFelt::ZERO {
@@ -715,9 +731,93 @@ mod tests {
         assert_eq!(aux[1][1], row1_col1);
     }
 
-    /// `LookupFractions::from_shape` sizes the flat `fractions` Vec with `num_rows * Σ shape`
-    /// capacity and the flat `counts` Vec with `num_rows * num_cols` capacity (so neither
-    /// reallocates in the hot loop). Both start empty.
+    struct WrappedCenteredFixture {
+        fractions: LookupFractions<Felt, QuadFelt>,
+        row0_col0: QuadFelt,
+        row0_col1: QuadFelt,
+        row1_col0: QuadFelt,
+        row2_col1: QuadFelt,
+    }
+
+    fn wrapped_centered_fixture() -> WrappedCenteredFixture {
+        let one = Felt::new_unchecked(1);
+        let two = Felt::new_unchecked(2);
+        let three = Felt::new_unchecked(3);
+        let four = Felt::new_unchecked(4);
+        let d1 = QuadFelt::new([Felt::new_unchecked(5), Felt::ZERO]);
+        let d2 = QuadFelt::new([Felt::new_unchecked(7), Felt::ZERO]);
+        let d3 = QuadFelt::new([Felt::new_unchecked(11), Felt::ZERO]);
+        let d4 = QuadFelt::new([Felt::new_unchecked(13), Felt::ZERO]);
+
+        let mut fractions = fixture([1, 1], 3);
+        // Row 0: both columns contribute.
+        fractions.fractions.push((one, d1));
+        fractions.counts.push(1);
+        fractions.fractions.push((two, d2));
+        fractions.counts.push(1);
+        // Row 1: only the accumulator column contributes.
+        fractions.fractions.push((three, d3));
+        fractions.counts.push(1);
+        fractions.counts.push(0);
+        // Row 2: only the fraction column contributes, exercising the wrap edge.
+        fractions.counts.push(0);
+        fractions.fractions.push((four, d4));
+        fractions.counts.push(1);
+
+        WrappedCenteredFixture {
+            fractions,
+            row0_col0: d1.try_inverse().unwrap(),
+            row0_col1: d2.try_inverse().unwrap() * two,
+            row1_col0: d3.try_inverse().unwrap() * three,
+            row2_col1: d4.try_inverse().unwrap() * four,
+        }
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_closes_cyclically() {
+        let fx = wrapped_centered_fixture();
+
+        let (slow, slow_sigma) = accumulate_slow(&fx.fractions);
+        let (fast, fast_sigma) = accumulate(&fx.fractions);
+        assert_matrix_matches_slow(&slow, slow_sigma, &fast, fast_sigma, 2, 3);
+
+        let total = fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1;
+        let center = total / QuadFelt::from_u64(3);
+
+        assert_eq!(fast_sigma, center);
+        assert_eq!(fast.get(0, 0), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(1, 0), Some(fx.row0_col0 + fx.row0_col1 - center));
+        assert_eq!(
+            fast.get(2, 0),
+            Some(fx.row0_col0 + fx.row0_col1 + fx.row1_col0 - center.double())
+        );
+        assert_eq!(fast.get(0, 1), Some(fx.row0_col1));
+        assert_eq!(fast.get(1, 1), Some(QuadFelt::ZERO));
+        assert_eq!(fast.get(2, 1), Some(fx.row2_col1));
+    }
+
+    #[test]
+    fn wrapped_centered_accumulator_rejects_wrong_center() {
+        let fx = wrapped_centered_fixture();
+        let (fast, _sigma) = accumulate(&fx.fractions);
+
+        let true_center =
+            (fx.row0_col0 + fx.row0_col1 + fx.row1_col0 + fx.row2_col1) / QuadFelt::from_u64(3);
+        let wrong_center = true_center + QuadFelt::ONE;
+
+        let last_acc = fast.get(2, 0).expect("row 2 accumulator");
+        let first_acc = fast.get(0, 0).expect("row 0 accumulator");
+        assert_eq!(first_acc, QuadFelt::ZERO);
+
+        // Row 2 has no col0 contribution. A wrong center leaves a nonzero wrap-edge residual.
+        let honest_residual = first_acc - (last_acc + fx.row2_col1) + true_center;
+        let wrong_residual = first_acc - (last_acc + fx.row2_col1) + wrong_center;
+
+        assert_eq!(honest_residual, QuadFelt::ZERO);
+        assert_ne!(wrong_residual, QuadFelt::ZERO);
+    }
+
+    /// `LookupFractions::from_shape` reserves from the declared shape and starts empty.
     #[test]
     fn new_reserves_capacity() {
         let air = FakeAir { shape: [3, 5] };

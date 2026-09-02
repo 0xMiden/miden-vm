@@ -1,7 +1,7 @@
-//! Constraint-path adapter for the closure-based lookup API.
+//! Constraint-path adapter for the closure-based LogUp API.
 //!
-//! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. Each column's
-//! constraints are emitted inline during [`LookupBuilder::next_column`].
+//! The adapter turns each row's interactions into cross-multiplied `(V, U)` pairs. Fraction
+//! columns check `U * aux - V = 0`; column 0 is the running accumulator.
 //!
 //! ## LogUp constraint structure
 //!
@@ -114,6 +114,7 @@ where
     type PeriodicVar = AB::PeriodicVar;
 
     type MainWindow = AB::MainWindow;
+    type PreprocessedWindow = AB::PreprocessedWindow;
 
     type Column<'a>
         = ConstraintColumn<'a, AB>
@@ -123,6 +124,10 @@ where
 
     fn main(&self) -> Self::MainWindow {
         self.ab.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -136,7 +141,7 @@ where
     ) -> R {
         // Open the column with an empty `(V, U) = (0, 1)` accumulator.
         // The column only holds a shared borrow of the challenges and
-        // the two running-pair slots — the `&mut AB` stays on the
+        // the two running-pair slots - the `&mut AB` stays on the
         // builder and is only reached back into for the constraint
         // emission below.
         let mut col = ConstraintColumn {
@@ -161,7 +166,7 @@ where
                 (acc, acc_next, sigma_prime)
             };
 
-            // Σ_i acc[i] across all permutation columns.
+            // sum_i acc[i] across all permutation columns.
             let all_curr_sum = {
                 let mp = self.ab.permutation();
                 let current = mp.current_slice();
@@ -198,8 +203,7 @@ where
 /// Holds only the running `(V, U)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
-/// — the enclosing `next_column` method handles finalization
-/// directly after the closure returns.
+/// - the enclosing `next_column` method handles finalization directly after the closure returns.
 pub struct ConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
@@ -216,7 +220,7 @@ where
 {
     /// Compose an inner-group `(V_g, U_g)` pair into this column's
     /// running `(V, U)` using the cross-multiplication rule
-    /// `V ← V·U_g + V_g·U`, `U ← U·U_g`.
+    /// `V <- V*U_g + V_g*U`, `U <- U*U_g`.
     fn fold_group(&mut self, u_g: AB::ExprEF, v_g: AB::ExprEF) {
         self.v = self.v.clone() * u_g.clone() + v_g * self.u.clone();
         self.u = self.u.clone() * u_g;
@@ -290,7 +294,7 @@ where
 ///
 /// Each per-interaction `add` / `remove` / `insert` body calls
 /// `msg.encode(self.challenges)` directly and folds the resulting
-/// denominator into `(V_g, U_g)` inline — no intermediate scratch
+/// denominator into `(V_g, U_g)` inline - no intermediate scratch
 /// buffer and no helper method call.
 pub struct ConstraintGroup<'a, AB>
 where
@@ -319,7 +323,7 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `add` = multiplicity +1. `V_g += flag · 1 = flag`, skipping
+        // `add` = multiplicity +1. `V_g += flag * 1 = flag`, skipping
         // the redundant multiplication that a generic `insert` would
         // emit.
         let v = msg().encode(self.challenges);
@@ -336,7 +340,7 @@ where
     ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `remove` = multiplicity −1. `V_g += flag · (−1) = −flag`.
+        // `remove` = multiplicity -1. `V_g += flag * (-1) = -flag`.
         let v = msg().encode(self.challenges);
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v -= flag;
@@ -352,7 +356,7 @@ where
     ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // General case: `V_g += flag · multiplicity`.
+        // General case: `V_g += flag * multiplicity`.
         let v = msg().encode(self.challenges);
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v += flag * multiplicity;
@@ -367,7 +371,7 @@ where
     ) {
         // Batch algebra: start with `(N, D) = (0, 1)`, run `build`,
         // then fold the final `(N, D)` into `(V_g, U_g)` via
-        // `V_g += N · flag`, `U_g += (D − 1) · flag`.
+        // `V_g += N * flag`, `U_g += (D - 1) * flag`.
         let mut batch = ConstraintBatch {
             challenges: self.challenges,
             n: AB::ExprEF::ZERO,
@@ -411,14 +415,14 @@ where
 /// Batch handle returned by [`LookupGroup::batch`].
 ///
 /// Wraps an internal `(N, D)` pair and absorbs each interaction via the
-/// cross-multiplication rule `N' = N·v + m·D`, `D' = D·v`. The
+/// cross-multiplication rule `N' = N*v + m*D`, `D' = D*v`. The
 /// enclosing [`ConstraintGroup::batch`] folds the final `(N, D)` into
 /// the group's `(V_g, U_g)` using the outer flag.
 ///
 /// Per-interaction encoding lives on the message itself
 /// ([`LookupMessage::encode`]), and the `(N, D)` update is inlined at
 /// every call site (no `absorb` helper) so the `add` / `remove` paths
-/// can skip the `m · D` multiplication when `m = ±1`.
+/// can skip the `m * D` multiplication when `m = +/-1`.
 pub struct ConstraintBatch<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
@@ -440,7 +444,7 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `m = 1`: `(N, D) ← (N·v + D, D·v)`. Skips the `m · D` mul.
+        // `m = 1`: `(N, D) <- (N*v + D, D*v)`. Skips the `m * D` mul.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() + d_prev;
@@ -451,7 +455,7 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `m = −1`: `(N, D) ← (N·v − D, D·v)`.
+        // `m = -1`: `(N, D) <- (N*v - D, D*v)`.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() - d_prev;
@@ -462,7 +466,7 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // General case: `(N, D) ← (N·v + m·D, D·v)`.
+        // General case: `(N, D) <- (N*v + m*D, D*v)`.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() + d_prev * multiplicity;

@@ -260,8 +260,9 @@ fn dag_residual_with(
     rng: &mut impl Rng,
 ) -> usize {
     let mains = traces.mains();
+    let composite = crate::tests::with_transcript_eval_main(traces, eval_main.clone());
     let challenges = Challenges::new(rand_qf(rng), rand_qf(rng), MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
-    session_stack_residual(&mains, &[(4, eval_main), (8, add_main)], &challenges).len()
+    session_stack_residual(&mains, &[(4, &composite), (8, add_main)], &challenges).len()
 }
 
 /// First row whose `col` flag is 1 (width taken from the matrix, so this
@@ -314,11 +315,11 @@ fn eval_locally_holds(traces: &SessionTraces, eval_main: &RowMajorMatrix<Felt>) 
 #[should_panic(expected = "constraint not satisfied")]
 fn dag_pai_payload_must_be_true_true() {
     // A PAI VALUE node has no coordinate children. Its canonical payload is
-    // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both rate halves.
+    // `(TRUE_DIGEST, TRUE_DIGEST)`, i.e. zero digest in both block halves.
     let traces = ec_dag_pai_traces();
-    let eval = traces.mains()[4];
-    let row = first_row_with_flag(eval, COL_IS_EC_PAI);
-    let forged = tamper(eval, row, &[(COL_LHS_BEGIN, Felt::ONE)]);
+    let eval = crate::tests::transcript_eval_main(&traces);
+    let row = first_row_with_flag(&eval, COL_IS_EC_PAI);
+    let forged = tamper(&eval, row, &[(COL_LHS_BEGIN, Felt::ONE)]);
 
     eval_locally_holds(&traces, &forged);
 }
@@ -329,13 +330,13 @@ fn dag_finite_forged_as_pai_unbalances() {
     // (is_ec_create→0, is_ec_pai→1), zero its coord fields, and zero its
     // canonical PAI payload so the row stays locally valid. The bus catches
     // it — the finite point's EcPoint provide (is_pai = 0) loses its
-    // consumer, and the coord children / Poseidon2 messages dangle.
+    // consumer, and the coord children / Eidos messages dangle.
     let traces = ec_dag_3g_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f01);
-    let eval = traces.mains()[4];
-    assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
+    let eval = crate::tests::transcript_eval_main(&traces);
+    assert_eq!(dag_residual(&traces, &eval, &mut rng), 0, "honest stack must balance");
 
-    let row = first_row_with_flag(eval, COL_IS_EC_CREATE);
+    let row = first_row_with_flag(&eval, COL_IS_EC_CREATE);
     let mut cells = vec![
         (COL_IS_EC_CREATE, Felt::ZERO),
         (COL_IS_EC_PAI, Felt::ONE),
@@ -347,7 +348,7 @@ fn dag_finite_forged_as_pai_unbalances() {
         cells.push((COL_LHS_BEGIN + i, Felt::ZERO));
         cells.push((COL_RHS_BEGIN + i, Felt::ZERO));
     }
-    let forged = tamper(eval, row, &cells);
+    let forged = tamper(&eval, row, &cells);
     eval_locally_holds(&traces, &forged);
     assert_ne!(
         dag_residual(&traces, &forged, &mut rng),
@@ -365,12 +366,12 @@ fn dag_sub_result_forged_unbalances() {
     // `ec_is` consumer — the rearrangement is load-bearing, not decorative.
     let traces = ec_dag_sub_from_pai_traces();
     let mut rng = StdRng::seed_from_u64(0xec_da9_f03);
-    let eval = traces.mains()[4];
-    assert_eq!(dag_residual(&traces, eval, &mut rng), 0, "honest stack must balance");
+    let eval = crate::tests::transcript_eval_main(&traces);
+    assert_eq!(dag_residual(&traces, &eval, &mut rng), 0, "honest stack must balance");
 
-    let row = first_ec_op_row(eval, COL_IS_SUB);
+    let row = first_ec_op_row(&eval, COL_IS_SUB);
     let r = eval.values[row * EVAL_COLS + COL_PTR]; // R = P − Q, the bound result
-    let forged = tamper(eval, row, &[(COL_PTR, r + Felt::ONE)]);
+    let forged = tamper(&eval, row, &[(COL_PTR, r + Felt::ONE)]);
     eval_locally_holds(&traces, &forged);
     assert_ne!(
         dag_residual(&traces, &forged, &mut rng),

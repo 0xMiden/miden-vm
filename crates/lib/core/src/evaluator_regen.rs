@@ -23,6 +23,8 @@ const HEADER: &str = "\
 //! Equivalence with the hand-written definitions is machine-checked: identical
 //! constraint values in the identical global order, so `ConstraintLayout`, alpha
 //! assignment, and all proof artifacts are unchanged.
+
+#![allow(clippy::eq_op)]
 ";
 
 /// Generate the evaluator-module source from the current constraint definitions.

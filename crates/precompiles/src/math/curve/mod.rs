@@ -48,8 +48,9 @@ use miden_core::{
     Felt, ZERO,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag, precompile_id,
+        PrecompileError, TRUE_DIGEST, Tag,
     },
+    program::domain::CURVE_PRECOMPILE_SELECTOR,
 };
 
 use self::secp256k1::Secp256k1;
@@ -458,21 +459,17 @@ impl CurveOp {
         Self::decode(tag.args()).map(Some).ok_or(PrecompileError::InvalidNode)
     }
 
-    fn decode(args: [Felt; 3]) -> Option<Self> {
+    fn decode(args: [Felt; 2]) -> Option<Self> {
         match args[0].as_canonical_u64() {
-            CurvePrecompile::VALUE_OP_ID if args[2] == ZERO => {
+            CurvePrecompile::VALUE_OP_ID => {
                 let group_ptr = u32::try_from(args[1].as_canonical_u64()).ok()?;
                 let curve = CurveId::from_group_ptr(group_ptr)?;
                 Some(Self::Value(curve))
             },
-            CurvePrecompile::ADD_OP_ID if args[1] == ZERO && args[2] == ZERO => {
-                Some(Self::Binary(CurveBinaryOp::Add))
-            },
-            CurvePrecompile::SUB_OP_ID if args[1] == ZERO && args[2] == ZERO => {
-                Some(Self::Binary(CurveBinaryOp::Sub))
-            },
-            CurvePrecompile::EQ_OP_ID if args[1] == ZERO && args[2] == ZERO => Some(Self::Eq),
-            CurvePrecompile::MSM_OP_ID if args[1] == ZERO && args[2] == ZERO => Some(Self::Msm),
+            CurvePrecompile::ADD_OP_ID if args[1] == ZERO => Some(Self::Binary(CurveBinaryOp::Add)),
+            CurvePrecompile::SUB_OP_ID if args[1] == ZERO => Some(Self::Binary(CurveBinaryOp::Sub)),
+            CurvePrecompile::EQ_OP_ID if args[1] == ZERO => Some(Self::Eq),
+            CurvePrecompile::MSM_OP_ID if args[1] == ZERO => Some(Self::Msm),
             _ => None,
         }
     }
@@ -533,7 +530,7 @@ impl CurveNode {
 pub struct CurvePrecompile;
 
 impl CurvePrecompile {
-    /// Stable precompile name used to derive this precompile's tag id.
+    /// Human-readable precompile name used for diagnostics.
     pub const NAME: &'static str = "curve";
 
     /// Operation discriminants owned by this precompile.
@@ -543,15 +540,15 @@ impl CurvePrecompile {
     pub const EQ_OP_ID: u64 = 3;
     pub const MSM_OP_ID: u64 = 4;
 
-    /// Stable precompile id derived from [`Self::NAME`].
+    /// Registered precompile selector.
     pub fn id() -> Felt {
-        precompile_id(Self::NAME)
+        CURVE_PRECOMPILE_SELECTOR
     }
 
     /// Builds a canonical curve `VALUE` tag for `curve`.
     pub fn value_tag(curve: CurveId) -> Tag {
         let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr()), ZERO])
+        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr())])
             .expect("curve precompile id is not framework-reserved")
     }
 
@@ -561,7 +558,7 @@ impl CurvePrecompile {
     /// precompile rejects.
     pub fn op_tag(op_id: u64) -> Tag {
         let op_id = Felt::new(op_id).expect("curve op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, ZERO, ZERO])
+        Tag::precompile(Self::id(), [op_id, ZERO])
             .expect("curve precompile id is not framework-reserved")
     }
 
@@ -831,14 +828,14 @@ impl Precompile for CurvePrecompile {
         nodes
     }
 
-    fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+    fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
         let op = CurveOp::decode(args)?;
         Some(op.node_type())
     }
 
     fn evaluate(
         &self,
-        args: [Felt; 3],
+        args: [Felt; 2],
         payload: &Payload,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
@@ -952,16 +949,7 @@ mod tests {
         assert_eq!(
             precompile.decode([
                 Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
-                Felt::from(curve.group_ptr()),
-                Felt::from_u32(1),
-            ]),
-            None
-        );
-        assert_eq!(
-            precompile.decode([
-                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
                 Felt::new_unchecked(99),
-                ZERO,
             ]),
             None
         );
@@ -1002,14 +990,6 @@ mod tests {
         let mut msm_with_curve = CurvePrecompile::msm_tag().args();
         msm_with_curve[1] = Felt::from(curve.group_ptr());
         assert_eq!(precompile.decode(msm_with_curve), None);
-        assert_eq!(
-            precompile.decode([
-                Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
-                Felt::from(curve.group_ptr()),
-                Felt::from_u32(1),
-            ]),
-            None
-        );
     }
 
     #[test]

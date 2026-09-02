@@ -16,15 +16,15 @@
 //! ```
 //!
 //! The code context comes first so that callsites that pin `(P, K)` can resume the claim hash
-//! from a precomputed sponge state; 40 elements is exactly five Poseidon2 rate blocks, so no
-//! padding block is absorbed and both read points (the `(P, K)` prefix state and the claim
-//! commitment) fall on permutation boundaries.
+//! from a precomputed chaining value. Forty elements is exactly five Eidos blocks, so no partial
+//! block is synthesized and both read points (the `(P, K)` prefix state and the claim commitment)
+//! fall on compression boundaries.
 //!
 //! # Claim commitment
 //!
-//! `CLAIM_HASH = Poseidon2::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`, i.e. the
-//! domain tag rides in the second capacity element while the first carries the Sponge2 padding
-//! rule of <https://eprint.iacr.org/2024/911> (here `40 % 8 = 0`).
+//! `CLAIM_HASH = Eidos::hash_elements_in_domain(P ‖ K ‖ I ‖ O, CLAIM_DOMAIN_TAG)`. The initial
+//! chaining value binds both the registered domain and the exact logical length (`40`), after
+//! which Eidos processes five compression blocks in sequence.
 
 use super::{
     KernelDescriptor, ProgramInfo, StackInputs, StackOutputs,

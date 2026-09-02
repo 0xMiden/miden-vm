@@ -20,7 +20,7 @@ use crate::{
     ec::{msm::trace::EcExprPtr, trace::EcPointPtr},
     math::{U256, from_limbs32, to_limbs32},
     session::{EcNode, Session, Truthy, UintNode, strategies},
-    transcript::poseidon2::P2Digest,
+    transcript::eidos::EidosDigest,
 };
 
 const MSM_WNAF_WINDOW: usize = 5;
@@ -364,9 +364,9 @@ impl WitnessImporter {
     fn check_commitment(
         &self,
         expected: Digest,
-        actual: P2Digest,
+        actual: EidosDigest,
     ) -> Result<(), SessionInputError> {
-        if actual == P2Digest::from(expected) {
+        if actual == EidosDigest::from(expected) {
             Ok(())
         } else {
             Err(SessionInputError::Commitment {

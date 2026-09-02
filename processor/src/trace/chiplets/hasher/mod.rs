@@ -1,23 +1,40 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-use hashbrown::HashMap;
-use miden_air::trace::chiplets::hasher::{
-    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MAX_MERKLE_INDEX_HALF,
-    MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH,
-    Selectors,
+use miden_air::trace::{
+    and8_lookup::{
+        BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7,
+        BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
+    },
+    chiplets::hasher::{
+        BLOCK_LEN, CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
+        MR_UPDATE_NEW, MR_UPDATE_OLD, STATE_WIDTH, Selectors,
+    },
+    eidos_compression::{
+        ByteLookupRecorder, EIDOS_COMPRESSION_CYCLE_LEN, EidosCompressionByteLookup,
+        NUM_EIDOS_COMPRESSION_COLS, TraceMode as EidosCompressionTraceMode,
+        retag_felt_trace_block_cycle_id,
+        write_felt_trace_block_into_zeroed_with_lookups as write_eidos_compression_felt_trace_block,
+    },
 };
-use miden_core::chiplets::hasher::apply_permutation;
+use miden_core::{
+    chiplets::{eidos_compression, hasher::compress_state},
+    utils::RowMajorMatrix,
+};
+use rayon::prelude::*;
 
 use super::{
-    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, Word as Digest,
-    ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
+    RangeChecker, Word as Digest, ZERO,
 };
-use crate::trace::range::RangeChecker;
+use crate::{ContextId, RowIndex};
 
 mod trace;
-use trace::{HasherTrace, fill_poseidon2_permutation_trace};
+use trace::HasherTrace;
+mod and8_trace;
+pub(crate) use and8_trace::build_and8_lookup_trace;
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR
@@ -26,16 +43,26 @@ mod tests;
 /// Key type for digest-based lookups.
 type DigestKey = [u64; 4];
 
-/// Key type for full-state lookups.
+/// Key type for Eidos compression input states.
 type StateKey = [u64; STATE_WIDTH];
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct PermRequest {
-    state: StateKey,
-    multiplicity: u64,
+/// Output shape requested from one Eidos compression block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CompressionOutput {
+    /// Packed chaining-value output used by the VM hash operations.
+    Packed,
+    /// Direct 16-lane XOF output used by AEAD stream rows.
+    AeadXof { clk: Felt },
 }
 
-/// Converts a Digest to a DigestKey for map lookup.
+/// Deduplication key for standalone Eidos compression blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CompressionRequestKey {
+    state: StateKey,
+    output: CompressionOutput,
+}
+
+/// Converts a Digest to a DigestKey for BTreeMap lookup.
 fn digest_to_key(digest: Digest) -> DigestKey {
     let elems = digest.as_elements();
     core::array::from_fn(|i| elems[i].as_canonical_u64())
@@ -46,24 +73,18 @@ fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
 
+/// Converts a stable map key back into a hasher state.
+fn key_to_state(key: &StateKey) -> HasherState {
+    key.map(Felt::new_unchecked)
+}
+
 /// Hash chiplet for the VM.
 ///
-/// This component records controller rows in the chiplets trace and permutation cycles in the
-/// Poseidon2 permutation trace:
-///
-/// - **Controller region**: pairs of (input, output) rows for each permutation request. Input rows
-///   (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0, s1=0) capture
-///   the post-permutation state.
-///
-/// - **Poseidon2 permutation trace**: one 16-row cycle per unique input state, linked to controller
-///   rows via the hasher perm-link LogUp bus.
-///
-/// Equal input states share one permutation cycle with the corresponding multiplicity.
-///
-/// ## Controller row layout
-///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  perm_id
-/// ├────┴───┴───┴────────┴────┴────────────┴─────────────┴───────────────┴─────────┤
+/// The controller records one row per compression request. Hash rows carry
+/// `block[8] || cv_in[4]` in the state columns and `cv_out[4]` in row data; Merkle rows carry
+/// `block[8] || cv_out[4]` plus their path-index data. The standalone Eidos compression
+/// AIR executes one block per unique input state, with multiplicity tracked by the
+/// compression-link bus.
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
@@ -71,11 +92,10 @@ pub struct Hasher {
     // hasher (foldhash); a crafted program can degrade lookups, but trace growth is
     // bounded by `max_trace_len`, which caps the damage.
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
-    memoized_trace_map: HashMap<DigestKey, (usize, usize)>,
-    /// Maps input state -> Poseidon2 cycle id.
-    perm_request_map: HashMap<StateKey, usize>,
-    /// Deduplicated Poseidon2 requests in cycle-id order.
-    perm_requests: Vec<PermRequest>,
+    memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
+    /// Maps (input state, output shape) -> multiplicity for compression deduplication.
+    /// During trace generation, one standalone Eidos compression block is emitted per entry.
+    compression_request_map: BTreeMap<CompressionRequestKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
     /// Whether the controller trace has been finalized.
@@ -88,8 +108,9 @@ impl Hasher {
 
     /// Returns the controller trace length.
     ///
-    /// Before finalization, this returns the padded controller-region estimate. The estimate is
-    /// checked against the actual length during `fill_trace()`.
+    /// Before finalization, this returns an estimate based on the controller region length.
+    /// The estimate is verified against the actual length during `fill_trace()` via a
+    /// debug assertion.
     pub(crate) fn trace_len(&self) -> usize {
         if self.finalized {
             self.trace.trace_len()
@@ -98,29 +119,53 @@ impl Hasher {
         }
     }
 
-    /// Returns the layout of the hasher region as `(controller_len, poseidon2_len)`.
+    /// Returns the layout of the hasher region as `(controller_len, compression_len)`.
     ///
-    /// `controller_len` includes padding rows that align the following chiplet section.
-    /// `poseidon2_len` includes one zero-multiplicity padding cycle.
+    /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
+    /// align the following chiplet section. `compression_len` is the standalone Eidos compression
+    /// AIR length, before power-of-two trace padding.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
         let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
-        let perm_len = self.poseidon2_permutation_trace_len();
-        (controller_len, perm_len)
+        let compression_len = self.eidos_compression_trace_len();
+        (controller_len, compression_len)
     }
 
-    /// Returns the unpadded Poseidon2-permutation AIR trace length.
-    pub(super) fn poseidon2_permutation_trace_len(&self) -> usize {
+    /// Returns the unpadded Eidos compression AIR trace length.
+    ///
+    /// Wrapped lookup accumulation lets real compression blocks occupy the full logical trace.
+    /// Power-of-two padding may still add zero-multiplicity dummy blocks later.
+    pub(crate) fn eidos_compression_trace_len(&self) -> usize {
         if self.finalized {
             0
         } else {
-            (self.perm_requests.len() + 1) * HASH_CYCLE_LEN
+            self.compression_request_map.len() * EIDOS_COMPRESSION_CYCLE_LEN
         }
     }
 
-    /// Adds range-check requests for the level-0 Merkle canonicality witnesses.
-    pub(super) fn append_range_checks(&self, range_checker: &mut RangeChecker) {
-        self.trace.append_range_checks(range_checker);
+    /// Adds range-check requests emitted by the standalone Eidos compression AIR.
+    pub(super) fn append_eidos_compression_range_checks(
+        &self,
+        eidos_compression_height: usize,
+        range: &mut RangeChecker,
+    ) {
+        debug_assert_eq!(eidos_compression_height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
+        debug_assert!(!self.finalized, "range checks must be collected before finalization");
+
+        let block_count = eidos_compression_height / EIDOS_COMPRESSION_CYCLE_LEN;
+        debug_assert!(
+            block_count >= self.compression_request_map.len(),
+            "EidosCompression height is too short for recorded compression requests",
+        );
+
+        for key in self.compression_request_map.keys() {
+            append_message_row_range_checks(&key_to_state(&key.state), range);
+        }
+
+        append_zero_message_row_range_checks(
+            block_count - self.compression_request_map.len(),
+            range,
+        );
     }
 
     /// Estimates the controller trace length before finalization.
@@ -135,26 +180,27 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Applies a single permutation of the hash function to the provided state and records the
-    /// execution trace of this computation.
-    ///
-    /// Returns (addr, permuted_state).
-    pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
+    /// Applies one packed Eidos compression.
+    pub fn compress(&mut self, state: HasherState) -> (Felt, HasherState) {
         let addr = self.trace.next_row_addr();
 
-        let permuted = self.append_controller_permutation(
-            LINEAR_HASH,
-            RETURN_STATE,
-            state,
-            ZERO, // input_node_index
-            ZERO, // output_node_index
-            ONE,  // is_boundary_input = 1 (first input)
-            ONE,  // is_boundary_output = 1 (final output)
-            ZERO, // input_direction_bit (non-Merkle)
-            ZERO, // output_direction_bit (non-Merkle)
-        );
+        let compressed = self.append_hash_compression(LINEAR_HASH, state, true);
 
-        (addr, permuted)
+        (addr, compressed)
+    }
+
+    /// Applies one Eidos compression and returns all 16 raw output lanes.
+    pub fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        clk: RowIndex,
+        state: HasherState,
+    ) -> [Felt; 16] {
+        self.record_compression_request(
+            &state,
+            CompressionOutput::AeadXof { clk: Felt::from(clk) },
+        );
+        eidos_compression::compress_raw_xof_lanes(&state).map(Felt::from_u32)
     }
 
     /// Computes hash(h1, h2) for a control block and returns the result.
@@ -174,115 +220,51 @@ impl Hasher {
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
         let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
-        // Single permutation: boundary on both input and output
-        let permuted = self.append_controller_permutation(
-            LINEAR_HASH,
-            RETURN_HASH,
-            init_state,
-            ZERO,
-            ZERO, // node_index: input, output
-            ONE,
-            ONE, // is_boundary: input=1, output=1
-            ZERO,
-            ZERO, // direction_bit: non-Merkle
-        );
+        let compressed = self.append_hash_compression(LINEAR_HASH, init_state, true);
 
         self.insert_to_memoized_trace_map(op_start, expected_hash);
-        let result = get_digest(&permuted);
+        let result = get_digest(&compressed);
         (addr, result)
     }
 
-    /// Computes a sequential hash of a basic block's operation batches, given as one group-hash
-    /// array per batch (the only part of a batch the hasher absorbs), and returns the result.
+    /// Computes a sequential hash of all operation batches and returns the result.
     ///
     /// Returns (addr, digest).
-    pub fn hash_basic_block<'a, I>(
+    pub fn hash_basic_block(
         &mut self,
-        batch_groups: I,
+        op_batches: &[OpBatch],
         expected_hash: Digest,
-    ) -> (Felt, Digest)
-    where
-        I: IntoIterator<Item = &'a [Felt; RATE_LEN]>,
-        I::IntoIter: ExactSizeIterator,
-    {
+    ) -> (Felt, Digest) {
         if let Some(memoized) = self.replay_memoized_trace(expected_hash) {
             return memoized;
         }
 
-        let mut batch_groups = batch_groups.into_iter();
-        let num_batches = batch_groups.len();
-        let first_batch = batch_groups.next().expect("basic blocks contain at least one op batch");
-
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
-        let init_state = init_state(first_batch, ZERO);
+        let num_batches = op_batches.len();
+        let n = u32::try_from(num_basic_block_hash_groups(op_batches))
+            .expect("felt length must fit in u32");
+        let init_state = init_state(op_batches[0].groups(), n);
 
         if num_batches == 1 {
-            // One-batch hashes have both boundary flags set.
-            let permuted = self.append_controller_permutation(
-                LINEAR_HASH,
-                RETURN_HASH,
-                init_state,
-                ZERO,
-                ZERO,
-                ONE,
-                ONE,
-                ZERO,
-                ZERO,
-            );
+            let compressed = self.append_hash_compression(LINEAR_HASH, init_state, true);
             self.insert_to_memoized_trace_map(op_start, expected_hash);
-            let result = get_digest(&permuted);
+            let result = get_digest(&compressed);
             return (addr, result);
         }
 
-        // First batch: boundary input only.
-        let mut state = self.append_controller_permutation(
-            LINEAR_HASH,
-            RETURN_STATE,
-            init_state,
-            ZERO,
-            ZERO,
-            ONE,
-            ZERO,
-            ZERO,
-            ZERO,
-        );
+        let mut state = self.append_hash_compression(LINEAR_HASH, init_state, false);
 
-        // Middle batches: no boundary flags.
-        for groups in batch_groups.by_ref().take(num_batches - 2) {
-            absorb_into_state(&mut state, groups);
-            state = self.append_controller_permutation(
-                LINEAR_HASH,
-                RETURN_STATE,
-                state,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-            );
+        for batch in op_batches.iter().take(num_batches - 1).skip(1) {
+            absorb_into_state(&mut state, batch.groups());
+            state = self.append_hash_compression(HASH_ABSORB, state, false);
         }
 
-        // Last batch: boundary output only.
-        let last_batch = batch_groups.next().expect("multi-batch block has a final op batch");
-        let next = batch_groups.next();
-        debug_assert!(next.is_none());
-        absorb_into_state(&mut state, last_batch);
-        let permuted = self.append_controller_permutation(
-            LINEAR_HASH,
-            RETURN_HASH,
-            state,
-            ZERO,
-            ZERO,
-            ZERO,
-            ONE,
-            ZERO,
-            ZERO,
-        );
+        absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
+        let compressed = self.append_hash_compression(HASH_ABSORB, state, true);
 
         self.insert_to_memoized_trace_map(op_start, expected_hash);
-        let result = get_digest(&permuted);
+        let result = get_digest(&compressed);
         (addr, result)
     }
 
@@ -331,12 +313,15 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Finalizes and fills the controller and Poseidon2-permutation traces.
+    /// Finalizes and fills the controller and Eidos compression traces.
+    ///
+    /// Finalization pads the controller region and materializes one Eidos compression block
+    /// per unique input state. Trace-height padding may append zero-multiplicity dummy blocks.
     pub(super) fn fill_trace(
         mut self,
         trace: &mut ChipletTraceFragment,
-        poseidon2_trace: &mut [Felt],
-    ) {
+        eidos_compression_trace: &mut [Felt],
+    ) -> Vec<u64> {
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
             self.finalize_trace();
@@ -348,9 +333,9 @@ impl Hasher {
                 self.trace.trace_len(),
             );
         }
-        let perm_requests = core::mem::take(&mut self.perm_requests);
+        let compression_requests = core::mem::take(&mut self.compression_request_map);
         self.trace.fill_trace(trace);
-        fill_poseidon2_permutation_trace(perm_requests, poseidon2_trace);
+        fill_eidos_compression_trace(compression_requests, eidos_compression_trace)
     }
 
     /// Finalizes the controller trace by padding it to the chiplet alignment boundary.
@@ -364,77 +349,61 @@ impl Hasher {
         self.finalized = true;
     }
 
-    // CORE HELPER: CONTROLLER PERMUTATION
+    // CORE HELPER: CONTROLLER COMPRESSION
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a controller (input, output) pair and records the permutation request.
-    ///
-    /// Writes two rows to the controller region:
-    /// - Input row: `init_selectors` (s0=1), pre-permutation `state`, `input_node_index`,
-    ///   `is_boundary_input`, `input_direction_bit`.
-    /// - Output row: `final_selectors` (s0=0), post-permutation state, `output_node_index`,
-    ///   `is_boundary_output`, `output_direction_bit`.
-    ///
-    /// Both rows carry the current `mrupdate_id` for sibling table domain separation.
-    /// The pre-permutation state is also recorded in `perm_request_map` for deduplication.
-    ///
-    /// For Merkle operations, `input_node_index` is the full tree index and
-    /// `output_node_index` is the shifted index (input >> 1). For non-Merkle operations,
-    /// both should be ZERO.
-    ///
-    /// Returns the post-permutation state.
-    fn append_controller_permutation(
+    /// Appends a hash-controller compression row and records the Eidos compression request.
+    fn append_hash_compression(
         &mut self,
-        init_selectors: Selectors,
-        final_selectors: Selectors,
+        selectors: Selectors,
         state: HasherState,
-        input_node_index: Felt,
-        output_node_index: Felt,
-        is_boundary_input: Felt,
-        is_boundary_output: Felt,
-        input_direction_bit: Felt,
-        output_direction_bit: Felt,
+        is_final: bool,
     ) -> HasherState {
-        let perm_id = self.record_perm_request(&state);
+        let mut compressed = state;
+        compress_state(&mut compressed);
 
-        // Level-0 Merkle rows store the canonical-index witness in the capacity columns. Keep the
-        // witness separate from `state`, which is the zero-capacity input used by the permutation
-        // request and by memoized replay.
-        let is_merkle_input = init_selectors == MP_VERIFY
-            || init_selectors == MR_UPDATE_OLD
-            || init_selectors == MR_UPDATE_NEW;
-        let canonicality_witness = if is_boundary_input == ONE && is_merkle_input {
-            Some(merkle_index_canonicality_witness(output_node_index, input_direction_bit))
-        } else {
-            None
-        };
+        let digest = get_digest(&compressed).into();
+        let op_final = if is_final { ONE } else { ZERO };
+        self.trace
+            .append_controller_row(selectors, &state, digest, op_final, self.mrupdate_id);
 
+        self.record_compression_request(&state, CompressionOutput::Packed);
+
+        compressed
+    }
+
+    /// Appends a Merkle-controller compression row and records the Eidos compression request.
+    fn append_merkle_compression(
+        &mut self,
+        selectors: Selectors,
+        input_state: HasherState,
+        node_index: u64,
+        is_start: bool,
+        is_final: bool,
+    ) -> HasherState {
+        let mut compressed = input_state;
+        compress_state(&mut compressed);
+
+        let mut row_state = input_state;
+        row_state[8..12].copy_from_slice(get_digest(&compressed).as_elements());
+        let row_data = [
+            Felt::new_unchecked(node_index),
+            Felt::new_unchecked(node_index >> 1),
+            if is_start { ONE } else { ZERO },
+            ZERO,
+        ];
+        let op_final = if is_final { ONE } else { ZERO };
         self.trace.append_controller_row(
-            init_selectors,
-            &state,
-            input_node_index,
+            selectors,
+            &row_state,
+            row_data,
+            op_final,
             self.mrupdate_id,
-            is_boundary_input,
-            input_direction_bit,
-            perm_id,
-            canonicality_witness,
         );
 
-        let mut permuted = state;
-        apply_permutation(&mut permuted);
+        self.record_compression_request(&input_state, CompressionOutput::Packed);
 
-        self.trace.append_controller_row(
-            final_selectors,
-            &permuted,
-            output_node_index,
-            self.mrupdate_id,
-            is_boundary_output,
-            output_direction_bit,
-            perm_id,
-            None,
-        );
-
-        permuted
+        compressed
     }
 
     // MERKLE PATH HELPERS
@@ -455,63 +424,30 @@ impl Hasher {
         );
 
         let main_selectors = context.main_selectors();
-        let depth = path.len();
-
         let mut root = value;
 
+        let last_idx = path.len() - 1;
         for (i, &sibling) in path.iter().enumerate() {
-            let is_first = i == 0;
-            let is_last = i == depth - 1;
-
-            let is_boundary_input = if is_first { ONE } else { ZERO };
-            let is_boundary_output = if is_last { ONE } else { ZERO };
-
             let b_i = index & 1;
             let state = build_merge_state(&root, &sibling, b_i);
 
-            // Input row carries the full index; output row carries the shifted index.
-            let input_node_idx = Felt::new_unchecked(index);
-            let output_node_idx = Felt::new_unchecked(index >> 1);
+            let compressed =
+                self.append_merkle_compression(main_selectors, state, index, i == 0, i == last_idx);
 
-            // The output row carries the next level's direction bit for the transition constraint.
-            let b_next = if is_last { 0 } else { (index >> 1) & 1 };
-
-            let final_selectors = if is_last { RETURN_HASH } else { RETURN_STATE };
-
-            let permuted = self.append_controller_permutation(
-                main_selectors,
-                final_selectors,
-                state,
-                input_node_idx,
-                output_node_idx,
-                is_boundary_input,
-                is_boundary_output,
-                Felt::new_unchecked(b_i), // input direction_bit: current step's bit
-                Felt::new_unchecked(b_next), // output direction_bit: next step's bit (propagated)
-            );
-
-            root = get_digest(&permuted);
+            root = get_digest(&compressed);
             index >>= 1;
         }
 
         root
     }
 
-    // PERMUTATION DEDUPLICATION
+    // COMPRESSION DEDUPLICATION
     // --------------------------------------------------------------------------------------------
 
-    /// Records a permutation request for the given input state and returns its cycle id.
-    fn record_perm_request(&mut self, state: &HasherState) -> Felt {
-        let key = state_to_key(state);
-        if let Some(&id) = self.perm_request_map.get(&key) {
-            self.perm_requests[id].multiplicity += 1;
-            return perm_id_felt(id);
-        }
-
-        let id = self.perm_requests.len();
-        self.perm_request_map.insert(key, id);
-        self.perm_requests.push(PermRequest { state: key, multiplicity: 1 });
-        perm_id_felt(id)
+    /// Records an Eidos compression request keyed by input state and output shape.
+    fn record_compression_request(&mut self, state: &HasherState, output: CompressionOutput) {
+        let key = CompressionRequestKey { state: state_to_key(state), output };
+        *self.compression_request_map.entry(key).or_insert(0) += 1;
     }
 
     // MEMOIZATION
@@ -520,8 +456,8 @@ impl Hasher {
     /// Attempts to replay a memoized controller trace for the given expected hash.
     ///
     /// If a memoized trace exists, re-pushes the source ops with the current `mrupdate_id`,
-    /// re-registers permutation requests from copied input rows, and returns `Some((addr,
-    /// digest))`. Otherwise returns `None`.
+    /// re-registers compression requests from copied controller rows, and returns
+    /// `Some((addr, digest))`. Otherwise returns `None`.
     fn replay_memoized_trace(&mut self, expected_hash: Digest) -> Option<(Felt, Digest)> {
         let (op_start, op_end) = match self.get_memoized_trace(expected_hash) {
             Some(&(s, e)) => (s, e),
@@ -533,7 +469,7 @@ impl Hasher {
             self.trace.replay_ops_range(op_start..op_end, self.mrupdate_id);
 
         for input_state in input_states {
-            self.record_perm_request(&input_state);
+            self.record_compression_request(&input_state, CompressionOutput::Packed);
         }
 
         let result = get_digest(&last_state);
@@ -550,6 +486,383 @@ impl Hasher {
         let op_end = self.trace.next_op_index();
         self.memoized_trace_map.insert(digest_to_key(hash), (op_start, op_end));
     }
+}
+
+fn fill_eidos_compression_trace(
+    compression_requests: BTreeMap<CompressionRequestKey, u64>,
+    trace: &mut [Felt],
+) -> Vec<u64> {
+    const W: usize = NUM_EIDOS_COMPRESSION_COLS;
+    const BLOCKS_PER_FILL_CHUNK: usize = 512;
+    debug_assert_eq!(trace.len() % W, 0, "Eidos compression trace buffer is not row-aligned");
+
+    let (rows, _) = trace.as_chunks_mut::<W>();
+    debug_assert_eq!(
+        rows.len() % EIDOS_COMPRESSION_CYCLE_LEN,
+        0,
+        "EidosCompression height must align to blocks"
+    );
+    debug_assert!(
+        compression_requests.len() * EIDOS_COMPRESSION_CYCLE_LEN <= rows.len(),
+        "Eidos compression trace buffer is too short for compression requests",
+    );
+
+    let request_count = compression_requests.len();
+    let requests: Vec<_> = compression_requests.into_iter().collect();
+    let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
+    let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
+
+    let mut counts = real_rows
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+        .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
+        .enumerate()
+        .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
+            let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+            for (block_idx, (block_rows, (key, multiplicity))) in rows_chunk
+                .as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>()
+                .0
+                .iter_mut()
+                .zip(requests_chunk.iter())
+                .enumerate()
+            {
+                let compression_cycle_id = (chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx) as u64;
+                write_eidos_compression_block(
+                    block_rows,
+                    &key.state,
+                    compression_cycle_id,
+                    key.output,
+                    *multiplicity,
+                    &mut local_counts,
+                );
+            }
+            local_counts
+        })
+        .reduce_with(|mut left, right| {
+            for (left, right) in left.iter_mut().zip(right) {
+                *left += right;
+            }
+            left
+        })
+        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+
+    if !dummy_rows.is_empty() {
+        let zero_state = [0u64; STATE_WIDTH];
+        let mut dummy_block = vec![[ZERO; W]; EIDOS_COMPRESSION_CYCLE_LEN];
+        let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+        write_eidos_compression_block(
+            &mut dummy_block,
+            &zero_state,
+            0,
+            CompressionOutput::Packed,
+            0,
+            &mut dummy_counts,
+        );
+
+        let dummy_blocks = dummy_rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+        for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
+            *count += dummy_count * dummy_blocks as u64;
+        }
+
+        dummy_rows
+            .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                for (block_idx, block_rows) in
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+                {
+                    block_rows.copy_from_slice(&dummy_block);
+                    let compression_cycle_id =
+                        request_count + chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx;
+                    retag_felt_trace_block_cycle_id(block_rows, compression_cycle_id as u64);
+                }
+            });
+    }
+
+    counts
+}
+
+/// Fills an Eidos compression trace without interning or reordering the requested compression
+/// cycles.
+///
+/// The PVM transcript assigns a logical absorption ID to every compression, so two identical input
+/// states at different absorption positions must remain two physical 32-row cycles. This writer
+/// retains input order while keeping the per-block trace construction parallel.
+fn fill_ordered_eidos_compression_trace(requests: &[StateKey], trace: &mut [Felt]) -> Vec<u64> {
+    const W: usize = NUM_EIDOS_COMPRESSION_COLS;
+    const BLOCKS_PER_FILL_CHUNK: usize = 512;
+    debug_assert_eq!(trace.len() % W, 0, "Eidos compression trace buffer is not row-aligned");
+
+    let (rows, _) = trace.as_chunks_mut::<W>();
+    debug_assert_eq!(
+        rows.len() % EIDOS_COMPRESSION_CYCLE_LEN,
+        0,
+        "EidosCompression height must align to blocks"
+    );
+    debug_assert!(
+        requests.len() * EIDOS_COMPRESSION_CYCLE_LEN <= rows.len(),
+        "Eidos compression trace buffer is too short for ordered compression requests",
+    );
+
+    let real_rows_len = requests.len() * EIDOS_COMPRESSION_CYCLE_LEN;
+    let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
+
+    let mut counts = real_rows
+        .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+        .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
+        .enumerate()
+        .map(|(chunk_idx, (rows_chunk, requests_chunk))| {
+            let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+            for (block_idx, (block_rows, state)) in rows_chunk
+                .as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>()
+                .0
+                .iter_mut()
+                .zip(requests_chunk)
+                .enumerate()
+            {
+                // The PVM supplies its own input/output interface on this same trace, so the
+                // Miden-controller compression-link multiplicity is deliberately zero.
+                let compression_cycle_id = (chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx) as u64;
+                write_eidos_compression_block(
+                    block_rows,
+                    state,
+                    compression_cycle_id,
+                    CompressionOutput::Packed,
+                    0,
+                    &mut local_counts,
+                );
+            }
+            local_counts
+        })
+        .reduce_with(|mut left, right| {
+            for (left, right) in left.iter_mut().zip(right) {
+                *left += right;
+            }
+            left
+        })
+        .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN]);
+
+    if !dummy_rows.is_empty() {
+        let zero_state = [0u64; STATE_WIDTH];
+        let mut dummy_block = vec![[ZERO; W]; EIDOS_COMPRESSION_CYCLE_LEN];
+        let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+        write_eidos_compression_block(
+            &mut dummy_block,
+            &zero_state,
+            0,
+            CompressionOutput::Packed,
+            0,
+            &mut dummy_counts,
+        );
+
+        let dummy_blocks = dummy_rows.len() / EIDOS_COMPRESSION_CYCLE_LEN;
+        for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
+            *count += dummy_count * dummy_blocks as u64;
+        }
+        dummy_rows
+            .par_chunks_mut(EIDOS_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                for (block_idx, block_rows) in
+                    chunk.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
+                {
+                    block_rows.copy_from_slice(&dummy_block);
+                    let compression_cycle_id =
+                        requests.len() + chunk_idx * BLOCKS_PER_FILL_CHUNK + block_idx;
+                    retag_felt_trace_block_cycle_id(block_rows, compression_cycle_id as u64);
+                }
+            });
+    }
+
+    counts
+}
+
+/// Builds the standalone Eidos compression and byte-lookup traces for an external
+/// collection of packed Eidos compression requests.
+///
+/// Each request is `[block(8), cv_in(4)]` plus its compression-link multiplicity. Identical input
+/// states are interned exactly as they are in the VM hasher, so the returned Eidos compression
+/// trace contains one `EIDOS_COMPRESSION_CYCLE_LEN`-row block per distinct state and the interface
+/// row carries the summed multiplicity. The companion byte-lookup trace includes both
+/// Eidos compression's byte-operation demand and the message-row range checks required by the
+/// standalone compression AIR.
+pub fn build_external_eidos_compression_traces(
+    requests: impl IntoIterator<Item = ([Felt; STATE_WIDTH], u64)>,
+) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    let mut compression_requests = BTreeMap::new();
+    for (state, multiplicity) in requests {
+        if multiplicity == 0 {
+            continue;
+        }
+        let key = CompressionRequestKey {
+            state: state_to_key(&state),
+            output: CompressionOutput::Packed,
+        };
+        *compression_requests.entry(key).or_insert(0) += multiplicity;
+    }
+
+    let real_blocks = compression_requests.len();
+    let height = (real_blocks * EIDOS_COMPRESSION_CYCLE_LEN)
+        .next_power_of_two()
+        .max(EIDOS_COMPRESSION_CYCLE_LEN);
+    let block_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
+
+    let mut range = RangeChecker::new();
+    for key in compression_requests.keys() {
+        append_message_row_range_checks(&key_to_state(&key.state), &mut range);
+    }
+    append_zero_message_row_range_checks(block_count - real_blocks, &mut range);
+
+    let mut eidos_compression = vec![ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
+    let mut byte_counts =
+        fill_eidos_compression_trace(compression_requests, &mut eidos_compression);
+    range.write_range_counts(&mut byte_counts);
+    let and8 = build_and8_lookup_trace(&byte_counts);
+
+    (
+        RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
+        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+    )
+}
+
+/// Builds ordered Eidos compression and byte-lookup traces for an external PVM
+/// transcript.
+///
+/// Unlike [`build_external_eidos_compression_traces`], this function deliberately performs no state
+/// interning: the output contains one 32-row cycle for every input state, in iterator order.
+pub fn build_ordered_external_eidos_compression_traces(
+    requests: impl IntoIterator<Item = [Felt; STATE_WIDTH]>,
+) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    let requests: Vec<StateKey> = requests.into_iter().map(|state| state_to_key(&state)).collect();
+    let real_blocks = requests.len();
+    let height = (real_blocks * EIDOS_COMPRESSION_CYCLE_LEN)
+        .next_power_of_two()
+        .max(EIDOS_COMPRESSION_CYCLE_LEN);
+    let block_count = height / EIDOS_COMPRESSION_CYCLE_LEN;
+
+    let mut range = RangeChecker::new();
+    for state in &requests {
+        append_message_row_range_checks(&key_to_state(state), &mut range);
+    }
+    append_zero_message_row_range_checks(block_count - real_blocks, &mut range);
+
+    let mut eidos_compression = vec![ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
+    let mut byte_counts = fill_ordered_eidos_compression_trace(&requests, &mut eidos_compression);
+    range.write_range_counts(&mut byte_counts);
+    let and8 = build_and8_lookup_trace(&byte_counts);
+
+    (
+        RowMajorMatrix::new(eidos_compression, NUM_EIDOS_COMPRESSION_COLS),
+        RowMajorMatrix::new(and8, miden_air::trace::and8_lookup::NUM_AND8_LOOKUP_COLS),
+    )
+}
+
+fn append_message_row_range_checks(state: &HasherState, range: &mut RangeChecker) {
+    for felt in &state[..BLOCK_LEN] {
+        let value = felt.as_canonical_u64();
+        let lo = (value & 0xffff_ffff) as u32;
+        let hi = (value >> 32) as u32;
+
+        range.add_value((lo & 0xffff) as u16);
+        range.add_value((lo >> 16) as u16);
+        range.add_value((hi & 0xffff) as u16);
+        range.add_value((hi >> 16) as u16);
+    }
+}
+
+fn append_zero_message_row_range_checks(block_count: usize, range: &mut RangeChecker) {
+    if block_count == 0 {
+        return;
+    }
+
+    range.add_value_repeated(0, BLOCK_LEN * 4 * block_count);
+}
+
+fn num_basic_block_hash_groups(op_batches: &[OpBatch]) -> usize {
+    let Some((last, prefix)) = op_batches.split_last() else {
+        return 0;
+    };
+    prefix.len() * BLOCK_LEN + last.num_groups().next_power_of_two()
+}
+
+fn write_eidos_compression_block(
+    rows: &mut [[Felt; NUM_EIDOS_COMPRESSION_COLS]],
+    input_state: &StateKey,
+    compression_cycle_id: u64,
+    output_mode: CompressionOutput,
+    multiplicity: u64,
+    and8_counts: &mut [u64],
+) {
+    let block = unpack_block_from_state_key(input_state);
+    let h = unpack_cv_from_state_key(input_state);
+    let trace_mode = match output_mode {
+        CompressionOutput::Packed => {
+            EidosCompressionTraceMode::CompressionWithMultiplicity { multiplicity }
+        },
+        CompressionOutput::AeadXof { clk } => {
+            assert_eq!(multiplicity, 1, "AEAD XOF requests must not be deduplicated by clk");
+            EidosCompressionTraceMode::AeadXof { clk: clk.as_canonical_u64() }
+        },
+    };
+
+    let mut recorder = EidosCompressionLookupCounter { counts: and8_counts };
+    write_eidos_compression_felt_trace_block(
+        rows,
+        block,
+        h,
+        compression_cycle_id,
+        trace_mode,
+        &mut recorder,
+    );
+}
+
+fn unpack_block_from_state_key(state: &StateKey) -> [u32; BLOCK_LEN * 2] {
+    core::array::from_fn(|idx| {
+        let packed = state[idx / 2];
+        if idx.is_multiple_of(2) {
+            (packed & 0xffff_ffff) as u32
+        } else {
+            (packed >> 32) as u32
+        }
+    })
+}
+
+fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - BLOCK_LEN) * 2] {
+    core::array::from_fn(|idx| {
+        let packed = state[BLOCK_LEN + idx / 2];
+        if idx.is_multiple_of(2) {
+            (packed & 0xffff_ffff) as u32
+        } else {
+            (packed >> 32) as u32
+        }
+    })
+}
+
+struct EidosCompressionLookupCounter<'a> {
+    counts: &'a mut [u64],
+}
+
+impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
+    fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
+        let kind = match lookup {
+            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
+            EidosCompressionByteLookup::Rot12 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
+            },
+            EidosCompressionByteLookup::Rot7 { byte } => {
+                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
+            },
+        };
+        count_byte_lookup(self.counts, kind, lhs, rhs, result);
+    }
+}
+
+fn count_byte_lookup(counts: &mut [u64], kind: usize, lhs: u8, rhs: u8, result: u32) {
+    debug_assert_eq!(
+        byte_lookup_result(kind, lhs, rhs),
+        result,
+        "byte-pair witness does not match table row",
+    );
+    counts[kind * BYTE_PAIR_ROWS + ((lhs as usize) << 8) + rhs as usize] += 1;
 }
 
 // MERKLE PATH CONTEXT
@@ -592,74 +905,46 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
     }
 }
 
-fn perm_id_felt(id: usize) -> Felt {
-    Felt::from_u32(u32::try_from(id).expect("Poseidon2 permutation id exceeds u32"))
-}
-
-/// Builds the four limbs of the level-0 Merkle canonicality slack.
-///
-/// Let `x` be the index after removing the first direction bit `b`, and let
-/// `M = (Q - 1) / 2`. A canonical index satisfies `x + b <= M`, so its slack is
-/// `y = M - x - b`. The AIR checks this equation, while the range bus checks all four 16-bit limbs
-/// and `2*y_3`. The latter makes the top limb 15-bit and therefore keeps `y` below `2^63`.
-/// For the largest canonical index, `Q - 1`, the slack is zero.
-fn merkle_index_canonicality_witness(node_index_next: Felt, direction_bit: Felt) -> [Felt; 4] {
-    const LIMB_MASK: u64 = (1 << 16) - 1;
-
-    let x = node_index_next.as_canonical_u64();
-    let bit = direction_bit.as_canonical_u64();
-    let slack = MAX_MERKLE_INDEX_HALF
-        .checked_sub(x.checked_add(bit).expect("Merkle index plus direction bit overflowed"))
-        .expect("non-canonical Merkle index has no canonicality slack witness");
-
-    [
-        Felt::new_unchecked(slack & LIMB_MASK),
-        Felt::new_unchecked((slack >> 16) & LIMB_MASK),
-        Felt::new_unchecked((slack >> 32) & LIMB_MASK),
-        Felt::new_unchecked(slack >> 48),
-    ]
-}
-
 // HASHER STATE MUTATORS
 // ================================================================================================
 
-/// Initializes hasher state with the first 8 elements to be absorbed.
+/// Initializes the first Eidos compression state for sequential hashing.
 ///
-/// State layout: [RATE0, RATE1, CAP] where:
-/// - state[0..8] = init_values (rate)
-/// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
+/// `n` is the total number of felts in the hash call.
 #[inline(always)]
-pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; STATE_WIDTH] {
-    debug_assert!(
-        padding_flag == ZERO || padding_flag == ONE,
-        "first capacity element must be 0 or 1"
-    );
+pub fn init_state(init_values: &[Felt; BLOCK_LEN], n: u32) -> [Felt; STATE_WIDTH] {
+    let cv = eidos_compression::init_chaining_word(0, n);
     let mut state = [ZERO; STATE_WIDTH];
-    state[..RATE_LEN].copy_from_slice(init_values);
-    state[RATE_LEN] = padding_flag;
+    state[..BLOCK_LEN].copy_from_slice(init_values);
+    state[BLOCK_LEN..STATE_WIDTH].copy_from_slice(cv.as_slice());
     state
 }
 
-/// Initializes hasher state from two words with zero capacity.
+/// Initializes a domain-0 two-word compression state.
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
     init_state_from_words_with_domain(w1, w2, ZERO)
 }
 
-/// Initializes hasher state from two words with a domain value in capacity[1].
+/// Initializes a two-word compression state for the provided domain.
 #[inline(always)]
 pub fn init_state_from_words_with_domain(
     w1: &Digest,
     w2: &Digest,
     domain: Felt,
 ) -> [Felt; STATE_WIDTH] {
-    [w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], ZERO, domain, ZERO, ZERO]
+    let domain_u32 =
+        u32::try_from(domain.as_canonical_u64()).expect("hasher domain must fit in u32");
+    let cv = eidos_compression::two_to_one_chaining_word(domain_u32);
+    [
+        w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], cv[0], cv[1], cv[2], cv[3],
+    ]
 }
 
-/// Absorbs values into the rate portion of the state.
+/// Places the next block into the compression state.
 #[inline(always)]
-pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; RATE_LEN]) {
-    state[..RATE_LEN].copy_from_slice(values);
+pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; BLOCK_LEN]) {
+    state[..BLOCK_LEN].copy_from_slice(values);
 }
 
 /// Returns the digest portion of the hasher state.

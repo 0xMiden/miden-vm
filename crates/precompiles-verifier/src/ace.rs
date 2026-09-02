@@ -251,9 +251,9 @@ mod tests {
     fn quotient_chunks_match_the_symbolic_derivation() {
         const EXPECTED: [(&str, u8); NUM_CHIPLETS] = [
             ("ChunkNodeSponge", 2),
-            ("Poseidon2", 2),
+            ("EidosCompression", 1),
             ("KeccakRound", 2),
-            ("BytePairLut", 1),
+            ("BytePairAnd8", 1),
             ("TranscriptEval", 1),
             ("UintStoreMul", 1),
             ("UintAdd", 1),
@@ -337,7 +337,13 @@ mod tests {
         // BytePairLut is the only chiplet with a preprocessed trace, so the combined
         // preprocessed region must be nonempty and routed by the shuffle section.
         assert!(factored.layout().counts.preprocessed_width > 0);
-        assert_eq!(factored.layout().counts.num_aux_boundary, NUM_CHIPLETS);
+        let num_aux_values: usize = ChipletAir::all()
+            .iter()
+            .map(|air| {
+                <ChipletAir as miden_lifted_air::LiftedAir<Felt, QuadFelt>>::num_aux_values(air)
+            })
+            .sum();
+        assert_eq!(factored.layout().counts.num_aux_boundary, num_aux_values);
 
         let factory =
             miden_ace_codegen::FactoredCircuitFactory::new(factored).expect("factored factory");
@@ -362,7 +368,7 @@ mod tests {
         insta::assert_snapshot!(snapshot);
     }
 
-    /// The PVM aux hook reads ten quadratic-extension sigmas as five MASM words.
+    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
     /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
@@ -375,8 +381,8 @@ mod tests {
             .collect();
         assert_eq!(
             derived,
-            alloc::vec![1; NUM_CHIPLETS],
-            "the PVM aux hook assumes exactly one sigma from every chiplet"
+            alloc::vec![1, 2, 1, 2, 1, 1, 1, 1, 1, 1],
+            "the PVM aux hook boundary shape drifted"
         );
         assert_eq!(
             derived.iter().sum::<usize>(),
@@ -406,6 +412,8 @@ mod tests {
 
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/public_inputs.masm");
+        const RELATION_PATH: &str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
         let multi_air = ChipletMultiAir::new();
         assert_eq!(masm_const(HOOK_PATH, "NUM_PUBLIC_VALUES"), multi_air.num_air_inputs() as u64);
@@ -414,7 +422,7 @@ mod tests {
         assert_eq!(masm_const(HOOK_PATH, "NUM_CHIPLETS"), multi_air.airs().len() as u64);
         for (i, expected) in PVM_PREPROCESSED_COMMITMENT.into_iter().enumerate() {
             assert_eq!(
-                masm_const(HOOK_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
+                masm_const(RELATION_PATH, &alloc::format!("PREPROCESSED_COMMITMENT_{i}")),
                 expected,
                 "PVM trusted setup commitment limb {i} drifted"
             );
@@ -423,7 +431,7 @@ mod tests {
 
     #[test]
     fn pvm_masm_read_layout_matches_every_codegen_boundary() {
-        const READ_START: u64 = 3_225_426_416;
+        const READ_START: u64 = 3_225_432_064;
         const NEXT_VM_REGION: u64 = 3_238_002_688;
         const LAYOUT_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/layout.masm");

@@ -30,8 +30,10 @@ where
     A: LiftedAir<F, EF>,
     for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
+    // Preprocessed columns are already prepended to `main` by the only AIR which uses them
+    // (BytePairLut); passing them a second time would shift its lookup column indices.
     let (mut aux_trace, mut aux_values) =
-        miden_air::lookup::build_logup_aux_trace(air, main, challenges);
+        miden_air::lookup::build_logup_aux_trace_with_preprocessed(air, main, None, challenges);
     let sigma_prime = aux_values[0];
     let num_cols = aux_trace.width;
     let num_rows = main.height();
