@@ -133,17 +133,17 @@ impl CoreLibrary {
         Arc::clone(&self.package)
     }
 
-    /// Returns the MAST root of `sys::vm::verify_vm_proof` — the verifier identity under
+    /// Returns the MAST root of `sys::vm::verify_proof`, the verifier identity under
     /// which recursive proofs are content-addressed.
     ///
     /// Operators pass this root when registering a proof package in the advice map
     /// (`RecursiveVerifierInputs::for_request`). A consumer derives the identical value
     /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
     /// agree without a shared constant; consumers key their proof fetches by this root.
-    pub fn recursive_verifier_root(&self) -> Word {
+    pub fn vm_recursive_verifier_root(&self) -> Word {
         self.package
-            .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
-            .expect("verify_vm_proof is exported from the core library")
+            .get_procedure_root_by_path("::miden::core::sys::vm::verify_proof")
+            .expect("vm::verify_proof is exported from the core library")
     }
 
     /// Returns the MAST root of `sys::pvm::verify_proof` — the verifier identity under which PVM
@@ -160,9 +160,9 @@ impl CoreLibrary {
     /// Returns the MAST root of the common recursive conjectured security estimator.
     ///
     /// The MVM and PVM verifiers return relation-specific descriptors consumed by this one
-    /// procedure. Its root does not encode an acceptance threshold; consumers apply their own
-    /// common policy to the returned level. The estimator does not verify proofs or authenticate
-    /// caller-assembled descriptors.
+    /// procedure. Its root does not encode an acceptance threshold; each consumer compares the
+    /// returned level with its own threshold. The estimator does not verify proofs or authenticate
+    /// descriptors assembled by the caller.
     pub fn conjectured_security_estimator_root(&self) -> Word {
         self.package
             .get_procedure_root_by_path(

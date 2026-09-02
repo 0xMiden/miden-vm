@@ -15,16 +15,18 @@ for a complete proof, the aggregate precompile STARK is also verified when prese
 
 Use `Verifier::new().verify_precompile(&proof, expected_root)` to validate a `PrecompileProof`
 without first attaching it to an execution proof. It checks the expected-root membership and full
-ordered aggregate statement, verifies the precompile STARK, and returns its security level.
+ordered aggregate statement, verifies the precompile STARK, and returns its authenticated security
+parameters.
 
 Stack inputs are in push order (the last value is on top), while stack outputs are in pop order (the
 first value is on top).
 
-`Verifier::verify` returns a `VerificationOutcome`. Its `security_level()` is the minimum security
-level among the STARK components actually verified. Deferred verification exposes the authenticated
-obligation through `outstanding_precompile_root()`; complete verification returns no outstanding
-root. See the [deferred-proof semantics](../docs/src/design/deferred/semantics.md) for artifact,
-transport, and fixed-limit policy.
+`Verifier::verify` returns a `VerificationOutcome` containing the authenticated security parameters
+of each STARK component actually verified. Callers estimate the corresponding security levels and
+apply their own policy. Deferred verification exposes the authenticated obligation through
+`outstanding_precompile_root()`; complete verification returns no outstanding root. See the
+[deferred-proof semantics](../docs/src/design/deferred/semantics.md) for artifact, transport, and
+fixed-limit policy.
 
 ## Crate features
 

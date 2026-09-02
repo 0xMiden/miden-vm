@@ -2218,6 +2218,7 @@ dependencies = [
  "miden-utils-sync",
  "miden-verifier",
  "num",
+ "p3-security",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rstest",

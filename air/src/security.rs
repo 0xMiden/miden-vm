@@ -1,12 +1,11 @@
 //! Conjectured security level computation for the Miden VM STARK configuration.
 //!
-//! The AIR shape entering the round budget is stored as the constant [`AIR_SHAPE`] so the MASM
-//! recursive verifier can compute the same security level without running a symbolic pass in-VM.
-//! The constant is not hand-maintained: [`derive_air_shape`] computes it from the AIRs themselves,
-//! and `air_shape_matches_symbolic` fails the build's test run if an AIR change moves it.
+//! The AIR shape entering the security calculation is stored in [`AIR_SHAPE`], allowing the MASM
+//! estimator to use it without evaluating the AIRs symbolically. [`derive_air_shape`] performs
+//! that evaluation in Rust, and `air_shape_matches_symbolic` checks the stored value against it.
 
 use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
-use miden_crypto::stark::pcs::PcsParams;
+use miden_crypto::{hash::poseidon2::Poseidon2, stark::pcs::PcsParams};
 use p3_security::{
     budget::{
         AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
@@ -20,22 +19,21 @@ use crate::{
     constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
 };
 
-/// Inputs for estimating the conjectured security of a verified Miden STARK proof.
+/// Security parameters of a verified Miden STARK proof.
 ///
-/// Native MVM and PVM verifiers return these parameters after deriving them from the verified
-/// proof, the proof's commitment scheme, and the committed AIR configuration. Callers pass the
-/// returned value to a security estimator and apply their own acceptance policy. Constructing a
-/// value directly does not authenticate it.
+/// Native MVM and PVM verifiers return these parameters after deriving them from the proof, the
+/// commitment scheme used to verify it, and the AIR relation selected by the verifier. Callers
+/// pass the returned value to a security estimator and apply their own acceptance policy.
+/// Constructing this type directly does not authenticate its contents.
 ///
 /// These fields contain every input required by the conjectured estimator. `log_final_degree` and
 /// `num_ood_points` are also returned because they are additional inputs needed to model the
 /// current backend's proven security.
 ///
-/// Recursive MASM verifiers return an equivalent MASM-specific descriptor instead of this Rust
-/// type. It contains the proof-varying inputs and precomputed Q16 round bases for the fixed
-/// relation shape. Within the recursive verifiers' documented parameter ranges, the in-VM estimator
-/// matches the native conjectured estimator exactly while avoiding expensive runtime logarithms.
-/// Both APIs leave estimation and acceptance policy to the caller.
+/// Recursive MASM verifiers return a descriptor containing the inputs needed by the conjectured
+/// estimator rather than this Rust type. `log_final_degree` and `num_ood_points` are currently
+/// native-only because the MASM estimator does not compute proven security. Both APIs leave
+/// estimation and acceptance policy to the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProofSecurityParameters {
     /// Protocol parameters bound by the proof transcript.
@@ -73,10 +71,10 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 /// the rate.
 pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 
-/// Shape of the Miden VM multi-AIR statement, as it enters the round budget.
+/// Shape of the Miden VM multi-AIR statement used by the security estimator.
 ///
-/// Stored as a constant rather than derived at runtime, so the native and in-VM verifiers compute
-/// the same security level. Guarded against drift by `air_shape_matches_symbolic`.
+/// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
+/// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 427,
     max_constraint_degree: 9,
@@ -89,8 +87,8 @@ pub const AIR_SHAPE: AirShape = AirShape {
 
 /// Computes the AIR shape by symbolically evaluating every AIR in the statement.
 ///
-/// This is the source of truth for [`AIR_SHAPE`]; it allocates and runs the full symbolic pass, so
-/// the verifiers use the constant instead of calling this function.
+/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
+/// AIR, so verifiers use the checked constant instead of calling this function.
 pub fn derive_air_shape() -> AirShape {
     let mut num_constraints = 0;
     let mut max_constraint_degree = 0;
@@ -164,16 +162,13 @@ fn aligned(width: usize, alignment: usize) -> usize {
     width.next_multiple_of(alignment)
 }
 
-// MIRRORED CONSTANTS
+// SECURITY MODEL CONSTANTS
 // ================================================================================================
 //
-// The MASM recursive verifier computes the same round budget and cannot run this code, so it
-// carries these values as literals. Each is derived here rather than chosen. The output cross-test
-// in `crates/lib/core/tests/sys` compares only the two implementations' final computed security
-// level, which exposes whichever round attains the minimum — so it alone would not catch drift in
-// a constant that never determines that minimum. `derived_security_constants_match_snapshot`
-// below checks every one of these constants against a fixed numeric snapshot instead,
-// independently of which round determines the minimum.
+// The MASM recursive estimator consumes the raw AIR shape. Tests in
+// `crates/lib/core/tests/stark/security.rs` compare it with the native calculation over the ranges
+// accepted by the recursive verifiers. `derived_security_constants_match_snapshot` checks the
+// native constants independently.
 
 /// Fractional bits in the fixed-point representation shared with the MASM estimator.
 pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
@@ -185,11 +180,8 @@ pub const FIXED_POINT_ONE: u64 = fixed::ONE;
 pub const BITS_PER_QUERY: u64 =
     fixed::bits_per_query(config::LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
 
-/// Collision resistance of the commitment hash, in whole bits.
-///
-/// A digest is `DIGEST_WIDTH` field elements wide, and birthday collisions cost half its entropy.
-pub const COLLISION_RESISTANCE: u32 =
-    fixed::to_bits(config::DIGEST_WIDTH as u64 * fixed::floor_log2(Felt::ORDER_U64)) / 2;
+/// Collision resistance of the Poseidon2 commitment used by the recursive verifier.
+pub const COLLISION_RESISTANCE: u32 = Poseidon2::COLLISION_RESISTANCE;
 
 /// Ceiling any reported level is capped at, in fixed point.
 pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
@@ -217,27 +209,27 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << config::LOG_FOL
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
-/// The deployed Miden VM samples them directly after the main-trace commitment.
+/// Lifted STARK currently samples them directly after the main-trace commitment and exposes no
+/// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// `sys::vm::mod.masm`'s `LOOKUP_BASE_FP`: `log2|E|` less the lookup round's coefficient, in fixed
-/// point.
+/// `log2|E|` less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
 
-/// `sys::vm::mod.masm`'s `COMPOSITION_TERM_FP`: `log2|E|` less the constraint-composition round's
-/// coefficient, in fixed point.
+/// `log2|E|` less the constraint-composition round's coefficient, in fixed point.
 pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
 
-/// `sys::vm::mod.masm`'s `OOD_BASE_FP`: `log2|E|` less the out-of-domain round's coefficient, in
-/// fixed point.
+/// `log2|E|` less the out-of-domain round's coefficient, in fixed point.
 pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 
-/// `sys::vm::mod.masm`'s `DEEP_BASE_FP`: `log2|E|` less the DEEP round's coefficient, in fixed
-/// point.
+/// `log2|E|` less the DEEP round's coefficient, in fixed point.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// The common MASM estimator's `FOLDING_BASE_FP`: `log2|E|` less the FRI folding round's
-/// coefficient and the fixed blowup, in fixed point.
+/// `log2|E|` less the FRI folding round's coefficient and the fixed blowup, in fixed point.
+///
+/// The MASM estimator compares the whole-bit floor of this value with the lookup term to show that
+/// the FRI folding term cannot determine the final level. The drift test checks that the two
+/// values remain equal.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(config::LOG_BLOWUP as u32);
 
@@ -296,7 +288,7 @@ fn apply_lookup_correction(report: SecurityReport, correction: u64) -> SecurityR
 }
 
 impl ProofSecurityParameters {
-    /// Computes the conjectured round budget for the verified proof.
+    /// Computes the conjectured security report for the verified proof.
     ///
     /// The same estimator handles MVM and PVM proofs because the parameters include the protocol,
     /// instance, and AIR shapes. Callers must use parameters returned by the verifier that
@@ -368,14 +360,12 @@ fn mvm_security_parameters_from_protocol(
     }
 }
 
-/// Computes a deployed Miden VM proof's conjectured security level, in whole bits.
+/// Computes a Poseidon2 Miden VM proof's conjectured security level, in whole bits.
 ///
-/// Every input is bound by the Fiat-Shamir transcript — the PCS parameters through
-/// `observe_protocol_params`, the AIR log heights through the multi-AIR statement, the kernel
-/// procedure count through the kernel witness authenticated against the claim — so the computed
-/// level always reflects the parameters and shape the proof was actually produced with. The
-/// blowup, folding arity, AIR shape, challenge field, and commitment hash are fixed by the
-/// deployed configuration and enter as the constants above.
+/// The Fiat-Shamir transcript binds the PCS parameters and AIR log heights. The authenticated
+/// kernel witness determines the kernel procedure count. The remaining inputs are fixed by the
+/// deployed AIR and commitment configuration. The result therefore describes the proof and claim
+/// that were verified rather than an independently supplied parameter preset.
 ///
 /// Mirrored bit-for-bit by the common MASM estimator when supplied with the MVM descriptor. The
 /// recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed
@@ -415,11 +405,12 @@ pub fn conjectured_security_level(
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
 /// [`AIR_SHAPE`] otherwise. Not mirrored in MASM: the recursive verifier accepts only Poseidon2
-/// proofs, which `conjectured_security_level` already computes exactly at alignment
+/// proofs, which `conjectured_security_level` computes at alignment
 /// [`COMMITMENT_ALIGNMENT`] (and this function is identical at that alignment, since
 /// `num_deep_terms(COMMITMENT_ALIGNMENT)` equals `AIR_SHAPE.num_deep_terms` —
-/// `num_deep_terms_matches_the_pinned_alignment` checks it). The native verifier calls this for
-/// every hash function, including the non-algebraic ones the recursive verifier never sees.
+/// `num_deep_terms_matches_the_pinned_alignment` checks it). This helper assumes the commitment
+/// scheme has [`COLLISION_RESISTANCE`] bits; verification returns [`ProofSecurityParameters`] built
+/// with the collision resistance of the proof's actual hash function.
 pub fn conjectured_security_level_for_alignment(
     num_queries: u32,
     query_pow_bits: u32,
@@ -498,9 +489,8 @@ pub fn security_report(
 mod tests {
     use super::*;
 
-    /// [`AIR_SHAPE`] must track the AIRs. An AIR change that adds constraints, columns, or lookup
-    /// fractions moves the conjectured level, and both verifiers use the constant rather than
-    /// recomputing it — so drift here silently overstates security.
+    /// Checks that [`AIR_SHAPE`] matches the current AIRs. A stale shape can make the reported
+    /// security level differ from the level implied by the relation being verified.
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
@@ -574,25 +564,20 @@ mod tests {
 
     /// Every derived Rust security constant, checked against a fixed numeric snapshot.
     ///
-    /// `sys::vm::mod.masm` carries the same values as literals; `security_masm_matches_air`
-    /// checks those literals directly against these constants. This test does not read the MASM
-    /// source — it only checks that the Rust-side values below have not silently drifted from the
-    /// snapshot.
-    ///
-    /// Under the deployed shape the lookup round sits below every other algebraic term and the
-    /// cap across the whole swept domain, so the output cross-test in `crates/lib/core/tests/sys`
-    /// observes only two round constants; the rest would drift unnoticed there.
+    /// This test does not read the MASM source; it checks that the Rust-side values below have not
+    /// silently drifted from the reviewed snapshot.
     #[test]
     fn derived_security_constants_match_snapshot() {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_323_072;
+        const SECURITY_CAP_FP: u64 = 8_388_606;
         const LOOKUP_BASE_FP: u64 = 7_800_270;
         const COMPOSITION_TERM_FP: u64 = 7_815_946;
         const OOD_BASE_FP: u64 = 8_170_900;
         const DEEP_BASE_FP: u64 = 7_922_741;
         const FOLDING_BASE_FP: u64 = 8_022_589;
+        const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
         assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
@@ -603,17 +588,18 @@ mod tests {
         assert_eq!(OOD_BASE, OOD_BASE_FP, "OOD_BASE_FP is stale");
         assert_eq!(DEEP_BASE, DEEP_BASE_FP, "DEEP_BASE_FP is stale");
         assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
+        assert_eq!(
+            LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
+            "Lifted STARK does not currently support lookup grinding"
+        );
     }
 
-    /// Every round's computed bit count, against values computed outside this crate from the
-    /// closed forms each round documents.
+    /// Checks every round against values computed independently from its documented formula.
     ///
-    /// The tests around it assert properties of the derivation they exercise — a term composed
-    /// with the wrong coefficient, size, or grinding site satisfies monotonicity and still
-    /// computes the deployed preset at level 96. These rows are the independent check. They cover
-    /// parameters the deployed preset never reaches, so the DEEP and folding terms leave the cap
-    /// and the query term reaches it, rather than only the two rounds that determine the level in
-    /// practice.
+    /// Final-level and monotonicity tests do not expose an error in a term that never determines
+    /// the minimum. These vectors therefore include parameters that move the query, DEEP, and
+    /// FRI folding terms away from the security cap and make their individual values
+    /// observable.
     #[test]
     fn security_report_matches_reference_vectors() {
         // (queries, query PoW, DEEP PoW, folding PoW, log height)
@@ -621,32 +607,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_406_895, 7_815_946, 7_777_684, 8_323_072, 7_891_517, 6_335_399, 8_323_072],
+                [7_406_895, 7_815_946, 7_777_684, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_489_549, 7_815_946, 6_860_180, 8_323_072, 6_974_013, 6_335_399, 8_323_072],
+                [6_489_549, 7_815_946, 6_860_180, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_292_941, 7_815_946, 6_663_572, 8_323_072, 6_777_405, 6_335_399, 8_323_072],
+                [6_292_941, 7_815_946, 6_663_572, 8_388_606, 6_777_405, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_899_725, 7_815_946, 6_270_356, 8_323_072, 6_384_189, 6_335_399, 8_323_072],
+                [5_899_725, 7_815_946, 6_270_356, 8_388_606, 6_384_189, 6_335_399, 8_388_606],
                 90,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_489_549, 7_815_946, 6_860_180, 7_922_741, 6_711_869, 1_353_667, 8_323_072],
+                [6_489_549, 7_815_946, 6_860_180, 7_922_741, 6_711_869, 1_353_667, 8_388_606],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_899_725, 7_815_946, 6_270_356, 8_323_072, 8_153_661, 8_323_072, 8_323_072],
+                [5_899_725, 7_815_946, 6_270_356, 8_388_606, 8_153_661, 8_388_606, 8_388_606],
                 90,
             ),
         ];

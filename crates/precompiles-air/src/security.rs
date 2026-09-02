@@ -1,11 +1,11 @@
 //! Conjectured security level computation for the precompile chiplet stack.
 //!
-//! The chiplet stack proves a different statement from the VM's, with its own AIRs, bus width, and
-//! PCS preset, so it needs its own shape — but the round budget itself is shared with the VM
-//! through [`p3_security::budget`], and so are the challenge field and commitment hash.
+//! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
+//! Both statements use the round-budget formulas in [`p3_security::budget`] and share the same
+//! challenge field and commitment hash.
 //!
-//! The AIR shape is stored as the constant [`AIR_SHAPE`] and guarded against drift by
-//! `air_shape_matches_symbolic`, matching how the VM side does it.
+//! [`AIR_SHAPE`] stores the values used during verification, while `air_shape_matches_symbolic`
+//! checks them against the shape obtained from the chiplet AIRs.
 
 pub use miden_air::security::ProofSecurityParameters;
 use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
@@ -43,9 +43,9 @@ const NUM_OOD_POINTS: u32 = 2;
 /// Base field elements per challenge-field element.
 const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 
-/// Shape of the chiplet multi-AIR statement, as it enters the round budget.
+/// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
-/// Guarded against drift by `air_shape_matches_symbolic`.
+/// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 591,
     max_constraint_degree: 5,
@@ -58,8 +58,8 @@ pub const AIR_SHAPE: AirShape = AirShape {
 
 /// Computes the AIR shape by symbolically evaluating every chiplet AIR.
 ///
-/// This is the source of truth for [`AIR_SHAPE`]; it allocates and runs the full symbolic pass, so
-/// [`security_report`] uses the constant instead of calling this function.
+/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
+/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
 pub fn derive_air_shape() -> AirShape {
     let airs = ChipletAir::all();
     let num_airs = airs.len();
@@ -134,15 +134,13 @@ fn aligned(width: usize, alignment: usize) -> usize {
     width.next_multiple_of(alignment)
 }
 
-// MIRRORED CONSTANTS
+// SECURITY MODEL CONSTANTS
 // ================================================================================================
 //
-// The MASM recursive verifier computes the same round budget and cannot run this code, so it
-// carries the resulting round bases as literals. Each base is derived here rather than chosen. The
-// output cross-test in `crates/lib/core/tests/sys` compares the two implementations' final
-// computed security level, while `derived_security_constants_match_snapshot` below and
-// `pvm_security_masm_matches_air` check every active literal independently of which round
-// determines the minimum.
+// The MASM recursive estimator consumes the raw AIR shape. Tests in
+// `crates/lib/core/tests/stark/security.rs` compare it with the native calculation over the ranges
+// accepted by the recursive verifiers. `derived_security_constants_match_snapshot` checks the
+// native constants independently.
 
 /// Fractional bits in the fixed-point representation shared with the MASM estimator.
 pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
@@ -179,28 +177,34 @@ pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARI
 
 /// Lookup grinding applied before the lookup challenges are sampled.
 ///
-/// The deployed chiplet stack samples them directly after the main-trace commitment.
+/// Lifted STARK currently samples them directly after the main-trace commitment and exposes no
+/// lookup-grinding parameter.
 pub const LOOKUP_POW_BITS: u32 = 0;
 
-/// Number of fixed-environment lookup fractions consumed once per PVM proof.
+/// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
+/// `EcGroup` messages.
 ///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages, and the drift
-/// test below keeps the exported descriptor constant tied to that source of truth.
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
+/// that the descriptor constant remains equal to the derived count.
 pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
 
 /// `log2|E|` less the lookup round's coefficient, in fixed point.
 pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
 
-/// `sys::pvm::mod.masm`'s `COMPOSITION_TERM_FP`.
+/// `log2|E|` less the constraint-composition round's coefficient, in fixed point.
 pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
 
-/// `sys::pvm::mod.masm`'s `OOD_BASE_FP`.
+/// `log2|E|` less the out-of-domain round's coefficient, in fixed point.
 pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
 
-/// `sys::pvm::mod.masm`'s `DEEP_BASE_FP`.
+/// `log2|E|` less the DEEP round's coefficient, in fixed point.
 pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
 
-/// The common MASM estimator's `FOLDING_BASE_FP`, including the fixed blowup.
+/// `log2|E|` less the FRI folding round's coefficient and the fixed blowup, in fixed point.
+///
+/// The MASM estimator compares the whole-bit floor of this value with the lookup term to show that
+/// the FRI folding term cannot determine the final level. The drift test checks that the two
+/// values remain equal.
 pub const FOLDING_BASE: u64 =
     CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
 
@@ -244,10 +248,10 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
     }
 }
 
-/// Number of fixed-environment lookup fractions the verifier boundary consumes once per proof: one
+/// Counts the lookup fractions added at the PVM boundary by fixed protocol data: one
 /// `UintVal` fraction per fixed uint ([`crate::fixed::fixed_uintval_msgs`]) and one `EcGroup`
-/// fraction per fixed curve group ([`crate::fixed::fixed_ecgroup_msgs`]). [`AIR_SHAPE`]'s
-/// `lookup.fractions_per_row` counts only the fractions each row of trace emits, not these.
+/// fraction per fixed curve group ([`crate::fixed::fixed_ecgroup_msgs`]). These are additional to
+/// the per-row fractions recorded in [`AIR_SHAPE`].
 fn fixed_boundary_fraction_count() -> u64 {
     (crate::fixed::fixed_uintval_msgs().count() + crate::fixed::fixed_ecgroup_msgs().count()) as u64
 }
@@ -255,12 +259,11 @@ fn fixed_boundary_fraction_count() -> u64 {
 /// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
 /// via `log2(1 + x) <= x · log2(e)`.
 ///
-/// `boundary` is [`fixed_boundary_fraction_count`]. Bounding a malicious trace cannot assume it
-/// supplies providers matching the verifier's fixed-environment consumes, so the generic lookup
-/// bound — which assumes exactly `fractions_per_row · 2^log_max_height` fractions — is corrected
-/// down by this amount to account for the `boundary` extra fractions the verifier always consumes.
-/// Both divisions round up, so the correction never understates the true log term, keeping the
-/// corrected round conservative.
+/// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
+/// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
+/// of [`fixed_boundary_fraction_count`] additional terms per proof. These terms are not included
+/// in [`AIR_SHAPE`]'s per-row count, so their contribution is accounted for separately. Both
+/// divisions round up, which keeps the correction conservative.
 fn fixed_boundary_correction(log_max_height: u32) -> u64 {
     let numerator = fixed_boundary_fraction_count() * LOG2_E;
     numerator
@@ -268,8 +271,8 @@ fn fixed_boundary_correction(log_max_height: u32) -> u64 {
         .div_ceil(1u64 << log_max_height)
 }
 
-/// Corrects a report's lookup round for the fixed-environment boundary fractions
-/// [`fixed_boundary_correction`] counts.
+/// Applies the contribution from the fixed `UintVal` and `EcGroup` boundary messages to the lookup
+/// term.
 fn apply_fixed_boundary_correction(report: SecurityReport, log_max_height: u32) -> SecurityReport {
     let correction = fixed_boundary_correction(log_max_height);
     let terms = (*report.terms()).map(|term| {
@@ -326,10 +329,9 @@ pub fn proof_security_parameters(
 
 /// Computes a chiplet-stack proof's conjectured security level, per protocol round.
 ///
-/// `log_max_height` is the largest chiplet trace height in the proof; the Fiat-Shamir transcript
-/// binds every AIR's log height, so a prover cannot understate it to inflate the reported level.
-/// The lookup round is corrected for the fixed-environment boundary fractions the verifier
-/// consumes on top of [`AIR_SHAPE`]'s per-row fractions.
+/// `log_max_height` is the largest chiplet trace height bound by the proof transcript. The lookup
+/// term includes the additional fractions added by the fixed `UintVal` and `EcGroup`
+/// boundary messages.
 /// The recursive verifier admits only 7..=150 queries, 0..=31 query/DEEP/folding grinding bits,
 /// fixed zero lookup grinding, and a maximum log trace height in `16..=29`. This native function
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
@@ -340,7 +342,7 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
     apply_fixed_boundary_correction(report, log_max_height)
 }
 
-/// Computes a chiplet-stack proof's conjectured security level, in bits.
+/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
     proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
         .conjectured_security_level()
@@ -350,10 +352,10 @@ pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u3
 /// under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] is exact only at the Poseidon2 preset's
-/// alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash function, so
-/// a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17) is graded
-/// under its own DEEP term count rather than the Poseidon2 one.
+/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] uses the Poseidon2 preset's alignment
+/// [`COMMITMENT_ALIGNMENT`]. This helper accepts a different alignment but still assumes the
+/// commitment scheme has [`COLLISION_RESISTANCE`] bits; verification returns
+/// [`ProofSecurityParameters`] built with both properties of the proof's actual hash function.
 pub fn conjectured_security_level_for_alignment(
     params: &PcsParams,
     log_max_height: u32,
@@ -370,16 +372,15 @@ mod tests {
     use super::*;
     use crate::stark_config::precompile_pcs_params;
 
-    /// [`AIR_SHAPE`] must track the chiplet AIRs. A chiplet change that adds constraints, columns,
-    /// or lookup fractions moves the conjectured level, and [`security_report`] uses the constant
-    /// rather than recomputing it — so drift here silently overstates security.
+    /// Checks that [`AIR_SHAPE`] matches the current chiplet AIRs. A stale shape can make the
+    /// reported security level differ from the level implied by the relation being verified.
     #[test]
     fn air_shape_matches_symbolic() {
         assert_eq!(AIR_SHAPE, derive_air_shape(), "AIR_SHAPE in security.rs is stale");
     }
 
-    /// Pin the fixed-boundary shape so any environment change receives an explicit security
-    /// review, even while its rounded correction remains unchanged.
+    /// Checks that the descriptor's fixed boundary count matches the number of fixed `UintVal` and
+    /// `EcGroup` messages.
     #[test]
     fn fixed_boundary_fraction_count_matches_snapshot() {
         assert_eq!(
@@ -391,19 +392,19 @@ mod tests {
 
     /// Every derived Rust security constant, checked against a fixed numeric snapshot.
     ///
-    /// `sys::pvm::mod.masm` carries the corresponding descriptor bases as literals;
-    /// `pvm_security_masm_matches_air` checks them directly against these constants.
+    /// The recursive estimator consumes the raw PVM shape rather than mirroring these Q16 values.
     #[test]
     fn derived_security_constants_match_snapshot() {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_323_072;
+        const SECURITY_CAP_FP: u64 = 8_388_606;
         const LOOKUP_BASE_FP: u64 = 7_584_459;
         const COMPOSITION_TERM_FP: u64 = 7_785_215;
         const OOD_BASE_FP: u64 = 8_219_197;
         const DEEP_BASE_FP: u64 = 7_760_199;
         const FOLDING_BASE_FP: u64 = 8_022_589;
+        const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
         assert_eq!(FIXED_POINT_FRACTIONAL_BITS, FP_SHIFT, "FP_SHIFT is stale");
         assert_eq!(FIXED_POINT_ONE, FP_ONE, "FP_ONE is stale");
@@ -414,6 +415,10 @@ mod tests {
         assert_eq!(OOD_BASE, OOD_BASE_FP, "OOD_BASE_FP is stale");
         assert_eq!(DEEP_BASE, DEEP_BASE_FP, "DEEP_BASE_FP is stale");
         assert_eq!(FOLDING_BASE, FOLDING_BASE_FP, "FOLDING_BASE_FP is stale");
+        assert_eq!(
+            LOOKUP_POW_BITS, LOOKUP_POW_BITS_SNAPSHOT,
+            "Lifted STARK does not currently support lookup grinding"
+        );
     }
 
     /// [`num_deep_terms`] at [`COMMITMENT_ALIGNMENT`] must reproduce [`AIR_SHAPE`]'s stored
@@ -467,12 +472,10 @@ mod tests {
         }
     }
 
-    /// Every round's computed bit count, against values computed outside this crate from the
-    /// closed forms each round documents.
+    /// Checks every round against values computed independently from its documented formula.
     ///
-    /// The chiplet shape enters the same round budget the VM's does, so this checks that the
-    /// shape is wired into it correctly — a term composed with the wrong coefficient or size
-    /// still computes the deployed preset at level 96 and still falls with height.
+    /// The final level alone would not expose a wrong coefficient in a term that does not determine
+    /// the minimum. These vectors therefore check all seven terms separately.
     #[test]
     fn security_report_matches_reference_vectors() {
         // (queries, query PoW, DEEP PoW, folding PoW, log height)
@@ -480,32 +483,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_191_195, 7_785_215, 7_825_981, 8_323_072, 7_891_517, 6_335_399, 8_323_072],
+                [7_191_195, 7_785_215, 7_825_981, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_535_882, 7_785_215, 7_170_621, 8_323_072, 7_236_157, 6_335_399, 8_323_072],
+                [6_535_882, 7_785_215, 7_170_621, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_339_274, 7_785_215, 6_974_013, 8_323_072, 7_039_549, 6_335_399, 8_323_072],
+                [6_339_274, 7_785_215, 6_974_013, 8_388_606, 7_039_549, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_273_738, 7_785_215, 6_908_477, 8_323_072, 6_974_013, 6_335_399, 8_323_072],
+                [6_273_738, 7_785_215, 6_908_477, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_011_594, 7_785_215, 6_646_333, 8_323_072, 6_711_869, 6_335_399, 8_323_072],
+                [6_011_594, 7_785_215, 6_646_333, 8_388_606, 6_711_869, 6_335_399, 8_388_606],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_535_882, 7_785_215, 7_170_621, 7_760_199, 6_974_013, 1_353_667, 8_323_072],
+                [6_535_882, 7_785_215, 7_170_621, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
                 20,
             ),
         ];

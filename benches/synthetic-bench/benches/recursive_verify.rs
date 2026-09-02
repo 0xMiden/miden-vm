@@ -77,19 +77,19 @@ fn push_word_masm(source: &mut String, word: Word) {
     }
 }
 
-/// MASM for one `exec.vm::verify_vm_proof` call.
+/// MASM for one `exec.vm::verify_proof` call.
 ///
 /// The generated program appends one block like this per inner transaction proof.
-fn verify_vm_proof_call_masm(claim_commitment: Word) -> String {
+fn vm_verify_proof_call_masm(claim_commitment: Word) -> String {
     let mut source = String::new();
     push_word_masm(&mut source, claim_commitment);
     writeln!(
         source,
         "
         dupw
-        procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+        procref.vm::verify_proof exec.sys::build_proof_request_key
         adv.push_mapval dropw
-        exec.vm::verify_vm_proof
+        exec.vm::verify_proof
         # => [security_descriptor, D]
         dropw dropw dropw dropw
         ",
@@ -196,11 +196,11 @@ fn build_recursive_verifier_case(
     );
     let mut verify_calls = String::new();
     let mut advice_inputs = AdviceInputs::default();
-    let mvm_verifier_root = CoreLibrary::default().recursive_verifier_root();
+    let mvm_verifier_root = CoreLibrary::default().vm_recursive_verifier_root();
 
     for fixture in fixtures.iter().take(composition.mvm_count()) {
         let proof_advice = recursive_proof_advice(fixture, mvm_verifier_root);
-        verify_calls.push_str(&verify_vm_proof_call_masm(proof_advice.claim_commitment));
+        verify_calls.push_str(&vm_verify_proof_call_masm(proof_advice.claim_commitment));
         advice_inputs.extend(proof_advice.advice_inputs);
     }
     if let Some(pvm_advice) = pvm_advice {

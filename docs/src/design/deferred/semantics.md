@@ -169,11 +169,11 @@ only performs the `Deferred` to `Complete` transition and rejects an already-com
 Public variants, canonical decoding, encoding, Serde, and completion may represent inconsistent
 artifacts; none establishes validity. `Verifier::verify_precompile` validates precompile-proof shape,
 expected-root membership, ordered aggregate folding, and the precompile STARK. It can validate a
-precompile artifact independently against an expected outstanding root and returns the artifact's
-security level. `Verifier::verify` owns execution-lifecycle validity, verifies the VM STARK, and
-reuses `verify_precompile` for complete proofs. A successful deferred verification returns only the
-authenticated outstanding VM root; a successful complete verification has no outstanding
-obligation.
+precompile artifact independently against an expected outstanding root and returns its authenticated
+security parameters. `Verifier::verify` owns execution-lifecycle validity, verifies the VM STARK,
+and reuses `verify_precompile` for complete proofs. A successful deferred verification returns the
+authenticated VM security parameters and outstanding root; a successful complete verification also
+returns the PVM security parameters and has no outstanding obligation.
 
 
 ## Transport and limits
@@ -200,7 +200,7 @@ The shortest canonical singleton `PrecompileProof` is 35 bytes; a vector of two 
 
 Recursive VM verification packages the unchanged proof stream under
 `proof_request_key(verifier_root, claim_commitment)`. The consumer derives the same key from the
-claim commitment and `verify_vm_proof` procedure root, fetches the stream with
-`adv.push_mapval`, and then invokes `verify_vm_proof`. Claim and kernel preimages remain
+claim commitment and `vm::verify_proof` procedure root, fetches the stream with
+`adv.push_mapval`, and then invokes `vm::verify_proof`. Claim and kernel preimages remain
 separately content-addressed; no proof values are copied into claim memory. Recursive verification
 authenticates and returns the VM root but does not settle precompile work.

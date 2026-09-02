@@ -9,16 +9,13 @@ use miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
-# PVM-specific fields of the common security descriptor returned by `verify_proof`.
-#
-# The Q16 round bases are derived by `miden_precompiles_air::security`; its symbolic AIR-shape test
-# and the PVM wrapper drift test prevent these literals from drifting. The generic estimator owns
-# the shared PCS constants and round arithmetic.
+# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
+# zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
-const LOOKUP_BASE_FP = 7584459
-const COMPOSITION_TERM_FP = 7785215
-const OOD_BASE_FP = 8219197
-const DEEP_BASE_FP = 7760199
+const MAX_MESSAGE_WIDTH = 18
+const NUM_COMPOSED_CONSTRAINTS = 591
+const MAX_CONSTRAINT_DEGREE = 5
+const NUM_DEEP_TERMS = 770
 const LOOKUP_FRACTIONS_PER_ROW = 247
 const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
@@ -156,26 +153,26 @@ proc store_ace_registry_root
     dropw
 end
 
-#! Appends the PVM-specific fields of the common security descriptor to the four transcript-bound
-#! proof parameters returned by the generic STARK verifier.
+#! Builds the common security descriptor from the four transcript-bound proof parameters returned
+#! by the generic STARK verifier and the PVM relation data.
 #!
-#! Every appended value is fixed by this relation except for the maximum trace height, which the
-#! proof transcript binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the verifier's fixed-environment
-#! lookup consumes; it is derived from those messages and pinned by the native AIR tests.
+#! The relation fields are fixed except for the maximum trace height, which the proof transcript
+#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages;
+#! the native AIR tests derive and check this count.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
-#! Outputs: [num_queries, query_pow_bits, lookup_pow_bits, deep_pow_bits, folding_pow_bits,
-#!          log_max_height, lookup_base_fp, composition_base_fp, ood_base_fp, deep_base_fp,
-#!          lookup_fractions_per_row, num_lookup_boundary_terms, ...]
-proc append_security_descriptor
-    push.LOOKUP_POW_BITS movdn.2
-    exec.constants::get_trace_length_log movdn.5
-    push.LOOKUP_BASE_FP movdn.6
-    push.COMPOSITION_TERM_FP movdn.7
-    push.OOD_BASE_FP movdn.8
-    push.DEEP_BASE_FP movdn.9
-    push.LOOKUP_FRACTIONS_PER_ROW movdn.10
-    push.FIXED_BOUNDARY_LOOKUP_TERMS movdn.11
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+proc build_security_descriptor
+    exec.constants::get_trace_length_log
+    push.LOOKUP_FRACTIONS_PER_ROW
+    push.FIXED_BOUNDARY_LOOKUP_TERMS
+    push.MAX_MESSAGE_WIDTH
+    push.NUM_DEEP_TERMS
+    push.MAX_CONSTRAINT_DEGREE
+    push.NUM_COMPOSED_CONSTRAINTS
+    push.LOOKUP_POW_BITS
 end
 
 #! Requests and stages a PVM proof package for the deferred root.
@@ -213,10 +210,14 @@ end
 #!
 #! The deferred root is the relation's four public base-field values. The caller supplies it as
 #! the obligation being settled; all proof data and security/shape metadata are read from advice.
-#! Successful verification authenticates the root at the returned security parameters. The four
-#! proof parameters and maximum trace height are transcript-bound; the remaining descriptor fields
-#! are fixed by this verifier's relation. The caller passes all twelve elements unchanged to
+#! Successful verification authenticates the root, and the returned descriptor records that
+#! proof's parameters and relation shape. The four proof parameters and maximum trace height are
+#! transcript-bound; the remaining descriptor fields are fixed by this verifier's relation. The
+#! caller passes all twelve elements unchanged to
 #! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
+#! Changing only the formula therefore changes the estimator root without changing this verifier's
+#! root. A change to the proof format or to any value supplied by the verifier still changes this
+#! procedure.
 #!
 #! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
 #! lookup grinding, and AIR log trace heights from each relation-specific minimum through 29; the
@@ -226,16 +227,32 @@ end
 #! commitment, constraint, or public-root check fails.
 #!
 #! Inputs:  [D]
-#! Outputs: [num_queries, query_pow_bits, lookup_pow_bits, deep_pow_bits, folding_pow_bits,
-#!           log_max_height, lookup_base_fp, composition_base_fp, ood_base_fp, deep_base_fp,
-#!           lookup_fractions_per_row, num_lookup_boundary_terms]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 #!
 #! Invocation: exec
-pub proc verify_proof
-    exec.utils::load_security_params
+pub proc verify_proof(deferred_root: word) -> (
+    lookup_pow_bits: u32,
+    num_composed_constraints: u32,
+    max_constraint_degree: u32,
+    num_deep_terms: u32,
+    max_message_width: u32,
+    num_lookup_boundary_terms: u32,
+    lookup_fractions_per_row: u32,
+    log_max_height: u32,
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+)
+    # --- Prepare PVM verifier state --------------------------------------------------------------
 
+    exec.utils::load_security_params
     exec.public_inputs::stage_public_root
     exec.load_air_context
+
+    # --- Verify ----------------------------------------------------------------------------------
 
     # Dynamic hook digests in the generic verifier's ABI order.
     procref.deep_queries::compute_deep_composition_polynomial_queries
@@ -243,7 +260,13 @@ pub proc verify_proof
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
+    # => [D0, D1, D2, D3, D4]
 
     exec.verifier::verify
-    exec.append_security_descriptor
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+
+    # --- Return result ---------------------------------------------------------------------------
+
+    exec.build_security_descriptor
+    # => [security_descriptor, ...]
 end

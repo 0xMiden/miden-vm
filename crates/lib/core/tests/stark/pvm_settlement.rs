@@ -123,7 +123,7 @@ async fn run_settlement_in_masm(
     deferred_state: DeferredState,
 ) -> Result<SettlementResult, miden_processor::ExecutionError> {
     let vm = RecursiveVerifierInputs::for_request(
-        core_lib.recursive_verifier_root(),
+        core_lib.vm_recursive_verifier_root(),
         deferred_proof,
         claim,
     )
@@ -158,12 +158,12 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
 
         begin
             dupw
-            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
-            exec.vm::verify_vm_proof
+            exec.vm::verify_proof
 
-            # Both verifiers return the same descriptor shape, so one estimator and policy grade
-            # the MVM proof while retaining its authenticated deferred root.
+            # Estimate the MVM proof's security while retaining its authenticated deferred root.
+            # The same estimator accepts the descriptor returned by either verifier.
             exec.security::compute_conjectured_security_level
             u32lt.96 assertz
 
@@ -172,7 +172,7 @@ fn assemble_settlement_program(core_lib: &CoreLibrary) -> miden_processor::Progr
             exec.pvm::request_proof
             exec.pvm::verify_proof
 
-            # The PVM verifier returns its relation-specific values in the identical descriptor.
+            # Estimate the PVM proof from its relation-specific descriptor values.
             exec.security::compute_conjectured_security_level
             u32lt.96 assertz
             exec.sys::truncate_stack

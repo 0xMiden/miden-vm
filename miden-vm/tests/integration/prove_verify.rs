@@ -85,7 +85,7 @@ fn assert_recursive_verify(
     proof: &ExecutionProof,
 ) {
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-    let verifier_root = CoreLibrary::default().recursive_verifier_root();
+    let verifier_root = CoreLibrary::default().vm_recursive_verifier_root();
     let verifier_inputs = generate_request_inputs(verifier_root, proof, &claim)
         .expect("recursive verifier request construction failed");
 
@@ -96,9 +96,9 @@ fn assert_recursive_verify(
         begin
             # Initial stack: [CLAIM_COMMITMENT].
             dupw
-            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
-            exec.vm::verify_vm_proof
+            exec.vm::verify_proof
             # => [security_descriptor, D]
             exec.sys::truncate_stack
         end
