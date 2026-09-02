@@ -47,10 +47,10 @@ const VM_VERIFIER_ROOT_V1: Word = Word::new([
     Felt::new_unchecked(5300166905943834781),
 ]);
 const PVM_VERIFIER_ROOT_V1: Word = Word::new([
-    Felt::new_unchecked(4577265377705777154),
-    Felt::new_unchecked(4184571826008741582),
-    Felt::new_unchecked(13177478522234947032),
-    Felt::new_unchecked(17782284996265163606),
+    Felt::new_unchecked(2947623151120287659),
+    Felt::new_unchecked(14078382412112533261),
+    Felt::new_unchecked(16121817997513902205),
+    Felt::new_unchecked(3291147646890284397),
 ]);
 
 struct VerifierSupport {
