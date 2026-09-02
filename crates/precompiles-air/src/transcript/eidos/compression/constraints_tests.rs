@@ -1,11 +1,13 @@
 use std::{vec, vec::Vec};
 
+use miden_air::eidos_compression::testing as mvm;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
 use miden_crypto::stark::air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use super::{
     constraints::{enforce_footer_rows, enforce_fused_rows},
@@ -148,6 +150,48 @@ fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -> Vec<Felt>
     enforce_fused_rows(&mut builder, local, next, &selectors);
     enforce_footer_rows(&mut builder, local, next, &selectors);
     builder.evaluations
+}
+
+#[test]
+fn mvm_and_pvm_shared_constraints_match() {
+    assert_eq!(get_periodic_column_values(), mvm::get_periodic_column_values());
+
+    let mut rng = StdRng::seed_from_u64(0x0e1d_05c0_a57a_a1e5);
+    for sample in 0..8 {
+        for row_idx in 0..BLOCK_PERIOD {
+            let mut local = core::array::from_fn(|_| Felt::from_u64(rng.random()));
+            let mut next = core::array::from_fn(|_| Felt::from_u64(rng.random()));
+
+            // The PVM footer carries a digest, which is the MVM footer's mode-zero interface.
+            local[mvm::MVM_MODE_COL] = Felt::ZERO;
+            next[mvm::MVM_MODE_COL] = Felt::ZERO;
+
+            let periodic_values = periodic_row(row_idx);
+            let mut pvm_builder = ConstraintEvalBuilder::new(
+                &local,
+                &next,
+                periodic_values.clone(),
+                row_idx,
+                BLOCK_PERIOD,
+            );
+            let pvm_selectors =
+                EidosCompressionSelectors::<Felt>::new(pvm_builder.periodic_values(), 0);
+            enforce_fused_rows(&mut pvm_builder, &local, &next, &pvm_selectors);
+            enforce_footer_rows(&mut pvm_builder, &local, &next, &pvm_selectors);
+
+            let mut mvm_builder =
+                ConstraintEvalBuilder::new(&local, &next, periodic_values, row_idx, BLOCK_PERIOD);
+            let mvm_selectors =
+                mvm::EidosCompressionSelectors::<Felt>::new(mvm_builder.periodic_values(), 0);
+            mvm::enforce_fused_rows(&mut mvm_builder, &local, &next, &mvm_selectors);
+            mvm::enforce_common_footer_rows(&mut mvm_builder, &local, &next, &mvm_selectors);
+
+            assert_eq!(
+                mvm_builder.evaluations, pvm_builder.evaluations,
+                "constraint mismatch in sample {sample}, row {row_idx}",
+            );
+        }
+    }
 }
 
 #[test]
