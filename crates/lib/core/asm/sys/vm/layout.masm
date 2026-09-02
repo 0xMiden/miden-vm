@@ -47,6 +47,16 @@ const BOUNDARY_INPUTS_PTR = 3223322836
 ### Kernel digest witness (up to 255 word-aligned procedure digests).
 const KERNEL_WITNESS_PTR = 3223322844
 
+### Out-of-domain ingest scatter table, immediately after the VM control frame. Reserves 64 felts:
+###
+###   +0            base address of the out-of-domain row being ingested
+###   +4  .. +19    per proof position, in stream order: (row-relative destination, digest address)
+###   +20 .. +43    `pipe_k` procedure digests reached by `dynexec`, one word each
+###
+### The internal offsets and the reserve's sufficiency are owned by the regeneration tool, which
+### derives them from the AIR widths and fills `sys/vm/ood_frames.masm` accordingly.
+const OOD_SCATTER_TABLE_PTR = 3223323864
+
 ## VM ACE READ section
 ##
 ## Starts at 3225419776 = 2**31 + 2**30 + 2**22. The 32 fixed-length public-input
@@ -64,7 +74,8 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##                           [ chiplets selectors       ]  slots 14..16
 ##                           [ Eidos compression selectors        ]  slots 17..19
 ##                           [ And8 selectors           ]  slots 20..22
-##                           [ alignment pad            ]  slot 23
+##                           [ per-AIR fold coefficients]  slots 23..26
+##                           [ alignment pad            ]  slot 27
 ##   ACE_CIRCUIT_STREAM_PTR
 ##                       --> [ stream + reserved tail up to the fixed PVM allocation ]
 
@@ -77,17 +88,17 @@ const AUX_RAND_ELEM_PTR = 3225419776
 ### per row.
 const OOD_EVALUATIONS_PTR = 3225419784
 
-### Four LogUp finals in proof order (8 base felts).
+### Four LogUp finals, one per AIR in canonical instance order (8 base felts). The proof submits
+### them in the height-sorted proof order; `sys/vm/aux_trace.masm` scatters them here.
 const AUX_BUS_BOUNDARY_PTR = 3225420904
 
-### Twenty-four extension-field stark-var slots: 11 fixed slots, three selector slots for each of
-### the four AIRs, and one alignment slot.
+### Twenty-eight extension-field stark-var slots: 11 fixed slots, three selector slots and one
+### multi-air fold coefficient for each of the four AIRs, and one alignment slot.
 const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 
-### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
-### `ACE_COMMON_BLOCKS`. The reserved tail beyond the stream keeps the
-### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
-const ACE_CIRCUIT_STREAM_PTR = 3225420960
+### ACE circuit stream, sized by the generated evaluator's `ACE_STREAM_BLOCKS`. The reserved tail
+### beyond the stream keeps the PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
+const ACE_CIRCUIT_STREAM_PTR = 3225420968
 
 ### Scratch row for DEEP query openings: 8 preprocessed, 192 main, 64
 ### auxiliary-coordinate, and 16 quotient felts (280 total).
@@ -146,6 +157,10 @@ end
 
 pub proc ood_evaluations_ptr
     push.OOD_EVALUATIONS_PTR
+end
+
+pub proc ood_scatter_table_ptr
+    push.OOD_SCATTER_TABLE_PTR
 end
 
 pub proc current_trace_row_ptr

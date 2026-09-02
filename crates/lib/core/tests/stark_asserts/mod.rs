@@ -585,6 +585,28 @@ fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
     }
 }
 
+/// A relation evaluator that still selects its circuit by proof-order tag must reject padding
+/// slots before opening its registry tree.
+///
+/// The VM evaluator no longer has a tag to reject: one circuit serves every proof order and the
+/// loader pins it to a compiled-in digest instead of opening a registry slot.
+#[test]
+fn relation_constraint_evaluators_reject_padding_order_tags() {
+    for (relation, order_count) in [("pvm", 3_628_800)] {
+        let source = format!(
+            "use miden::core::stark::constants
+             use miden::core::sys::{relation}::constraints_eval
+             begin
+                 push.{order_count} exec.constants::set_order_tag
+                 push.8 exec.constants::set_trace_length_log
+                 exec.constraints_eval::execute_constraint_evaluation_check
+             end"
+        );
+        let test = build_test!(source, &[]);
+        expect_assert_error_code_from_msg!(test, "invalid order tag");
+    }
+}
+
 /// Every fixed verifier-memory region must be declared, disjoint, and correctly sized.
 ///
 /// The memory map is split across the generic module and per-relation layouts, so no
