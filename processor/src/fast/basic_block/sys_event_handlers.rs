@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    chiplets::hasher::{Hasher as VmHasher, compress_state},
+    chiplets::hasher,
     deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -161,7 +161,7 @@ fn insert_hdword_into_adv_map(
     let b = processor.stack_get_word(5);
 
     // Hash as [A, B] to match `hmerge` behavior directly.
-    let key = VmHasher::merge_in_domain(&[a, b], domain);
+    let key = hasher::merge_in_domain(&[a, b], domain);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -195,7 +195,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = VmHasher::hash_elements(&[*a, *b, *c, *d].concat());
+    let key = hasher::hash_elements(&[*a, *b, *c, *d].concat());
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
@@ -240,12 +240,12 @@ fn insert_compress_into_adv_map(processor: &mut FastProcessor) -> Result<(), Sys
     ];
 
     // Preserve the two input block words (the first 8 elements) as the mapped values.
-    let values = state[..VmHasher::BLOCK_LEN].to_vec();
+    let values = state[..hasher::BLOCK_LEN].to_vec();
 
     // Apply one compression and extract the updated chaining value as the key.
-    compress_state(&mut state);
+    hasher::compress_state(&mut state);
     let key = Word::new(
-        state[VmHasher::CV_RANGE]
+        state[hasher::CV_RANGE]
             .try_into()
             .expect("failed to extract chaining value from state"),
     );
@@ -579,13 +579,12 @@ mod tests {
 
         // Compute the expected key by compressing the same state.
         let mut expected_state_after_compression = state_felts;
-        compress_state(&mut expected_state_after_compression);
-        let expected_key = Word::new(
-            expected_state_after_compression[hasher::Hasher::CV_RANGE].try_into().unwrap(),
-        );
+        hasher::compress_state(&mut expected_state_after_compression);
+        let expected_key =
+            Word::new(expected_state_after_compression[hasher::CV_RANGE].try_into().unwrap());
 
         // The expected values are the two block words (first 8 elements) of the input state.
-        let expected_values = state_felts[..hasher::Hasher::BLOCK_LEN].to_vec();
+        let expected_values = state_felts[..hasher::BLOCK_LEN].to_vec();
 
         // Verify the advice map contains the correct entry.
         let stored_values = processor
@@ -625,7 +624,7 @@ mod tests {
 
         let a = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(1 + idx as u64)));
         let b = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(5 + idx as u64)));
-        let key = VmHasher::merge_in_domain(&[a, b], domain);
+        let key = hasher::merge_in_domain(&[a, b], domain);
         let stored_values = output
             .advice
             .get_mapped_values(&key)

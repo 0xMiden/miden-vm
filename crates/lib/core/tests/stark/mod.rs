@@ -844,9 +844,10 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
     // across every end-to-end configuration.
     let params = miden_air::config::pcs_params();
     let height_start = 4 + WORD_SIZE;
-    let log_max_height = data.proof_stream[height_start..height_start + miden_air::MIDEN_AIR_COUNT]
+    let log_max_height = data.proof_stream[height_start..height_start + MIDEN_AIR_COUNT - 1]
         .iter()
         .copied()
+        .chain([u64::from(AND8_LOOKUP_LOG_HEIGHT)])
         .max()
         .expect("the MVM relation has AIR instances");
     let kernel_commitment = claim_kernel_commitment(data);

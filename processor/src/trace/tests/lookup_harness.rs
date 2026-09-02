@@ -50,7 +50,7 @@ impl InteractionLog {
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &VmTrace) -> Self {
         let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
-            trace.main_trace().to_air_matrices();
+            trace.main_trace().clone_air_matrices();
         Self::from_air_matrices(&core_matrix, &chip_matrix, &eidos_compression_matrix, &and8_matrix)
     }
 

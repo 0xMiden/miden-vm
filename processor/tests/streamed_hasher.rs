@@ -91,8 +91,10 @@ fn assert_overlapped_matches_buffered(program_src: &str, stack: &[u64], advice: 
     };
 
     assert_eq!(buffered.program_hash(), streamed.program_hash());
-    let (b_core, b_chiplets, b_eidos_compression, b_and8) = buffered.main_trace().to_air_matrices();
-    let (s_core, s_chiplets, s_eidos_compression, s_and8) = streamed.main_trace().to_air_matrices();
+    let (b_core, b_chiplets, b_eidos_compression, b_and8) =
+        buffered.main_trace().clone_air_matrices();
+    let (s_core, s_chiplets, s_eidos_compression, s_and8) =
+        streamed.main_trace().clone_air_matrices();
     assert_eq!(b_core, s_core, "core segment diverged");
     assert_eq!(b_chiplets, s_chiplets, "chiplets segment diverged");
     assert_eq!(b_eidos_compression, s_eidos_compression, "EidosCompression segment diverged");

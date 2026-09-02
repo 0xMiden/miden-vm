@@ -15,6 +15,7 @@ use super::{
         NarrowLookupKind, OverlayRelationKind, lookup_plan,
     },
     model::low_output,
+    narrow::NARROW_SLOTS,
     periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values},
     schedule::fused_step_at,
     trace::{EidosCompressionRow, TraceMode, generate_trace_block_with_cycle_id},
@@ -144,17 +145,17 @@ fn expected_column_counts(row: usize, mode: EidosCompressionMode) -> [usize; AUX
     let mut counts = [0; AUX_COLS];
     match row_kind(row) {
         RowKind::Ab | RowKind::Cd | RowKind::AbDiag | RowKind::CdDiag => {
-            counts[..NARROW_BATCH_COLUMNS].fill(2);
+            for (column, slots) in NARROW_SLOTS.as_chunks::<2>().0.iter().enumerate() {
+                counts[column] = slots.len();
+            }
             if row == 0 {
                 counts[FOOTER_INPUT_COLUMN] = 1;
             }
         },
         RowKind::Footer(footer) => {
-            counts[..9].fill(2);
-            counts[11..13].fill(2);
-            counts[13] = 1;
-            counts[14] = 2;
-            counts[16..18].fill(2);
+            for (column, slots) in NARROW_SLOTS.as_chunks::<2>().0.iter().enumerate() {
+                counts[column] = slots.iter().filter(|slot| slot.footer_bus.is_some()).count();
+            }
             if footer == FOOTER_ROWS - 1 {
                 counts[FOOTER_INPUT_COLUMN] = 2;
             }

@@ -13,10 +13,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 775
+const NUM_COMPOSED_CONSTRAINTS = 780
 const MAX_CONSTRAINT_DEGREE = 5
 const NUM_DEEP_TERMS = 922
-const LOOKUP_FRACTIONS_PER_ROW = 280
+const LOOKUP_FRACTIONS_PER_ROW = 283
 const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
 # Inclusive upper bound used by the PVM shape checks.

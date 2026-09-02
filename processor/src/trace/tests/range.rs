@@ -114,7 +114,7 @@ fn merkle_index_helpers_are_constrained_and_range_checked() {
     // unmatched range request). This mutation touches no controller row.
     let main = trace.main_trace();
     let op_row = find_op_row(main, opcodes::MRUPDATE);
-    let (mut core, chiplets, eidos_compression, and8) = main.to_air_matrices();
+    let (mut core, chiplets, eidos_compression, and8) = main.clone_air_matrices();
     let changed = main.helper_register(2, op_row) + Felt::ONE;
     set_helper_register(&mut core, op_row, 2, changed);
     super::lookup::assert_trace_constraints_reject(&trace, core, chiplets, eidos_compression, and8);
@@ -138,7 +138,7 @@ fn merkle_init_bus_binds_the_first_direction_bit() {
     let honest_message =
         HasherMsg::merkle_verify_init(helper_addr, Felt::new_unchecked(INDEX), honest_bit, word);
 
-    let (core, mut chiplets, eidos_compression, and8) = main.to_air_matrices();
+    let (core, mut chiplets, eidos_compression, and8) = main.clone_air_matrices();
     let alias = INDEX + Felt::ORDER_U64;
     set_mpverify_controller_indices(main, &mut chiplets, alias);
 
@@ -168,7 +168,7 @@ fn merkle_index_alias_emits_out_of_range_doubled_top_limb() {
     let limbs = split_u64_into_u16_limbs(alias_y);
     assert!(limbs[3] >= 1 << 15, "alias witness must violate y < 2^63");
 
-    let (mut core, mut chiplets, eidos_compression, and8) = main.to_air_matrices();
+    let (mut core, mut chiplets, eidos_compression, and8) = main.clone_air_matrices();
     set_mpverify_controller_indices(main, &mut chiplets, alias);
     set_helper_register(&mut core, op_row, 1, Felt::new_unchecked(alias_bit));
     for (i, limb) in limbs.into_iter().enumerate() {
@@ -204,7 +204,8 @@ fn forged_merkle_depths_emit_unbalanced_lookup_requests() {
     let op_row = find_op_row(main, opcodes::MPVERIFY);
     let helper0 = main.helper_register(0, op_row);
     let root = core::array::from_fn(|i| main.stack_element(6 + i, op_row));
-    let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) = main.to_air_matrices();
+    let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) =
+        main.clone_air_matrices();
     let first_unsupported_depth = Felt::new_unchecked(u64::from(MAX_MERKLE_DEPTH) + 1);
 
     for forged_depth in [ZERO, first_unsupported_depth, Felt::NEG_ONE] {
@@ -343,7 +344,7 @@ fn range_checker_table_emits_per_row_adds() {
     let operations = vec![Operation::U32add];
     let trace = build_trace_from_ops(operations, &stack);
     let log = InteractionLog::new(&trace);
-    let (_, _, _, and8_matrix) = trace.main_trace().to_air_matrices();
+    let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
 
     let mut nonzero_mult_rows = 0usize;
     let mut exp = Expectations::new(&log);

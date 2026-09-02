@@ -94,17 +94,16 @@ pub struct ChipletCols<T> {
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
 impl<T> ChipletCols<T> {
-    /// Returns the 6 columns used by the chiplet selector logic.
+    /// Returns the five columns used by the chiplet selector hierarchy.
     ///
-    /// The second entry is the shared mode cell, interpreted as stream mode only in the bitwise
-    /// selector region.
-    pub fn chiplet_selectors(&self) -> [T; 6]
+    /// The bitwise-local mode cell is exposed separately through
+    /// [`Self::bitwise_stream_mode`].
+    pub fn chiplet_selectors(&self) -> [T; 5]
     where
         T: Copy,
     {
         [
             self.chiplets[0],
-            self.bitwise_stream_mode(),
             self.chiplets[1],
             self.chiplets[2],
             self.chiplets[3],

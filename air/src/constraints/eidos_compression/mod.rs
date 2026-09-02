@@ -37,6 +37,8 @@ pub(crate) mod model;
 #[cfg(test)]
 mod model_tests;
 
+mod narrow;
+
 pub(crate) mod periodic;
 
 #[cfg(test)]
@@ -63,8 +65,44 @@ pub(crate) mod views;
 #[cfg(test)]
 mod views_tests;
 
+/// Test-only access to the shared compression constraints.
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub mod testing {
+    use miden_core::Felt;
+    use miden_crypto::stark::air::LiftedAirBuilder;
+
+    pub use super::{periodic::get_periodic_column_values, selectors::EidosCompressionSelectors};
+
+    pub const MVM_MODE_COL: usize = super::layout::F_MODE_COL;
+
+    pub fn enforce_fused_rows<AB>(
+        builder: &mut AB,
+        local: &[AB::Var],
+        next: &[AB::Var],
+        selectors: &EidosCompressionSelectors<AB::Expr>,
+    ) where
+        AB: LiftedAirBuilder<F = Felt>,
+    {
+        super::constraints::enforce_fused_rows(builder, local, next, selectors);
+    }
+
+    pub fn enforce_common_footer_rows<AB>(
+        builder: &mut AB,
+        local: &[AB::Var],
+        next: &[AB::Var],
+        selectors: &EidosCompressionSelectors<AB::Expr>,
+    ) where
+        AB: LiftedAirBuilder<F = Felt>,
+    {
+        super::constraints::enforce_common_footer_rows(builder, local, next, selectors);
+    }
+}
+
 pub use layout::NUM_COLS;
 pub use lookup::EidosCompressionCols;
+#[doc(hidden)]
+pub use narrow::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields, NarrowSlotSpec};
 pub use trace::{
     ByteLookupRecorder, EidosCompressionByteLookup, EidosCompressionFeltRow,
     EidosCompressionFeltTraceBlock, TraceMode, generate_felt_trace_block,

@@ -464,8 +464,8 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> MastForestCommitment {
-    let interface_commitment = crate::chiplets::hasher::Hasher::merge_many(&[]);
-    let dependency_commitment = crate::chiplets::hasher::Hasher::merge_many(&[]);
+    let interface_commitment = crate::chiplets::hasher::merge_many(&[]);
+    let dependency_commitment = crate::chiplets::hasher::merge_many(&[]);
     let advice_commitment = AdviceMap::default().commitment();
     MastForestCommitment::new(interface_commitment, dependency_commitment, advice_commitment)
 }
@@ -476,7 +476,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    crate::chiplets::hasher::Hasher::merge_many(&digests)
+    crate::chiplets::hasher::merge_many(&digests)
 }
 
 fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word {
@@ -486,7 +486,7 @@ fn compute_dependency_commitment(nodes: &IndexVec<MastNodeId, MastNode>) -> Word
         .map(MastNodeExt::digest)
         .collect();
     digests.sort_unstable();
-    crate::chiplets::hasher::Hasher::merge_many(&digests)
+    crate::chiplets::hasher::merge_many(&digests)
 }
 
 impl MastForestCommitment {
@@ -495,7 +495,7 @@ impl MastForestCommitment {
         dependency_commitment: Word,
         advice_commitment: Word,
     ) -> Self {
-        let commitment = crate::chiplets::hasher::Hasher::merge_many(&[
+        let commitment = crate::chiplets::hasher::merge_many(&[
             interface_commitment,
             dependency_commitment,
             advice_commitment,

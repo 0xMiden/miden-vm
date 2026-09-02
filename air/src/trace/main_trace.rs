@@ -165,7 +165,7 @@ impl MainTrace {
     }
 
     /// Clones the stored buffers into the per-AIR matrices used by the multi-AIR proving path.
-    pub fn to_air_matrices(
+    pub fn clone_air_matrices(
         &self,
     ) -> (
         RowMajorMatrix<Felt>,
@@ -182,7 +182,7 @@ impl MainTrace {
         )
     }
 
-    /// Like [`Self::to_air_matrices`], but consumes the trace and moves buffers.
+    /// Like [`Self::clone_air_matrices`], but consumes the trace and moves buffers.
     pub fn into_air_matrices(
         self,
     ) -> (
@@ -932,20 +932,20 @@ mod tests {
     }
 
     #[test]
-    fn into_split_matches_borrowed_split() {
+    fn owned_matrices_match_cloned_matrices() {
         const NUM_ROWS: usize = 8;
-        let (ref_core, ref_chip, ref_p2, ref_and8) =
-            deterministic_parts_trace(NUM_ROWS).to_air_matrices();
-        let (moved_core, moved_chip, moved_p2, moved_and8) =
+        let (ref_core, ref_chip, ref_eidos, ref_and8) =
+            deterministic_parts_trace(NUM_ROWS).clone_air_matrices();
+        let (moved_core, moved_chip, moved_eidos, moved_and8) =
             deterministic_parts_trace(NUM_ROWS).into_air_matrices();
 
         assert_eq!(ref_core.width(), moved_core.width());
         assert_eq!(ref_chip.width(), moved_chip.width());
-        assert_eq!(ref_p2.width(), moved_p2.width());
+        assert_eq!(ref_eidos.width(), moved_eidos.width());
         assert_eq!(ref_and8.width(), moved_and8.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
-        assert_eq!(ref_p2.values, moved_p2.values);
+        assert_eq!(ref_eidos.values, moved_eidos.values);
         assert_eq!(ref_and8.values, moved_and8.values);
     }
 }
