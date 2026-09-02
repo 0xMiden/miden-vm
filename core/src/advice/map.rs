@@ -9,7 +9,7 @@ use alloc::{
 
 use crate::{
     Felt, WORD_SIZE, Word,
-    chiplets::hasher::Hasher,
+    chiplets::hasher,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -86,8 +86,8 @@ impl AdviceMap {
     /// Returns a commitment to this advice map.
     ///
     /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
-    /// value elements. [`Hasher::hash_elements`] binds the entry length, and
-    /// [`Hasher::merge_many`] folds the ordered entry commitments into the final map commitment.
+    /// value elements. [`hasher::hash_elements`] binds the entry length, and
+    /// [`hasher::merge_many`] folds the ordered entry commitments into the final map commitment.
     pub fn commitment(&self) -> Word {
         let entry_commitments = self
             .iter()
@@ -95,11 +95,11 @@ impl AdviceMap {
                 let mut elements = Vec::with_capacity(WORD_SIZE + values.len());
                 elements.extend_from_slice(key.as_elements());
                 elements.extend_from_slice(values);
-                Hasher::hash_elements(&elements)
+                hasher::hash_elements(&elements)
             })
             .collect::<Vec<_>>();
 
-        Hasher::merge_many(&entry_commitments)
+        hasher::merge_many(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.

@@ -29,7 +29,7 @@ use miden_core::serde::DeserializationError;
 use miden_core::{
     Word,
     advice::AdviceMap,
-    chiplets::hasher::Hasher as VmHasher,
+    chiplets::hasher,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::KernelDescriptor,
     serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
@@ -274,7 +274,7 @@ impl Package {
         bytes.write_u8(self.kind.into());
         self.manifest.write_into(&mut bytes);
         self.write_dependency_commitment_sections(&mut bytes);
-        VmHasher::hash(&bytes)
+        hasher::hash(&bytes)
     }
 
     fn write_dependency_commitment_sections<W: ByteWriter>(&self, target: &mut W) {
@@ -295,7 +295,7 @@ impl Package {
         bytes.write_bytes(b"miden.package.artifacts.v1");
         self.write_header_into(&mut bytes);
         self.write_trailer_into(&mut bytes);
-        VmHasher::hash(&bytes)
+        hasher::hash(&bytes)
     }
 
     /// Returns the commitment to the complete package.
@@ -312,7 +312,7 @@ impl Package {
         bytes.write_bytes(domain);
         left.write_into(&mut bytes);
         right.write_into(&mut bytes);
-        VmHasher::hash(&bytes)
+        hasher::hash(&bytes)
     }
 
     /// Returns true if this package was produced for an executable target

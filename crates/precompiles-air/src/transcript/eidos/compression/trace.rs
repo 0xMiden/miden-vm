@@ -147,23 +147,6 @@ pub fn generate_felt_trace_block_with_cycle_id(
     EidosCompressionFeltTraceBlock { rows, final_v }
 }
 
-#[cfg(test)]
-pub(super) fn generate_felt_trace_block_with_initial_state_for_test(
-    block: [u32; 16],
-    h: [u32; 8],
-    initial_v: [u32; 16],
-) -> EidosCompressionFeltTraceBlock {
-    assert_eq!(&initial_v[..8], &h);
-    let mut rows = vec![[Felt::ZERO; NUM_COLS]; BLOCK_PERIOD];
-    let mut recorder = NoopByteLookupRecorder;
-    let final_v = write_trace_rows_from_state(&mut rows, block, h, initial_v, 0, &mut recorder);
-    let rows = rows
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
-
-    EidosCompressionFeltTraceBlock { rows, final_v }
-}
-
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub fn rewrite_felt_footer_for_test(

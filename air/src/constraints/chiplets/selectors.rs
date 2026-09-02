@@ -82,17 +82,18 @@ pub struct ChipletFlags<E> {
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
     pub controller: ChipletFlags<E>,
-    pub bitwise: ChipletFlags<E>,
-    pub stream_mode: StreamModeFlags<E>,
+    pub bitwise: BitwiseFlags<E>,
     pub memory: ChipletFlags<E>,
     pub ace: ChipletFlags<E>,
 }
 
-/// Local mode expressions inside the bitwise selector region.
+/// Selector flags for the bitwise region and its two row modes.
 #[derive(Clone)]
-pub struct StreamModeFlags<E> {
+pub struct BitwiseFlags<E> {
+    /// Flags for the complete bitwise selector region.
+    pub region: ChipletFlags<E>,
     /// Normal `u32and`/`u32xor` rows.
-    pub normal_bitwise: E,
+    pub normal: E,
     /// AEAD stream rows.
     pub aead_stream: E,
 }
@@ -121,7 +122,7 @@ where
     // LOAD SELECTOR COLUMNS
     // =========================================================================
 
-    // [s_ctrl, stream_mode, s1, s2, s3, s4]
+    // [s_ctrl, s1, s2, s3, s4]
     let sel = local.chiplet_selectors();
     let sel_next = next.chiplet_selectors();
 
@@ -130,18 +131,18 @@ where
     let s_ctrl_next: AB::Expr = sel_next[0].into();
 
     // AEAD stream mode slot. It is used only inside the bitwise selector region.
-    let stream_mode: AB::Expr = sel[1].into();
+    let stream_mode: AB::Expr = local.bitwise_stream_mode().into();
 
     // s1..s4: remaining chiplet selectors.
-    let s1: AB::Expr = sel[2].into();
-    let s2: AB::Expr = sel[3].into();
-    let s3: AB::Expr = sel[4].into();
-    let s4: AB::Expr = sel[5].into();
+    let s1: AB::Expr = sel[1].into();
+    let s2: AB::Expr = sel[2].into();
+    let s3: AB::Expr = sel[3].into();
+    let s4: AB::Expr = sel[4].into();
 
-    let s1_next: AB::Expr = sel_next[2].into();
-    let s2_next: AB::Expr = sel_next[3].into();
-    let s3_next: AB::Expr = sel_next[4].into();
-    let s4_next: AB::Expr = sel_next[5].into();
+    let s1_next: AB::Expr = sel_next[1].into();
+    let s2_next: AB::Expr = sel_next[2].into();
+    let s3_next: AB::Expr = sel_next[3].into();
+    let s4_next: AB::Expr = sel_next[4].into();
 
     // Virtual s0 = 1 - s_ctrl: 0 on controller rows, 1 on all other chiplet rows.
     let s0: AB::Expr = s_ctrl.not();
@@ -260,8 +261,8 @@ where
     // skip.)
     let next_is_bitwise_first = ctrl_is_last.clone() * not_s1_next.clone();
 
-    // In this layout `sel_next = [s_ctrl', stream_mode', s1', s2', s3', s4']`; the boundary
-    // detection below works on the virtual `s0' = 1 - s_ctrl'` and the named chain selectors.
+    // The boundary detection below works on the virtual `s0' = 1 - s_ctrl'` and the named chain
+    // selectors.
     let s0_next_virtual: AB::Expr = s_ctrl_next.not();
     let s1_next_raw: AB::Expr = s1_next;
     let s2_next_raw: AB::Expr = s2_next;
@@ -305,14 +306,14 @@ where
             is_last: ctrl_is_last,
             next_is_first: ctrl_next_is_first,
         },
-        bitwise: ChipletFlags {
-            is_active: is_bitwise,
-            is_transition: bitwise_transition,
-            is_last: is_bitwise_last,
-            next_is_first: next_is_bitwise_first,
-        },
-        stream_mode: StreamModeFlags {
-            normal_bitwise,
+        bitwise: BitwiseFlags {
+            region: ChipletFlags {
+                is_active: is_bitwise,
+                is_transition: bitwise_transition,
+                is_last: is_bitwise_last,
+                next_is_first: next_is_bitwise_first,
+            },
+            normal: normal_bitwise,
             aead_stream: aead_stream_active,
         },
         memory: ChipletFlags {

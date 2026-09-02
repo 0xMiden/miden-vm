@@ -31,6 +31,7 @@ const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4] = [
     8439887896402127641,
     4048810480047996444,
 ];
+const _: () = assert!(config::LOG_BLOWUP == 3);
 
 type PreprocessedCommitment<SC> = <<SC as StarkConfig<Felt, QuadFelt>>::Lmcs as Lmcs>::Commitment;
 

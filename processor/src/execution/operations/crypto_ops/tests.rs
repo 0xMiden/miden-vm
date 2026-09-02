@@ -4,7 +4,7 @@ use miden_core::{
     Felt, ONE, Word, ZERO,
     chiplets::{
         eidos_compression,
-        hasher::{Hasher, compress_state},
+        hasher::{CV_RANGE, compress_state},
     },
     crypto::merkle::{MerklePath, MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
@@ -112,7 +112,7 @@ proptest! {
         for i in 0..8 {
             prop_assert_eq!(stack[15 - i], stack_inputs[i], "block mismatch at position {}", i);
         }
-        for (j, i) in Hasher::CV_RANGE.enumerate() {
+        for (j, i) in CV_RANGE.enumerate() {
             prop_assert_eq!(stack[15 - (8 + j)], expected_state[i], "CV mismatch at lane {}", j);
         }
 
