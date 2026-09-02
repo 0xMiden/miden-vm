@@ -344,74 +344,6 @@ fn ir_lowering_matches_symbolic_lowering_node_for_node() {
     }
 }
 
-#[test]
-fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
-    use miden_air::{
-        ProofOrder,
-        ace::{RecursiveAceCircuitFactory, build_factored_recursive_verifier_ace_circuit},
-    };
-    use miden_core::crypto::hash::Eidos;
-
-    // The loader's two `repeat` counts are generated from this split, so pin it to the real
-    // constants+shuffle boundary instead of trusting the value the struct reports.
-    let factored = miden_air::ace::build_factored_multi_air_ace_circuit(AceConfig {
-        num_quotient_chunks: 8,
-        layout: LayoutKind::Masm,
-        num_airs: MIDEN_AIR_COUNT,
-    })
-    .expect("factored circuit");
-    let expected_prefix_len = factored
-        .circuit_for_order(&ProofOrder::instance_order())
-        .expect("canonical circuit")
-        .to_ace()
-        .expect("encoded circuit")
-        .num_constants()
-        * EXT_DEGREE
-        + factored.num_shuffle_ops();
-
-    let factory = RecursiveAceCircuitFactory::new().expect("factory");
-    let mut reference: Option<(usize, Vec<_>)> = None;
-    for order in ProofOrder::variants() {
-        let circuit =
-            build_factored_recursive_verifier_ace_circuit(&order).expect("recursive ACE circuit");
-        let resumed = factory.circuit_for_order(&order).expect("factory circuit");
-        assert_eq!(resumed, circuit, "factory diverges for {}", order.file_stem());
-
-        // Both segments must be proper adv_pipe-aligned stream slices.
-        assert_eq!(
-            circuit.shuffle_prefix_len, expected_prefix_len,
-            "stream prefix must end exactly at the shuffle/common boundary"
-        );
-        assert!(circuit.shuffle_prefix_len.is_multiple_of(8));
-        assert!(circuit.shuffle_prefix_len < circuit.stream_len);
-        assert_eq!(circuit.stream_len, circuit.instructions.len());
-
-        // The registry leaf binds both segment digests.
-        let (prefix, common) = circuit.instructions.split_at(circuit.shuffle_prefix_len);
-        assert_eq!(circuit.shuffle_commitment, Eidos::hash_elements(prefix));
-        assert_eq!(circuit.common_commitment, Eidos::hash_elements(common));
-        assert_eq!(
-            circuit.commitment,
-            Eidos::merge(&[circuit.shuffle_commitment, circuit.common_commitment])
-        );
-
-        // The common section must be byte-identical across proof orders; only the
-        // shuffle section may differ.
-        match &reference {
-            None => reference = Some((circuit.shuffle_prefix_len, common.to_vec())),
-            Some((prefix_len, common_reference)) => {
-                assert_eq!(circuit.shuffle_prefix_len, *prefix_len);
-                assert_eq!(
-                    common,
-                    common_reference,
-                    "common section differs for {}",
-                    order.file_stem()
-                );
-            },
-        }
-    }
-}
-
 /// The recursive verifier's canonical entry point must be a thin wrapper over the canonical
 /// builder: same encoding, same commitment, and no dependence on the proof order.
 ///
@@ -809,25 +741,5 @@ fn canonical_circuit_matches_every_vm_proof_order() {
         for (j, right) in canonical_roots.iter().enumerate().skip(i + 1) {
             assert_ne!(left, right, "orders {i} and {j} fold identically; the sweep is vacuous");
         }
-    }
-}
-
-/// `recursive_registry_entry` checks circuit-to-leaf coherence. This test checks that every
-/// served circuit commitment and path authenticate under the protocol root.
-#[test]
-fn registry_entry_paths_authenticate_under_the_protocol_root() {
-    use miden_air::{ProofOrder, ace::recursive_registry_entry, config::ACE_CIRCUIT_REGISTRY_ROOT};
-
-    for order in ProofOrder::variants() {
-        let (circuit, leaf, path) = recursive_registry_entry(&order)
-            .expect("registry entry must build")
-            .into_parts();
-        assert_eq!(leaf, circuit.commitment);
-        assert_eq!(
-            path.compute_root(u64::from(order.tag()), circuit.commitment)
-                .expect("path must fold to a root"),
-            miden_core::Word::new(ACE_CIRCUIT_REGISTRY_ROOT),
-            "the served path must authenticate the leaf under the protocol root"
-        );
     }
 }

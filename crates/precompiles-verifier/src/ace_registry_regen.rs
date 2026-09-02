@@ -271,7 +271,7 @@ fn trace_row_widths(
 }
 
 /// The encoded ACE stream's shape, which an in-VM verifier needs as compile-time
-/// constants: how much to read, where the order-invariant segment begins, and its digest.
+/// constants: how much to read and the digest the loaded stream must reproduce.
 ///
 /// Uniform across proof orders by construction: only the factored shuffle routing changes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -279,8 +279,7 @@ struct CircuitShape {
     num_inputs: usize,
     num_eval_gates: usize,
     stream_len: usize,
-    shuffle_prefix_len: usize,
-    common_commitment: Word,
+    circuit_digest: Word,
 }
 
 impl CircuitShape {
@@ -299,8 +298,7 @@ impl CircuitShape {
             num_inputs: circuit.encoded.num_vars(),
             num_eval_gates: circuit.encoded.num_eval_rows(),
             stream_len,
-            shuffle_prefix_len: circuit.shuffle_prefix_len,
-            common_commitment: circuit.common_commitment,
+            circuit_digest: Eidos::hash_elements(circuit.encoded.instructions()),
         })
     }
 }
@@ -712,13 +710,13 @@ fn render_pvm_constraints_eval(
         num_inputs: shape.num_inputs,
         num_eval_gates: shape.num_eval_gates,
         stream_len: shape.stream_len,
-        shuffle_prefix_len: shape.shuffle_prefix_len,
         max_cycle_len_log,
-        registry_depth: PVM_ACE_REGISTRY_DEPTH,
-        order_tag_count: PVM_ORDER_COUNT,
         num_airs: NUM_CHIPLETS,
+        // The PVM READ layout has no per-AIR fold-coefficient slots, so its evaluator must not
+        // stage them.
+        stages_fold_coefficients: false,
         quotient_inputs,
-        common_commitment: shape.common_commitment,
+        circuit_digest: shape.circuit_digest,
     })
     .map_err(|err| err.to_string())
 }

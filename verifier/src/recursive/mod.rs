@@ -26,10 +26,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{
-    MIDEN_AIR_COUNT, MidenMultiAir, ProofOrder, PublicInputs, Statement,
-    ace::recursive_registry_entry, config,
-};
+use miden_air::{MIDEN_AIR_COUNT, MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceStack},
@@ -172,11 +169,9 @@ pub enum RecursiveVerifierInputsError {
 /// Merkle store + advice map pair returned by Merkle data construction.
 type MerkleAdvice = (MerkleStore, Vec<(Word, Vec<Felt>)>);
 
-/// The per-AIR log trace heights, in both arrangements the advice needs: the fixed instance
-/// order (streamed to the verifier) and the sorted proof order (ACE circuit selection).
+/// The per-AIR log trace heights in the fixed instance order streamed to the verifier.
 struct MidenTraceHeights {
     instance_log_heights: [usize; MIDEN_AIR_COUNT],
-    proof_order: ProofOrder,
 }
 
 // ADVICE CONSTRUCTION
@@ -237,7 +232,6 @@ fn miden_trace_heights(
     };
     Ok(MidenTraceHeights {
         instance_log_heights: log_heights.map(usize::from),
-        proof_order: ProofOrder::from_instance_log_heights(&log_heights),
     })
 }
 
@@ -307,7 +301,7 @@ fn build_advice(
 
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(config, stark, &heights.proof_order)?;
+    let (store, advice_map) = build_merkle_data(config, stark)?;
 
     let advice = AdviceInputs::default()
         .with_stack(advice_stack.into())
@@ -378,7 +372,6 @@ where
 fn build_merkle_data(
     config: &RecursiveConfig,
     stark: &StarkProof<Challenge, RecursiveLmcs>,
-    proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, RecursiveVerifierInputsError> {
     let pcs = &stark.pcs_proof;
     let lmcs = config.lmcs();
@@ -394,18 +387,32 @@ fn build_merkle_data(
         advice_map.extend(entries);
     }
 
-    // One factory serves the evaluated circuit and its registry authentication: the
-    // verifier reads one registry leaf, and seeding the complete registry would not
-    // scale to the precompile relation's `10!` orders.
-    let (circuit, leaf, path) = recursive_registry_entry(proof_order)
-        .map_err(|_| {
+    // One canonical circuit serves every proof order; the verifier authenticates it against the
+    // compiled-in circuit digest.
+    #[cfg(feature = "std")]
+    {
+        let circuit = miden_air::ace::shared_recursive_circuit();
+        debug_assert_eq!(
+            circuit.commitment,
+            Word::from(config::ACE_CIRCUIT_DIGEST),
+            "the freshly built ACE circuit's commitment disagrees with the compiled-in \
+             ACE_CIRCUIT_DIGEST; run `make regenerate-constraints`"
+        );
+        advice_map.push((circuit.commitment, circuit.instructions.clone()));
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        let circuit = miden_air::ace::build_recursive_verifier_ace_circuit().map_err(|_| {
             RecursiveVerifierInputsError::InvalidProofShape("failed to build recursive ACE circuit")
-        })?
-        .into_parts();
-    store.add_merkle_path(u64::from(proof_order.tag()), leaf, path).map_err(|_| {
-        RecursiveVerifierInputsError::InvalidProofShape("ACE registry path could not be stored")
-    })?;
-    advice_map.push((circuit.commitment, circuit.instructions));
+        })?;
+        debug_assert_eq!(
+            circuit.commitment,
+            Word::from(config::ACE_CIRCUIT_DIGEST),
+            "the freshly built ACE circuit's commitment disagrees with the compiled-in \
+             ACE_CIRCUIT_DIGEST; run `make regenerate-constraints`"
+        );
+        advice_map.push((circuit.commitment, circuit.instructions));
+    }
 
     Ok((store, advice_map))
 }
