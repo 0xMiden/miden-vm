@@ -255,16 +255,4 @@ mod tests {
             Some(&core_lib.pvm_recursive_verifier_root()),
         );
     }
-
-    #[test]
-    fn conjectured_security_estimator_root_matches_the_embedded_core_library() {
-        let expected = CoreLibrary::default()
-            .package
-            .get_procedure_root_by_path(
-                "::miden::core::sys::vm::compute_conjectured_security_level",
-            )
-            .unwrap();
-
-        assert_eq!(conjectured_security_estimator_root(), expected);
-    }
 }

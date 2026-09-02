@@ -89,9 +89,10 @@ impl Verifier {
 
     /// Verifies a deferred or complete versioned execution proof against its public claim.
     ///
-    /// The VM STARK authenticates the carried precompile root in either state. Deferred wire data
-    /// is neither hydrated nor validated by the verifier. Complete proofs additionally verify the
-    /// aggregate precompile STARK when the VM authenticated outstanding work. The outcome reports
+    /// The VM STARK authenticates the carried precompile root in either state. For a deferred
+    /// proof, the verifier returns that root but does not validate the carried wire against it.
+    /// Callers must validate the wire before using it. Complete proofs additionally verify the
+    /// aggregate precompile STARK against the root authenticated by the VM. The outcome reports
     /// the minimum security level of the components actually verified and any authenticated
     /// precompile root that remains outstanding.
     ///

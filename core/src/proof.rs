@@ -381,6 +381,9 @@ impl ExecutionProof {
     }
 
     /// Transitions a deferred proof to complete by attaching a precompile proof.
+    ///
+    /// This method does not verify the precompile proof or check it against the VM proof. The
+    /// verifier performs those checks.
     pub fn complete(mut self, precompile: PrecompileProof) -> Result<Self, ExecutionProofError> {
         if !matches!(self.precompile, PrecompileStatus::Deferred(_)) {
             return Err(ExecutionProofError::AlreadyComplete);
