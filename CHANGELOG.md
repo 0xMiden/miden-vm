@@ -17,10 +17,18 @@
 - [BREAKING] Added the processor-independent `miden-event-handler` crate and migrated native event
   and trace callbacks from concrete `ProcessorState` access to an explicit `EventContext`
   capability interface. Native memory access now validates `u64` addresses through one strict
-  buffer-read operation and derives value, word, and slice reads from it. `miden-processor` retains
-  a small deprecated compatibility facade and legacy accessors in v0.31; these will be removed in
-  v0.32. Callers naming the concrete `AdviceProvider`, reading all `ExecutionOptions`, or expecting
-  a `RowIndex` clock must migrate ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
+  buffer-read operation and defines value, word, slice `(start, count)`, and half-open range
+  `[start, end)` reads around it; processor adapters can provide equivalent scalar and word fast
+  paths. Operand-stack and advice-stack positions use `u64`, while
+  `stack_depth()` remains `u32`; fallible stack and memory reads return the processor-independent
+  `EventContextError`. `miden-processor` retains a small deprecated compatibility facade and the
+  SDK-base `get_*` accessors in v0.31; these will be removed in v0.32. The concrete
+  `ProcessorState::advice_provider()` and unrestricted `ExecutionOptions` access are not
+  reproduced, `clock()` now returns `u32` instead of `RowIndex`, and call sites naming the
+  processor's `MemoryError` must migrate. Deprecated `get_mem_addr_range` callers should read the
+  pointers with `stack_item` and select `memory_range`, `memory_slice`, `memory_value`, or
+  `memory_word` for the intended operation
+  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
 - Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
 

@@ -72,9 +72,9 @@ pub fn handle_lowerbound_key_value(
 }
 
 /// Offsets for the push_lowerbound_result inputs from the top of the stack
-const KEY_OFFSET: usize = 1;
-const START_ADDR_OFFSET: usize = 5;
-const END_ADDR_OFFSET: usize = 6;
+const KEY_OFFSET: u64 = 1;
+const START_ADDR_OFFSET: u64 = 5;
+const END_ADDR_OFFSET: u64 = 6;
 
 fn push_lowerbound_result(
     context: &EventContext,
@@ -158,19 +158,19 @@ fn push_lowerbound_result(
 
 fn memory_range_from_stack(
     context: &EventContext,
-) -> Result<Range<u32>, miden_event_handler::MemoryReadError> {
-    use miden_event_handler::MemoryReadError;
+) -> Result<Range<u32>, miden_event_handler::EventContextError> {
+    use miden_event_handler::EventContextError;
 
     let start = context.stack_item(START_ADDR_OFFSET).as_canonical_u64();
     let end = context.stack_item(END_ADDR_OFFSET).as_canonical_u64();
     if start > u64::from(u32::MAX) {
-        return Err(MemoryReadError::AddressOutOfBounds { address: start });
+        return Err(EventContextError::AddressOutOfBounds { address: start });
     }
     if end > u64::from(u32::MAX) {
-        return Err(MemoryReadError::AddressOutOfBounds { address: end });
+        return Err(EventContextError::AddressOutOfBounds { address: end });
     }
     if start > end {
-        return Err(MemoryReadError::InvalidRange { start, end });
+        return Err(EventContextError::InvalidRange { start, end });
     }
 
     Ok(start as u32..end as u32)

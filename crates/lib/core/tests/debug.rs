@@ -19,7 +19,7 @@ use miden_core_lib::{
         PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
     },
 };
-use miden_event_handler::MemoryReadError;
+use miden_event_handler::EventContextError;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, HostLibrary,
     Program, StackInputs, SyncHost,
@@ -320,8 +320,10 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         ExecutionOptions::default(),
     ) {
         Err(ExecutionError::EventError { error, .. }) => {
-            let err = error.downcast_ref::<MemoryReadError>().expect("expected a MemoryReadError");
-            assert!(matches!(err, MemoryReadError::AddressOutOfBounds { .. }));
+            let err = error
+                .downcast_ref::<EventContextError>()
+                .expect("expected an EventContextError");
+            assert!(matches!(err, EventContextError::AddressOutOfBounds { .. }));
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
         Ok(_) => panic!("out-of-bounds print_mem range should fail"),

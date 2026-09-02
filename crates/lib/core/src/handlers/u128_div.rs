@@ -59,12 +59,12 @@ pub fn handle_u128_div(context: &EventContext) -> Result<Vec<AdviceMutation>, Ev
 /// Reads a u128 value from 4 consecutive stack positions starting at `start`.
 fn read_u128_from_stack(
     context: &EventContext,
-    start: usize,
+    start: u64,
     name: &'static str,
 ) -> Result<u128, EventError> {
     let mut value: u128 = 0;
     for i in (0..4).rev() {
-        let limb = context.stack_item(start + i).as_canonical_u64();
+        let limb = context.stack_item(start + i as u64).as_canonical_u64();
         if limb > u32::MAX as u64 {
             return Err(U128DivError::NotU32Value {
                 value: limb,

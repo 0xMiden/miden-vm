@@ -23,7 +23,7 @@ use core::fmt;
 
 use miden_core::{Felt, Word, events::EventName};
 use miden_event_handler::{
-    AdviceMutation, EventContext, EventError, EventHandler, MemoryReadError,
+    AdviceMutation, EventContext, EventContextError, EventError, EventHandler,
 };
 use miden_processor::{StdoutWriter, write_interval, write_stack};
 use miden_utils_sync::RwLock;
@@ -193,7 +193,7 @@ impl EventHandler for NoopDebugHandler {
 // ================================================================================================
 
 /// Reads the element at `pos` on the operand stack as a `usize` (saturating).
-fn stack_item_as_usize(context: &EventContext, pos: usize) -> usize {
+fn stack_item_as_usize(context: &EventContext, pos: u64) -> usize {
     usize::try_from(context.stack_item(pos).as_canonical_u64()).unwrap_or(usize::MAX)
 }
 
@@ -213,21 +213,21 @@ fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
 /// inclusive end of `u32::MAX`.
 fn read_mem_print_range(
     context: &EventContext,
-    start_idx: usize,
-    end_idx: usize,
-) -> Result<Option<(u32, u32)>, MemoryReadError> {
+    start_idx: u64,
+    end_idx: u64,
+) -> Result<Option<(u32, u32)>, EventContextError> {
     let start_addr = context.stack_item(start_idx).as_canonical_u64();
     let end_addr = context.stack_item(end_idx).as_canonical_u64();
 
     if start_addr > u32::MAX as u64 {
-        return Err(MemoryReadError::AddressOutOfBounds { address: start_addr });
+        return Err(EventContextError::AddressOutOfBounds { address: start_addr });
     }
     // The exclusive end may be one past the last valid address (`2^32`).
     if end_addr > u32::MAX as u64 + 1 {
-        return Err(MemoryReadError::AddressOutOfBounds { address: end_addr });
+        return Err(EventContextError::AddressOutOfBounds { address: end_addr });
     }
     if start_addr > end_addr {
-        return Err(MemoryReadError::InvalidRange { start: start_addr, end: end_addr });
+        return Err(EventContextError::InvalidRange { start: start_addr, end: end_addr });
     }
 
     if start_addr == end_addr {

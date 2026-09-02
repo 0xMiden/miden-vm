@@ -1,5 +1,5 @@
 use alloc::{vec, vec::Vec};
-use core::fmt;
+use core::{alloc::Layout, fmt};
 
 use miden_core::{
     ContextId, Felt, MemoryAddress, WORD_SIZE, Word, ZERO,
@@ -8,6 +8,8 @@ use miden_core::{
     deferred::{Digest, Node, PrecompileError},
     events::EventId,
 };
+
+use crate::EventContextError;
 
 /// Distinguishes the two VM callback kinds that use [`EventContext`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -72,45 +74,9 @@ impl Invocation {
     }
 }
 
-/// Errors returned by memory read capabilities.
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
-pub enum MemoryReadError {
-    /// A field-element address did not fit in the VM's `u32` address space.
-    #[error("memory address must be less than 2^32 but was {address}")]
-    AddressOutOfBounds { address: u64 },
-    /// A half-open range extended past the end of the VM's address space.
-    #[error("memory range starting at {start} with {count} elements exceeds the address space")]
-    RangeOverflow { start: u64, count: u64 },
-    /// A range derived from two stack values had its end before its start.
-    #[error("memory range start cannot exceed end, but was ({start}, {end})")]
-    InvalidRange { start: u64, end: u64 },
-    /// A strict range read touched a word which has never been initialized.
-    #[error("memory at address {address} in context {context_id} is uninitialized")]
-    Uninitialized { context_id: ContextId, address: u32 },
-    /// A word read used an address which is not divisible by four.
-    #[error("word address {address} in context {context_id} is not aligned to four elements")]
-    UnalignedWord { context_id: ContextId, address: u32 },
-}
-
-/// Errors returned by strict advice-stack range reads.
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
-pub enum AdviceReadError {
-    /// Computing the requested half-open range overflowed `usize`.
-    #[error("advice-stack range starting at {start} with {count} elements overflows")]
-    RangeOverflow { start: usize, count: usize },
-    /// The requested range extended beyond the advice stack.
-    #[error(
-        "advice-stack range starting at {start} with {count} elements exceeds stack length {len}"
-    )]
-    OutOfBounds { start: usize, count: usize, len: usize },
-}
-
 /// Errors returned by typed Merkle-store reads.
 #[derive(Debug, thiserror::Error)]
 pub enum MerkleReadError {
-    /// Legacy depth/position values did not form a valid [`NodeIndex`].
-    #[error("invalid Merkle node index at depth {depth}, position {position}")]
-    InvalidNodeIndex { depth: u64, position: u64 },
     /// The requested node or path is not present in the Merkle store.
     #[error("Merkle store lookup failed: {0}")]
     Lookup(#[source] MerkleError),
@@ -129,24 +95,27 @@ impl From<MerkleError> for MerkleReadError {
 /// unchanged when [`Self::read_memory`] returns an error.
 #[doc(hidden)]
 pub trait EventContextProvider: Sync {
-    fn stack_depth(&self) -> usize;
+    fn stack_depth(&self) -> u32;
 
-    fn stack_item(&self, position: usize) -> Felt;
+    fn stack_item(&self, position: u64) -> Felt;
 
-    fn read_stack(&self, start: usize, output: &mut [Felt]) {
+    fn read_stack(&self, start: u64, output: &mut [Felt]) {
         for (offset, value) in output.iter_mut().enumerate() {
-            *value = start.checked_add(offset).map_or(ZERO, |position| self.stack_item(position));
+            *value = u64::try_from(offset)
+                .ok()
+                .and_then(|offset| start.checked_add(offset))
+                .map_or(ZERO, |position| self.stack_item(position));
         }
     }
 
-    fn stack_word(&self, start: usize) -> Word {
+    fn stack_word(&self, start: u64) -> Word {
         let mut elements = [ZERO; WORD_SIZE];
         self.read_stack(start, &mut elements);
         elements.into()
     }
 
     fn stack_snapshot(&self) -> Vec<Felt> {
-        let mut snapshot = vec![ZERO; self.stack_depth()];
+        let mut snapshot = vec![ZERO; self.stack_depth() as usize];
         self.read_stack(0, &mut snapshot);
         snapshot
     }
@@ -156,7 +125,33 @@ pub trait EventContextProvider: Sync {
         context_id: ContextId,
         start: u32,
         output: &mut [Felt],
-    ) -> Result<(), MemoryReadError>;
+    ) -> Result<(), EventContextError>;
+
+    fn memory_value(
+        &self,
+        context_id: ContextId,
+        address: u32,
+    ) -> Result<Option<Felt>, EventContextError> {
+        let mut value = [ZERO];
+        match self.read_memory(context_id, address, &mut value) {
+            Ok(()) => Ok(Some(value[0])),
+            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn memory_word(
+        &self,
+        context_id: ContextId,
+        address: u32,
+    ) -> Result<Option<Word>, EventContextError> {
+        let mut elements = [ZERO; WORD_SIZE];
+        match self.read_memory(context_id, address, &mut elements) {
+            Ok(()) => Ok(Some(elements.into())),
+            Err(EventContextError::UninitializedMemory { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)>;
 
@@ -245,30 +240,38 @@ impl<'a> EventContext<'a> {
     }
 
     /// Returns the current operand-stack depth.
-    pub fn stack_depth(&self) -> usize {
+    pub fn stack_depth(&self) -> u32 {
         self.provider.stack_depth()
     }
 
     /// Returns an operand-stack element, or zero when `position` is beyond the current depth.
-    pub fn stack_item(&self, position: usize) -> Felt {
+    pub fn stack_item(&self, position: u64) -> Felt {
         self.provider.stack_item(position)
     }
 
     /// Reads stack positions into `output`, zero-extending beyond the current depth.
-    pub fn read_stack(&self, start: usize, output: &mut [Felt]) {
+    pub fn read_stack(&self, start: u64, output: &mut [Felt]) {
         self.provider.read_stack(start, output);
     }
 
     /// Returns four stack elements beginning at `start`, zero-extending when necessary.
-    pub fn stack_word(&self, start: usize) -> Word {
+    pub fn stack_word(&self, start: u64) -> Word {
         self.provider.stack_word(start)
     }
 
-    /// Allocates a stack range, zero-extending when it crosses the current depth.
-    pub fn stack_range(&self, start: usize, count: usize) -> Vec<Felt> {
+    /// Allocates a stack slice by start and element count, zero-extending when necessary.
+    pub fn stack_slice(&self, start: u64, count: u64) -> Result<Vec<Felt>, EventContextError> {
+        check_slice_range(start, count)?;
+        let count = felt_vec_len(start, count)?;
         let mut values = vec![ZERO; count];
         self.read_stack(start, &mut values);
-        values
+        Ok(values)
+    }
+
+    /// Allocates the half-open stack range `[start, end)`, zero-extending when necessary.
+    pub fn stack_range(&self, start: u64, end: u64) -> Result<Vec<Felt>, EventContextError> {
+        let count = range_count(start, end)?;
+        self.stack_slice(start, count)
     }
 
     /// Allocates a snapshot of the complete operand stack, top first.
@@ -278,7 +281,7 @@ impl<'a> EventContext<'a> {
 
     /// Returns a memory value from the active execution context, or `None` when its word is
     /// uninitialized.
-    pub fn memory_value(&self, address: u64) -> Result<Option<Felt>, MemoryReadError> {
+    pub fn memory_value(&self, address: u64) -> Result<Option<Felt>, EventContextError> {
         self.memory_value_in_context(self.context_id(), address)
     }
 
@@ -288,18 +291,14 @@ impl<'a> EventContext<'a> {
         &self,
         context_id: ContextId,
         address: u64,
-    ) -> Result<Option<Felt>, MemoryReadError> {
-        let mut value = [ZERO];
-        match self.read_memory_in_context(context_id, address, &mut value) {
-            Ok(()) => Ok(Some(value[0])),
-            Err(MemoryReadError::Uninitialized { .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
+    ) -> Result<Option<Felt>, EventContextError> {
+        let address = check_memory_address(address)?;
+        self.provider.memory_value(context_id, address)
     }
 
     /// Returns an aligned memory word from the active execution context, or `None` when it is
     /// uninitialized.
-    pub fn memory_word(&self, address: u64) -> Result<Option<Word>, MemoryReadError> {
+    pub fn memory_word(&self, address: u64) -> Result<Option<Word>, EventContextError> {
         self.memory_word_in_context(self.context_id(), address)
     }
 
@@ -309,25 +308,20 @@ impl<'a> EventContext<'a> {
         &self,
         context_id: ContextId,
         address: u64,
-    ) -> Result<Option<Word>, MemoryReadError> {
+    ) -> Result<Option<Word>, EventContextError> {
         let address_u32 = check_memory_address(address)?;
         if !address_u32.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryReadError::UnalignedWord { context_id, address: address_u32 });
+            return Err(EventContextError::UnalignedWord { context_id, address: address_u32 });
         }
 
-        let mut elements = [ZERO; WORD_SIZE];
-        match self.read_memory_in_context(context_id, address, &mut elements) {
-            Ok(()) => Ok(Some(elements.into())),
-            Err(MemoryReadError::Uninitialized { .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
+        self.provider.memory_word(context_id, address_u32)
     }
 
     /// Strictly reads a memory range from the active context into `output`.
     ///
     /// Address validation occurs before the provider is called. On an invalid address, overflow,
     /// or an uninitialized word, `output` is left unchanged.
-    pub fn read_memory(&self, start: u64, output: &mut [Felt]) -> Result<(), MemoryReadError> {
+    pub fn read_memory(&self, start: u64, output: &mut [Felt]) -> Result<(), EventContextError> {
         self.read_memory_in_context(self.context_id(), start, output)
     }
 
@@ -340,17 +334,19 @@ impl<'a> EventContext<'a> {
         context_id: ContextId,
         start: u64,
         output: &mut [Felt],
-    ) -> Result<(), MemoryReadError> {
+    ) -> Result<(), EventContextError> {
         let count = u64::try_from(output.len())
-            .map_err(|_| MemoryReadError::RangeOverflow { start, count: u64::MAX })?;
-        let start = check_memory_range(start, count)?;
+            .map_err(|_| EventContextError::RangeOverflow { start, count: u64::MAX })?;
+        let Some(start) = check_memory_range(start, count)? else {
+            return Ok(());
+        };
         self.provider.read_memory(context_id, start, output)
     }
 
     /// Allocates a strict memory slice from the active execution context.
     ///
     /// The read fails if the address range is invalid or touches an uninitialized word.
-    pub fn memory_slice(&self, start: u64, count: u64) -> Result<Vec<Felt>, MemoryReadError> {
+    pub fn memory_slice(&self, start: u64, count: u64) -> Result<Vec<Felt>, EventContextError> {
         self.memory_slice_in_context(self.context_id(), start, count)
     }
 
@@ -362,13 +358,34 @@ impl<'a> EventContext<'a> {
         context_id: ContextId,
         start: u64,
         count: u64,
-    ) -> Result<Vec<Felt>, MemoryReadError> {
+    ) -> Result<Vec<Felt>, EventContextError> {
         check_memory_range(start, count)?;
-        let count =
-            usize::try_from(count).map_err(|_| MemoryReadError::RangeOverflow { start, count })?;
+        let count = felt_vec_len(start, count)?;
         let mut values = vec![ZERO; count];
         self.read_memory_in_context(context_id, start, &mut values)?;
         Ok(values)
+    }
+
+    /// Allocates the strict half-open memory range `[start, end)` from the active context.
+    ///
+    /// The read fails if the range is reversed, exceeds the address space, or touches an
+    /// uninitialized word.
+    pub fn memory_range(&self, start: u64, end: u64) -> Result<Vec<Felt>, EventContextError> {
+        self.memory_range_in_context(self.context_id(), start, end)
+    }
+
+    /// Allocates the strict half-open memory range `[start, end)` from an explicit context.
+    ///
+    /// The read fails if the range is reversed, exceeds the address space, or touches an
+    /// uninitialized word.
+    pub fn memory_range_in_context(
+        &self,
+        context_id: ContextId,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<Felt>, EventContextError> {
+        let count = range_count(start, end)?;
+        self.memory_slice_in_context(context_id, start, count)
     }
 
     /// Allocates a snapshot of initialized memory in the active execution context.
@@ -396,33 +413,51 @@ impl<'a> EventContext<'a> {
     /// On overflow or an out-of-bounds range, `output` is left unchanged.
     pub fn read_advice_stack(
         &self,
-        start: usize,
+        start: u64,
         output: &mut [Felt],
-    ) -> Result<(), AdviceReadError> {
-        let count = output.len();
+    ) -> Result<(), EventContextError> {
+        let count = u64::try_from(output.len())
+            .map_err(|_| EventContextError::RangeOverflow { start, count: u64::MAX })?;
         let end = start
             .checked_add(count)
-            .ok_or(AdviceReadError::RangeOverflow { start, count })?;
+            .ok_or(EventContextError::RangeOverflow { start, count })?;
         let stack = self.advice_stack();
-        if end > stack.len() {
-            return Err(AdviceReadError::OutOfBounds { start, count, len: stack.len() });
+        let len = u64::try_from(stack.len()).unwrap_or(u64::MAX);
+        if end > len {
+            return Err(EventContextError::AdviceStackOutOfBounds { start, end, len });
         }
 
+        let start = usize::try_from(start).expect("validated advice-stack index must fit in usize");
         for (target, value) in output.iter_mut().zip(stack.iter().skip(start)) {
             *target = *value;
         }
         Ok(())
     }
 
-    /// Allocates a strict advice-stack range.
-    pub fn advice_stack_range(
+    /// Allocates a strict advice-stack slice by start and element count.
+    pub fn advice_stack_slice(
         &self,
-        start: usize,
-        count: usize,
-    ) -> Result<Vec<Felt>, AdviceReadError> {
+        start: u64,
+        count: u64,
+    ) -> Result<Vec<Felt>, EventContextError> {
+        let end = start
+            .checked_add(count)
+            .ok_or(EventContextError::RangeOverflow { start, count })?;
+        let len = u64::try_from(self.advice_stack().len()).unwrap_or(u64::MAX);
+        if end > len {
+            return Err(EventContextError::AdviceStackOutOfBounds { start, end, len });
+        }
+
+        let count = felt_vec_len(start, count)?;
         let mut values = vec![ZERO; count];
         self.read_advice_stack(start, &mut values)?;
         Ok(values)
+    }
+
+    /// Allocates the strict half-open advice-stack range `[start, end)`.
+    pub fn advice_stack_range(&self, start: u64, end: u64) -> Result<Vec<Felt>, EventContextError> {
+        let count = range_count(start, end)?;
+        self.advice_stack_slice(start, count)
     }
 
     /// Returns a node from the advice Merkle store.
@@ -484,24 +519,44 @@ impl<'a> BuiltinEventContext<'a> {
     }
 }
 
-fn check_memory_address(address: u64) -> Result<u32, MemoryReadError> {
-    address.try_into().map_err(|_| MemoryReadError::AddressOutOfBounds { address })
+fn range_count(start: u64, end: u64) -> Result<u64, EventContextError> {
+    end.checked_sub(start).ok_or(EventContextError::InvalidRange { start, end })
 }
 
-fn check_memory_range(start: u64, count: u64) -> Result<u32, MemoryReadError> {
-    let start_u32 = check_memory_address(start)?;
-    if start.checked_add(count).is_none_or(|end| end > u64::from(u32::MAX) + 1) {
-        return Err(MemoryReadError::RangeOverflow { start, count });
+fn check_slice_range(start: u64, count: u64) -> Result<(), EventContextError> {
+    start
+        .checked_add(count)
+        .ok_or(EventContextError::RangeOverflow { start, count })?;
+    Ok(())
+}
+
+fn felt_vec_len(start: u64, count: u64) -> Result<usize, EventContextError> {
+    let count_usize =
+        usize::try_from(count).map_err(|_| EventContextError::RangeOverflow { start, count })?;
+    Layout::array::<Felt>(count_usize)
+        .map_err(|_| EventContextError::RangeOverflow { start, count })?;
+    Ok(count_usize)
+}
+
+fn check_memory_address(address: u64) -> Result<u32, EventContextError> {
+    address
+        .try_into()
+        .map_err(|_| EventContextError::AddressOutOfBounds { address })
+}
+
+fn check_memory_range(start: u64, count: u64) -> Result<Option<u32>, EventContextError> {
+    const EXCLUSIVE_END: u64 = u32::MAX as u64 + 1;
+
+    if start > EXCLUSIVE_END {
+        return Err(EventContextError::AddressOutOfBounds { address: start });
     }
-    Ok(start_u32)
-}
+    if start.checked_add(count).is_none_or(|end| end > EXCLUSIVE_END) {
+        return Err(EventContextError::RangeOverflow { start, count });
+    }
 
-pub(crate) fn node_index_from_elements(
-    depth: Felt,
-    position: Felt,
-) -> Result<NodeIndex, MerkleReadError> {
-    NodeIndex::from_elements(&depth, &position).map_err(|_| MerkleReadError::InvalidNodeIndex {
-        depth: depth.as_canonical_u64(),
-        position: position.as_canonical_u64(),
-    })
+    if count == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(check_memory_address(start)?))
+    }
 }

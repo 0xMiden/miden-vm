@@ -8,8 +8,8 @@ use miden_core::{
     events::EventId,
 };
 use miden_event_handler::{
-    AdviceReadError, BuiltinEventContextProvider, EventContext, EventContextProvider, Invocation,
-    InvocationKind, MemoryReadError, MerkleReadError,
+    BuiltinEventContextProvider, EventContext, EventContextError, EventContextProvider, Invocation,
+    InvocationKind, MerkleReadError,
 };
 
 fn felt(value: u64) -> Felt {
@@ -28,12 +28,16 @@ struct FakeProvider {
 }
 
 impl EventContextProvider for FakeProvider {
-    fn stack_depth(&self) -> usize {
-        self.stack.len()
+    fn stack_depth(&self) -> u32 {
+        self.stack.len() as u32
     }
 
-    fn stack_item(&self, position: usize) -> Felt {
-        self.stack.get(position).copied().unwrap_or(Felt::ZERO)
+    fn stack_item(&self, position: u64) -> Felt {
+        usize::try_from(position)
+            .ok()
+            .and_then(|position| self.stack.get(position))
+            .copied()
+            .unwrap_or(Felt::ZERO)
     }
 
     fn read_memory(
@@ -41,7 +45,7 @@ impl EventContextProvider for FakeProvider {
         context_id: ContextId,
         start: u32,
         output: &mut [Felt],
-    ) -> Result<(), MemoryReadError> {
+    ) -> Result<(), EventContextError> {
         let mut pending = Vec::with_capacity(output.len());
         for offset in 0..output.len() {
             let address = start + offset as u32;
@@ -49,7 +53,7 @@ impl EventContextProvider for FakeProvider {
                 .memory
                 .get(&(context_id, address))
                 .copied()
-                .ok_or(MemoryReadError::Uninitialized { context_id, address })?;
+                .ok_or(EventContextError::UninitializedMemory { context_id, address })?;
             pending.push(value);
         }
         output.copy_from_slice(&pending);
@@ -179,15 +183,34 @@ fn metadata_and_stack_reads_follow_the_context_contract() {
     assert_eq!(context.id(), event_id);
     assert_eq!(context.clock(), 456);
     assert_eq!(context.context_id(), ContextId::from(7));
-    assert_eq!(context.stack_depth(), 3);
+    let depth: u32 = context.stack_depth();
+    assert_eq!(depth, 3);
     assert_eq!(context.stack_item(1), felt(12));
     assert_eq!(context.stack_item(100), Felt::ZERO);
+    assert_eq!(context.stack_item(u64::MAX), Felt::ZERO);
     assert_eq!(context.stack_word(1), Word::new([felt(12), felt(13), Felt::ZERO, Felt::ZERO]));
 
     let mut output = [felt(99); 5];
     context.read_stack(1, &mut output);
     assert_eq!(output, [felt(12), felt(13), Felt::ZERO, Felt::ZERO, Felt::ZERO]);
-    assert_eq!(context.stack_range(2, 3), vec![felt(13), Felt::ZERO, Felt::ZERO]);
+    context.read_stack(u64::MAX, &mut output[..2]);
+    assert_eq!(output[..2], [Felt::ZERO, Felt::ZERO]);
+    assert_eq!(context.stack_slice(2, 3).unwrap(), vec![felt(13), Felt::ZERO, Felt::ZERO]);
+    assert_eq!(context.stack_range(2, 5).unwrap(), vec![felt(13), Felt::ZERO, Felt::ZERO]);
+    assert_eq!(context.stack_range(3, 3).unwrap(), Vec::<Felt>::new());
+    assert_eq!(
+        context.stack_range(5, 2),
+        Err(EventContextError::InvalidRange { start: 5, end: 2 })
+    );
+    assert_eq!(
+        context.stack_slice(1, u64::MAX),
+        Err(EventContextError::RangeOverflow { start: 1, count: u64::MAX })
+    );
+    assert_eq!(
+        context.stack_slice(0, u64::MAX),
+        Err(EventContextError::RangeOverflow { start: 0, count: u64::MAX })
+    );
+    assert_eq!(context.stack_range(u64::MAX - 1, u64::MAX).unwrap(), vec![Felt::ZERO]);
     assert_eq!(context.stack_snapshot(), vec![felt(11), felt(12), felt(13)]);
 
     let trace = EventContext::new(
@@ -208,13 +231,15 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     let context =
         EventContext::new(&provider, &builtins, Invocation::event(EventId::from_u64(1), 2, active));
 
+    // `FakeProvider` only implements the canonical buffer read, so scalar and word reads exercise
+    // the provider defaults derived from it.
     assert_eq!(context.memory_value(4).unwrap(), Some(felt(21)));
     assert_eq!(context.memory_value_in_context(other, 4).unwrap(), Some(felt(31)));
     assert_eq!(context.memory_value(u64::from(u32::MAX)).unwrap(), Some(felt(25)));
     assert_eq!(context.memory_value(8).unwrap(), None);
     assert_eq!(
         context.memory_value(u64::from(u32::MAX) + 1),
-        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
+        Err(EventContextError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
     );
     assert_eq!(
         context.memory_word(4).unwrap(),
@@ -226,12 +251,12 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     );
     assert_eq!(
         context.memory_word(5),
-        Err(MemoryReadError::UnalignedWord { context_id: active, address: 5 })
+        Err(EventContextError::UnalignedWord { context_id: active, address: 5 })
     );
     assert_eq!(context.memory_word(8).unwrap(), None);
     assert_eq!(
         context.memory_word(u64::from(u32::MAX) + 1),
-        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
+        Err(EventContextError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
     );
 
     let mut output = [felt(90), felt(91)];
@@ -245,19 +270,26 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     let before = output;
     assert_eq!(
         context.read_memory(7, &mut output),
-        Err(MemoryReadError::Uninitialized { context_id: active, address: 8 })
+        Err(EventContextError::UninitializedMemory { context_id: active, address: 8 })
     );
     assert_eq!(output, before);
     assert_eq!(
         context.read_memory(u64::from(u32::MAX), &mut output),
-        Err(MemoryReadError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
+        Err(EventContextError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
     );
     assert_eq!(output, before);
     assert_eq!(
         context.read_memory(u64::from(u32::MAX) + 1, &mut output),
-        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
+        Err(EventContextError::RangeOverflow { start: u64::from(u32::MAX) + 1, count: 2 })
     );
     assert_eq!(output, before);
+
+    let mut empty = [];
+    context.read_memory(u64::from(u32::MAX) + 1, &mut empty).unwrap();
+    assert_eq!(
+        context.read_memory(u64::from(u32::MAX) + 2, &mut empty),
+        Err(EventContextError::AddressOutOfBounds { address: u64::from(u32::MAX) + 2 })
+    );
 
     assert_eq!(
         context.memory_slice(4, 4).unwrap(),
@@ -266,11 +298,36 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     assert_eq!(context.memory_slice_in_context(other, 5, 2).unwrap(), vec![felt(32), felt(33)]);
     assert_eq!(
         context.memory_slice(u64::from(u32::MAX), 2),
-        Err(MemoryReadError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
+        Err(EventContextError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
     );
     assert_eq!(
         context.memory_slice(7, 2),
-        Err(MemoryReadError::Uninitialized { context_id: active, address: 8 })
+        Err(EventContextError::UninitializedMemory { context_id: active, address: 8 })
+    );
+    assert_eq!(
+        context.memory_range(4, 8).unwrap(),
+        vec![felt(21), felt(22), felt(23), felt(24)]
+    );
+    assert_eq!(context.memory_range_in_context(other, 5, 7).unwrap(), vec![felt(32), felt(33)]);
+    assert_eq!(
+        context.memory_range(u64::from(u32::MAX), u64::from(u32::MAX) + 1).unwrap(),
+        vec![felt(25)]
+    );
+    assert_eq!(
+        context.memory_range(u64::from(u32::MAX) + 1, u64::from(u32::MAX) + 1).unwrap(),
+        Vec::<Felt>::new()
+    );
+    assert_eq!(
+        context.memory_range(8, 7),
+        Err(EventContextError::InvalidRange { start: 8, end: 7 })
+    );
+    assert_eq!(
+        context.memory_range(u64::from(u32::MAX), u64::from(u32::MAX) + 2),
+        Err(EventContextError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
+    );
+    assert_eq!(
+        context.memory_range(7, 9),
+        Err(EventContextError::UninitializedMemory { context_id: active, address: 8 })
     );
     assert_eq!(
         context.memory_snapshot_in_context(other),
@@ -303,19 +360,38 @@ fn advice_and_merkle_reads_are_borrowed_typed_and_atomic() {
     let mut output = [Felt::ZERO; 2];
     context.read_advice_stack(1, &mut output).unwrap();
     assert_eq!(output, [felt(42), felt(43)]);
-    assert_eq!(context.advice_stack_range(1, 2).unwrap(), output);
+    assert_eq!(context.advice_stack_slice(1, 2).unwrap(), output);
+    assert_eq!(context.advice_stack_range(1, 3).unwrap(), output);
+    assert_eq!(context.advice_stack_range(3, 3).unwrap(), Vec::<Felt>::new());
+    assert_eq!(
+        context.advice_stack_range(3, 1),
+        Err(EventContextError::InvalidRange { start: 3, end: 1 })
+    );
 
     let before = output;
     assert_eq!(
         context.read_advice_stack(2, &mut output),
-        Err(AdviceReadError::OutOfBounds { start: 2, count: 2, len: 3 })
+        Err(EventContextError::AdviceStackOutOfBounds { start: 2, end: 4, len: 3 })
     );
     assert_eq!(output, before);
     assert_eq!(
-        context.read_advice_stack(usize::MAX, &mut output[..1]),
-        Err(AdviceReadError::RangeOverflow { start: usize::MAX, count: 1 })
+        context.read_advice_stack(u64::MAX, &mut output[..1]),
+        Err(EventContextError::RangeOverflow { start: u64::MAX, count: 1 })
     );
     assert_eq!(output, before);
+    assert_eq!(
+        context.advice_stack_slice(2, 2),
+        Err(EventContextError::AdviceStackOutOfBounds { start: 2, end: 4, len: 3 })
+    );
+    let mut empty = [];
+    assert_eq!(
+        context.read_advice_stack(u64::from(u32::MAX) + 1, &mut empty),
+        Err(EventContextError::AdviceStackOutOfBounds {
+            start: u64::from(u32::MAX) + 1,
+            end: u64::from(u32::MAX) + 1,
+            len: 3,
+        })
+    );
 
     assert_eq!(context.merkle_node(provider.merkle_root, merkle_index).unwrap(), merkle_node);
     assert_eq!(

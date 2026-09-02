@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
-use miden_event_handler::MemoryReadError;
+use miden_event_handler::EventContextError;
 
 use crate::{ContextId, ExecutionOptions, MemoryAddress, MemoryError, processor::MemoryInterface};
 
@@ -221,12 +221,12 @@ impl Memory {
         ctx: ContextId,
         start: u32,
         output: &mut [Felt],
-    ) -> Result<(), MemoryReadError> {
+    ) -> Result<(), EventContextError> {
         let count = output.len();
         let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
         let end = u64::from(start).saturating_add(count_u64);
         if end > u64::from(u32::MAX) + 1 {
-            return Err(MemoryReadError::RangeOverflow {
+            return Err(EventContextError::RangeOverflow {
                 start: u64::from(start),
                 count: count_u64,
             });
@@ -240,7 +240,7 @@ impl Memory {
         let last_word_addr = last - last % WORD_SIZE as u32;
         loop {
             if !self.memory.contains_key(&(ctx, word_addr)) {
-                return Err(MemoryReadError::Uninitialized {
+                return Err(EventContextError::UninitializedMemory {
                     context_id: ctx,
                     address: word_addr.max(start),
                 });
@@ -251,11 +251,21 @@ impl Memory {
             word_addr += WORD_SIZE as u32;
         }
 
-        for (offset, target) in output.iter_mut().enumerate() {
-            let address = start + offset as u32;
-            *target = self
-                .read_element_impl(ctx, address)
+        let start = u64::from(start);
+        let mut word_addr = start - start % WORD_SIZE as u64;
+        while word_addr < end {
+            let word = self
+                .memory
+                .get(&(ctx, word_addr as u32))
                 .expect("all words touched by the range were validated above");
+            let copy_start = start.max(word_addr);
+            let copy_end = end.min(word_addr + WORD_SIZE as u64);
+            let source_start = (copy_start - word_addr) as usize;
+            let target_start = (copy_start - start) as usize;
+            let copy_len = (copy_end - copy_start) as usize;
+            output[target_start..target_start + copy_len]
+                .copy_from_slice(&word.as_elements()[source_start..source_start + copy_len]);
+            word_addr += WORD_SIZE as u64;
         }
         Ok(())
     }

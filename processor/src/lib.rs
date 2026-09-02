@@ -81,10 +81,9 @@ pub mod advice {
 /// compatibility types remain here for v0.31 and will be removed in v0.32.
 pub mod event {
     pub use miden_core::events::*;
-    #[allow(deprecated)]
     pub use miden_event_handler::{
-        AdviceProviderView, EventContext, EventError, EventHandler, NoopEventHandler,
-        NoopTraceHandler, TraceError, TraceHandler,
+        EventContext, EventContextError, EventError, EventHandler, Invocation, InvocationKind,
+        MerkleReadError, NoopEventHandler, NoopTraceHandler, TraceError, TraceHandler,
     };
 
     pub use crate::host::handlers::{EventHandlerRegistry, TraceHandlerRegistry};

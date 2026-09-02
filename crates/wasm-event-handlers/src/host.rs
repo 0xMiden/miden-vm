@@ -20,7 +20,7 @@ use miden_crypto::{
         sha2::{Sha256, Sha512},
     },
 };
-use miden_event_handler::{AdviceMutation, EventContext, MemoryReadError, MerkleReadError};
+use miden_event_handler::{AdviceMutation, EventContext, EventContextError, MerkleReadError};
 use miden_event_handler_abi::{IMPORT_MODULE, MAX_FAIL_MSG_BYTES, MEMORY_EXPORT, Status, host_fn};
 use miden_processor::{
     ContextId, Felt, Word,
@@ -343,14 +343,13 @@ const OK: i32 = Status::Ok.as_raw();
 /// Returns the depth of the operand stack.
 fn stack_depth(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    u32::try_from(state(&caller)?.stack_depth())
-        .map_err(|_| trap("operand stack depth exceeds u32"))
+    Ok(state(&caller)?.stack_depth())
 }
 
 /// Returns the operand-stack element at position `pos` in canonical form.
 fn stack_get(mut caller: Caller<'_, HostCtx>, pos: u32) -> Result<u64, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + FUEL_PER_FELT)?;
-    Ok(state(&caller)?.stack_item(pos as usize).as_canonical_u64())
+    Ok(state(&caller)?.stack_item(u64::from(pos)).as_canonical_u64())
 }
 
 /// Writes the `count` operand-stack elements at positions `start_pos..start_pos + count` to
@@ -368,7 +367,7 @@ fn stack_read(
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
     let state = state(&caller)?;
     let mut felts = vec![Felt::ZERO; count as usize];
-    state.read_stack(start_pos as usize, &mut felts);
+    state.read_stack(u64::from(start_pos), &mut felts);
     write_felts(mem.data_mut(&mut caller), out, &felts)
 }
 
@@ -436,8 +435,12 @@ fn mem_read_range(
     let mut felts = vec![Felt::ZERO; count as usize];
     match state.read_memory_in_context(ctx, u64::from(addr), &mut felts) {
         Ok(()) => {},
-        Err(MemoryReadError::RangeOverflow { .. }) => return Ok(Status::OutOfBounds.as_raw()),
-        Err(MemoryReadError::Uninitialized { .. }) => return Ok(Status::Uninit.as_raw()),
+        Err(EventContextError::RangeOverflow { .. }) => {
+            return Ok(Status::OutOfBounds.as_raw());
+        },
+        Err(EventContextError::UninitializedMemory { .. }) => {
+            return Ok(Status::Uninit.as_raw());
+        },
         Err(err) => return Err(trap(format!("{err}"))),
     }
     write_felts(mem.data_mut(caller), out, &felts)?;
@@ -512,10 +515,6 @@ fn merkle_get_node(
             write_felts(mem.data_mut(&mut caller), out, node.as_elements())?;
             Ok(OK)
         },
-        // A position outside the valid range for a Merkle tree is a defect, not a miss.
-        Err(MerkleReadError::InvalidNodeIndex { .. }) => {
-            Err(trap("invalid merkle node depth/index"))
-        },
         Err(MerkleReadError::Lookup(_)) => Ok(Status::NotFound.as_raw()),
     }
 }
@@ -549,7 +548,7 @@ fn adv_stack_read(
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL + u64::from(count) * FUEL_PER_FELT)?;
     let mem = memory(&mut caller)?;
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, count)?;
-    let start = offset as usize;
+    let start = u64::from(offset);
     let mut felts = vec![Felt::ZERO; count as usize];
     if state(&caller)?.read_advice_stack(start, &mut felts).is_err() {
         return Ok(Status::OutOfBounds.as_raw());

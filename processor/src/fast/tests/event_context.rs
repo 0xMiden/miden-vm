@@ -5,8 +5,8 @@ use miden_core::{
     events::{EventId, EventName, SystemEvent},
 };
 use miden_event_handler::{
-    AdviceMutation, AdviceReadError, EventContext, EventError, Invocation, InvocationKind,
-    MemoryReadError, TraceError,
+    AdviceMutation, EventContext, EventContextError, EventError, Invocation, InvocationKind,
+    TraceError,
 };
 
 use super::*;
@@ -61,11 +61,11 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     assert_eq!(context.id(), event_id);
     assert_eq!(context.clock(), 77);
     assert_eq!(context.context_id(), active_context);
-    assert_eq!(context.stack_depth(), processor.stack_depth() as usize);
+    assert_eq!(context.stack_depth(), processor.stack_depth());
     assert_eq!(context.stack_item(0), processor.stack_get_safe(0));
-    assert_eq!(context.stack_item(context.stack_depth() + 10), ZERO);
+    assert_eq!(context.stack_item(u64::from(context.stack_depth()) + 10), ZERO);
     assert_eq!(context.stack_word(1), processor.stack_get_word_safe(1));
-    let depth = context.stack_depth();
+    let depth = u64::from(context.stack_depth());
     assert_eq!(
         context.stack_word(depth - 2),
         Word::new([context.stack_item(depth - 2), context.stack_item(depth - 1), ZERO, ZERO])
@@ -76,15 +76,18 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     );
 
     let mut stack_output = [felt(99); 5];
-    context.read_stack(context.stack_depth() - 2, &mut stack_output);
-    assert_eq!(stack_output[0], processor.stack_get_safe(context.stack_depth() - 2));
-    assert_eq!(stack_output[1], processor.stack_get_safe(context.stack_depth() - 1));
+    context.read_stack(depth - 2, &mut stack_output);
+    assert_eq!(stack_output[0], processor.stack_get_safe((depth - 2) as usize));
+    assert_eq!(stack_output[1], processor.stack_get_safe((depth - 1) as usize));
     assert_eq!(&stack_output[2..], &[ZERO; 3]);
+    assert_eq!(context.stack_range(depth - 2, depth + 3).unwrap(), stack_output);
+    assert_eq!(context.stack_slice(depth - 2, 5).unwrap(), stack_output);
 
     assert_eq!(context.memory_value(4).unwrap(), Some(felt(200)));
     assert_eq!(context.memory_value_in_context(root_context, 4).unwrap(), Some(felt(100)));
     assert_eq!(context.memory_word(4).unwrap(), Some(word(200)));
     assert_eq!(context.memory_word_in_context(root_context, 4).unwrap(), Some(word(100)));
+    assert_eq!(context.memory_range(4, 8).unwrap(), word(200).to_vec());
     assert_eq!(context.memory_slice(4, 4).unwrap(), word(200).to_vec());
 
     let mut memory_output = [ZERO; 2];
@@ -93,12 +96,12 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     let before = memory_output;
     assert_eq!(
         context.read_memory_in_context(root_context, 7, &mut memory_output),
-        Err(MemoryReadError::Uninitialized { context_id: root_context, address: 8 })
+        Err(EventContextError::UninitializedMemory { context_id: root_context, address: 8 })
     );
     assert_eq!(memory_output, before);
     assert_eq!(
         context.memory_word(5),
-        Err(MemoryReadError::UnalignedWord { context_id: active_context, address: 5 })
+        Err(EventContextError::UnalignedWord { context_id: active_context, address: 5 })
     );
     assert_eq!(
         context.memory_snapshot_in_context(root_context),
@@ -121,11 +124,12 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     let mut advice_output = [ZERO; 2];
     context.read_advice_stack(1, &mut advice_output).unwrap();
     assert_eq!(advice_output, [felt(22), felt(23)]);
-    assert_eq!(context.advice_stack_range(1, 2).unwrap(), advice_output);
+    assert_eq!(context.advice_stack_range(1, 3).unwrap(), advice_output);
+    assert_eq!(context.advice_stack_slice(1, 2).unwrap(), advice_output);
     let before = advice_output;
     assert_eq!(
         context.read_advice_stack(2, &mut advice_output),
-        Err(AdviceReadError::OutOfBounds { start: 2, count: 2, len: 3 })
+        Err(EventContextError::AdviceStackOutOfBounds { start: 2, end: 4, len: 3 })
     );
     assert_eq!(advice_output, before);
 

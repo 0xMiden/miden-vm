@@ -3,37 +3,30 @@
 //! Explicit-context methods intentionally read the context supplied by the caller. This differs
 //! from the abandoned precursor to this interface, which silently read the active context.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     ContextId, Felt, MemoryAddress, Word,
-    advice::{AdviceMap, AdviceStack},
-    crypto::merkle::MerklePath,
     deferred::{Digest, Node, PrecompileError},
 };
 
-use crate::{
-    AdviceReadError, EventContext, EventContextProvider, MemoryReadError, MerkleReadError,
-    context::node_index_from_elements,
-};
+use crate::{EventContext, EventContextError};
+
+fn legacy_stack_position(position: usize) -> u64 {
+    u64::try_from(position).unwrap_or(u64::MAX)
+}
 
 impl EventContext<'_> {
-    /// Legacy alias for [`EventContext::id`].
-    #[deprecated(note = "use EventContext::id")]
-    pub const fn event_id(&self) -> miden_core::events::EventId {
-        self.id()
-    }
-
     /// Legacy alias for [`EventContext::stack_item`].
     #[deprecated(note = "use EventContext::stack_item")]
     pub fn get_stack_item(&self, position: usize) -> Felt {
-        self.stack_item(position)
+        self.stack_item(legacy_stack_position(position))
     }
 
     /// Legacy alias for [`EventContext::stack_word`].
     #[deprecated(note = "use EventContext::stack_word")]
     pub fn get_stack_word(&self, start: usize) -> Word {
-        self.stack_word(start)
+        self.stack_word(legacy_stack_position(start))
     }
 
     /// Legacy allocating operand-stack snapshot.
@@ -61,7 +54,7 @@ impl EventContext<'_> {
         &self,
         context_id: ContextId,
         address: u32,
-    ) -> Result<Option<Word>, MemoryReadError> {
+    ) -> Result<Option<Word>, EventContextError> {
         self.memory_word_in_context(context_id, u64::from(address))
     }
 
@@ -72,31 +65,26 @@ impl EventContext<'_> {
     }
 
     /// Reads and validates a half-open memory range from two operand-stack positions.
-    #[deprecated(note = "read stack addresses and use EventContext::memory_slice")]
+    #[deprecated(
+        note = "read the pointers with EventContext::stack_item, then use EventContext::memory_range, memory_slice, memory_value, or memory_word as appropriate"
+    )]
     pub fn get_mem_addr_range(
         &self,
         start_position: usize,
         end_position: usize,
-    ) -> Result<core::ops::Range<u32>, MemoryReadError> {
-        let start = self.stack_item(start_position).as_canonical_u64();
-        let end = self.stack_item(end_position).as_canonical_u64();
+    ) -> Result<core::ops::Range<u32>, EventContextError> {
+        let start = self.stack_item(legacy_stack_position(start_position)).as_canonical_u64();
+        let end = self.stack_item(legacy_stack_position(end_position)).as_canonical_u64();
         if start > u32::MAX as u64 {
-            return Err(MemoryReadError::AddressOutOfBounds { address: start });
+            return Err(EventContextError::AddressOutOfBounds { address: start });
         }
         if end > u32::MAX as u64 {
-            return Err(MemoryReadError::AddressOutOfBounds { address: end });
+            return Err(EventContextError::AddressOutOfBounds { address: end });
         }
         if start > end {
-            return Err(MemoryReadError::InvalidRange { start, end });
+            return Err(EventContextError::InvalidRange { start, end });
         }
         Ok(start as u32..end as u32)
-    }
-
-    /// Returns the legacy read-only advice-provider compatibility view.
-    #[allow(deprecated)]
-    #[deprecated(note = "use EventContext advice and Merkle accessors directly")]
-    pub fn advice_provider(&self) -> AdviceProviderView<'_> {
-        AdviceProviderView { provider: self.provider }
     }
 
     /// Legacy read-only deferred digest lookup.
@@ -118,107 +106,5 @@ impl EventContext<'_> {
         digest: Digest,
     ) -> Result<(Digest, &Node), PrecompileError> {
         self.builtins().require_canonical_deferred_node(digest)
-    }
-}
-
-/// Temporary read-only view covering the former advice and Merkle query surface.
-#[deprecated(note = "use EventContext advice and Merkle accessors directly")]
-pub struct AdviceProviderView<'a> {
-    provider: &'a dyn EventContextProvider,
-}
-
-#[allow(deprecated)]
-impl AdviceProviderView<'_> {
-    /// Allocates the advice stack as elements ordered from top to bottom.
-    pub fn stack(&self) -> Vec<Felt> {
-        self.provider.advice_stack().iter().copied().collect()
-    }
-
-    /// Returns the number of elements on the advice stack.
-    pub fn stack_len(&self) -> usize {
-        self.provider.advice_stack().len()
-    }
-
-    /// Iterates over the advice stack from top to bottom.
-    pub fn stack_iter(&self) -> impl Iterator<Item = &Felt> {
-        self.provider.advice_stack().iter()
-    }
-
-    /// Returns the borrowed typed advice stack.
-    pub fn typed_stack(&self) -> &AdviceStack {
-        self.provider.advice_stack()
-    }
-
-    /// Returns the borrowed advice map.
-    pub fn map(&self) -> &AdviceMap {
-        self.provider.advice_map()
-    }
-
-    /// Returns true when the advice map contains `key`.
-    pub fn contains_map_key(&self, key: &Word) -> bool {
-        self.provider.advice_map().contains_key(key)
-    }
-
-    /// Returns the advice-map value associated with `key`.
-    pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
-        self.provider.advice_map().get(key).map(AsRef::as_ref)
-    }
-
-    /// Strictly reads an advice-stack range without modifying `output` on failure.
-    pub fn read_stack(&self, start: usize, output: &mut [Felt]) -> Result<(), AdviceReadError> {
-        let count = output.len();
-        let end = start
-            .checked_add(count)
-            .ok_or(AdviceReadError::RangeOverflow { start, count })?;
-        let stack = self.provider.advice_stack();
-        if end > stack.len() {
-            return Err(AdviceReadError::OutOfBounds { start, count, len: stack.len() });
-        }
-        for (target, value) in output.iter_mut().zip(stack.iter().skip(start)) {
-            *target = *value;
-        }
-        Ok(())
-    }
-
-    /// Allocates a strict advice-stack range.
-    pub fn stack_range(&self, start: usize, count: usize) -> Result<Vec<Felt>, AdviceReadError> {
-        let mut values = vec![Felt::ZERO; count];
-        self.read_stack(start, &mut values)?;
-        Ok(values)
-    }
-
-    /// Returns a Merkle node addressed by legacy depth/position field elements.
-    pub fn get_tree_node(
-        &self,
-        root: Word,
-        depth: Felt,
-        position: Felt,
-    ) -> Result<Word, MerkleReadError> {
-        self.provider.merkle_node(root, node_index_from_elements(depth, position)?)
-    }
-
-    /// Returns a Merkle path addressed by legacy depth/position field elements.
-    pub fn get_merkle_path(
-        &self,
-        root: Word,
-        depth: Felt,
-        position: Felt,
-    ) -> Result<MerklePath, MerkleReadError> {
-        self.provider.merkle_path(root, node_index_from_elements(depth, position)?)
-    }
-
-    /// Checks for a Merkle path addressed by legacy depth/position field elements.
-    pub fn has_merkle_path(
-        &self,
-        root: Word,
-        depth: Felt,
-        position: Felt,
-    ) -> Result<bool, MerkleReadError> {
-        Ok(self.provider.has_merkle_path(root, node_index_from_elements(depth, position)?))
-    }
-
-    /// Returns true when the Merkle store contains `root`.
-    pub fn has_merkle_root(&self, root: Word) -> bool {
-        self.provider.has_merkle_root(root)
     }
 }

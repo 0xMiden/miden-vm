@@ -266,7 +266,7 @@ fn clk_ctx_and_depth_are_visible() {
     let expected = [
         Felt::new_unchecked(u64::from(state.clock())),
         Felt::new_unchecked(u64::from(u32::from(state.context_id()))),
-        Felt::new_unchecked(u64::try_from(state.stack_depth()).unwrap()),
+        Felt::new_unchecked(u64::from(state.stack_depth())),
     ];
 
     let mutations = run(&module, &processor).expect("handler succeeds");
