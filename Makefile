@@ -420,6 +420,10 @@ fuzz-mast-node-info: fuzz-seeds ## Run fuzzing for SerializedMastForest node met
 fuzz-mast-forest-wire-view: fuzz-seeds ## Run fuzzing for MastForestWireView structural inspection
 	@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir tools/miden-core-fuzz
 
+.PHONY: fuzz-execution-proof
+fuzz-execution-proof: fuzz-seeds ## Run bounded ExecutionProof deserialization fuzzing
+	@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir tools/miden-core-fuzz -- -rss_limit_mb=512 -timeout=10 $(FUZZ_ARGS)
+
 .PHONY: fuzz-all
 fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	FAILED=0; \

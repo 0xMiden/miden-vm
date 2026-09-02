@@ -101,11 +101,12 @@ The **`operation_serde_deserialize`** target tests `Operation` JSON deserializat
 cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir tools/miden-core-fuzz
 ```
 
-The **`execution_proof_deserialize`** target tests canonical `ExecutionProof` decoding without a registry,
-including its passive deferred-state proof wire.
+The **`execution_proof_deserialize`** target tests canonical `ExecutionProof` decoding without a
+registry, including its passive deferred-state proof wire. Successful decodes must encode to the
+same bytes and decode to the same proof.
 
 ```bash
-cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir tools/miden-core-fuzz
+make fuzz-execution-proof
 ```
 
 The **`execution_proof_serde_deserialize`** target exercises the derived Serde parsers for
