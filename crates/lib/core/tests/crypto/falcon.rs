@@ -79,7 +79,9 @@ pub fn push_falcon_signature(
     let msg = context.stack_word(5);
 
     let pk_sk_felts = context
-        .advice_map_entry(&pub_key)
+        .advice_map()
+        .get(&pub_key)
+        .map(AsRef::as_ref)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     // Convert felts back to bytes (each felt was a single byte stored as u64)

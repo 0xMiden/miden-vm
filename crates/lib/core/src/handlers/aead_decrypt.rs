@@ -80,13 +80,8 @@ pub fn handle_aead_decrypt(context: &EventContext) -> Result<Vec<AdviceMutation>
     )?;
 
     // Read authentication tag: 4 elements (1 word) immediately after ciphertext
-    let tag_addr: u32 = tag_ptr
-        .try_into()
-        .ok()
-        .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
-
     let tag_word = context
-        .memory_word(tag_addr)
+        .memory_word(tag_ptr)
         .map_err(|_| AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?
         .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
 

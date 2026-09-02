@@ -398,7 +398,7 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
     // result would be a status.
     byte_range(mem.data(&caller).len(), out, FELT_BYTES, 1)?;
     let state = state(&caller)?;
-    match state.memory_value(addr) {
+    match state.memory_value(u64::from(addr)).map_err(|err| trap(format!("{err}")))? {
         Some(felt) => {
             write_felts(mem.data_mut(&mut caller), out, &[felt])?;
             Ok(OK)
@@ -434,7 +434,7 @@ fn mem_read_range(
     let state = state(caller)?;
     let ctx = ctx.unwrap_or_else(|| state.context_id());
     let mut felts = vec![Felt::ZERO; count as usize];
-    match state.read_memory_in_context(ctx, addr, &mut felts) {
+    match state.read_memory_in_context(ctx, u64::from(addr), &mut felts) {
         Ok(()) => {},
         Err(MemoryReadError::RangeOverflow { .. }) => return Ok(Status::OutOfBounds.as_raw()),
         Err(MemoryReadError::Uninitialized { .. }) => return Ok(Status::Uninit.as_raw()),
@@ -585,7 +585,7 @@ fn adv_map_value_lookup(
     }
     byte_range(data_len, out_len, 4, 1)?;
     let key = read_word(mem.data(&*caller), key)?;
-    let Some(len) = state(caller)?.advice_map_entry(&key).map(<[Felt]>::len) else {
+    let Some(len) = state(caller)?.advice_map().get(&key).map(|values| values.len()) else {
         return Ok(None);
     };
     let count = u32::try_from(len).map_err(|_| trap("advice-map value length overflows u32"))?;
@@ -628,7 +628,8 @@ fn adv_map_value_read(
     // `mem.data_mut`, so the read resolves the entry again, and the guest pays for both probes.
     charge_fuel(&mut caller, len as u64 * FUEL_PER_FELT + FUEL_PER_MAP_PROBE)?;
     let values = state(&caller)?
-        .advice_map_entry(&key)
+        .advice_map()
+        .get(&key)
         .expect("the entry was present above")
         .to_vec();
     write_felts(mem.data_mut(&mut caller), out, &values)?;

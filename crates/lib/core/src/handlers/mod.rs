@@ -47,8 +47,10 @@ pub(crate) fn read_memory_region(
     start_ptr: u64,
     len: u64,
 ) -> Option<Vec<Felt>> {
-    let range = memory_region_range(start_ptr, len)?;
-    context.memory_range(range.start, range.len()).ok()
+    if !start_ptr.is_multiple_of(4) {
+        return None;
+    }
+    context.memory_slice(start_ptr, len).ok()
 }
 
 /// Reads a contiguous region of memory elements, treating addresses that were never written to as
@@ -62,28 +64,26 @@ pub(crate) fn read_uninitialized_memory_region(
     start_ptr: u64,
     len: u64,
 ) -> Option<Vec<Felt>> {
-    let elements = memory_region_range(start_ptr, len)?
-        .map(|addr| context.memory_value(addr).unwrap_or(Felt::ZERO))
-        .collect();
-
-    Some(elements)
+    memory_region_range(start_ptr, len)?
+        .map(|addr| context.memory_value(addr).ok().map(|value| value.unwrap_or(Felt::ZERO)))
+        .collect()
 }
 
 /// Returns the address range covered by a memory region, or `None` if the region is invalid.
 ///
-/// A region is valid if its start address fits in a u32 and is word-aligned, its length fits in a
-/// u32, and its end address does not overflow.
-fn memory_region_range(start_ptr: u64, len: u64) -> Option<Range<u32>> {
-    let start_addr: u32 = start_ptr.try_into().ok()?;
-    let len: u32 = len.try_into().ok()?;
-
+/// A region is valid if its start address fits in a u32 and is word-aligned, and its exclusive end
+/// does not exceed `2^32`.
+fn memory_region_range(start_ptr: u64, len: u64) -> Option<Range<u64>> {
     // Enforce word alignment (required for crypto_stream, mem_stream operations)
-    if !start_addr.is_multiple_of(4) {
+    if start_ptr > u64::from(u32::MAX) || !start_ptr.is_multiple_of(4) {
         return None;
     }
 
     // Calculate end address with overflow check
-    let end_addr = start_addr.checked_add(len)?;
+    let end_addr = start_ptr.checked_add(len)?;
+    if end_addr > u64::from(u32::MAX) + 1 {
+        return None;
+    }
 
-    Some(start_addr..end_addr)
+    Some(start_ptr..end_addr)
 }

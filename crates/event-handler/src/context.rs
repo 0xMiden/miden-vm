@@ -32,7 +32,6 @@ pub struct Invocation {
 
 impl Invocation {
     /// Creates custom-event invocation metadata.
-    #[doc(hidden)]
     pub const fn event(id: EventId, clock: u32, context_id: ContextId) -> Self {
         Self {
             kind: InvocationKind::Event,
@@ -43,7 +42,6 @@ impl Invocation {
     }
 
     /// Creates trace-event invocation metadata.
-    #[doc(hidden)]
     pub const fn trace(id: EventId, clock: u32, context_id: ContextId) -> Self {
         Self {
             kind: InvocationKind::Trace,
@@ -78,11 +76,11 @@ impl Invocation {
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 pub enum MemoryReadError {
     /// A field-element address did not fit in the VM's `u32` address space.
-    #[error("memory address cannot exceed 2^32 but was {address}")]
+    #[error("memory address must be less than 2^32 but was {address}")]
     AddressOutOfBounds { address: u64 },
     /// A half-open range extended past the end of the VM's address space.
     #[error("memory range starting at {start} with {count} elements exceeds the address space")]
-    RangeOverflow { start: u32, count: usize },
+    RangeOverflow { start: u64, count: u64 },
     /// A range derived from two stack values had its end before its start.
     #[error("memory range start cannot exceed end, but was ({start}, {end})")]
     InvalidRange { start: u64, end: u64 },
@@ -127,8 +125,8 @@ impl From<MerkleError> for MerkleReadError {
 /// Read-only capabilities an execution engine provides to [`EventContext`].
 ///
 /// This object-safe interface is public only so execution-engine adapters can implement it.
-/// Handler implementations should use [`EventContext`]. Range defaults are deliberately built
-/// from the smallest primitive reads and preserve the caller's output buffer on error.
+/// Handler implementations should use [`EventContext`]. Implementations must leave `output`
+/// unchanged when [`Self::read_memory`] returns an error.
 #[doc(hidden)]
 pub trait EventContextProvider: Sync {
     fn stack_depth(&self) -> usize;
@@ -153,44 +151,12 @@ pub trait EventContextProvider: Sync {
         snapshot
     }
 
-    fn memory_value(&self, context_id: ContextId, address: u32) -> Option<Felt>;
-
     fn read_memory(
         &self,
         context_id: ContextId,
         start: u32,
         output: &mut [Felt],
-    ) -> Result<(), MemoryReadError> {
-        check_memory_range(start, output.len())?;
-
-        let mut pending = Vec::with_capacity(output.len());
-        for offset in 0..output.len() {
-            let address = start + offset as u32;
-            let value = self
-                .memory_value(context_id, address)
-                .ok_or(MemoryReadError::Uninitialized { context_id, address })?;
-            pending.push(value);
-        }
-        output.copy_from_slice(&pending);
-        Ok(())
-    }
-
-    fn memory_word(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Word>, MemoryReadError> {
-        if !address.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryReadError::UnalignedWord { context_id, address });
-        }
-
-        let mut elements = [ZERO; WORD_SIZE];
-        match self.read_memory(context_id, address, &mut elements) {
-            Ok(()) => Ok(Some(elements.into())),
-            Err(MemoryReadError::Uninitialized { .. }) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
+    ) -> Result<(), MemoryReadError>;
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)>;
 
@@ -268,14 +234,6 @@ impl<'a> EventContext<'a> {
         self.invocation.id()
     }
 
-    /// Returns the semantic custom-event or trace-event ID.
-    ///
-    /// This spelling is retained for handlers written against the precursor interface. New code
-    /// which handles both callback kinds can use [`Self::id`].
-    pub const fn event_id(&self) -> EventId {
-        self.id()
-    }
-
     /// Returns the processor clock at callback dispatch.
     pub const fn clock(&self) -> u32 {
         self.invocation.clock()
@@ -318,84 +276,99 @@ impl<'a> EventContext<'a> {
         self.provider.stack_snapshot()
     }
 
-    /// Returns a memory value from the active execution context.
-    pub fn memory_value(&self, address: u32) -> Option<Felt> {
+    /// Returns a memory value from the active execution context, or `None` when its word is
+    /// uninitialized.
+    pub fn memory_value(&self, address: u64) -> Result<Option<Felt>, MemoryReadError> {
         self.memory_value_in_context(self.context_id(), address)
     }
 
-    /// Returns a memory value from an explicit execution context.
-    pub fn memory_value_in_context(&self, context_id: ContextId, address: u32) -> Option<Felt> {
-        self.provider.memory_value(context_id, address)
+    /// Returns a memory value from an explicit execution context, or `None` when its word is
+    /// uninitialized.
+    pub fn memory_value_in_context(
+        &self,
+        context_id: ContextId,
+        address: u64,
+    ) -> Result<Option<Felt>, MemoryReadError> {
+        let mut value = [ZERO];
+        match self.read_memory_in_context(context_id, address, &mut value) {
+            Ok(()) => Ok(Some(value[0])),
+            Err(MemoryReadError::Uninitialized { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
-    /// Returns an aligned memory word from the active execution context.
-    pub fn memory_word(&self, address: u32) -> Result<Option<Word>, MemoryReadError> {
+    /// Returns an aligned memory word from the active execution context, or `None` when it is
+    /// uninitialized.
+    pub fn memory_word(&self, address: u64) -> Result<Option<Word>, MemoryReadError> {
         self.memory_word_in_context(self.context_id(), address)
     }
 
-    /// Returns an aligned memory word from an explicit execution context.
+    /// Returns an aligned memory word from an explicit execution context, or `None` when it is
+    /// uninitialized.
     pub fn memory_word_in_context(
         &self,
         context_id: ContextId,
-        address: u32,
+        address: u64,
     ) -> Result<Option<Word>, MemoryReadError> {
-        self.provider.memory_word(context_id, address)
+        let address_u32 = check_memory_address(address)?;
+        if !address_u32.is_multiple_of(WORD_SIZE as u32) {
+            return Err(MemoryReadError::UnalignedWord { context_id, address: address_u32 });
+        }
+
+        let mut elements = [ZERO; WORD_SIZE];
+        match self.read_memory_in_context(context_id, address, &mut elements) {
+            Ok(()) => Ok(Some(elements.into())),
+            Err(MemoryReadError::Uninitialized { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Strictly reads a memory range from the active context into `output`.
     ///
-    /// On overflow or an uninitialized word, `output` is left unchanged.
-    pub fn read_memory(&self, start: u32, output: &mut [Felt]) -> Result<(), MemoryReadError> {
+    /// Address validation occurs before the provider is called. On an invalid address, overflow,
+    /// or an uninitialized word, `output` is left unchanged.
+    pub fn read_memory(&self, start: u64, output: &mut [Felt]) -> Result<(), MemoryReadError> {
         self.read_memory_in_context(self.context_id(), start, output)
     }
 
     /// Strictly reads a memory range from an explicit context into `output`.
     ///
-    /// On overflow or an uninitialized word, `output` is left unchanged.
+    /// Address validation occurs before the provider is called. On an invalid address, overflow,
+    /// or an uninitialized word, `output` is left unchanged.
     pub fn read_memory_in_context(
         &self,
         context_id: ContextId,
-        start: u32,
+        start: u64,
         output: &mut [Felt],
     ) -> Result<(), MemoryReadError> {
+        let count = u64::try_from(output.len())
+            .map_err(|_| MemoryReadError::RangeOverflow { start, count: u64::MAX })?;
+        let start = check_memory_range(start, count)?;
         self.provider.read_memory(context_id, start, output)
     }
 
-    /// Allocates a strict memory range from the active execution context.
-    pub fn memory_range(&self, start: u32, count: usize) -> Result<Vec<Felt>, MemoryReadError> {
-        self.memory_range_in_context(self.context_id(), start, count)
+    /// Allocates a strict memory slice from the active execution context.
+    ///
+    /// The read fails if the address range is invalid or touches an uninitialized word.
+    pub fn memory_slice(&self, start: u64, count: u64) -> Result<Vec<Felt>, MemoryReadError> {
+        self.memory_slice_in_context(self.context_id(), start, count)
     }
 
-    /// Allocates a strict memory range from an explicit execution context.
-    pub fn memory_range_in_context(
+    /// Allocates a strict memory slice from an explicit execution context.
+    ///
+    /// The read fails if the address range is invalid or touches an uninitialized word.
+    pub fn memory_slice_in_context(
         &self,
         context_id: ContextId,
-        start: u32,
-        count: usize,
+        start: u64,
+        count: u64,
     ) -> Result<Vec<Felt>, MemoryReadError> {
+        check_memory_range(start, count)?;
+        let count =
+            usize::try_from(count).map_err(|_| MemoryReadError::RangeOverflow { start, count })?;
         let mut values = vec![ZERO; count];
         self.read_memory_in_context(context_id, start, &mut values)?;
         Ok(values)
-    }
-
-    /// Reads and validates a half-open memory address range from two stack positions.
-    pub fn memory_range_from_stack(
-        &self,
-        start_position: usize,
-        end_position: usize,
-    ) -> Result<core::ops::Range<u32>, MemoryReadError> {
-        let start = self.stack_item(start_position).as_canonical_u64();
-        let end = self.stack_item(end_position).as_canonical_u64();
-        if start > u32::MAX as u64 {
-            return Err(MemoryReadError::AddressOutOfBounds { address: start });
-        }
-        if end > u32::MAX as u64 {
-            return Err(MemoryReadError::AddressOutOfBounds { address: end });
-        }
-        if start > end {
-            return Err(MemoryReadError::InvalidRange { start, end });
-        }
-        Ok(start as u32..end as u32)
     }
 
     /// Allocates a snapshot of initialized memory in the active execution context.
@@ -416,16 +389,6 @@ impl<'a> EventContext<'a> {
     /// Returns the borrowed advice map.
     pub fn advice_map(&self) -> &AdviceMap {
         self.provider.advice_map()
-    }
-
-    /// Returns true when the advice map contains `key`.
-    pub fn advice_map_contains(&self, key: &Word) -> bool {
-        self.advice_map().contains_key(key)
-    }
-
-    /// Returns the advice-map value for `key`.
-    pub fn advice_map_entry(&self, key: &Word) -> Option<&[Felt]> {
-        self.advice_map().get(key).map(AsRef::as_ref)
     }
 
     /// Strictly reads an advice-stack range into `output`.
@@ -460,16 +423,6 @@ impl<'a> EventContext<'a> {
         let mut values = vec![ZERO; count];
         self.read_advice_stack(start, &mut values)?;
         Ok(values)
-    }
-
-    /// Clones the current advice stack.
-    pub fn advice_stack_snapshot(&self) -> AdviceStack {
-        self.advice_stack().clone()
-    }
-
-    /// Clones the current advice map.
-    pub fn advice_map_snapshot(&self) -> AdviceMap {
-        self.advice_map().clone()
     }
 
     /// Returns a node from the advice Merkle store.
@@ -531,12 +484,16 @@ impl<'a> BuiltinEventContext<'a> {
     }
 }
 
-pub(crate) fn check_memory_range(start: u32, count: usize) -> Result<(), MemoryReadError> {
-    let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
-    if u64::from(start).saturating_add(count_u64) > u64::from(u32::MAX) + 1 {
+fn check_memory_address(address: u64) -> Result<u32, MemoryReadError> {
+    address.try_into().map_err(|_| MemoryReadError::AddressOutOfBounds { address })
+}
+
+fn check_memory_range(start: u64, count: u64) -> Result<u32, MemoryReadError> {
+    let start_u32 = check_memory_address(start)?;
+    if start.checked_add(count).is_none_or(|end| end > u64::from(u32::MAX) + 1) {
         return Err(MemoryReadError::RangeOverflow { start, count });
     }
-    Ok(())
+    Ok(start_u32)
 }
 
 pub(crate) fn node_index_from_elements(

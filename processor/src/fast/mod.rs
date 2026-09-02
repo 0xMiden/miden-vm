@@ -731,11 +731,6 @@ impl EventContextProvider for FastProcessor {
     }
 
     #[inline(always)]
-    fn memory_value(&self, context_id: ContextId, address: u32) -> Option<Felt> {
-        self.memory.read_element_impl(context_id, address)
-    }
-
-    #[inline(always)]
     fn read_memory(
         &self,
         context_id: ContextId,
@@ -743,15 +738,6 @@ impl EventContextProvider for FastProcessor {
         output: &mut [Felt],
     ) -> Result<(), MemoryReadError> {
         self.memory.read_range_for_event(context_id, start, output)
-    }
-
-    #[inline(always)]
-    fn memory_word(
-        &self,
-        context_id: ContextId,
-        address: u32,
-    ) -> Result<Option<Word>, MemoryReadError> {
-        self.memory.read_word_for_event(context_id, address)
     }
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)> {

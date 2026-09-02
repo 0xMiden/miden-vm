@@ -259,7 +259,10 @@ fn write_mem_range<W: fmt::Write>(
     )?;
     let items: Vec<_> = (start..=end)
         .map(|addr| {
-            let value = context.memory_value(addr).map(|v| v.to_string());
+            let value = context
+                .memory_value(u64::from(addr))
+                .expect("a u32 memory address is always valid")
+                .map(|v| v.to_string());
             (format!("{addr:#010x}"), value)
         })
         .collect();
@@ -299,7 +302,7 @@ fn write_adv_map_entry<W: fmt::Write>(w: &mut W, context: &EventContext) -> fmt:
     let key = context.stack_word(1);
     let key_str = format_word(&key);
     let clk = context.clock();
-    match context.advice_map_entry(&key) {
+    match context.advice_map().get(&key).map(AsRef::as_ref) {
         Some(values) => {
             writeln!(w, "Advice map entry for key {key_str} before step {clk}:")?;
             let items: Vec<_> = values

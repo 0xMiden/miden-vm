@@ -75,14 +75,16 @@ pub mod advice {
     pub use super::host::advice::{AdviceError, AdviceProvider};
 }
 
+/// Compatibility facade for common handler-facing types.
+///
+/// New handlers should import these types directly from `miden_event_handler`. Deprecated
+/// compatibility types remain here for v0.31 and will be removed in v0.32.
 pub mod event {
     pub use miden_core::events::*;
     #[allow(deprecated)]
     pub use miden_event_handler::{
-        AdviceProviderView, AdviceReadError, BuiltinEventContext, EventContext,
-        EventContextProvider, EventError, EventHandler, Invocation, InvocationKind,
-        MemoryReadError, MerkleReadError, NoopEventHandler, NoopTraceHandler, TraceError,
-        TraceHandler,
+        AdviceProviderView, EventContext, EventError, EventHandler, NoopEventHandler,
+        NoopTraceHandler, TraceError, TraceHandler,
     };
 
     pub use crate::host::handlers::{EventHandlerRegistry, TraceHandlerRegistry};

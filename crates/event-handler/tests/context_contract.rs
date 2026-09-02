@@ -36,8 +36,24 @@ impl EventContextProvider for FakeProvider {
         self.stack.get(position).copied().unwrap_or(Felt::ZERO)
     }
 
-    fn memory_value(&self, context_id: ContextId, address: u32) -> Option<Felt> {
-        self.memory.get(&(context_id, address)).copied()
+    fn read_memory(
+        &self,
+        context_id: ContextId,
+        start: u32,
+        output: &mut [Felt],
+    ) -> Result<(), MemoryReadError> {
+        let mut pending = Vec::with_capacity(output.len());
+        for offset in 0..output.len() {
+            let address = start + offset as u32;
+            let value = self
+                .memory
+                .get(&(context_id, address))
+                .copied()
+                .ok_or(MemoryReadError::Uninitialized { context_id, address })?;
+            pending.push(value);
+        }
+        output.copy_from_slice(&pending);
+        Ok(())
     }
 
     fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)> {
@@ -116,6 +132,7 @@ fn fixture() -> (FakeProvider, FakeBuiltins, Word, Word, NodeIndex) {
     for (offset, value) in [31, 32, 33, 34].into_iter().enumerate() {
         memory.insert((other, 4 + offset as u32), felt(value));
     }
+    memory.insert((active, u32::MAX), felt(25));
 
     let advice_stack = AdviceStack::from(vec![felt(41), felt(42), felt(43)]);
     let map_key = Word::new([felt(51), felt(52), felt(53), felt(54)]);
@@ -159,7 +176,7 @@ fn metadata_and_stack_reads_follow_the_context_contract() {
     );
 
     assert_eq!(context.kind(), InvocationKind::Event);
-    assert_eq!(context.event_id(), event_id);
+    assert_eq!(context.id(), event_id);
     assert_eq!(context.clock(), 456);
     assert_eq!(context.context_id(), ContextId::from(7));
     assert_eq!(context.stack_depth(), 3);
@@ -179,7 +196,7 @@ fn metadata_and_stack_reads_follow_the_context_contract() {
         Invocation::trace(EventId::from_u64(999), 457, ContextId::from(9)),
     );
     assert_eq!(trace.kind(), InvocationKind::Trace);
-    assert_eq!(trace.event_id(), EventId::from_u64(999));
+    assert_eq!(trace.id(), EventId::from_u64(999));
     assert_eq!(trace.context_id(), ContextId::from(9));
 }
 
@@ -191,8 +208,14 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     let context =
         EventContext::new(&provider, &builtins, Invocation::event(EventId::from_u64(1), 2, active));
 
-    assert_eq!(context.memory_value(4), Some(felt(21)));
-    assert_eq!(context.memory_value_in_context(other, 4), Some(felt(31)));
+    assert_eq!(context.memory_value(4).unwrap(), Some(felt(21)));
+    assert_eq!(context.memory_value_in_context(other, 4).unwrap(), Some(felt(31)));
+    assert_eq!(context.memory_value(u64::from(u32::MAX)).unwrap(), Some(felt(25)));
+    assert_eq!(context.memory_value(8).unwrap(), None);
+    assert_eq!(
+        context.memory_value(u64::from(u32::MAX) + 1),
+        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
+    );
     assert_eq!(
         context.memory_word(4).unwrap(),
         Some(Word::new([felt(21), felt(22), felt(23), felt(24)]))
@@ -205,10 +228,19 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
         context.memory_word(5),
         Err(MemoryReadError::UnalignedWord { context_id: active, address: 5 })
     );
+    assert_eq!(context.memory_word(8).unwrap(), None);
+    assert_eq!(
+        context.memory_word(u64::from(u32::MAX) + 1),
+        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
+    );
 
     let mut output = [felt(90), felt(91)];
     context.read_memory_in_context(other, 5, &mut output).unwrap();
     assert_eq!(output, [felt(32), felt(33)]);
+
+    let mut terminal = [Felt::ZERO];
+    context.read_memory(u64::from(u32::MAX), &mut terminal).unwrap();
+    assert_eq!(terminal, [felt(25)]);
 
     let before = output;
     assert_eq!(
@@ -217,14 +249,28 @@ fn memory_reads_honor_context_and_leave_caller_buffers_unchanged_on_error() {
     );
     assert_eq!(output, before);
     assert_eq!(
-        context.read_memory(u32::MAX, &mut output),
-        Err(MemoryReadError::RangeOverflow { start: u32::MAX, count: 2 })
+        context.read_memory(u64::from(u32::MAX), &mut output),
+        Err(MemoryReadError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
+    );
+    assert_eq!(output, before);
+    assert_eq!(
+        context.read_memory(u64::from(u32::MAX) + 1, &mut output),
+        Err(MemoryReadError::AddressOutOfBounds { address: u64::from(u32::MAX) + 1 })
     );
     assert_eq!(output, before);
 
     assert_eq!(
-        context.memory_range(4, 4).unwrap(),
+        context.memory_slice(4, 4).unwrap(),
         vec![felt(21), felt(22), felt(23), felt(24)]
+    );
+    assert_eq!(context.memory_slice_in_context(other, 5, 2).unwrap(), vec![felt(32), felt(33)]);
+    assert_eq!(
+        context.memory_slice(u64::from(u32::MAX), 2),
+        Err(MemoryReadError::RangeOverflow { start: u64::from(u32::MAX), count: 2 })
+    );
+    assert_eq!(
+        context.memory_slice(7, 2),
+        Err(MemoryReadError::Uninitialized { context_id: active, address: 8 })
     );
     assert_eq!(
         context.memory_snapshot_in_context(other),
@@ -248,8 +294,11 @@ fn advice_and_merkle_reads_are_borrowed_typed_and_atomic() {
 
     assert!(std::ptr::eq(context.advice_stack(), &provider.advice_stack));
     assert!(std::ptr::eq(context.advice_map(), &provider.advice_map));
-    assert!(context.advice_map_contains(&map_key));
-    assert_eq!(context.advice_map_entry(&map_key), Some([felt(61), felt(62)].as_slice()));
+    assert!(context.advice_map().contains_key(&map_key));
+    assert_eq!(
+        context.advice_map().get(&map_key).map(AsRef::as_ref),
+        Some([felt(61), felt(62)].as_slice())
+    );
 
     let mut output = [Felt::ZERO; 2];
     context.read_advice_stack(1, &mut output).unwrap();
@@ -268,8 +317,6 @@ fn advice_and_merkle_reads_are_borrowed_typed_and_atomic() {
     );
     assert_eq!(output, before);
 
-    assert_eq!(context.advice_stack_snapshot(), provider.advice_stack);
-    assert_eq!(context.advice_map_snapshot(), provider.advice_map);
     assert_eq!(context.merkle_node(provider.merkle_root, merkle_index).unwrap(), merkle_node);
     assert_eq!(
         context.merkle_path(provider.merkle_root, merkle_index).unwrap(),

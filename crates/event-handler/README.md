@@ -5,10 +5,15 @@ handlers. It depends on `miden-core`, never `miden-processor`, and exposes only 
 handlers return declarative `AdviceMutation`s which the processor validates and applies as one
 transaction.
 
-For the first release of this interface, `miden-processor` continues to re-export the old handler
-paths and provides `ProcessorState<'a>` as a deprecated alias for `EventContext<'a>`. Legacy stack,
-memory, context, snapshot, advice, Merkle, and deferred lookup accessors are retained. Explicit
-`ContextId` arguments continue to select that context.
+In v0.31, `miden-processor` keeps a small compatibility facade and provides `ProcessorState<'a>` as
+a deprecated alias for `EventContext<'a>`. Legacy stack, memory, context, snapshot, advice, Merkle,
+and deferred lookup accessors are retained through that release. Explicit `ContextId` arguments
+continue to select that context. New handlers should import directly from `miden-event-handler`;
+the compatibility facade and deprecated accessors are scheduled for removal in v0.32.
+
+Native memory reads accept `u64` addresses and validate them against the VM's `u32` address space.
+`read_memory` is the canonical strict operation and leaves its output buffer unchanged on failure;
+`memory_value`, `memory_word`, and `memory_slice` are semantic operations derived from it.
 
 The bounded migration breaks are:
 

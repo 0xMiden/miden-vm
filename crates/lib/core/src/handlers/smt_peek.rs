@@ -97,7 +97,11 @@ fn get_smt_leaf_preimage(
     context: &EventContext,
     node: Word,
 ) -> Result<Vec<(Word, Word)>, SmtPeekError> {
-    let kv_pairs = context.advice_map_entry(&node).ok_or(SmtPeekError::SmtNodeNotFound { node })?;
+    let kv_pairs = context
+        .advice_map()
+        .get(&node)
+        .map(AsRef::as_ref)
+        .ok_or(SmtPeekError::SmtNodeNotFound { node })?;
 
     if kv_pairs.len() % (WORD_SIZE * 2) != 0 {
         return Err(SmtPeekError::InvalidSmtNodePreimage { node, preimage_len: kv_pairs.len() });

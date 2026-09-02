@@ -1,4 +1,5 @@
 use alloc::{vec, vec::Vec};
+use core::ops::Range;
 
 use miden_core::{Felt, Word, events::EventName, field::PrimeCharacteristicRing};
 use miden_event_handler::{AdviceMutation, EventContext, EventError};
@@ -85,10 +86,10 @@ fn push_lowerbound_result(
 
     // Read inputs from the stack; keys are provided in structural / little-endian order.
     let key = word_to_search_key(context.stack_word(KEY_OFFSET), key_size);
-    let addr_range = context.memory_range_from_stack(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
+    let addr_range = memory_range_from_stack(context)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
-    let first_word = context.memory_word(addr_range.start)?;
+    let first_word = context.memory_word(u64::from(addr_range.start))?;
 
     // Validate the end_addr is properly aligned (i.e. the entire array has size divisible by
     // stride)
@@ -116,7 +117,7 @@ fn push_lowerbound_result(
     // Helper function to get a word from memory and normalize it to the requested key size.
     let get_word = |addr: u32| {
         context
-            .memory_word(addr)
+            .memory_word(u64::from(addr))
             .map(|word| word_to_search_key(word.unwrap_or_default(), key_size))
     };
 
@@ -153,6 +154,26 @@ fn push_lowerbound_result(
         Felt::from_u32(result.unwrap_or(addr_range.end)),
         Felt::from_bool(was_key_found),
     ])])
+}
+
+fn memory_range_from_stack(
+    context: &EventContext,
+) -> Result<Range<u32>, miden_event_handler::MemoryReadError> {
+    use miden_event_handler::MemoryReadError;
+
+    let start = context.stack_item(START_ADDR_OFFSET).as_canonical_u64();
+    let end = context.stack_item(END_ADDR_OFFSET).as_canonical_u64();
+    if start > u64::from(u32::MAX) {
+        return Err(MemoryReadError::AddressOutOfBounds { address: start });
+    }
+    if end > u64::from(u32::MAX) {
+        return Err(MemoryReadError::AddressOutOfBounds { address: end });
+    }
+    if start > end {
+        return Err(MemoryReadError::InvalidRange { start, end });
+    }
+
+    Ok(start as u32..end as u32)
 }
 
 /// Selectively zeroizes the felts in a [`Word`] based on the provided [`KeySize`].

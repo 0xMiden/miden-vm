@@ -27,7 +27,7 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     let tree = MerkleTree::new([word(50), word(60), word(70), word(80)]).unwrap();
     let merkle_store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default()
-        .with_stack(advice_stack.clone())
+        .with_stack(advice_stack)
         .with_map([(map_key, map_values.clone())])
         .with_merkle_store(merkle_store);
     let options = ExecutionOptions::default();
@@ -58,7 +58,7 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     let context = processor.event_context(Invocation::event(event_id, 77, active_context));
 
     assert_eq!(context.kind(), InvocationKind::Event);
-    assert_eq!(context.event_id(), event_id);
+    assert_eq!(context.id(), event_id);
     assert_eq!(context.clock(), 77);
     assert_eq!(context.context_id(), active_context);
     assert_eq!(context.stack_depth(), processor.stack_depth() as usize);
@@ -81,10 +81,11 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
     assert_eq!(stack_output[1], processor.stack_get_safe(context.stack_depth() - 1));
     assert_eq!(&stack_output[2..], &[ZERO; 3]);
 
-    assert_eq!(context.memory_value(4), Some(felt(200)));
-    assert_eq!(context.memory_value_in_context(root_context, 4), Some(felt(100)));
+    assert_eq!(context.memory_value(4).unwrap(), Some(felt(200)));
+    assert_eq!(context.memory_value_in_context(root_context, 4).unwrap(), Some(felt(100)));
     assert_eq!(context.memory_word(4).unwrap(), Some(word(200)));
     assert_eq!(context.memory_word_in_context(root_context, 4).unwrap(), Some(word(100)));
+    assert_eq!(context.memory_slice(4, 4).unwrap(), word(200).to_vec());
 
     let mut memory_output = [ZERO; 2];
     context.read_memory_in_context(root_context, 5, &mut memory_output).unwrap();
@@ -111,10 +112,11 @@ fn fast_processor_adapter_matches_every_public_read_capability() {
 
     assert!(core::ptr::eq(context.advice_stack(), processor.advice.stack_ref()));
     assert!(core::ptr::eq(context.advice_map(), processor.advice.map()));
-    assert_eq!(context.advice_stack_snapshot(), advice_stack);
-    assert_eq!(context.advice_map_entry(&map_key), Some(map_values.as_slice()));
-    assert!(context.advice_map_contains(&map_key));
-    assert_eq!(context.advice_map_snapshot(), processor.advice.map().clone());
+    assert_eq!(
+        context.advice_map().get(&map_key).map(AsRef::as_ref),
+        Some(map_values.as_slice())
+    );
+    assert!(context.advice_map().contains_key(&map_key));
 
     let mut advice_output = [ZERO; 2];
     context.read_advice_stack(1, &mut advice_output).unwrap();

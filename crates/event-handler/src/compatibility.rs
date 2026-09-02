@@ -18,6 +18,12 @@ use crate::{
 };
 
 impl EventContext<'_> {
+    /// Legacy alias for [`EventContext::id`].
+    #[deprecated(note = "use EventContext::id")]
+    pub const fn event_id(&self) -> miden_core::events::EventId {
+        self.id()
+    }
+
     /// Legacy alias for [`EventContext::stack_item`].
     #[deprecated(note = "use EventContext::stack_item")]
     pub fn get_stack_item(&self, position: usize) -> Felt {
@@ -45,7 +51,8 @@ impl EventContext<'_> {
     /// Reads a value from the explicitly supplied execution context.
     #[deprecated(note = "use EventContext::memory_value_in_context")]
     pub fn get_mem_value(&self, context_id: ContextId, address: u32) -> Option<Felt> {
-        self.memory_value_in_context(context_id, address)
+        self.memory_value_in_context(context_id, u64::from(address))
+            .expect("a u32 memory address is always valid")
     }
 
     /// Reads a word from the explicitly supplied execution context.
@@ -55,7 +62,7 @@ impl EventContext<'_> {
         context_id: ContextId,
         address: u32,
     ) -> Result<Option<Word>, MemoryReadError> {
-        self.memory_word_in_context(context_id, address)
+        self.memory_word_in_context(context_id, u64::from(address))
     }
 
     /// Allocates a memory snapshot for the explicitly supplied execution context.
@@ -65,13 +72,24 @@ impl EventContext<'_> {
     }
 
     /// Reads and validates a half-open memory range from two operand-stack positions.
-    #[deprecated(note = "read stack addresses and use EventContext::memory_range")]
+    #[deprecated(note = "read stack addresses and use EventContext::memory_slice")]
     pub fn get_mem_addr_range(
         &self,
         start_position: usize,
         end_position: usize,
     ) -> Result<core::ops::Range<u32>, MemoryReadError> {
-        self.memory_range_from_stack(start_position, end_position)
+        let start = self.stack_item(start_position).as_canonical_u64();
+        let end = self.stack_item(end_position).as_canonical_u64();
+        if start > u32::MAX as u64 {
+            return Err(MemoryReadError::AddressOutOfBounds { address: start });
+        }
+        if end > u32::MAX as u64 {
+            return Err(MemoryReadError::AddressOutOfBounds { address: end });
+        }
+        if start > end {
+            return Err(MemoryReadError::InvalidRange { start, end });
+        }
+        Ok(start as u32..end as u32)
     }
 
     /// Returns the legacy read-only advice-provider compatibility view.

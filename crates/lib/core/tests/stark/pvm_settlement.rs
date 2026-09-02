@@ -269,7 +269,7 @@ impl Host for PvmSettlementHost {
             }
 
             let proof_key = proof_request_key(verifier_root, requested_root);
-            if context.advice_map_contains(&proof_key) {
+            if context.advice_map().contains_key(&proof_key) {
                 return Err(SettlementEventError::PackageAlreadyLoaded.into());
             }
 

@@ -215,18 +215,6 @@ impl Memory {
         Ok(word)
     }
 
-    /// Reads an aligned word for the processor-independent event context.
-    pub(crate) fn read_word_for_event(
-        &self,
-        ctx: ContextId,
-        addr: u32,
-    ) -> Result<Option<Word>, MemoryReadError> {
-        if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryReadError::UnalignedWord { context_id: ctx, address: addr });
-        }
-        Ok(self.memory.get(&(ctx, addr)).copied())
-    }
-
     /// Strictly reads a contiguous range without modifying `output` when validation fails.
     pub(crate) fn read_range_for_event(
         &self,
@@ -238,7 +226,10 @@ impl Memory {
         let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
         let end = u64::from(start).saturating_add(count_u64);
         if end > u64::from(u32::MAX) + 1 {
-            return Err(MemoryReadError::RangeOverflow { start, count });
+            return Err(MemoryReadError::RangeOverflow {
+                start: u64::from(start),
+                count: count_u64,
+            });
         }
         if output.is_empty() {
             return Ok(());

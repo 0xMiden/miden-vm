@@ -43,8 +43,10 @@ impl EventHandler for LegacyHandler {
         let _: u32 = state.clock();
 
         assert_eq!(state.get_stack_item(0), self.event.to_event_id().as_felt());
+        assert_eq!(state.event_id(), self.event.to_event_id());
         assert_eq!(state.get_stack_word(0)[0], self.event.to_event_id().as_felt());
         assert_eq!(state.get_stack_state()[0], self.event.to_event_id().as_felt());
+        assert_eq!(state.get_mem_addr_range(1, 2).unwrap(), 0..0);
 
         assert_eq!(state.get_mem_value(root, 0), Some(felt(11)));
         assert_eq!(state.get_mem_value(active, 0), Some(felt(22)));
