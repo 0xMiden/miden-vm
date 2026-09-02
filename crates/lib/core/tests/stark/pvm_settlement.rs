@@ -101,7 +101,7 @@ fn prove_deferred_ecdsa_execution(
         .with_hash_fn(HashFunction::Poseidon2)
         .prove(witness)
         .expect("ECDSA execution must produce a deferred MVM proof");
-    let PrecompileStatus::Deferred(precompile) = proof.precompile_status() else {
+    let PrecompileStatus::Deferred(precompile) = proof.precompile() else {
         panic!("ECDSA execution must retain deferred precompile work")
     };
     let deferred_state =

@@ -17,6 +17,28 @@ use crate::{
     },
 };
 
+// CONSTANTS
+// ================================================================================================
+
+/// Hard encoded-size and per-allocation safety ceiling for every STARK proof.
+pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
+
+const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
+const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
+
+const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
+    crate::Felt::new_unchecked(4465259443638079335),
+    crate::Felt::new_unchecked(17418505147041915588),
+    crate::Felt::new_unchecked(17745366771765383900),
+    crate::Felt::new_unchecked(5300166905943834781),
+]);
+const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
+    crate::Felt::new_unchecked(2947623151120287659),
+    crate::Felt::new_unchecked(14078382412112533261),
+    crate::Felt::new_unchecked(16121817997513902205),
+    crate::Felt::new_unchecked(3291147646890284397),
+]);
+
 // HASH FUNCTION
 // ================================================================================================
 
@@ -127,9 +149,6 @@ impl Deserializable for HashFunction {
 // PROOF ARTIFACTS
 // ================================================================================================
 
-/// Hard encoded-size and per-allocation safety ceiling for every STARK proof.
-pub const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-
 /// A Miden VM STARK proof together with its authenticated precompile obligation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmProof {
@@ -215,22 +234,6 @@ impl Deserializable for PrecompileProof {
     }
 }
 
-const DEFERRED_PROOF_DISCRIMINANT: u8 = 0;
-const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
-
-const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(4465259443638079335),
-    crate::Felt::new_unchecked(17418505147041915588),
-    crate::Felt::new_unchecked(17745366771765383900),
-    crate::Felt::new_unchecked(5300166905943834781),
-]);
-const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(2947623151120287659),
-    crate::Felt::new_unchecked(14078382412112533261),
-    crate::Felt::new_unchecked(16121817997513902205),
-    crate::Felt::new_unchecked(3291147646890284397),
-]);
-
 /// The transport format and recursive verifier roots declared by an execution proof.
 ///
 /// Verifier roots are listed in chronological order, with the newest root last. Root order does
@@ -298,11 +301,6 @@ impl ExecutionProofCompatibility {
     }
 }
 
-fn has_duplicate(roots: &[Word]) -> bool {
-    let mut unique = BTreeSet::new();
-    roots.iter().any(|root| !unique.insert(*root))
-}
-
 /// Errors returned while constructing execution proof compatibility metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ExecutionProofCompatibilityError {
@@ -360,13 +358,8 @@ impl ExecutionProof {
         &self.vm
     }
 
-    /// Returns a mutable reference to the VM proof.
-    pub const fn vm_mut(&mut self) -> &mut VmProof {
-        &mut self.vm
-    }
-
     /// Returns the state of the precompile work.
-    pub const fn precompile_status(&self) -> &PrecompileStatus {
+    pub const fn precompile(&self) -> &PrecompileStatus {
         &self.precompile
     }
 
@@ -576,6 +569,17 @@ impl Deserializable for StarkProof {
         Vec::<u8>::min_serialized_size() + HashFunction::min_serialized_size()
     }
 }
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+fn has_duplicate(roots: &[Word]) -> bool {
+    let mut unique = BTreeSet::new();
+    roots.iter().any(|root| !unique.insert(*root))
+}
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {

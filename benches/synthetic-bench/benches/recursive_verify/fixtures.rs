@@ -136,7 +136,7 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    let vm_proof = match proof.precompile_status() {
+    let vm_proof = match proof.precompile() {
         PrecompileStatus::Empty => proof.vm(),
         PrecompileStatus::Proven(_) | PrecompileStatus::Deferred(_) => {
             eprintln!(
@@ -474,7 +474,7 @@ pub(super) fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<
                 (stack_outputs, proof, "miss")
             };
             assert!(
-                matches!(proof.precompile_status(), PrecompileStatus::Empty),
+                matches!(proof.precompile(), PrecompileStatus::Empty),
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
                  this benchmark expects precompile-free fixtures"
             );

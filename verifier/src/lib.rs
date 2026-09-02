@@ -132,7 +132,7 @@ impl Verifier {
         proof: &ExecutionProof,
     ) -> Result<VerificationOutcome, VerificationError> {
         let vm = proof.vm();
-        let (outstanding_root, precompile) = match proof.precompile_status() {
+        let (outstanding_root, precompile) = match proof.precompile() {
             PrecompileStatus::Deferred(_) => {
                 let root = vm.precompile_root;
                 if root == TRUE_DIGEST {
@@ -367,10 +367,6 @@ impl Verifier {
     }
 }
 
-fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
-    proof_roots.iter().any(|root| accepted_roots.contains(root))
-}
-
 impl Default for Verifier {
     fn default() -> Self {
         Self::new()
@@ -453,6 +449,13 @@ pub enum StarkVerificationError {
     ProofTooLarge { size: usize, max: usize },
     #[error(transparent)]
     Verifier(#[from] VerifierError),
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+fn roots_overlap(proof_roots: &[Word], accepted_roots: &[Word]) -> bool {
+    proof_roots.iter().any(|root| accepted_roots.contains(root))
 }
 
 // TESTS
@@ -660,7 +663,7 @@ mod tests {
             )
             .unwrap(),
             proof.vm().clone(),
-            proof.precompile_status().clone(),
+            proof.precompile().clone(),
         );
         let incompatible_pvm = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(
@@ -669,7 +672,7 @@ mod tests {
             )
             .unwrap(),
             proof.vm().clone(),
-            proof.precompile_status().clone(),
+            proof.precompile().clone(),
         );
 
         assert!(matches!(
@@ -710,7 +713,7 @@ mod tests {
         let old_compatible = ExecutionProof::from_parts(
             ExecutionProofCompatibility::new(vec![OLD_VM_ROOT], vec![OLD_PVM_ROOT]).unwrap(),
             proof.vm().clone(),
-            proof.precompile_status().clone(),
+            proof.precompile().clone(),
         );
         assert!(SUPPORT.check(&old_compatible).is_ok());
     }
