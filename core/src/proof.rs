@@ -246,12 +246,17 @@ impl ExecutionProofCompatibility {
         self.format
     }
 
-    /// Returns the recursive VM verifier roots in chronological order.
+    /// Returns the VM verifier roots which can be used to verify this proof.
+    ///
+    /// The roots are listed in chronological order with the most recent verifier listed last.
     pub fn vm_verifier_roots(&self) -> &[Word] {
         &self.vm_verifier_roots
     }
 
-    /// Returns the recursive PVM verifier roots in chronological order.
+    /// Returns the precompile VM verifier roots which can be used to verify the precompile proof
+    /// associated with this execution proof, if any.
+    ///
+    /// The roots are listed in chronological order with the most recent verifier listed last.
     pub fn pvm_verifier_roots(&self) -> &[Word] {
         &self.pvm_verifier_roots
     }

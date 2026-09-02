@@ -55,8 +55,6 @@ const PVM_VERIFIER_ROOT_V1: Word = Word::new([
 
 struct VerifierSupport {
     format: u8,
-    proof_vm_roots: &'static [Word],
-    proof_pvm_roots: &'static [Word],
     accepted_vm_roots: &'static [Word],
     accepted_pvm_roots: &'static [Word],
 }
@@ -76,20 +74,10 @@ impl VerifierSupport {
 
         Ok(())
     }
-
-    fn wrap(&self, proof: ExecutionProof) -> VersionedProof {
-        let compatibility = ExecutionProofCompatibility::new(
-            self.proof_vm_roots.to_vec(),
-            self.proof_pvm_roots.to_vec(),
-        );
-        VersionedProof::new(compatibility, proof)
-    }
 }
 
 const VERIFIER_SUPPORT_V1: VerifierSupport = VerifierSupport {
     format: ExecutionProofCompatibility::FORMAT_V1,
-    proof_vm_roots: &[VM_VERIFIER_ROOT_V1],
-    proof_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
     accepted_vm_roots: &[VM_VERIFIER_ROOT_V1],
     accepted_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
 };
@@ -107,9 +95,17 @@ impl Verifier {
         Self
     }
 
+    /// Returns the compatibility declared by proofs produced by the current prover.
+    pub fn proof_compatibility() -> ExecutionProofCompatibility {
+        ExecutionProofCompatibility::new(
+            alloc::vec![VM_VERIFIER_ROOT_V1],
+            alloc::vec![PVM_VERIFIER_ROOT_V1],
+        )
+    }
+
     /// Wraps an execution proof in the current versioned transport format.
     pub fn wrap_proof(proof: ExecutionProof) -> VersionedProof {
-        VERIFIER_SUPPORT_V1.wrap(proof)
+        VersionedProof::new(Self::proof_compatibility(), proof)
     }
 
     /// Verifies a deferred or complete versioned execution proof against its public claim.
@@ -466,6 +462,9 @@ pub enum StarkVerificationError {
     Verifier(#[from] VerifierError),
 }
 
+// TESTS
+// ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use alloc::{vec, vec::Vec};
@@ -705,14 +704,12 @@ mod tests {
         ]);
         const SUPPORT: VerifierSupport = VerifierSupport {
             format: ExecutionProofCompatibility::FORMAT_V1,
-            proof_vm_roots: &[VM_VERIFIER_ROOT_V1],
-            proof_pvm_roots: &[PVM_VERIFIER_ROOT_V1],
             accepted_vm_roots: &[OLD_VM_ROOT, VM_VERIFIER_ROOT_V1],
             accepted_pvm_roots: &[OLD_PVM_ROOT, PVM_VERIFIER_ROOT_V1],
         };
 
         let proof = complete(TRUE_DIGEST, None);
-        let wrapped = SUPPORT.wrap(proof.clone());
+        let wrapped = Verifier::wrap_proof(proof.clone());
 
         assert_eq!(wrapped.compatibility().vm_verifier_roots(), &[VM_VERIFIER_ROOT_V1]);
         assert_eq!(wrapped.compatibility().pvm_verifier_roots(), &[PVM_VERIFIER_ROOT_V1]);
