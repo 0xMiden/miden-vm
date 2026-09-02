@@ -1304,7 +1304,9 @@ impl FastProcessor {
 
     fn cache_loaded_mast_forest(&mut self, loaded_mast_forest: &LoadedMastForest) {
         for procedure_digest in loaded_mast_forest.mast_forest().local_procedure_digests() {
-            self.loaded_mast_forests.insert(procedure_digest, loaded_mast_forest.clone());
+            self.loaded_mast_forests
+                .entry(procedure_digest)
+                .or_insert_with(|| loaded_mast_forest.clone());
         }
     }
 

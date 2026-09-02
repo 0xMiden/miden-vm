@@ -1658,6 +1658,44 @@ async fn caches_advice_from_distinct_mast_forests() {
 }
 
 #[test]
+fn preserves_first_cached_forest_for_a_shared_procedure() {
+    let mut first_forest = MastForest::new();
+    let shared_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut first_forest)
+        .unwrap();
+    let first_unique_root = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut first_forest)
+        .unwrap();
+    first_forest.make_root(shared_root);
+    first_forest.make_root(first_unique_root);
+    let shared_digest = first_forest[shared_root].digest();
+    let first_unique_digest = first_forest[first_unique_root].digest();
+    let first_forest = Arc::new(first_forest);
+    let first_commitment = first_forest.commitment();
+
+    let mut second_forest = MastForest::new();
+    let second_shared_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut second_forest)
+        .unwrap();
+    let second_unique_root = BasicBlockNodeBuilder::new(vec![Operation::Neg])
+        .add_to_forest(&mut second_forest)
+        .unwrap();
+    second_forest.make_root(second_shared_root);
+    second_forest.make_root(second_unique_root);
+    let second_unique_digest = second_forest[second_unique_root].digest();
+    let second_forest = Arc::new(second_forest);
+
+    let program = program_calling_external_procedures([first_unique_digest, second_unique_digest]);
+    let mut host = CountingMastForestHost::new([first_forest, second_forest]);
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    processor.execute_mut_sync(&program, &mut host).unwrap();
+
+    let cached_shared_forest = processor.loaded_mast_forests.get(&shared_digest).unwrap();
+    assert_eq!(cached_shared_forest.mast_forest().commitment(), first_commitment);
+}
+
+#[test]
 fn package_source_debug_missing_external_preserves_external_source_span() {
     let (program, package_debug_info, mut host, _, expected_span, source_file) =
         missing_external_package_source_debug_fixture();
