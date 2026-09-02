@@ -255,4 +255,9 @@ mod tests {
             Some(&core_lib.pvm_recursive_verifier_root()),
         );
     }
+
+    #[test]
+    fn conjectured_security_estimator_is_exported_by_the_embedded_core_library() {
+        conjectured_security_estimator_root();
+    }
 }
