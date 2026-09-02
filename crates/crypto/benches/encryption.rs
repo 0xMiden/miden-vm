@@ -25,6 +25,9 @@ benchmark_aead_field!(
     aead_poseidon2_felts_group
 );
 
+benchmark_aead_bytes!(aead_eidos, "AEAD Eidos", bench_aead_eidos_bytes, aead_eidos_bytes_group);
+benchmark_aead_field!(aead_eidos, "AEAD Eidos", bench_aead_eidos_felts, aead_eidos_felts_group);
+
 benchmark_aead_bytes!(
     xchacha,
     "AEAD XChaCha20-Poly1305",
@@ -43,6 +46,8 @@ benchmark_aead_field!(
 criterion_main!(
     aead_poseidon2_bytes_group,
     aead_poseidon2_felts_group,
+    aead_eidos_bytes_group,
+    aead_eidos_felts_group,
     aead_xchacha_bytes_group,
     aead_xchacha_felts_group
 );
