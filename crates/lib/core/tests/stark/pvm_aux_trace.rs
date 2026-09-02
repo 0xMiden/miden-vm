@@ -1,50 +1,57 @@
 //! Behavioral oracles for the PVM auxiliary-trace verifier hook.
 
+use std::fmt::Write as _;
+
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_precompiles::{CurveId, UintDomain};
 
+use super::pvm_layout_const;
 use crate::helpers::read_memory_felt;
 
 const AUX_TRACE_COM_PTR: u32 = 3_223_322_644;
-const R1_PTR: u32 = 3_223_322_672;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_760;
-const AUX_RAND_ELEM_PTR: u32 = 3_225_426_424;
-const AUX_BUS_BOUNDARY_PTR: u32 = 3_225_429_504;
-const BUS_GAMMA_PTR: u32 = 3_225_443_432;
-const C_TOTAL_PTR: u32 = 3_225_443_436;
-
-const INITIAL_SPONGE: [u64; 12] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+const RANDOM_COIN_CV_PTR: u32 = 3_223_322_668;
+const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3_223_322_767;
+const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3_223_322_768;
+const RANDOM_COIN_COUNTER_PTR: u32 = 3_223_322_769;
+const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
+const LOG_HEIGHTS: [u8; 10] = [8, 6, 7, 16, 5, 9, 10, 11, 12, 13];
+const AUX_VALUE_WIDTHS: [usize; 10] = [1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
 
 fn setup_masm() -> String {
-    let s = INITIAL_SPONGE;
+    let cv = INITIAL_CV;
+    let mut heights = String::new();
+    for (index, height) in LOG_HEIGHTS.into_iter().enumerate() {
+        let offset = if index == 0 {
+            String::new()
+        } else {
+            format!(" add.{index}")
+        };
+        writeln!(
+            heights,
+            "push.{height} exec.constants::air_trace_length_logs_ptr{offset} mem_store"
+        )
+        .expect("write height setup");
+    }
     format!(
         r#"
-        push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-        exec.constants::r1_ptr mem_storew_le dropw
-        push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-        exec.constants::r2_ptr mem_storew_le dropw
-        push.{c_3}.{c_2}.{c_1}.{c_0}
-        exec.constants::c_ptr mem_storew_le dropw
+        push.{cv3}.{cv2}.{cv1}.{cv0}
+        exec.constants::random_coin_cv_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_output_word_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_block_ptr mem_storew_le dropw
+        padw exec.constants::random_coin_block_ptr add.4 mem_storew_le dropw
         push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 exec.constants::random_coin_output_len_ptr mem_store
+        push.0 exec.constants::random_coin_counter_ptr mem_store
+        {heights}
         "#,
-        r1_0 = s[0],
-        r1_1 = s[1],
-        r1_2 = s[2],
-        r1_3 = s[3],
-        r2_0 = s[4],
-        r2_1 = s[5],
-        r2_2 = s[6],
-        r2_3 = s[7],
-        c_0 = s[8],
-        c_1 = s[9],
-        c_2 = s[10],
-        c_3 = s[11],
+        cv0 = cv[0],
+        cv1 = cv[1],
+        cv2 = cv[2],
+        cv3 = cv[3],
     )
 }
 
@@ -53,11 +60,9 @@ fn sampler_source() -> String {
         r#"
         use miden::core::stark::constants
         use miden::core::stark::random_coin
-        use miden::core::sys::pvm::layout
 
         begin
             {}
-            exec.layout::aux_rand_elem_ptr
             exec.random_coin::generate_aux_randomness
         end
         "#,
@@ -80,8 +85,8 @@ fn hook_source() -> String {
     )
 }
 
-/// A deliberately straightforward transcript path: consume the same six advice words through
-/// the public buffered word API, pairing them into three full rate blocks.
+/// A deliberately straightforward transcript path: consume the same seven advice words through
+/// the public buffered word API, compressing three complete Eidos blocks and buffering one word.
 fn reference_source() -> String {
     format!(
         r#"
@@ -91,7 +96,6 @@ fn reference_source() -> String {
 
         begin
             {}
-            exec.layout::aux_rand_elem_ptr
             exec.random_coin::generate_aux_randomness
 
             padw adv_loadw
@@ -99,21 +103,24 @@ fn reference_source() -> String {
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr mem_storew_le
-            exec.random_coin::observe_word_and_flush_buffer
+            exec.random_coin::observe_word
 
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le
-            exec.random_coin::observe_word_and_flush_buffer
+            exec.random_coin::observe_word
 
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
-            exec.random_coin::observe_word_and_flush_buffer
+            exec.random_coin::observe_word
+            padw adv_loadw
+            exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+            exec.random_coin::observe_word
         end
         "#,
         setup_masm()
@@ -124,13 +131,14 @@ fn sampled_challenges() -> (QuadFelt, QuadFelt) {
     let (output, _) = build_test!(&sampler_source(), &[])
         .execute_for_output()
         .expect("challenge sampler must execute");
+    let aux_rand_elem_ptr = pvm_layout_const("AUX_RAND_ELEM_PTR");
     let beta = QuadFelt::new([
-        read_memory_felt(&output, AUX_RAND_ELEM_PTR),
-        read_memory_felt(&output, AUX_RAND_ELEM_PTR + 1),
+        read_memory_felt(&output, aux_rand_elem_ptr),
+        read_memory_felt(&output, aux_rand_elem_ptr + 1),
     ]);
     let alpha = QuadFelt::new([
-        read_memory_felt(&output, AUX_RAND_ELEM_PTR + 2),
-        read_memory_felt(&output, AUX_RAND_ELEM_PTR + 3),
+        read_memory_felt(&output, aux_rand_elem_ptr + 2),
+        read_memory_felt(&output, aux_rand_elem_ptr + 3),
     ]);
     (alpha, beta)
 }
@@ -215,19 +223,51 @@ fn fixed_boundary_correction(alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     })
 }
 
-fn valid_sigmas(correction: QuadFelt) -> [QuadFelt; 10] {
-    let mut sigmas = core::array::from_fn(|i| {
-        QuadFelt::new([Felt::from_u32(i as u32 + 1), Felt::from_u32(2 * i as u32 + 3)])
+fn proof_order() -> [usize; 10] {
+    let mut order = core::array::from_fn(|index| index);
+    order.sort_by_key(|&index| (LOG_HEIGHTS[index], index));
+    order
+}
+
+fn valid_sigmas(correction: QuadFelt) -> [Vec<QuadFelt>; 10] {
+    let mut next = 1u32;
+    let mut sigmas: [Vec<QuadFelt>; 10] = core::array::from_fn(|air_index| {
+        (0..AUX_VALUE_WIDTHS[air_index])
+            .map(|_| {
+                let value = QuadFelt::new([Felt::from_u32(next), Felt::from_u32(next + 1)]);
+                next += 2;
+                value
+            })
+            .collect()
     });
-    let partial = sigmas[..9].iter().copied().sum::<QuadFelt>();
-    sigmas[9] = -correction - partial;
+
+    // Reserve a single-width AIR as the balancing term, then mirror MultiAir::eval_external:
+    // the second EidosCompression and BytePairAnd8 values use the centered sigma-prime convention.
+    sigmas[9][0] = QuadFelt::ZERO;
+    let partial = sigmas.iter().enumerate().fold(QuadFelt::ZERO, |sum, (index, values)| {
+        if matches!(index, 1 | 3) {
+            let n = Felt::new_unchecked(1u64 << LOG_HEIGHTS[index]);
+            sum + values[0] + values[1] * n
+        } else {
+            sum + values[0]
+        }
+    });
+    sigmas[9][0] = -correction - partial;
     sigmas
 }
 
-fn advice(sigmas: &[QuadFelt; 10]) -> Vec<u64> {
+fn proof_ordered_sigmas(sigmas: &[Vec<QuadFelt>; 10]) -> Vec<QuadFelt> {
+    proof_order()
+        .into_iter()
+        .flat_map(|air_index| sigmas[air_index].iter().copied())
+        .collect()
+}
+
+fn advice(sigmas: &[Vec<QuadFelt>; 10]) -> Vec<u64> {
+    let ordered = proof_ordered_sigmas(sigmas);
     COMMITMENT
         .into_iter()
-        .chain(sigmas.iter().flat_map(|sigma| {
+        .chain(ordered.iter().flat_map(|sigma| {
             sigma
                 .as_basis_coefficients_slice()
                 .iter()
@@ -250,14 +290,14 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
         .execute_for_output()
         .expect("reference transcript must execute");
 
-    for addr in R1_PTR..R1_PTR + 12 {
+    for addr in RANDOM_COIN_CV_PTR..RANDOM_COIN_CV_PTR + 4 {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),
             "transcript state differs at address {addr}"
         );
     }
-    for addr in [RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR] {
+    for addr in [RANDOM_COIN_INPUT_LEN_PTR, RANDOM_COIN_OUTPUT_LEN_PTR, RANDOM_COIN_COUNTER_PTR] {
         assert_eq!(
             read_memory_felt(&hook_output, addr),
             read_memory_felt(&reference_output, addr),
@@ -267,22 +307,25 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 
     let gamma = (0..18).fold(QuadFelt::ONE, |acc, _| acc * beta);
     let expected_gamma: &[Felt] = gamma.as_basis_coefficients_slice();
-    assert_eq!(read_memory_felt(&hook_output, BUS_GAMMA_PTR), expected_gamma[0]);
-    assert_eq!(read_memory_felt(&hook_output, BUS_GAMMA_PTR + 1), expected_gamma[1]);
-    assert_eq!(read_memory_felt(&hook_output, BUS_GAMMA_PTR + 2), Felt::ZERO);
-    assert_eq!(read_memory_felt(&hook_output, BUS_GAMMA_PTR + 3), Felt::ZERO);
+    let bus_gamma_ptr = pvm_layout_const("BUS_GAMMA_PTR");
+    assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr), expected_gamma[0]);
+    assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 1), expected_gamma[1]);
+    assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 2), Felt::ZERO);
+    assert_eq!(read_memory_felt(&hook_output, bus_gamma_ptr + 3), Felt::ZERO);
 
     let expected_correction: &[Felt] = correction.as_basis_coefficients_slice();
-    assert_eq!(read_memory_felt(&hook_output, C_TOTAL_PTR), expected_correction[0]);
-    assert_eq!(read_memory_felt(&hook_output, C_TOTAL_PTR + 1), expected_correction[1]);
-    assert_eq!(read_memory_felt(&hook_output, C_TOTAL_PTR + 2), Felt::ZERO);
-    assert_eq!(read_memory_felt(&hook_output, C_TOTAL_PTR + 3), Felt::ZERO);
+    let c_total_ptr = pvm_layout_const("C_TOTAL_PTR");
+    assert_eq!(read_memory_felt(&hook_output, c_total_ptr), expected_correction[0]);
+    assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 1), expected_correction[1]);
+    assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 2), Felt::ZERO);
+    assert_eq!(read_memory_felt(&hook_output, c_total_ptr + 3), Felt::ZERO);
 
-    for (i, sigma) in sigmas.iter().enumerate() {
+    let aux_bus_boundary_ptr = pvm_layout_const("AUX_BUS_BOUNDARY_PTR");
+    for (i, sigma) in proof_ordered_sigmas(&sigmas).iter().enumerate() {
         let coefficients: &[Felt] = sigma.as_basis_coefficients_slice();
         for (coord, expected) in coefficients.iter().enumerate() {
             assert_eq!(
-                read_memory_felt(&hook_output, AUX_BUS_BOUNDARY_PTR + 2 * i as u32 + coord as u32,),
+                read_memory_felt(&hook_output, aux_bus_boundary_ptr + 2 * i as u32 + coord as u32,),
                 *expected,
                 "sigma {i} coordinate {coord} was not stored in proof order"
             );
@@ -301,7 +344,7 @@ fn pvm_aux_hook_matches_independent_transcript_and_fixed_boundary_oracles() {
 fn pvm_aux_hook_rejects_an_unbalanced_sigma() {
     let (alpha, beta) = sampled_challenges();
     let mut sigmas = valid_sigmas(fixed_boundary_correction(alpha, beta));
-    sigmas[4] += QuadFelt::ONE;
+    sigmas[4][0] += QuadFelt::ONE;
     let advice = advice(&sigmas);
 
     let test = build_test!(&hook_source(), &[], &advice);

@@ -35,7 +35,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let trace =
         build_trace(vm_witness).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
     let summary = trace.trace_len_summary();
-    let chiplets = summary.chiplets_trace_len();
+    let chiplets = summary.chiplets();
 
     let breakdown = TraceBreakdown {
         hasher_rows: chiplets.hash_chiplet_len() as u64,
@@ -45,10 +45,10 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         ace_rows: chiplets.ace_chiplet_len() as u64,
     };
     let totals = TraceTotals {
-        core_rows: summary.core_trace_len() as u64,
-        chiplets_rows: chiplets.trace_len() as u64,
-        poseidon2_permutation_rows: summary.poseidon2_permutation_trace_len() as u64,
-        range_rows: summary.range_trace_len() as u64,
+        core_rows: summary.core_rows() as u64,
+        chiplets_rows: summary.chiplets_rows() as u64,
+        eidos_compression_rows: summary.eidos_compression_rows() as u64,
+        byte_pair_lookup_rows: summary.byte_pair_lookup_rows() as u64,
     };
 
     // Cross-check derived formulas against the processor's authoritative values.
@@ -61,7 +61,11 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         });
     }
     let derived_padded = totals.padded_total();
-    let processor_padded = summary.padded_trace_len() as u64;
+    let processor_padded = summary
+        .core_height()
+        .max(summary.chiplets_height())
+        .max(summary.eidos_compression_height())
+        .max(summary.byte_pair_lookup_rows()) as u64;
     if derived_padded != processor_padded {
         return Err(MeasurementError::InvariantDrift {
             quantity: "padded_total",
@@ -100,21 +104,19 @@ pub enum MeasurementError {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IterCost {
     pub core: f64,
-    pub hasher: f64,
+    pub eidos_compression: f64,
     pub bitwise: f64,
     pub chiplets: f64,
     pub memory: f64,
-    pub range: f64,
 }
 
 impl IterCost {
     pub fn get(&self, component: Component) -> f64 {
         match component {
             Component::Core => self.core,
-            Component::Hasher => self.hasher,
+            Component::EidosCompression => self.eidos_compression,
             Component::Chiplets => self.chiplets,
             Component::Memory => self.memory,
-            Component::Range => self.range,
         }
     }
 }
@@ -139,16 +141,19 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
     let k = iters as f64;
     IterCost {
         core: shape.totals.core_rows as f64 / k,
-        hasher: shape.hasher_work_rows() as f64 / k,
+        eidos_compression: shape.totals.eidos_compression_rows as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
-        chiplets: shape.totals.chiplets_rows as f64 / k,
+        // The chiplets trace always contains one structural padding row. It is an intercept, not
+        // work contributed by any snippet, so exclude it from the per-iteration rate.
+        chiplets: shape.totals.chiplets_rows.saturating_sub(1) as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
-        range: shape.totals.range_rows as f64 / k,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use miden_air::trace::chiplets::bitwise::OP_CYCLE_LEN;
+
     use super::*;
 
     // MEASUREMENT TESTS
@@ -164,15 +169,15 @@ mod tests {
     }
 
     #[test]
-    fn hperm_adds_rows_beyond_baseline() {
+    fn compress_adds_rows_beyond_baseline() {
         let baseline = measure_program("begin push.1 drop end").expect("baseline");
-        let with_hperm =
-            measure_program("begin padw padw padw hperm dropw dropw dropw end").expect("hperm");
+        let with_compress = measure_program("begin padw padw padw compress dropw dropw dropw end")
+            .expect("compress");
         assert!(
-            with_hperm.hasher_work_rows() > baseline.hasher_work_rows(),
-            "hperm should add hasher work above the baseline ({} vs {})",
-            with_hperm.hasher_work_rows(),
-            baseline.hasher_work_rows(),
+            with_compress.totals.eidos_compression_rows > baseline.totals.eidos_compression_rows,
+            "compress should add Eidos compression rows above the baseline ({} vs {})",
+            with_compress.totals.eidos_compression_rows,
+            baseline.totals.eidos_compression_rows,
         );
     }
 
@@ -192,15 +197,15 @@ mod tests {
     }
 
     #[test]
-    fn hasher_snippet_is_hasher_dominant() {
+    fn compression_snippet_is_compression_dominant() {
         let c = cal();
-        let hasher = c["hasher"];
+        let compression = c["eidos_compression"];
         let pad = c["decoder_pad"];
         assert!(
-            hasher.hasher > pad.hasher * 10.0,
-            "hasher/iter ({}) not dominant over decoder_pad leak ({})",
-            hasher.hasher,
-            pad.hasher,
+            compression.eidos_compression > pad.eidos_compression * 10.0,
+            "compression rows/iter ({}) not dominant over decoder_pad leak ({})",
+            compression.eidos_compression,
+            pad.eidos_compression,
         );
     }
 
@@ -208,16 +213,12 @@ mod tests {
     fn bitwise_snippet_rows_match_op_cycle_len() {
         let c = cal();
         let bitwise = c["bitwise"];
-        // OP_CYCLE_LEN = 8 per u32 bitwise op.
+        let expected = OP_CYCLE_LEN as f64;
         assert!(
-            bitwise.bitwise >= 7.5,
-            "bitwise per-iter ({}) below OP_CYCLE_LEN",
-            bitwise.bitwise
-        );
-        assert!(
-            bitwise.bitwise <= 9.0,
-            "bitwise per-iter ({}) above OP_CYCLE_LEN",
-            bitwise.bitwise
+            (bitwise.bitwise - expected).abs() <= 0.01,
+            "bitwise per-iter ({}) should match OP_CYCLE_LEN ({})",
+            bitwise.bitwise,
+            OP_CYCLE_LEN,
         );
     }
 
@@ -231,28 +232,15 @@ mod tests {
     }
 
     #[test]
-    fn u32arith_snippet_drives_range() {
-        let c = cal();
-        let arith = c["u32arith"];
-        let pad = c["decoder_pad"];
-        assert!(
-            arith.range > pad.range * 5.0,
-            "u32arith range/iter ({}) should dominate the baseline decoder_pad range/iter ({})",
-            arith.range,
-            pad.range,
-        );
-    }
-
-    #[test]
     fn decoder_pad_is_core_dominant() {
         let c = cal();
         let pad = c["decoder_pad"];
         assert!(pad.core > 1.0, "decoder_pad core/iter should be > 1.0");
         assert!(
-            pad.core > pad.hasher * 3.0,
-            "decoder_pad core ({}) should dominate hasher ({})",
+            pad.core > pad.eidos_compression,
+            "decoder_pad core ({}) should dominate Eidos compression ({})",
             pad.core,
-            pad.hasher,
+            pad.eidos_compression,
         );
     }
 }

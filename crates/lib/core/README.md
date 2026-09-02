@@ -9,7 +9,7 @@ The goals of Miden core library are:
 
 The second goal can be achieved because calls to procedures in the core library can always be serialized as 32 bytes, regardless of how large the procedure is.
 
-`CoreLibrary` provides the `miden-core` Miden package (a `.masp` file) in addition to its associated event handlers. This package occupies the `miden::core` namespace. 
+`CoreLibrary` provides the `miden-core` Miden package (a `.masp` file) in addition to its associated event handlers. This package occupies the `miden::core` namespace.
 
 Generated core-library MASM can be inspected locally:
 
@@ -23,9 +23,10 @@ Currently, Miden core library contains just a few modules, which are listed belo
 - [miden::core::collections::mmr](./docs/collections/mmr.md)
 - [miden::core::collections::smt](./docs/collections/smt.md)
 - [miden::core::collections::sorted_array](./docs/collections/sorted_array.md)
+- [miden::core::crypto::aead_eidos](./docs/crypto/aead_eidos.md)
 - [miden::core::crypto::dsa::ecdsa_k256_keccak](./docs/crypto/dsa/ecdsa_k256_keccak.md)
-- [miden::core::crypto::dsa::falcon512_poseidon2](./docs/crypto/dsa/falcon512_poseidon2.md)
-- [miden::core::crypto::hashes::poseidon2](./docs/crypto/hashes/poseidon2.md)
+- [miden::core::crypto::dsa::falcon512_eidos](./docs/crypto/dsa/falcon512_eidos.md)
+- [miden::core::crypto::hashes::eidos](./docs/crypto/hashes/eidos.md)
 - [miden::core::crypto::hashes::blake3](./docs/crypto/hashes/blake3.md)
 - [miden::core::crypto::hashes::keccak256](./docs/crypto/hashes/keccak256.md)
 - [miden::core::crypto::hashes::sha256](./docs/crypto/hashes/sha256.md)

@@ -1,6 +1,6 @@
 //! Advice construction for the in-VM PVM STARK verifier.
 //!
-//! This module parses a Poseidon2 PVM proof into the exact stack, Merkle-store, and advice-map
+//! This module parses an Eidos PVM proof into the exact stack, Merkle-store, and advice-map
 //! inputs consumed by `miden::core::sys::pvm::verify_proof`. The caller supplies the deferred claim
 //! on the operand stack; its root is the PVM statement.
 
@@ -30,13 +30,11 @@ use miden_crypto::{
         proof::{StarkProof, StarkProofData},
     },
 };
-use miden_lifted_air::Statement;
+use miden_lifted_air::{LiftedAir, Statement};
 use miden_lifted_stark::VerifierInstance;
 use miden_precompiles_air::{
     ChipletAir, ChipletMultiAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{
-        Poseidon2Config, observe_protocol_params, poseidon2_config, precompile_pcs_params,
-    },
+    stark_config::{EidosConfig, eidos_config, observe_protocol_params, precompile_pcs_params},
 };
 use miden_serde_utils::deserialize_schema_exact;
 use serde_wincode::SerdeCompat;
@@ -47,7 +45,7 @@ use crate::{
 };
 
 type Challenge = QuadFelt;
-type P2Lmcs = <Poseidon2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+type EidosLmcs = <EidosConfig as StarkConfig<Felt, Challenge>>::Lmcs;
 
 /// Request-packaged inputs for MASM recursive verification of a PVM proof.
 ///
@@ -64,7 +62,7 @@ impl PvmRecursiveVerifierInputs {
     ///
     /// The proof must contain exactly one deferred root. Aggregated precompile proofs require a
     /// separate authentication of their ordered constituent roots, which the MASM verifier does
-    /// not yet implement. The underlying STARK must use Poseidon2.
+    /// not yet implement. The underlying STARK must use Eidos.
     ///
     /// # Errors
     ///
@@ -116,8 +114,8 @@ pub enum PvmRecursiveVerifierInputsError {
     /// The current MASM verifier authenticates one deferred root at a time.
     #[error("the PVM MASM verifier requires exactly one deferred root, found {roots}")]
     UnsupportedRootCount { roots: usize },
-    /// The MASM verifier implements the Poseidon2 transcript only.
-    #[error("the PVM MASM verifier supports Poseidon2 proofs only")]
+    /// The MASM verifier implements the native Eidos transcript only.
+    #[error("the PVM MASM verifier supports Eidos proofs only")]
     UnsupportedHashFunction,
     /// The serialized proof exceeds the adapter's allocation limit.
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
@@ -143,7 +141,7 @@ fn build_verifier_advice(
     proof: &SerializedStarkProof,
     claim: DeferredClaim,
 ) -> Result<AdviceInputs, PvmRecursiveVerifierInputsError> {
-    if proof.hash_fn() != HashFunction::Poseidon2 {
+    if proof.hash_fn() != HashFunction::Eidos {
         return Err(PvmRecursiveVerifierInputsError::UnsupportedHashFunction);
     }
     if proof.bytes().len() > MAX_STARK_PROOF_BYTES {
@@ -153,21 +151,19 @@ fn build_verifier_advice(
         });
     }
 
-    let config = poseidon2_config(
+    let config = eidos_config(
         precompile_pcs_params(),
         crate::ace_registry::PVM_RELATION_DIGEST.map(Felt::new_unchecked),
     );
-    let preprocessed = preprocessed::poseidon2();
+    let preprocessed = preprocessed::eidos();
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof_data: StarkProofData<Felt, Challenge, Poseidon2Config> = deserialize_schema_exact::<
-        SerdeCompat<StarkProofData<Felt, Challenge, Poseidon2Config>>,
-        _,
-    >(
-        proof.bytes(),
-        proof_encoding_config,
-    )
-    .map_err(|err| PvmRecursiveVerifierInputsError::ProofDeserialization(err.to_string()))?;
+    let proof_data: StarkProofData<Felt, Challenge, EidosConfig> =
+        deserialize_schema_exact::<SerdeCompat<StarkProofData<Felt, Challenge, EidosConfig>>, _>(
+            proof.bytes(),
+            proof_encoding_config,
+        )
+        .map_err(|err| PvmRecursiveVerifierInputsError::ProofDeserialization(err.to_string()))?;
 
     let public_root = claim.root();
     let statement =
@@ -185,8 +181,8 @@ fn build_verifier_advice(
 }
 
 fn build_advice(
-    config: &Poseidon2Config,
-    stark: &StarkProof<Challenge, P2Lmcs>,
+    config: &EidosConfig,
+    stark: &StarkProof<Challenge, EidosLmcs>,
 ) -> Result<AdviceInputs, PvmRecursiveVerifierInputsError> {
     let log_heights: [u8; NUM_CHIPLETS] = stark.log_trace_heights().try_into().map_err(|_| {
         PvmRecursiveVerifierInputsError::InvalidProofShape("unexpected AIR-height count")
@@ -206,16 +202,18 @@ fn build_advice(
             "unexpected number of aux-final groups",
         ));
     }
-    if stark.all_aux_values.iter().any(|values| values.len() != 1) {
-        return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
-            "unexpected aux-final group width",
-        ));
-    }
-
     // The registry and MASM wrapper implement the same stable (height, instance-index) order as
     // lifted-stark. Make that coupling executable so a future proof-order convention change fails
     // here rather than selecting a circuit for a different ordering.
     let proof_order = proof_order_from_log_heights(&log_heights);
+    let airs = ChipletAir::all();
+    if stark.all_aux_values.iter().zip(proof_order).any(|(values, air_index)| {
+        values.len() != <ChipletAir as LiftedAir<Felt, Challenge>>::num_aux_values(&airs[air_index])
+    }) {
+        return Err(PvmRecursiveVerifierInputsError::InvalidProofShape(
+            "unexpected proof-ordered aux-final group width",
+        ));
+    }
     if stark
         .air_order()
         .iter()
@@ -295,8 +293,8 @@ where
 }
 
 fn build_merkle_data(
-    config: &Poseidon2Config,
-    stark: &StarkProof<Challenge, P2Lmcs>,
+    config: &EidosConfig,
+    stark: &StarkProof<Challenge, EidosLmcs>,
     log_heights: &[u8; NUM_CHIPLETS],
     proof_order: &[usize; NUM_CHIPLETS],
 ) -> Result<MerkleAdvice, PvmRecursiveVerifierInputsError> {
@@ -343,7 +341,7 @@ fn batch_proof_to_merkle<L>(
 ) -> Result<BatchMerkleResult, PvmRecursiveVerifierInputsError>
 where
     L: Lmcs<F = Felt>,
-    L::Commitment: Copy + Into<[Felt; 4]> + PartialEq,
+    L::Commitment: Copy + Into<[u64; 4]> + PartialEq,
     L::BatchProof: BatchProofView<Felt, L::Commitment>,
 {
     let mut paths = Vec::new();
@@ -371,9 +369,10 @@ where
         }
         let leaf_data = rows.as_slice().to_vec();
         let leaf_hash = lmcs.hash(rows.iter_rows());
-        let leaf_word = Word::new(leaf_hash.into());
-        let merkle_path =
-            MerklePath::new(siblings.into_iter().map(|commit| Word::new(commit.into())).collect());
+        let leaf_word = Word::new(commitment_felts(leaf_hash));
+        let merkle_path = MerklePath::new(
+            siblings.into_iter().map(|commit| Word::new(commitment_felts(commit))).collect(),
+        );
         paths.push((index as u64, leaf_word, merkle_path));
         advice_entries.push((leaf_word, leaf_data));
     }
@@ -382,8 +381,12 @@ where
     Ok((tree, advice_entries))
 }
 
-fn commitment_felts<C: Copy + Into<[Felt; 4]>>(commitment: C) -> [Felt; 4] {
-    commitment.into()
+fn commitment_felts<C: Copy + Into<[u64; 4]>>(commitment: C) -> [Felt; 4] {
+    // Eidos LMCS masks every packed high limb, so current commitments are already canonical.
+    // Reduce explicitly anyway: this adapter is generic over the concrete commitment wrapper,
+    // and advice words must never retain Goldilocks' permitted non-canonical representation if a
+    // future backend supplies an arbitrary u64 limb.
+    commitment.into().map(|limb| Felt::new_unchecked(limb % Felt::ORDER))
 }
 
 fn challenge_felts(challenges: &[Challenge]) -> Vec<Felt> {
@@ -395,7 +398,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recursive_inputs_reject_non_poseidon2_proofs_before_parsing() {
+    fn commitment_limbs_are_canonicalized_before_entering_advice() {
+        let felts = commitment_felts([Felt::ORDER + 7, u64::MAX, 0, Felt::ORDER - 1]);
+        assert_eq!(
+            felts.map(|felt| felt.as_canonical_u64()),
+            [7, u32::MAX as u64 - 1, 0, Felt::ORDER - 1]
+        );
+    }
+
+    #[test]
+    fn recursive_inputs_reject_non_eidos_proofs_before_parsing() {
         let proof = PrecompileProof {
             proof: SerializedStarkProof::new(Vec::new(), HashFunction::Rpo256),
             roots: vec![Word::default()],
@@ -410,7 +422,7 @@ mod tests {
     fn recursive_inputs_reject_oversized_proofs_before_parsing() {
         let size = MAX_STARK_PROOF_BYTES + 1;
         let proof = PrecompileProof {
-            proof: SerializedStarkProof::new(vec![0; size], HashFunction::Poseidon2),
+            proof: SerializedStarkProof::new(vec![0; size], HashFunction::Eidos),
             roots: vec![Word::default()],
         };
         assert!(matches!(
@@ -424,7 +436,7 @@ mod tests {
 
     #[test]
     fn recursive_inputs_reject_non_singleton_precompile_proofs() {
-        let serialized = || SerializedStarkProof::new(Vec::new(), HashFunction::Poseidon2);
+        let serialized = || SerializedStarkProof::new(Vec::new(), HashFunction::Eidos);
         for roots in [Vec::new(), vec![Word::default(); 2]] {
             let root_count = roots.len();
             let proof = PrecompileProof { proof: serialized(), roots };

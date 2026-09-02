@@ -79,7 +79,8 @@ fn verifier_rejects_forged_overflow_pop_order() {
         (Felt::new_unchecked(2), Felt::new_unchecked(2), Felt::new_unchecked(1)),
     );
 
-    let (mut core_matrix, chiplets_matrix, poseidon2_matrix) = main.to_air_matrices();
+    let (mut core_matrix, chiplets_matrix, eidos_compression_matrix, and8_matrix) =
+        main.to_air_matrices();
 
     // Redirect the first DROP to consume the older overflow record R1.
     core_row_mut(&mut core_matrix, drop_rows[0]).stack.b1 = first_record_clk;
@@ -137,19 +138,20 @@ fn verifier_rejects_forged_overflow_pop_order() {
         trace.precompile_root(),
     );
     let (public_values, aux_inputs) = public_inputs.to_air_inputs();
-    let stark_config = config::poseidon2_config(config::pcs_params(), config::RELATION_DIGEST);
+    let stark_config = config::eidos_config(config::pcs_params(), config::RELATION_DIGEST);
     let proof_bytes = prove_stark(
         &stark_config,
         core_matrix,
         chiplets_matrix,
-        poseidon2_matrix,
+        eidos_compression_matrix,
+        and8_matrix,
         &public_values,
         &aux_inputs,
     )
     .expect("the low-level prover should encode the forged trace for the verifier regression");
     let proof = ExecutionProof::new(
         VmProof {
-            proof: StarkProof::new(proof_bytes, HashFunction::Poseidon2),
+            proof: StarkProof::new(proof_bytes, HashFunction::Eidos),
             precompile_root: TRUE_DIGEST,
         },
         miden_core::proof::PrecompileStatus::Empty,
@@ -163,13 +165,13 @@ fn verifier_rejects_forged_overflow_pop_order() {
     let verification_result = Verifier::new().verify(&claim, &proof);
     assert!(
         matches!(
-            verification_result,
+            &verification_result,
             Err(VerificationError::StarkVerificationError(_, source))
                 if matches!(
-                    *source,
+                    source.as_ref(),
                     StarkVerificationError::Verifier(VerifierError::ConstraintMismatch)
                 )
         ),
-        "the forged public output must fail an AIR constraint",
+        "the forged public output must fail an AIR constraint, got {verification_result:?}",
     );
 }

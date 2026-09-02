@@ -5,8 +5,9 @@ sidebar_position: 3
 
 # Eidos framing and selectors
 
-Eidos separates message constructions with numeric selectors and binds three selector-defined
-parameters into the initial chaining value.
+Eidos separates message constructions with registered numeric selectors and binds three
+selector-defined parameters into the initial chaining value. This framing is shared by the Rust
+implementation, core-library assembly, and the Precompile VM.
 
 ## Initial chaining value
 
@@ -58,8 +59,9 @@ The selector determines how the three parameter slots are interpreted:
 
 | Construction | `selector` | `param0` | `param1` | `param2` |
 | --- | --- | --- | --- | --- |
-| Felt sequence | zero or a registered selector | number of Felts | 0 | 0 |
+| Felt sequence | zero or a registered domain selector | number of Felts | 0 | 0 |
 | Byte string | byte-string selector | number of bytes | 0 | 0 |
+| Precompile-owned deferred node | precompile selector | payload length in Felts | `arg0` | `arg1` |
 | LMCS leaf row | zero | 0 | 0 | 0 |
 | LMCS internal node | zero | 8 | 0 | 0 |
 
@@ -93,20 +95,21 @@ elements.
 
 ## Selector registry
 
-A registered selector has the form:
+Consensus-visible selectors are numeric allocations. A registered selector has the form:
 
 ```text
 selector = (domain_id << 8) | version
 ```
 
-The `domain_id` is a registered 24-bit value and `version` is an 8-bit construction version. Names
-may be used for diagnostics, but they are not hashed to produce selectors. New constructions must
-receive an explicit numeric allocation.
+The `domain_id` is a registered 24-bit value and `version` is an 8-bit construction version. Both
+values start at one. Names may be used for diagnostics, but they are not hashed to produce
+selectors. New constructions must receive an explicit numeric allocation.
 
-The crypto-level allocations are:
+The current allocations are:
 
 | Domain | `domain_id` | Selector | Decimal |
 | --- | ---: | ---: | ---: |
+| Miden VM STARK transcript | `0x000002` | `0x00000201` | 513 |
 | Byte string | `0x000003` | `0x00000301` | 769 |
 | Falcon hash-to-point | `0x000004` | `0x00000401` | 1025 |
 | Falcon product-check transcript | `0x000005` | `0x00000501` | 1281 |
@@ -114,9 +117,49 @@ The crypto-level allocations are:
 | AEAD MAC-key derivation | `0x000007` | `0x00000701` | 1793 |
 | Random-coin state | `0x000008` | `0x00000801` | 2049 |
 | Random-coin output | `0x000009` | `0x00000901` | 2305 |
+| Kernel commitment | `0x010000` | `0x01000001` | 16777217 |
+| Execution claim | `0x010001` | `0x01000101` | 16777473 |
+| Proof-request key | `0x010002` | `0x01000201` | 16777729 |
+| Deferred AND | `0x010003` | `0x01000301` | 16777985 |
+| Deferred CHUNKS | `0x010004` | `0x01000401` | 16778241 |
+| Keccak-256 precompile | `0x010006` | `0x01000601` | 16778753 |
+| Uint256 precompile | `0x010007` | `0x01000701` | 16779009 |
+| Curve precompile | `0x010008` | `0x01000801` | 16779265 |
+| PVM uint pin claim | `0x010009` | `0x01000901` | 16779521 |
+| Account patch commitment | `0x020000` | `0x02000001` | 33554433 |
+| Account delta commitment | `0x020001` | `0x02000101` | 33554689 |
 
-The domain-ID range `0x000001..0x00ffff` is allocated to `miden-crypto`.
+The `0x000001..0x00ffff` domain-ID range is allocated to `miden-crypto`,
+`0x010000..0x01ffff` to `miden-vm`, and `0x020000..0x02ffff` to
+`miden-protocol`. These numeric allocations are protocol inputs and remain explicit.
 
-## Reference
+## Deferred-node digest
+
+A precompile-owned tag has one word with the canonical layout:
+
+```text
+TAG = [selector, arg0, arg1, 0]
+```
+
+The fourth tag Felt is reserved and must be zero. The selector and both arguments must fit in
+`u32`. For `b` complete eight-Felt payload blocks, the digest is:
+
+```text
+CV0 = init(selector, [8 · b, arg0, arg1])
+CVi+1 = compress(CVi, payload_block_i)  for i = 0..b-1
+digest = CVb
+```
+
+Every active compression consumes payload, so the physical compression count equals the payload
+block count. The last payload compression produces the digest. The complete semantic context may
+also accompany each block in a lookup relation.
+
+Framework nodes use dedicated framing. AND hashes its child-digest block with the registered
+deferred-AND selector and parameters `[8, 0, 0]`. CHUNKS hashes its ordered payload blocks with the
+registered deferred-CHUNKS selector and parameters `[8 · b, 0, 0]`. Their stored framework tags
+remain `[1, 0, 0, 0]` and `[2, 0, 0, 0]`, respectively.
+
+## References
 
 - [Eidos hash function](https://github.com/0xMiden/crypto/pull/1026)
+- [Eidos integration in Miden VM](https://github.com/0xMiden/miden-vm/pull/3718)

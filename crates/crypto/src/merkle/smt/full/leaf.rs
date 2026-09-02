@@ -3,7 +3,7 @@ use alloc::{string::ToString, vec::Vec};
 use super::EMPTY_WORD;
 use crate::{
     Felt, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::smt::{LEAF_DOMAIN, LeafIndex, MAX_LEAF_ENTRIES, SMT_DEPTH, SmtLeafError},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -182,12 +182,10 @@ impl SmtLeaf {
     pub fn hash(&self) -> Word {
         match self {
             SmtLeaf::Empty(_) => EMPTY_WORD,
-            SmtLeaf::Single((key, value)) => {
-                Poseidon2::merge_in_domain(&[*key, *value], LEAF_DOMAIN)
-            },
+            SmtLeaf::Single((key, value)) => Eidos::merge_in_domain(&[*key, *value], LEAF_DOMAIN),
             SmtLeaf::Multiple(kvs) => {
                 let elements: Vec<Felt> = kvs.iter().copied().flat_map(kv_to_elements).collect();
-                Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
+                Eidos::hash_elements_in_domain(&elements, LEAF_DOMAIN)
             },
         }
     }

@@ -1,20 +1,22 @@
 //! Chiplets trace constraints.
 //!
-//! This module enforces:
-//! - chiplet selector constraints
-//! - hasher controller main-trace constraints
+//! Currently we implement:
+//! - chiplet selector constraints (including hasher internal selectors)
+//! - controller sub-chiplet main-trace constraints
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
 //!
-//! Poseidon2 permutation constraints are enforced by the separate
-//! [`crate::Poseidon2PermutationAir`].
+//! Eidos compression constraints are enforced by the separate
+//! [`crate::EidosCompressionAir`], with byte-table relations supplied by
+//! [`crate::And8LookupAir`].
 //!
 //! Chiplet LogUp lookup-argument constraints are emitted by
 //! [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] and wired
 //! through [`crate::ChipletsAir`]'s `LookupAir` impl from `ChipletsAir::eval`.
 
 pub mod ace;
+pub mod aead_stream;
 pub mod bitwise;
 pub mod columns;
 pub mod hasher_control;
@@ -51,7 +53,13 @@ pub fn enforce_main<AB>(
     // Hasher controller.
     hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
 
-    bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
+    aead_stream::enforce_aead_stream_constraints(builder, local, next, selectors);
+    bitwise::enforce_bitwise_constraints(
+        builder,
+        local,
+        next,
+        selectors.stream_mode.normal_bitwise.clone(),
+    );
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
 }

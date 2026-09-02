@@ -1,5 +1,5 @@
 use miden::core::mem
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::math::u64
 
 #! Loads the leaf at the absolute `pos` in the MMR.
@@ -192,7 +192,7 @@ pub proc pack
   swap dup.1 dup.1
   # => [mmr_ptr, mmr_ptr_end, mmr_ptr, mmr_ptr_end, ...]
 
-  exec.poseidon2::hash_words
+  exec.eidos::hash_words
   # => [HASH, mmr_ptr, mmr_ptr_end, ...]
 
   # copy the data to advice map

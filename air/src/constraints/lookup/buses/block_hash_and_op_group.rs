@@ -52,7 +52,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
 
     let addr = dec.addr;
     let addr_next = dec_next.addr;
-    // `dec.hasher_state` is the rate portion of the sponge, split into two halves of 4:
+    // `dec.hasher_state` is the Eidos input block, split into two words:
     // `h_0 = h[0..4]` (first child) and `h_1 = h[4..8]` (second child).
     let h_0: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[i]);
     let h_1: [LB::Var; 4] = array::from_fn(|i| dec.hasher_state[4 + i]);

@@ -33,7 +33,7 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// The trait carries both the static *shape* (column count, payload
 /// width bound, bus-id upper bound) and the `eval` method that actually
 /// emits the interactions. Adapter constructors take a `&impl
-/// LookupAir<Self>` and read the shape via the trait — the `LB` type
+/// LookupAir<Self>` and read the shape via the trait - the `LB` type
 /// parameter is pinned to the adapter itself, so there is no
 /// ambiguity when the blanket `impl<LB: LookupBuilder> LookupAir<LB>
 /// for MyAir` implementations apply.
@@ -41,12 +41,12 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// ## Contract
 ///
 /// - [`num_columns()`](Self::num_columns) must match the number of `LookupBuilder::next_column`
-///   calls issued from [`eval`](Self::eval) — the adapter advances its internal column index each
+///   calls issued from [`eval`](Self::eval) - the adapter advances its internal column index each
 ///   time the closure returns and will panic (or produce undefined constraints) on a mismatch.
-/// - [`max_message_width()`](Self::max_message_width) must be ≥ the widest payload any message in
-///   the AIR emits. It counts **only** contiguous payload slots — the bus identifier is handled
+/// - [`max_message_width()`](Self::max_message_width) must be >= the widest payload any message in
+///   the AIR emits. It counts **only** contiguous payload slots - the bus identifier is handled
 ///   separately through the precomputed bus-prefix table.
-/// - [`num_bus_ids()`](Self::num_bus_ids) must be ≥ the largest bus ID any message in the AIR
+/// - [`num_bus_ids()`](Self::num_bus_ids) must be >= the largest bus ID any message in the AIR
 ///   emits, plus one; the adapter precomputes exactly that many bus prefixes and indexes into the
 ///   table with `bus_id as usize`.
 /// - The auxiliary trace must have a positive row count. Its single committed value is the

@@ -131,59 +131,37 @@ These registers have the following meanings:
 
 ### Program block hashing
 
-To compute hashes of program blocks, the decoder relies on the [hash chiplet](../chiplets/hasher.md). Specifically, the decoder needs to perform two types of hashing operations:
+To compute program-block hashes, the decoder relies on the [hash controller](../chiplets/hasher.md).
+It performs two related Eidos operations:
 
-1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements and get back $4$ field elements representing the result. This is represented by one hash-controller pair plus one packed 16-row cycle in `Poseidon2PermutationAir` for the corresponding input state.
-2. A sequential hash of $n$ elements. This requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. At the controller level, each absorbed batch contributes one `(input, output)` controller pair, so the controller addresses for successive batches advance by $2$.
+1. A two-to-one hash compresses one 8-element block under a domain-specific chaining value and
+   returns a 4-element digest.
+2. A sequential hash uses one controller row per 8-element block. The digest of each row becomes
+   the input chaining value of the next row.
 
-To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/index.md#chiplets-bus) column $b_{chip}$ as described below.
+Each controller row contains both the compression input and output. A typed compression-link
+message binds its complete `(block, cv_in, cv_out)` tuple to one physical 32-row cycle in
+`EidosCompressionAir`. Identical tuples may share one provider cycle through multiplicity without
+removing any decoder/controller request.
 
-#### Simple 2-to-1 hash
+#### Simple two-to-one hash
 
-To initiate a 2-to-1 hash of $8$ elements ($v_0, ..., v_7$) we need to divide $b_{chip}$ by the following value:
-
-$$
-\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
-$$
-
-where:
-* $m_{bp}$ is a label indicating beginning of a new permutation. Value of this label is computed based on hash-controller selector flags according to the methodology described [here](../chiplets/hasher.md#lookup-buses).
-* $r$ is the address of the row at which the hashing begins.
-* Some $\alpha$ values are skipped in the above (e.g., $\alpha_3$) because of how hash-controller rows are reduced to field elements (described [here](../chiplets/hasher.md#lookup-buses)). For example, $\alpha_3$ is used as a coefficient for node index values during Merkle path computations in the hasher, and thus, is not relevant in this case. The capacity lanes (state indices $8..11$, coefficients $\alpha_{12..15}$) are zero for these messages, so those terms drop out.
-
-To read the $4$-element result ($u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
-
-$$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
-$$
-
-where:
-* $m_{hout}$ is a label indicating return of the hash value. Value of this label is computed based on hash-controller selector flags according to the methodology described [here](../chiplets/hasher.md#lookup-buses).
-* $r$ is the address of the row at which the hashing began.
+The decoder initializes the Eidos chaining value from the control-block opcode and places the two
+child words in the block. At controller address `r`, it consumes a full-state input message and a
+digest-return message. Both messages use node index zero and the same row address. The explicit
+bus domains distinguish the input and output even though they share an address.
 
 #### Sequential hash
 
-To initiate a sequential hash of $n$ elements ($v_0, ..., v_{n-1}$), we need to divide $b_{chip}$ by the following value:
+The first block contributes a full-state input message at address `r`. Each following block
+contributes a next-block absorption message at the next controller address. The controller AIR
+constrains that row's input chaining value to equal the previous row's output chaining value.
 
-$$
-\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
-$$
-
-This also absorbs the first $8$ elements of the sequence into the hasher state. Then, to absorb the next sequence of $8$ elements (e.g., $v_8, ..., v_{15}$), we need to divide $b_{chip}$ by the following value:
-
-$$
-\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 2) + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_{i + 8})
-$$
-
-Where $m_{abp}$ is a label indicating absorption of more elements into the hasher state. Value of this label is computed based on hash-controller selector flags according to the methodology described [here](../chiplets/hasher.md#lookup-buses).
-
-We can keep absorbing elements into the hasher in the similar manner until all elements have been absorbed. Then, to read the result (e.g., $u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
-
-$$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 2 \cdot \lceil n / 8 \rceil - 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
-$$
-
-Thus, for example, if $n = 14$, the result of the hash is available at controller output row $r + 3$ (two absorbed batches).
+The final block also supplies the digest-return message at its own address. Thus, for a stream of
+`k` blocks, controller addresses run from `r` through `r + k - 1`, and the result is returned at
+`r + k - 1`.
+Message reduction and the cross-AIR compression link are described in the
+[hash-chiplet lookup section](../chiplets/hasher.md#lookup-buses).
 
 ### Control flow tables
 
@@ -287,7 +265,7 @@ When the VM executes a `JOIN` operation, it does the following:
 
 1. Adds a tuple `(blk, prnt, 0, 0...)` to the block stack table.
 2. Adds tuples `(blk, left_child_hash, 1, 0)` and `(blk, right_child_hash, 0, 0)` to the block hash table.
-3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
+3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
 
 #### SPLIT operation
 
@@ -304,11 +282,11 @@ When the VM executes a `SPLIT` operation, it does the following:
    a. If the popped value is $1$, adds a tuple `(blk, true_branch_hash, 0, 0)` to the block hash table.\
    b. If the popped value is $0$, adds a tuple `(blk, false_branch_hash, 0, 0)` to the block hash table.\
    c. If the popped value is neither $1$ nor $0$, the execution fails.
-3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
+3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_7$ as input values.
 
 #### LOOP operation
 
-Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below. The remaining registers $h_4, ..., h_7$ are set to $0$ so the hash input is padded to a full 8-element rate.
+Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below. The remaining registers $h_4, ..., h_7$ are set to $0$ to complete the 8-element Eidos block.
 
 ![decoder_loop_operation](../../img/design/decoder/decoder_loop_operation.png)
 
@@ -319,7 +297,7 @@ The `LOOP` operation has do-while semantics: the body is entered unconditionally
 1. Adds a tuple `(blk, prnt, 1, 0...)` to the block stack table (the `1` indicates that the
    loop's body is expected to be executed).
 2. Adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table.
-3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
+3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
 
 The `LOOP` operation does not read or pop the stack.
 
@@ -352,7 +330,7 @@ When the VM executes a `DYN` operation, it does the following:
 1. Adds a tuple `(blk, p_addr, 0, 0...)` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
 3. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
-4. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
+4. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
 5. Performs a stack left shift
     - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
 
@@ -368,9 +346,9 @@ When the VM executes a `DYNCALL` operation, it does the following:
 
 1. Adds a tuple `(blk, p_addr, 0, ctx, b_0, b_1, fn_hash[0..3])` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
-3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
-5. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
+5. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
 6. Performs a stack left shift
     - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
 
@@ -469,8 +447,8 @@ In the above diagram, `blk` is the ID of the *call* block which is about to be e
 When the VM executes a `CALL` operation, it does the following:
 
 1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
-2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
-3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
+2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 2` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
 #### SYSCALL operation
 
@@ -494,7 +472,7 @@ When the VM executes a `SYSCALL` operation, it does the following:
 1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
 2. Sends a request to the kernel ROM chiplet indicating that `hash of callee` is being accessed.
     - this results in a fault if `hash of callee` does not correspond to the hash of a kernel procedure
-3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
+3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-two-to-one-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
 
 ## Program decoding
 

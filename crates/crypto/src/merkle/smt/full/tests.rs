@@ -5,7 +5,7 @@ use assert_matches::assert_matches;
 use super::{EMPTY_WORD, LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
 use crate::{
     Felt, ONE, Word,
-    hash::poseidon2::Poseidon2,
+    hash::eidos::Eidos,
     merkle::{
         EmptySubtreeRoots,
         smt::{
@@ -1267,7 +1267,7 @@ fn build_multiple_leaf_node(kv_pairs: &[(Word, Word)]) -> Word {
         })
         .collect();
 
-    Poseidon2::hash_elements_in_domain(&elements, LEAF_DOMAIN)
+    Eidos::hash_elements_in_domain(&elements, LEAF_DOMAIN)
 }
 
 /// Applies mutations with and without reversion to the given SMT, comparing resulting SMTs,

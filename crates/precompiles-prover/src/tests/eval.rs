@@ -10,36 +10,36 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
     transcript::{
+        eidos::{EidosDigest, trace::EidosRequires},
         eval::{
             COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR,
             NUM_MAIN_COLS, TranscriptEvalAir,
             trace::{TranscriptEvalRequires, Truthy, generate_trace},
         },
-        poseidon2::{P2Digest, trace::Poseidon2Requires},
     },
     uint::trace::{UintPtr, UintStoreRequires},
 };
 
-fn random_hash(rng: &mut impl Rng) -> P2Digest {
-    P2Digest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))
+fn random_hash(rng: &mut impl Rng) -> EidosDigest {
+    EidosDigest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))
 }
 
 fn fold_one(
     requires: &mut TranscriptEvalRequires,
-    p2: &mut Poseidon2Requires,
+    eidos: &mut EidosRequires,
     a: Truthy,
     b: Truthy,
 ) -> Truthy {
-    requires.record_and(a, b, p2)
+    requires.record_and(a, b, eidos)
 }
 
-fn build_eval_trace(rng: &mut impl Rng, k: usize) -> (RowMajorMatrix<Felt>, P2Digest) {
-    let mut p2 = Poseidon2Requires::new();
+fn build_eval_trace(rng: &mut impl Rng, k: usize) -> (RowMajorMatrix<Felt>, EidosDigest) {
+    let mut eidos = EidosRequires::new();
     let mut req = TranscriptEvalRequires::new();
     let handles = (0..k).map(|_| req.issue(random_hash(rng))).collect::<Vec<_>>();
     let mut acc = req.zero();
     for handle in handles {
-        acc = fold_one(&mut req, &mut p2, acc, handle);
+        acc = fold_one(&mut req, &mut eidos, acc, handle);
     }
     let public_root = acc.hash();
     (generate_trace(req, acc), public_root)
@@ -49,7 +49,7 @@ fn check_corrupted(
     seed: u64,
     k: usize,
     corrupt_trace: impl FnOnce(&mut RowMajorMatrix<Felt>),
-    corrupt_public_root: impl FnOnce(&mut P2Digest),
+    corrupt_public_root: impl FnOnce(&mut EidosDigest),
 ) {
     let mut rng = StdRng::seed_from_u64(seed);
     let (mut main, mut public_root) = build_eval_trace(&mut rng, k);
@@ -112,17 +112,17 @@ fn corruption_act_sticky_down() {
 
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
-fn corruption_pinned_leaf_cap_slot_mismatch() {
+fn corruption_pinned_leaf_chain_context_slot_mismatch() {
     let mut rng = StdRng::seed_from_u64(0xf0_f6_3d);
-    let mut p2 = Poseidon2Requires::new();
+    let mut eidos = EidosRequires::new();
     let mut req = TranscriptEvalRequires::new();
 
     let zero = req.zero();
     let value = core::array::from_fn(|_| rng.random());
     let mut scratch = UintStoreRequires::new();
     let pinned =
-        req.pin_uint(UintPtr::from_addr(7), UintPtr::from_addr(7), value, &mut scratch, &mut p2);
-    let root = fold_one(&mut req, &mut p2, zero, pinned);
+        req.pin_uint(UintPtr::from_addr(7), UintPtr::from_addr(7), value, &mut scratch, &mut eidos);
+    let root = fold_one(&mut req, &mut eidos, zero, pinned);
     let public_root = root.hash();
     let mut main = generate_trace(req, root);
 

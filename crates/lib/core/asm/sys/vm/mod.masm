@@ -15,10 +15,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 16
-const NUM_COMPOSED_CONSTRAINTS = 427
+const NUM_COMPOSED_CONSTRAINTS = 680
 const MAX_CONSTRAINT_DEGREE = 9
-const NUM_DEEP_TERMS = 138
-const LOOKUP_FRACTIONS_PER_ROW = 28     # matches AIR_SHAPE.lookup.fractions_per_row
+const NUM_DEEP_TERMS = 322
+const LOOKUP_FRACTIONS_PER_ROW = 81     # matches AIR_SHAPE.lookup.fractions_per_row
 const CORE_BOUNDARY_LOOKUP_TERMS = 3    # emit_core_boundary: block-hash seed + 2 log-deferred terms
 
 # Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
@@ -31,8 +31,7 @@ const LOG_HEIGHT_MAX = 29
 const KERNEL_COMMITMENT_OFFSET = 4
 
 # Domain tag for the kernel commitment: the registered selector
-# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
+# (KERNEL_COMMITMENT_DOMAIN_ID << 8) | version = (0x010000 << 8) | 1.
 # Must match miden_core::program::KERNEL_DOMAIN_TAG (enforced by cross-tests).
 const KERNEL_DOMAIN_TAG = 0x01000001
 
@@ -41,24 +40,33 @@ const FELTS_PER_KERNEL_DIGEST = 4
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
 # Number of AIR instances contributing to the proof order.
-const NUM_MIDEN_AIRS = 3
+const NUM_MIDEN_AIRS = 4
+const AND8_LOOKUP_LOG_HEIGHT = 16
 
-# RELATION_DIGEST = hash(PROTOCOL_ID, ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 8509919582315365814
-const RELATION_DIGEST_1 = 12865978328275266043
-const RELATION_DIGEST_2 = 12073117316737140237
-const RELATION_DIGEST_3 = 5647109555087128169
+# RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_REGISTRY_ROOT]).
+const RELATION_DIGEST_0 = 5386642688186435407
+const RELATION_DIGEST_1 = 6538706076452792969
+const RELATION_DIGEST_2 = 9112338682580750753
+const RELATION_DIGEST_3 = 4367732112936953739
 
 # Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 8563712008625779037
-const ACE_REGISTRY_ROOT_1 = 2346635758357605862
-const ACE_REGISTRY_ROOT_2 = 17725435322360039753
-const ACE_REGISTRY_ROOT_3 = 12106900609136090006
+const ACE_REGISTRY_ROOT_0 = 6867412142867451962
+const ACE_REGISTRY_ROOT_1 = 2481413844695882715
+const ACE_REGISTRY_ROOT_2 = 5303340724979295925
+const ACE_REGISTRY_ROOT_3 = 8468512126931593944
+
+# Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
+const AND8_PREPROCESSED_TRACE_COM_0 = 6547037438551888543
+const AND8_PREPROCESSED_TRACE_COM_1 = 5332594494244509749
+const AND8_PREPROCESSED_TRACE_COM_2 = 8439887896402127641
+const AND8_PREPROCESSED_TRACE_COM_3 = 4048810480047996444
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
 #! Advice supplies log heights in fixed instance order:
-#!   [log_core, log_chiplets, log_poseidon2_permutation]
+#!   [log_core, log_chiplets, log_eidos_compression]
+#!
+#! The And8 lookup height is fixed verifier setup.
 #!
 #! Writes the trace shape, proof-order tag, relation commitments, and fixed OOD/query-row
 #! addresses to verifier memory.
@@ -73,12 +81,17 @@ pub proc load_air_context
 
     adv_push
     exec.assert_shape_log
-    exec.layout::set_poseidon2_permutation_trace_length_log
+    exec.layout::set_eidos_compression_trace_length_log
+
+    push.AND8_LOOKUP_LOG_HEIGHT
+    exec.layout::set_and8_lookup_trace_length_log
 
     exec.layout::get_core_trace_length_log
     exec.layout::get_chiplets_trace_length_log
     u32max
-    exec.layout::get_poseidon2_permutation_trace_length_log
+    exec.layout::get_eidos_compression_trace_length_log
+    u32max
+    exec.layout::get_and8_lookup_trace_length_log
     u32max
     exec.constants::set_trace_length_log
 
@@ -87,10 +100,15 @@ pub proc load_air_context
 
     exec.store_relation_digest
     exec.store_ace_registry_root
+    exec.store_and8_preprocessed_trace_commitment
     exec.layout::ood_evaluations_ptr
     exec.constants::set_ood_evaluations_address
     exec.layout::current_trace_row_ptr
     exec.constants::set_current_trace_row_address
+    exec.layout::auxiliary_ace_inputs_ptr
+    exec.constants::set_auxiliary_ace_inputs_address
+    exec.layout::aux_rand_elem_ptr
+    exec.constants::set_aux_rand_elem_address
 end
 
 proc assert_shape_log
@@ -116,7 +134,7 @@ end
 #! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
 #! factorial argument never underflows the field.
 #!
-#! This VM-local specialization keeps the three-AIR loop bounds compile-time constants. New
+#! This VM-local specialization keeps the four-AIR loop bounds compile-time constants. New
 #! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
 #! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
 #! layout accessors, and the public-input schema; regeneration checks pin those copies.
@@ -211,6 +229,12 @@ proc store_ace_registry_root
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
+    dropw
+end
+
+proc store_and8_preprocessed_trace_commitment
+    push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
+    exec.constants::preprocessed_trace_com_ptr mem_storew_le
     dropw
 end
 

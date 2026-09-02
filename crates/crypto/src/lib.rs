@@ -162,10 +162,10 @@ pub trait SequentialCommit {
 
     /// Computes the commitment to the object.
     ///
-    /// The default implementation of this function uses Poseidon2 hash function to hash the
-    /// sequence of elements returned from [Self::to_elements()].
+    /// The default implementation hashes the sequence of elements returned from
+    /// [Self::to_elements()] with Eidos.
     fn to_commitment(&self) -> Self::Commitment {
-        hash::poseidon2::Poseidon2::hash_elements(&self.to_elements()).into()
+        hash::eidos::Eidos::hash_elements(&self.to_elements()).into()
     }
 
     /// Returns a representation of the object as a sequence of fields elements.

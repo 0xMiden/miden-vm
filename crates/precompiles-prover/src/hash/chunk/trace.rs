@@ -4,7 +4,7 @@
 //! [`Invocation`]s to it via [`ChunkRequires::require`]. Each call
 //! packs the invocation into 32-byte chunks, claims a fresh
 //! `chunk_seq_id` range, and delegates to the caller-supplied
-//! [`Poseidon2Requires`] for the absorption (P2 itself interns by
+//! [`EidosRequires`] for the absorption (Eidos itself interns by
 //! content digest, so identical chunk content shares one cycle range
 //! with `in_mult` tallied — even when the chunk rows themselves are
 //! duplicated here).
@@ -18,7 +18,7 @@
 //! [`generate_trace`] takes a `&ChunkRequires` and walks the recorded
 //! invocations in allocation order, emitting one row per chunk;
 //! trailing rows are inactive (`act = 0`) with `chunk_seq_id` and
-//! `perm_seq_id` continuing `+1` to satisfy the relaxed chain on dead
+//! `absorption_id` continuing `+1` to satisfy the relaxed chain on dead
 //! rows.
 
 use alloc::vec::Vec;
@@ -29,9 +29,9 @@ use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::RowMajorMatrix};
 use crate::{
     hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
     logup::build_logup_aux_trace,
-    transcript::poseidon2::{
-        digest::{P2Cap, P2Digest},
-        trace::{PermSpan, Poseidon2Requires},
+    transcript::eidos::{
+        digest::{EidosChainContext, EidosDigest},
+        trace::{AbsorptionSpan, EidosRequires},
     },
 };
 
@@ -47,17 +47,17 @@ pub struct Invocation {
 // ================================================================================================
 
 /// What a `ChunkRequires::require` call returns: the content digest
-/// and the `(chunk_seq_id, perm_seq_id)` ranges the invocation
+/// and the `(chunk_seq_id, absorption_id)` ranges the invocation
 /// occupies. The chunk range is what the downstream hasher uses as
-/// its chunk-chain head; the perm span holds the P2 cycles the chunk
-/// chiplet stamps into `COL_PERM_SEQ_ID`.
+/// its chunk-chain head; the compression span holds the Eidos cycles the chunk
+/// chiplet stamps into `COL_ABSORPTION_ID`.
 #[derive(Debug, Clone)]
 pub struct ChunkOutput {
-    pub digest: P2Digest,
+    pub digest: EidosDigest,
     /// First chunk row of the invocation's chain (rows are laid
     /// contiguously; the count is the layout's chunk count).
     pub chunk_head: ChunkSeqId,
-    pub perm_span: PermSpan,
+    pub absorption_span: AbsorptionSpan,
 }
 
 /// Handle to one chunk row — minted only by the chunk accumulator's
@@ -94,14 +94,14 @@ impl ChunkSeqId {
 struct ChunkRecord {
     f_per_chunk: Vec<[Felt; NUM_F]>,
     chunk_seq_id_range: Range<u32>,
-    perm_span: PermSpan,
+    absorption_span: AbsorptionSpan,
 }
 
 /// Pure-allocator streaming accumulator for chunked invocations. Each
 /// [`require`](Self::require) call lays fresh chunk rows and delegates
-/// to [`Poseidon2Requires`] for the absorption (which itself interns
+/// to [`EidosRequires`] for the absorption (which itself interns
 /// by content digest). No chunk-level dedup: same byte content with
-/// different downstream `len_bytes` collides at the P2 layer but needs
+/// different downstream `len_bytes` collides at the Eidos layer but needs
 /// its own chunk-row set because each chunk row has exactly one
 /// downstream Memory64 consumer (CR-dedup at the orchestrator above is
 /// what guarantees that invariant).
@@ -118,25 +118,26 @@ impl ChunkRequires {
     }
 
     /// Register an invocation; lays a fresh chunk-row span and calls
-    /// `p2.require_absorption` to claim its P2 cycle range. Empty input
+    /// `eidos.require_absorption` to claim its Eidos cycle range. Empty input
     /// lays one canonical all-zero chunk (see `Invocation::num_chunks`),
     /// so the span is always non-empty.
-    pub fn require(&mut self, inv: &Invocation, p2: &mut Poseidon2Requires) -> ChunkOutput {
+    pub fn require(&mut self, inv: &Invocation, eidos: &mut EidosRequires) -> ChunkOutput {
         let f_per_chunk = Node::chunks_from_bytes(&inv.input)
             .payload()
             .as_data()
             .expect("chunks_from_bytes creates data payload")
             .to_vec();
         debug_assert!(!f_per_chunk.is_empty(), "chunks_from_bytes guarantees ≥1 chunk",);
-        let rate_pairs: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
+        let block_words: Vec<([Felt; 4], [Felt; 4])> = f_per_chunk
             .iter()
             .map(|f| {
-                let rate0: [Felt; 4] = f[0..4].try_into().expect("rate0 slice");
-                let rate1: [Felt; 4] = f[4..8].try_into().expect("rate1 slice");
-                (rate0, rate1)
+                let block_lo: [Felt; 4] = f[0..4].try_into().expect("block-low slice");
+                let block_hi: [Felt; 4] = f[4..8].try_into().expect("block-high slice");
+                (block_lo, block_hi)
             })
             .collect();
-        let p2_out = p2.require_absorption(P2Cap::chunk(), rate_pairs.iter().copied());
+        let eidos_out =
+            eidos.require_absorption(EidosChainContext::chunk(), block_words.iter().copied());
         let n = f_per_chunk.len() as u32;
         let chunk_head = ChunkSeqId(self.next_chunk_seq);
         let chunk_seq_id_range = self.next_chunk_seq..self.next_chunk_seq + n;
@@ -144,12 +145,12 @@ impl ChunkRequires {
         self.records.push(ChunkRecord {
             f_per_chunk,
             chunk_seq_id_range,
-            perm_span: p2_out.span,
+            absorption_span: eidos_out.span,
         });
         ChunkOutput {
-            digest: p2_out.digest,
+            digest: eidos_out.digest,
             chunk_head,
-            perm_span: p2_out.span,
+            absorption_span: eidos_out.span,
         }
     }
 
@@ -166,7 +167,7 @@ impl ChunkRequires {
 /// invocations. Walks records in allocation order, stamping each at
 /// its `chunk_seq_id_range.start`; trailing rows up to the next power
 /// of two are inactive (`act = 0`), with `chunk_seq_id` and
-/// `perm_seq_id` continuing `+1` to satisfy the relaxed chain on
+/// `absorption_id` continuing `+1` to satisfy the relaxed chain on
 /// dead rows. Returns a 12-column trace.
 pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
     generate_trace_padded_to(requires, 0)
@@ -186,40 +187,40 @@ pub(crate) fn generate_trace_padded_to(
     let mut trace = Vec::with_capacity(height * NUM_MAIN_COLS);
 
     // Running row index = global chunk_seq_id (records tile it contiguously
-    // in allocation order). Where the perm_seq_id chain lands at the end of
+    // in allocation order). Where the absorption_id chain lands at the end of
     // the active section, so dead rows can continue +1 from there.
     let mut chunk_seq_id = 0u32;
-    let mut next_perm_seq_id = 0u32;
+    let mut next_absorption_id = 0u32;
 
     for rec in &requires.records {
         debug_assert_eq!(chunk_seq_id, rec.chunk_seq_id_range.start, "contiguous chunk_seq_id");
-        let perm_start = rec.perm_span.head().seq();
+        let absorption_start = rec.absorption_span.head().as_u32();
         for (c, f) in rec.f_per_chunk.iter().enumerate() {
-            // chunk_seq_id, perm_seq_id, act, is_head, f[8].
+            // chunk_seq_id, absorption_id, act, is_head, f[8].
             trace.extend([
                 Felt::new(chunk_seq_id as u64).expect("chunk_seq_id fits"),
-                Felt::new((perm_start + c as u32) as u64).expect("perm_seq_id fits"),
+                Felt::new((absorption_start + c as u32) as u64).expect("absorption_id fits"),
                 Felt::ONE,
                 Felt::from(u8::from(c == 0)),
             ]);
             trace.extend(*f);
             chunk_seq_id += 1;
         }
-        next_perm_seq_id = rec.perm_span.tail().seq() + 1;
+        next_absorption_id = rec.absorption_span.tail().as_u32() + 1;
     }
 
     // Padding rows: act = 0 (f = is_head = 0), but chunk_seq_id and
-    // perm_seq_id continue +1 to satisfy the relaxed chain on dead rows.
+    // absorption_id continue +1 to satisfy the relaxed chain on dead rows.
     for _ in total_chunks..height {
         trace.extend([
             Felt::new(chunk_seq_id as u64).expect("chunk_seq_id fits"),
-            Felt::new(next_perm_seq_id as u64).expect("perm_seq_id fits"),
+            Felt::new(next_absorption_id as u64).expect("absorption_id fits"),
             Felt::ZERO,
             Felt::ZERO,
         ]);
         trace.extend([Felt::ZERO; NUM_F]);
         chunk_seq_id += 1;
-        next_perm_seq_id += 1;
+        next_absorption_id += 1;
     }
 
     debug_assert_eq!(trace.len(), height * NUM_MAIN_COLS);

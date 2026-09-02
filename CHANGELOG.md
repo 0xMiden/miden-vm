@@ -19,6 +19,28 @@
 - [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
 - [BREAKING] Replaced the Poseidon2-backed IES variants with `K256AeadEidos` and
   `X25519AeadEidos`. Their numeric scheme identifiers remain 2 and 3.
+- [BREAKING] Made Eidos the native hash for programs, MAST forests, Merkle data structures,
+  advice maps, packages, kernels, signatures, authenticated encryption, deferred nodes, and proof
+  transcripts. Their digests and commitments have changed. Poseidon2 remains available as a
+  standalone primitive and as an optional STARK proof hash. `HPERM` is now `COMPRESS`, and
+  `adv.insert_hperm` is now `adv.insert_compress`. MAST serialization uses version 0.0.5, and Eidos
+  execution witnesses use version 2 ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Replaced the core-library module `crypto::hashes::poseidon2` with
+  `crypto::hashes::eidos`, and `crypto::aead` with `crypto::aead_eidos`. The removed Poseidon2 hash
+  procedures are `permute`, `squeeze_digest`, `init_no_padding`, and `init_with_capacity`; the
+  removed AEAD procedures are `encrypt` and `decrypt`. The old
+  `miden::core::crypto::aead::decrypt` host event was replaced by
+  `miden::core::crypto::aead_eidos::decrypt_empty_ad`. The `crypto_stream` instruction now derives
+  an Eidos XOF block, XORs it with eight plaintext Felts, and writes sixteen u32 ciphertext limbs
+  ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Split the native proof statement into Core, Chiplets, EidosCompression, and
+  And8Lookup AIRs. The fixed 65,536-row And8 table also serves the 16-bit range checks and sets the
+  minimum padded trace height. `LOG_DEFERRED` now replaces the statement digest on top of the stack
+  with the updated deferred root ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Changed deferred precompile nodes to initialize Eidos from their registered selector,
+  payload length, and two tag arguments. Each payload block is compressed once, with no terminal
+  tag block. Framework AND and CHUNKS nodes keep separate registered selectors
+  ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
 
 #### Fixes
 
@@ -57,7 +79,7 @@
 - Fixed `verify` checking for the proof, input, and output files before validating the `--kernel` file extension, so a malformed `--kernel` path was reported as a missing/invalid proof or input/output file instead of the actual problem (mirrors the same ordering issue already fixed for `prove` in #3587) ([#3656](https://github.com/0xMiden/miden-vm/issues/3656)).
 - Fixed `line_column_to_offset` treating the column index as a raw byte offset instead of a character offset, which returned the wrong offset or panicked for lines containing multi-byte UTF-8 characters ([#3633](https://github.com/0xMiden/miden-vm/issues/3633)).
 - Clarified the ACE circuit trust model and distinguished the order-independent AIR wiring relation from the standard processor's sequential DAG witness construction ([#3683](https://github.com/0xMiden/miden-vm/pull/3683)).
-- [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. Callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::poseidon2::hash_elements_in_domain` directly.
+- [BREAKING] Removed the MASM `sys::vm::claim::kernel_commitment` procedure. The recursive verifier now copies and hashes kernel digests from advice in one pass using the new `mem::pipe_words_to_memory_in_domain` procedure. On the current native-hash API, callers computing a domain-tagged hash over an existing memory region can use `crypto::hashes::eidos::hash_elements_in_domain` directly.
 - [BREAKING] Replaced package digests with separate interface, MAST forest, code, artifact, dependency, and full package commitments. Dependency commitments exclude optional debug data and opaque custom sections ([#3679](https://github.com/0xMiden/miden-vm/pull/3679)).
 - Documented the `word("...")` and `event("...")` string-derived constant constructors and word
   slicing behavior in the assembly reference ([#2688](https://github.com/0xMiden/miden-vm/issues/2688)).

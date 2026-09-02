@@ -244,7 +244,7 @@ impl UintStores {
 
     /// A [`UintRequire`] view borrowing all three accumulators — the
     /// recording entry point. One borrow of the bundle, so a caller can
-    /// hold it alongside disjoint sibling borrows (eval, Poseidon2).
+    /// hold it alongside disjoint sibling borrows (eval, Eidos).
     pub fn require(&mut self) -> UintRequire<'_> {
         UintRequire::new(&mut self.store, &mut self.add, &mut self.mul)
     }

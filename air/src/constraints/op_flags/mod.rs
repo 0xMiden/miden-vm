@@ -196,7 +196,7 @@ where
         // --- Degree-5 flags (opcodes 80-95) ---
         // Uses extra[0] = b6*(1-b5)*b4 (degree 3), discriminated by [b0, b1, b2, b3].
         // Index = b3*8 + b2*4 + b1*2 + b0:
-        // - 0: HPERM          -  1: MPVERIFY
+        // - 0: COMPRESS      -  1: MPVERIFY
         // - 2: PIPE           -  3: MSTREAM
         // - 4: SPLIT          -  5: LOOP
         // - 6: SPAN           -  7: JOIN
@@ -211,7 +211,7 @@ where
         // --- Degree-4 flags (opcodes 96-127) ---
         // Uses extra[1] = b6*b5 (degree 2), discriminated by [b2, b3, b4].
         // Index = b4*4 + b3*2 + b2:
-        // - 0: MRUPDATE      - 1: CRYPTOSTREAM
+        // - 0: MRUPDATE      - 1: AEADSTREAM
         // - 2: SYSCALL        - 3: CALL
         // - 4: END            - 5: REPEAT
         // - 6: RESPAN         - 7: HALT
@@ -234,10 +234,10 @@ where
         // --- Next-row control flow flags (degree 4) ---
         // Detect END, REPEAT, RESPAN, HALT on the *next* row.
         // Prefix = extra[1]' * b4' = b6'*b5'*b4'.
-        // - END    = 0b0111_0000 → prefix * (1-b3') * (1-b2')
-        // - REPEAT = 0b0111_0100 → prefix * (1-b3') * b2'
-        // - RESPAN = 0b0111_1000 → prefix * b3' * (1-b2')
-        // - HALT   = 0b0111_1100 → prefix * b3' * b2'
+        // - END    = 0b0111_0000 -> prefix * (1-b3') * (1-b2')
+        // - REPEAT = 0b0111_0100 -> prefix * (1-b3') * b2'
+        // - RESPAN = 0b0111_1000 -> prefix * b3' * (1-b2')
+        // - HALT   = 0b0111_1100 -> prefix * b3' * b2'
         let (end_next, repeat_next, respan_next, halt_next) = {
             let prefix: E = decoder_next.extra[1].into();
             let prefix = prefix * decoder_next.op_bits[4];
@@ -312,10 +312,10 @@ where
 
         // --- Shared bit-prefix selectors ---
 
-        // prefix_01: (1-b6)*b5 — degree 2, shared by prefix_010 and prefix_011
+        // prefix_01: (1-b6)*b5 - degree 2, shared by prefix_010 and prefix_011
         let prefix_01 = bits[6][0].clone() * bits[5][1].clone();
 
-        // prefix_100: b6*(1-b5)*(1-b4) — degree 3, all u32 operations (opcodes 64-79)
+        // prefix_100: b6*(1-b5)*(1-b4) - degree 3, all u32 operations (opcodes 64-79)
         let prefix_100 = bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone();
 
         // --- END operation with loop flag ---
@@ -329,108 +329,113 @@ where
         let no_shift_depth0 = E::sum_array::<15>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
-            // +U32ASSERT2   — checks s0,s1 are u32, no change
+            // +COMPRESS    - preserves the 8-felt block and updates only the CV
+            op5(opcodes::COMPRESS),
+            // +U32ASSERT2   - checks s0,s1 are u32, no change
             op6(opcodes::U32ASSERT2),
-            // +MPVERIFY     — verifies Merkle path in place
+            // +MPVERIFY     - verifies Merkle path in place
             op5(opcodes::MPVERIFY),
-            // +SPAN         — control flow: begins basic block
-            op5(opcodes::SPAN),
-            // +JOIN         — control flow: begins join block
-            op5(opcodes::JOIN),
-            // +LOOP         — control flow: do-while LOOP reads no stack input
-            op5(opcodes::LOOP),
-            // +EMIT         — emits event, no stack change
-            op7(opcodes::EMIT),
-            // +RESPAN       — control flow: next batch in basic block
-            op4(opcodes::RESPAN),
-            // +HALT         — control flow: ends program
-            op4(opcodes::HALT),
-            // +CALL         — control flow: enters procedure
-            op4(opcodes::CALL),
-            // +SYSCALL      - control flow: enters kernel procedure.
-            op4(opcodes::SYSCALL),
-            // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
-            op4(opcodes::END) * (E::ONE - is_loop_end),
-            // +EVALCIRCUIT  - asserts an ACE evaluation without changing the stack.
+            // +EVALCIRCUIT  - evaluates ACE circuit from advice without changing the stack
             op5(opcodes::EVALCIRCUIT),
+            // +SPAN         - control flow: begins basic block
+            op5(opcodes::SPAN),
+            // +JOIN         - control flow: begins join block
+            op5(opcodes::JOIN),
+            // +EMIT         - emits event, no stack change
+            op7(opcodes::EMIT),
+            // +RESPAN       - control flow: next batch in basic block
+            op4(opcodes::RESPAN),
+            // +HALT         - control flow: ends program
+            op4(opcodes::HALT),
+            // +CALL         - control flow: enters procedure
+            op4(opcodes::CALL),
+            // +SYSCALL      - control flow: enters kernel procedure
+            op4(opcodes::SYSCALL),
+            // +END*(1-loop) - no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
+            op4(opcodes::END) * (E::ONE - is_loop_end),
             // +HORNERBASE   - Horner step rewrites only the accumulator (s14, s15).
             op5(opcodes::HORNERBASE),
             // +HORNEREXT    - Horner step rewrites only the accumulator (s14, s15).
             op5(opcodes::HORNEREXT),
-        ]);
+        ])
+        // +LOOP - control flow: begins loop body without consuming a stack item.
+        + op5(opcodes::LOOP);
 
-        // +opcodes[0..8] –NOOP — unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
+        // +opcodes[0..8] -NOOP - unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
         let no_shift_depth1 = deg7[0..8].iter().cloned().sum::<E>() - op7(opcodes::NOOP);
 
-        // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
+        // +U32ADD +U32SUB +U32MUL +U32DIV - consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
 
-        let no_shift_depth4 = E::sum_array::<6>(&[
-            // +MOVUP3|MOVDN3  — permute s0..s3
+        let no_shift_depth4 = E::sum_array::<7>(&[
+            // +MOVUP3|MOVDN3  - permute s0..s3
             movup_or_movdn[1].clone(),
-            // +ADVPOPW|EXPACC — overwrite s0..s3 in place
+            // +ADVPOPW|EXPACC - overwrite s0..s3 in place
             advpopw_or_expacc,
-            // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
-            swapw2_or_swapw3,
-            // +EXT2MUL        — ext field multiply on s0..s3
-            op7(opcodes::EXT2MUL),
-            // +MRUPDATE       — Merkle root update on s0..s3
-            op4(opcodes::MRUPDATE),
-            // +CALLER         - overwrite s0..s3 with the caller hash.
+            // +CALLER         - overwrites only s0..s3
             op7(opcodes::CALLER),
+            // +SWAPW2|SWAPW3  - swap s0..s3 with s8+ (leaves at depth 8)
+            swapw2_or_swapw3,
+            // +EXT2MUL        - ext field multiply on s0..s3
+            op7(opcodes::EXT2MUL),
+            // +MRUPDATE       - Merkle root update on s0..s3
+            op4(opcodes::MRUPDATE),
+            // +LOGDEFERRED    - replaces only the top word
+            op5(opcodes::LOGDEFERRED),
         ]);
 
-        // Prefix-summed deltas for SWAPW2/SWAPW3:
-        //   SWAPW2 is active at depths 4..7 and 12..15.
-        //   SWAPW3 is active at depths 4..11.
-        // The shared SWAPW2|SWAPW3 term starts at depth 4. Depth 8 removes only SWAPW2,
-        // and depth 12 adds SWAPW2 back while removing SWAPW3.
+        let swapw2 = op7(opcodes::SWAPW2);
+        let swapw3 = op7(opcodes::SWAPW3);
+        let stream_word = op5(opcodes::PIPE) + op5(opcodes::MSTREAM);
 
-        let stream_word_ops = op5(opcodes::MSTREAM) + op5(opcodes::PIPE);
+        // SWAPW2/SWAPW3 depth lifecycle:
+        //   Op      Swaps               No-shift depths
+        //   SWAPW2  s[0..4] ↔ s[8..12]  0-7, 12-15
+        //   SWAPW3  s[0..4] ↔ s[12..16] 0-7, 8-11
 
         let no_shift_depth8
-            // +MOVUP7|MOVDN7  — permute s0..s7
+            // +MOVUP7|MOVDN7  - permute s0..s7
             = movup_or_movdn[5].clone()
-            // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0-7
+            // +SWAPW          - swap s0..s3 with s4..s7, only affects depths 0-7
             + op7(opcodes::SWAPW)
-            // +MSTREAM/PIPE   - overwrite s0..s7 and increment s12; preserve s8..s11.
-            + stream_word_ops.clone()
-            // -SWAPW2         - s8..s11 are SWAPW2's target word, but unchanged for SWAPW3.
-            - op7(opcodes::SWAPW2);
+            // +PIPE|MSTREAM   - overwrite s0..s7 and cursor at s12
+            + stream_word.clone()
+            // -COMPRESS      - updates the CV at depths 8..11
+            - op5(opcodes::COMPRESS)
+            // -SWAPW2         - target range s8..s11 is affected by SWAPW2 only
+            - swapw2.clone();
 
         let no_shift_depth12
-            // +SWAPW2         - s12..s15 are unchanged by SWAPW2.
-            = op7(opcodes::SWAPW2)
-            // +HPERM         — Poseidon2 permutation on s0..s11
-            + op5(opcodes::HPERM)
-            // +LOGDEFERRED — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
-            + op5(opcodes::LOGDEFERRED)
-            // -MSTREAM/PIPE  - s12 is incremented by these ops.
-            - stream_word_ops.clone()
-            // -SWAPW3         - s12..s15 are SWAPW3's target word.
-            - op7(opcodes::SWAPW3);
+            // +SWAPW2       - SWAPW2 re-enters at s12
+            = swapw2
+            // -SWAPW3       - SWAPW3 leaves at s12
+            - swapw3
+            // +COMPRESS     - preserves the stack tail above the CV
+            + op5(opcodes::COMPRESS)
+            // -PIPE|MSTREAM - cursor at s12 is updated
+            - stream_word.clone();
 
         let no_shift = accumulate_depth_deltas([
             // d=0
             no_shift_depth0,
             // d=1
             no_shift_depth1,
-            // +SWAP            — swap s0,s1
-            // +u32_arith_group — U32ADD..U32DIV: consume s0,s1, produce 2 results
+            // +SWAP            - swap s0,s1
+            // +u32_arith_group - U32ADD..U32DIV: consume s0,s1, produce 2 results
             op7(opcodes::SWAP) + u32_arith_group,
-            // +MOVUP2|MOVDN2   — permute s0..s2
+            // +MOVUP2|MOVDN2   - permute s0..s2
             movup_or_movdn[0].clone(),
             // d=4
             no_shift_depth4,
-            // +MOVUP4|MOVDN4   — permute s0..s4
+            // +MOVUP4|MOVDN4   - permute s0..s4
             movup_or_movdn[2].clone(),
-            // +MOVUP5|MOVDN5   — permute s0..s5
+            // +MOVUP5|MOVDN5   - permute s0..s5
             movup_or_movdn[3].clone(),
-            // +MOVUP6|MOVDN6   — permute s0..s6
+            // +MOVUP6|MOVDN6   - permute s0..s6
             movup_or_movdn[4].clone(),
             // d=8
             no_shift_depth8,
-            // +MOVUP8|MOVDN8   — permute s0..s8
+            // +MOVUP8|MOVDN8   - permute s0..s8
             movup_or_movdn[6].clone(),
             // d=10 (unchanged)
             E::ZERO,
@@ -438,8 +443,8 @@ where
             E::ZERO,
             // d=12
             no_shift_depth12,
-            // +MSTREAM/PIPE   - preserve s13..s15 after skipping the incremented s12.
-            stream_word_ops,
+            // +PIPE|MSTREAM   - stack tail above the cursor is preserved
+            stream_word,
             // -HORNERBASE/HORNEREXT - s14, s15 hold the Horner accumulator, updated each step.
             -(op5(opcodes::HORNERBASE) + op5(opcodes::HORNEREXT)),
             // d=15 (unchanged)
@@ -451,47 +456,47 @@ where
         // Built incrementally via accumulate_depth_deltas.
 
         // All MOVUP/MOVDN pairs share bits [1..6] and differ only in b0:
-        //   b0 = 0 → MOVUP{w},  b0 = 1 → MOVDN{w}    (for all widths 2..8)
+        //   b0 = 0 -> MOVUP{w},  b0 = 1 -> MOVDN{w}    (for all widths 2..8)
         let all_mov_pairs = E::sum_array::<7>(&movup_or_movdn);
         let all_movdn = all_mov_pairs.clone() * bits[0][1].clone();
 
-        let left_shift_depth1 = E::sum_array::<11>(&[
-            // +ASSERT      — consumes s0 (must be 1)
+        let left_shift_depth1 = E::sum_array::<9>(&[
+            // +ASSERT      - consumes s0 (must be 1)
             op7(opcodes::ASSERT),
-            // +MOVDN{2..8} — move s0 down, shifts left above
+            // +MOVDN{2..8} - move s0 down, shifts left above
             all_movdn,
-            // +DROP         — discards s0
+            // +DROP         - discards s0
             op7(opcodes::DROP),
-            // +MSTORE       — pops address s0, stores s1 to memory
+            // +MSTORE       - pops address s0, stores s1 to memory
             op7(opcodes::MSTORE),
-            // +MSTOREW      — pops address s0, stores word to memory
+            // +MSTOREW      - pops address s0, stores word to memory
             op7(opcodes::MSTOREW),
-            // +(opcode 47)  — unused opcode slot
+            // +(opcode 47)  - unused opcode slot
             deg7[47].clone(),
-            // +SPLIT        — control flow: pops condition from s0
+            // +SPLIT        - control flow: pops condition from s0
             op5(opcodes::SPLIT),
-            // +REPEAT       - control flow: pops condition before re-entering a loop body
+            // +REPEAT       - control flow: pops condition for the next iteration
             op4(opcodes::REPEAT),
-            // +END*loop     — END when ending a loop: pops the trailing condition the body left
+            // +END*loop     - END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
-            // +DYN          — control flow: consumes s0..s3 (target hash)
-            op5(opcodes::DYN),
-            // +DYNCALL      — control flow: consumes s0..s3 (target hash)
-            op5(opcodes::DYNCALL),
-        ]);
+        ])
+            // +DYN          - control flow: consumes s0..s3 (target hash)
+            + op5(opcodes::DYN)
+            // +DYNCALL      - control flow: consumes s0..s3 (target hash)
+            + op5(opcodes::DYNCALL);
 
-        // +opcodes[32..40] –ASSERT — binary ops (EQ, ADD, MUL, AND, OR, U32AND, U32XOR)
+        // +opcodes[32..40] -ASSERT - binary ops (EQ, ADD, MUL, AND, OR, U32AND, U32XOR)
         //   that consume s0,s1 and produce 1 result; ASSERT already counted at depth 1
         let left_shift_depth2 = deg7[32..40].iter().cloned().sum::<E>() - op7(opcodes::ASSERT);
 
         let left_shift_depth3
-            // +CSWAP   — pops condition s0, conditionally swaps s1,s2; net -1 at depth 3
+            // +CSWAP   - pops condition s0, conditionally swaps s1,s2; net -1 at depth 3
             = op7(opcodes::CSWAP)
-            // +U32ADD3 — pops s0,s1,s2, pushes 2 results; net -1 at depth 3
+            // +U32ADD3 - pops s0,s1,s2, pushes 2 results; net -1 at depth 3
             + op6(opcodes::U32ADD3)
-            // +U32MADD — pops s0,s1,s2, pushes s0*s1+s2 as 2 results; net -1 at depth 3
+            // +U32MADD - pops s0,s1,s2, pushes s0*s1+s2 as 2 results; net -1 at depth 3
             + op6(opcodes::U32MADD)
-            // –MOVDN2  — only shifts left at depths 1..2
+            // -MOVDN2  - only shifts left at depths 1..2
             - op7(opcodes::MOVDN2);
 
         let left_shift = accumulate_depth_deltas([
@@ -503,19 +508,19 @@ where
             left_shift_depth2,
             // d=3
             left_shift_depth3,
-            // –MOVDN3  — only shifts left at depths 1..3
+            // -MOVDN3  - only shifts left at depths 1..3
             -op7(opcodes::MOVDN3),
-            // +MLOADW  — pops address, loads 4 values; net -1 at depth 5
-            // –MOVDN4  — only shifts left at depths 1..4
+            // +MLOADW  - pops address, loads 4 values; net -1 at depth 5
+            // -MOVDN4  - only shifts left at depths 1..4
             op7(opcodes::MLOADW) - op7(opcodes::MOVDN4),
-            // –MOVDN5  — only shifts left at depths 1..5
+            // -MOVDN5  - only shifts left at depths 1..5
             -op7(opcodes::MOVDN5),
-            // –MOVDN6  — only shifts left at depths 1..6
+            // -MOVDN6  - only shifts left at depths 1..6
             -op7(opcodes::MOVDN6),
-            // –MOVDN7  — only shifts left at depths 1..7
+            // -MOVDN7  - only shifts left at depths 1..7
             -op7(opcodes::MOVDN7),
-            // +CSWAPW  — pops condition, swaps words s1..s4 with s5..s8; net -1 from depth 9
-            // –MOVDN8  — only shifts left at depths 1..8
+            // +CSWAPW  - pops condition, swaps words s1..s4 with s5..s8; net -1 from depth 9
+            // -MOVDN8  - only shifts left at depths 1..8
             op7(opcodes::CSWAPW) - op7(opcodes::MOVDN8),
             // d=10 (unchanged)
             E::ZERO,
@@ -537,31 +542,31 @@ where
 
         let all_movup = all_mov_pairs * bits[0][0].clone();
         let right_shift_depth0
-            // +deg7[48..64] — PAD, DUP0..DUP15, ADVPOP, SDEPTH, CLK: push one element
+            // +deg7[48..64] - PAD, DUP0..DUP15, ADVPOP, SDEPTH, CLK: push one element
             = deg7[48..64].iter().cloned().sum::<E>()
-            // +PUSH         — push immediate value
+            // +PUSH         - push immediate value
             + op5(opcodes::PUSH)
-            // +MOVUP{2..8}  — move element from below to top, shifting s0..s{w-1} right
+            // +MOVUP{2..8}  - move element from below to top, shifting s0..s{w-1} right
             + all_movup;
 
         let right_shift = accumulate_depth_deltas([
             // d=0
             right_shift_depth0,
-            // +U32SPLIT — pops one u32, pushes high and low halves; net +1 from depth 1
+            // +U32SPLIT - pops one u32, pushes high and low halves; net +1 from depth 1
             op6(opcodes::U32SPLIT),
-            // –MOVUP2   — only shifts right at depths 0..1
+            // -MOVUP2   - only shifts right at depths 0..1
             -op7(opcodes::MOVUP2),
-            // –MOVUP3   — only shifts right at depths 0..2
+            // -MOVUP3   - only shifts right at depths 0..2
             -op7(opcodes::MOVUP3),
-            // –MOVUP4   — only shifts right at depths 0..3
+            // -MOVUP4   - only shifts right at depths 0..3
             -op7(opcodes::MOVUP4),
-            // –MOVUP5   — only shifts right at depths 0..4
+            // -MOVUP5   - only shifts right at depths 0..4
             -op7(opcodes::MOVUP5),
-            // –MOVUP6   — only shifts right at depths 0..5
+            // -MOVUP6   - only shifts right at depths 0..5
             -op7(opcodes::MOVUP6),
-            // –MOVUP7   — only shifts right at depths 0..6
+            // -MOVUP7   - only shifts right at depths 0..6
             -op7(opcodes::MOVUP7),
-            // –MOVUP8   — only shifts right at depths 0..7
+            // -MOVUP8   - only shifts right at depths 0..7
             -op7(opcodes::MOVUP8),
             // d=9 (unchanged)
             E::ZERO,
@@ -589,16 +594,16 @@ where
         // Uses prefix_011 (degree 3) instead of summing all 16 push-like degree-7 flags.
         let prefix_011 = prefix_01.clone() * bits[4][1].clone();
         let right_shift_scalar
-            // +prefix_011 — PAD, DUP0..DUP15, ADVPOP, SDEPTH, CLK (opcodes 48-63)
+            // +prefix_011 - PAD, DUP0..DUP15, ADVPOP, SDEPTH, CLK (opcodes 48-63)
             = prefix_011
-            // +PUSH       — push immediate value
+            // +PUSH       - push immediate value
             + op5(opcodes::PUSH)
-            // +U32SPLIT   — pops one u32, pushes high and low halves
+            // +U32SPLIT   - pops one u32, pushes high and low halves
             + op6(opcodes::U32SPLIT);
 
         // left_shift_scalar (degree 5):
         // Uses prefix_010 (degree 3) instead of summing all left-shifting degree-7 flags.
-        // DYNCALL is intentionally excluded — it left-shifts the stack but uses
+        // DYNCALL is intentionally excluded - it left-shifts the stack but uses
         // decoder hasher state (h5) for overflow constraints, not the generic path.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
@@ -606,15 +611,15 @@ where
             // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, FRIE2F4,
             //                        DROP, CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
             prefix_010,
-            // +u32_add3_madd_group — U32ADD3, U32MADD: consume 3, produce 2
+            // +u32_add3_madd_group - U32ADD3, U32MADD: consume 3, produce 2
             u32_add3_madd_group,
-            // +SPLIT               — control flow: pops condition
+            // +SPLIT               - control flow: pops condition
             op5(opcodes::SPLIT),
-            // +REPEAT              — control flow: pops condition for next iteration
+            // +REPEAT              - control flow: pops condition for next iteration
             op4(opcodes::REPEAT),
-            // +END*loop            — END when ending a loop: pops the trailing condition
+            // +END*loop            - END when ending a loop: pops the trailing condition
             end_loop_flag,
-            // +DYN                 — control flow: consumes target hash
+            // +DYN                 - control flow: consumes target hash
             op5(opcodes::DYN),
         ]);
 
@@ -633,17 +638,17 @@ where
         // IMPORTANT: If a new control flow operation is added, it MUST be included here,
         // otherwise the decoder constraint will fail when executing that operation.
         let control_flow = E::sum_array::<6>(&[
-            // +SPAN, JOIN, SPLIT, LOOP    — block starters
+            // +SPAN, JOIN, SPLIT, LOOP    - block starters
             bits[3][0].clone() * bits[2][1].clone() * decoder.extra[0],
-            // +END, REPEAT, RESPAN, HALT  — block transitions
+            // +END, REPEAT, RESPAN, HALT  - block transitions
             bits[4][1].clone() * decoder.extra[1],
-            // +DYNCALL                    — dynamic execution
+            // +DYNCALL                    - dynamic execution
             op5(opcodes::DYNCALL),
-            // +DYN                        — dynamic execution
+            // +DYN                        - dynamic execution
             op5(opcodes::DYN),
-            // +SYSCALL                    — procedure call
+            // +SYSCALL                    - procedure call
             op4(opcodes::SYSCALL),
-            // +CALL                       — procedure call
+            // +CALL                       - procedure call
             op4(opcodes::CALL),
         ]);
 
@@ -699,7 +704,7 @@ where
     /// This is NOT the same expression as `left_shift_at(15)`. It uses low-degree
     /// bit prefixes (degree 5) that are algebraically equivalent on valid traces.
     ///
-    /// Excludes `DYNCALL` — it left-shifts the stack but is handled via the
+    /// Excludes `DYNCALL` - it left-shifts the stack but is handled via the
     /// per-position `left_shift_at` flags. The aggregate `left_shift` flag only
     /// gates generic helper/overflow constraints, which don't apply to `DYNCALL`
     /// because those helper columns are reused for the context switch and the
@@ -940,11 +945,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // ------ Degree 5 operations  ----------------------------------------------------------------
 
     op_flag_getters!(degree5_op_flags,
-        /// Operation Flag of HPERM operation.
-        #[expect(dead_code)]
-        hperm => opcodes::HPERM,
         /// Operation Flag of MPVERIFY operation.
-        #[expect(dead_code)]
         mpverify => opcodes::MPVERIFY,
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
@@ -982,7 +983,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
 
     op_flag_getters!(degree4_op_flags,
         /// Operation Flag of MRUPDATE operation.
-        #[expect(dead_code)]
         mrupdate => opcodes::MRUPDATE,
         /// Operation Flag of CALL operation.
         call => opcodes::CALL,

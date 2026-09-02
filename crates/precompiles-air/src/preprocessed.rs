@@ -19,9 +19,9 @@ use crate::{
     ChipletMultiAir,
     logup::NUM_PUBLIC_VALUES,
     stark_config::{
-        Blake3Config, KeccakConfig, PRECOMPILE_RELATION_DIGEST, Poseidon2Config, RpoConfig,
-        RpxConfig, blake3_256_config, keccak_config, poseidon2_config, precompile_pcs_params,
-        rpo_config, rpx_config,
+        Blake3Config, EidosConfig, KeccakConfig, PRECOMPILE_RELATION_DIGEST, Poseidon2Config,
+        RpoConfig, RpxConfig, blake3_256_config, eidos_config, keccak_config, poseidon2_config,
+        precompile_pcs_params, rpo_config, rpx_config,
     },
 };
 
@@ -104,3 +104,4 @@ cached_preprocessed!(rpo, RpoConfig, rpo_config);
 cached_preprocessed!(rpx, RpxConfig, rpx_config);
 cached_preprocessed!(poseidon2, Poseidon2Config, poseidon2_config);
 cached_preprocessed!(keccak, KeccakConfig, keccak_config);
+cached_preprocessed!(eidos, EidosConfig, eidos_config);

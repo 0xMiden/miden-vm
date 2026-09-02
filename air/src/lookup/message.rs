@@ -8,7 +8,7 @@
 //! the denominator
 //!
 //! ```text
-//!     bus_prefix[bus] + Σ_{k=0..width} β^k · values[k]
+//!     bus_prefix[bus] + sum_{k=0..width} beta^k * values[k]
 //! ```
 //!
 //! where `bus_prefix[i] = α + (i + 1) · β^W` is precomputed at builder construction time

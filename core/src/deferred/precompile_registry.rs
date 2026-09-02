@@ -2,11 +2,28 @@
 
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use super::precompile::{Precompile, precompile_id};
+use super::precompile::Precompile;
 use crate::{
     Felt,
-    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag},
+    deferred::{
+        DEFERRED_AND_DOMAIN, DEFERRED_CHUNKS_DOMAIN, DeferredContext, Node, NodeType,
+        PrecompileError, Tag,
+    },
+    program::{
+        CLAIM_DOMAIN_TAG, KERNEL_DOMAIN_TAG, PROOF_REQUEST_DOMAIN_TAG,
+        domain::{MAX_EIDOS_INIT_VALUE, PVM_UINT_PIN_CLAIM_SELECTOR, has_domain_selector_encoding},
+    },
 };
+
+/// Eidos selectors allocated to VM constructions other than deferred precompiles.
+const NON_PRECOMPILE_EIDOS_SELECTORS: [Felt; 6] = [
+    KERNEL_DOMAIN_TAG,
+    CLAIM_DOMAIN_TAG,
+    PROOF_REQUEST_DOMAIN_TAG,
+    DEFERRED_AND_DOMAIN,
+    DEFERRED_CHUNKS_DOMAIN,
+    PVM_UINT_PIN_CLAIM_SELECTOR,
+];
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
 ///
@@ -41,7 +58,8 @@ impl PrecompileRegistry {
 
     /// Adds a precompile to the registry and returns `self` for chaining.
     ///
-    /// Panics on setup errors: id drift, a framework-reserved id, or a duplicate id.
+    /// Panics if the selector is invalid, allocated to another VM construction, or already
+    /// registered.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         self.insert_precompile(Arc::new(precompile));
         self
@@ -59,7 +77,7 @@ impl PrecompileRegistry {
 
     fn insert_precompile(&mut self, precompile: Arc<dyn Precompile>) {
         let id = precompile.id();
-        validate_precompile_id(precompile.name(), id, precompile_id(precompile.name()));
+        validate_precompile_selector(precompile.name(), id);
         let name = precompile.name();
         if let Some(prev) = self.precompiles.get(&id) {
             panic!("duplicate precompile id in registry (`{}` and `{name}`)", prev.name());
@@ -88,7 +106,11 @@ impl PrecompileRegistry {
     /// framework-aware decoder and rejected here. [`NodeType::True`] is reserved for the framework
     /// TRUE sentinel, so a precompile that returns it is rejected as an invalid node.
     pub fn decode_precompile_tag(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
-        if tag.is_framework_reserved() {
+        if tag.is_framework_reserved()
+            || !has_domain_selector_encoding(tag.id())
+            || !tag.has_canonical_reserved_lane()
+            || !tag.has_canonical_init_values()
+        {
             return Err(PrecompileError::InvalidNode);
         }
         let precompile = self.precompiles.get(&tag.id()).ok_or(PrecompileError::InvalidNode)?;
@@ -102,6 +124,9 @@ impl PrecompileRegistry {
 
     /// Decodes either a framework-owned tag or a precompile-owned tag.
     pub(crate) fn decode_node_type(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
+        if !tag.has_canonical_reserved_lane() || !tag.has_canonical_init_values() {
+            return Err(PrecompileError::InvalidNode);
+        }
         if tag == Tag::TRUE {
             Ok(NodeType::True)
         } else if tag == Tag::AND {
@@ -140,14 +165,22 @@ impl PrecompileRegistry {
     }
 }
 
-fn validate_precompile_id(name: &'static str, id: Felt, derived: Felt) {
+fn validate_precompile_selector(name: &'static str, id: Felt) {
     assert!(
-        id == derived,
-        "precompile `{name}` declares an id inconsistent with its name derivation"
+        id.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE),
+        "precompile `{name}` selector must fit in a u32"
     );
     assert!(
         !Tag::is_framework_reserved_id(id),
-        "precompile `{name}` derives a framework-reserved id"
+        "precompile `{name}` uses a framework-reserved id"
+    );
+    assert!(
+        has_domain_selector_encoding(id),
+        "precompile `{name}` selector is not a registered Eidos selector"
+    );
+    assert!(
+        !NON_PRECOMPILE_EIDOS_SELECTORS.contains(&id),
+        "precompile `{name}` uses an Eidos selector allocated to another VM construction"
     );
 }
 
@@ -157,24 +190,28 @@ mod tests {
     use super::*;
     use crate::{
         ONE, ZERO,
-        deferred::{DeferredState, Payload},
+        deferred::{DeferredState, Payload, precompile::test_precompile_selector},
     };
 
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
-    /// Names control ids, so duplicate names exercise duplicate-id handling. Non-zero arguments
-    /// are rejected by the fixture, not by the framework.
+    /// Selectors control routing, so duplicate selectors exercise duplicate-id handling. Non-zero
+    /// arguments are rejected by the fixture, not by the framework.
     #[derive(Debug, Clone, Copy)]
     struct Fixture {
         name: &'static str,
+        id: Felt,
     }
 
     impl Fixture {
-        fn new(name: &'static str) -> Self {
-            Self { name }
+        fn new(name: &'static str, discriminant: u8) -> Self {
+            Self {
+                name,
+                id: test_precompile_selector(discriminant),
+            }
         }
         fn tag(&self) -> Tag {
-            Tag::precompile(self.id(), [ZERO; 3]).expect("fixture id is precompile-owned")
+            Tag::precompile(self.id(), [ZERO; 2]).expect("fixture id is precompile-owned")
         }
     }
 
@@ -183,17 +220,17 @@ mod tests {
             self.name
         }
         fn id(&self) -> Felt {
-            precompile_id(self.name())
+            self.id
         }
-        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-            if args != [ZERO; 3] {
+        fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
+            if args != [ZERO; 2] {
                 return None;
             }
             Some(NodeType::Data)
         }
         fn evaluate(
             &self,
-            args: [Felt; 3],
+            args: [Felt; 2],
             payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -213,14 +250,14 @@ mod tests {
             "malicious-true"
         }
         fn id(&self) -> Felt {
-            precompile_id(self.name())
+            test_precompile_selector(6)
         }
-        fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
+        fn decode(&self, _args: [Felt; 2]) -> Option<NodeType> {
             Some(NodeType::True)
         }
         fn evaluate(
             &self,
-            _args: [Felt; 3],
+            _args: [Felt; 2],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -230,8 +267,8 @@ mod tests {
 
     #[test]
     fn dispatches_by_id_across_inserted_and_merged_registries() {
-        let a = Fixture::new("fixture-a");
-        let b = Fixture::new("fixture-b");
+        let a = Fixture::new("fixture-a", 4);
+        let b = Fixture::new("fixture-b", 5);
         let tag_a = a.tag();
         let tag_b = b.tag();
         let mut registry = PrecompileRegistry::default().with_precompile(a);
@@ -261,7 +298,7 @@ mod tests {
     fn registry_rejects_precompile_owned_true_shape() {
         let registry = PrecompileRegistry::default().with_precompile(MaliciousTrue);
         let tag =
-            Tag::precompile(MaliciousTrue.id(), [ZERO; 3]).expect("test id is precompile-owned");
+            Tag::precompile(MaliciousTrue.id(), [ZERO; 2]).expect("test id is precompile-owned");
         assert!(matches!(
             registry.decode_precompile_tag(tag),
             Err(PrecompileError::Precompile { .. })
@@ -274,8 +311,8 @@ mod tests {
 
     #[test]
     fn unknown_id_rejected() {
-        let registry = PrecompileRegistry::default().with_precompile(Fixture::new("known"));
-        let bogus = Tag::precompile(Felt::new_unchecked(9999), [ZERO; 3])
+        let registry = PrecompileRegistry::default().with_precompile(Fixture::new("known", 7));
+        let bogus = Tag::precompile(Felt::new_unchecked(9999), [ZERO; 2])
             .expect("bogus id is not framework-reserved");
         // Unknown id is rejected by the registry itself (not a precompile), so it is *not*
         // name-wrapped.
@@ -286,12 +323,11 @@ mod tests {
     }
 
     #[test]
-    fn fixture_rejects_nonzero_immediate() {
-        let f = Fixture::new("f");
-        let tag = Tag::precompile(f.id(), [ZERO, ZERO, Felt::new_unchecked(1)])
-            .expect("fixture id is precompile-owned");
+    fn fixture_rejects_nonzero_argument() {
+        let f = Fixture::new("f", 8);
+        let tag = Tag::precompile(f.id(), [ONE, ZERO]).expect("test id is precompile-owned");
         let registry = PrecompileRegistry::default().with_precompile(f);
-        // The fixture chose to reject the immediate, so the registry name-wraps the cause.
+        // The fixture chose to reject the argument, so the registry name-wraps the cause.
         assert!(matches!(
             registry.decode_precompile_tag(tag).unwrap_err().root(),
             PrecompileError::InvalidNode
@@ -299,34 +335,63 @@ mod tests {
     }
 
     #[test]
+    fn registry_rejects_nonzero_reserved_lane() {
+        let f = Fixture::new("f", 8);
+        let tag = Tag::from_word([f.id(), ZERO, ZERO, ONE]);
+        let registry = PrecompileRegistry::default().with_precompile(f);
+
+        assert!(matches!(registry.decode_precompile_tag(tag), Err(PrecompileError::InvalidNode)));
+        assert!(matches!(registry.decode_node_type(tag), Err(PrecompileError::InvalidNode)));
+    }
+
+    #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn true_id_is_reserved_for_framework() {
-        validate_precompile_id("reserved-true", Tag::TRUE.id(), Tag::TRUE.id());
+        validate_precompile_selector("reserved-true", Tag::TRUE.id());
     }
 
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn and_id_is_reserved_for_framework() {
-        validate_precompile_id("reserved-and", Tag::AND.id(), Tag::AND.id());
+        validate_precompile_selector("reserved-and", Tag::AND.id());
     }
 
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn chunks_id_is_reserved_for_framework() {
-        validate_precompile_id("reserved-chunks", Tag::CHUNKS.id(), Tag::CHUNKS.id());
+        validate_precompile_selector("reserved-chunks", Tag::CHUNKS.id());
+    }
+
+    #[test]
+    #[should_panic(expected = "not a registered Eidos selector")]
+    fn opcode_sized_selector_is_rejected() {
+        validate_precompile_selector(
+            "opcode-sized",
+            Felt::from_u32(u32::from(crate::operations::opcodes::JOIN)),
+        );
+    }
+
+    #[test]
+    fn selectors_allocated_to_other_vm_constructions_are_rejected() {
+        for selector in NON_PRECOMPILE_EIDOS_SELECTORS {
+            let result = std::panic::catch_unwind(|| {
+                validate_precompile_selector("conflicting-selector", selector);
+            });
+            assert!(result.is_err(), "selector {selector} was accepted");
+        }
     }
 
     #[test]
     #[should_panic(expected = "duplicate precompile id in registry")]
     fn duplicate_id_panics() {
         let _ = PrecompileRegistry::default()
-            .with_precompile(Fixture::new("dup"))
-            .with_precompile(Fixture::new("dup"));
+            .with_precompile(Fixture::new("dup-a", 9))
+            .with_precompile(Fixture::new("dup-b", 9));
     }
 
     #[test]
     fn evaluate_dispatches_to_owning_precompile() {
-        let f = Fixture::new("r");
+        let f = Fixture::new("r", 10);
         let tag = f.tag();
         let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
         let node = Node::value(tag, [ZERO; 8]).unwrap();

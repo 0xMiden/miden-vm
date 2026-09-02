@@ -37,7 +37,8 @@ pub mod trace;
 /// Miden VM-specific LogUp lookup argument: bus identifiers and bus message types.
 ///
 /// [`crate::MidenAir`] is the single `LiftedAir`/`LookupAir` type for the multi-AIR
-/// statement; it dispatches per-trace work to Core, Chiplets, and Poseidon2 permutation AIRs.
+/// statement; it dispatches per-trace work to Core, Chiplets, Eidos compression, and
+/// byte-pair lookup AIRs.
 /// [`crate::MidenMultiAir`] is the `MultiAir` carrying the cross-AIR reduction.
 /// The generic LogUp framework lives in [`crate::lookup`].
 pub mod logup {
@@ -46,27 +47,40 @@ pub mod logup {
     };
 }
 
-use constraints::lookup::{
-    chiplet_air::ChipletLookupBuilder,
-    main_air::{MainLookupAir, MainLookupBuilder},
-    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
-};
 pub use constraints::{
+    and8_lookup,
+    and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
     chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+        AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
+        ControllerCols, KernelRomCols, MemoryCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
+    eidos_compression,
+    eidos_compression::{EidosCompressionCols, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS},
     ext_field::QuadFeltExpr,
-    poseidon2_permutation::columns::{
-        CYCLE_INPUT_ROW, CYCLE_OUTPUT_ROW, INITIAL_EXTERNAL_ROUND_END,
-        INITIAL_EXTERNAL_ROUND_START, INTERNAL_PLUS_EXTERNAL_ROW, LAST_INTERNAL_ROUND_ARK_IDX,
-        NUM_PACKED_INTERNAL_ROUND_ROWS, NUM_SBOX_WITNESSES, NUM_TRAILING_EXTERNAL_ROUND_ROWS,
-        PACKED_INTERNAL_ROUND_START, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
-    },
-    range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
+};
+use constraints::{
+    eidos_compression::{
+        constraints::{
+            enforce_footer_rows, enforce_fused_rows, enforce_inactive_footer_input_aux,
+            enforce_inactive_footer_output_aux,
+        },
+        lookup::{
+            EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupBuilder,
+            emit_lookup_columns,
+        },
+        periodic::get_periodic_column_values,
+        selectors::EidosCompressionSelectors,
+    },
+    lookup::{
+        and8_lookup_air::And8LookupBuilder,
+        chiplet_air::ChipletLookupBuilder,
+        main_air::{MainLookupAir, MainLookupBuilder},
+    },
 };
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 use lookup::{
@@ -276,8 +290,10 @@ impl Deserializable for PublicInputs {
 /// [`MidenMultiAir::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
-/// LogUp aux trace width: 4 core columns + 3 chiplet columns + 1 Poseidon2 column.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
+/// Combined LogUp width used by constraint test harnesses: 4 core columns, 4 chiplet
+/// columns, and the byte-pair table column. Standalone Eidos compression tests size their aux
+/// matrix from the AIR directly.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 9;
 
 // `aux_inputs` layout offsets — statement inputs that the AIRs do not read. The fixed program
 // hash and final deferred root occupy the first two words; the variable-length kernel-procedure
@@ -488,26 +504,24 @@ impl ChipletsAir {
     }
 }
 
-// POSEIDON2 PERMUTATION AIR
+// EIDOS COMPRESSION AIR
 // ================================================================================================
 
-/// Poseidon2 permutation trace AIR.
-///
-/// Enforces 16-row permutation cycles and the permutation-side LogUp bus.
+/// Standalone Eidos compression AIR.
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Poseidon2PermutationAir;
+pub struct EidosCompressionAir;
 
-impl Poseidon2PermutationAir {
+impl EidosCompressionAir {
     fn width(self) -> usize {
-        constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS
+        NUM_EIDOS_COMPRESSION_COLS
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        Poseidon2PermutationPeriodicCols::periodic_columns()
+        get_periodic_column_values()
     }
 
     fn aux_width(self) -> usize {
-        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -518,7 +532,7 @@ impl Poseidon2PermutationAir {
     ) -> Result<EF, ReductionError> {
         if !boundary_inputs.is_empty() {
             return Err(format!(
-                "Poseidon2PermutationAir expects 0 boundary input slices, got {}",
+                "EidosCompressionAir expects 0 boundary input slices, got {}",
                 boundary_inputs.len()
             )
             .into());
@@ -527,18 +541,29 @@ impl Poseidon2PermutationAir {
     }
 
     fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        constraints::enforce_poseidon2_permutation(builder);
+        {
+            let main = builder.main();
+            let local = main.current_slice();
+            let next = main.next_slice();
+            let periodic_values: Vec<AB::Expr> =
+                builder.periodic_values().iter().map(|value| (*value).into()).collect();
+            let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Poseidon2Permutation);
+            enforce_fused_rows(builder, local, next, &selectors);
+            enforce_footer_rows(builder, local, next, &selectors);
+            enforce_inactive_footer_input_aux(builder, &selectors);
+            enforce_inactive_footer_output_aux(builder, local, &selectors);
+        }
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
         self.lookup_eval(&mut lb);
     }
 
     fn lookup_num_columns(self) -> usize {
-        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
-        &constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
+        &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
 
     fn lookup_max_message_width(self) -> usize {
@@ -549,13 +574,85 @@ impl Poseidon2PermutationAir {
         BusId::COUNT
     }
 
-    fn lookup_eval<LB: Poseidon2PermutationLookupBuilder>(self, builder: &mut LB) {
+    fn lookup_eval<LB: EidosCompressionLookupBuilder>(self, builder: &mut LB) {
         let main = builder.main();
-        let local: &Poseidon2PermutationCols<_> = main.current_slice().borrow();
+        let local: &EidosCompressionCols<_> = main.current_slice().borrow();
+        let next: &EidosCompressionCols<_> = main.next_slice().borrow();
+        let periodic_values: Vec<LB::Expr> =
+            builder.periodic_values().iter().map(|value| (*value).into()).collect();
+        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
 
-        constraints::lookup::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns(
-            builder, local,
-        );
+        emit_lookup_columns(builder, local, next, &selectors);
+    }
+
+    fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
+}
+
+// BYTE-PAIR LOOKUP AIR
+// ================================================================================================
+
+/// Standalone byte-AND and range lookup-table AIR.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct And8LookupAir;
+
+impl And8LookupAir {
+    fn width(self) -> usize {
+        and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+    }
+
+    fn preprocessed_trace(self) -> RowMajorMatrix<Felt> {
+        and8_lookup::preprocessed_trace()
+    }
+
+    fn preprocessed_width(self) -> usize {
+        and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
+    }
+
+    fn aux_width(self) -> usize {
+        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        _challenges: &Challenges<EF>,
+        _public_values: &[Felt],
+        boundary_inputs: &[&[Felt]],
+    ) -> Result<EF, ReductionError> {
+        if !boundary_inputs.is_empty() {
+            return Err(format!(
+                "And8LookupAir expects 0 boundary input slices, got {}",
+                boundary_inputs.len()
+            )
+            .into());
+        }
+        Ok(EF::ZERO)
+    }
+
+    fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::And8Lookup);
+        self.lookup_eval(&mut lb);
+    }
+
+    fn lookup_num_columns(self) -> usize {
+        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+    }
+
+    fn lookup_column_shape(self) -> &'static [usize] {
+        &constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE
+    }
+
+    fn lookup_max_message_width(self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn lookup_num_bus_ids(self) -> usize {
+        BusId::COUNT
+    }
+
+    fn lookup_eval<LB: And8LookupBuilder>(self, builder: &mut LB) {
+        let main = builder.main();
+        let local: &And8LookupCols<_> = main.current_slice().borrow();
+        constraints::lookup::and8_lookup_air::emit_and8_lookup_columns(builder, local);
     }
 
     fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
@@ -573,15 +670,22 @@ impl Poseidon2PermutationAir {
 pub enum MidenAir {
     Core,
     Chiplets,
-    Poseidon2Permutation,
+    EidosCompression,
+    And8Lookup,
 }
 
 impl MidenAir {
+    pub const CORE: Self = Self::Core;
+    pub const CHIPLETS: Self = Self::Chiplets;
+    pub const EIDOS_COMPRESSION: Self = Self::EidosCompression;
+    pub const AND8_LOOKUP: Self = Self::And8Lookup;
+
     pub const fn instance_index(self) -> usize {
         match self {
             Self::Core => 0,
             Self::Chiplets => 1,
-            Self::Poseidon2Permutation => 2,
+            Self::EidosCompression => 2,
+            Self::And8Lookup => 3,
         }
     }
 
@@ -589,7 +693,8 @@ impl MidenAir {
         match self {
             Self::Core => "Core",
             Self::Chiplets => "Chiplets",
-            Self::Poseidon2Permutation => "Poseidon2Permutation",
+            Self::EidosCompression => "EidosCompression",
+            Self::And8Lookup => "And8Lookup",
         }
     }
 
@@ -601,7 +706,8 @@ impl MidenAir {
         match self {
             Self::Core => CoreAir.lookup_column_shape(),
             Self::Chiplets => ChipletsAir.lookup_column_shape(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_column_shape(),
+            Self::EidosCompression => EidosCompressionAir.lookup_column_shape(),
+            Self::And8Lookup => And8LookupAir.lookup_column_shape(),
         }
     }
 
@@ -609,7 +715,8 @@ impl MidenAir {
         match self {
             Self::Core => "core",
             Self::Chiplets => "chiplets",
-            Self::Poseidon2Permutation => "poseidon2_permutation",
+            Self::EidosCompression => "eidos_compression",
+            Self::And8Lookup => "and8_lookup",
         }
     }
 
@@ -638,9 +745,10 @@ impl MidenAir {
                 public_values,
                 &[&aux_inputs[AUX_KERNEL_DIGESTS..]],
             ),
-            Self::Poseidon2Permutation => {
-                Poseidon2PermutationAir.boundary_correction(challenges, public_values, &[])
+            Self::EidosCompression => {
+                EidosCompressionAir.boundary_correction(challenges, public_values, &[])
             },
+            Self::And8Lookup => And8LookupAir.boundary_correction(challenges, public_values, &[]),
         }
     }
 
@@ -654,7 +762,8 @@ impl MidenAir {
         match self {
             Self::Core => CoreAir.eval(builder),
             Self::Chiplets => ChipletsAir.eval(builder),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.eval(builder),
+            Self::EidosCompression => EidosCompressionAir.eval(builder),
+            Self::And8Lookup => And8LookupAir.eval(builder),
         }
     }
 }
@@ -671,6 +780,14 @@ pub struct HandwrittenMidenAir(pub MidenAir);
 impl BaseAir<Felt> for HandwrittenMidenAir {
     fn width(&self) -> usize {
         self.0.width()
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        self.0.preprocessed_trace()
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        self.0.preprocessed_width()
     }
 
     fn num_public_values(&self) -> usize {
@@ -719,7 +836,22 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.width(),
             Self::Chiplets => ChipletsAir.width(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.width(),
+            Self::EidosCompression => EidosCompressionAir.width(),
+            Self::And8Lookup => And8LookupAir.width(),
+        }
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        match self {
+            Self::And8Lookup => Some(And8LookupAir.preprocessed_trace()),
+            Self::Core | Self::Chiplets | Self::EidosCompression => None,
+        }
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        match self {
+            Self::And8Lookup => And8LookupAir.preprocessed_width(),
+            Self::Core | Self::Chiplets | Self::EidosCompression => 0,
         }
     }
 
@@ -731,7 +863,8 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core => CoreAir.periodic_columns(),
             Self::Chiplets => ChipletsAir.periodic_columns(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.periodic_columns(),
+            Self::EidosCompression => EidosCompressionAir.periodic_columns(),
+            Self::And8Lookup => Vec::new(),
         }
     }
 }
@@ -746,7 +879,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core => CoreAir.aux_width(),
             Self::Chiplets => ChipletsAir.aux_width(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.aux_width(),
+            Self::EidosCompression => EidosCompressionAir.aux_width(),
+            Self::And8Lookup => And8LookupAir.aux_width(),
         }
     }
 
@@ -774,7 +908,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
         match self {
             Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
-            Self::Poseidon2Permutation => ConstraintDegrees { base: 8, ext: 3 },
+            Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
+            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 2 },
         }
     }
 
@@ -786,22 +921,25 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core => constraints::generated::eval_core(builder),
             Self::Chiplets => constraints::generated::eval_chiplets(builder),
-            Self::Poseidon2Permutation => {
-                constraints::generated::eval_poseidon2_permutation(builder)
-            },
+            Self::EidosCompression => constraints::generated::eval_eidos_compression(builder),
+            Self::And8Lookup => constraints::generated::eval_and8_lookup(builder),
         }
     }
 }
 
 impl<LB> LookupAir<LB> for MidenAir
 where
-    LB: MainLookupBuilder + ChipletLookupBuilder + Poseidon2PermutationLookupBuilder,
+    LB: MainLookupBuilder
+        + ChipletLookupBuilder
+        + EidosCompressionLookupBuilder
+        + And8LookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
             Self::Core => CoreAir.lookup_num_columns(),
             Self::Chiplets => ChipletsAir.lookup_num_columns(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_columns(),
+            Self::EidosCompression => EidosCompressionAir.lookup_num_columns(),
+            Self::And8Lookup => And8LookupAir.lookup_num_columns(),
         }
     }
 
@@ -813,7 +951,8 @@ where
         match self {
             Self::Core => CoreAir.lookup_max_message_width(),
             Self::Chiplets => ChipletsAir.lookup_max_message_width(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_max_message_width(),
+            Self::EidosCompression => EidosCompressionAir.lookup_max_message_width(),
+            Self::And8Lookup => And8LookupAir.lookup_max_message_width(),
         }
     }
 
@@ -821,7 +960,8 @@ where
         match self {
             Self::Core => CoreAir.lookup_num_bus_ids(),
             Self::Chiplets => ChipletsAir.lookup_num_bus_ids(),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_num_bus_ids(),
+            Self::EidosCompression => EidosCompressionAir.lookup_num_bus_ids(),
+            Self::And8Lookup => And8LookupAir.lookup_num_bus_ids(),
         }
     }
 
@@ -829,7 +969,8 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval(builder),
             Self::Chiplets => ChipletsAir.lookup_eval(builder),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval(builder),
+            Self::EidosCompression => EidosCompressionAir.lookup_eval(builder),
+            Self::And8Lookup => And8LookupAir.lookup_eval(builder),
         }
     }
 
@@ -840,7 +981,8 @@ where
         match self {
             Self::Core => CoreAir.lookup_eval_boundary(boundary),
             Self::Chiplets => ChipletsAir.lookup_eval_boundary(boundary),
-            Self::Poseidon2Permutation => Poseidon2PermutationAir.lookup_eval_boundary(boundary),
+            Self::EidosCompression => EidosCompressionAir.lookup_eval_boundary(boundary),
+            Self::And8Lookup => And8LookupAir.lookup_eval_boundary(boundary),
         }
     }
 }
@@ -853,8 +995,8 @@ where
 /// AIR instances come from [`AIRS`], and the external reduction combines the trace-length-weighted
 /// normalized LogUp sums with the open-bus boundary corrections.
 ///
-/// Instance order is `[Core, Chiplets, Poseidon2Permutation]`; every per-AIR slice follows that
-/// ordering.
+/// Instance order is `[Core, Chiplets, EidosCompression, And8Lookup]`; every per-AIR slice follows
+/// that ordering.
 #[derive(Copy, Clone, Debug)]
 pub struct MidenMultiAir;
 
@@ -891,7 +1033,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// One rate-aligned block: `[CLAIM_HASH (4) | deferred_root (4)]`, where `CLAIM_HASH` is the
+    /// One complete Eidos block: `[CLAIM_HASH (4) | deferred_root (4)]`, where `CLAIM_HASH` is the
     /// canonical execution-claim commitment (see `miden_core::program::ExecutionClaim`) over
     /// `program_hash ‖ kernel_H ‖ stack_inputs ‖ stack_outputs`. With the relation digest
     /// pre-loaded in the challenger (see `config`), the transcript state after this block
@@ -1144,14 +1286,19 @@ mod tests {
         let raw_challenges = [QuadFelt::from_u32(7), QuadFelt::from_u32(11)];
         let air_inputs = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
         let aux_inputs = vec![Felt::ZERO; AUX_KERNEL_DIGESTS];
-        let normalized_sums =
-            [QuadFelt::from_u32(13), QuadFelt::from_u32(17), QuadFelt::from_u32(19)];
+        let normalized_sums = [
+            QuadFelt::from_u32(13),
+            QuadFelt::from_u32(17),
+            QuadFelt::from_u32(19),
+            QuadFelt::from_u32(23),
+        ];
         let core_values = [normalized_sums[0]];
         let chiplets_values = [normalized_sums[1]];
-        let poseidon2_values = [normalized_sums[2]];
+        let eidos_compression_values = [normalized_sums[2]];
+        let and8_values = [normalized_sums[3]];
         let aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
-            [&core_values, &chiplets_values, &poseidon2_values];
-        let log_trace_heights = [6, 9, 7];
+            [&core_values, &chiplets_values, &eidos_compression_values, &and8_values];
+        let log_trace_heights = [6, 9, 7, 16];
 
         let lookup_challenges = Challenges::new(
             raw_challenges[0],
@@ -1193,11 +1340,17 @@ mod tests {
         let zero = QuadFelt::from(Felt::ZERO);
         let core_aux = [zero];
         let chiplets_aux = [zero];
-        let poseidon2_aux = [zero];
-        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+        let eidos_compression_aux = [zero];
+        let and8_aux = [zero];
+        let aux_values = [
+            core_aux.as_slice(),
+            chiplets_aux.as_slice(),
+            eidos_compression_aux.as_slice(),
+            and8_aux.as_slice(),
+        ];
 
         let err = MidenMultiAir::new()
-            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8, 16])
             .unwrap_err();
 
         assert!(err.to_string().contains("kernel digest felts length 1 is not a multiple of 4"));
@@ -1214,11 +1367,17 @@ mod tests {
         let zero = QuadFelt::from(Felt::ZERO);
         let core_aux = [zero];
         let chiplets_aux = [zero];
-        let poseidon2_aux = [zero];
-        let aux_values = [core_aux.as_slice(), chiplets_aux.as_slice(), poseidon2_aux.as_slice()];
+        let eidos_compression_aux = [zero];
+        let and8_aux = [zero];
+        let aux_values = [
+            core_aux.as_slice(),
+            chiplets_aux.as_slice(),
+            eidos_compression_aux.as_slice(),
+            and8_aux.as_slice(),
+        ];
 
         let err = MidenMultiAir::new()
-            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8])
+            .eval_external(&challenges, &air_inputs, &aux_inputs, &aux_values, &[8, 8, 8, 16])
             .unwrap_err();
 
         assert!(err.to_string().contains(&format!(
@@ -1309,7 +1468,7 @@ mod tests {
             &mut sink,
             &air_inputs,
             &aux_inputs,
-            &[10, 10, 10],
+            &[10, 10, 10, 16],
         );
 
         let mut expected: Vec<Felt> = claim.commitment().as_elements().to_vec();
@@ -1342,7 +1501,7 @@ mod tests {
             &mut challenger,
             &air_inputs,
             &[],
-            &[8, 8, 8],
+            &[8, 8, 8, 16],
         );
     }
 }

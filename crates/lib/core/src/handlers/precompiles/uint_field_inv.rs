@@ -3,7 +3,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    Felt, Word, ZERO,
+    Felt, Word,
     deferred::{DeferredError, Node},
     events::EventName,
 };
@@ -27,8 +27,8 @@ pub fn handle_uint_field_inv(
     let (_, canonical_node) = process.require_canonical_deferred_node(input_digest)?;
 
     let tag = canonical_node.tag();
-    let [op_id, bound_ptr, reserved] = tag.args();
-    if op_id.as_canonical_u64() != UintPrecompile::VALUE_OP_ID || reserved != ZERO {
+    let [op_id, bound_ptr] = tag.args();
+    if op_id.as_canonical_u64() != UintPrecompile::VALUE_OP_ID {
         return Err(UintFieldInvError::ExpectedUintValue.into());
     }
 

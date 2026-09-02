@@ -144,7 +144,7 @@ impl FastProcessor {
     /// (inherently sequential) execution itself. When the caller is Rayon's only worker, this uses
     /// compact buffered replay and builds the trace after execution.
     ///
-    /// `max_prover_memory_bytes` bounds the trace the same way
+    /// `max_prover_memory_bytes` applies the same modelled peak-memory bound as
     /// [`crate::trace::build_trace_with_budget`] does; the streamed hasher builds ahead of that
     /// call, so it needs its own copy of the derived row cap.
     ///
@@ -196,7 +196,11 @@ impl FastProcessor {
             let span = tracing::Span::current();
             scope.spawn(move |_| {
                 let _span = span.entered();
-                let result = build_hasher_chiplet(receiver.into_iter().map(Ok), max_trace_len);
+                let result = build_hasher_chiplet(
+                    receiver.into_iter().map(Ok),
+                    max_trace_len,
+                    max_trace_len,
+                );
                 *hasher_slot = Some(result);
             });
 

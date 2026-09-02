@@ -12,7 +12,7 @@ const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_FIELD_WHOLE_BITS = 127
 const CHALLENGE_FIELD_OFFSET_FP = 2
 # Whole-bit floor of the field/hash security cap used by the native report.
-const SECURITY_CAP_BITS = 127
+const SECURITY_CAP_BITS = 126
 # Whole-bit FRI folding bound before subtracting trace height or adding grinding.
 const FRI_FOLDING_BASE_BITS = 122
 const LOG2_E_FP = 94548
@@ -156,7 +156,7 @@ end
 #!   `119 - height`;
 #! - composition: `composed <= 8192` gives `127 - floor(log2(composed)) >= 114 > 113`;
 #! - DEEP: `deep_terms <= 8192` gives `127 - floor(log2(deep)) + deep_pow >= 114`;
-#! - collision cap: `SECURITY_CAP_BITS = 127 > 113`, so neither the cap nor a query clamp is
+#! - collision cap: `SECURITY_CAP_BITS = 126 > 113`, so neither the cap nor a query clamp is
 #!   needed.
 #!
 #! Both the out-of-domain and FRI folding terms subtract the same height as the lookup term, so

@@ -40,9 +40,8 @@ pub struct BatchProof<F, C, const SALT_ELEMS: usize = 0> {
 
 /// Accessor trait for batch proof data.
 ///
-/// Provides read access to individual openings, authentication paths, and leaf indices.
-/// This allows consumers (e.g. the Miden VM recursive verifier) to work with batch proofs
-/// through the opaque `Lmcs::BatchProof` associated type.
+/// Provides read access to individual openings, authentication paths, and leaf indices through
+/// the opaque `Lmcs::BatchProof` associated type.
 pub trait BatchProofView<F, C> {
     /// Get the opened rows for a given leaf index.
     fn opening(&self, index: usize) -> Option<&RowList<F>>;

@@ -8,14 +8,30 @@
 //! carries no dev-dependency on `miden-air`, keeping the release order acyclic:
 //! `miden-constraint-compiler` → `miden-ace-codegen` → `miden-air`.
 
-use miden_air::{HandwrittenMidenAir, MIDEN_AIR_COUNT, MidenAir};
+use miden_air::{BaseAir, Felt, HandwrittenMidenAir, MIDEN_AIR_COUNT, MidenAir};
 use miden_constraint_compiler::ir::{Class, Graph, Leaf, Node, capture, capture_into, op_counts};
 
 const AIRS: [HandwrittenMidenAir; MIDEN_AIR_COUNT] = [
     HandwrittenMidenAir(MidenAir::Core),
     HandwrittenMidenAir(MidenAir::Chiplets),
-    HandwrittenMidenAir(MidenAir::Poseidon2Permutation),
+    HandwrittenMidenAir(MidenAir::EidosCompression),
+    HandwrittenMidenAir(MidenAir::And8Lookup),
 ];
+
+#[test]
+fn handwritten_wrapper_preserves_air_layout() {
+    for handwritten in AIRS {
+        let air = handwritten.0;
+        assert_eq!(
+            BaseAir::<Felt>::preprocessed_width(&handwritten),
+            BaseAir::<Felt>::preprocessed_width(&air),
+        );
+        assert_eq!(
+            BaseAir::<Felt>::preprocessed_trace(&handwritten),
+            BaseAir::<Felt>::preprocessed_trace(&air),
+        );
+    }
+}
 
 #[test]
 fn capture_is_deterministic() {
@@ -111,7 +127,7 @@ fn roots_and_indices_are_parallel_and_nonempty() {
         let (_, c) = capture(&air);
         assert_eq!(c.base_roots.len(), c.base_global_indices.len());
         assert_eq!(c.ext_roots.len(), c.ext_global_indices.len());
-        assert!(!c.base_roots.is_empty());
+        assert!(!c.base_roots.is_empty() || !c.ext_roots.is_empty());
         assert!(!c.ext_roots.is_empty());
     }
 }

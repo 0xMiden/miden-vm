@@ -119,7 +119,7 @@ pub fn lookup_challenges_from_slice(s: &[QuadFelt]) -> Challenges<QuadFelt> {
 // ================================================================================================
 
 /// Number of base-field public inputs the VM exposes: the 4-felt
-/// transcript root (a Poseidon2 digest).
+/// transcript root (an Eidos digest).
 ///
 /// 0.26's `air_inputs` is a single slice every AIR reads, so every chiplet
 /// declares the *same* count and they must agree. The root is the VM's one
