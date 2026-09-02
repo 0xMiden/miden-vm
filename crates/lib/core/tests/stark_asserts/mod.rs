@@ -3,7 +3,10 @@
 // The VM wrapper validates AIR shape before calling the generic verifier. The generic
 // validate_inputs procedure only checks memory-resident security parameters.
 
-use miden_core::Felt;
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, QuadFelt},
+};
 use miden_processor::ExecutionOutput;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
@@ -16,8 +19,6 @@ use crate::{
 };
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
-const ORDER_TAG_PTR: u32 = 3223322639;
-const ORDER_TAG_SCRATCH_PTR: u32 = 3223322684;
 const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322744;
 const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3223322770;
 const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3223322771;
@@ -133,34 +134,6 @@ fn load_air_context_stores_shape_and_max_height() {
         read_memory(&output, CURRENT_TRACE_ROW_ADDRESS_PTR),
         VM_CURRENT_TRACE_ROW_PTR as u64
     );
-}
-
-#[test]
-fn load_air_context_derives_proof_order_tags() {
-    let cases = [
-        ((8, 9, 10), 0),  // Core, Chiplets, EidosCompression, And8
-        ((8, 10, 9), 2),  // Core, EidosCompression, Chiplets, And8
-        ((9, 8, 10), 6),  // Chiplets, Core, EidosCompression, And8
-        ((10, 8, 9), 8),  // Chiplets, EidosCompression, Core, And8
-        ((9, 10, 8), 12), // EidosCompression, Core, Chiplets, And8
-        ((10, 9, 8), 14), // EidosCompression, Chiplets, Core, And8
-        ((8, 8, 8), 0),   // ties use instance order
-        ((8, 8, 9), 0),   // partial tie: Core before Chiplets
-        ((8, 9, 8), 2),   // partial tie: Core before EidosCompression
-        ((9, 8, 8), 8),   // partial tie: Chiplets before EidosCompression
-        ((9, 9, 8), 12),  // partial tie: Core before Chiplets after EidosCompression
-        ((9, 8, 9), 6),   // partial tie: Core before EidosCompression after Chiplets
-        ((8, 9, 9), 0),   // partial tie: Chiplets before EidosCompression
-    ];
-
-    for ((core, chiplets, eidos_compression), expected_tag) in cases {
-        let output = execute_load_air_context(core, chiplets, eidos_compression);
-        assert_eq!(
-            read_memory(&output, ORDER_TAG_PTR),
-            expected_tag,
-            "unexpected proof-order tag for (core={core}, chiplets={chiplets}, eidos_compression={eidos_compression})",
-        );
-    }
 }
 
 #[test]
@@ -281,43 +254,58 @@ fn check_pow_invalid_has_message() {
     expect_assert_error_message!(test);
 }
 
-/// Program: store `n` advice heights at `ptr..ptr+n`, then derive the order tag with
-/// the shared N-generic procedure.
-fn derive_order_tag_source() -> &'static str {
+// ---- proof_order_position_from_heights ----
+//
+// Every ingest scatter (OOD row, aux-bus boundary, fold-coefficient staging) resolves an AIR's
+// place in the proof order through this one primitive, so its correctness against the shared
+// Rust stable sort is load-bearing for all three. `pos_k` breaks ties by instance index, matching
+// `sort_by_key(|i| (h[i], i))` — that `<`/`<=` asymmetry between earlier and later AIRs is what
+// keeps the ranking a total order.
+
+/// Program: store `n` advice heights at `ptr..ptr+n`, then derive `target`'s proof-order position
+/// with the shared N-generic procedure.
+///
+/// `target` stays on top of the operand stack throughout the store loop (pushed below `ptr`/`n`
+/// before it starts and recovered after), so the loop body itself is untouched by its presence.
+fn proof_order_position_source() -> &'static str {
     "use miden::core::stark::utils
      begin
-         # => [ptr, n]; advice: [h_0, ..., h_{n-1}] in instance order
+         # => [target, ptr, n]; advice: [h_0, ..., h_{n-1}] in instance order
+         movdn.2
+         # => [ptr, n, target]
          push.0
-         # => [i, ptr, n]
+         # => [i, ptr, n, target]
          dup.2 dup.1 u32gt
          while.true
              adv_push
-             # => [h_i, i, ptr, n]
+             # => [h_i, i, ptr, n, target]
              dup.2 dup.2 add
-             # => [ptr + i, h_i, i, ptr, n]
+             # => [ptr + i, h_i, i, ptr, n, target]
              mem_store
              add.1
              dup.2 dup.1 u32gt
          end
          drop swap
-         # => [n, ptr]
-         exec.utils::derive_order_tag_from_heights
-         # => [tag]
+         # => [n, ptr, target]
+         movup.2
+         # => [target, n, ptr]
+         exec.utils::proof_order_position_from_heights
+         # => [pos]
      end"
 }
 
-fn expected_order_tag(heights: &[u64]) -> u64 {
+/// `target`'s rank under the shared stable sort by `(height, instance index)`.
+fn expected_position(target: usize, heights: &[u64]) -> u64 {
     let mut order: Vec<usize> = (0..heights.len()).collect();
     order.sort_by_key(|&i| (heights[i], i));
-    u64::from(miden_ace_codegen::order_tag(&order))
+    order.iter().position(|&i| i == target).expect("target is in range") as u64
 }
 
-/// The generic MASM tag derivation must agree with the shared Rust Lehmer ranking
-/// (`miden_ace_codegen::order_tag` over the stable height sort). Covers every supported AIR count,
-/// structured N=10 orders and tie patterns, and the full N=3 case table also used to pin the VM's
-/// fixed-count specialization.
+/// The generic MASM position derivation must agree with the shared Rust stable sort for every
+/// AIR in every case, not just the case as a whole: a wrong tie-break direction can still land
+/// the right AIR in the right *set* of positions while assigning the wrong one to each.
 #[test]
-fn derive_order_tag_from_heights_matches_the_rust_ranking() {
+fn proof_order_position_from_heights_matches_the_rust_ranking() {
     const PTR: u64 = 1000;
 
     let mut cases: Vec<Vec<u64>> = vec![
@@ -326,9 +314,8 @@ fn derive_order_tag_from_heights_matches_the_rust_ranking() {
         vec![20, 6, 19, 7, 18, 8, 17, 9, 16, 10],     // interleaved extremes
         vec![0, u32::MAX as u64, 1 << 31, 1, (1 << 31) - 1], // valid u32 boundaries
     ];
-    // Descending and all-tie shapes exercise every supported AIR count. N=12 reversal exercises
-    // factorial(11) and the maximum supported tag, 12! - 1.
-    for num_airs in 2..=12u64 {
+    // Descending and all-tie shapes exercise every supported AIR count.
+    for num_airs in 2..=miden_ace_codegen::MAX_ORDER_AIRS as u64 {
         cases.push((0..num_airs).rev().collect());
         cases.push(vec![12; num_airs as usize]);
     }
@@ -338,7 +325,8 @@ fn derive_order_tag_from_heights_matches_the_rust_ranking() {
         heights.swap(i as usize, i as usize + 1);
         cases.push(heights);
     }
-    // The N=3 table the VM-local `derive_order_tag` is pinned against.
+    // The full N=3 partial-tie table (every combination of two heights above/below/equal to the
+    // third), previously pinned against the VM's fixed-count specialization.
     for (a, b, c) in [
         (8, 9, 10),
         (8, 10, 9),
@@ -358,44 +346,23 @@ fn derive_order_tag_from_heights_matches_the_rust_ranking() {
     }
 
     for heights in cases {
-        let expected = expected_order_tag(&heights);
         let n = heights.len() as u64;
-        let test = build_test!(derive_order_tag_source(), &[PTR, n], &heights);
-        test.expect_stack(&[expected]);
+        for target in 0..heights.len() {
+            let expected = expected_position(target, &heights);
+            let test =
+                build_test!(proof_order_position_source(), &[target as u64, PTR, n], &heights);
+            test.expect_stack(&[expected]);
+        }
     }
 
     // Sanity anchors, independent of the Rust reference.
-    assert_eq!(expected_order_tag(&(10..20).collect::<Vec<_>>()), 0);
-    assert_eq!(expected_order_tag(&(10..20).rev().collect::<Vec<_>>()), 3_628_799);
-    assert_eq!(expected_order_tag(&(0..12).rev().collect::<Vec<_>>()), 479_001_599);
-}
-
-#[test]
-fn derive_order_tag_materializes_reverse_proof_order_in_its_scratch_table() {
-    const HEIGHTS_PTR: u64 = 1000;
-    let mut cases = vec![vec![12, 12, 11, 11, 13, 13, 12, 11, 13, 12]];
-    for num_airs in 2..=12_u64 {
-        cases.push((0..num_airs).rev().collect());
-        cases.push(vec![12; num_airs as usize]);
+    let ascending: Vec<u64> = (10..20).collect();
+    for (target, expected) in (0..10).zip(0..10) {
+        assert_eq!(expected_position(target, &ascending), expected);
     }
-
-    for heights in cases {
-        let num_airs = heights.len();
-        let (output, _) =
-            build_test!(derive_order_tag_source(), &[HEIGHTS_PTR, num_airs as u64], &heights)
-                .execute_for_output()
-                .expect("order-tag derivation must execute");
-
-        let mut proof_order: Vec<usize> = (0..num_airs).collect();
-        proof_order.sort_by_key(|&air_index| (heights[air_index], air_index));
-        for (proof_position, &air_index) in proof_order.iter().enumerate() {
-            let reverse_position = num_airs - 1 - proof_position;
-            assert_eq!(
-                read_memory(&output, ORDER_TAG_SCRATCH_PTR + reverse_position as u32),
-                air_index as u64,
-                "scratch entry for proof position {proof_position} is wrong"
-            );
-        }
+    let descending: Vec<u64> = (10..20).rev().collect();
+    for (target, expected) in (0..10).zip((0..10).rev()) {
+        assert_eq!(expected_position(target, &descending), expected);
     }
 }
 
@@ -403,9 +370,10 @@ fn derive_order_tag_materializes_reverse_proof_order_in_its_scratch_table() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
-    /// Sample duplicate-heavy and full-width u32 heights across the supported AIR-count range.
+    /// Sample duplicate-heavy and full-width u32 heights across the supported AIR-count range,
+    /// checking every AIR's position against the Rust reference for each sample.
     #[test]
-    fn derive_order_tag_from_heights_matches_random_stable_orders(
+    fn proof_order_position_from_heights_matches_random_stable_orders(
         heights in prop::collection::vec(
             prop_oneof![
                 4 => 0_u64..8,
@@ -415,23 +383,24 @@ proptest! {
         ),
     ) {
         const PTR: u64 = 1000;
-        let expected = expected_order_tag(&heights);
         let n = heights.len() as u64;
-        build_test!(derive_order_tag_source(), &[PTR, n], &heights)
-            .prop_expect_stack(&[expected])?;
+        for target in 0..heights.len() {
+            let expected = expected_position(target, &heights);
+            build_test!(proof_order_position_source(), &[target as u64, PTR, n], &heights)
+                .prop_expect_stack(&[expected])?;
+        }
     }
 }
 
-/// The shared derivation's u32 comparisons must reject an out-of-range height. A
-/// caller that forgets its own shape assertion must trap here, not silently
-/// mis-rank.
+/// The shared derivation's u32 comparisons must reject an out-of-range height. A caller that
+/// forgets its own shape assertion must trap here, not silently mis-rank.
 #[test]
-fn derive_order_tag_from_heights_rejects_out_of_range_heights() {
+fn proof_order_position_from_heights_rejects_out_of_range_heights() {
     const PTR: u64 = 1000;
     for invalid_index in 0..2 {
         let mut heights = vec![7, 8];
         heights[invalid_index] = 1 << 32;
-        let test = build_test!(derive_order_tag_source(), &[PTR, 2], &heights);
+        let test = build_test!(proof_order_position_source(), &[0, PTR, 2], &heights);
         let err = test.execute().expect_err("out-of-range height must trap");
         assert!(
             format!("{err:?}").contains("NotU32Values"),
@@ -440,38 +409,179 @@ fn derive_order_tag_from_heights_rejects_out_of_range_heights() {
     }
 }
 
-/// The MASM order-tag limit must match the generic registry's supported AIR count.
-#[test]
-fn derive_order_tag_from_heights_matches_the_registry_air_limit() {
-    const PTR: u64 = 1000;
-    let max_airs = miden_ace_codegen::MAX_REGISTRY_AIRS;
+// ---- canonical fold-coefficient staging ----
+//
+// The multi-AIR fold is a Horner accumulation over the height-sorted proof order, so the
+// coefficient staged for AIR k is beta^(num_airs - 1 - pos_k) with `pos_k` that AIR's *proof
+// position*, not its instance index. The two agree only for the identity order, so the fixtures
+// below deliberately include tie, reversal and transposition shapes.
 
-    let heights: Vec<u64> = (0..max_airs as u64).collect();
-    build_test!(derive_order_tag_source(), &[PTR, max_airs as u64], &heights)
-        .execute()
-        .expect("the registry's maximum AIR count must be supported");
+/// Base offset, in felts from the relation's stark-vars base, of AIR 0's selector triple.
+const FIRST_SELECTOR_OFFSET: u32 = 22;
+/// Felts per AIR in the selector block (three EF-valued selectors).
+const SELECTOR_STRIDE: u32 = 6;
 
-    let oversized = max_airs + 1;
-    let heights: Vec<u64> = (0..oversized as u64).collect();
-    let test = build_test!(derive_order_tag_source(), &[PTR, oversized as u64], &heights);
-    expect_assert_error_code_from_msg!(test, "num_airs exceeds supported order-tag range");
+const FOLD_HEIGHTS_PTR: u32 = 1000;
+const FOLD_STARK_VARS_PTR: u32 = 2000;
+/// Written either side of the coefficient block; staging must leave both intact.
+const FOLD_SENTINEL: u64 = 0xdead_beef;
+
+/// Program: seed `beta` as the sampled multi-air fold challenge, store `heights` in instance
+/// order, guard the coefficient block with sentinels, then stage the per-AIR fold coefficients.
+fn stage_fold_coefficients_source(heights: &[u64], beta: (u64, u64)) -> String {
+    let num_airs = heights.len() as u32;
+    let block_start = FOLD_STARK_VARS_PTR + FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs;
+    let (beta0, beta1) = beta;
+
+    let mut source = String::from(
+        "use miden::core::stark::constants
+         use miden::core::stark::constraints_eval_inputs
+         begin\n",
+    );
+    for (i, height) in heights.iter().enumerate() {
+        let addr = FOLD_HEIGHTS_PTR + i as u32;
+        source += &format!("             push.{height} push.{addr} mem_store\n");
+    }
+    source += &format!(
+        "             push.{beta0} exec.constants::composition_coef_ptr add.2 mem_store\n\
+         \x20            push.{beta1} exec.constants::composition_coef_ptr add.3 mem_store\n"
+    );
+    for addr in [block_start - 1, block_start + 2 * num_airs] {
+        source += &format!("             push.{FOLD_SENTINEL} push.{addr} mem_store\n");
+    }
+    source += &format!(
+        "             push.{FOLD_STARK_VARS_PTR} push.{FOLD_HEIGHTS_PTR} push.{num_airs}\n\
+         \x20            exec.constraints_eval_inputs::stage_air_fold_coefficients\n\
+         end"
+    );
+    source
 }
 
-/// Relation evaluators must reject padding slots before opening their registry tree.
+/// AIR `k`'s rank in the stable height-sorted proof order.
+fn proof_order_positions(heights: &[u64]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..heights.len()).collect();
+    order.sort_by_key(|&i| (heights[i], i));
+    let mut positions = vec![0; heights.len()];
+    for (rank, &air) in order.iter().enumerate() {
+        positions[air] = rank;
+    }
+    positions
+}
+
+fn quad_felt(c0: u64, c1: u64) -> QuadFelt {
+    QuadFelt::new([
+        Felt::new(c0).expect("coefficient is a valid field element"),
+        Felt::new(c1).expect("coefficient is a valid field element"),
+    ])
+}
+
+/// Staging must place `beta^(num_airs - 1 - pos_k)` at `FIRST_SELECTOR_OFFSET +
+/// SELECTOR_STRIDE * num_airs + 2k`, keyed by proof position rather than instance index, and must
+/// write nothing outside that block.
 #[test]
-fn relation_constraint_evaluators_reject_padding_order_tags() {
-    for (relation, order_count) in [("vm", 24), ("pvm", 3_628_800)] {
-        let source = format!(
-            "use miden::core::stark::constants
-             use miden::core::sys::{relation}::constraints_eval
-             begin
-                 push.{order_count} exec.constants::set_order_tag
-                 push.8 exec.constants::set_trace_length_log
-                 exec.constraints_eval::execute_constraint_evaluation_check
-             end"
-        );
-        let test = build_test!(source, &[]);
-        expect_assert_error_code_from_msg!(test, "invalid order tag");
+fn stage_air_fold_coefficients_places_beta_powers_by_proof_order_position() {
+    const BETA: (u64, u64) = (7, 3);
+
+    let mut cases: Vec<Vec<u64>> = vec![
+        vec![12, 12, 11, 11, 13, 13, 12, 11, 13, 12], // block ties
+        vec![9, 14, 9, 22, 7, 14, 25, 6, 14, 9],      // mixed with repeated heights
+        vec![20, 6, 19, 7, 18, 8, 17, 9, 16, 10],     // interleaved extremes
+        vec![10, 11, 12, 13],                         // identity order: position == index
+    ];
+    // Descending and all-tie shapes over every supported AIR count.
+    for num_airs in 2..=miden_ace_codegen::MAX_ORDER_AIRS as u64 {
+        cases.push((0..num_airs).rev().collect());
+        cases.push(vec![12; num_airs as usize]);
+    }
+    // Every adjacent transposition of an ascending order.
+    for i in 0..9 {
+        let mut heights: Vec<u64> = (10..20).collect();
+        heights.swap(i, i + 1);
+        cases.push(heights);
+    }
+
+    let beta = quad_felt(BETA.0, BETA.1);
+    for heights in cases {
+        let num_airs = heights.len() as u32;
+        let block_start = FOLD_STARK_VARS_PTR + FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs;
+        let (output, _) = build_test!(stage_fold_coefficients_source(&heights, BETA), &[])
+            .execute_for_output()
+            .expect("staging should execute");
+
+        for (k, position) in proof_order_positions(&heights).into_iter().enumerate() {
+            let mut expected = QuadFelt::ONE;
+            for _ in 0..(heights.len() - 1 - position) {
+                expected *= beta;
+            }
+            let addr = block_start + 2 * k as u32;
+            let staged = QuadFelt::new([
+                read_memory_felt(&output, addr),
+                read_memory_felt(&output, addr + 1),
+            ]);
+            assert_eq!(
+                staged, expected,
+                "AIR {k} of {heights:?} sits at proof position {position}"
+            );
+        }
+
+        for addr in [block_start - 1, block_start + 2 * num_airs] {
+            assert_eq!(
+                read_memory(&output, addr),
+                FOLD_SENTINEL,
+                "staging wrote outside the coefficient block of {heights:?}"
+            );
+        }
+    }
+}
+
+/// Staging must inherit the shared proof-order primitive's AIR-count limit rather than silently
+/// mis-rank a relation with more AIRs than the Lehmer encoding can represent.
+#[test]
+fn stage_air_fold_coefficients_rejects_oversized_air_counts() {
+    let oversized = miden_ace_codegen::MAX_ORDER_AIRS + 1;
+    let heights: Vec<u64> = (10..10 + oversized as u64).collect();
+    let test = build_test!(stage_fold_coefficients_source(&heights, (7, 3)), &[]);
+    expect_assert_error_code_from_msg!(test, "num_airs exceeds supported proof-order range");
+}
+
+/// The MASM staging address must land on the canonical layout's `MultiAirFoldCoeff` slot.
+///
+/// The MASM side derives the block base from `num_airs` at run time and the Rust side allocates
+/// it right after the selector block; nothing else forces the two to agree, so a change to either
+/// side's slot arithmetic would otherwise be caught only by a full recursive proof.
+#[test]
+fn stage_air_fold_coefficients_offset_matches_the_canonical_ace_layout() {
+    use miden_ace_codegen::{EXT_DEGREE, InputCounts, InputKey, InputLayout};
+
+    let counts = InputCounts {
+        preprocessed_width: 0,
+        width: 1,
+        aux_width: 1,
+        num_aux_boundary: 3,
+        num_public: 8,
+        num_randomness: 2,
+        num_quotient_chunks: 1,
+    };
+
+    for num_airs in 2..=miden_ace_codegen::MAX_ORDER_AIRS {
+        let layout = InputLayout::new_masm_canonical_multi_air(counts, num_airs);
+        let first_selector = layout
+            .index(InputKey::IsFirstAir(0))
+            .expect("canonical layout has per-AIR selectors");
+        for k in 0..num_airs {
+            let coeff = layout
+                .index(InputKey::MultiAirFoldCoeff(k))
+                .expect("canonical layout has per-AIR fold coefficients");
+            let layout_offset =
+                FIRST_SELECTOR_OFFSET as usize + (coeff - first_selector) * EXT_DEGREE;
+            let masm_offset = FIRST_SELECTOR_OFFSET as usize
+                + SELECTOR_STRIDE as usize * num_airs
+                + EXT_DEGREE * k;
+            assert_eq!(
+                layout_offset, masm_offset,
+                "canonical fold coefficient {k} of {num_airs} AIRs is staged off-slot"
+            );
+        }
     }
 }
 
@@ -561,10 +671,10 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("RANDOM_COIN_OUTPUT_LEN_PTR", 0, 1),
         ("OOD_EVALUATIONS_ADDRESS_PTR", 0, 1),
         ("CURRENT_TRACE_ROW_ADDRESS_PTR", 0, 1),
-        ("ORDER_TAG_PTR", 0, 1),
+        ("GENERIC_RESERVED_CELL_PTR", 0, 1),
         ("AIR_TRACE_LENGTH_LOGS_PTR", 0, 16),
         ("RELATION_DIGEST_PTR", 0, 4),
-        ("ACE_REGISTRY_ROOT_PTR", 0, 4),
+        ("GENERIC_RESERVED_WORD_PTR", 0, 4),
         ("PREPROCESSED_TRACE_COM_PTR", 0, 4),
         ("RANDOM_COIN_COUNTER_PTR", 0, 1),
         ("AUXILIARY_ACE_INPUTS_ADDRESS_PTR", 0, 1),
@@ -628,7 +738,14 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, Until("CURRENT_TRACE_ROW_PTR")),
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, Until("PREPROCESSED_COM_PTR")),
         ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, Fixed(4)),
-        ("pvm/layout.masm", "AUX_VALUE_PTRS_PTR", 0, Fixed(10)),
+        (
+            "pvm/layout.masm",
+            "OOD_SCATTER_TABLE_PTR",
+            0,
+            Until("PROOF_ORDER_POSITIONS_PTR"),
+        ),
+        // One cell per chiplet: its position in the height-sorted proof order.
+        ("pvm/layout.masm", "PROOF_ORDER_POSITIONS_PTR", 0, Fixed(10)),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, Fixed(1)),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, Fixed(3)),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, Fixed(4)),
@@ -638,11 +755,14 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, Fixed(4)),
         ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, Fixed(8)),
         ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, Fixed(1020)),
+        // Out-of-domain scatter table: row base, per-position dispatch pairs, and the `pipe_k`
+        // digests. Sits immediately after the VM control frame, so it is outside the tiling above.
+        ("vm/layout.masm", "OOD_SCATTER_TABLE_PTR", 0, Fixed(64)),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
         ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, Fixed(8)),
         ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, Until("AUX_BUS_BOUNDARY_PTR")),
         ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, Fixed(8)),
-        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(48)),
+        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, Fixed(56)),
         // Fixed VM stream reservation ending at the PVM allocation.
         ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, UntilAddress(PVM_FRAME_START)),
         (
@@ -951,9 +1071,11 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     let relation_region_refs: Vec<_> = relation_regions.iter().collect();
     let pvm_frame_end = relation_regions
         .iter()
-        .find(|region| region.source == "pvm/layout.masm" && region.name == "AUX_VALUE_PTRS_PTR")
+        .find(|region| {
+            region.source == "pvm/layout.masm" && region.name == "PROOF_ORDER_POSITIONS_PTR"
+        })
         .and_then(|region| region.hi.checked_add(1))
-        .expect("the terminal PVM auxiliary-value pointer region must define the frame end");
+        .expect("the terminal PVM proof-order-positions region must define the frame end");
 
     assert_disjoint(&canonical_generic_regions, "generic");
     assert_disjoint(&relation_region_refs, "relation");
@@ -997,7 +1119,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
 /// The relation's named height setters must write consecutive cells of the generic
 /// per-AIR array, in canonical instance order.
 ///
-/// `derive_order_tag_from_heights` and `set_up_auxiliary_inputs_ace` both index that
+/// `proof_order_position_from_heights` and `set_up_auxiliary_inputs_ace` both index that
 /// array as `base + k`, so a gap or a reordered offset would silently feed one AIR's
 /// height in another's place.
 #[test]
@@ -1025,17 +1147,15 @@ fn relation_height_setters_write_the_generic_array_in_order() {
     );
 }
 
-/// The map must reserve at least as many height cells as a registry-backed relation can
-/// use, so a relation is never silently truncated by the memory map.
+/// The map must reserve at least as many height cells as the shared proof-order ranking
+/// supports, so a relation is never silently truncated by the memory map.
 #[test]
 fn height_array_capacity_covers_the_supported_air_count() {
-    // 13! exceeds the u32 tag space, so `RegistryLayout::new` caps a registry-backed
-    // relation at 12 AIRs; the map reserves 16 cells.
-    assert!(miden_ace_codegen::RegistryLayout::new(12, 1).is_some(), "12 AIRs supported");
-    assert!(
-        miden_ace_codegen::RegistryLayout::new(13, 1).is_none(),
-        "13! overflows u32 tags"
-    );
+    // 13! exceeds the u32 tag space, so the shared ranking caps a relation at 12 AIRs. The
+    // reserved extent is pinned against the declaration itself by
+    // `verifier_memory_layout_is_complete_dense_and_disjoint`.
+    const RESERVED_HEIGHT_CELLS: usize = 16;
+    const { assert!(miden_ace_codegen::MAX_ORDER_AIRS <= RESERVED_HEIGHT_CELLS) };
 }
 
 /// `load_air_context` documents no stack effect. Compare against a no-op program run with the
