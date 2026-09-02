@@ -17,10 +17,6 @@ pub use multi_air::{
 };
 #[cfg(feature = "std")]
 pub use recursive::shared_recursive_circuit;
-#[cfg(feature = "std")]
-pub(crate) use recursive::shared_recursive_factory;
 pub use recursive::{
-    FactoredRecursiveAceCircuit, RecursiveAceCircuit, RecursiveAceCircuitFactory,
-    build_factored_recursive_verifier_ace_circuit, build_recursive_verifier_ace_circuit,
-    recursive_registry_entry,
+    RecursiveAceCircuit, build_recursive_verifier_ace_circuit, recursive_verifier_input_layout,
 };

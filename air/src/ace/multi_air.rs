@@ -43,13 +43,6 @@ impl FactoredMultiAirCircuit {
         let proof_order: Vec<usize> = order.airs().iter().map(|air| air.instance_index()).collect();
         self.inner.circuit_for_order(&proof_order)
     }
-
-    /// Unwrap into the generic ace-codegen composition (for [`FactoredCircuitFactory`]).
-    ///
-    /// [`FactoredCircuitFactory`]: miden_ace_codegen::FactoredCircuitFactory
-    pub(crate) fn into_inner(self) -> miden_ace_codegen::FactoredMultiAirCircuit<QuadFelt> {
-        self.inner
-    }
 }
 
 /// Build the canonical Miden multi-AIR composition and lower it into the factored form.
