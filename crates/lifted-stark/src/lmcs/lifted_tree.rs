@@ -259,7 +259,7 @@ where
                         initial_state,
                     );
 
-                // Absorb salt into states using SIMD-parallelized path (no-op when salt is None)
+                // Absorb salt into the leaf states when hiding is enabled.
                 if let Some(ref salt_matrix) = salt {
                     debug_assert_eq!(salt_matrix.height(), leaf_states.len());
                     debug_assert_eq!(salt_matrix.width(), SALT_ELEMS);
@@ -388,7 +388,7 @@ where
 ///
 /// # Preconditions
 /// - `matrices` is non-empty and sorted by non-decreasing power-of-two heights.
-/// - `P::WIDTH` is a power of two.
+/// - `PF::WIDTH` and `PD::WIDTH` are powers of two.
 ///
 /// Panics in debug builds if preconditions are violated.
 fn build_leaf_states_upsampled<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
@@ -443,7 +443,7 @@ where
                     .for_each(|(chunk, state)| chunk.fill(*state));
             });
 
-            // Copy upsampled states back to canonical buffer
+            // Copy upsampled states back to the canonical buffer.
             mem::swap(&mut scratch_states, &mut states);
         }
 
@@ -461,11 +461,9 @@ where
 /// Incorporate one matrix's row-wise contribution into the running per-leaf states.
 ///
 /// Semantics: given `states` of length `h = matrix.height()`, for each row index `r ∈ [0, h)`
-/// update `states[r]` by absorbing the matrix row `r` into that state. In the overall tree
-/// construction, callers ensure that `states` is the correct lifted view for the current matrix
-/// (either the "nearest-neighbor" duplication or the "modulo" duplication across the final
-/// height). This helper performs exactly one absorption round for that matrix and returns with the
-/// states mutated; it does not change the lifting shape or squeeze hashes.
+/// update `states[r]` by absorbing the matrix row `r` into that state. Callers ensure that
+/// `states` already has the lifted shape required by the current matrix. This helper performs
+/// exactly one absorption round; it does not change the lifting shape or squeeze hashes.
 fn absorb_matrix<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     states: &mut [[PD::Value; WIDTH]],
     matrix: &M,
@@ -482,12 +480,12 @@ fn absorb_matrix<PF, PD, M, H, const WIDTH: usize, const DIGEST_ELEMS: usize>(
     assert_eq!(height, states.len());
 
     if height < PF::WIDTH || PF::WIDTH == 1 {
-        // Scalar path: walk every final leaf state and absorb the wrapped row for this matrix.
+        // Scalar path: absorb one matrix row into each leaf state.
         states.par_iter_mut().zip(matrix.par_rows()).for_each(|(state, row)| {
             sponge.absorb_into(state, row);
         });
     } else {
-        // SIMD path: gather → absorb wrapped packed row → scatter per chunk.
+        // SIMD path: gather states, absorb a vertically packed row, then scatter.
         states
             .par_chunks_mut(PF::WIDTH)
             .enumerate()
@@ -527,7 +525,7 @@ fn compress_uniform<
     let default_digest = [P::Value::default(); DIGEST_ELEMS];
     let mut next_digests = vec![default_digest; next_len];
 
-    // Use scalar path when output is too small for packing
+    // Use scalar path when output is too small for packing.
     if next_len < P::WIDTH || P::WIDTH == 1 {
         next_digests.par_iter_mut().zip(prev_layer.par_chunks_exact(2)).for_each(
             |(next_digest, prev_layer_pair)| {

@@ -1,28 +1,20 @@
-use miden::core::crypto::hashes::poseidon2
-
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes a Poseidon2 hasher state and a pointer. Loads OOD evaluations from the advice provider,
-#! stores them at `ptr`, absorbs them into the hasher state, and simultaneously computes a random
-#! linear combination using Horner evaluation.
+#! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
+#! Horner accumulator used by the DEEP fixed terms.
 #!
-#!
-#! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
-#!
+#! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations
-    # Per-row OOD layout matches the LMCS aligned wire format (alignment = 8 for
-    # Poseidon2). Per row:
-    #   main:       56 + 24 + 16 = 96 EF slots
-    #   aux coords:  8 +  8 +  8 = 24 EF slots
-    #   quot:       8 chunks * 2 = 16 EF slots
-    #   total                    = 136 EF slots = 272 felts
-    # 272 / 8 = 34 iterations.
-    repeat.34
+    # Per-row OOD layout uses LMCS alignment 8:
+    #   preprocessed: 16 scalar evaluations
+    #   main:         56 + 24 + 112 + 16 = 208 scalar evaluations
+    #   aux:          8 + 8 + 40 + 24 = 80 scalar evaluations
+    #   quotient:     16 scalar evaluations
+    # The advice stream supplies 640 base felts, read as 80 `adv_pipe` blocks.
+    repeat.80
         adv_pipe
         horner_eval_ext
-        # Bind the absorbed length (8) into the capacity before each absorb permutation.
-        movup.8 add.8 movdn.8
-        exec.poseidon2::permute
+        compress
     end
 end

@@ -121,7 +121,7 @@ fn non_empty_execution_witness_splits_with_matching_precompile_root() {
     mast_forest.make_root(basic_block_id);
     let program = Program::new(mast_forest.into(), basic_block_id);
     let stack_inputs =
-        StackInputs::new(&[1, 2, 3, 4, 0, 0, 0, 0].map(Felt::new_unchecked)).unwrap();
+        StackInputs::new(&[0, 0, 0, 0, 1, 2, 3, 4].map(Felt::new_unchecked)).unwrap();
 
     let mut host = DefaultHost::default();
     let execution_witness = FastProcessor::new(stack_inputs)

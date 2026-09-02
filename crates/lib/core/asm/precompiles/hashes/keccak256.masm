@@ -11,16 +11,48 @@ use miden::core::precompiles
 
 # CONSTANTS — Keccak256Precompile assertion tag fields and digest advice event
 # ================================================================================================
-# Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the Blake3-derived
-# `precompile_id(&Keccak256Precompile)` over NAME ("keccak256"); changing the NAME in Rust must
-# update this literal in lockstep. ASSERT_TAG_ID is the generic hash assertion discriminant.
+# Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the registered
+# Keccak-256 selector; ASSERT_TAG_ID is the generic hash assertion discriminant.
 
-const PRECOMPILE_ID = 1416710563871706399
+const PRECOMPILE_ID = 16778753
 const ASSERT_TAG_ID = 0
 const KECCAK256_DIGEST_EVENT = event("miden::precompiles::hashes::keccak256::digest")
 
+# Fixed lanes of `init(PRECOMPILE_ID, [8, ASSERT_TAG_ID, len_bytes])`.
+const ASSERT_INIT_CV_0 = 4280581857109607937
+const ASSERT_INIT_CV_1 = 2688637132020383752
+const ASSERT_INIT_CV_2 = 1947077364412317696
+const ASSERT_INIT_CV_3_BASE = 6620516959492505600
+
 # PROCEDURES
 # ================================================================================================
+
+#! Registers a Keccak assertion expression and returns its content-addressed digest.
+#!
+#! The caller constructs `TAG=[PRECOMPILE_ID, ASSERT_TAG_ID, len_bytes, 0]`. The selector,
+#! expression payload length, assertion operation, and reserved lane are therefore fixed; only
+#! `len_bytes` needs runtime validation and injection into the initial chaining word.
+#!
+#! Input:  [TAG, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+#! Output: [ASSERTION_DIGEST, ...]
+proc register_hash_assert
+    movdnw.2
+    # => [PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, TAG, ...]
+    adv.register_deferred
+
+    # Extract len_bytes from the caller-constructed tag and discard its fixed lanes.
+    movupw.2 drop drop swap drop
+    # => [len_bytes, PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
+    u32assert.err="Keccak preimage length must fit in u32"
+
+    push.ASSERT_INIT_CV_3_BASE add
+    push.ASSERT_INIT_CV_2.ASSERT_INIT_CV_1.ASSERT_INIT_CV_0
+    movdnw.2
+    # => [PREIMAGE_CHUNKS_DIGEST, EXPECTED_DIGEST_CHUNKS_DIGEST, CV, ...]
+
+    compress
+    dropw dropw
+end
 
 #! Writes the advised Keccak256 digest, registers expected digest chunks, and logs the hash assertion.
 #!
@@ -46,7 +78,7 @@ proc finish_hash_assert
     movup.8 push.0 swap push.ASSERT_TAG_ID push.PRECOMPILE_ID
     # => [ASSERT_TAG=[PRECOMPILE_ID,0,len_bytes,0], PREIMAGE_CHUNKS_DIGEST,
     #     EXPECTED_DIGEST_CHUNKS_DIGEST, ...]
-    exec.precompiles::register_expr
+    exec.register_hash_assert
     # => [ASSERTION_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [...]

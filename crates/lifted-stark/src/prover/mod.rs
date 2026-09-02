@@ -332,6 +332,15 @@ where
         .map(|&(_, trace)| {
             let src = &trace.values;
             let mut values = Vec::with_capacity(src.len() * blowup);
+            #[cfg(feature = "concurrent")]
+            if current_num_threads() == 1 {
+                values.extend_from_slice(src);
+            } else {
+                // Indexed collection preserves row-major order while first-touching pages across
+                // the Rayon pool.
+                src.par_iter().copied().collect_into_vec(&mut values);
+            }
+            #[cfg(not(feature = "concurrent"))]
             values.extend_from_slice(src);
             RowMajorMatrix::new(values, trace.width())
         })

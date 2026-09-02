@@ -10,9 +10,9 @@
 //! column-blind by construction — two messages routed onto different aux columns still compare
 //! equal if they share both multiplicity and encoded denominator.
 //!
-//! No scalar sums, no per-column deltas, no terminals: those views invite missing + spurious
-//! interactions to cancel silently. Subset semantics over raw `(mult, denom)` tuples keeps every
-//! expected interaction independently observable.
+//! The harness does not reduce rows to scalar sums or per-column deltas. Those views can let
+//! missing and spurious interactions cancel. Subset semantics over raw `(mult, denom)` tuples keeps
+//! every expected interaction independently observable.
 
 use alloc::vec::Vec;
 
@@ -49,18 +49,25 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &VmTrace) -> Self {
-        let (core_matrix, chip_matrix, poseidon2_matrix) = trace.main_trace().to_air_matrices();
-        Self::from_air_matrices(&core_matrix, &chip_matrix, &poseidon2_matrix)
+        let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
+            trace.main_trace().to_air_matrices();
+        Self::from_air_matrices(&core_matrix, &chip_matrix, &eidos_compression_matrix, &and8_matrix)
     }
 
-    /// Drive the prover-path lookup emitter with caller-supplied per-AIR trace matrices.
+    /// Drive the prover-path lookup emitters with caller-supplied per-AIR trace matrices.
     pub(super) fn from_air_matrices(
         core_matrix: &RowMajorMatrix<Felt>,
         chip_matrix: &RowMajorMatrix<Felt>,
-        poseidon2_matrix: &RowMajorMatrix<Felt>,
+        eidos_compression_matrix: &RowMajorMatrix<Felt>,
+        and8_matrix: &RowMajorMatrix<Felt>,
     ) -> Self {
-        let chip_periodic = MidenAir::Chiplets.periodic_columns();
-        let poseidon2_periodic = MidenAir::Poseidon2Permutation.periodic_columns();
+        // Core has no periodic columns.
+        let chip_periodic = BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS);
+        let eidos_compression_periodic =
+            BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION);
+        let and8_preprocessed = MidenAir::AND8_LOOKUP
+            .preprocessed_trace()
+            .expect("AND8 lookup AIR declares a preprocessed table");
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -69,19 +76,34 @@ impl InteractionLog {
         let challenges =
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
-        let core_fractions = build_lookup_fractions(&MidenAir::Core, core_matrix, &[], &challenges);
-        let chip_fractions =
-            build_lookup_fractions(&MidenAir::Chiplets, chip_matrix, &chip_periodic, &challenges);
-        let poseidon2_fractions = build_lookup_fractions(
-            &MidenAir::Poseidon2Permutation,
-            poseidon2_matrix,
-            &poseidon2_periodic,
+        let core_fractions =
+            build_lookup_fractions(&MidenAir::CORE, core_matrix, None, &[], &challenges);
+        let chip_fractions = build_lookup_fractions(
+            &MidenAir::CHIPLETS,
+            chip_matrix,
+            None,
+            &chip_periodic,
+            &challenges,
+        );
+        let eidos_compression_fractions = build_lookup_fractions(
+            &MidenAir::EIDOS_COMPRESSION,
+            eidos_compression_matrix,
+            None,
+            &eidos_compression_periodic,
+            &challenges,
+        );
+        let and8_fractions = build_lookup_fractions(
+            &MidenAir::AND8_LOOKUP,
+            and8_matrix,
+            Some(&and8_preprocessed),
+            &[],
             &challenges,
         );
         let rows = merge_rows(vec![
             split_rows(&core_fractions),
             split_rows(&chip_fractions),
-            split_rows(&poseidon2_fractions),
+            split_rows(&eidos_compression_fractions),
+            split_rows(&and8_fractions),
         ]);
 
         Self { challenges, rows }
@@ -91,9 +113,8 @@ impl InteractionLog {
     /// prover pushes.
     ///
     /// For every `(row, mult, denom)` in `expected`, there must be at least as many matching
-    /// pushes at that row. Unclaimed actual pushes are ignored — this is the whole point of
-    /// subset semantics, so partial tests can focus on one bus or one instruction without
-    /// enumerating every other interaction that happens to fire.
+    /// pushes at that row. Unclaimed actual pushes are ignored, so partial tests can focus on one
+    /// bus or one instruction without enumerating every other interaction that happens to fire.
     pub fn assert_contains(&self, expected: &Expectations) {
         for &entry in &expected.entries {
             let (row, mult, denom) = entry;

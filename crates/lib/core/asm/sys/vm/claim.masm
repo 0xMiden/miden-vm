@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::mem
 
 # EXECUTION CLAIM
@@ -15,7 +15,7 @@ use miden::core::mem
 # The deferred root D is not part of the claim: it is the obligation a verified claim hands back.
 #
 # The claim commitment is the domain-tagged sequential hash of the region. 40 felts is exactly
-# five rate blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
+# five Eidos blocks, so no padding block is absorbed and the (P, K) prefix state after block 1 is
 # resumable by callsites that pin those fields. Mirrors
 # miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
 
@@ -62,10 +62,10 @@ end
 #!
 #! Where:
 #! - claim_ptr is the word-aligned address of the claim region.
-#! - CLAIM_HASH is the domain-tagged Poseidon2 hash of the 40-element encoding.
+#! - CLAIM_HASH is the domain-tagged Eidos hash of the 40-element encoding.
 pub proc claim_commitment
     push.CLAIM_DOMAIN_TAG push.NUM_CLAIM_ELEMENTS movup.2
     # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
-    exec.poseidon2::hash_elements_in_domain
+    exec.eidos::hash_elements_in_domain
     # => [CLAIM_HASH, ...]
 end

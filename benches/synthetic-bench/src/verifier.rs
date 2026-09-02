@@ -1,17 +1,16 @@
 //! Verification helpers for synthetic-trace matching.
 //!
 //! Hard checks:
-//! - `padded_core_side(actual) == padded_core_side(target)`: `next_pow2(max(core_rows,
-//!   range_rows))`
-//! - `padded_chiplets(actual) == padded_chiplets(target)`.
-//! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)`.
+//! - `padded_core(actual) == padded_core(target)`
+//! - `padded_and8_lookup(actual) == padded_and8_lookup(target)`
+//! - `padded_chiplets(actual) == padded_chiplets(target)`
+//! - `padded_eidos_compression(actual) == padded_eidos_compression(target)`
 //! - `padded_total(actual) == padded_total(target)`
 //!
 //! Soft reporting:
-//! - unpadded totals (`core_rows`, `chiplets_rows`, `poseidon2_permutation_rows`) within
+//! - unpadded totals (`core_rows`, `chiplets_rows`, `eidos_compression_rows`) within
 //!   [`PER_COMPONENT_TOLERANCE`]
 //! - advisory breakdown deltas (info only)
-//! - warning if `range_rows` dominates
 
 use std::fmt::{self, Display};
 
@@ -65,24 +64,24 @@ impl VerificationReport {
                 DeltaStatus::Enforced,
             ),
             (
-                "poseidon2_rows",
-                target.totals.poseidon2_permutation_rows,
-                actual.totals.poseidon2_permutation_rows,
+                "eidos_compression_rows",
+                target.totals.eidos_compression_rows,
+                actual.totals.eidos_compression_rows,
                 DeltaStatus::Enforced,
             ),
             (
-                // range_rows is derived, not independently driven.
-                "range_rows",
-                target.totals.range_rows,
-                actual.totals.range_rows,
+                // byte_pair_lookup_rows is derived, not independently driven.
+                "byte_pair_lookup_rows",
+                target.totals.byte_pair_lookup_rows,
+                actual.totals.byte_pair_lookup_rows,
                 DeltaStatus::Informational,
             ),
         ];
         let breakdown_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
-                "hasher",
-                target.hasher_work_rows(),
-                actual.hasher_work_rows(),
+                "controller_hasher",
+                target.breakdown.hasher_rows,
+                actual.breakdown.hasher_rows,
                 DeltaStatus::Informational,
             ),
             (
@@ -106,19 +105,14 @@ impl VerificationReport {
         }
     }
 
-    /// True when all padded proxies match their targets exactly.
+    /// True when all available padded proxies match their targets exactly.
     pub fn brackets_match(&self) -> bool {
-        self.target.totals.padded_core_side() == self.actual.totals.padded_core_side()
+        self.target.totals.padded_core() == self.actual.totals.padded_core()
+            && self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup()
             && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
-            && self.target.totals.padded_poseidon2_permutation()
-                == self.actual.totals.padded_poseidon2_permutation()
+            && self.target.totals.padded_eidos_compression()
+                == self.actual.totals.padded_eidos_compression()
             && self.target.totals.padded_total() == self.actual.totals.padded_total()
-    }
-
-    /// True if `range_rows` is the largest unpadded component in either side, which means snippet
-    /// balance should be revisited.
-    pub fn range_dominates(&self) -> bool {
-        self.target.totals.range_dominates() || self.actual.totals.range_dominates()
     }
 }
 
@@ -143,9 +137,15 @@ impl Display for VerificationReport {
         writeln!(f, "-- hard brackets (padded power-of-two) --")?;
         write_bracket_row(
             f,
-            "padded_core_side",
-            self.target.totals.padded_core_side(),
-            self.actual.totals.padded_core_side(),
+            "padded_core",
+            self.target.totals.padded_core(),
+            self.actual.totals.padded_core(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_and8",
+            self.target.totals.padded_and8_lookup(),
+            self.actual.totals.padded_and8_lookup(),
         )?;
         write_bracket_row(
             f,
@@ -155,9 +155,9 @@ impl Display for VerificationReport {
         )?;
         write_bracket_row(
             f,
-            "padded_poseidon2",
-            self.target.totals.padded_poseidon2_permutation(),
-            self.actual.totals.padded_poseidon2_permutation(),
+            "padded_eidos_compression",
+            self.target.totals.padded_eidos_compression(),
+            self.actual.totals.padded_eidos_compression(),
         )?;
         write_bracket_row(
             f,
@@ -183,9 +183,6 @@ impl Display for VerificationReport {
             writeln!(f, "=> BRACKET MATCH")?;
         } else {
             writeln!(f, "=> BRACKET MISS")?;
-        }
-        if self.range_dominates() {
-            writeln!(f, "!! WARNING: range_rows is the largest unpadded component")?;
         }
         Ok(())
     }
@@ -248,8 +245,8 @@ mod tests {
         let totals = TraceTotals {
             core_rows: core,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: hasher,
-            range_rows: 0,
+            eidos_compression_rows: hasher,
+            byte_pair_lookup_rows: 0,
         };
         TraceShape::new(totals, breakdown)
     }
@@ -281,57 +278,78 @@ mod tests {
         let target = shape(40000, 8000, 12000);
         let actual = shape(40000, 20000, 30000);
         let r = VerificationReport::new(target, actual);
-        // padded_core_side: both 40000 → 65536 (same)
-        assert_eq!(target.totals.padded_core_side(), actual.totals.padded_core_side());
+        // padded_core: both 40000 → 65536 (same)
+        assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
         // padded_chiplets differs
         assert_ne!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
         assert!(!r.brackets_match());
     }
 
     #[test]
-    fn poseidon2_bracket_can_miss_independently_of_core_and_chiplets() {
+    fn eidos_compression_bracket_can_miss_independently_of_core_and_chiplets() {
         let target = shape(40000, 8000, 1000);
         let actual = shape(40000, 9000, 1000);
         let r = VerificationReport::new(target, actual);
 
-        assert_eq!(target.totals.padded_core_side(), actual.totals.padded_core_side());
+        assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
         assert_eq!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
         assert_ne!(
-            target.totals.padded_poseidon2_permutation(),
-            actual.totals.padded_poseidon2_permutation()
+            target.totals.padded_eidos_compression(),
+            actual.totals.padded_eidos_compression()
         );
         assert!(!r.brackets_match());
     }
 
     #[test]
-    fn range_dominates_is_warned() {
-        let breakdown = TraceBreakdown {
-            hasher_rows: 100,
-            bitwise_rows: 0,
-            memory_rows: 0,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let totals = TraceTotals {
-            core_rows: 100,
-            chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: 0,
-            range_rows: 500,
-        };
-        let t = TraceShape::new(totals, breakdown);
-        let r = VerificationReport::new(t, t);
-        assert!(r.range_dominates());
-        assert!(r.to_string().contains("range_rows is the largest unpadded component"));
+    fn zero_eidos_compression_target_is_still_a_hard_bracket() {
+        let mut target = shape(40_000, 8_000, 1_000);
+        let mut actual = target;
+        target.totals.eidos_compression_rows = 0;
+        actual.totals.eidos_compression_rows = 128;
+        let report = VerificationReport::new(target, actual);
+
+        assert_eq!(target.totals.padded_eidos_compression(), 64);
+        assert_eq!(actual.totals.padded_eidos_compression(), 128);
+        assert!(!report.brackets_match());
+    }
+
+    #[test]
+    fn and8_bracket_can_miss_independently_of_core() {
+        let mut target = shape(40_000, 8_000, 1_000);
+        let mut actual = target;
+        target.totals.byte_pair_lookup_rows = 65_536;
+        actual.totals.byte_pair_lookup_rows = 32_768;
+        let r = VerificationReport::new(target, actual);
+
+        assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
+        assert_eq!(target.totals.padded_total(), actual.totals.padded_total());
+        assert_ne!(target.totals.padded_and8_lookup(), actual.totals.padded_and8_lookup());
+        assert!(!r.brackets_match());
     }
 
     #[test]
     fn per_component_overshoot_stays_within_bracket() {
-        // Hasher overshoots but every padded AIR bracket stays unchanged.
+        // Eidos compression overshoots but every padded AIR bracket stays unchanged.
         let target = shape(68000, 8000, 12000);
         let actual = shape(68000, 8191, 12000);
         let r = VerificationReport::new(target, actual);
         assert!(r.brackets_match());
-        let hasher_delta = r.breakdown_deltas.iter().find(|d| d.name == "hasher").unwrap();
-        assert!(!hasher_delta.within_tolerance);
+        let compression_delta =
+            r.total_deltas.iter().find(|d| d.name == "eidos_compression_rows").unwrap();
+        assert!(!compression_delta.within_tolerance);
+    }
+
+    #[test]
+    fn controller_hasher_rows_are_advisory_and_distinct_from_compression_rows() {
+        let target = shape(68_000, 8_000, 12_000);
+        let mut actual = target;
+        actual.breakdown.hasher_rows = 9_000;
+        let report = VerificationReport::new(target, actual);
+
+        assert!(report.brackets_match());
+        let controller_delta =
+            report.breakdown_deltas.iter().find(|d| d.name == "controller_hasher").unwrap();
+        assert_eq!(controller_delta.status, DeltaStatus::Informational);
+        assert!(!controller_delta.within_tolerance);
     }
 }

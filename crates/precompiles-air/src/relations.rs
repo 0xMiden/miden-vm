@@ -19,10 +19,10 @@
 //! | 1     | `Range16`       | `byte_pair_lut::BytePairLutAir` | `(w,)`, where `w ∈ [0, 2^16)`                               |
 //! | 4     | `Memory64`      | external (sponge / miniVM)      | `(addr, lo, hi)`, 64-bit cell — multiset, see `memory64`    |
 //! | 5     | `KeccakSponge`  | external (transcript chiplet)   | `(sponge_seq_id, chunk_ptr, len_bytes)`, per-invocation request — see `keccak::sponge` |
-//! | 6     | `Poseidon2In`   | `poseidon2::Poseidon2Air`       | `(perm_seq_id, tag, c0, c1, c2, c3)`, `tag ∈ {0, 1, 2}` for rate0/rate1/cap |
-//! | 7     | `Poseidon2Out`  | `poseidon2::Poseidon2Air`       | `(perm_seq_id, d0, d1, d2, d3)` — digest = first 4 lanes of post-perm state |
-//! | 8     | `Binding`       | transcript eval chips           | `(h0, h1, h2, h3, value_tag, ptr)` — node hash ↦ typed value (self-referential) |
-//! | 9     | `ChunkChain`    | `hash::chunk_node_sponge::ChunkNodeSpongeAir` (chunk band) | `(chunk_seq_id_head, perm_seq_id_head)` — per-invocation chain head, in chunk's native namespace |
+//! | 6     | `EidosIn`   | native `EidosCompressionAir` | `(chain_step_id, domain, message[8], chain_context[4])` — atomic Eidos chaining input |
+//! | 7     | `EidosOut`  | native `EidosCompressionAir` | `(chain_step_id, d0, d1, d2, d3)` — terminal Eidos chaining word |
+//! | 8     | `Binding`       | transcript eval chips           | `(h0, h1, h2, h3, value_tag, ptr, bound_ptr)` — node hash ↦ typed value (self-referential) |
+//! | 9     | `ChunkChain`    | `hash::chunk_node_sponge::ChunkNodeSpongeAir` (chunk band) | `(chunk_seq_id_head, absorption_id_head)` — per-invocation chain head, in chunk's native namespace |
 //! | 10    | `UintVal`      | `uint::store_mul::UintStoreMulAir` (store band) | `(ptr, bound_ptr, c0..c7)` — complete 256-bit value as 8×32-bit recombined limbs |
 //! | 11    | `UintAdd`      | `uint::add::UintAddAir`       | `(bound_ptr, a_ptr, b_ptr, c_ptr)` — asserts `a + b ≡ c (mod p)` for uints sharing `bound_ptr` |
 //! | 12    | `UintMul`      | `uint::mul::UintMulAir`       | `(kappa_a, kappa_c, a_ptr, b_ptr, c_ptr, r_ptr, bound_ptr)` — asserts `κₐ·a·b + κ_c·c ≡ r (mod p)` for uints sharing `bound_ptr` |
@@ -34,6 +34,7 @@
 //! | 18    | `MsmTerm`      | `ec::msm::EcMsmAir`           | `(expr_ptr, idx, base_ptr, scalar_ptr)` — one term `P × s` of MSM expression `expr_ptr` at position `idx` |
 //! | 19    | `MsmExpr`      | `ec::msm::EcMsmAir`           | `(expr_ptr, group_ptr, val_ptr, k)` — MSM expression head: `k` terms summing to the point `val_ptr` (see `chiplets/ec-msm.md`) |
 //! | 20    | `MsmClaimTerm` | `ec::msm::EcMsmAir`           | `(expr_ptr, base_ptr, scalar_ptr)` — a **resolve-seam** term of MSM expression `expr_ptr`, *positionless* (unlike `MsmTerm`): the eval `EcMsm` absorb consumes the claim's terms as a **set**, so the DAG absorb order is the caller's, decoupled from the chiplet's storage `idx` (and thus from the addition-chain strategy). Provided per claim-expr term at the **resolve** use count |
+//! | 21    | `EidosCv`      | native `EidosCompressionAir` | `(compression_cycle_id, cv0, ..., cv7)` — atomic internal bridge from the first fused row to footer 3 |
 //!
 //! ## Adding a new relation
 //!
@@ -54,8 +55,8 @@ pub enum BusId {
     Range16 = 1,
     Memory64 = 4,
     KeccakSponge = 5,
-    Poseidon2In = 6,
-    Poseidon2Out = 7,
+    EidosIn = 6,
+    EidosOut = 7,
     Binding = 8,
     ChunkChain = 9,
     UintVal = 10,
@@ -69,14 +70,16 @@ pub enum BusId {
     MsmTerm = 18,
     MsmExpr = 19,
     MsmClaimTerm = 20,
+    EidosCv = 21,
 }
 
 /// Number of distinct buses currently registered. Sized so that
 /// [`Challenges::new`](miden_air::lookup::Challenges::new) precomputes
-/// exactly one prefix per [`BusId`] variant (indices 0..=20; `Logic64`/
+/// exactly one prefix per [`BusId`] variant (indices 0..=21; `Logic64`/
 /// `Rol64`'s old slots at 2/3 are retired gaps, harmless since ids only
 /// need uniqueness, not contiguity).
-pub const NUM_BUS_IDS: usize = 21;
+pub const NUM_BUS_IDS: usize = 22;
+const _: () = assert!(NUM_BUS_IDS == BusId::EidosCv as usize + 1);
 
 /// Maximum payload width (excluding the bus prefix) any message in this
 /// VM emits. Sets the size of the precomputed `β^0..β^{W-1}` table held

@@ -231,7 +231,7 @@ where
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
-            Operation::HPerm => crypto_ops::op_hperm(processor, tracer)
+            Operation::Compress => crypto_ops::op_compress(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
             Operation::MpVerify(err_code) => crypto_ops::op_mpverify(processor, *err_code, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
@@ -254,7 +254,7 @@ where
             },
             Operation::LogDeferred => crypto_ops::op_log_deferred(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
-            Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
+            Operation::CryptoStream => crypto_ops::op_aead_stream(processor, tracer)
                 .map_exec_err_with_package_source_op_idx(package_source_context, host, op_idx)?,
         };
 

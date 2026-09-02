@@ -1,17 +1,25 @@
-use miden::core::crypto::hashes::poseidon2
 use miden::core::precompiles::hashes::keccak256
 use miden::core::precompiles::curves::secp256k1
 use miden::core::precompiles::fields::k1_base
 use miden::core::precompiles::fields::k1_scalar
+use miden::core::crypto::hashes::eidos
 use miden::core::word
 
 const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::recover")
+
+# Selector-zero Eidos chaining word for the 16-Felt public-key preimage.
+const PUBLIC_KEY_INIT_CV = [
+    4280581857092829184,
+    2688637132020383760,
+    1947077364412317696,
+    6620516959492505600
+]
 
 # ENCODING CONVENTIONS
 # ================================================================================================
 #
 # - Native secp256k1 values are stored as little-endian numeric u32 limbs, one limb per Felt.
-# - The public-key commitment is `Poseidon2::hash_elements(QX[8] || QY[8])` over the native
+# - The public-key commitment is `Eidos::hash_elements(QX[8] || QY[8])` over the native
 #   coordinate limbs in advice/memory order.
 # - MSG_WORD is a word whose four felts are split into eight little-endian u32 limbs before Keccak256.
 # - Variable-length messages are stored as packed little-endian u32 limbs in word-aligned memory.
@@ -31,7 +39,7 @@ const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::
 #!   Advice stack:  [...]
 #!
 #! Where:
-#! - `PK_COMM`: Poseidon2 hash commitment of `QX[8] || QY[8]`, where coordinates are native
+#! - `PK_COMM`: Eidos hash commitment of `QX[8] || QY[8]`, where coordinates are native
 #!   little-endian numeric u32 limbs, one limb per Felt.
 #! - `MSG_WORD`: single word / 4 felts representing the 32-byte message to verify.
 #! - `QX[8]`, `QY[8]`: native public-key coordinates as little-endian u32 limbs.
@@ -92,7 +100,7 @@ end
 #!   Advice stack:  [...]
 #!
 #! Where:
-#! - `PK_COMM`: Poseidon2 hash commitment of `QX[8] || QY[8]`, where coordinates are native
+#! - `PK_COMM`: Eidos hash commitment of `QX[8] || QY[8]`, where coordinates are native
 #!   little-endian numeric u32 limbs, one limb per Felt.
 #! - `MSG_PTR`: word-aligned address containing the message as packed little-endian u32 limbs.
 #! - `MSG_LEN_BYTES`: number of message bytes to hash. Unused bytes in the final u32 and remaining felts
@@ -267,12 +275,12 @@ proc recover_digest
     exec.load_recovery_signature_k1
     # => [SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
 
-    # Stream the candidate point into local memory. The sponge words are scratch; no digest is
-    # derived from the untrusted advice here.
+    # Stream the candidate point into local memory. The Eidos block words and chaining word are
+    # scratch; no digest is derived from the untrusted advice here.
     locaddr.0 padw padw padw
     adv_pipe
     adv_pipe
-    # => [QY_RATE[8], C, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
+    # => [QY_BLOCK[8], CV, end_ptr=loc[16], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
     dropw dropw dropw sub.16
     # => [pubkey_ptr=loc[0], SIG_S, SIG_R, Z, SIG_R_BASE, recovery_parity, ...]
     exec.secp256k1::load_mem
@@ -305,20 +313,20 @@ end
 #! Advice: [QX[8] | QY[8] | ...]
 #! Output: [pubkey_ptr + 16, ...]
 proc load_and_verify_public_key
-    # Since there are exactly 16 elements, `hash_elements` has a zero capacity word and requires no
-    # partial-block padding. `adv_pipe` exposes each written chunk in the rate slots in the same
+    # Since there are exactly 16 elements, Eidos binds that count into its initial chaining word and
+    # requires no partial-block padding. `adv_pipe` exposes each written chunk in the block slots in the same
     # order that `mem_stream` would read it back from memory.
-    padw padw padw
-    # => [R0=0w, R1=0w, C=0w, write_ptr=pubkey_ptr, PK_COMM, ...]
+    push.PUBLIC_KEY_INIT_CV padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, write_ptr=pubkey_ptr, PK_COMM, ...]
     adv_pipe
-    # => [QX_RATE[8], C=0w, write_ptr=pubkey_ptr+8, PK_COMM, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    # => [QX_BLOCK[8], CV, write_ptr=pubkey_ptr+8, PK_COMM, ...]
+    exec.eidos::compress
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr=pubkey_ptr+8, PK_COMM, ...]
     adv_pipe
-    # => [QY_RATE[8], C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
-    hperm
-    # => [R0, R1, C, write_ptr=pubkey_ptr+16, PK_COMM, ...]
-    exec.poseidon2::squeeze_digest
+    # => [QY_BLOCK[8], CV, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    exec.eidos::compress
+    # => [BLOCK_LO, BLOCK_HI, CV, write_ptr=pubkey_ptr+16, PK_COMM, ...]
+    exec.eidos::digest
     # => [PK_HASH, write_ptr=pubkey_ptr+16, PK_COMM, ...]
     movup.4 movdn.8
     # => [PK_HASH, PK_COMM, write_ptr=pubkey_ptr+16, ...]

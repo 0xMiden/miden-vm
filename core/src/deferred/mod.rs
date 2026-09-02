@@ -20,19 +20,37 @@ use alloc::boxed::Box;
 
 pub use claim::DeferredClaim;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
-pub use precompile::{Precompile, precompile_id};
+pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
 pub use state::{DeferredContext, DeferredState};
 pub use wire::{DeferredStateWire, IntegrityError};
 pub use witness::{PrecompileWitness, PrecompileWitnessError};
 
-use crate::Word;
+use crate::{
+    Felt, Word,
+    program::domain::{DEFERRED_AND_DOMAIN_ID, DEFERRED_CHUNKS_DOMAIN_ID, domain_selector},
+};
 
 /// The deferred root committed in public inputs.
 pub type DeferredRoot = Digest;
 
-/// Fixed capacity word used to domain-separate deferred root folds.
-pub const DEFERRED_ROOT_DOMAIN: Word = Word::new(Tag::AND.as_word());
+/// Eidos domain selector for semantic AND nodes and rolling deferred-root folds.
+pub const DEFERRED_AND_DOMAIN: Felt = domain_selector(DEFERRED_AND_DOMAIN_ID, 1);
+
+/// Eidos domain selector for framework-owned CHUNKS nodes.
+pub const DEFERRED_CHUNKS_DOMAIN: Felt = domain_selector(DEFERRED_CHUNKS_DOMAIN_ID, 1);
+
+/// Fixed initial Eidos chaining value for deferred AND nodes and rolling-root folds.
+///
+/// This is
+/// `Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8)`. It is spelled out
+/// so the consensus-critical value remains a `const` usable by AIR definitions.
+pub const DEFERRED_AND_INIT_CV: Word = Word::new([
+    Felt::new_unchecked(4280581857109607169),
+    Felt::new_unchecked(2688637132020383752),
+    Felt::new_unchecked(1947077364412317696),
+    Felt::new_unchecked(6620516959492505600),
+]);
 
 /// Hard maximum approximate number of field elements allowed in deferred state.
 pub const MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
@@ -111,5 +129,20 @@ impl PrecompileError {
 
     pub(crate) fn with_precompile(name: &'static str, source: PrecompileError) -> Self {
         Self::Precompile { name, source: Box::new(source) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_crypto::hash::eidos::Eidos;
+
+    use super::*;
+
+    #[test]
+    fn deferred_and_init_cv_matches_its_eidos_derivation() {
+        assert_eq!(
+            DEFERRED_AND_INIT_CV,
+            Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8),
+        );
     }
 }

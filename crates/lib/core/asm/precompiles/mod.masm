@@ -11,6 +11,60 @@ pub mod u256
 # Framework data tag used for generic CHUNKS nodes: Tag::CHUNKS = [2, 0, 0, 0].
 const CHUNKS_TAG = [2, 0, 0, 0]
 
+# Registered Eidos domain selectors. These must match `miden_core::deferred`.
+const DEFERRED_AND_DOMAIN = 0x01000301
+const DEFERRED_CHUNKS_DOMAIN = 0x01000401
+
+# Eidos initial-CV bases. Kept local so this package remains independent of `miden-core`; they
+# match `miden::core::crypto::eidos`.
+const EIDOS_INIT_CV_0_BASE = 4280581857092829184
+const EIDOS_INIT_CV_1_BASE = 2688637132020383744
+const EIDOS_INIT_CV_2_BASE = 1947077364412317696
+const EIDOS_INIT_CV_3_BASE = 6620516959492505600
+
+# Initial chaining words for one, two, and three framework CHUNKS payload blocks. Each word is
+# `init(DEFERRED_CHUNKS_DOMAIN, [8 * n_chunks, 0, 0])`.
+const DEFERRED_CHUNKS_INIT_CV_1 = [4280581857109607425, 2688637132020383752, 1947077364412317696, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_2 = [4280581857109607425, 2688637132020383760, 1947077364412317696, 6620516959492505600]
+const DEFERRED_CHUNKS_INIT_CV_3 = [4280581857109607425, 2688637132020383768, 1947077364412317696, 6620516959492505600]
+
+#! Constructs an Eidos chaining word from a registered selector and three selector-defined
+#! parameters.
+#! Input: [selector, param0, param1, param2, ...]
+#! Output: [CV, ...]
+proc init_deferred_cv
+    u32assert2.err="Eidos init values must fit in u32"
+    movup.3 movup.3 u32assert2.err="Eidos init values must fit in u32"
+
+    push.EIDOS_INIT_CV_2_BASE add
+    swap push.EIDOS_INIT_CV_3_BASE add
+    movup.3 push.EIDOS_INIT_CV_1_BASE add
+    movup.3 push.EIDOS_INIT_CV_0_BASE add
+    movup.3 movdn.2
+end
+
+#! Constructs `init(selector, [length, 0, 0])`.
+#! Input: [length, selector, ...]
+#! Output: [CV, ...]
+proc init_deferred_cv_in_domain
+    u32assert2.err="Eidos init values must fit in u32"
+
+    push.EIDOS_INIT_CV_1_BASE add
+    swap push.EIDOS_INIT_CV_0_BASE add
+    push.EIDOS_INIT_CV_3_BASE.EIDOS_INIT_CV_2_BASE
+    movdn.3 movdn.3
+end
+
+#! Constructs the initial Eidos chaining word for a precompile-owned deferred node.
+#! The tag's reserved lane must be zero; every value injected into the CV must fit in a u32.
+#! Input: [payload_len, TAG=[selector, arg0, arg1, reserved], ...]
+#! Output: [CV, ...]
+proc init_precompile_deferred_cv
+    movup.4 assertz.err="deferred tag reserved lane must be zero"
+    swap
+    exec.init_deferred_cv
+end
+
 #! Returns whether two words are equal, consuming both words.
 #!
 #! This helper keeps generated precompile modules independent of `miden-core`. Importing
@@ -35,11 +89,9 @@ end
 
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
-# NOTE: `register_value`, `register_mem`, and `log_deferred` are adapted from `miden::core::sys`
-# (crates/lib/core/asm/sys/mod.masm) so the internal `miden::precompiles` support namespace can be
-# assembled without depending on `miden-core`. This keeps the package dependency one-way because
-# `miden-core` depends on `miden-precompiles`. These helpers should be deduplicated against a single
-# shared source once the precompile proof-model migration settles.
+# The internal `miden::precompiles` support namespace cannot import `miden-core` because
+# `miden-core` depends on the precompile package. These procedures implement the same registration
+# contracts as the core system helpers and must remain semantically aligned with them.
 #
 # `register_value` / `register_mem` bind their registration inputs by deriving the node digest with
 # VM instructions from the exact same tag and payload. There is intentionally no `evaluate` proc
@@ -50,21 +102,20 @@ end
 # That discipline is precompile-specific, so each precompile wraps the raw event itself rather than
 # calling a deceptively "safe" shared helper.
 
-#! Registers the expression node currently laid out in Poseidon2 sponge order and returns its
-#! content-addressed digest.
+#! Registers a one-chunk expression node and returns its Eidos content-addressed digest.
 #!
-#! `adv.register_deferred` interns the node host-side (no stack or advice output); `hperm` then
-#! derives the digest inside the VM from the same operand-stack payload. The helper expects the
-#! stack in Poseidon2 sponge layout — `[R0=PAYLOAD_LO, R1=PAYLOAD_HI, C=TAG]` — so one `hperm`
-#! produces the permuted state and the digest is its rate0 word (`state[0..4]`), matching
-#! `Node::digest`.
+#! `adv.register_deferred` interns the node host-side (no stack or advice output). The VM binds the
+#! tag selector, payload length, and two tag arguments into the initial Eidos chaining word, then
+#! compresses the payload block once.
 #!
 #! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
 #! Output: [NODE_DIGEST, ...]
 pub proc digest_expr
     adv.register_deferred
-    hperm
-    swapw.2 dropw dropw
+
+    movupw.2 push.8 exec.init_precompile_deferred_cv
+    movdnw.2 compress
+    dropw dropw
 end
 
 #! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
@@ -81,8 +132,7 @@ end
 #! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and returns
 #! its content-addressed digest on top of the operand stack.
 #!
-#! This is the root-module compatibility helper for value-node callers. It is equivalent to
-#! `register_expr`.
+#! Alias of `register_expr` for callers that register value-shaped nodes.
 #!
 #! Input:  [TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
 #! Output: [NODE_DIGEST, ...]
@@ -90,44 +140,43 @@ pub proc register_value
     exec.register_expr
 end
 
-#! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! Registers a data-bodied node (`n` eight-Felt blocks of bulk data at `ptr`) in the
 #! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
 #! `adv.register_deferred_data` interns the node host-side by reading `8n` felts from memory at
 #! `ptr`, where `n` is the stack-supplied `n_chunks`; it produces no stack or advice output. The
 #! event leaves those stack arguments unchanged, but its direct host read adds no AIR memory access.
-#! This wrapper binds the registration input by applying a Poseidon2 linear hash with VM instructions
-#! to the exact same `TAG` and ordered chunk sequence, using `TAG` as the initial capacity and one
-#! `hperm` per 8-felt block loaded by `mem_stream`. The rate0 word matches `Node::digest`. Empty data
-#! bodies are forbidden, so `n ≥ 1` and the linear-hash loop always runs at least one permutation.
+#! This wrapper binds the registration input with the same Eidos construction as `Node::digest`:
+#! the tag selector, `8n` payload length, and two tag arguments initialize the chaining word, then
+#! the `n` payload chunks are compressed. Empty data bodies are forbidden, so `n ≥ 1`.
 #!
 #! Input:  [TAG, ptr, n_chunks, ...]
 #! Output: [NODE_DIGEST, ...]
+@locals(1)
 pub proc register_mem
     adv.register_deferred_data
-    # => [TAG, ptr, n_chunks, ...]
 
-    # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
-    movup.5 mul.8 dup.5 add movdn.5
+    # Retain n_chunks in one scalar local while keeping TAG on the operand stack.
+    movup.5 loc_store.0
+    # => [TAG, ptr, ...]
+
+    # end_addr = ptr + 8 * n_chunks.
+    loc_load.0 mul.8 dup.5 add movdn.5
     # => [TAG, ptr, end_addr, ...]
 
-    # Build the sponge state: rate = 0, capacity = TAG, with [start_addr, end_addr] beneath it.
-    padw padw
-    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+    loc_load.0 mul.8 exec.init_precompile_deferred_cv
+    # => [CV, ptr, end_addr, ...]
 
-    # Linear hash: absorb one 8-felt block per iteration until start_addr reaches end_addr.
-    # Data bodies are non-empty, so use a do-while shape and avoid a redundant pre-loop compare.
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_addr, ...]
+
     push.1
     while.true
-        mem_stream hperm
+        mem_stream compress
         dup.13 dup.13 neq
     end
-    # => [R0', R1', C', end_addr, end_addr, ...]
-
-    swapw.2 dropw dropw
-    # => [NODE_DIGEST, end_addr, end_addr, ...]  (digest = rate0)
+    dropw dropw
     movup.4 drop movup.4 drop
-    # => [NODE_DIGEST, ...]
 end
 
 #! Registers memory as framework CHUNKS data and returns its content-addressed digest.
@@ -137,7 +186,30 @@ end
 pub proc register_chunks_mem
     push.CHUNKS_TAG
     # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks, ...]
-    exec.register_mem
+    adv.register_deferred_data
+
+    dropw
+    # => [ptr, n_chunks, ...]
+
+    # Build end_addr while retaining n_chunks for Eidos length framing.
+    dup.1 mul.8 dup.1 add
+    # => [end_addr, ptr, n_chunks, ...]
+    movdn.2
+    # => [ptr, n_chunks, end_addr, ...]
+
+    push.DEFERRED_CHUNKS_DOMAIN movup.2 mul.8
+    # => [num_elements=8*n_chunks, domain, ptr, end_addr, ...]
+    exec.init_deferred_cv_in_domain
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, end_addr, ...]
+
+    push.1
+    while.true
+        mem_stream compress
+        dup.13 dup.13 neq
+    end
+    dropw dropw
+    movup.4 drop movup.4 drop
 end
 
 #! Registers exactly one 8-felt memory chunk as framework CHUNKS data.
@@ -146,18 +218,17 @@ end
 #! Output: [CHUNKS_DIGEST, ...]
 pub proc register_chunks_mem_1
     push.1 swap push.CHUNKS_TAG
-    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=1, ...]
+    # => [Tag::CHUNKS, ptr, n_chunks=1, ...]
     adv.register_deferred_data
 
-    padw padw
-    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=1, ...]
-    mem_stream hperm
-    # => [R0', R1', C', ptr+8, n_chunks=1, ...]
+    dropw
+    # => [ptr, n_chunks=1, ...]
 
-    swapw.2 dropw dropw
-    # => [CHUNKS_DIGEST, ptr+8, n_chunks=1, ...]
+    push.DEFERRED_CHUNKS_INIT_CV_1 padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, n_chunks=1, ...]
+    mem_stream compress
+    dropw dropw
     movup.4 drop movup.4 drop
-    # => [CHUNKS_DIGEST, ...]
 end
 
 #! Registers exactly two contiguous 8-felt memory chunks as framework CHUNKS data.
@@ -166,20 +237,19 @@ end
 #! Output: [CHUNKS_DIGEST, ...]
 pub proc register_chunks_mem_2
     push.2 swap push.CHUNKS_TAG
-    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=2, ...]
+    # => [Tag::CHUNKS, ptr, n_chunks=2, ...]
     adv.register_deferred_data
 
-    padw padw
-    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=2, ...]
-    repeat.2
-        mem_stream hperm
-    end
-    # => [R0'', R1'', C'', ptr+16, n_chunks=2, ...]
+    dropw
+    # => [ptr, n_chunks=2, ...]
 
-    swapw.2 dropw dropw
-    # => [CHUNKS_DIGEST, ptr+16, n_chunks=2, ...]
+    push.DEFERRED_CHUNKS_INIT_CV_2 padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, n_chunks=2, ...]
+    repeat.2
+        mem_stream compress
+    end
+    dropw dropw
     movup.4 drop movup.4 drop
-    # => [CHUNKS_DIGEST, ...]
 end
 
 #! Registers exactly three contiguous 8-felt memory chunks as framework CHUNKS data.
@@ -188,35 +258,29 @@ end
 #! Output: [CHUNKS_DIGEST, ...]
 pub proc register_chunks_mem_3
     push.3 swap push.CHUNKS_TAG
-    # => [Tag::CHUNKS=[2,0,0,0], ptr, n_chunks=3, ...]
+    # => [Tag::CHUNKS, ptr, n_chunks=3, ...]
     adv.register_deferred_data
 
-    padw padw
-    # => [R0=0w, R1=0w, C=Tag::CHUNKS, ptr, n_chunks=3, ...]
-    repeat.3
-        mem_stream hperm
-    end
-    # => [R0''', R1''', C''', ptr+24, n_chunks=3, ...]
+    dropw
+    # => [ptr, n_chunks=3, ...]
 
-    swapw.2 dropw dropw
-    # => [CHUNKS_DIGEST, ptr+24, n_chunks=3, ...]
+    push.DEFERRED_CHUNKS_INIT_CV_3 padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, n_chunks=3, ...]
+    repeat.3
+        mem_stream compress
+    end
+    dropw dropw
     movup.4 drop movup.4 drop
-    # => [CHUNKS_DIGEST, ...]
 end
 
 #! Folds a deferred node digest into the rolling deferred root using `log_deferred`.
 #! The digest must reference a node that will reduce to TRUE under the installed precompiles.
 #!
-#! Pads the operand stack so `log_deferred`'s implicit `[_, STMNT, _, ...]` shape sees
-#! NODE_DIGEST at stack[4..8] (the HPERM rate1 lanes). The opcode folds with framework AND
-#! capacity `[1, 0, 0, 0]`, then this helper drops the three words it writes to stack[0..12].
+#! The opcode replaces NODE_DIGEST with the updated deferred root, which this helper drops.
 #!
 #! Input:  [NODE_DIGEST, ...]
 #! Output: `[...]` (the deferred commitment root advances; node is folded in)
 pub proc log_deferred
-    padw padw movdnw.2
-    # => [_, NODE_DIGEST, _, ...]
     log_deferred
-    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
-    dropw dropw dropw
+    dropw
 end

@@ -52,7 +52,7 @@ pub proc verify
     exec.utils::validate_inputs
     # => [...]
 
-    # Initialize sponge with DSFS seeding and derive trace domain parameters.
+    # Initialize the Eidos challenger with DSFS seeding and derive trace domain parameters.
     # Security params, relation digest, and trace-height metadata are read from memory.
     exec.random_coin::init_seed
     # => [...]

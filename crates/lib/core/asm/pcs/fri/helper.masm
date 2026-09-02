@@ -1,4 +1,3 @@
-use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::random_coin
 use miden::core::stark::constants
 
@@ -31,23 +30,19 @@ end
 # HELPERS
 # =================================================================================================
 
-#! Absorbs the next 8 advice elements into the sponge state, binding the absorbed length (8)
-#! into the capacity before permuting.
-proc absorb_remainder_poly_chunk
-    adv_pipe movup.8 add.8 movdn.8 exec.poseidon2::permute
-end
-
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
 proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
-        exec.absorb_remainder_poly_chunk
+        adv_pipe
+        compress
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
 proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
-        exec.absorb_remainder_poly_chunk
+        adv_pipe
+        compress
     end
 end
 
@@ -72,11 +67,10 @@ end
 #!
 #! Input: [...]
 #! Output: [num_fri_layers, ...]
-#! Cycles: 45
 pub proc generate_fri_parameters
     # Load FRI verifier data
     padw exec.constants::get_lde_domain_info_word
-    #=> [lde_size, log(lde_size), lde_g, 0, ...] (6 cycles)
+    #=> [lde_size, log(lde_size), lde_g, 0, ...]
 
     # Compute the number of FRI layers
     dup
@@ -94,19 +88,19 @@ pub proc generate_fri_parameters
         push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG sub
         div.2
     end
-    # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (12 cycles)
+    # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
     exec.constants::set_num_fri_layers
     div.8
     exec.constants::set_remainder_poly_size
-    # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (7 cycles)
+    # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
     dropw
     drop
-    # => [...] (5 cycles)
+    # => [...]
 end
 
-#! Get FRI layer commitments and reseed with them in order to draw folding challenges i.e. alphas.
+#! Get FRI layer commitments and reseed with them in order to draw folding challenges.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -114,13 +108,13 @@ pub proc load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
     padw exec.constants::get_lde_domain_info_word
     exec.constants::tmp1 mem_storew_le
-    # => [Y, ...] where `Y` is as "garbage" word
+    # => [Y, ...] where `Y` is a garbage word
 
     # Address containing the first layer commitment
     push.0.0
     exec.constants::fri_com_ptr
     exec.constants::get_num_fri_layers
-    # => [num_layers, ptr_layer, y, y, Y, ...] where `y` are considered as "garbage" values
+    # => [num_layers, ptr_layer, y, y, Y, ...] where `y` values are garbage
 
     dup
     push.0
@@ -182,26 +176,21 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#!
-#! Cycles:
-#!
-#!  1- Remainder polynomial of degree less
-#!     than 64: 157
-#!  2- Remainder polynomial of degree less
-#!     than 128: 191
 pub proc load_and_verify_remainder
 
     # `adv_pipe` the remainder codeword
     ## Get the numbers of FRI layers
     exec.constants::get_num_fri_layers
-    ## Compute the correct remainder pointer, note that the remainder poly is laid out just after
-    ## the FRI layer commitments, each saved in a word, and folding challenges, also saved in
-    ## a word, and this explains the multiplication by 8
+    ## Compute the remainder pointer. The remainder polynomial is laid out after the FRI layer
+    ## commitments and folding challenges, each stored as one word; this gives 8 felts per layer.
     mul.8 exec.constants::fri_com_ptr add
     #=> [fri_com_ptr, 8 * num_fri_layers, ...]
     ## Store for later use
     dup exec.constants::set_remainder_poly_address
     #=> [remainder_poly_ptr, ...]
+
+    exec.constants::random_coin_buffer_len_ptr mem_load
+    assertz.err="FRI remainder absorption requires an empty transcript buffer"
 
     exec.constants::get_remainder_poly_size
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
@@ -209,38 +198,28 @@ pub proc load_and_verify_remainder
     eq
     if.true
         # Remainder polynomial degree less than 64
-        # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw padw
+        # => [Y, Y, cv, remainder_poly_ptr, remainder_size, y, y]
 
-        # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1_half
-
-        # Update the random coin state with the remainder polynomial digest.
-        exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
 
     else
         # Remainder polynomial degree less than 128
-        # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw padw
+        # => [Y, Y, cv, remainder_poly_ptr, remainder_size, y, y]
 
-        # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
-
-        # Update the random coin state with the remainder polynomial digest.
-        exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
 
     end
+    swapw.2
+    exec.constants::random_coin_cv_ptr mem_storew_le
+    dropw dropw dropw
+    exec.random_coin::eidos_clear_buffer
+    exec.random_coin::eidos_enter_absorbing
     dropw dropw
     #=> [...]
 end
@@ -253,8 +232,6 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#!
-#! Cycles: 7
 pub proc compute_query_pointer
     exec.constants::fri_com_ptr
     exec.constants::get_number_queries

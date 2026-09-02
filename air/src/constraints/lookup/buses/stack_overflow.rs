@@ -1,6 +1,8 @@
 //! Stack overflow table bus (`BusId::StackOverflowTable`).
 //!
-//! Three mutually exclusive interactions:
+//! Stack-overflow table interactions share this column with the low three limbs of the Merkle
+//! canonical-index witness. The opcode families are row-disjoint: MPVERIFY and MRUPDATE are
+//! no-shift operations, so neither can activate a stack-overflow add/remove.
 //!
 //! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` — the
 //!   cycle, the spilled value, and the link to the previous overflow row.
@@ -13,17 +15,16 @@
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::StackOverflowMsg,
+        messages::{RangeMsg, StackOverflowMsg},
     },
-    lookup::{Deg, LookupColumn, LookupGroup},
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// All three interactions gate on mutually exclusive opcode flags (right_shift, left_shift,
-/// dyncall — DYNCALL is excluded from the `left_shift` aggregate by construction), so at
-/// most one fires per row.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+/// Stack-overflow interactions contribute one fraction; MPVERIFY/MRUPDATE contribute the three
+/// low canonical-index limbs. The branches are opcode-disjoint, so at most three fire per row.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the stack overflow table bus.
 pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
@@ -42,6 +43,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     let b1 = local.stack.b1;
     let b1_next = next.stack.b1;
     let h5 = local.decoder.hasher_state[5];
+    let helpers = local.decoder.user_op_helpers();
 
     // `op_flags.overflow() = (b0 - 16) * h0`, degree 2. Aliased once so each remove site
     // does not re-clone the underlying expression.
@@ -91,6 +93,38 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
                             prev: h5.into(),
                         },
                         Deg { v: 7, u: 8 },
+                    );
+
+                    // MPVERIFY and MRUPDATE preserve stack depth, so these branches cannot
+                    // overlap any overflow-table interaction above. The top witness limb and its
+                    // doubled bound are placed in other existing columns to preserve degree 9.
+                    g.batch(
+                        "mpverify_merkle_y_low",
+                        op_flags.mpverify(),
+                        |b| {
+                            for helper in &helpers[2..5] {
+                                b.remove(
+                                    "mpverify_merkle_y_limb",
+                                    RangeMsg { value: (*helper).into() },
+                                    Deg { v: 5, u: 6 },
+                                );
+                            }
+                        },
+                        Deg { v: 7, u: 8 }, // (V, U) = (2 + 5, 3 + 5)
+                    );
+                    g.batch(
+                        "mrupdate_merkle_y_low",
+                        op_flags.mrupdate(),
+                        |b| {
+                            for helper in &helpers[2..5] {
+                                b.remove(
+                                    "mrupdate_merkle_y_limb",
+                                    RangeMsg { value: (*helper).into() },
+                                    Deg { v: 4, u: 5 },
+                                );
+                            }
+                        },
+                        Deg { v: 6, u: 7 }, // (V, U) = (2 + 4, 3 + 4)
                     );
                 },
                 Deg { v: 7, u: 8 },

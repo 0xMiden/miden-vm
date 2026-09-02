@@ -18,7 +18,7 @@ const FRI_FOLD_ARITY = 4
 # =================================================================================================
 
 ## General
-## The generic frame occupies the half-open range 3223322624..3223322764. Relation-owned
+## The generic frame occupies the half-open range 3223322624..3223322776. Relation-owned
 ## storage begins at the next address.
 
 ### Addresses to store the LDE domain parameters
@@ -75,7 +75,7 @@ const COMPOSITION_POLY_COM_PTR = 3223322648
 ### Address to store the OOD evaluation point
 const Z_PTR = 3223322652
 
-### Address to store the zero word, mainly used in the context of Poseidon2
+### Address to store the zero word for hash-state and transcript helpers.
 const ZERO_WORD_PTR = 3223322656
 
 ### Address to store the non-deterministically provided DEEP polynomial batching randomness
@@ -84,72 +84,80 @@ const ALPHA_DEEP_ND_PTR = 3223322660
 ### Address to store the fixed terms, across all queries, of the DEEP queries.
 const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 
-### Addresses to store the state of Poseidon2-based random coin
-const C_PTR = 3223322668
-const R1_PTR = 3223322672
-const R2_PTR = 3223322676
+### Eidos random-coin state: chaining value, cached output word, and 8-felt absorb block.
+const RANDOM_COIN_CV_PTR = 3223322668
+const RANDOM_COIN_OUTPUT_WORD_PTR = 3223322672
+const RANDOM_COIN_INPUT_BUF_PTR = 3223322676
 
 ### Addresses used for storing temporary values
-const TMP1 = 3223322680
-const TMP2 = 3223322684
-const TMP3 = 3223322688
-const TMP4 = 3223322692
+const TMP1 = 3223322684
+const TMP2 = 3223322688
+const TMP3 = 3223322692
+const TMP4 = 3223322696
 
 ### Scratch word used by the FRI verifier to persist loop state between queries.
 ### Stores [query_ptr, layer_ptr, rem_ptr, g].
-const FRI_VERIFY_STATE_PTR = 3223322696
+const FRI_VERIFY_STATE_PTR = 3223322700
 
 ### Address of the composition challenges [alpha0, alpha1, beta0, beta1].
-const COMPOSITION_COEF_PTR = 3223322700
+const COMPOSITION_COEF_PTR = 3223322704
 
 ### Address to the randomness used in computing the DEEP polynomial
-const DEEP_RAND_CC_PTR = 3223322704
+const DEEP_RAND_CC_PTR = 3223322708
 
 ### Addresses of the digests of dynamically executed procedures
-const DYNAMIC_PROCEDURE_0_PTR = 3223322708
-const DYNAMIC_PROCEDURE_1_PTR = 3223322712
-const DYNAMIC_PROCEDURE_2_PTR = 3223322716
-const DYNAMIC_PROCEDURE_3_PTR = 3223322720
-const DYNAMIC_PROCEDURE_4_PTR = 3223322724
+const DYNAMIC_PROCEDURE_0_PTR = 3223322712
+const DYNAMIC_PROCEDURE_1_PTR = 3223322716
+const DYNAMIC_PROCEDURE_2_PTR = 3223322720
+const DYNAMIC_PROCEDURE_3_PTR = 3223322724
+const DYNAMIC_PROCEDURE_4_PTR = 3223322728
 
 ### Relation metadata for this verifier instance.
-const RELATION_DIGEST_PTR = 3223322728
-const ACE_REGISTRY_ROOT_PTR = 3223322732
+const RELATION_DIGEST_PTR = 3223322732
+const ACE_REGISTRY_ROOT_PTR = 3223322736
+const PREPROCESSED_TRACE_COM_PTR = 3223322740
 
 ### Shared per-AIR log-height scratch. Generic consumers take the base and count as
 ### arguments; each relation owns the meaning of its offsets. The registry-backed
 ### order tag fits in u32 for at most 12 AIRs, while 16 cells leave aligned headroom.
-const AIR_TRACE_LENGTH_LOGS_PTR = 3223322736
+const AIR_TRACE_LENGTH_LOGS_PTR = 3223322744
 const AIR_TRACE_LENGTH_LOGS_CAPACITY = 16
 
 ### Addresses to store parameters needed for calls to the ACE chiplet.
-const NUM_FIXED_LEN_PUBLIC_INPUTS_PTR = 3223322752
-const NUM_ACE_INPUTS_PTR = 3223322753
-const NUM_ACE_GATES_PTR = 3223322754
-const MAX_CYCLE_LEN_LOG_PTR = 3223322755
+const NUM_FIXED_LEN_PUBLIC_INPUTS_PTR = 3223322760
+const NUM_ACE_INPUTS_PTR = 3223322761
+const NUM_ACE_GATES_PTR = 3223322762
+const MAX_CYCLE_LEN_LOG_PTR = 3223322763
 
 ### Addresses to store proof-of-work bit counts.
 ### query_pow_bits: PoW before query index sampling (PCS_PARAMS.query_pow_bits)
 ### deep_pow_bits: PoW before DEEP challenge sampling (PCS_PARAMS.deep.deep_pow_bits)
 ### folding_pow_bits: PoW per FRI folding round (PCS_PARAMS.fri.folding_pow_bits), same for all layers
-const QUERY_POW_BITS_PTR = 3223322756
-const DEEP_POW_BITS_PTR = 3223322757
-const FOLDING_POW_BITS_PTR = 3223322758
+const QUERY_POW_BITS_PTR = 3223322764
+const DEEP_POW_BITS_PTR = 3223322765
+const FOLDING_POW_BITS_PTR = 3223322766
 
 ### Random-coin buffer lengths.
-### The input length counts pending rate elements awaiting absorption (0..7).
-### The output length counts rate elements still available for sampling (0..8).
-const RANDOM_COIN_INPUT_LEN_PTR = 3223322759
-const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322760
+### The input length counts pending block elements awaiting compression (0..8).
+### The output length counts cached elements still available for sampling (0..4).
+const RANDOM_COIN_INPUT_LEN_PTR = 3223322767
+const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322768
+const RANDOM_COIN_COUNTER_PTR = 3223322769
 
 ### Address storing the relation-local start of the OOD evaluation rows.
-const OOD_EVALUATIONS_ADDRESS_PTR = 3223322761
+const OOD_EVALUATIONS_ADDRESS_PTR = 3223322770
 
 ### Address storing the relation-local query-row buffer.
-const CURRENT_TRACE_ROW_ADDRESS_PTR = 3223322762
+const CURRENT_TRACE_ROW_ADDRESS_PTR = 3223322771
+
+### Address storing the relation-local ACE stark-vars region.
+const AUXILIARY_ACE_INPUTS_ADDRESS_PTR = 3223322772
+
+### Address storing the relation-local auxiliary-randomness word.
+const AUX_RAND_ELEM_ADDRESS_PTR = 3223322773
 
 ### Reserved to align the following relation-owned frame to a word boundary.
-const GENERIC_ALIGNMENT_PADDING_PTR = 3223322763
+const GENERIC_ALIGNMENT_PADDING_PTR = 3223322774
 
 ## FRI
 ##
@@ -404,19 +412,20 @@ pub proc public_inputs_address_ptr
     push.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
-#! Returns the pointer to the capacity word of the Poseidon2-based random coin.
-pub proc c_ptr
-    push.C_PTR
+pub proc random_coin_cv_ptr
+    push.RANDOM_COIN_CV_PTR
 end
 
-#! Returns the pointer to the first rate word of the Poseidon2-based random coin.
-pub proc r1_ptr
-    push.R1_PTR
+pub proc random_coin_output_word_ptr
+    push.RANDOM_COIN_OUTPUT_WORD_PTR
 end
 
-#! Returns the pointer to the second rate word of the Poseidon2-based random coin.
-pub proc r2_ptr
-    push.R2_PTR
+pub proc random_coin_input_buf_ptr
+    push.RANDOM_COIN_INPUT_BUF_PTR
+end
+
+pub proc random_coin_block_ptr
+    push.RANDOM_COIN_INPUT_BUF_PTR
 end
 
 pub proc tmp1
@@ -463,12 +472,24 @@ pub proc ace_registry_root_ptr
     push.ACE_REGISTRY_ROOT_PTR
 end
 
+pub proc preprocessed_trace_com_ptr
+    push.PREPROCESSED_TRACE_COM_PTR
+end
+
 pub proc random_coin_input_len_ptr
+    push.RANDOM_COIN_INPUT_LEN_PTR
+end
+
+pub proc random_coin_buffer_len_ptr
     push.RANDOM_COIN_INPUT_LEN_PTR
 end
 
 pub proc random_coin_output_len_ptr
     push.RANDOM_COIN_OUTPUT_LEN_PTR
+end
+
+pub proc random_coin_counter_ptr
+    push.RANDOM_COIN_COUNTER_PTR
 end
 
 pub proc set_ood_evaluations_address
@@ -485,6 +506,22 @@ end
 
 pub proc get_current_trace_row_address
     push.CURRENT_TRACE_ROW_ADDRESS_PTR mem_load
+end
+
+pub proc set_auxiliary_ace_inputs_address
+    push.AUXILIARY_ACE_INPUTS_ADDRESS_PTR mem_store
+end
+
+pub proc get_auxiliary_ace_inputs_address
+    push.AUXILIARY_ACE_INPUTS_ADDRESS_PTR mem_load
+end
+
+pub proc set_aux_rand_elem_address
+    push.AUX_RAND_ELEM_ADDRESS_PTR mem_store
+end
+
+pub proc get_aux_rand_elem_address
+    push.AUX_RAND_ELEM_ADDRESS_PTR mem_load
 end
 
 pub proc fri_verify_state_ptr

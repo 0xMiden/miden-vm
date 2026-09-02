@@ -17,9 +17,9 @@ use crate::{
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
 const ORDER_TAG_PTR: u32 = 3223322639;
-const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322736;
-const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3223322761;
-const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3223322762;
+const AIR_TRACE_LENGTH_LOGS_PTR: u32 = 3223322744;
+const OOD_EVALUATIONS_ADDRESS_PTR: u32 = 3223322770;
+const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3223322771;
 
 const VM_OOD_EVALUATIONS_PTR: u32 = 3225419784;
 const VM_CURRENT_TRACE_ROW_PTR: u32 = 3238002688;
@@ -38,12 +38,12 @@ fn read_memory(output: &ExecutionOutput, addr: u32) -> u64 {
 fn execute_load_air_context(
     core_log_height: u64,
     chiplets_log_height: u64,
-    poseidon2_log_height: u64,
+    eidos_compression_log_height: u64,
 ) -> ExecutionOutput {
     let (output, _) = build_test!(
         load_air_context_source(),
         &[],
-        &[core_log_height, chiplets_log_height, poseidon2_log_height],
+        &[core_log_height, chiplets_log_height, eidos_compression_log_height],
     )
     .execute_for_output()
     .expect("load_air_context should execute");
@@ -95,13 +95,13 @@ fn load_air_context_chiplets_trace_length_lower_bound() {
 }
 
 #[test]
-fn load_air_context_poseidon2_trace_length_upper_bound() {
+fn load_air_context_eidos_compression_trace_length_upper_bound() {
     let test = build_test!(load_air_context_source(), &[], &[10, 10, LOG_HEIGHT_MAX + 1],);
     expect_assert_error_message!(test);
 }
 
 #[test]
-fn load_air_context_poseidon2_trace_length_lower_bound() {
+fn load_air_context_eidos_compression_trace_length_lower_bound() {
     let test = build_test!(load_air_context_source(), &[], &[10, 10, MVM_LOG_HEIGHT_MIN - 1],);
     expect_assert_error_message!(test);
 }
@@ -125,7 +125,8 @@ fn load_air_context_stores_shape_and_max_height() {
     assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR), 8);
     assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 1), 10);
     assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 2), 9);
-    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 10);
+    assert_eq!(read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 3), 16);
+    assert_eq!(read_memory(&output, TRACE_LENGTH_LOG_PTR), 16);
     assert_eq!(read_memory(&output, OOD_EVALUATIONS_ADDRESS_PTR), VM_OOD_EVALUATIONS_PTR as u64);
     assert_eq!(
         read_memory(&output, CURRENT_TRACE_ROW_ADDRESS_PTR),
@@ -136,24 +137,28 @@ fn load_air_context_stores_shape_and_max_height() {
 #[test]
 fn load_air_context_derives_proof_order_tags() {
     let cases = [
-        ((8, 9, 10), 0), // Core, Chiplets, Poseidon2Permutation
-        ((8, 10, 9), 1), // Core, Poseidon2Permutation, Chiplets
-        ((9, 8, 10), 2), // Chiplets, Core, Poseidon2Permutation
-        ((10, 8, 9), 3), // Chiplets, Poseidon2Permutation, Core
-        ((9, 10, 8), 4), // Poseidon2Permutation, Core, Chiplets
-        ((10, 9, 8), 5), // Poseidon2Permutation, Chiplets, Core
-        ((8, 8, 8), 0),  // ties use instance order
-        ((8, 8, 9), 0),  // partial tie: Core before Chiplets
-        ((8, 9, 8), 1),  // partial tie: Core before Poseidon2Permutation
-        ((9, 8, 8), 3),  // partial tie: Chiplets before Poseidon2Permutation
-        ((9, 9, 8), 4),  // partial tie: Core before Chiplets after Poseidon2Permutation
-        ((9, 8, 9), 2),  // partial tie: Core before Poseidon2Permutation after Chiplets
-        ((8, 9, 9), 0),  // partial tie: Chiplets before Poseidon2Permutation
+        ((8, 9, 10), 0),  // Core, Chiplets, EidosCompression, And8
+        ((8, 10, 9), 2),  // Core, EidosCompression, Chiplets, And8
+        ((9, 8, 10), 6),  // Chiplets, Core, EidosCompression, And8
+        ((10, 8, 9), 8),  // Chiplets, EidosCompression, Core, And8
+        ((9, 10, 8), 12), // EidosCompression, Core, Chiplets, And8
+        ((10, 9, 8), 14), // EidosCompression, Chiplets, Core, And8
+        ((8, 8, 8), 0),   // ties use instance order
+        ((8, 8, 9), 0),   // partial tie: Core before Chiplets
+        ((8, 9, 8), 2),   // partial tie: Core before EidosCompression
+        ((9, 8, 8), 8),   // partial tie: Chiplets before EidosCompression
+        ((9, 9, 8), 12),  // partial tie: Core before Chiplets after EidosCompression
+        ((9, 8, 9), 6),   // partial tie: Core before EidosCompression after Chiplets
+        ((8, 9, 9), 0),   // partial tie: Chiplets before EidosCompression
     ];
 
-    for ((core, chiplets, poseidon2), expected_tag) in cases {
-        let output = execute_load_air_context(core, chiplets, poseidon2);
-        assert_eq!(read_memory(&output, ORDER_TAG_PTR), expected_tag);
+    for ((core, chiplets, eidos_compression), expected_tag) in cases {
+        let output = execute_load_air_context(core, chiplets, eidos_compression);
+        assert_eq!(
+            read_memory(&output, ORDER_TAG_PTR),
+            expected_tag,
+            "unexpected proof-order tag for (core={core}, chiplets={chiplets}, eidos_compression={eidos_compression})",
+        );
     }
 }
 
@@ -425,7 +430,7 @@ fn derive_order_tag_from_heights_matches_the_registry_air_limit() {
 /// Relation evaluators must reject padding slots before opening their registry tree.
 #[test]
 fn relation_constraint_evaluators_reject_padding_order_tags() {
-    for (relation, order_count) in [("vm", 6), ("pvm", 3_628_800)] {
+    for (relation, order_count) in [("vm", 24), ("pvm", 3_628_800)] {
         let source = format!(
             "use miden::core::stark::constants
              use miden::core::sys::{relation}::constraints_eval
@@ -498,12 +503,12 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("ZERO_WORD_PTR", 0, 4),
         ("ALPHA_DEEP_ND_PTR", 0, 4),
         ("OOD_FIXED_TERM_HORNER_EVALS_PTR", 0, 4),
+        ("RANDOM_COIN_CV_PTR", 0, 4),
+        ("RANDOM_COIN_OUTPUT_WORD_PTR", 0, 4),
+        ("RANDOM_COIN_INPUT_BUF_PTR", 0, 8),
         ("TRACE_DOMAIN_GENERATOR_PTR", 0, 1),
         ("PUBLIC_INPUTS_ADDRESS_PTR", 0, 1),
         ("FRI_VERIFY_STATE_PTR", 0, 4),
-        ("C_PTR", 0, 4),
-        ("R1_PTR", 0, 4),
-        ("R2_PTR", 0, 4),
         ("TMP1", 0, 4),
         ("TMP2", 0, 4),
         ("TMP3", 0, 4),
@@ -530,7 +535,11 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("AIR_TRACE_LENGTH_LOGS_PTR", 0, 16),
         ("RELATION_DIGEST_PTR", 0, 4),
         ("ACE_REGISTRY_ROOT_PTR", 0, 4),
-        ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 1),
+        ("PREPROCESSED_TRACE_COM_PTR", 0, 4),
+        ("RANDOM_COIN_COUNTER_PTR", 0, 1),
+        ("AUXILIARY_ACE_INPUTS_ADDRESS_PTR", 0, 1),
+        ("AUX_RAND_ELEM_ADDRESS_PTR", 0, 1),
+        ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 2),
         // One word per accepted query grows backward; FRI layers and the remainder grow forward.
         (
             "FRI_COM_PTR",
@@ -544,30 +553,30 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         &["LDE_DOMAIN_SIZE_PTR", "LDE_DOMAIN_LOG_SIZE_PTR", "LDE_DOMAIN_GEN_PTR"];
 
     const GENERIC_FRAME_START: u64 = 3_223_322_624;
-    const GENERIC_FRAME_END: u64 = 3_223_322_764;
+    const GENERIC_FRAME_END: u64 = 3_223_322_776;
     const VM_FRAME_END: u64 = 3_223_323_864;
-    const PVM_FRAME_START: u64 = 3_225_426_416;
-    const PVM_FRAME_END: u64 = 3_225_444_212;
+    const PVM_FRAME_START: u64 = 3_225_432_064;
+    const PVM_FRAME_END: u64 = 3_225_452_240;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
     const RELATION_REGIONS: &[(&str, &str, i64, u64)] = &[
         ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, 8),
         ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
-        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 880),
-        ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, 624),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, 32),
+        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 1088),
+        ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, 704),
         ("pvm/layout.masm", "QUOTIENT_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 880),
-        ("pvm/layout.masm", "AUX_NEXT_PTR", 0, 624),
+        ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, 32),
+        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 1088),
+        ("pvm/layout.masm", "AUX_NEXT_PTR", 0, 704),
         ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
-        ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
+        ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 24),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13824),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 15440),
         ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
-        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),
+        ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 920),
         ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, 4),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, 1),
         ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, 3),
@@ -575,17 +584,18 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("vm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_PTR", 0, 40),
-        ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, 16),
+        ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, 4),
         ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, 8),
         ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, 1020),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
         ("vm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
-        ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, 544),
+        // Two 320-evaluation rows, represented over the quadratic extension field.
+        ("vm/layout.masm", "OOD_EVALUATIONS_PTR", 0, 2 * 320 * 2),
         ("vm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 8),
-        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 40),
+        ("vm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 48),
         // Fixed VM stream reservation ending at the PVM allocation.
-        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 6040),
-        ("vm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 136),
+        ("vm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 10944),
+        ("vm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 320),
     ];
 
     #[derive(Debug)]
@@ -881,7 +891,8 @@ fn relation_height_setters_write_the_generic_array_in_order() {
      begin
          push.11 exec.layout::set_core_trace_length_log
          push.22 exec.layout::set_chiplets_trace_length_log
-         push.33 exec.layout::set_poseidon2_permutation_trace_length_log
+         push.33 exec.layout::set_eidos_compression_trace_length_log
+         push.44 exec.layout::set_and8_lookup_trace_length_log
      end";
     let (output, _) =
         build_test!(source, &[]).execute_for_output().expect("setters should execute");
@@ -890,7 +901,12 @@ fn relation_height_setters_write_the_generic_array_in_order() {
     assert_eq!(
         read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 2),
         33,
-        "poseidon2_permutation at offset 2"
+        "Eidos compression at offset 2"
+    );
+    assert_eq!(
+        read_memory(&output, AIR_TRACE_LENGTH_LOGS_PTR + 3),
+        44,
+        "And8 lookup at offset 3"
     );
 }
 

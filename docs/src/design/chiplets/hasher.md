@@ -5,314 +5,227 @@ sidebar_position: 2
 
 # Hash chiplet
 
-The hash chiplet records Poseidon2-based hash requests and connects them to the
-rest of the VM through lookup buses. The Poseidon2 permutation itself is enforced
-by the separate `Poseidon2PermutationAir`.
+The Miden VM hasher uses Eidos framing and Eidos compression. Its protocol is split across four
+AIRs:
 
-This split gives the VM one controller trace for hash semantics and one
-permutation trace for computation. If the same Poseidon2 input state is requested
-more than once, the controller records each request, while the permutation AIR
-executes one cycle and carries the request count as a multiplicity.
+- `CoreAir` issues native operations such as `compress` and `log_deferred`;
+- `ChipletsAir` records one semantic controller row for each Eidos compression request;
+- `EidosCompressionAir` proves the 32-row compression computation;
+- `And8LookupAir` supplies the fixed byte table used by Eidos compression XORs and rotations.
+
+This keeps control-flow, Merkle, and sequential-hash semantics in the controller while isolating
+the wide compression computation. Identical compression inputs may be deduplicated: controller
+rows retain unit multiplicity, and one physical Eidos compression cycle carries their aggregate provider
+multiplicity.
 
 ## Supported operations
 
-The controller supports:
+The controller handles:
 
-- a single Poseidon2 permutation (`HPERM` / full-state return),
-- a 2-to-1 hash,
-- sequential sponge hashing over one or more rate blocks,
-- Merkle path verification,
-- Merkle root update.
+- native `COMPRESS` requests;
+- Eidos two-to-one hashes for MAST and Merkle nodes;
+- sequential hashing over one or more 8-felt blocks;
+- Merkle path verification;
+- Merkle root updates;
+- the Eidos compression used by `LOG_DEFERRED`.
+
+AEAD `CRYPTOSTREAM` also uses `EidosCompressionAir`, but selects its XOF mode and connects through
+clock-tagged AEAD input/output relations rather than an ordinary controller compression link.
 
 ## Chiplet selector prefix
 
 The chiplets trace uses a top-level selector prefix `s0..s4`.
 
 | Region | Active when |
-|--------|-------------|
+| ------ | ----------- |
 | Hash controller | `!s0` |
-| Bitwise | `s0 * !s1` |
+| Bitwise / AEAD stream | `s0 * !s1` |
 | Memory | `s0 * s1 * !s2` |
 | ACE | `s0 * s1 * s2 * !s3` |
 | Kernel ROM | `s0 * s1 * s2 * s3 * !s4` |
 | Padding | `s0 * s1 * s2 * s3 * s4` |
 
-Hash-controller rows therefore have top-level `s0 = 0`. The controller payload
-starts at `chiplets[1]`, so the controller-internal selectors do not overlap
-with the top-level selector prefix.
+The controller region is padded to an 8-row boundary before the bitwise/AEAD-stream region so its
+8-row entries remain phase-aligned.
 
-## Controller row layout
+## Single-row controller
 
-The hash-controller overlay occupies 19 columns, viewed as `chiplets[1..20]`.
-
-```text
-| hs0 hs1 hs2 | state[12]                                    | extra cols            |
-|             | rate0[4] (= digest) | rate1[4] | capacity[4] | idx mr bnd dir perm |
-```
-
-The controller state is a Poseidon2 sponge state in little-endian sponge order:
+Every compression request occupies one controller row. The 19-column controller overlay is:
 
 ```text
-[h0..h11] = [RATE0(4), RATE1(4), CAPACITY(4)]
+| cs0 cs1 cs2 | state[12]                                | row_data[4]   |
+|             | block_lo[4] | block_hi[4] | cv/digest[4] | row-kind data |
 ```
 
-`RATE0` (`h0..h3`) is the digest word.
+Two additional controller cells carry `op_final` and `mrupdate_id`; a shared chiplet-mode cell
+distinguishes Merkle/padding rows from ordinary hash rows.
 
-The controller-internal selectors `(hs0, hs1, hs2)` encode row kind:
+The overlay depends on row kind:
 
-| `(hs0, hs1, hs2)` | Row kind |
-|-------------------|----------|
-| `(1, 0, 0)` | Sponge input (`LINEAR_HASH`, 2-to-1 hash, `HPERM`) |
-| `(1, 0, 1)` | Merkle path verify input |
-| `(1, 1, 0)` | Merkle update old-path input |
-| `(1, 1, 1)` | Merkle update new-path input |
-| `(0, 0, 0)` | Return digest |
-| `(0, 0, 1)` | Return full state |
-| `(0, 1, *)` | Controller padding |
+- hash rows store `block[8] || cv_in[4]` in `state` and `cv_out[4]` in `row_data`;
+- Merkle rows store `block[8] || cv_out[4]` in `state` and
+  `[node_index, node_index_next, is_start, 0]` in `row_data`.
 
-These selectors are meaningful only on hash-controller rows. Other chiplet
-regions interpret the same physical columns according to their own overlays.
+Merkle compression always uses the fixed domain-zero two-to-one chaining value, so it does not
+need a committed `cv_in` column.
 
-## Design invariants
+The internal selectors have the following valid encodings:
 
-The split design relies on the following invariants.
+| `(cs0, cs1, cs2)` | Row kind |
+| ----------------- | -------- |
+| `(1, 0, 0)` | Hash start |
+| `(0, 0, 0)` | Hash continuation |
+| `(1, 0, 1)` | Merkle path verification |
+| `(1, 1, 0)` | Merkle update, old path |
+| `(1, 1, 1)` | Merkle update, new path |
+| `(0, 1, 0)` | Controller padding |
 
-- **Only controller rows expose hasher semantics to the VM.** The decoder, stack,
-  and recursive verifier communicate with the hasher through controller rows on
-  the chiplets bus. The Poseidon2 permutation AIR is internal computation.
-- **Controller rows form request pairs.** Each request has an input row followed
-  by an output row. The input row contains the pre-permutation state; the output
-  row contains the post-permutation state.
-- **A request pair has one permutation id.** The controller constrains
-  `perm_id` to be equal on the input and output rows of the pair.
-- **Permutation cycles have stable ids.** `Poseidon2PermutationAir` starts at
-  `perm_id = 0`, keeps the id constant inside each 16-row cycle, and increments
-  by one when a cycle ends.
-- **Multiplicity is cycle-wide.** One Poseidon2 cycle represents one unique
-  input state. Its multiplicity is the number of controller requests that use
-  that state.
-- **Merkle routing is controller-local.** `node_index`, `direction_bit`, and
-  `mrupdate_id` have controller semantics. The permutation AIR carries only the
-  Poseidon2 state, row-scheduled witnesses, multiplicity, and `perm_id`.
-- **Sibling-table balancing is partitioned by `mrupdate_id`.** The old-path and
-  new-path legs of one `MRUPDATE` share the same `mrupdate_id`, while different
-  updates use different ids.
+The remaining selector patterns are invalid.
 
-## Request lifecycle
-
-Each permutation request is recorded as two consecutive controller rows:
-
-- an input row containing the pre-permutation state,
-- an output row containing the post-permutation state.
-
-The first trace row must be a controller input row. Input rows cannot terminate
-the controller section, and output rows cannot be followed by output rows. Once
-controller padding starts, it remains padding until the next chiplet region.
-
-The controller trace is padded to `CONTROLLER_TRACE_ALIGNMENT = 8` rows before
-the next chiplet region starts. Padding rows use the controller padding selector
-pattern and do not participate in hash buses.
-
-The trace builder also materializes the corresponding permutation cycles into
-`Poseidon2PermutationAir`. One cycle is emitted per unique input state, with a
-multiplicity column recording how many controller requests use that state.
-Padding cycles have multiplicity zero.
-
-## Poseidon2 permutation AIR
-
-`Poseidon2PermutationAir` contains one 16-row cycle per unique permutation input.
-The state stored on each row is the pre-transition state for that packed step;
-row 15 stores the final permutation output.
-
-The 31-step Poseidon2 schedule is packed as follows:
-
-| Row | Meaning |
-|-----|---------|
-| 0 | initial linear layer plus first initial external round |
-| 1 | second initial external round |
-| 2 | third initial external round |
-| 3 | fourth initial external round |
-| 4 | internal rounds 1, 2, and 3 |
-| 5 | internal rounds 4, 5, and 6 |
-| 6 | internal rounds 7, 8, and 9 |
-| 7 | internal rounds 10, 11, and 12 |
-| 8 | internal rounds 13, 14, and 15 |
-| 9 | internal rounds 16, 17, and 18 |
-| 10 | internal rounds 19, 20, and 21 |
-| 11 | final internal round plus first terminal external round |
-| 12 | second terminal external round |
-| 13 | third terminal external round |
-| 14 | fourth terminal external round |
-| 15 | output row |
-
-The permutation AIR has three witness columns. On rows 4 through 10 they hold
-the three S-box outputs for the packed internal rounds. On row 11, `witnesses[0]`
-holds the final internal-round S-box output. On rows 0 and 15, `witnesses[0]`
-holds the perm-link multiplicity for the cycle. Unused witness cells are
-constrained to zero by the permutation step constraints.
-
-The periodic columns describe the fixed 16-row schedule:
-
-- one selector for row 0,
-- one selector for plain external-round rows,
-- one selector for packed-internal rows,
-- one selector for row 11,
-- twelve round-constant columns.
-
-The final internal-round constant is used directly by the row-11 constraint
-rather than occupying a periodic column with fifteen zero rows.
-
-## Sponge operations
-
-Sequential hashing is represented as a chain of controller request pairs:
-
-- the first input row has `is_boundary = 1`,
-- continuation rows have `is_boundary = 0`,
-- the final output row has `is_boundary = 1`.
-
-Across continuation boundaries, the next input row overwrites the rate lanes and
-preserves the previous permutation's capacity word. This binds a multi-block
-sponge computation into one continuous state transition.
-
-## Merkle operations
-
-Merkle verification and update rows also use:
-
-- `node_index`,
-- `direction_bit`,
-- `mrupdate_id`.
+## Controller invariants
 
 The controller AIR enforces:
 
-- index decomposition `idx = 2 * idx_next + direction_bit` on Merkle input rows,
-- direction-bit booleanity,
-- continuity of the shifted index across non-final controller boundaries,
-- the level-0 canonical-index witness equation in the reused capacity columns
-  (see [Merkle range checks](../stack/crypto_ops.md#merkle-range-checks)),
-- zero capacity on Merkle input rows after level 0,
-- digest routing into the correct rate half for the next path step.
+- a valid row kind and stable padding once padding begins;
+- `op_final` booleanity and valid start/continuation sequencing;
+- chaining-value continuity between consecutive blocks of one sequential hash;
+- Merkle index decomposition and direction-bit booleanity;
+- continuity of the shifted Merkle index across non-final controller rows;
+- routing the current Merkle digest into the correct half of the next block;
+- termination of a Merkle path at index zero;
+- one `mrupdate_id` shared by the old and new legs of an update, with distinct IDs for distinct
+  updates.
 
-Merkle compression uses a zero capacity word. After level 0, the controller
-stores those zeros directly. At level 0, the same four columns hold the
-canonical-index slack witness instead. The permutation-link lookup replaces
-the witness values with zeros in its message, so the Poseidon2 permutation
-still receives the same zero-capacity input.
+For the first row of a Merkle path, the controller derives the direction bit as
+`node_index - 2 * node_index_next` and includes it in the typed Merkle-init message. The matching
+Core-side request includes stack helper `b`, so the lookup binds `b` to the controller-derived bit.
+`CoreAir` enforces the canonical-index equation and emits its range checks; the controller does not
+store a canonical-index witness. See
+[Merkle range checks](../stack/crypto_ops.md#merkle-range-checks).
 
-On non-final Merkle boundaries, the output row carries the next step's
-`direction_bit`. This lets the AIR route the current digest into either `RATE0`
-or `RATE1` of the next Merkle input row.
+Only controller rows expose ordinary hasher semantics to the decoder and stack. The wide AIR is an
+internal computation provider connected by lookup arguments.
 
-For `MRUPDATE`, the old-path and new-path legs share the same `mrupdate_id`.
-Different updates use different IDs, so sibling-table entries from unrelated
-updates cannot cancel each other.
+## Eidos compression AIR
+
+`EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row block per
+physical compression:
+
+| Rows | Role |
+| ---- | ---- |
+| 0–27 | Seven Eidos compression rounds, represented as 28 fused G-function rows |
+| 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
+
+This is the MVM layout. The PVM has an independent Eidos transcript AIR: it uses the same
+108-column Eidos compression layout plus 20 transcript/interface columns, for 128 main columns
+and 20 auxiliary columns in total.
+
+Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
+each footer row. The fused rows prove u32 additions, XOR witnesses, and rotations. Their input
+`a` and `c` words are reconstructed from the output words and constrained carry witnesses, then
+anchored to the initial state or preceding fused row. Footer rows reconstruct the original block
+and chaining word, perform feed-forward XOR, enforce canonical field encodings, and expose the result.
+The eight raw chaining-value words cross the cycle in one atomic, cycle-tagged internal relation;
+the sixteen message words remain independently cycle-tagged.
+
+The compression AIR has two external modes:
+
+- **compression mode** emits one controller/compression-link provider message on footer row 3,
+  weighted by the aggregate request multiplicity;
+- **AEAD-XOF mode** consumes one clock-tagged AEAD input on footer row 3 and emits low/high raw-XOF
+  output pairs across the four footer rows.
+
+Padding blocks have zero compression multiplicity and cannot masquerade as AEAD cycles.
+
+## Physical-cycle binding
+
+Every 32-row block carries a canonical `compression_cycle_id`:
+
+- the first physical block has ID zero;
+- the ID is constant throughout the block;
+- it increments exactly once between blocks, including padding blocks.
+
+The ID occupies one shared main column throughout the 32-row block rather than being duplicated in
+every message tuple. All internal message-word and chaining-value LogUp relations include the
+physical ID. The chaining-value relation carries `(cycle_id, h[0], ..., h[7])` atomically, while
+each message-word relation carries the cycle ID directly.
+
+This binding is security-critical. Without it, internal inputs from two valid compression cycles
+could be swapped and still cancel as anonymous multisets. With it, every internal witness is tied
+to one physical cycle, while the footer-3 compression-link relation ties that cycle's complete
+`(block, cv_in, cv_out)` tuple to the controller.
+
+## Byte lookups and the And8 AIR
+
+The Eidos compression AIR represents its u32 logic with byte-level lookup messages:
+
+- ordinary bytewise AND, from which XOR is reconstructed as `a + b - 2*(a & b)`;
+- weighted byte contributions for rotate-right-by-12;
+- weighted byte contributions for rotate-right-by-7;
+- range checks for packed u32 limbs.
+
+`And8LookupAir` owns the fixed 256×256 byte table and balances those requests. The same table also
+supports the bytewise XORs in the AEAD stream trace.
 
 ## Lookup buses {#lookup-buses}
 
-The hash controller participates in three lookup constructions.
+The hasher participates in four classes of lookup relations.
 
 ### Chiplets bus
 
-The controller sends and receives the chiplets-bus messages used by the decoder,
-stack, and recursive verifier. Examples include:
+Typed hasher messages connect controller rows to the decoder and stack. They cover full Eidos
+compression inputs, next-block sequential absorptions, Merkle leaf inputs, completed hash digests,
+and updated chaining values from raw compression.
 
-- full-state sponge starts,
-- rate-only sponge continuations,
-- selected Merkle leaf words,
-- digest returns,
-- full-state returns.
+### Compression link
 
-The Poseidon2 permutation AIR does not contribute to this bus.
+The shared `v_wiring` column links each non-padding controller row to
+`EidosCompressionAir`. A hash row contributes `[block(8), cv_in(4), cv_out(4)]`; a Merkle row
+contributes the same tuple with the fixed Eidos two-to-one chaining value. Footer row 3 of the
+matching physical compression receives the tuple with its provider multiplicity.
 
-### Permutation link
+### Internal Eidos compression buses
 
-The `v_wiring` bus links controller rows to `Poseidon2PermutationAir`:
-
-- controller input rows contribute `+1 / msg_in`,
-- controller output rows contribute `+1 / msg_out`,
-- Poseidon2 cycle row 0 contributes `-m / msg_in`,
-- Poseidon2 cycle row 15 contributes `-m / msg_out`,
-
-where `m` is the permutation-cycle multiplicity.
-
-The input and output sides use separate bus domains. Each message contains
-`perm_id` plus the full Poseidon2 state. The state starts at the same beta-power
-offset used by full-state hasher messages; the beta slot between `perm_id` and
-the state is intentionally unused for layout alignment.
-
-This bus makes permutation deduplication sound: every controller request must be
-matched by a permutation cycle with the same input and output states. The
-`perm_id` is required because the bus balances input and output multisets
-separately. Without the controller-side equality constraint on `perm_id`, a
-prover could swap `(perm_id, output_state)` tuples across requests while keeping
-the LogUp sums balanced. The controller pair constraint rejects that swap, and
-the permutation AIR transition constraints tie each cycle's row-15 output state
-to its row-0 input state.
+Cycle-tagged relations connect fused computation rows to footer reconstruction for the message and
+input chaining value. Separate byte-table relations prove XOR, rotation, and range witnesses.
 
 ### Hash-kernel table {#sibling-table-constraints}
 
-During `MRUPDATE`, old-path rows insert sibling entries into the virtual
-hash-kernel table and new-path rows remove them. The entries are keyed by
-`mrupdate_id`, `node_index`, the sibling word, and the branch side, so the
-running product balances only when the old and new legs of the same update use
-the same siblings.
+During `MRUPDATE`, old-path rows insert sibling entries and new-path rows remove them. Entries are
+keyed by `mrupdate_id`, node index, sibling word, and branch side, so only the two legs of the same
+update can balance.
 
-## AIR obligations
+## Four-AIR topology
 
-The hash-controller constraints enforce:
+The MVM instance order is protocol-pinned as:
 
-- top-level chiplet selector ordering through the shared chiplet selector system,
-- controller row-kind selector booleanity,
-- first-row input boundary,
-- input-to-output adjacency,
-- output non-adjacency,
-- controller padding stability,
-- equality of `perm_id` across each input/output pair,
-- capacity preservation across sponge continuations,
-- Merkle index and direction-bit routing,
-- `mrupdate_id` progression for Merkle root updates.
+```text
+[Core, Chiplets, EidosCompression, And8Lookup]
+```
 
-The Poseidon2 permutation AIR enforces:
-
-- the packed 16-row Poseidon2 transition schedule,
-- zeroing of unused witness cells,
-- stable `perm_id` inside each cycle,
-- consecutive `perm_id` values across cycle boundaries.
-
-The perm-link lookup argument binds the two AIRs together by matching
-controller-row messages against row 0 and row 15 of each Poseidon2 cycle.
+Proof commitments are sorted by trace height, with instance order as the tie-breaker. The recursive
+verifier selects the corresponding generated constraint circuit by the proof-order tag.
 
 ## Implementation map
 
-The hasher design is implemented across the following files:
-
 - `air/src/constraints/chiplets/selectors.rs`
-  Top-level chiplet selector prefix, booleanity, ordering, and precomputed
-  `ChipletFlags`.
-
-- `air/src/constraints/chiplets/hasher_control/mod.rs`
-  Hash-controller constraints: lifecycle, padding, sponge capacity preservation,
-  Merkle routing, the canonical-index witness, `mrupdate_id` progression, and
-  pair-level `perm_id` equality.
-
+  Top-level chiplet selector prefix, booleanity, ordering, and precomputed `ChipletFlags`.
+- `air/src/constraints/chiplets/hasher_control/`
+  Single-row controller lifecycle, sequential-hash continuity, Merkle index shifting, and digest
+  routing.
 - `air/src/constraints/chiplets/hasher_control/flags.rs`
   Named row-kind flags derived from the controller-internal selectors.
-
-- `air/src/constraints/poseidon2_permutation/`
-  Separate Poseidon2 permutation AIR: packed transition schedule, periodic
-  columns, cycle-id constraints, and witness zeroing.
-
-- `air/src/constraints/lookup/buses/chiplets.rs`
-  Hasher messages visible to the rest of the VM through `b_chiplets`.
-
+- `air/src/constraints/eidos_compression/`
+  32-row layout, schedule, selectors, constraints, lookup plan, and trace writer.
+- `air/src/constraints/and8_lookup/`
+  Fixed byte-table AIR used by Eidos compression and AEAD stream XORs.
+- `air/src/constraints/lookup/buses/chiplet_requests.rs`
+  Decoder/stack requests for native hashing, Merkle operations, canonical-index range checks, AEAD
+  stream, and deferred logging.
+- `air/src/constraints/lookup/buses/chiplet_responses.rs`
+  Controller, bytewise, memory, ACE, and kernel-ROM provider messages.
 - `air/src/constraints/lookup/buses/wiring.rs`
-  Controller-to-permutation perm-link relation on the shared `v_wiring` column.
-
-- `air/src/constraints/lookup/poseidon2_permutation_air.rs`
-  Poseidon2-side perm-link removals from rows 0 and 15 of each cycle.
-
-- `air/src/constraints/lookup/buses/hash_kernel.rs`
-  Sibling-table balancing for Merkle root updates.
-
+  Controller-to-Eidos compression link and AEAD XOF output wiring.
 - `processor/src/trace/chiplets/hasher/`
-  Trace generation for controller rows, request deduplication, `perm_id`
-  assignment, and Poseidon2 permutation cycles.
+  Controller trace generation, request deduplication, canonical physical IDs, and 32-row block
+  materialization.
