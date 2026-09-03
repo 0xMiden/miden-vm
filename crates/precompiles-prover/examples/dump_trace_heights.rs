@@ -122,7 +122,7 @@ fn main() {
             eprintln!("COMBO keccaks={keccaks} ecdsas={ecdsas}");
             let workload = PrecompileWorkload { keccaks, ecdsas };
             let fixture = PrecompileFixture::generate(workload);
-            let _ = prove_once_with_hash(&fixture, HashFunction::Blake3_256);
+            let _ = prove_once_with_hash(&fixture, HashFunction::Eidos);
         }
     }
 }
