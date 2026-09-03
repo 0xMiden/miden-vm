@@ -108,7 +108,7 @@ impl LayoutPolicy {
             quotient: Alignment::DoubleWord,
             aux_bus_boundary: Alignment::Word,
             stark_vars: Alignment::Word,
-            end_align: Some(Alignment::Word),
+            end_align: Some(Alignment::DoubleWord),
         }
     }
 }
