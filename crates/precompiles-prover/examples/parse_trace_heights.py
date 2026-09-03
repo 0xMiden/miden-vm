@@ -10,6 +10,11 @@ Input is the line-oriented stderr log produced by
     COMBO keccaks=<k> ecdsas=<e>
     REAL_HEIGHT <ChipletName> <rows>
     PADDED_HEIGHT <ChipletName> <rows>
+    PROVE_MS <milliseconds>
+
+`PROVE_MS` times only the `prove_once_with_hash` call (wall-clock,
+single sample, no warm-up) — a rough per-combo comparison point, not a
+criterion-grade benchmark.
 
 Three chiplets are merged AIRs assembled from multiple sub-traces sharing
 one row range, so their real height is reported as several separate
@@ -23,7 +28,7 @@ lookup table, not workload-driven) — its real height is read from its
 own `PADDED_HEIGHT` line, since real == padded == TRACE_HEIGHT always.
 
 Each output line is a JSON object:
-    {"keccaks": <k>, "ecdsas": <e>,
+    {"keccaks": <k>, "ecdsas": <e>, "prove_ms": <ms>,
      "<ChipletName>": [real, padded, wastePct], ...}
 where wastePct = round((padded - real) / padded * 100, 1).
 """
@@ -57,6 +62,7 @@ ALL_CHIPLETS = list(SPLIT_CHIPLETS) + SIMPLE_CHIPLETS + ["BytePairLut"]
 
 COMBO_RE = re.compile(r"^COMBO keccaks=(\d+) ecdsas=(\d+)$")
 HEIGHT_RE = re.compile(r"^(REAL_HEIGHT|PADDED_HEIGHT) (\S+) (\d+)$")
+PROVE_MS_RE = re.compile(r"^PROVE_MS (\d+)$")
 
 
 def waste_pct(real: int, padded: int) -> float:
@@ -65,12 +71,12 @@ def waste_pct(real: int, padded: int) -> float:
     return round((padded - real) / padded * 100, 1)
 
 
-def flush_combo(keccaks, ecdsas, real, padded):
+def flush_combo(keccaks, ecdsas, real, padded, prove_ms):
     """Build one combo's JSON record from its accumulated probes."""
     if keccaks is None:
         return None
 
-    record = {"keccaks": keccaks, "ecdsas": ecdsas}
+    record = {"keccaks": keccaks, "ecdsas": ecdsas, "prove_ms": prove_ms}
 
     for name, probe_names in SPLIT_CHIPLETS.items():
         r = max(real.get(probe_name, 0) for probe_name in probe_names)
@@ -90,7 +96,7 @@ def flush_combo(keccaks, ecdsas, real, padded):
 
 
 def parse(lines):
-    keccaks = ecdsas = None
+    keccaks = ecdsas = prove_ms = None
     real = {}
     padded = {}
 
@@ -101,19 +107,24 @@ def parse(lines):
 
         combo_match = COMBO_RE.match(line)
         if combo_match:
-            record = flush_combo(keccaks, ecdsas, real, padded)
+            record = flush_combo(keccaks, ecdsas, real, padded, prove_ms)
             if record is not None:
                 yield record
             keccaks, ecdsas = int(combo_match.group(1)), int(combo_match.group(2))
-            real, padded = {}, {}
+            real, padded, prove_ms = {}, {}, None
             continue
 
         height_match = HEIGHT_RE.match(line)
         if height_match:
             kind, name, value = height_match.groups()
             (real if kind == "REAL_HEIGHT" else padded)[name] = int(value)
+            continue
 
-    record = flush_combo(keccaks, ecdsas, real, padded)
+        prove_ms_match = PROVE_MS_RE.match(line)
+        if prove_ms_match:
+            prove_ms = int(prove_ms_match.group(1))
+
+    record = flush_combo(keccaks, ecdsas, real, padded, prove_ms)
     if record is not None:
         yield record
 

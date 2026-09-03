@@ -13,14 +13,19 @@
 //!     2> heights.log
 //! ```
 //!
-//! `heights.log` is a line-oriented log with three record kinds, meant to
+//! `heights.log` is a line-oriented log with four record kinds, meant to
 //! be fed to `parse_trace_heights.py`:
 //!
 //! ```text
 //! COMBO keccaks=<k> ecdsas=<e>
 //! REAL_HEIGHT <ChipletName> <rows>
 //! PADDED_HEIGHT <ChipletName> <rows>
+//! PROVE_MS <milliseconds>
 //! ```
+//!
+//! `PROVE_MS` times only the `prove_once_with_hash` call (wall-clock,
+//! single sample, no warm-up) — a rough per-combo comparison point, not a
+//! criterion-grade benchmark.
 //!
 //! Three chiplets are merged AIRs built from multiple sub-traces sharing
 //! one row range, so their real height is the `max` of several probes
@@ -122,7 +127,10 @@ fn main() {
             eprintln!("COMBO keccaks={keccaks} ecdsas={ecdsas}");
             let workload = PrecompileWorkload { keccaks, ecdsas };
             let fixture = PrecompileFixture::generate(workload);
+            let started_at = std::time::Instant::now();
             let _ = prove_once_with_hash(&fixture, HashFunction::Eidos);
+            let elapsed_ms = started_at.elapsed().as_millis();
+            eprintln!("PROVE_MS {elapsed_ms}");
         }
     }
 }
