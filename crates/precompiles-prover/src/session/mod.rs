@@ -36,6 +36,8 @@
 use alloc::{vec, vec::Vec};
 
 pub use miden_core::proof::StarkProof;
+#[cfg(feature = "std")]
+use miden_core::utils::Matrix;
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -492,6 +494,20 @@ impl Session {
             trace_span!("ec_add", ec_add_trace(self.ec.add, &mut self.ec.store, &mut self.bpl));
         let ec = trace_span!("ec_store", ec_store_trace(self.ec.store));
         let byte_pair_lut = trace_span!("byte_pair_lut", bpl_trace(self.bpl));
+
+        #[cfg(feature = "std")]
+        if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+            std::eprintln!("PADDED_HEIGHT ChunkNodeSponge {}", chunk_node_sponge.height());
+            std::eprintln!("PADDED_HEIGHT EidosCompression {}", eidos_compression.height());
+            std::eprintln!("PADDED_HEIGHT Round {}", round.height());
+            std::eprintln!("PADDED_HEIGHT BytePairLut {}", byte_pair_lut.height());
+            std::eprintln!("PADDED_HEIGHT TranscriptEval {}", eval.height());
+            std::eprintln!("PADDED_HEIGHT UintStoreMul {}", uint.height());
+            std::eprintln!("PADDED_HEIGHT UintAdd {}", add.height());
+            std::eprintln!("PADDED_HEIGHT EcPointStoreGroups {}", ec.height());
+            std::eprintln!("PADDED_HEIGHT EcGroupAdd {}", ec_add.height());
+            std::eprintln!("PADDED_HEIGHT EcMsm {}", msm.height());
+        }
 
         SessionTraces {
             chunk_node_sponge,
