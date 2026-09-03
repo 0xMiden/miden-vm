@@ -39,21 +39,13 @@ const FELTS_PER_KERNEL_DIGEST = 4
 
 # Must match KernelDescriptor::MAX_NUM_PROCEDURES.
 const MAX_NUM_KERNEL_PROCEDURES = 255
-# Number of AIR instances contributing to the proof order.
-const NUM_MIDEN_AIRS = 4
 const AND8_LOOKUP_LOG_HEIGHT = 16
 
-# RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_REGISTRY_ROOT]).
-const RELATION_DIGEST_0 = 8632016592601946927
-const RELATION_DIGEST_1 = 1621553245858730349
-const RELATION_DIGEST_2 = 4913324106662899112
-const RELATION_DIGEST_3 = 7145020521687365277
-
-# Root of the accepted ACE circuit registry. Leaves are indexed by ORDER_TAG.
-const ACE_REGISTRY_ROOT_0 = 4294634516380605961
-const ACE_REGISTRY_ROOT_1 = 6303681609237167832
-const ACE_REGISTRY_ROOT_2 = 2768420426064337471
-const ACE_REGISTRY_ROOT_3 = 284704709593806813
+# RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_DIGEST]).
+const RELATION_DIGEST_0 = 1334130675330914798
+const RELATION_DIGEST_1 = 9150815126231542754
+const RELATION_DIGEST_2 = 1441196807745704811
+const RELATION_DIGEST_3 = 3761162031092671873
 
 # Commitment to the canonical And8 preprocessed table under the Eidos LMCS setup.
 const AND8_PREPROCESSED_TRACE_COM_0 = 6268951225194987386
@@ -95,11 +87,12 @@ pub proc load_air_context
     u32max
     exec.constants::set_trace_length_log
 
-    exec.derive_order_tag
-    exec.constants::set_order_tag
+    # Route each AIR's canonical out-of-domain destination to its proof-order stream position.
+    # The heights are stored above and unchanged from here on, so this runs once per proof rather
+    # than once per ingested row.
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
     exec.store_and8_preprocessed_trace_commitment
     exec.layout::ood_evaluations_ptr
     exec.constants::set_ood_evaluations_address
@@ -118,116 +111,9 @@ proc assert_shape_log
     drop
 end
 
-#! Derives the Lehmer proof-order tag of the height-sorted proof order.
-#!
-#! The proof order sorts the AIRs by ascending log height; the canonical instance order
-#! breaks ties (a stable sort). For each canonical AIR k with log height h_k:
-#!
-#!   inv_k   = #{m < k : h_m > h_k}     inversions contributed by AIR k
-#!   after_k = #{m > k : h_m < h_k}
-#!   pos_k   = k - inv_k + after_k      position of AIR k in the proof order
-#!   tag    += inv_k * (NUM_MIDEN_AIRS - 1 - pos_k)!
-#!
-#! The comparisons are branch-free (flag products), so the derivation is a flat
-#! NUM_MIDEN_AIRS^2 comparison sweep plus one small factorial per AIR.
-#!
-#! `pos_k` is always in `0 .. NUM_MIDEN_AIRS - 1` (inv_k <= k and k + after_k <= N - 1), so the
-#! factorial argument never underflows the field.
-#!
-#! This VM-local specialization keeps the four-AIR loop bounds compile-time constants. New
-#! relations should use `stark::utils::derive_order_tag_from_heights`; tests pin both paths to the
-#! same Rust ranking. Changing the VM AIR set requires updating `NUM_MIDEN_AIRS`, its relation
-#! layout accessors, and the public-input schema; regeneration checks pin those copies.
-#!
-#! Input:  []
-#! Output: [tag]
-proc derive_order_tag
-    push.0.0
-    # => [k = 0, tag = 0]
-
-    repeat.NUM_MIDEN_AIRS
-        dup exec.constants::air_trace_length_logs_ptr add mem_load
-        # => [h_k, k, tag]
-
-        push.0.0 push.0
-        # => [m = 0, inv = 0, after = 0, h_k, k, tag]
-
-        repeat.NUM_MIDEN_AIRS
-            dup exec.constants::air_trace_length_logs_ptr add mem_load
-            # => [h_m, m, inv, after, h_k, k, tag]
-
-            # inv += (m < k) * (h_m > h_k)
-            dup dup.5 u32gt
-            dup.2 dup.7 u32lt
-            mul
-            # => [flag, h_m, m, inv, after, h_k, k, tag]
-            movup.3 add movdn.2
-            # => [h_m, m, inv', after, h_k, k, tag]
-
-            # after += (m > k) * (h_m < h_k)
-            dup dup.5 u32lt
-            dup.2 dup.7 u32gt
-            mul
-            # => [flag, h_m, m, inv, after, h_k, k, tag]
-            movup.4 add movdn.3
-            # => [h_m, m, inv, after', h_k, k, tag]
-
-            drop add.1
-            # => [m + 1, inv, after, h_k, k, tag]
-        end
-        drop
-        # => [inv, after, h_k, k, tag]
-
-        # pos = k - inv + after
-        dup.3 dup.1 sub
-        movup.2 add
-        # => [pos, inv, h_k, k, tag]
-
-        # tag += inv * (NUM_MIDEN_AIRS - 1 - pos)!
-        push.NUM_MIDEN_AIRS sub.1 swap sub
-        exec.factorial
-        mul
-        # => [inv * weight, h_k, k, tag]
-        movup.3 add movdn.2
-        # => [h_k, k, tag']
-
-        drop add.1
-        # => [k + 1, tag']
-    end
-    drop
-    # => [tag]
-end
-
-#! Computes x! for small x.
-#!
-#! Input:  [x]
-#! Output: [x!]
-proc factorial
-    push.1 swap
-    # => [x, acc = 1]
-    dup push.0 neq
-    while.true
-        # => [x, acc] with x > 0
-        dup movup.2 mul
-        # => [acc * x, x]
-        swap sub.1
-        # => [x - 1, acc']
-        dup push.0 neq
-    end
-    drop
-    # => [acc]
-end
-
 proc store_relation_digest
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
-    # Relation metadata is memory-only; leave the caller stack unchanged.
-    dropw
-end
-
-proc store_ace_registry_root
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
     # Relation metadata is memory-only; leave the caller stack unchanged.
     dropw
 end

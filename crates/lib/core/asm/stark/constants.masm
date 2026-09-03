@@ -64,8 +64,8 @@ const TRACE_DOMAIN_GENERATOR_PTR = 3223322637
 ### Address storing a pointer to the public inputs.
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322638
 
-### Proof-order tag. Its relation-specific active-leaf bound is supplied by the caller.
-const ORDER_TAG_PTR = 3223322639
+### Reserved single-felt generic cell.
+const GENERIC_RESERVED_CELL_PTR = 3223322639
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 const MAIN_TRACE_COM_PTR = 3223322640
@@ -114,12 +114,13 @@ const DYNAMIC_PROCEDURE_4_PTR = 3223322728
 
 ### Relation metadata for this verifier instance.
 const RELATION_DIGEST_PTR = 3223322732
-const ACE_REGISTRY_ROOT_PTR = 3223322736
+### Reserved single-word generic region.
+const GENERIC_RESERVED_WORD_PTR = 3223322736
 const PREPROCESSED_TRACE_COM_PTR = 3223322740
 
 ### Shared per-AIR log-height scratch. Generic consumers take the base and count as
-### arguments; each relation owns the meaning of its offsets. The registry-backed
-### order tag fits in u32 for at most 12 AIRs, while 16 cells leave aligned headroom.
+### arguments; each relation owns the meaning of its offsets. The shared proof-order
+### ranking supports at most 12 AIRs, while 16 cells leave aligned headroom.
 const AIR_TRACE_LENGTH_LOGS_PTR = 3223322744
 const AIR_TRACE_LENGTH_LOGS_CAPACITY = 16
 
@@ -444,32 +445,8 @@ pub proc tmp4
     push.TMP4
 end
 
-pub proc set_order_tag
-    push.ORDER_TAG_PTR mem_store
-end
-
-pub proc get_order_tag
-    push.ORDER_TAG_PTR mem_load
-end
-
-#! Rejects an order tag outside a relation's active registry leaves.
-#!
-#! The relation supplies its active order count (`n!` for `n` AIRs), not the registry tree's
-#! power-of-two leaf count. This keeps padding leaves unreachable before `mtree_get`.
-#!
-#! Inputs:  [order_tag_count, ...]
-#! Outputs: [...]
-pub proc assert_valid_order_tag
-    push.ORDER_TAG_PTR mem_load
-    swap u32lt assert.err="invalid order tag"
-end
-
 pub proc relation_digest_ptr
     push.RELATION_DIGEST_PTR
-end
-
-pub proc ace_registry_root_ptr
-    push.ACE_REGISTRY_ROOT_PTR
 end
 
 pub proc preprocessed_trace_com_ptr

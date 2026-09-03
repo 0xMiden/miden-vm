@@ -21,28 +21,27 @@ pub struct MasmConstraintsEvalConfig<'a> {
     pub num_eval_gates: usize,
     /// Total encoded circuit-stream length, in felts.
     pub stream_len: usize,
-    /// Length of the order-dependent stream prefix, in felts.
-    pub shuffle_prefix_len: usize,
     /// Log2 of the longest periodic-column cycle across the relation's AIRs.
     pub max_cycle_len_log: u32,
-    /// Depth of the relation's ACE registry Merkle tree.
-    pub registry_depth: usize,
-    /// Number of valid proof-order tags; higher registry slots are padding.
-    pub order_tag_count: usize,
     /// Number of AIR instances in the relation.
     pub num_airs: usize,
+    /// Whether the evaluator stages one multi-AIR fold coefficient per AIR.
+    ///
+    /// Only a relation whose ACE READ layout reserves the coefficient slots may do this: the
+    /// staged block sits immediately after the selectors, so a relation without those slots
+    /// would write past its `auxiliary_ace_inputs_ptr` region.
+    pub stages_fold_coefficients: bool,
     /// Relation-local inputs for reconstructing the quotient from its chunks.
     pub quotient_inputs: QuotientRecompositionInputs<Felt>,
-    /// Digest of the order-invariant circuit-stream section.
-    pub common_commitment: Word,
+    /// Eidos digest of the circuit-stream the relation accepts.
+    pub circuit_digest: Word,
 }
 
-/// Render the MASM wrapper that prepares ACE inputs, authenticates the selected circuit, and
-/// executes it.
+/// Render the MASM wrapper that prepares ACE inputs, authenticates the circuit, and executes it.
 ///
-/// Both the Miden VM and PVM use this renderer. Their circuit sizes, registry geometry, quotient
-/// inputs, and memory layouts remain relation-local parameters; the authentication and evaluation
-/// control flow has one source.
+/// Both the Miden VM and PVM use this renderer. Their circuit sizes, quotient inputs, and memory
+/// layouts remain relation-local parameters; the authentication and evaluation control flow has
+/// one source.
 pub fn render_masm_constraints_eval(
     config: &MasmConstraintsEvalConfig<'_>,
 ) -> Result<String, AceError> {
@@ -51,18 +50,21 @@ pub fn render_masm_constraints_eval(
             message: "ACE stream must be 8-felt aligned".into(),
         });
     }
-    if !config.shuffle_prefix_len.is_multiple_of(8)
-        || config.shuffle_prefix_len >= config.stream_len
-    {
-        return Err(AceError::InvalidInputLayout {
-            message: "ACE shuffle prefix must be a proper 8-felt-aligned stream prefix".into(),
-        });
-    }
 
-    let prefix_rows = config.shuffle_prefix_len / 8;
-    let common_rows = (config.stream_len - config.shuffle_prefix_len) / 8;
-    let common_commitment = config.common_commitment;
+    let stream_blocks = config.stream_len / 8;
+    let circuit_digest = config.circuit_digest;
     let quotient = config.quotient_inputs;
+    let fold_coefficient_staging = if config.stages_fold_coefficients {
+        concat!(
+            "\n",
+            "    exec.layout::auxiliary_ace_inputs_ptr\n",
+            "    exec.constants::air_trace_length_logs_ptr\n",
+            "    push.NUM_AIRS\n",
+            "    exec.constraints_eval_inputs::stage_air_fold_coefficients\n",
+        )
+    } else {
+        ""
+    };
 
     Ok(format!(
         concat!(
@@ -79,16 +81,10 @@ pub fn render_masm_constraints_eval(
             "const NUM_EVAL_GATES_CIRCUIT = {num_eval_gates}\n\n",
             "# Max cycle length for periodic columns\n",
             "const MAX_CYCLE_LEN_LOG = {max_cycle_len_log}\n\n",
-            "# Depth of the ACE circuit registry tree.\n",
-            "const ACE_REGISTRY_DEPTH = {registry_depth}\n\n",
-            "# Number of valid proof-order tags (n! for n AIRs); higher slots are registry\n",
-            "# padding and must never be opened.\n",
-            "const ORDER_TAG_COUNT = {order_tag_count}\n\n",
             "# Number of AIR instances in the relation.\n",
             "const NUM_AIRS = {num_airs}\n\n",
-            "# Number of 8-felt blocks in each authenticated ACE circuit segment.\n",
-            "const ACE_PREFIX_BLOCKS = {prefix_rows}\n",
-            "const ACE_COMMON_BLOCKS = {common_rows}\n\n",
+            "# Number of 8-felt blocks in the authenticated ACE circuit stream.\n",
+            "const ACE_STREAM_BLOCKS = {stream_blocks}\n\n",
             "# Quotient recomposition inputs derived from the circuit's quotient arity and the\n",
             "# relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;\n",
             "# QUOTIENT_FIRST_SHIFT depends on the canonical LDE shift and blowup; and\n",
@@ -96,25 +92,22 @@ pub fn render_masm_constraints_eval(
             "const QUOTIENT_SHIFT_RATIO = {quotient_shift_ratio}\n",
             "const QUOTIENT_FIRST_SHIFT = {quotient_first_shift}\n",
             "const QUOTIENT_FIRST_WEIGHT = {quotient_first_weight}\n\n",
-            "# Eidos digest of the order-invariant common section of the ACE circuit stream\n",
-            "# (common ops + root padding). The registry leaf for each ORDER_TAG is\n",
-            "# merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).\n",
-            "const ACE_COMMON_COMMITMENT_0 = {common_commitment_0}\n",
-            "const ACE_COMMON_COMMITMENT_1 = {common_commitment_1}\n",
-            "const ACE_COMMON_COMMITMENT_2 = {common_commitment_2}\n",
-            "const ACE_COMMON_COMMITMENT_3 = {common_commitment_3}\n\n",
+            "# Eidos digest of the ACE circuit stream this relation accepts. One circuit serves\n",
+            "# every proof order, so it is the advice-map key and the value the loader pins.\n",
+            "const ACE_CIRCUIT_DIGEST_0 = {circuit_digest_0}\n",
+            "const ACE_CIRCUIT_DIGEST_1 = {circuit_digest_1}\n",
+            "const ACE_CIRCUIT_DIGEST_2 = {circuit_digest_2}\n",
+            "const ACE_CIRCUIT_DIGEST_3 = {circuit_digest_3}\n\n",
             "# ERRORS\n",
             "# =================================================================================================\n\n",
-            "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"merged ACE circuit segment digests do not match the registry commitment\"\n\n",
-            "const ERR_COMMON_SECTION_MISMATCH = \"common ACE circuit section does not match the compiled-in digest\"\n\n",
+            "const ERR_CIRCUIT_DIGEST_MISMATCH = \"ACE circuit stream does not match the compiled-in circuit digest\"\n\n",
             "# CONSTRAINT EVALUATION CHECKER\n",
             "# =================================================================================================\n\n",
-            "#! Executes the constraints evaluation check for the proof order selected by ORDER_TAG.\n",
+            "#! Executes the constraints evaluation check.\n",
             "#!\n",
             "#! Inputs:  []\n",
             "#! Outputs: []\n",
             "pub proc execute_constraint_evaluation_check()\n",
-            "    push.ORDER_TAG_COUNT exec.constants::assert_valid_order_tag\n\n",
             "    push.QUOTIENT_SHIFT_RATIO\n",
             "    push.QUOTIENT_FIRST_SHIFT\n",
             "    push.QUOTIENT_FIRST_WEIGHT\n",
@@ -122,7 +115,8 @@ pub fn render_masm_constraints_eval(
             "    exec.constants::air_trace_length_logs_ptr\n",
             "    push.NUM_AIRS\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
-            "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n\n",
+            "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n",
+            "{fold_coefficient_staging}\n",
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
@@ -130,56 +124,28 @@ pub fn render_masm_constraints_eval(
             "    eval_circuit\n",
             "    drop drop drop\n",
             "end\n\n",
-            "#! Loads and authenticates the ACE circuit selected by ORDER_TAG.\n",
+            "#! Loads the ACE circuit from the advice map and pins it to the compiled-in digest.\n",
             "#!\n",
-            "#! The circuit stream is factored into two adv_pipe-aligned segments: a per-order\n",
-            "#! prefix [constants | shuffle ops] and an order-invariant common section\n",
-            "#! [common ops | root padding]. Both are hashed separately; the common digest is\n",
-            "#! pinned to the compiled-in ACE_COMMON_COMMITMENT, and the registry leaf\n",
-            "#! selected by ORDER_TAG must equal\n",
-            "#! merge(PREFIX_COMMITMENT, ACE_COMMON_COMMITMENT).\n",
+            "#! The stream is one adv_pipe-aligned segment hashed in a single pass. Its digest is both\n",
+            "#! the advice-map key the stream is fetched under and the value the hash must reproduce,\n",
+            "#! so a stream that is not the accepted circuit fails here rather than mis-evaluating.\n",
             "proc load_and_authenticate_ace_circuit\n",
-            "    exec.load_ace_registry_commitment\n",
-            "    # => [LEAF]\n",
+            "    push.ACE_CIRCUIT_DIGEST_3.ACE_CIRCUIT_DIGEST_2.ACE_CIRCUIT_DIGEST_1.ACE_CIRCUIT_DIGEST_0\n",
+            "    # => [ACE_CIRCUIT_DIGEST]\n",
             "    adv.push_mapval\n",
             "    exec.layout::ace_circuit_stream_ptr\n",
-            "    push.{prefix_felts} exec.eidos::init_chaining_word\n",
+            "    push.{stream_felts} exec.eidos::init_chaining_word\n",
             "    padw padw\n",
-            "    # => [ZERO, ZERO, CV, ptr, LEAF]\n",
-            "    repeat.ACE_PREFIX_BLOCKS\n",
+            "    # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]\n",
+            "    repeat.ACE_STREAM_BLOCKS\n",
             "        adv_pipe\n",
             "        exec.eidos::compress\n",
             "    end\n",
             "    exec.eidos::digest\n",
-            "    # => [PREFIX_COMMITMENT, ptr, LEAF]\n",
-            "    movup.4\n",
-            "    # => [ptr, PREFIX_COMMITMENT, LEAF]\n",
-            "    push.{common_felts} exec.eidos::init_chaining_word\n",
-            "    padw padw\n",
-            "    repeat.ACE_COMMON_BLOCKS\n",
-            "        adv_pipe\n",
-            "        exec.eidos::compress\n",
-            "    end\n",
-            "    exec.eidos::digest\n",
-            "    # => [COMMON_COMMITMENT, ptr, PREFIX_COMMITMENT, LEAF]\n",
+            "    # => [STREAM_DIGEST, ptr, ACE_CIRCUIT_DIGEST]\n",
             "    movup.4 drop\n",
-            "    # => [COMMON_COMMITMENT, PREFIX_COMMITMENT, LEAF]\n",
-            "    dupw push.ACE_COMMON_COMMITMENT_3.ACE_COMMON_COMMITMENT_2.ACE_COMMON_COMMITMENT_1.ACE_COMMON_COMMITMENT_0\n",
-            "    assert_eqw.err=ERR_COMMON_SECTION_MISMATCH\n",
-            "    # => [COMMON_COMMITMENT, PREFIX_COMMITMENT, LEAF]\n",
-            "    swapw\n",
-            "    # => [PREFIX_COMMITMENT, COMMON_COMMITMENT, LEAF]\n",
-            "    exec.eidos::merge\n",
-            "    # => [CIRCUIT_COMMITMENT, LEAF]\n",
-            "    assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH\n",
-            "end\n\n",
-            "#! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.\n",
-            "proc load_ace_registry_commitment\n",
-            "    padw exec.constants::ace_registry_root_ptr mem_loadw_le\n",
-            "    exec.constants::get_order_tag\n",
-            "    push.ACE_REGISTRY_DEPTH\n",
-            "    mtree_get\n",
-            "    swapw dropw\n",
+            "    # => [STREAM_DIGEST, ACE_CIRCUIT_DIGEST]\n",
+            "    assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH\n",
             "end\n",
         ),
         generated_by = config.generated_by,
@@ -187,19 +153,82 @@ pub fn render_masm_constraints_eval(
         num_inputs = config.num_inputs,
         num_eval_gates = config.num_eval_gates,
         max_cycle_len_log = config.max_cycle_len_log,
-        registry_depth = config.registry_depth,
-        order_tag_count = config.order_tag_count,
         num_airs = config.num_airs,
+        stream_blocks = stream_blocks,
         quotient_shift_ratio = quotient.shift_ratio.as_canonical_u64(),
         quotient_first_shift = quotient.first_shift.as_canonical_u64(),
         quotient_first_weight = quotient.first_weight.as_canonical_u64(),
-        prefix_rows = prefix_rows,
-        common_rows = common_rows,
-        prefix_felts = config.shuffle_prefix_len,
-        common_felts = config.stream_len - config.shuffle_prefix_len,
-        common_commitment_0 = common_commitment[0].as_canonical_u64(),
-        common_commitment_1 = common_commitment[1].as_canonical_u64(),
-        common_commitment_2 = common_commitment[2].as_canonical_u64(),
-        common_commitment_3 = common_commitment[3].as_canonical_u64(),
+        fold_coefficient_staging = fold_coefficient_staging,
+        stream_felts = config.stream_len,
+        circuit_digest_0 = circuit_digest[0].as_canonical_u64(),
+        circuit_digest_1 = circuit_digest[1].as_canonical_u64(),
+        circuit_digest_2 = circuit_digest[2].as_canonical_u64(),
+        circuit_digest_3 = circuit_digest[3].as_canonical_u64(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::Felt;
+    use miden_crypto::stark::QuotientRecompositionInputs;
+
+    use super::{MasmConstraintsEvalConfig, render_masm_constraints_eval};
+
+    const STAGING_CALL: &str = "exec.constraints_eval_inputs::stage_air_fold_coefficients";
+
+    fn config(stages_fold_coefficients: bool) -> MasmConstraintsEvalConfig<'static> {
+        MasmConstraintsEvalConfig {
+            generated_by: "test",
+            layout_module: "miden::core::sys::test::layout",
+            num_inputs: 16,
+            num_eval_gates: 8,
+            stream_len: 64,
+            max_cycle_len_log: 5,
+            num_airs: 4,
+            stages_fold_coefficients,
+            quotient_inputs: QuotientRecompositionInputs {
+                shift_ratio: Felt::new_unchecked(2),
+                first_shift: Felt::new_unchecked(3),
+                first_weight: Felt::new_unchecked(5),
+            },
+            circuit_digest: [7, 11, 13, 17].map(Felt::new_unchecked).into(),
+        }
+    }
+
+    /// A relation whose READ layout has no fold-coefficient slots must get no staging call.
+    ///
+    /// The staged block sits immediately after the selectors, so emitting it for such a relation
+    /// would write past its `auxiliary_ace_inputs_ptr` region. Nothing downstream of the renderer
+    /// can tell the two cases apart, which is why the flag is checked here rather than only where
+    /// it is passed.
+    #[test]
+    fn fold_coefficient_staging_is_emitted_only_when_the_relation_asks_for_it() {
+        let staged = render_masm_constraints_eval(&config(true)).expect("renders");
+        assert!(staged.contains(STAGING_CALL), "the staging call is missing when requested");
+
+        let bare = render_masm_constraints_eval(&config(false)).expect("renders");
+        assert!(
+            !bare.contains(STAGING_CALL),
+            "the staging call leaked into a relation without fold-coefficient slots"
+        );
+
+        // Only the staging block may differ: both relations run the same setup, authentication,
+        // and evaluation.
+        for shared in [
+            "exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace",
+            "exec.load_and_authenticate_ace_circuit",
+            "assert_eqw.err=ERR_CIRCUIT_DIGEST_MISMATCH",
+        ] {
+            assert!(bare.contains(shared), "{shared} is missing from the unstaged evaluator");
+            assert!(staged.contains(shared), "{shared} is missing from the staged evaluator");
+        }
+    }
+
+    /// The single authenticated segment must be a whole number of `adv_pipe` blocks.
+    #[test]
+    fn a_misaligned_stream_is_refused() {
+        let mut config = config(true);
+        config.stream_len = 60;
+        assert!(render_masm_constraints_eval(&config).is_err());
+    }
 }

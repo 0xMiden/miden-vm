@@ -18,10 +18,9 @@ pub enum InputKey {
     MultiAirFoldBeta,
     /// Fold coefficient for the AIR instance at the given index.
     ///
-    /// Factored-emission-only: this key has no READ-layout slot. The factored emitter binds it
-    /// to a shuffle-section gate holding a power of [`InputKey::MultiAirFoldBeta`]; which power
-    /// is chosen per assembled circuit by the caller of
-    /// `FactoredAceCircuit::assemble`.
+    /// Has a real READ-layout slot. The MASM verifier populates it with `beta^(N-1-pos(k))`,
+    /// where `pos(k)` is the AIR's position in the height-sorted proof order, via
+    /// `stark::constraints_eval_inputs::stage_air_fold_coefficients`.
     MultiAirFoldCoeff(usize),
     /// Preprocessed trace value at (offset, index).
     Preprocessed { offset: usize, index: usize },
@@ -87,8 +86,11 @@ impl InputKeyMapper<'_> {
             InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::MultiAirFoldBeta => layout.stark.multi_air_fold_beta_index(),
-            // Factored-emission-only key: never present in the READ layout.
-            InputKey::MultiAirFoldCoeff(_) => None,
+            // Present in the READ layout only under a canonical composition; the per-order
+            // oracle composition leaves `fold_coeff_start` unset and this falls through to
+            // `None`, since `build_multi_air_ace_circuit` bakes each AIR's fold coefficient
+            // into that order's circuit gates directly instead of reading it.
+            InputKey::MultiAirFoldCoeff(i) => layout.stark.multi_air_fold_coeff_index(i),
             InputKey::Preprocessed { offset, index } => match offset {
                 0 => layout.regions.preprocessed_curr.index(index),
                 1 => layout.regions.preprocessed_next.index(index),

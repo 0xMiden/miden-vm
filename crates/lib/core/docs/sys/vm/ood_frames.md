@@ -1,6 +1,6 @@
-Processes the out-of-domain (OOD) evaluations of all committed polynomials.<br /><br />Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the<br />Horner accumulator used by the DEEP fixed terms.<br /><br />Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]<br />Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']<br />
-
 
 ## miden::core::sys::vm::ood_frames
 | Procedure | Description |
 | ----------- | ------------- |
+| stage_ood_scatter_table | Stages the proof-order-dependent half of the out-of-domain scatter table.<br /><br />The proof commits each AIR's trace at its position in the height-sorted proof order, while the<br />constraint circuit reads it at the AIR's canonical instance offset. Both the canonical<br />destination and the segment length are compile-time per AIR; this procedure only routes them to<br />the stream position the absorbed trace heights put that AIR in.<br /><br />Must run after the AIR heights are stored and before the first out-of-domain row is ingested.<br /><br />Inputs:  []<br />Outputs: []<br /> |
+| process_row_ood_evaluations | Processes the out-of-domain (OOD) evaluations of all committed polynomials.<br /><br />Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the Horner<br />accumulator used by the DEEP fixed terms. Both stay positional over the advice stream; the only<br />thing the proof order moves is where each segment is stored, which the table staged by<br />`stage_ood_scatter_table` supplies.<br /><br />Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]<br />Outputs: [scratch0, scratch1, cv', ptr + 560, alpha_ptr, acc0', acc1']<br /> |

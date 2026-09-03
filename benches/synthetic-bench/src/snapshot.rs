@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn executable_eidos_snapshot_rejects_non_eidos_trace_fields() {
-        for field in ["blakeg_compression_rows", "range_rows"] {
+        for field in ["poseidon2_permutation_rows", "range_rows"] {
             let snapshot = format!(
                 r#"{{
                     "invalid field": {{

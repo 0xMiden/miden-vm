@@ -1,12 +1,17 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
+use miden::core::stark::utils
 use miden::core::sys::vm::public_inputs
 use miden::core::sys::vm::layout
 
-const ORDER_TAG_COUNT = 24
+# Number of AIR instances in the relation, each contributing one boundary value.
+const NUM_AIRS = 4
 
 #! Load one normalized committed LogUp sum and scale both extension coordinates by the AIR's row
 #! count `n = 2^log_height`.
+#!
+#! `boundary_offset` is `2k` for canonical instance index `k`, so the caller must have scattered
+#! the sums to their canonical addresses first.
 #!
 #! Input:  [boundary_offset, log_height, ...]
 #! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
@@ -21,260 +26,73 @@ proc load_weighted_aux_sum
     movup.2 mul swap
 end
 
-#! Push the four AIR log heights in the same proof order as the absorbed auxiliary boundary values.
+#! Push the four AIR log heights in canonical instance order: Core, Chiplets,
+#! EidosCompression, And8Lookup.
 #!
-#! `ORDER_TAG` is the Lehmer rank of the proof-order permutation over
-#! [Core, Chiplets, EidosCompression, And8Lookup].
-#! The AIR set is fixed, so direct dispatch loads each height once instead of rescanning the
-#! height array for every output position.
+#! The order the values these heights weight arrived in does not appear here: the boundary sums
+#! are moved to their canonical addresses before the weighted sum reads them, so pairing is by
+#! canonical instance index on both sides.
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, log_3, ...]
-pub proc push_proof_order_log_heights
-    push.ORDER_TAG_COUNT exec.constants::assert_valid_order_tag
-    exec.constants::get_order_tag
-    dup eq.0
-    if.true
-        drop
-        # Core, Chiplets, EidosCompression, And8Lookup.
-        exec.layout::get_and8_lookup_trace_length_log
-        exec.layout::get_eidos_compression_trace_length_log
-        exec.layout::get_chiplets_trace_length_log
-        exec.layout::get_core_trace_length_log
-    else
-        dup eq.1
-        if.true
-            drop
-            # Core, Chiplets, And8Lookup, EidosCompression.
-            exec.layout::get_eidos_compression_trace_length_log
-            exec.layout::get_and8_lookup_trace_length_log
-            exec.layout::get_chiplets_trace_length_log
-            exec.layout::get_core_trace_length_log
-        else
-            dup eq.2
-            if.true
-                drop
-                # Core, EidosCompression, Chiplets, And8Lookup.
-                exec.layout::get_and8_lookup_trace_length_log
-                exec.layout::get_chiplets_trace_length_log
-                exec.layout::get_eidos_compression_trace_length_log
-                exec.layout::get_core_trace_length_log
-            else
-                dup eq.3
-                if.true
-                    drop
-                    # Core, EidosCompression, And8Lookup, Chiplets.
-                    exec.layout::get_chiplets_trace_length_log
-                    exec.layout::get_and8_lookup_trace_length_log
-                    exec.layout::get_eidos_compression_trace_length_log
-                    exec.layout::get_core_trace_length_log
-                else
-                    dup eq.4
-                    if.true
-                        drop
-                        # Core, And8Lookup, Chiplets, EidosCompression.
-                        exec.layout::get_eidos_compression_trace_length_log
-                        exec.layout::get_chiplets_trace_length_log
-                        exec.layout::get_and8_lookup_trace_length_log
-                        exec.layout::get_core_trace_length_log
-                    else
-                        dup eq.5
-                        if.true
-                            drop
-                            # Core, And8Lookup, EidosCompression, Chiplets.
-                            exec.layout::get_chiplets_trace_length_log
-                            exec.layout::get_eidos_compression_trace_length_log
-                            exec.layout::get_and8_lookup_trace_length_log
-                            exec.layout::get_core_trace_length_log
-                        else
-                            dup eq.6
-                            if.true
-                                drop
-                                # Chiplets, Core, EidosCompression, And8Lookup.
-                                exec.layout::get_and8_lookup_trace_length_log
-                                exec.layout::get_eidos_compression_trace_length_log
-                                exec.layout::get_core_trace_length_log
-                                exec.layout::get_chiplets_trace_length_log
-                            else
-                                dup eq.7
-                                if.true
-                                    drop
-                                    # Chiplets, Core, And8Lookup, EidosCompression.
-                                    exec.layout::get_eidos_compression_trace_length_log
-                                    exec.layout::get_and8_lookup_trace_length_log
-                                    exec.layout::get_core_trace_length_log
-                                    exec.layout::get_chiplets_trace_length_log
-                                else
-                                    dup eq.8
-                                    if.true
-                                        drop
-                                        # Chiplets, EidosCompression, Core, And8Lookup.
-                                        exec.layout::get_and8_lookup_trace_length_log
-                                        exec.layout::get_core_trace_length_log
-                                        exec.layout::get_eidos_compression_trace_length_log
-                                        exec.layout::get_chiplets_trace_length_log
-                                    else
-                                        dup eq.9
-                                        if.true
-                                            drop
-                                            # Chiplets, EidosCompression, And8Lookup, Core.
-                                            exec.layout::get_core_trace_length_log
-                                            exec.layout::get_and8_lookup_trace_length_log
-                                            exec.layout::get_eidos_compression_trace_length_log
-                                            exec.layout::get_chiplets_trace_length_log
-                                        else
-                                            dup eq.10
-                                            if.true
-                                                drop
-                                                # Chiplets, And8Lookup, Core, EidosCompression.
-                                                exec.layout::get_eidos_compression_trace_length_log
-                                                exec.layout::get_core_trace_length_log
-                                                exec.layout::get_and8_lookup_trace_length_log
-                                                exec.layout::get_chiplets_trace_length_log
-                                            else
-                                                dup eq.11
-                                                if.true
-                                                    drop
-                                                    # Chiplets, And8Lookup, EidosCompression, Core.
-                                                    exec.layout::get_core_trace_length_log
-                                                    exec.layout::get_eidos_compression_trace_length_log
-                                                    exec.layout::get_and8_lookup_trace_length_log
-                                                    exec.layout::get_chiplets_trace_length_log
-                                                else
-                                                    dup eq.12
-                                                    if.true
-                                                        drop
-                                                        # EidosCompression, Core, Chiplets, And8Lookup.
-                                                        exec.layout::get_and8_lookup_trace_length_log
-                                                        exec.layout::get_chiplets_trace_length_log
-                                                        exec.layout::get_core_trace_length_log
-                                                        exec.layout::get_eidos_compression_trace_length_log
-                                                    else
-                                                        dup eq.13
-                                                        if.true
-                                                            drop
-                                                            # EidosCompression, Core, And8Lookup, Chiplets.
-                                                            exec.layout::get_chiplets_trace_length_log
-                                                            exec.layout::get_and8_lookup_trace_length_log
-                                                            exec.layout::get_core_trace_length_log
-                                                            exec.layout::get_eidos_compression_trace_length_log
-                                                        else
-                                                            dup eq.14
-                                                            if.true
-                                                                drop
-                                                                # EidosCompression, Chiplets, Core, And8Lookup.
-                                                                exec.layout::get_and8_lookup_trace_length_log
-                                                                exec.layout::get_core_trace_length_log
-                                                                exec.layout::get_chiplets_trace_length_log
-                                                                exec.layout::get_eidos_compression_trace_length_log
-                                                            else
-                                                                dup eq.15
-                                                                if.true
-                                                                    drop
-                                                                    # EidosCompression, Chiplets, And8Lookup, Core.
-                                                                    exec.layout::get_core_trace_length_log
-                                                                    exec.layout::get_and8_lookup_trace_length_log
-                                                                    exec.layout::get_chiplets_trace_length_log
-                                                                    exec.layout::get_eidos_compression_trace_length_log
-                                                                else
-                                                                    dup eq.16
-                                                                    if.true
-                                                                        drop
-                                                                        # EidosCompression, And8Lookup, Core, Chiplets.
-                                                                        exec.layout::get_chiplets_trace_length_log
-                                                                        exec.layout::get_core_trace_length_log
-                                                                        exec.layout::get_and8_lookup_trace_length_log
-                                                                        exec.layout::get_eidos_compression_trace_length_log
-                                                                    else
-                                                                        dup eq.17
-                                                                        if.true
-                                                                            drop
-                                                                            # EidosCompression, And8Lookup, Chiplets, Core.
-                                                                            exec.layout::get_core_trace_length_log
-                                                                            exec.layout::get_chiplets_trace_length_log
-                                                                            exec.layout::get_and8_lookup_trace_length_log
-                                                                            exec.layout::get_eidos_compression_trace_length_log
-                                                                        else
-                                                                            dup eq.18
-                                                                            if.true
-                                                                                drop
-                                                                                # And8Lookup, Core, Chiplets, EidosCompression.
-                                                                                exec.layout::get_eidos_compression_trace_length_log
-                                                                                exec.layout::get_chiplets_trace_length_log
-                                                                                exec.layout::get_core_trace_length_log
-                                                                                exec.layout::get_and8_lookup_trace_length_log
-                                                                            else
-                                                                                dup eq.19
-                                                                                if.true
-                                                                                    drop
-                                                                                    # And8Lookup, Core, EidosCompression, Chiplets.
-                                                                                    exec.layout::get_chiplets_trace_length_log
-                                                                                    exec.layout::get_eidos_compression_trace_length_log
-                                                                                    exec.layout::get_core_trace_length_log
-                                                                                    exec.layout::get_and8_lookup_trace_length_log
-                                                                                else
-                                                                                    dup eq.20
-                                                                                    if.true
-                                                                                        drop
-                                                                                        # And8Lookup, Chiplets, Core, EidosCompression.
-                                                                                        exec.layout::get_eidos_compression_trace_length_log
-                                                                                        exec.layout::get_core_trace_length_log
-                                                                                        exec.layout::get_chiplets_trace_length_log
-                                                                                        exec.layout::get_and8_lookup_trace_length_log
-                                                                                    else
-                                                                                        dup eq.21
-                                                                                        if.true
-                                                                                            drop
-                                                                                            # And8Lookup, Chiplets, EidosCompression, Core.
-                                                                                            exec.layout::get_core_trace_length_log
-                                                                                            exec.layout::get_eidos_compression_trace_length_log
-                                                                                            exec.layout::get_chiplets_trace_length_log
-                                                                                            exec.layout::get_and8_lookup_trace_length_log
-                                                                                        else
-                                                                                            dup eq.22
-                                                                                            if.true
-                                                                                                drop
-                                                                                                # And8Lookup, EidosCompression, Core, Chiplets.
-                                                                                                exec.layout::get_chiplets_trace_length_log
-                                                                                                exec.layout::get_core_trace_length_log
-                                                                                                exec.layout::get_eidos_compression_trace_length_log
-                                                                                                exec.layout::get_and8_lookup_trace_length_log
-                                                                                            else
-                                                                                                eq.23 assert.err="invalid proof-order tag"
-                                                                                                # And8Lookup, EidosCompression, Chiplets, Core.
-                                                                                                exec.layout::get_core_trace_length_log
-                                                                                                exec.layout::get_chiplets_trace_length_log
-                                                                                                exec.layout::get_eidos_compression_trace_length_log
-                                                                                                exec.layout::get_and8_lookup_trace_length_log
-                                                                                            end
-                                                                                        end
-                                                                                    end
-                                                                                end
-                                                                            end
-                                                                        end
-                                                                    end
-                                                                end
-                                                            end
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
+pub proc push_canonical_log_heights
+    exec.layout::get_and8_lookup_trace_length_log
+    exec.layout::get_eidos_compression_trace_length_log
+    exec.layout::get_chiplets_trace_length_log
+    exec.layout::get_core_trace_length_log
+end
+
+#! Reads the normalized boundary sum submitted at one position of the proof order.
+#!
+#! Input:  [proof_order_position, ...]
+#! Output: [sigma_prime_0, sigma_prime_1, ...]
+proc load_boundary_pair
+    mul.2 exec.layout::aux_bus_boundary_ptr add
+
+    dup add.1 mem_load
+    swap mem_load
+end
+
+#! Moves each normalized boundary sum from its proof-order slot to its canonical instance-order
+#! slot.
+#!
+#! The proof submits one sum per AIR ordered by trace height, so the absorb above stores them in
+#! that order. The constraint circuit instead reads AIR `k`'s sum at `AUX_BUS_BOUNDARY_PTR + 2k`,
+#! the address `InputKey::AuxBusBoundary(k)` names, with `k` the canonical instance index.
+#!
+#! Every sum is read onto the operand stack before any is written back, so the region is permuted
+#! in place without scratch memory. The AIR heights must already be stored; the sums must already
+#! be absorbed.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc scatter_aux_bus_boundary
+    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.3
+    exec.utils::proof_order_position_from_heights
+    exec.load_boundary_pair
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.2
+    exec.utils::proof_order_position_from_heights
+    exec.load_boundary_pair
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.1
+    exec.utils::proof_order_position_from_heights
+    exec.load_boundary_pair
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_AIRS push.0
+    exec.utils::proof_order_position_from_heights
+    exec.load_boundary_pair
+    # => [sigma_prime_0, ..., sigma_prime_3, ...] in canonical instance order
+
+    exec.layout::aux_bus_boundary_ptr mem_storew_le dropw
+    exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le dropw
 end
 
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, absorbs the auxiliary trace commitment and four normalized
-#! boundary sums, then checks the modeless outer-LogUp boundary identity.
+#! boundary sums, moves the sums to the canonical addresses the constraint circuit reads them
+#! from, and checks the modeless outer-LogUp boundary identity there.
 #!
 #! The advice provider supplies:
 #!   [commitment, sigma_prime_0, sigma_prime_1, sigma_prime_2, sigma_prime_3]
@@ -300,8 +118,13 @@ pub proc observe_aux_trace
     exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
     exec.random_coin::eidos_observe_word
 
-    # Scale each normalized sum by its proof-ordered trace length.
-    exec.push_proof_order_log_heights
+    # The transcript has now seen the wire order, so the sums may move to the canonical addresses
+    # the constraint circuit reads them from. Everything below indexes the region by canonical
+    # instance index, so this must precede the weighted sum, not follow it.
+    exec.scatter_aux_bus_boundary
+
+    # Scale AIR k's normalized sum, now at offset 2k, by AIR k's trace length.
+    exec.push_canonical_log_heights
 
     push.0 exec.load_weighted_aux_sum
 

@@ -22,11 +22,8 @@ const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 # Inclusive upper bound used by the PVM shape checks.
 const LOG_HEIGHT_MAX = 29
 
-# Fixed ChipletAir::all() cardinality and registry metadata.
+# Fixed ChipletAir::all() cardinality.
 const NUM_CHIPLETS = 10
-const LAST_CHIPLET_INDEX = 9
-# Every AIR exposes one quadratic-extension value, stored as two base-field elements.
-const NUM_AUX_VALUE_FELTS = 20
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
@@ -45,17 +42,11 @@ const MIN_LOG_HEIGHT_7 = 1
 const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 
-# PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 1343014258601518641
-const RELATION_DIGEST_1 = 9076820302092083746
-const RELATION_DIGEST_2 = 7102860409392076119
-const RELATION_DIGEST_3 = 8428538352472289356
-
-# Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
-const ACE_REGISTRY_ROOT_0 = 7974810249840898517
-const ACE_REGISTRY_ROOT_1 = 4075718488425796651
-const ACE_REGISTRY_ROOT_2 = 5877811957563926885
-const ACE_REGISTRY_ROOT_3 = 3123587770109982413
+# PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_CIRCUIT_DIGEST).
+const RELATION_DIGEST_0 = 6587660001117274832
+const RELATION_DIGEST_1 = 5869676935261161425
+const RELATION_DIGEST_2 = 7063803722444350762
+const RELATION_DIGEST_3 = 7843579492266924388
 
 # Trusted setup commitment. Regeneration updates this for the native Eidos configuration.
 const PREPROCESSED_COMMITMENT_0 = 6268951225194987386
@@ -65,9 +56,9 @@ const PREPROCESSED_COMMITMENT_3 = 7952151839024097748
 
 #! Loads the fixed PVM relation context.
 #!
-#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
-#! absolute addresses of each AIR's auxiliary boundary value in the proof-ordered buffer,
-#! relation commitments, and fixed OOD/query-row addresses.
+#! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, each chiplet's position
+#! in the height-sorted proof order, the out-of-domain scatter table, relation commitments, and
+#! fixed OOD/query-row addresses.
 #!
 #! Advice order: [h0, ..., h9].
 #! Inputs:  [...]
@@ -91,14 +82,14 @@ pub proc load_air_context
     drop
     exec.constants::set_trace_length_log
 
-    exec.constants::air_trace_length_logs_ptr
-    push.NUM_CHIPLETS
-    exec.utils::derive_order_tag_from_heights
-    exec.constants::set_order_tag
-    exec.materialize_aux_value_ptrs
+    # The heights are stored above and unchanged from here on, so both ingest scatters read each
+    # chiplet's proof-order position from this table rather than re-ranking the heights per use.
+    exec.stage_proof_order_positions
+
+    # Route each chiplet's canonical out-of-domain destination to its proof-order stream position.
+    exec.ood_frames::stage_ood_scatter_table
 
     exec.store_relation_digest
-    exec.store_ace_registry_root
     exec.store_preprocessed_commitment
     exec.layout::preprocessed_current_ptr
     exec.constants::set_ood_evaluations_address
@@ -110,36 +101,57 @@ pub proc load_air_context
     exec.constants::set_aux_rand_elem_address
 end
 
-#! Stores the address of each AIR's auxiliary boundary value, indexed by canonical AIR order.
+#! Stores each chiplet's position in the stable height-sorted proof order, indexed by its
+#! `ChipletAir::all()` instance index.
 #!
-#! `derive_order_tag_from_heights` leaves the proof order in `tmp1..tmp3`. Reading those ten
-#! entries in reverse address order yields the canonical AIR indices in proof order. Each AIR
-#! exposes one quadratic-extension value, so the boundary pointer advances by two felts per AIR.
+#! Both ingest scatters — the out-of-domain row scatter and the auxiliary-bus boundary scatter —
+#! address the proof stream by these positions. Ranking the heights once per chiplet here instead
+#! of once per use is what keeps that addressing off the per-row path.
 #!
-#! Inputs:  [...]
-#! Outputs: [...]
-proc materialize_aux_value_ptrs
-    exec.layout::aux_bus_boundary_ptr
-    exec.constants::tmp1 add.LAST_CHIPLET_INDEX
-    # => [reverse_order_ptr, next_value_ptr, ...]
+#! The AIR heights must already be stored.
+#!
+#! Inputs:  []
+#! Outputs: []
+pub proc stage_proof_order_positions
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.0
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr mem_store
 
-    repeat.NUM_CHIPLETS
-        dup mem_load
-        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.1
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.1 mem_store
 
-        dup
-        exec.layout::aux_value_ptrs_ptr add
-        dup.3 swap mem_store
-        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.2
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.2 mem_store
 
-        drop
-        swap add.2 swap sub.1
-        # => [reverse_order_ptr - 1, next_value_ptr', ...]
-    end
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.3
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.3 mem_store
 
-    drop
-    exec.layout::aux_bus_boundary_ptr add.NUM_AUX_VALUE_FELTS
-    assert_eq.err="PVM auxiliary-value layout width drifted"
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.4
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.4 mem_store
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.5
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.5 mem_store
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.6
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.6 mem_store
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.7
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.7 mem_store
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.8
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.8 mem_store
+
+    exec.constants::air_trace_length_logs_ptr push.NUM_CHIPLETS push.9
+    exec.utils::proof_order_position_from_heights
+    exec.layout::proof_order_positions_ptr add.9 mem_store
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.
@@ -192,12 +204,6 @@ end
 proc store_relation_digest
     push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
     exec.constants::relation_digest_ptr mem_storew_le
-    dropw
-end
-
-proc store_ace_registry_root
-    push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
-    exec.constants::ace_registry_root_ptr mem_storew_le
     dropw
 end
 

@@ -44,6 +44,27 @@
   payload length, and two tag arguments. Each payload block is compressed once, with no terminal
   tag block. Framework AND and CHUNKS nodes keep separate registered selectors
   ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Replaced the per-proof-order ACE circuit registries with one order-invariant circuit per relation ([#3762](https://github.com/0xMiden/miden-vm/pull/3762)).
+- [BREAKING] Replaced the VM-native Poseidon2 permutation and sponge-oriented hash interfaces with
+  Eidos compression chaining. Each native hash-controller row now uses one 32-row Eidos compression
+  cycle. Native program, MAST, Merkle, advice-map, package, kernel, Falcon, AEAD, deferred, and
+  recursive-verifier commitments and digests are incompatible with earlier releases; the optional
+  Poseidon2 STARK proof-hash configuration remains supported. `HPERM` is now `COMPRESS`,
+  `adv.insert_hperm` is now `adv.insert_compress`, Falcon-Poseidon2 APIs are now Falcon-Eidos, and
+  MAST serialization uses wire version 0.0.5 so forests containing the former opcode encoding are
+  rejected. Eidos execution witnesses use wire version 2 so Poseidon2-era replay data is rejected
+  rather than reinterpreted. Raw `LOG_DEFERRED` now replaces a top-of-stack statement with the
+  updated deferred root. The low-level MASM hash API uses `init(n)` for domain zero,
+  `init_in_domain(n, domain)` for a tagged chain, or `init_with_chaining_word(CV)` for a
+  protocol-defined CV; `copy_digest`, `prepare_hasher_state(ptr, n, pad_inputs_flag)`, and
+  `hash_elements_with_state` retain their streaming and checkpoint roles. The legacy AEAD library
+  is replaced by `aead_eidos`; `CRYPTOSTREAM` and `aead_ref` use eight-Felt XOF blocks,
+  `aead_eidos::decrypt_empty_ad` emits `miden::core::crypto::aead_eidos::decrypt_empty_ad`, and
+  public Eidos AEAD procedures reject invalid or overlapping memory ranges and counter overflow.
+  The Miden proof statement now has four AIRs: Core, Chiplets, standalone Eidos compression, and the
+  fixed And8 lookup. And8 supplies the byte-pair table used by the compression constraints and the
+  16-bit range-check relation. The precompile VM remains a ten-AIR statement and uses its own
+  32-row Eidos compression AIR.
 
 #### Fixes
 

@@ -91,8 +91,9 @@ impl EncodedCircuit {
 
     /// Eidos digest of the whole instruction stream.
     ///
-    /// Note this is not the recursive verifier's registry leaf: a factored circuit is committed
-    /// as `merge(H(constants | shuffle), H(common))` over the two stream segments.
+    /// This single value is the circuit's commitment: the advice-map key under which the
+    /// recursive verifier streams the instructions, and the value it checks against the
+    /// compiled-in circuit digest.
     pub fn circuit_hash(&self) -> Word {
         Eidos::hash_elements(self.instructions())
     }
@@ -101,9 +102,7 @@ impl EncodedCircuit {
 /// Node-id bases and operation packing for one encoded circuit shape.
 ///
 /// The chiplet numbers nodes downward from `num_nodes - 1`: inputs first, then constants,
-/// then operations. Every circuit assembled from one factored composition shares these
-/// bases, so a caller that only wants part of the stream can encode it without building
-/// the whole circuit — see `FactoredMultiAirCircuit::encode_shuffle_section_for_order`.
+/// then operations.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StreamGeometry {
     input_start: usize,
@@ -114,8 +113,8 @@ pub(crate) struct StreamGeometry {
 impl StreamGeometry {
     /// Derive the bases from UNPADDED counts, applying the chiplet padding rules:
     /// constants are rounded up to full READ rows and the constants+ops stream is padded
-    /// to whole `adv_pipe` blocks. The single authority for this arithmetic — `to_ace`
-    /// and `emit_factored_circuit` must agree on node ids, so both derive them here.
+    /// to whole `adv_pipe` blocks. The single authority for this arithmetic: `to_ace` derives
+    /// every node id from here rather than repeating the padding rules inline.
     pub(crate) fn from_counts(num_inputs: usize, num_constants: usize, num_ops: usize) -> Self {
         let num_const_nodes = num_constants.next_multiple_of(CONST_EF_ALIGN);
         let const_felts = num_const_nodes * BASE_FELTS_PER_EF;
@@ -154,8 +153,7 @@ impl StreamGeometry {
     }
 
     /// Reject shapes the ACE chiplet cannot consume: READ layouts that do not fill whole
-    /// rows, and node counts beyond the id-packing bound. Shared by `to_ace` and the
-    /// encode-only registry path so the two cannot drift apart.
+    /// rows, and node counts beyond the id-packing bound.
     pub(crate) fn validate(&self) -> Result<(), AceError> {
         if !self.num_inputs().is_multiple_of(ACE_READ_ROW_EF_NODES) {
             return Err(AceError::InvalidInputLayout {

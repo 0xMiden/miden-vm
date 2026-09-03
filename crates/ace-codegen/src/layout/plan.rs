@@ -101,6 +101,10 @@ pub(crate) struct MultiAirIndices {
     pub fold_beta: usize,
     /// First per-AIR selector slot.
     pub selector_start: usize,
+    /// First per-AIR fold-coefficient slot (canonical compositions only; `None` under the
+    /// per-order oracle composition, which bakes fold coefficients into that order's circuit
+    /// gates instead of reading them).
+    pub fold_coeff_start: Option<usize>,
 }
 
 /// ACE input layout for circuit evaluation.
@@ -201,6 +205,11 @@ impl InputLayout {
             for i in 0..(multi_air.air_count.get() * SELECTORS_PER_AIR) {
                 check("air_selector", multi_air.selector_start + i);
             }
+            if let Some(fold_coeff_start) = multi_air.fold_coeff_start {
+                for i in 0..multi_air.air_count.get() {
+                    check("fold_coeff", fold_coeff_start + i);
+                }
+            }
         }
 
         let rand_start = self.regions.randomness.offset;
@@ -219,6 +228,12 @@ impl InputLayout {
 impl StarkVarIndices {
     pub(crate) fn multi_air_fold_beta_index(&self) -> Option<usize> {
         self.multi_air.map(|multi_air| multi_air.fold_beta)
+    }
+
+    pub(crate) fn multi_air_fold_coeff_index(&self, air_index: usize) -> Option<usize> {
+        let multi_air = self.multi_air?;
+        let start = multi_air.fold_coeff_start?;
+        (air_index < multi_air.air_count.get()).then_some(start + air_index)
     }
 
     pub(crate) fn air_selector_index(

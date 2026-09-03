@@ -5,7 +5,7 @@ use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE, Word,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    program::{ExecutionClaim, KERNEL_DOMAIN_TAG, KernelDescriptor, NUM_CLAIM_ELEMENTS},
+    program::{ExecutionClaim, KernelDescriptor, NUM_CLAIM_ELEMENTS},
     proof::HashFunction,
 };
 use miden_crypto::stark::{
@@ -26,11 +26,14 @@ use rstest::rstest;
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
+mod f1_scatter_bench;
+mod f1_sigma_scatter;
 mod pvm_aux_trace;
 mod pvm_deep_queries;
-mod pvm_ood_frames;
 mod pvm_public_inputs;
+mod pvm_scatter_bench;
 mod pvm_settlement;
+mod pvm_sigma_scatter;
 mod pvm_verifier;
 mod pvm_wrapper;
 mod security;
@@ -140,7 +143,7 @@ fn stark_verifier_e2f4_with_kernel_flipped_order() {
 }
 
 #[test]
-fn stark_verifier_e2f4_uses_shape_order_tag_for_small_proofs() {
+fn stark_verifier_e2f4_derives_the_shape_proof_order_for_small_proofs() {
     let equal_height = generate_recursive_verifier_data(EXAMPLE_EQUAL_HEIGHTS, vec![], None);
     let core_heavy = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
 
@@ -151,167 +154,10 @@ fn stark_verifier_e2f4_uses_shape_order_tag_for_small_proofs() {
     assert_eq!(core_heavy_order, expected_order_from_shape(&core_heavy));
 }
 
-/// Executes the MASM proof-order dispatch for every Lehmer tag and compares its result with the
-/// Rust protocol decoder. This directly covers all 24 branches that order the normalized LogUp
-/// boundary values.
-#[test]
-fn aux_trace_proof_order_dispatch_matches_every_rust_variant() {
-    const INSTANCE_LOG_HEIGHTS: [u64; MIDEN_AIR_COUNT] = [10, 11, 12, 13];
-    const ORDER_OUTPUT_PTR: u32 = 1000;
-
-    for tag in 0..miden_air::PROOF_ORDER_COUNT as u32 {
-        let source = format!(
-            "
-            use miden::core::stark::constants
-            use miden::core::sys::vm::aux_trace
-            use miden::core::sys::vm::layout
-
-            begin
-                push.{core} exec.layout::set_core_trace_length_log
-                push.{chiplets} exec.layout::set_chiplets_trace_length_log
-                push.{eidos_compression} exec.layout::set_eidos_compression_trace_length_log
-                push.{and8} exec.layout::set_and8_lookup_trace_length_log
-                push.{tag} exec.constants::set_order_tag
-                exec.aux_trace::push_proof_order_log_heights
-                push.{output_ptr} mem_store
-                push.{output_ptr_plus_1} mem_store
-                push.{output_ptr_plus_2} mem_store
-                push.{output_ptr_plus_3} mem_store
-            end
-            ",
-            core = INSTANCE_LOG_HEIGHTS[0],
-            chiplets = INSTANCE_LOG_HEIGHTS[1],
-            eidos_compression = INSTANCE_LOG_HEIGHTS[2],
-            and8 = INSTANCE_LOG_HEIGHTS[3],
-            output_ptr = ORDER_OUTPUT_PTR,
-            output_ptr_plus_1 = ORDER_OUTPUT_PTR + 1,
-            output_ptr_plus_2 = ORDER_OUTPUT_PTR + 2,
-            output_ptr_plus_3 = ORDER_OUTPUT_PTR + 3,
-        );
-        let test = build_test!(source.as_str(), &[]);
-        let (output, _host) = test
-            .execute_for_output()
-            .unwrap_or_else(|err| panic!("MASM proof-order dispatch failed for tag {tag}: {err}"));
-        let order = ProofOrder::from_tag(tag).expect("tag is in range");
-        let actual_order = read_word(&output, ORDER_OUTPUT_PTR);
-
-        for (stack_idx, air) in order.airs().iter().copied().enumerate() {
-            let actual = actual_order[stack_idx].as_canonical_u64();
-            assert_eq!(
-                actual,
-                INSTANCE_LOG_HEIGHTS[air.instance_index()],
-                "MASM/Rust proof-order mismatch at tag {tag}, stack index {stack_idx}",
-            );
-        }
-    }
-}
-
-#[test]
-fn stark_verifier_e2f4_rejects_wrong_order_tag() {
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
-    assert_ne!(expected_order_from_shape(&data), ProofOrder::instance_order());
-
-    // Mirror `verify_vm_proof`'s staging, but flip the derived order tag before dispatching the
-    // constraint evaluation check. The registry then selects a different circuit commitment, so
-    // circuit lookup/authentication cannot succeed.
-    let source = format!(
-        "
-        use miden::core::mem
-        use miden::core::stark::constants
-        use miden::core::stark::verifier
-
-        use miden::core::sys::vm
-        use miden::core::sys::vm::aux_trace
-        use miden::core::sys::vm::claim
-        use miden::core::sys::vm::constraints_eval
-        use miden::core::sys::vm::deep_queries
-        use miden::core::sys::vm::layout
-        use miden::core::sys::vm::ood_frames
-        use miden::core::sys::vm::public_inputs
-
-        const KERNEL_DOMAIN_TAG = {kernel_domain_tag}
-
-        proc wrong_constraints_eval
-            # Flip the derived tag, then dispatch to the wrong order-specific circuit.
-            exec.constants::get_order_tag
-            add.1
-            push.24
-            u32mod
-            exec.constants::set_order_tag
-            exec.constraints_eval::execute_constraint_evaluation_check
-        end
-
-        # Same staging as the private `verify_vm_proof` kernel-witness helper.
-        proc materialize_kernel_witness
-            padw exec.layout::claim_ptr add.4 mem_loadw_le
-            adv.push_mapvaln
-            adv_push
-            u32assert
-            dup u32mod.4 assertz
-            div.4
-            dup u32lte.255 assert
-            dup exec.layout::num_kernel_procedures_ptr mem_store
-            exec.layout::kernel_witness_ptr swap
-            push.KERNEL_DOMAIN_TAG
-            exec.mem::pipe_words_to_memory_in_domain
-            movup.4 drop
-            assert_eqw
-        end
-
-        begin
-            # Initial stack: [CLAIM_COMMITMENT].
-            exec.layout::claim_commitment_ptr mem_storew_le
-            exec.layout::claim_ptr exec.claim::materialize_claim
-
-            adv_push exec.constants::set_number_queries
-            adv_push exec.constants::set_query_pow_bits
-            adv_push exec.constants::set_deep_pow_bits
-            adv_push exec.constants::set_folding_pow_bits
-
-            exec.materialize_kernel_witness
-            exec.public_inputs::stage_boundary_inputs
-            exec.vm::load_air_context
-
-            procref.deep_queries::compute_deep_composition_polynomial_queries
-            procref.wrong_constraints_eval
-            procref.ood_frames::process_row_ood_evaluations
-            procref.public_inputs::process_public_inputs
-            procref.aux_trace::observe_aux_trace
-
-            exec.verifier::verify
-        end
-        ",
-        kernel_domain_tag = KERNEL_DOMAIN_TAG.as_canonical_u64(),
-    );
-
-    let test = build_test!(
-        source.as_str(),
-        &data.initial_stack(),
-        data.advice_stack(),
-        data.store.clone(),
-        data.advice_map
-    );
-    assert!(test.execute_for_output().is_err(), "wrong order tag should fail");
-}
-
-#[test]
-fn stark_verifier_e2f4_rejects_missing_ace_registry() {
-    use miden_utils_testing::crypto::MerkleStore;
-
-    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    let registry_root = Word::new(config::ACE_CIRCUIT_REGISTRY_ROOT);
-    let mut store = MerkleStore::new();
-    store.extend(data.store.inner_nodes().filter(|node| node.value != registry_root));
-    data.store = store;
-
-    assert_recursive_verifier_rejects(data, "missing ACE registry should fail");
-}
-
 #[test]
 fn stark_verifier_e2f4_rejects_missing_ace_circuit_stream() {
     let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    let order = expected_order_from_shape(&data);
-    let circuit_key = recursive_circuit_key(&order);
+    let circuit_key = recursive_circuit_key();
     data.advice_map.retain(|(key, _)| *key != circuit_key);
 
     assert_recursive_verifier_rejects(data, "missing ACE circuit stream should fail");
@@ -320,12 +166,209 @@ fn stark_verifier_e2f4_rejects_missing_ace_circuit_stream() {
 #[test]
 fn stark_verifier_e2f4_rejects_corrupted_ace_circuit_stream() {
     let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
-    let order = expected_order_from_shape(&data);
-    let circuit_key = recursive_circuit_key(&order);
+    let circuit_key = recursive_circuit_key();
     let stream = advice_map_value_mut(&mut data, circuit_key);
     stream[0] += Felt::ONE;
 
     assert_recursive_verifier_rejects(data, "corrupted ACE circuit stream should fail");
+}
+
+/// A forged per-AIR log height must be rejected.
+///
+/// The heights are what carries the proof order into the verifier: `stage_ood_scatter_table`,
+/// `scatter_aux_bus_boundary` and `stage_air_fold_coefficients` each resolve an AIR's proof
+/// position from them, and nothing else in verifier memory records that order. They arrive on the
+/// advice stack, so what makes them unforgeable is that `sys/vm/public_inputs.masm` observes them
+/// into the Fiat-Shamir transcript: a forged height diverges the transcript, and the proof cannot
+/// survive that divergence.
+///
+/// The non-vacuity guard at the end is what makes this cover *order* binding rather than height
+/// binding alone: at least one forgery must land the verifier on a different proof order, which is
+/// exactly the case a verifier that took the heights on trust would scatter wrongly for.
+#[test]
+fn each_air_log_height_is_transcript_bound() {
+    /// Proof-stream index of the first advice-supplied log height: 4 security parameters and the
+    /// 4-felt deferred root precede it.
+    const FIRST_LOG_HEIGHT: usize = 8;
+    /// The And8Lookup height is verifier-fixed setup, so only the others come from the proof.
+    const ADVICE_SUPPLIED_HEIGHTS: usize = MIDEN_AIR_COUNT - 1;
+
+    let base = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+    let honest_order = expected_order_from_shape(&base);
+    let mut reordering_forgeries = 0usize;
+
+    for air in 0..ADVICE_SUPPLIED_HEIGHTS {
+        let mut data = base.clone();
+        // Raise the height rather than lower it: `assert_shape_log`'s bounds stay satisfied either
+        // way, so rejection cannot be explained by the structural check firing first.
+        data.proof_stream[FIRST_LOG_HEIGHT + air] += 1;
+        if expected_order_from_shape(&data) != honest_order {
+            reordering_forgeries += 1;
+        }
+
+        assert_recursive_verifier_rejects(
+            data,
+            &format!("verifier accepted a forged log height for AIR {air}"),
+        );
+    }
+
+    assert!(
+        reordering_forgeries > 0,
+        "no forged height moved the proof order, so this fixture cannot cover order binding"
+    );
+}
+
+/// The negative direction of order binding cannot be explained by transcript divergence alone:
+/// `each_air_log_height_is_transcript_bound` above would pass identically against a verifier
+/// whose scatter, sigma placement and fold staging were hard-wired to the identity order, since a
+/// forged height already diverges the transcript regardless of routing. This builds a mutant
+/// `verify_vm_proof` whose scatter table is never staged (transcript binding of the heights is
+/// untouched; only routing is removed) and checks it rejects a fixture whose honest proof order is
+/// non-identity, so the scatter mechanism itself is shown to be load-bearing.
+#[test]
+fn verifier_rejects_a_non_identity_order_when_the_scatter_table_is_unstaged() {
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
+    assert_ne!(
+        expected_order_from_shape(&data),
+        ProofOrder::instance_order(),
+        "fixture must have a non-identity proof order to exercise scatter routing"
+    );
+
+    let source = "
+        use miden::core::mem
+        use miden::core::stark::utils
+        use miden::core::stark::constants
+        use miden::core::stark::verifier
+
+        use miden::core::sys::vm::claim
+        use miden::core::sys::vm::constraints_eval
+        use miden::core::sys::vm::deep_queries
+        use miden::core::sys::vm::layout
+        use miden::core::sys::vm::ood_frames
+        use miden::core::sys::vm::public_inputs
+        use miden::core::sys::vm::aux_trace
+
+        const LOG_HEIGHT_MIN = 6
+        const LOG_HEIGHT_BOUND = 30
+        const AND8_LOOKUP_LOG_HEIGHT = 16
+        const KERNEL_COMMITMENT_OFFSET = 4
+        const KERNEL_DOMAIN_TAG = 0x01000001
+        const FELTS_PER_KERNEL_DIGEST = 4
+        const MAX_NUM_KERNEL_PROCEDURES = 255
+        const RELATION_DIGEST_0 = 7232478355167361721
+        const RELATION_DIGEST_1 = 2288487368701696106
+        const RELATION_DIGEST_2 = 1262608933889613709
+        const RELATION_DIGEST_3 = 6610580325338225009
+        const AND8_PREPROCESSED_TRACE_COM_0 = 8101824786889297799
+        const AND8_PREPROCESSED_TRACE_COM_1 = 5557459202643843712
+        const AND8_PREPROCESSED_TRACE_COM_2 = 8609469204800341145
+        const AND8_PREPROCESSED_TRACE_COM_3 = 5780773595731865481
+
+        proc assert_shape_log
+            dup u32assert.err=\"AIR log height must be u32\"
+            dup u32gte.LOG_HEIGHT_MIN assert.err=\"AIR log height below minimum\"
+            dup u32lt.LOG_HEIGHT_BOUND assert.err=\"AIR log height above maximum\"
+            drop
+        end
+
+        proc store_relation_digest
+            push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
+            exec.constants::relation_digest_ptr mem_storew_le
+            dropw
+        end
+
+        proc store_and8_preprocessed_trace_commitment
+            push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
+            exec.constants::preprocessed_trace_com_ptr mem_storew_le
+            dropw
+        end
+
+        proc materialize_kernel_witness
+            padw exec.layout::claim_ptr add.KERNEL_COMMITMENT_OFFSET mem_loadw_le
+            adv.push_mapvaln
+            adv_push
+            u32assert.err=\"kernel witness length must fit in a u32\"
+            dup u32mod.FELTS_PER_KERNEL_DIGEST
+            assertz.err=\"kernel witness length must be word-aligned\"
+            div.FELTS_PER_KERNEL_DIGEST
+            dup u32lte.MAX_NUM_KERNEL_PROCEDURES
+            assert.err=\"number of kernel procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES\"
+            dup exec.layout::num_kernel_procedures_ptr mem_store
+            exec.layout::kernel_witness_ptr swap
+            push.KERNEL_DOMAIN_TAG
+            exec.mem::pipe_words_to_memory_in_domain
+            movup.4 drop
+            assert_eqw.err=\"fetched kernel digests do not hash to the claim's kernel commitment\"
+        end
+
+        # Mirrors `sys::vm::load_air_context`, but never stages the out-of-domain scatter table:
+        # heights are still stored and absorbed identically, only routing is removed.
+        proc load_air_context_without_scatter_staging
+            adv_push
+            exec.assert_shape_log
+            exec.layout::set_core_trace_length_log
+
+            adv_push
+            exec.assert_shape_log
+            exec.layout::set_chiplets_trace_length_log
+
+            adv_push
+            exec.assert_shape_log
+            exec.layout::set_eidos_compression_trace_length_log
+
+            push.AND8_LOOKUP_LOG_HEIGHT
+            exec.layout::set_and8_lookup_trace_length_log
+
+            exec.layout::get_core_trace_length_log
+            exec.layout::get_chiplets_trace_length_log
+            u32max
+            exec.layout::get_eidos_compression_trace_length_log
+            u32max
+            exec.layout::get_and8_lookup_trace_length_log
+            u32max
+            exec.constants::set_trace_length_log
+
+            exec.store_relation_digest
+            exec.store_and8_preprocessed_trace_commitment
+            exec.layout::ood_evaluations_ptr
+            exec.constants::set_ood_evaluations_address
+            exec.layout::current_trace_row_ptr
+            exec.constants::set_current_trace_row_address
+            exec.layout::auxiliary_ace_inputs_ptr
+            exec.constants::set_auxiliary_ace_inputs_address
+            exec.layout::aux_rand_elem_ptr
+            exec.constants::set_aux_rand_elem_address
+        end
+
+        begin
+            exec.layout::claim_commitment_ptr mem_storew_le
+            exec.layout::claim_ptr exec.claim::materialize_claim
+
+            exec.utils::load_security_params
+            exec.materialize_kernel_witness
+            exec.public_inputs::stage_boundary_inputs
+            exec.load_air_context_without_scatter_staging
+
+            procref.deep_queries::compute_deep_composition_polynomial_queries
+            procref.constraints_eval::execute_constraint_evaluation_check
+            procref.ood_frames::process_row_ood_evaluations
+            procref.public_inputs::process_public_inputs
+            procref.aux_trace::observe_aux_trace
+
+            exec.verifier::verify
+        end
+    ";
+
+    let test = build_test!(
+        source,
+        &data.initial_stack(),
+        data.advice_stack(),
+        data.store,
+        data.advice_map
+    );
+    test.execute().expect_err(
+        "verifier must reject a non-identity proof order when the scatter table is unstaged",
+    );
 }
 
 fn assert_recursive_verifier_rejects(data: VerifierData, message: &str) {
@@ -1075,12 +1118,12 @@ fn advice_map_value_mut(data: &mut VerifierData, key: Word) -> &mut Vec<Felt> {
     &mut entry.1
 }
 
-fn recursive_circuit_key(order: &ProofOrder) -> Word {
-    miden_air::ace::RecursiveAceCircuitFactory::new()
-        .expect("recursive-verifier ACE composition must build")
-        .circuit_for_order(order)
-        .expect("recursive-verifier ACE circuit must encode")
-        .commitment
+/// Advice-map key the recursive verifier fetches the ACE circuit stream under.
+///
+/// One circuit serves every proof order, so this is the canonical circuit's own digest — the
+/// same value `build_merkle_data` keys the advice entry with and the loader pins the stream to.
+fn recursive_circuit_key() -> Word {
+    miden_air::ace::shared_recursive_circuit().commitment
 }
 
 // EXAMPLE PROGRAMS
@@ -1768,6 +1811,100 @@ fn quotient_recomposition_constants_match_derivation() {
     assert_eq!(shift_ratio, expected.shift_ratio, "QUOTIENT_SHIFT_RATIO is stale");
     assert_eq!(first_shift, expected.first_shift, "QUOTIENT_FIRST_SHIFT is stale");
     assert_eq!(first_weight, expected.first_weight, "QUOTIENT_FIRST_WEIGHT is stale");
+}
+
+/// A relation may stage per-AIR fold coefficients only once its ACE input region holds them.
+///
+/// `stage_air_fold_coefficients` writes one extension-field coefficient per AIR immediately after
+/// the selector block, at base offsets `FIRST_SELECTOR_OFFSET + SELECTOR_STRIDE * num_airs + 2k`
+/// from the relation's stark-vars base. Only the felts below `ACE_CIRCUIT_STREAM_PTR` belong to
+/// that region; a coefficient past its end lands in the circuit-stream region, where the loader's
+/// next `adv_pipe` silently overwrites it. The memory-map test cannot see this — it compares
+/// *declared* extents, and both regions stay dense and disjoint whether or not the writes stay
+/// inside them — so the bound is asserted here instead, against the procedure's real offsets.
+#[test]
+fn staged_fold_coefficients_fit_the_declared_ace_input_region() {
+    const STAGING_PROC: &str = "stage_air_fold_coefficients";
+    const ENTRY_PROC: &str = "set_up_auxiliary_inputs_ace";
+    /// Base felts per staged coefficient (one quadratic-extension element).
+    const COEFFICIENT_STRIDE: u32 = 2;
+
+    let staging = include_str!("../../asm/stark/constraints_eval_inputs.masm");
+    let masm_const = |source: &str, name: &str, what: &str| -> u32 {
+        let prefix = format!("const {name} = ");
+        source
+            .lines()
+            .find_map(|line| line.trim().strip_prefix(&prefix)?.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("missing {what} constant {name}"))
+    };
+
+    let first_selector_offset = masm_const(staging, "FIRST_SELECTOR_OFFSET", "staging");
+    let selector_stride = masm_const(staging, "SELECTOR_STRIDE", "staging");
+
+    // Walk the procedure declarations rather than the raw text so a rename of either procedure
+    // fails here instead of turning this guard into a silent no-op.
+    //
+    // Staging can be wired at either of two sites, and both are checked: inside the shared entry
+    // procedure, which stages for *every* relation that calls it, or in a relation's own generated
+    // evaluator, which stages for that relation alone. Watching only one site would let the other
+    // wire a relation past its region unnoticed.
+    let mut declares_staging = false;
+    let mut in_entry = false;
+    let mut shared_entry_stages = false;
+    for line in staging.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) =
+            trimmed.strip_prefix("pub proc ").or_else(|| trimmed.strip_prefix("proc "))
+        {
+            let name = rest.split(['(', ' ']).next().unwrap_or(rest);
+            declares_staging |= name == STAGING_PROC;
+            in_entry = name == ENTRY_PROC;
+        }
+        shared_entry_stages |= in_entry && trimmed.contains(&format!("exec.{STAGING_PROC}"));
+    }
+    assert!(declares_staging, "{STAGING_PROC} is no longer declared");
+
+    for (relation, layout_const, evaluator) in [
+        (
+            "vm",
+            vm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/vm/constraints_eval.masm"),
+        ),
+        (
+            "pvm",
+            pvm_layout_const as fn(&str) -> u32,
+            include_str!("../../asm/sys/pvm/constraints_eval.masm"),
+        ),
+    ] {
+        let num_airs = masm_const(evaluator, "NUM_AIRS", relation);
+        let region_felts =
+            layout_const("ACE_CIRCUIT_STREAM_PTR") - layout_const("AUXILIARY_ACE_INPUTS_PTR");
+
+        let selectors_end = first_selector_offset + selector_stride * num_airs;
+        assert!(
+            selectors_end <= region_felts,
+            "{relation}: {num_airs} selector triples end at felt {selectors_end}, past the \
+             {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR region"
+        );
+
+        let evaluator_stages = evaluator.lines().any(|line| {
+            line.trim().contains(&format!("exec.constraints_eval_inputs::{STAGING_PROC}"))
+        });
+        if shared_entry_stages || evaluator_stages {
+            let site = if shared_entry_stages {
+                ENTRY_PROC
+            } else {
+                "the generated evaluator"
+            };
+            let coefficients_end = selectors_end + COEFFICIENT_STRIDE * num_airs;
+            assert!(
+                coefficients_end <= region_felts,
+                "{relation}: {site} stages {num_airs} fold coefficients ending at felt \
+                 {coefficients_end}, past the {region_felts}-felt AUXILIARY_ACE_INPUTS_PTR \
+                 region; enlarge the region before wiring the staging call in"
+            );
+        }
+    }
 }
 
 // HELPERS
