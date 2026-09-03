@@ -8,6 +8,9 @@ pub(crate) mod digest;
 /// Blake3 hash function.
 pub mod blake;
 
+/// Eidos hash function.
+pub mod eidos;
+
 /// Keccak hash function.
 pub mod keccak;
 

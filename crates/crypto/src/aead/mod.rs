@@ -15,6 +15,7 @@ use crate::{
     },
 };
 
+pub mod aead_eidos;
 pub mod aead_poseidon2;
 pub mod xchacha;
 
@@ -117,11 +118,15 @@ pub(crate) trait AeadScheme {
 pub enum EncryptionError {
     #[error("authentication tag verification failed")]
     InvalidAuthTag,
-    #[error("peration failed")]
+    #[error("operation failed")]
     FailedOperation,
+    #[error("input is too long")]
+    InputTooLong,
+    #[error("malformed expanded ciphertext")]
+    MalformedCiphertext,
     #[error("malformed padding")]
     MalformedPadding,
-    #[error("ciphertext length, in field elements, is not a multiple of `RATE_WIDTH`")]
+    #[error("ciphertext length, in field elements, is not a multiple of the encryption rate")]
     CiphertextLenNotMultipleRate,
     #[error("invalid data type: expected {expected:?}, found {found:?}")]
     InvalidDataType { expected: DataType, found: DataType },
