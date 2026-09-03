@@ -8,10 +8,10 @@ use miden::core::sys::vm::layout
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 930
+const NUM_INPUTS_CIRCUIT = 932
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 7028
+const NUM_EVAL_GATES_CIRCUIT = 7016
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 5
@@ -20,7 +20,13 @@ const MAX_CYCLE_LEN_LOG = 5
 const NUM_AIRS = 4
 
 # Number of 8-felt blocks in the authenticated ACE circuit stream.
-const ACE_STREAM_BLOCKS = 954
+const ACE_STREAM_BLOCKS = 953
+
+# Precomputed generic Felt-sequence chaining word for the fixed-length stream.
+const ACE_STREAM_INIT_CV_0 = 4280581857092831745
+const ACE_STREAM_INIT_CV_1 = 2688637132020391368
+const ACE_STREAM_INIT_CV_2 = 1947077364412317696
+const ACE_STREAM_INIT_CV_3 = 6620516959492505600
 
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
 # relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;
@@ -32,10 +38,10 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 
 # Eidos digest of the ACE circuit stream this relation accepts. One circuit serves
 # every proof order, so it is the advice-map key and the value the loader pins.
-const ACE_CIRCUIT_DIGEST_0 = 5240518657106879739
-const ACE_CIRCUIT_DIGEST_1 = 845274915973112626
-const ACE_CIRCUIT_DIGEST_2 = 544901273331572528
-const ACE_CIRCUIT_DIGEST_3 = 1048467415471376081
+const ACE_CIRCUIT_DIGEST_0 = 4750678884012070358
+const ACE_CIRCUIT_DIGEST_1 = 7527550081110780464
+const ACE_CIRCUIT_DIGEST_2 = 3559099128752756335
+const ACE_CIRCUIT_DIGEST_3 = 7795140197938060971
 
 # ERRORS
 # =================================================================================================
@@ -83,7 +89,7 @@ proc load_and_authenticate_ace_circuit
     # => [ACE_CIRCUIT_DIGEST]
     adv.push_mapval
     exec.layout::ace_circuit_stream_ptr
-    push.7632 exec.eidos::init_chaining_word
+    push.ACE_STREAM_INIT_CV_3.ACE_STREAM_INIT_CV_2.ACE_STREAM_INIT_CV_1.ACE_STREAM_INIT_CV_0
     padw padw
     # => [ZERO, ZERO, CV, ptr, ACE_CIRCUIT_DIGEST]
     repeat.ACE_STREAM_BLOCKS

@@ -100,7 +100,7 @@ impl ProofOrder {
         self.tag
     }
 
-    /// File stem for the generated ACE circuit for this order.
+    /// Stable descriptive stem for this proof order in tests and reference artifacts.
     pub fn file_stem(&self) -> String {
         let mut stem = String::from("constraints_eval_");
         for (i, air) in self.airs.iter().copied().enumerate() {
