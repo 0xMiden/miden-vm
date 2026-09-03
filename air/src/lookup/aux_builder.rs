@@ -15,8 +15,8 @@
 //!
 //! Summing the cyclic recurrence gives `num_rows * sigma_prime = sigma`. The single committed
 //! auxiliary value is therefore `sigma_prime`, not a terminal accumulator row. This centered
-//! cyclic recurrence instantiates the additive coboundary construction from §3, “A cohomological
-//! sumcheck argument,” of [Darlin: Recursive Proofs using Marlin].
+//! cyclic recurrence instantiates the additive coboundary construction from §3, *A cohomological
+//! sumcheck argument*, of [Darlin: Recursive Proofs using Marlin].
 //!
 //! [Darlin: Recursive Proofs using Marlin]: https://eprint.iacr.org/2021/930
 use alloc::{vec, vec::Vec};
@@ -245,7 +245,9 @@ where
         for (col, &count) in row_counts.iter().enumerate() {
             let mut sum = EF::ZERO;
             for &(m, d) in &flat_fractions[cursor..cursor + count] {
-                let d_inv = d.try_inverse().expect("LogUp denominator must be non-zero");
+                let d_inv = d
+                    .try_inverse()
+                    .expect("LogUp denominator must be non-zero for the sampled challenges");
                 sum += d_inv * m;
             }
             per_row_value[col] = sum;
@@ -495,7 +497,7 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
 ///
 /// # Panics
 ///
-/// Panics if any denominator is zero.
+/// Panics if any denominator is zero for the sampled challenges.
 fn invert_and_scale<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
 where
     F: Field,
@@ -515,7 +517,7 @@ where
     // One field inversion — amortised over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
-        .expect("LogUp denominator product must be non-zero");
+        .expect("LogUp denominator product must be non-zero for the sampled challenges");
 
     // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
     //

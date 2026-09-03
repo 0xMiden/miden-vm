@@ -200,17 +200,17 @@ fn masm_initial_chaining_words_match_rust() {
 
     assert_word(FRI, "FRI_ROW_HASH_INIT_CV", Eidos::init_chaining_word(LMCS_LEAF, 8));
     for (name, len) in [
+        ("EIDOS_LMCS_INIT_CV_8", 8),
         ("EIDOS_LMCS_INIT_CV_16", 16),
-        ("EIDOS_LMCS_INIT_CV_80", 80),
-        ("EIDOS_LMCS_INIT_CV_208", 208),
+        ("EIDOS_LMCS_INIT_CV_64", 64),
+        ("EIDOS_LMCS_INIT_CV_192", 192),
     ] {
         assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
     }
     for (name, len) in [
         ("EIDOS_LMCS_INIT_CV_8", 8),
-        ("EIDOS_LMCS_INIT_CV_16", 16),
-        ("EIDOS_LMCS_INIT_CV_368", 368),
-        ("EIDOS_LMCS_INIT_CV_528", 528),
+        ("EIDOS_LMCS_INIT_CV_288", 288),
+        ("EIDOS_LMCS_INIT_CV_512", 512),
     ] {
         assert_word(PVM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
     }

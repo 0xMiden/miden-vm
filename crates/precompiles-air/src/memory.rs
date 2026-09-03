@@ -169,11 +169,11 @@ mod tests {
 
         assert_eq!(
             prover_peak_bytes(&[0; NUM_CHIPLETS], &low_blowup, HashFunction::Blake3_256),
-            Some(39_976_960)
+            Some(20_316_160)
         );
         assert_eq!(
             prover_peak_bytes(&[0; NUM_CHIPLETS], &production_blowup, HashFunction::Blake3_256),
-            Some(130_416_640)
+            Some(71_434_240)
         );
     }
 
@@ -182,22 +182,14 @@ mod tests {
         let params = precompile_pcs_params();
         // Current per-row trace costs before the safety multiplier, in `ChipletAir::all()` order,
         // are:
-        // 13_176, 11_088, 7_776, 2_664, 4_968, 7_344, 2_592, 2_592, 3_384, and 5_472
+        // 10_584, 11_088, 6_624, 1_080, 4_536, 7_056, 2_592, 2_592, 3_384, and 4_968
         // bytes. The shared term uses the maximum quotient degree (4) across the full AIR set.
         // Each expectation also includes that quotient/tree peak, the preprocessed bundle, and the
         // 5/4 safety factor. Blake3 and Eidos add no leaf-hashing scratch beyond the digest itself.
         // Any AIR shape change must break this test rather than silently drift the model.
         let expected = [
-            130_435_670,
-            130_433_060,
-            130_428_920,
-            130_422_530,
-            130_425_410,
-            130_428_380,
-            130_422_440,
-            130_422_440,
-            130_423_430,
-            130_426_040,
+            71_450_030, 71_450_660, 71_445_080, 71_438_150, 71_442_470, 71_445_620, 71_440_040,
+            71_440_040, 71_441_030, 71_443_010,
         ];
         for hash_fn in [HashFunction::Blake3_256, HashFunction::Eidos] {
             for (i, expected) in expected.into_iter().enumerate() {
@@ -212,7 +204,7 @@ mod tests {
             }
             assert_eq!(
                 prover_peak_bytes(&[1; NUM_CHIPLETS], &params, hash_fn),
-                Some(130_495_520),
+                Some(71_504_930),
                 "all chiplet AIRs at height 1 with {hash_fn:?}"
             );
         }
