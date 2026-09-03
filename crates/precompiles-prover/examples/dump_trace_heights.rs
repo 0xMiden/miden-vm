@@ -33,6 +33,10 @@
 //! `BytePairLut`'s trace is a fixed `TRACE_HEIGHT` regardless of workload,
 //! so it has no `REAL_HEIGHT` probe — its real row count always equals its
 //! padded one.
+//!
+//! The full grid is `KECCAK_LEVELS` × `ECDSA_LEVELS`; pairs already listed
+//! in `ALREADY_MEASURED` are skipped so a run only fills gaps left by
+//! prior sweeps.
 
 #[path = "../../precompiles/benches/precompiles_bench/support.rs"]
 #[allow(dead_code, unused_imports, reason = "reusing the shared bench fixture module as-is")]
@@ -42,9 +46,66 @@ use miden_vm::HashFunction;
 use support::{PrecompileFixture, input_generation::PrecompileWorkload, prove_once_with_hash};
 
 /// Keccak call counts to sweep. Edit freely.
-const KECCAK_LEVELS: &[usize] = &[16, 64, 256, 512, 1024];
+const KECCAK_LEVELS: &[usize] = &[10, 16, 50, 64, 100, 200, 256, 300, 512, 1000, 1024];
 /// ECDSA verification counts to sweep. Edit freely.
-const ECDSA_LEVELS: &[usize] = &[1, 10, 25, 50, 100];
+const ECDSA_LEVELS: &[usize] = &[1, 4, 8, 10, 16, 25, 32, 50, 64, 100, 128];
+
+/// `(keccaks, ecdsas)` pairs already measured in prior runs — skipped here
+/// so this sweep only fills the gaps in the full `KECCAK_LEVELS` ×
+/// `ECDSA_LEVELS` grid. Clear this list (or remove pairs from it) to
+/// re-measure combos that were already covered.
+const ALREADY_MEASURED: &[(usize, usize)] = &[
+    (10, 4),
+    (10, 8),
+    (10, 16),
+    (10, 32),
+    (10, 64),
+    (16, 1),
+    (16, 10),
+    (16, 25),
+    (16, 50),
+    (16, 100),
+    (50, 4),
+    (50, 8),
+    (50, 16),
+    (50, 32),
+    (50, 64),
+    (64, 1),
+    (64, 10),
+    (64, 25),
+    (64, 50),
+    (64, 100),
+    (100, 4),
+    (100, 8),
+    (100, 16),
+    (100, 32),
+    (100, 64),
+    (200, 4),
+    (200, 8),
+    (200, 16),
+    (200, 32),
+    (200, 64),
+    (256, 1),
+    (256, 10),
+    (256, 25),
+    (256, 50),
+    (256, 100),
+    (300, 4),
+    (300, 8),
+    (300, 16),
+    (300, 32),
+    (300, 64),
+    (512, 1),
+    (512, 10),
+    (512, 25),
+    (512, 50),
+    (512, 100),
+    (1024, 1),
+    (1024, 10),
+    (1024, 25),
+    (1024, 50),
+    (1024, 100),
+];
 
 fn main() {
     // SAFETY: single-threaded at this point in `main`, before any fixture
@@ -55,6 +116,9 @@ fn main() {
 
     for &keccaks in KECCAK_LEVELS {
         for &ecdsas in ECDSA_LEVELS {
+            if ALREADY_MEASURED.contains(&(keccaks, ecdsas)) {
+                continue;
+            }
             eprintln!("COMBO keccaks={keccaks} ecdsas={ecdsas}");
             let workload = PrecompileWorkload { keccaks, ecdsas };
             let fixture = PrecompileFixture::generate(workload);
