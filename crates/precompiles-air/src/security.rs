@@ -2,27 +2,24 @@
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
 //! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
-//! field. Their recursive verifiers both use Poseidon2. Native verification derives alignment and
-//! collision resistance from the commitment scheme used for each proof.
+//! field, so this module supplies the chiplet relation's inputs to the shared model in
+//! [`miden_air::security::model`]. Their recursive verifiers both use Poseidon2. Native
+//! verification derives alignment and collision resistance from the commitment scheme used for
+//! each proof.
 //!
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
-pub use miden_air::security::ProofSecurityParameters;
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
-use miden_core::{
-    Felt,
-    field::{BasedVectorSpace, QuadFelt},
+use miden_air::security::{
+    CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT, model,
 };
+pub use miden_air::security::{
+    FIXED_POINT_FRACTIONAL_BITS, FIXED_POINT_ONE, LOG2_E, LOOKUP_POW_BITS, ProofSecurityParameters,
+    SECURITY_CAP, protocol_params,
+};
+use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::pcs::PcsParams;
-use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
-use p3_security::{
-    budget::{
-        AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-        report::LOOKUP_LABEL,
-    },
-    fixed,
-};
+use p3_security::budget::{AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport};
 
 use crate::{
     ChipletAir,
@@ -36,13 +33,13 @@ use crate::{
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
+// CHIPLET STACK AIR SHAPE
+// ================================================================================================
+
 /// Number of out-of-domain points opened per committed column.
 ///
 /// The chiplet AIRs use `local` and `next` rotations only.
-const NUM_OOD_POINTS: u32 = 2;
-
-/// Base field elements per challenge-field element.
-const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
+const NUM_OOD_POINTS: u32 = model::NUM_OOD_POINTS;
 
 /// Shape of the chiplet multi-AIR statement used by the security estimator.
 ///
@@ -57,179 +54,11 @@ pub const AIR_SHAPE: AirShape = AirShape {
     },
 };
 
-/// Computes the AIR shape by symbolically evaluating every chiplet AIR.
-///
-/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
-/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
-pub fn derive_air_shape() -> AirShape {
-    let airs = ChipletAir::all();
-    let num_airs = airs.len();
-
-    let mut num_constraints = 0;
-    let mut max_constraint_degree = 0;
-    let mut num_columns = 0;
-    let mut fractions_per_row = 0;
-
-    for air in airs {
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
-        max_constraint_degree =
-            max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
-        num_columns += column_count(&air, COMMITMENT_ALIGNMENT);
-        fractions_per_row += fractions_per_row_of(air);
-    }
-    num_columns += quotient_column_count(max_constraint_degree, COMMITMENT_ALIGNMENT);
-
-    AirShape {
-        // One batching slot per AIR beyond the first sits alongside the constraints themselves:
-        // constraints are folded by powers of one challenge and the AIRs by a second, so a
-        // single-AIR statement needs no cross-AIR batching challenge.
-        num_composed_constraints: (num_constraints + num_airs - 1) as u32,
-        max_constraint_degree: max_constraint_degree as u32,
-        num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
-        lookup: LookupShape {
-            fractions_per_row: fractions_per_row as u32,
-            max_message_width: MAX_MESSAGE_WIDTH as u32,
-        },
-    }
-}
-
-/// Number of DEEP-quotient batching terms for a commitment scheme with the given column
-/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
-///
-/// Only the per-column padding is alignment-dependent, so this recomputes committed column counts
-/// from the chiplet AIRs' own width accessors — no symbolic constraint pass — reusing
-/// [`AIR_SHAPE`]'s `max_constraint_degree` for the quotient group's chunk count. Native
-/// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
-/// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
-/// fixed for the Poseidon2 preset.
-pub fn num_deep_terms(alignment: usize) -> u32 {
-    let mut num_columns = 0;
-    for air in ChipletAir::all() {
-        num_columns += column_count(&air, alignment);
-    }
-    num_columns += quotient_column_count(AIR_SHAPE.max_constraint_degree as usize, alignment);
-
-    num_columns as u32 + NUM_OOD_POINTS
-}
-
-/// Committed base columns for one chiplet: preprocessed, main, and auxiliary traces, each its own
-/// matrix within its commitment group and so each padded on its own.
-fn column_count(air: &ChipletAir, alignment: usize) -> usize {
-    aligned(BaseAir::<Felt>::preprocessed_width(air), alignment)
-        + aligned(BaseAir::<Felt>::width(air), alignment)
-        + aligned(LiftedAir::<Felt, QuadFelt>::aux_width(air) * EXTENSION_DEGREE, alignment)
-}
-
-/// Committed base columns in the quotient group: one chunk per unit of degree above the vanishing
-/// polynomial, rounded up to a power of two, committed as a single extension-valued matrix.
-fn quotient_column_count(max_constraint_degree: usize, alignment: usize) -> usize {
-    let chunks = max_constraint_degree.saturating_sub(1).max(1).next_power_of_two();
-
-    aligned(chunks * EXTENSION_DEGREE, alignment)
-}
-
-/// Pads a committed width up to the commitment scheme's column alignment.
-///
-/// The DEEP reduction batches every element of each opened, alignment-padded row, so padding also
-/// contributes batching slots.
-fn aligned(width: usize, alignment: usize) -> usize {
-    width.next_multiple_of(alignment)
-}
-
-// SECURITY MODEL CONSTANTS
-// ================================================================================================
-//
-// The MASM recursive estimator consumes the raw AIR shape. Tests in
-// `crates/lib/core/tests/stark/security.rs` compare it with the native calculation over the ranges
-// accepted by the recursive verifiers. `derived_security_constants_match_snapshot` checks the
-// native constants independently.
-
-/// Fractional bits in the fixed-point representation shared with the MASM estimator.
-pub const FIXED_POINT_FRACTIONAL_BITS: u32 = fixed::FRACTIONAL_BITS;
-
-/// Fixed-point representation of one, shared with the MASM estimator.
-pub const FIXED_POINT_ONE: u64 = fixed::ONE;
-
-/// Conjectured security contributed per FRI query, in fixed point.
-pub const BITS_PER_QUERY: u64 = fixed::bits_per_query(LOG_BLOWUP as u32, CHALLENGE_FIELD_BITS);
-
-/// Upper bound on every reported level, in fixed point.
-pub const SECURITY_CAP: u64 = deployed_instance(0).cap();
-
-/// Q16 upper bound on the log2 of the lookup round's error coefficient.
-pub const LOOKUP_COEFFICIENT: u64 = fixed::ceil_log2(
-    (AIR_SHAPE.lookup.max_message_width as u64 + 2) * AIR_SHAPE.lookup.fractions_per_row as u64,
-);
-
-/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
-pub const COMPOSITION_COEFFICIENT: u64 =
-    fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
-
-/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
-pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
-
-/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
-pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
-    Some(n) => n as u64,
-    None => 0,
-});
-
-/// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
-pub const FOLDING_COEFFICIENT: u64 = fixed::ceil_log2(2 * ((1 << LOG_FOLDING_ARITY) - 1));
-
-/// Lookup grinding applied before the lookup challenges are sampled.
-///
-/// Lifted STARK currently samples them directly after the main-trace commitment and exposes no
-/// lookup-grinding parameter.
-pub const LOOKUP_POW_BITS: u32 = 0;
-
-/// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
-/// `EcGroup` messages.
-///
-/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
-/// that the descriptor constant remains equal to the derived count.
-pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
-
-/// The configured challenge-field bound less the lookup round's coefficient, in fixed point.
-pub const LOOKUP_BASE: u64 = CHALLENGE_FIELD_BITS - LOOKUP_COEFFICIENT;
-
-/// The configured challenge-field bound less the constraint-composition round's coefficient, in
-/// fixed point.
-pub const COMPOSITION_TERM: u64 = CHALLENGE_FIELD_BITS - COMPOSITION_COEFFICIENT;
-
-/// The configured challenge-field bound less the out-of-domain round's coefficient, in fixed
-/// point.
-pub const OOD_BASE: u64 = CHALLENGE_FIELD_BITS - OOD_COEFFICIENT;
-
-/// The configured challenge-field bound less the DEEP round's coefficient, in fixed point.
-pub const DEEP_BASE: u64 = CHALLENGE_FIELD_BITS - DEEP_COEFFICIENT;
-
-/// The configured challenge-field bound less the FRI folding round's coefficient and fixed
-/// blowup, in fixed point.
-///
-/// The common MASM estimator uses the whole-bit floor of this value when proving that FRI folding
-/// cannot determine the result. Drift tests keep the MASM constant used by that proof synchronized
-/// with this value.
-pub const FOLDING_BASE: u64 =
-    CHALLENGE_FIELD_BITS - FOLDING_COEFFICIENT - fixed::from_bits(LOG_BLOWUP as u32);
-
-/// `log2(e)`, rounded down, in Q16 fixed point.
-pub const LOG2_E: u64 = fixed::LOG2_E;
-
-/// The instance shape of a deployed PVM proof at the given maximum AIR log height.
-const fn deployed_instance(log_max_height: u32) -> InstanceShape {
-    InstanceShape {
-        log_max_height,
-        field_bits: CHALLENGE_FIELD_BITS,
-        collision_resistance: COLLISION_RESISTANCE,
-    }
-}
-
 /// Lookup fractions one chiplet emits per row, summed over its auxiliary lookup columns.
 ///
 /// `LookupAir` is generic over its builder, so reading a shape means naming one; the choice does
 /// not affect the result, since the shapes are per-AIR constants.
-fn fractions_per_row_of(air: ChipletAir) -> usize {
+fn fractions_per_row_of(air: &ChipletAir) -> usize {
     type ShapeBuilder<'a> = ProverLookupBuilder<'a, Felt, QuadFelt>;
 
     fn shape_of<A>(air: A) -> usize
@@ -253,57 +82,87 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
     }
 }
 
+/// Computes the AIR shape by symbolically evaluating every chiplet AIR.
+///
+/// Tests compare [`AIR_SHAPE`] with this result. The symbolic pass allocates and evaluates every
+/// chiplet AIR, so [`security_report`] uses the checked constant instead of calling this function.
+pub fn derive_air_shape() -> AirShape {
+    model::derive_air_shape(
+        &ChipletAir::all(),
+        MAX_MESSAGE_WIDTH as u32,
+        fractions_per_row_of,
+        COMMITMENT_ALIGNMENT,
+    )
+}
+
+/// Number of DEEP-quotient batching terms for a commitment scheme with the given column
+/// alignment, holding every other AIR shape input fixed at [`AIR_SHAPE`]'s stored values.
+///
+/// Native verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1;
+/// Keccak, alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`]
+/// [`AIR_SHAPE`] fixed for the Poseidon2 preset.
+pub fn num_deep_terms(alignment: usize) -> u32 {
+    model::num_deep_terms(&ChipletAir::all(), AIR_SHAPE.max_constraint_degree as usize, alignment)
+}
+
+// SECURITY MODEL CONSTANTS
+// ================================================================================================
+//
+// Each value instantiates the corresponding formula in [`model`] at the chiplet stack's stored
+// shape and FRI configuration. `derived_security_constants_match_snapshot` checks them against a
+// fixed numeric snapshot.
+
+/// Conjectured security contributed per FRI query, in fixed point.
+pub const BITS_PER_QUERY: u64 = model::bits_per_query(LOG_BLOWUP as u32);
+
+/// Q16 upper bound on the log2 of the lookup round's error coefficient.
+pub const LOOKUP_COEFFICIENT: u64 = model::lookup_coefficient(&AIR_SHAPE);
+
+/// Q16 upper bound on the log2 of the constraint-composition round's error coefficient.
+pub const COMPOSITION_COEFFICIENT: u64 = model::composition_coefficient(&AIR_SHAPE);
+
+/// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
+pub const OOD_COEFFICIENT: u64 = model::ood_coefficient(&AIR_SHAPE);
+
+/// Q16 upper bound on the log2 of the DEEP round's error coefficient.
+pub const DEEP_COEFFICIENT: u64 = model::deep_coefficient(&AIR_SHAPE);
+
+/// Q16 upper bound on the log2 of the FRI folding round's error coefficient.
+pub const FOLDING_COEFFICIENT: u64 = model::folding_coefficient(LOG_FOLDING_ARITY as u32);
+
+/// Challenge-field bound less the lookup round's coefficient, in fixed point.
+pub const LOOKUP_BASE: u64 = model::lookup_base(&AIR_SHAPE);
+
+/// Challenge-field bound less the constraint-composition round's coefficient.
+pub const COMPOSITION_TERM: u64 = model::composition_term(&AIR_SHAPE);
+
+/// Challenge-field bound less the out-of-domain round's coefficient.
+pub const OOD_BASE: u64 = model::ood_base(&AIR_SHAPE);
+
+/// Challenge-field bound less the DEEP round's coefficient, in fixed point.
+pub const DEEP_BASE: u64 = model::deep_base(&AIR_SHAPE);
+
+/// Challenge-field bound less the FRI folding round's coefficient and fixed blowup.
+pub const FOLDING_BASE: u64 = model::folding_base(LOG_BLOWUP as u32, LOG_FOLDING_ARITY as u32);
+
+/// Number of one-time lookup fractions added at the PVM boundary by the fixed `UintVal` and
+/// `EcGroup` messages.
+///
+/// `fixed_boundary_fraction_count` derives this value from the fixed messages. A test below checks
+/// that the descriptor constant remains equal to the derived count.
+pub const FIXED_BOUNDARY_LOOKUP_TERMS: u32 = 8;
+
 /// Counts the lookup fractions added at the PVM boundary by fixed protocol data: one
 /// `UintVal` fraction per fixed uint ([`crate::fixed::fixed_uintval_msgs`]) and one `EcGroup`
 /// fraction per fixed curve group ([`crate::fixed::fixed_ecgroup_msgs`]). These are additional to
 /// the per-row fractions recorded in [`AIR_SHAPE`].
+#[cfg(test)]
 fn fixed_boundary_fraction_count() -> u64 {
     (crate::fixed::fixed_uintval_msgs().count() + crate::fixed::fixed_ecgroup_msgs().count()) as u64
 }
 
-/// Upper bound on `log2(1 + boundary / (fractions_per_row · 2^log_max_height))`, in fixed point,
-/// via `log2(1 + x) <= x · log2(e)`.
-///
-/// The generic lookup bound counts `fractions_per_row * 2^log_max_height` terms. The PVM boundary
-/// also adds one lookup fraction for every fixed `UintVal` and `EcGroup` message, for a total
-/// of [`fixed_boundary_fraction_count`] additional terms per proof. These terms are not included
-/// in [`AIR_SHAPE`]'s per-row count, so their contribution is accounted for separately. Both
-/// divisions round up, which keeps the correction conservative.
-fn fixed_boundary_correction(log_max_height: u32) -> u64 {
-    let numerator = fixed_boundary_fraction_count() * LOG2_E;
-    numerator
-        .div_ceil(AIR_SHAPE.lookup.fractions_per_row as u64)
-        .div_ceil(1u64 << log_max_height)
-}
-
-/// Applies the contribution from the fixed `UintVal` and `EcGroup` boundary messages to the lookup
-/// term.
-fn apply_fixed_boundary_correction(report: SecurityReport, log_max_height: u32) -> SecurityReport {
-    let correction = fixed_boundary_correction(log_max_height);
-    let terms = (*report.terms()).map(|term| {
-        if term.label == LOOKUP_LABEL {
-            SecurityTerm::new(term.label, term.bits.saturating_sub(correction))
-        } else {
-            term
-        }
-    });
-    SecurityReport::new(terms)
-}
-
-/// Maps PCS parameters onto the protocol parameters the round budget reads.
-pub fn protocol_params(params: &PcsParams) -> ProtocolParams {
-    ProtocolParams {
-        log_blowup: u32::from(params.log_blowup()),
-        log_folding_arity: u32::from(params.log_folding_arity()),
-        num_queries: params.num_queries() as u32,
-        query_pow_bits: params.query_pow_bits() as u32,
-        deep_pow_bits: params.deep_pow_bits() as u32,
-        folding_pow_bits: params.folding_pow_bits() as u32,
-        // The chiplet stack samples its lookup challenges directly after the main-trace
-        // commitment, with no grinding in between.
-        lookup_pow_bits: LOOKUP_POW_BITS,
-    }
-}
+// SECURITY LEVEL
+// ================================================================================================
 
 /// Builds PVM security parameters from values obtained during proof verification.
 ///
@@ -343,15 +202,17 @@ pub fn proof_security_parameters(
 /// also accepts configurations outside that domain; such inputs are not part of the recursive
 /// estimator's contract.
 pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> SecurityReport {
-    let instance = deployed_instance(log_max_height);
-    let report = p3_security::budget::security_report(params, &instance, &AIR_SHAPE);
-    apply_fixed_boundary_correction(report, log_max_height)
+    model::security_report(
+        params,
+        &model::deployed_instance(log_max_height),
+        &AIR_SHAPE,
+        FIXED_BOUNDARY_LOOKUP_TERMS,
+    )
 }
 
 /// Computes a Poseidon2 chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
-    proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
-        .conjectured_security_level()
+    conjectured_security_level_for_alignment(params, log_max_height, COMMITMENT_ALIGNMENT)
 }
 
 /// Computes a chiplet-stack proof's conjectured security level, in bits, for a proof committed
@@ -373,7 +234,7 @@ pub fn conjectured_security_level_for_alignment(
 
 #[cfg(test)]
 mod tests {
-    use p3_security::budget::report::QUERY_LABEL;
+    use p3_security::budget::report::{LOOKUP_LABEL, QUERY_LABEL};
 
     use super::*;
     use crate::stark_config::precompile_pcs_params;
