@@ -1,12 +1,11 @@
 //! [`EcMsmAir`] trace generation, the recording accumulator, and the
 //! LogUp aux builder.
 //!
-//! Each expression lays a run of term rows (`intro`, `intro_zero`, and `intro_endo`: one;
-//! `combine` and `neg`: one per output term). The variable block is the run
-//! sharing `expr_ptr`, with the allocator `expr_ptr' = expr_ptr +
-//! is_boundary` threaded by the AIR. Pad rows continue the allocator with
-//! `is_boundary = 0` (so `expr_ptr` freezes and the cursors simply count
-//! up), touching no bus.
+//! Each expression lays a run of term rows (`intro`: one; `combine`: one
+//! per output term). The variable block is the run sharing `expr_ptr`,
+//! with the allocator `expr_ptr' = expr_ptr + is_boundary` threaded by the
+//! AIR. Pad rows continue the allocator with `is_boundary = 0` (so
+//! `expr_ptr` freezes and the cursors simply count up), touching no bus.
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
@@ -102,9 +101,8 @@ struct ExprRecord {
     group: u32,
     sbound: u32,
     val: u32,
-    // Operation-level cells. `a_expr`/`val_a` are used by combine and neg;
-    // `b_expr`/`val_b` are combine-only. The curve-parameter ptrs are also
-    // used by intro_endo.
+    // combine/neg expression-level cells (0 for intro). `b_expr` / `val_b`
+    // are combine-only; `pai` is neg-only.
     a_expr: u32,
     b_expr: u32,
     val_a: u32,
@@ -141,8 +139,7 @@ struct ExprRecord {
 }
 
 /// Relation identity of a recorded expression — the dedup key. An `intro`
-/// or `intro_endo` is its base point; a `combine` / `neg` its operand
-/// expression ptr(s).
+/// is its base point; a `combine` / `neg` its operand expression ptr(s).
 /// Mirrors [`EcAddRequires`](crate::ec::add::trace)'s `(group, p, q)` dedup:
 /// two requests of the *same* derivation collapse onto one expression. The
 /// strict pointer order (operand `<` result) keeps this sound — a dedup hit
@@ -594,9 +591,8 @@ impl EcMsmRequires {
         self.exprs[expr.0 as usize - 1].claim_mult += mult;
     }
 
-    /// Count of recorded expressions (intros + endomorphism intros +
-    /// combines + negs) — the chain-cost diagnostic for comparing
-    /// addition-chain strategies.
+    /// Count of recorded expressions (intros + combines + negs) — the
+    /// chain-cost diagnostic for comparing addition-chain strategies.
     pub fn expr_count(&self) -> usize {
         self.exprs.len()
     }
@@ -700,8 +696,8 @@ pub fn generate_trace(
                 }
             } else if is_neg {
                 // Unary walk over A: cursor i, the consumed term cells, the
-                // operand value, and group params. Only the a-side ordering
-                // half is populated (the b-side is combine-only).
+                // operand value, group params, and the ∞ result slot. Only
+                // the a-side ordering half (b-side is combine-only).
                 set(COL_A_EXPR, e.a_expr);
                 set(COL_I, rv.i);
                 set(COL_BASE_A, rv.base_a);
@@ -728,10 +724,10 @@ pub fn generate_trace(
                     bpl.require_range16((a_diff >> 16) as u16);
                 }
             } else if is_intro_endo {
-                // The value relation reuses the negation witness slots. The
-                // boundary's `EcGroup` pin authenticates beta/lambda against
-                // the real group; `require::intro_endo` already routed the
-                // UintMul and EcOnCurveCert demand.
+                // The value relation's coordinate cells + the boundary's
+                // `EcGroup` pin (authenticating beta/lambda against the
+                // real group) — the UintMul and EcOnCurveCert demand were
+                // already routed by `require::intro_endo`.
                 set(COL_A_PTR, e.a_ptr);
                 set(COL_B_PTR, e.b_ptr);
                 set(COL_BOUND_PTR, e.bound_ptr);

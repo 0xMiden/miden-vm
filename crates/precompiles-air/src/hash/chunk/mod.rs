@@ -81,7 +81,7 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 
 /// Four aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
-/// - col 0: `lane0` alone — the gated running-sum anchor.
+/// - col 0: `lane0` alone.
 /// - col 1: `lane1` + `lane2` (Memory64).
 /// - col 2: `lane3` (Memory64) + one atomic Eidos chaining input.
 /// - col 3: `emit` alone (ChunkChain, no partner left to pair).
@@ -89,13 +89,6 @@ pub const NUM_AUX_COLS: usize = 4;
 
 /// Per-column fraction counts, matching the pairing above.
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
-
-// The single exposed σ ([`NUM_LOGUP_VALUES`]) follows the VM-wide σ
-// contract in [`crate::logup`]; aggregating the Memory64 + EidosIn
-// residues into one σ is the shared shape, not a chunk-specific choice.
-// The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript
-// root alone — declared but not read here; the natural last-row closing
-// needs no `inv_n` height input.
 
 // AIR
 // ================================================================================================
@@ -248,7 +241,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: lane0 alone — the gated running-sum anchor.
+        // col 0: lane0 alone.
         frac_col!(
             builder,
             "memory64",

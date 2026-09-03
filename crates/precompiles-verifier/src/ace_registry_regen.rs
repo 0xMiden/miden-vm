@@ -676,7 +676,7 @@ fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String
     .expect("writing to String cannot fail");
     writeln!(
         out,
-        "### {NUM_CHIPLETS} felts: {aux_value_ptrs_ptr}..{allocation_end}. Stores, by stable AIR index, the absolute address of its first auxiliary boundary value in the proof-ordered buffer.\nconst AUX_VALUE_PTRS_PTR = {aux_value_ptrs_ptr}\n"
+        "### {NUM_CHIPLETS} felts: {aux_value_ptrs_ptr}..{allocation_end}. Stores, by canonical AIR index, the absolute address of its auxiliary boundary value in the proof-ordered buffer.\nconst AUX_VALUE_PTRS_PTR = {aux_value_ptrs_ptr}\n"
     )
     .expect("writing to String cannot fail");
 

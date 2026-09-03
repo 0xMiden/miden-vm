@@ -21,7 +21,7 @@ const CURRENT_TRACE_ROW_ADDRESS_PTR: u32 = 3_223_322_771;
 const BYTE_PAIR_LUT_AIR_INDEX: usize = 3;
 const MIN_LOG_HEIGHTS: [u64; 10] = [5, 5, 7, 16, 1, 3, 1, 1, 2, 1];
 const HEIGHTS: [u64; 10] = [16, 7, 12, 16, 11, 7, 10, 12, 13, 14];
-const AUX_VALUE_COUNTS: [u32; 10] = [1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
+const AUX_VALUE_COUNTS: [u32; 10] = [1; 10];
 
 fn masm_const(source: &str, name: &str) -> u64 {
     let prefix = format!("const {name} = ");
@@ -82,7 +82,7 @@ fn pvm_wrapper_stores_heights_order_tag_and_registry_metadata() {
         expected_value_ptrs[air_index] = next_value_ptr;
         next_value_ptr += 2 * AUX_VALUE_COUNTS[air_index];
     }
-    assert_eq!(next_value_ptr, aux_bus_boundary_ptr + 24);
+    assert_eq!(next_value_ptr, aux_bus_boundary_ptr + 20);
     let aux_value_ptrs_ptr = pvm_layout_const("AUX_VALUE_PTRS_PTR");
     for (air_index, expected) in expected_value_ptrs.into_iter().enumerate() {
         assert_eq!(

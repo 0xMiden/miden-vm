@@ -1,12 +1,9 @@
-//! EcGroupAdd chiplet — adversarially complete point addition over the
-//! [EC stores](crate::ec).
+//! EcGroupAdd chiplet — complete point addition over the [EC stores](crate::ec).
 //!
-//! One op proves `R = P + Q` for **any** stored operands via a
-//! prover-witnessed near-one-hot over five cases. Every predicate and
-//! every piece of field math rides **ptr-level certificate tuples**
-//! consumed from the uint relation chiplets — no coordinate limb ever
-//! enters this trace. This AIR's own job is *proving which case
-//! applies* and tying the right certificate set to the result.
+//! One operation proves `R = P + Q` for any stored operands by selecting from five cases. The AIR
+//! consumes pointer-level certificates from the uint relation chiplets, so coordinate limbs do not
+//! enter this trace. It constrains the selected case and binds the corresponding certificates to
+//! the result.
 //!
 //! See the design notes for the design.
 //!
@@ -48,24 +45,23 @@
 //! `d ≠ 0` — a limb-level certificate carried by the subtraction that's
 //! already there, no separate inverse MAC or witness.
 //!
-//! The λ-float attack (a forged `d = 0` letting an attacker float the
-//! chord slope) dies because a `nz = 1` provide only exists when the
-//! `UintAdd` chiplet's own certificate holds (`d`'s limbs sum to a
+//! A forged `d = 0` cannot leave the chord slope unconstrained because an `nz = 1` provider exists
+//! only when the `UintAdd` chiplet's own certificate holds (`d`'s limbs sum to a
 //! Goldilocks-field-invertible nonzero value — see
 //! [`crate::uint::add`]'s "Nonzero certificate"), deterministically, with
 //! no β-dependent fingerprint and no completeness gap.
 //!
-//! `double` needs **no** analogous `y₁ ≠ 0` witness: its slope pin
+//! `double` needs no separate `y₁ ≠ 0` witness: its slope pin
 //! `2·λ·y₁ ≡ s` with `s = 3·x² + a` is itself the nonzero guard — at
 //! `y₁ = 0` it would force `s = 0`, which a **smooth** curve never permits
-//! (`3·x² + a ≠ 0` at a simple root of `x³ + ax + b`), so the λ-float
-//! attack dies the same way, for free. This rests on curve smoothness
+//! (`3·x² + a ≠ 0` at a simple root of `x³ + ax + b`), so the slope remains constrained. This
+//! relies on curve smoothness
 //! (`4a³ + 27b² ≠ 0`) — the same anchored-curve well-formedness premise as
 //! `b ≠ 0` (both trusted from the require layer / verifier curve anchoring,
 //! not proven in-circuit). For the cofactor-1 curves (secp256k1, P-256,
-//! bn254-G1) it is moot — prime order admits no 2-torsion, so no stored
-//! finite point ever has `y = 0`; it bites only for ed25519's cofactor-8
-//! image, whose smooth 2-torsion point routes through `cancel`.
+//! bn254-G1) prime order admits no 2-torsion, so no stored finite point has `y = 0`. The case is
+//! relevant only to the cofactor-8 image of ed25519, whose smooth 2-torsion point routes through
+//! `cancel`.
 //!
 //! ## Certificates (consumed tuples)
 //!
@@ -264,7 +260,7 @@ const ROLE_ROWS: [usize; NUM_PERIODIC] = [0, 1, 2, 3];
 // Aux: 12 columns, flattened via `frac_col!` over the 21 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree`
 // = 1:
-// - col 0: the `EcGroupAdd` provide, alone — the gated running-sum anchor.
+// - col 0: the `EcGroupAdd` provide, alone.
 // - col 1: the `p` / `q` operand `EcPoint` consumes.
 // - col 2: the live-result and cancel-PAI-result `EcPoint` consumes.
 // - col 3: the `EcGroup` consume + the cancel `y₁+y₂≡0` certificate.
@@ -519,8 +515,7 @@ where
         let single_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: the `EcGroupAdd` provide, alone — the gated running-sum
-        // anchor.
+        // col 0: the `EcGroupAdd` provide, alone.
         frac_col!(
             builder,
             "ec-add-bindings",

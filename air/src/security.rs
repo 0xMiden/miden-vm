@@ -15,7 +15,7 @@ use p3_security::{
 };
 
 use crate::{
-    AIRS, ConstraintCounts, ConstraintDegrees, Felt, MidenAir, config,
+    AIRS, ConstraintCounts, ConstraintDegrees, Felt, HandwrittenMidenAir, MidenAir, config,
     constraints::lookup::messages::MIDEN_MAX_MESSAGE_WIDTH,
 };
 
@@ -67,11 +67,11 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 /// This is stored rather than derived during verification. `air_shape_matches_symbolic` checks it
 /// against the shape obtained by symbolically evaluating the AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 680,
+    num_composed_constraints: 674,
     max_constraint_degree: 9,
-    num_deep_terms: Some(322),
+    num_deep_terms: Some(282),
     lookup: LookupShape {
-        fractions_per_row: 81,
+        fractions_per_row: 78,
         max_message_width: 16,
     },
 };
@@ -87,9 +87,10 @@ pub fn derive_air_shape() -> AirShape {
     let mut fractions_per_row = 0;
 
     for air in AIRS {
-        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&air).total();
-        max_constraint_degree =
-            max_constraint_degree.max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air).max());
+        let handwritten = HandwrittenMidenAir(air);
+        num_constraints += ConstraintCounts::from_air::<Felt, QuadFelt, _>(&handwritten).total();
+        max_constraint_degree = max_constraint_degree
+            .max(ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&handwritten).max());
         num_columns += column_count(air, COMMITMENT_ALIGNMENT);
         fractions_per_row += air.column_shape().iter().sum::<usize>();
     }
@@ -505,9 +506,9 @@ mod tests {
     #[test]
     fn num_deep_terms_matches_the_pinned_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
-        assert_eq!(num_deep_terms(1), 296, "Blake3 (alignment 1) DEEP term count moved");
-        assert_eq!(num_deep_terms(8), 322, "algebraic (alignment 8) DEEP term count moved");
-        assert_eq!(num_deep_terms(17), 376, "Keccak (alignment 17) DEEP term count moved");
+        assert_eq!(num_deep_terms(1), 274, "Blake3 (alignment 1) DEEP term count moved");
+        assert_eq!(num_deep_terms(8), 282, "algebraic (alignment 8) DEEP term count moved");
+        assert_eq!(num_deep_terms(17), 359, "Keccak (alignment 17) DEEP term count moved");
     }
 
     /// Parameters built for an MVM proof must reproduce the independent MVM security report.
@@ -570,10 +571,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_699_837;
-        const COMPOSITION_TERM_FP: u64 = 7_771_952;
+        const LOOKUP_BASE_FP: u64 = 7_703_405;
+        const COMPOSITION_TERM_FP: u64 = 7_772_790;
         const OOD_BASE_FP: u64 = 8_170_900;
-        const DEEP_BASE_FP: u64 = 7_842_631;
+        const DEEP_BASE_FP: u64 = 7_855_172;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -605,32 +606,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_306_566, 7_771_952, 7_777_684, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_310_132, 7_772_790, 7_777_684, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_389_116, 7_771_952, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_392_684, 7_772_790, 6_860_180, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 23),
-                [6_192_508, 7_771_952, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
+                [6_196_076, 7_772_790, 6_663_572, 8_257_536, 6_777_405, 6_335_399, 8_257_536],
                 94,
             ),
             (
                 (27, 17, 12, 4, 29),
-                [5_799_292, 7_771_952, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
+                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 6_384_189, 6_335_399, 8_257_536],
                 88,
             ),
             (
                 (7, 0, 0, 0, 20),
-                [6_389_116, 7_771_952, 6_860_180, 7_842_631, 6_711_869, 1_353_667, 8_257_536],
+                [6_392_684, 7_772_790, 6_860_180, 7_855_172, 6_711_869, 1_353_667, 8_257_536],
                 20,
             ),
             (
                 (150, 31, 31, 31, 29),
-                [5_799_292, 7_771_952, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
+                [5_802_860, 7_772_790, 6_270_356, 8_257_536, 8_153_661, 8_257_536, 8_257_536],
                 88,
             ),
         ];

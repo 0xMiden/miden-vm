@@ -57,8 +57,7 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 pub trait LookupAir<LB: LookupBuilder> {
     /// Number of LogUp permutation columns declared by this AIR.
     ///
-    /// The column shape is the authoritative source. Keeping this derived accessor preserves the
-    /// existing public API without maintaining a second, caller-supplied column count.
+    /// The column shape defines this count, so the two values cannot drift apart.
     fn num_columns(&self) -> usize {
         self.column_shape().len()
     }

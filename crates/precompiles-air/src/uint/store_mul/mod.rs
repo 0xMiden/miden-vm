@@ -518,10 +518,8 @@ where
         let val_lo: [LB::Expr; 4] = array::from_fn(|k| local_m[k].into());
         let val_hi: [LB::Expr; 4] = array::from_fn(|k| local_m[4 + k].into());
 
-        // col 0: the running sum — store's own anchor fraction, unpaired
-        // and unchanged (not folded with mul's, which would multiply the
-        // two groups' (u, v) together and push the closing constraint
-        // past the lqd = 1 budget for no width gain).
+        // col 0: store's original first fraction column, which drives the composite's centered
+        // accumulator.
         builder.next_column(
             |col| {
                 col.group(

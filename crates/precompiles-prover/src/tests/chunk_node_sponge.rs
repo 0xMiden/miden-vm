@@ -162,9 +162,8 @@ fn packed_lookup_columns_match_the_standalone_components() {
             "packed node D-limb/Eidos columns must preserve all standalone columns",
         );
 
-        // The same Sponge evaluator runs at two main/aux offsets. This
-        // comparison pins the composite offset plumbing; the independent
-        // multi-block session-balance test covers its bus semantics.
+        // The same Sponge evaluator runs at two main/aux offsets. This comparison checks the
+        // composite offsets; the multi-block session-balance test covers its bus semantics.
         for col in 0..SPONGE_NUM_AUX_COLS {
             assert_same_rational_fold(
                 composite_folds[row][chunk_node::NUM_AUX_COLS + col],

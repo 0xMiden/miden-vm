@@ -8,13 +8,10 @@
 //!   [`EcPointStoreAir`] implementations remain as component AIRs for isolated tests.
 //! - [`add::EcGroupAddAir`] — the complete group-law addition over the two stores.
 //!
-//! Both stores are **binding stores**, deliberately the thinnest
-//! chiplets in the stack: one row per entity, no periodic columns, a
-//! single aux column each. Everything heavy is delegated downward —
-//! coordinate canonicity to the [UintStore](crate::uint), curve
-//! membership to three [`UintMul`](crate::relations::BusId::UintMul)
-//! MACs sharing a result ptr, group-op field math to the uint relation
-//! chiplets.
+//! Both stores are compact binding chiplets: one row per entity, no periodic columns, and one
+//! auxiliary column each. They delegate coordinate canonicity to the [UintStore](crate::uint),
+//! curve membership to three [`UintMul`](crate::relations::BusId::UintMul) MACs sharing a result
+//! pointer, and group-operation field arithmetic to the uint relation chiplets.
 //!
 //! See the design notes for the full design.
 //!
@@ -195,8 +192,7 @@ pub const NUM_MAIN_COLS: usize = 16;
 
 // Aux: five columns, flattened via `frac_col!` so every closing
 // constraint stays at degree ≤ 3 → `log_quotient_degree = 1`. Six
-// fractions total: `EcPoint` provide (col 0, the gated running-sum
-// anchor, alone), `EcGroup` consume paired with the `EcGroupAdd`
+// fractions total: `EcPoint` provide alone in col 0, `EcGroup` consume paired with the `EcGroupAdd`
 // on-curve-cert consume (col 1), and the three trio MAC consumes — each
 // degree 3, so each sits alone (cols 2-4). The trio and the cert are
 // mutually-exclusive membership modes.
@@ -372,7 +368,7 @@ where
     let single_deg = Deg { v: 1, u: 2 };
     let paired_deg = Deg { v: 3, u: 2 };
 
-    // col 0: the point binding, alone — the gated running-sum anchor.
+    // col 0: the point binding, alone.
     frac_col!(
         builder,
         "ec-points",

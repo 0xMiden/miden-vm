@@ -110,20 +110,20 @@ pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(5386642688186435407),
-    Felt::new_unchecked(6538706076452792969),
-    Felt::new_unchecked(9112338682580750753),
-    Felt::new_unchecked(4367732112936953739),
+    Felt::new_unchecked(8632016592601946927),
+    Felt::new_unchecked(1621553245858730349),
+    Felt::new_unchecked(4913324106662899112),
+    Felt::new_unchecked(7145020521687365277),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(6867412142867451962),
-    Felt::new_unchecked(2481413844695882715),
-    Felt::new_unchecked(5303340724979295925),
-    Felt::new_unchecked(8468512126931593944),
+    Felt::new_unchecked(4294634516380605961),
+    Felt::new_unchecked(6303681609237167832),
+    Felt::new_unchecked(2768420426064337471),
+    Felt::new_unchecked(284704709593806813),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
