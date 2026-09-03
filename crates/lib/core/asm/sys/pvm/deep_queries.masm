@@ -12,9 +12,9 @@ const PREPROCESSED_INDEX_MASK = 524287
 
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
-const PREPROCESSED_ROW_DOUBLE_WORDS = 2
-const MAIN_ROW_DOUBLE_WORDS = 66
-const AUX_ROW_DOUBLE_WORDS = 46
+const PREPROCESSED_ROW_DOUBLE_WORDS = 1
+const MAIN_ROW_DOUBLE_WORDS = 64
+const AUX_ROW_DOUBLE_WORDS = 36
 const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS
@@ -27,9 +27,8 @@ const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
 # Registered LMCS leaf initial chaining words for the fixed PVM row widths.
 const EIDOS_LMCS_INIT_CV_8 = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
-const EIDOS_LMCS_INIT_CV_16 = [4280581857092832001, 2688637132020383760, 1947077364412317696, 6620516959492505600]
-const EIDOS_LMCS_INIT_CV_368 = [4280581857092832001, 2688637132020384112, 1947077364412317696, 6620516959492505600]
-const EIDOS_LMCS_INIT_CV_528 = [4280581857092832001, 2688637132020384272, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_288 = [4280581857092832001, 2688637132020384032, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_512 = [4280581857092832001, 2688637132020384256, 1947077364412317696, 6620516959492505600]
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -119,7 +118,7 @@ proc process_preprocessed_trace(
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
 
-    push.EIDOS_LMCS_INIT_CV_16
+    push.EIDOS_LMCS_INIT_CV_8
     swapw padw
     exec.load_preprocessed_trace
 
@@ -159,7 +158,7 @@ proc process_main_trace(
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_528
+    push.EIDOS_LMCS_INIT_CV_512
     swapw padw
     exec.load_main_trace
 
@@ -199,7 +198,7 @@ proc process_aux_trace(
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_368
+    push.EIDOS_LMCS_INIT_CV_288
     swapw padw
     exec.load_aux_trace
 
