@@ -137,55 +137,63 @@ impl LiftedAir<Felt, QuadFelt> for ChunkAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Phase 1: local row constraints.
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let chunk_seq_id: AB::Expr = local[COL_CHUNK_SEQ_ID].into();
-        let chunk_seq_id_next: AB::Expr = next[COL_CHUNK_SEQ_ID].into();
-        let absorption_id: AB::Expr = local[COL_ABSORPTION_ID].into();
-        let absorption_id_next: AB::Expr = next[COL_ABSORPTION_ID].into();
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let is_head: AB::Expr = local[COL_IS_HEAD].into();
-        let is_head_next: AB::Expr = next[COL_IS_HEAD].into();
-
-        // Boundary (`when_first_row`) ---------------------------
-        // chunk_seq_id starts at 0. absorption_id / act / is_head are
-        // unpinned at row 0: an all-padding trace is valid, and the
-        // first head's Eidos cycle is bus-pinned.
-        builder.when_first_row().assert_zero(chunk_seq_id.clone());
-
-        // chunk_seq_id chain ------------------------------------
-        // +1 per row, globally. `when_transition` leaves the cyclic
-        // wrap unconstrained.
-        builder
-            .when_transition()
-            .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
-
-        // absorption_id chain -------------------------------------
-        // Within an absorption chain (successor not a new head) it
-        // increments by 1, in lockstep with chunk_seq_id; at chain
-        // heads the gate vanishes and it jumps freely to the new
-        // chain's Eidos cycle. This lockstep makes Eidos's absorption order
-        // equal the downstream hasher's Memory64 order.
-        builder.when_transition().assert_zero(
-            (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
-        );
-
-        // Activity ----------------------------------------------
-        builder.assert_bool(local[COL_ACT]);
-        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
-
-        // Selector ----------------------------------------------
-        builder.assert_bool(local[COL_IS_HEAD]);
-        builder.assert_zero(is_head * (AB::Expr::ONE - act));
+        eval_main(builder, 0);
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
     }
+}
+
+/// Evaluate this component's base constraints in a main-trace column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    // Phase 1: local row constraints.
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+
+    let chunk_seq_id: AB::Expr = local[COL_CHUNK_SEQ_ID].into();
+    let chunk_seq_id_next: AB::Expr = next[COL_CHUNK_SEQ_ID].into();
+    let absorption_id: AB::Expr = local[COL_ABSORPTION_ID].into();
+    let absorption_id_next: AB::Expr = next[COL_ABSORPTION_ID].into();
+    let act: AB::Expr = local[COL_ACT].into();
+    let act_next: AB::Expr = next[COL_ACT].into();
+    let is_head: AB::Expr = local[COL_IS_HEAD].into();
+    let is_head_next: AB::Expr = next[COL_IS_HEAD].into();
+
+    // Boundary (`when_first_row`) ---------------------------
+    // chunk_seq_id starts at 0. absorption_id / act / is_head are
+    // unpinned at row 0: an all-padding trace is valid, and the
+    // first head's Eidos cycle is bus-pinned.
+    builder.when_first_row().assert_zero(chunk_seq_id.clone());
+
+    // chunk_seq_id chain ------------------------------------
+    // +1 per row, globally. `when_transition` leaves the cyclic
+    // wrap unconstrained.
+    builder
+        .when_transition()
+        .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
+
+    // absorption_id chain -------------------------------------
+    // Within an absorption chain (successor not a new head) it
+    // increments by 1, in lockstep with chunk_seq_id; at chain
+    // heads the gate vanishes and it jumps freely to the new
+    // chain's Eidos cycle. This lockstep makes Eidos's absorption order
+    // equal the downstream hasher's Memory64 order.
+    builder.when_transition().assert_zero(
+        (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
+    );
+
+    // Activity ----------------------------------------------
+    builder.assert_bool(local[COL_ACT]);
+    builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
+
+    // Selector ----------------------------------------------
+    builder.assert_bool(local[COL_IS_HEAD]);
+    builder.assert_zero(is_head * (AB::Expr::ONE - act));
 }
 
 // LOOKUP AIR

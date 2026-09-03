@@ -83,7 +83,6 @@
 //! register transition holds over zeros. No sentinel, no demand.
 
 mod aux;
-
 use alloc::{vec, vec::Vec};
 use core::array;
 
@@ -316,6 +315,27 @@ const REG_ID: usize = NUM_LOGUP_COLS;
 const REG_S: usize = NUM_LOGUP_COLS + 1;
 pub const AUX_WIDTH: usize = NUM_LOGUP_COLS + 2;
 
+/// Column band occupied by one copy of the mul component.
+///
+/// `main` and `periodic` are the band's first main-trace and periodic column;
+/// `reg_id` and `reg_s` are the auxiliary columns hosting the Schwartz-Zippel
+/// `id` and staging `S` registers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MulBand {
+    pub main: usize,
+    pub periodic: usize,
+    pub reg_id: usize,
+    pub reg_s: usize,
+}
+
+/// The band [`UintMulAir`] occupies on its own: every component at its own origin.
+pub(crate) const OWN_BAND: MulBand = MulBand {
+    main: 0,
+    periodic: 0,
+    reg_id: REG_ID,
+    reg_s: REG_S,
+};
+
 const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
     let mut shape = [2usize; NUM_LOGUP_COLS];
     shape[0] = 1;
@@ -388,175 +408,177 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let sel: [AB::Expr; NUM_PERIODIC] = {
-            let p = builder.periodic_values();
-            array::from_fn(|i| p[i].into())
-        };
-
-        // β⁰..β³¹ (the γ weights reach (β − t)·β³⁰).
-        let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(NUM_GAMMA + 1);
-        bp.push(AB::ExprEF::ONE);
-        for i in 1..NUM_GAMMA + 1 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
-        let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-        let x_minus_t: AB::ExprEF = beta - t16.clone();
-        let offset: AB::Expr = AB::Expr::from(Felt::from(GAMMA_OFFSET));
-
-        let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
-        let act: AB::Expr = local[COL_ACT].into();
-        // The `c` row reads its signed scale from its local term metadata.
-        let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
-
-        // Registers.
-        let id: AB::ExprEF =
-            current_main::<_, AB::VarEF, 1>(builder.permutation(), REG_ID)[0].into();
-        let id_next: AB::ExprEF =
-            next_main::<_, AB::VarEF, 1>(builder.permutation(), REG_ID)[0].into();
-        let s: AB::ExprEF = current_main::<_, AB::VarEF, 1>(builder.permutation(), REG_S)[0].into();
-        let s_next: AB::ExprEF =
-            next_main::<_, AB::VarEF, 1>(builder.permutation(), REG_S)[0].into();
-
-        // Weighted cell sums: the 16-limb operands (a/b/bound, cells
-        // 0–15), the 17-limb quotient (cells 0–16), and the linear r/c
-        // operands (4×32 limbs at even powers, cells 0–7).
-        let full16_sum: AB::ExprEF =
-            (0..16).fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
-        let full_q_sum: AB::ExprEF = (0..NUM_Q_LIMBS)
-            .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
-        let val_sum: AB::ExprEF = (0..8)
-            .fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
-
-        // S: build κₐ·a(β) on the `a` row, bound(β) on the `p` row;
-        // hold / reset per the periodic keep gate.
-        let build: AB::ExprEF = full16_sum.clone() * (sel[ROW_A].clone() * kappa_a)
-            + full16_sum.clone() * sel[ROW_P].clone();
-        let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
-        builder.when_first_row().assert_zero_ext(s.clone());
-        builder.when_transition().assert_zero_ext(s_next - s.clone() * keep - build);
-
-        // id contributions.
-        // The product: S = κₐ·a(β) through the `b` row.
-        let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
-        // The quotient: S = bound(β) through the `q` row; q(β)·(bound(β)+1).
-        let quotient = (s + AB::ExprEF::ONE) * full_q_sum * sel[ROW_Q].clone();
-        // The linear operands: 4×32 limbs at even powers, both halves on
-        // one row. κ_c_signed is local to the `c` row.
-        let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
-            - val_sum.clone() * sel[ROW_R].clone();
-        // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
-        // the lo halves carry the −2³¹ offset correction, act-gated so
-        // all-zero padding blocks contribute nothing.
-        let mut carries = AB::ExprEF::ZERO;
-        for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            let k = slot / 2;
-            let mut w = x_minus_t.clone() * bp[k].clone();
-            if slot % 2 == 1 {
-                w *= t16.clone();
-            }
-            let mut gated: AB::Expr = sel[row].clone() * AB::Expr::from(local[cell]);
-            if slot % 2 == 0 {
-                gated -= sel[row].clone() * act.clone() * offset.clone();
-            }
-            carries += w * gated;
-        }
-
-        // The subtractive borrow: when `is_sub` and `κₐ·a·b < κ_c·c`, the
-        // canonical reduction wraps up by one p, so the identity carries
-        // `+borrow·(bound(β)+1)`. Contributed on the `p` row, where
-        // bound(β) is live as the full limb sum; the +1 of `p = bound + 1`
-        // rides β⁰.
-        let borrow: AB::Expr = local[COL_BORROW].into();
-        let borrow_contrib: AB::ExprEF =
-            (full16_sum + AB::ExprEF::ONE) * (sel[ROW_P].clone() * borrow.clone());
-
-        let contrib: AB::ExprEF = product - quotient + linear + carries + borrow_contrib;
-        builder.when_first_row().assert_zero_ext(id.clone());
-        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-
-        // The closing row (`c`) has a nonzero contribution of its own —
-        // its `κ_c_signed · val_sum` linear term plus its share of γ — so
-        // the closure check folds it in directly instead of reading it
-        // back from `id_next`. That keeps the check local to the block's
-        // last row, so it also covers the trace's final block: relying on
-        // `id_next` would read the wrap-around first row's pinned zero
-        // regardless of whether that last block actually closed. Built
-        // from `c`'s own cells only (not the shared `contrib`, whose
-        // other-role terms carry their own periodic gates and would
-        // needlessly bloat this constraint's degree once multiplied by
-        // `sel[ROW_C]`).
-        let mut c_own: AB::ExprEF = val_sum * kappa_c_signed_local.clone();
-        for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
-            if row == ROW_C {
-                let k = slot / 2;
-                let mut w = x_minus_t.clone() * bp[k].clone();
-                if slot % 2 == 1 {
-                    w *= t16.clone();
-                }
-                let mut gated: AB::Expr = AB::Expr::from(local[cell]);
-                if slot % 2 == 0 {
-                    gated -= act.clone() * offset.clone();
-                }
-                c_own += w * gated;
-            }
-        }
-        builder.assert_zero_ext((id + c_own) * sel[ROW_C].clone());
-
-        // act is the boolean block-active flag (cycle-constant).
-        builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
-
-        // `is_sub` (`c`-row cell) is boolean; `borrow` (cycle-constant)
-        // ∈ {0, 1, 2} — a `κ_c = 2` double (`λ² − 2x₁`) underflows by up to
-        // 2p — and only fires in the subtractive mode (`borrow ⟹ is_sub`),
-        // so an additive op cannot smuggle a +p shift onto its quotient.
-        let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
-        builder.assert_zero(sel[ROW_C].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
-
-        // κ_c_signed = κ_c · (1 − 2·is_sub), pinned `c`-row-local (both
-        // operands live on this row), so `linear` above can read it via a
-        // single local witness. Degree 2 (`κ_c` × `is_sub`), well under
-        // the lqd-1 budget.
-        let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
-        let c_sign_local: AB::Expr = AB::Expr::ONE - is_sub.double();
-        builder.assert_zero(
-            sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local),
-        );
-
-        let two = AB::Expr::from(Felt::from(2u32));
-        builder.assert_zero(
-            borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two),
-        );
-        builder.assert_zero(sel[ROW_C].clone() * borrow * (AB::Expr::ONE - is_sub));
-
-        // A provide must come from an active block. The `UintMul` provide is
-        // gated only by `sel[ROW_C]` (not `act`), and the operand consumes
-        // are act-gated — so an `act = 0` block with zeroed limbs (the SZ
-        // registers close trivially) and a witnessed `c`-row `mult` would
-        // provide a *false* relation onto the bus. Force the mult to 0 when
-        // act = 0.
-        builder
-            .assert_zero(sel[ROW_C].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into());
-
-        // Cycle-constancy: ptrs / κₐ / act are constant within a block
-        // (every row but the terminal one).
-        let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_C].clone();
-        for col in
-            [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT, COL_BORROW]
-        {
-            let here: AB::Expr = local[col].into();
-            let there: AB::Expr = next[col].into();
-            builder.assert_zero(not_term.clone() * (there - here));
-        }
+        eval_main(builder, OWN_BAND);
 
         // Phase 2: LogUp — the UintMul provide + Range16 + the
         // operand consumes.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
+    }
+}
+
+/// Evaluate this component's base constraints in a column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, band: MulBand)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), band.main);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), band.main);
+
+    let sel: [AB::Expr; NUM_PERIODIC] = {
+        let p = builder.periodic_values();
+        array::from_fn(|i| p[band.periodic + i].into())
+    };
+
+    // β⁰..β³¹ (the γ weights reach (β − t)·β³⁰).
+    let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
+    let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(NUM_GAMMA + 1);
+    bp.push(AB::ExprEF::ONE);
+    for i in 1..NUM_GAMMA + 1 {
+        bp.push(bp[i - 1].clone() * beta.clone());
+    }
+    let t16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
+    let x_minus_t: AB::ExprEF = beta - t16.clone();
+    let offset: AB::Expr = AB::Expr::from(Felt::from(GAMMA_OFFSET));
+
+    let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
+    let act: AB::Expr = local[COL_ACT].into();
+    // The `c` row reads its signed scale from its local term metadata.
+    let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
+
+    // Registers.
+    let id: AB::ExprEF =
+        current_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_id)[0].into();
+    let id_next: AB::ExprEF =
+        next_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_id)[0].into();
+    let s: AB::ExprEF =
+        current_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_s)[0].into();
+    let s_next: AB::ExprEF =
+        next_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_s)[0].into();
+
+    // Weighted cell sums: the 16-limb operands (a/b/bound, cells
+    // 0–15), the 17-limb quotient (cells 0–16), and the linear r/c
+    // operands (4×32 limbs at even powers, cells 0–7).
+    let full16_sum: AB::ExprEF =
+        (0..16).fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+    let full_q_sum: AB::ExprEF = (0..NUM_Q_LIMBS)
+        .fold(AB::ExprEF::ZERO, |acc, i| acc + bp[i].clone() * AB::Expr::from(local[i]));
+    let val_sum: AB::ExprEF =
+        (0..8).fold(AB::ExprEF::ZERO, |acc, m| acc + bp[2 * m].clone() * AB::Expr::from(local[m]));
+
+    // S: build κₐ·a(β) on the `a` row, bound(β) on the `p` row;
+    // hold / reset per the periodic keep gate.
+    let build: AB::ExprEF = full16_sum.clone() * (sel[ROW_A].clone() * kappa_a)
+        + full16_sum.clone() * sel[ROW_P].clone();
+    let keep: AB::Expr = sel[PCOL_S_KEEP].clone();
+    builder.when_first_row().assert_zero_ext(s.clone());
+    builder.when_transition().assert_zero_ext(s_next - s.clone() * keep - build);
+
+    // id contributions.
+    // The product: S = κₐ·a(β) through the `b` row.
+    let product = s.clone() * full16_sum.clone() * sel[ROW_B].clone();
+    // The quotient: S = bound(β) through the `q` row; q(β)·(bound(β)+1).
+    let quotient = (s + AB::ExprEF::ONE) * full_q_sum * sel[ROW_Q].clone();
+    // The linear operands: 4×32 limbs at even powers, both halves on
+    // one row. κ_c_signed is local to the `c` row.
+    let linear = val_sum.clone() * (sel[ROW_C].clone() * kappa_c_signed_local.clone())
+        - val_sum.clone() * sel[ROW_R].clone();
+    // The carries: per slot, w(s) = (β − t)·β^k (·2¹⁶ for hi halves);
+    // the lo halves carry the −2³¹ offset correction, act-gated so
+    // all-zero padding blocks contribute nothing.
+    let mut carries = AB::ExprEF::ZERO;
+    for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+        let k = slot / 2;
+        let mut w = x_minus_t.clone() * bp[k].clone();
+        if slot % 2 == 1 {
+            w *= t16.clone();
+        }
+        let mut gated: AB::Expr = sel[row].clone() * AB::Expr::from(local[cell]);
+        if slot % 2 == 0 {
+            gated -= sel[row].clone() * act.clone() * offset.clone();
+        }
+        carries += w * gated;
+    }
+
+    // The subtractive borrow: when `is_sub` and `κₐ·a·b < κ_c·c`, the
+    // canonical reduction wraps up by one p, so the identity carries
+    // `+borrow·(bound(β)+1)`. Contributed on the `p` row, where
+    // bound(β) is live as the full limb sum; the +1 of `p = bound + 1`
+    // rides β⁰.
+    let borrow: AB::Expr = local[COL_BORROW].into();
+    let borrow_contrib: AB::ExprEF =
+        (full16_sum + AB::ExprEF::ONE) * (sel[ROW_P].clone() * borrow.clone());
+
+    let contrib: AB::ExprEF = product - quotient + linear + carries + borrow_contrib;
+    builder.when_first_row().assert_zero_ext(id.clone());
+    builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
+
+    // The closing row (`c`) has a nonzero contribution of its own —
+    // its `κ_c_signed · val_sum` linear term plus its share of γ — so
+    // the closure check folds it in directly instead of reading it
+    // back from `id_next`. That keeps the check local to the block's
+    // last row, so it also covers the trace's final block: relying on
+    // `id_next` would read the wrap-around first row's pinned zero
+    // regardless of whether that last block actually closed. Built
+    // from `c`'s own cells only (not the shared `contrib`, whose
+    // other-role terms carry their own periodic gates and would
+    // needlessly bloat this constraint's degree once multiplied by
+    // `sel[ROW_C]`).
+    let mut c_own: AB::ExprEF = val_sum * kappa_c_signed_local.clone();
+    for (slot, &(row, cell)) in GAMMA_SLOTS.iter().enumerate() {
+        if row == ROW_C {
+            let k = slot / 2;
+            let mut w = x_minus_t.clone() * bp[k].clone();
+            if slot % 2 == 1 {
+                w *= t16.clone();
+            }
+            let mut gated: AB::Expr = AB::Expr::from(local[cell]);
+            if slot % 2 == 0 {
+                gated -= act.clone() * offset.clone();
+            }
+            c_own += w * gated;
+        }
+    }
+    builder.assert_zero_ext((id + c_own) * sel[ROW_C].clone());
+
+    // act is the boolean block-active flag (cycle-constant).
+    builder.assert_zero(act.clone() * (AB::Expr::ONE - act.clone()));
+
+    // `is_sub` (`c`-row cell) is boolean; `borrow` (cycle-constant)
+    // ∈ {0, 1, 2} — a `κ_c = 2` double (`λ² − 2x₁`) underflows by up to
+    // 2p — and only fires in the subtractive mode (`borrow ⟹ is_sub`),
+    // so an additive op cannot smuggle a +p shift onto its quotient.
+    let is_sub: AB::Expr = local[TERM_CELL_IS_SUB].into();
+    builder.assert_zero(sel[ROW_C].clone() * is_sub.clone() * (AB::Expr::ONE - is_sub.clone()));
+
+    // κ_c_signed = κ_c · (1 − 2·is_sub), pinned `c`-row-local (both
+    // operands live on this row), so `linear` above can read it via a
+    // single local witness. Degree 2 (`κ_c` × `is_sub`), well under
+    // the lqd-1 budget.
+    let kappa_c_local: AB::Expr = local[TERM_CELL_KAPPA_C].into();
+    let c_sign_local: AB::Expr = AB::Expr::ONE - AB::Expr::from(Felt::from(2u32)) * is_sub.clone();
+    builder.assert_zero(sel[ROW_C].clone() * (kappa_c_signed_local - kappa_c_local * c_sign_local));
+
+    let two = AB::Expr::from(Felt::from(2u32));
+    builder.assert_zero(borrow.clone() * (borrow.clone() - AB::Expr::ONE) * (borrow.clone() - two));
+    builder.assert_zero(sel[ROW_C].clone() * borrow * (AB::Expr::ONE - is_sub));
+
+    // A provide must come from an active block. The `UintMul` provide is
+    // gated only by `sel[ROW_C]` (not `act`), and the operand consumes
+    // are act-gated — so an `act = 0` block with zeroed limbs (the SZ
+    // registers close trivially) and a witnessed `c`-row `mult` would
+    // provide a *false* relation onto the bus. Force the mult to 0 when
+    // act = 0.
+    builder.assert_zero(sel[ROW_C].clone() * (AB::Expr::ONE - act) * local[TERM_CELL_MULT].into());
+
+    // Cycle-constancy: ptrs / κₐ / act are constant within a block
+    // (every row but the terminal one).
+    let not_term: AB::Expr = AB::Expr::ONE - sel[ROW_C].clone();
+    for col in [COL_A_PTR, COL_B_PTR, COL_R_PTR, COL_BOUND_PTR, COL_KAPPA_A, COL_ACT, COL_BORROW] {
+        let here: AB::Expr = local[col].into();
+        let there: AB::Expr = next[col].into();
+        builder.assert_zero(not_term.clone() * (there - here));
     }
 }
 

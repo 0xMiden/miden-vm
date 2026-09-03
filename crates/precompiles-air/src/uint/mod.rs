@@ -58,6 +58,7 @@
 
 pub mod add;
 mod aux;
+pub(crate) use aux::StoreRegisters;
 pub mod mul;
 pub mod store_mul;
 
@@ -227,6 +228,25 @@ pub(crate) const NUM_LOGUP_COLS: usize = 1 // the merged UintVal provide
     + 1; // the merged raw UintLimbs provide
 const REGISTER_COL: usize = NUM_LOGUP_COLS;
 pub const AUX_WIDTH: usize = NUM_LOGUP_COLS + 1;
+
+/// Column band occupied by one copy of the store component.
+///
+/// `main` and `periodic` are the band's first main-trace and periodic column;
+/// `reg_id` is the auxiliary column hosting the Schwartz-Zippel `id` register.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StoreBand {
+    pub main: usize,
+    pub periodic: usize,
+    pub reg_id: usize,
+}
+
+/// The band [`UintStoreAir`] occupies on its own: every component at its own origin.
+pub(crate) const OWN_BAND: StoreBand = StoreBand {
+    main: 0,
+    periodic: 0,
+    reg_id: REGISTER_COL,
+};
+
 pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = {
     let mut shape = [2usize; NUM_LOGUP_COLS];
     shape[0] = 1;
@@ -286,138 +306,145 @@ impl LiftedAir<Felt, QuadFelt> for UintStoreAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        // Role selectors.
-        let (v_lo_sel, v_hi_sel, comp_sel, bound_sel): (AB::Expr, AB::Expr, AB::Expr, AB::Expr) = {
-            let p = builder.periodic_values();
-            (
-                p[PCOL_V_LO].into(),
-                p[PCOL_V_HI].into(),
-                p[PCOL_COMP].into(),
-                p[PCOL_BOUND].into(),
-            )
-        };
-
-        // β^0 .. β^7 (challenge constants).
-        let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
-        let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(8);
-        bp.push(AB::ExprEF::ONE);
-        for i in 1..8 {
-            bp.push(bp[i - 1].clone() * beta.clone());
-        }
-
-        // `id` register.
-        let id: AB::ExprEF =
-            current_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
-        let id_next: AB::ExprEF =
-            next_main::<_, AB::VarEF, 1>(builder.permutation(), REGISTER_COL)[0].into();
-
-        // Weighted limb sums. Recombined 32-bit (v/comp): r_k = limb[2k] +
-        // 2¹⁶·limb[2k+1]. Direct 32-bit (bound): d_k = limb[k]. k = 0..4.
-        // `v`/`comp`'s low half always lives at cells 0–7 (weighted at
-        // powers 0–3 for the row's own low content, at powers 4–7 for the
-        // row's own high content — since `v` hi's high content sits at
-        // cells 0–7 of *its own* row, while `comp`'s high content sits at
-        // cells 8–15 of the *same* row as its low content).
-        let two16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
-        let mut recomb_lo07 = AB::ExprEF::ZERO;
-        let mut recomb_hi07 = AB::ExprEF::ZERO;
-        let mut recomb_hi815 = AB::ExprEF::ZERO;
-        let mut direct_lo = AB::ExprEF::ZERO;
-        let mut direct_hi = AB::ExprEF::ZERO;
-        for k in 0..4 {
-            let r07: AB::Expr =
-                AB::Expr::from(local[2 * k]) + two16.clone() * AB::Expr::from(local[2 * k + 1]);
-            let r815: AB::Expr = AB::Expr::from(local[8 + 2 * k])
-                + two16.clone() * AB::Expr::from(local[8 + 2 * k + 1]);
-            recomb_lo07 += bp[k].clone() * r07.clone();
-            recomb_hi07 += bp[4 + k].clone() * r07;
-            recomb_hi815 += bp[4 + k].clone() * r815;
-            direct_lo += bp[k].clone() * AB::Expr::from(local[k]);
-            direct_hi += bp[4 + k].clone() * AB::Expr::from(local[8 + k]);
-        }
-
-        // Carry terms: Σ c_j·(β^{j+1} − t·β^j), t = 2³², hosted on the
-        // bound row — γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
-        let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
-        let mut carry_lo_term = AB::ExprEF::ZERO;
-        for j in 0..4 {
-            let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_lo_term += weight * AB::Expr::from(local[CARRY_LO_BEGIN + j]);
-        }
-        let mut carry_hi_term = AB::ExprEF::ZERO;
-        for j in 4..7 {
-            let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
-            carry_hi_term += weight * AB::Expr::from(local[CARRY_HI_BEGIN + (j - 4)]);
-        }
-
-        // contrib: v/comp add (β-weighted recombine), bound subtracts
-        // (direct) and adds its carry cells — gated by role. `comp`
-        // contributes both halves from its one row; `bound` likewise.
-        let contrib: AB::ExprEF = recomb_lo07.clone() * (v_lo_sel + comp_sel.clone())
-            + recomb_hi07 * v_hi_sel
-            + recomb_hi815 * comp_sel
-            + (carry_lo_term.clone() - direct_lo.clone() + carry_hi_term.clone()
-                - direct_hi.clone())
-                * bound_sel.clone();
-
-        builder.when_first_row().assert_zero_ext(id.clone());
-        builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
-
-        // The closing row (`bound`) has a nonzero contribution of its
-        // own — its `−direct` terms plus its carry share — so the
-        // closure check folds it in directly instead of reading it back
-        // from `id_next`, exactly like `UintMulAir`'s `c` row (see that
-        // module for the full rationale) and `UintAddAir`'s `p` row.
-        let bound_own: AB::ExprEF = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
-        builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
-
-        // Root the bounded positive pointer-gap chain at 1. Even a maximum
-        // 2³²-row trace grows by < 2⁴⁶, so it cannot wrap through 0.
-        let ptr: AB::Expr = local[COL_PTR].into();
-        builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
-
-        // Carry booleanity (the no-wrap bound needs binary carries):
-        // γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
-        for &cell in
-            [CARRY_LO_BEGIN, CARRY_LO_BEGIN + 1, CARRY_LO_BEGIN + 2, CARRY_LO_BEGIN + 3].iter()
-        {
-            let lj: AB::Expr = local[cell].into();
-            builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
-        }
-        for &cell in [CARRY_HI_BEGIN, CARRY_HI_BEGIN + 1, CARRY_HI_BEGIN + 2].iter() {
-            let lj: AB::Expr = local[cell].into();
-            builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
-        }
-
-        // Cycle-constancy: ptr / bound_ptr are constant within a block
-        // (every row but the terminal one). The mults need no transport —
-        // they live once, in the hub cells the provides read directly.
-        let not_term: AB::Expr = AB::Expr::ONE - bound_sel.clone();
-        for col in [COL_PTR, COL_BOUND_PTR] {
-            let here: AB::Expr = local[col].into();
-            let there: AB::Expr = next[col].into();
-            builder.assert_zero(not_term.clone() * (there - here));
-        }
-
-        // ptr-gap tie: on a real block boundary (bound row) the witnessed
-        // gap = ptr' − ptr − 1, so its Range16 forces strictly-increasing,
-        // bounded-gap (hence injective) ptrs. when_transition drops the
-        // cyclic last row, where the gap is left free (the prover sets 0).
-        let gap: AB::Expr = local[TERM_CELL_GAP].into();
-        let ptr_here: AB::Expr = local[COL_PTR].into();
-        let ptr_next: AB::Expr = next[COL_PTR].into();
-        builder
-            .when_transition()
-            .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
+        eval_main(builder, OWN_BAND);
 
         // Phase 2: LogUp — UintVal (col 0) + Range16.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
     }
+}
+
+/// Evaluate this component's base constraints in a column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, band: StoreBand)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), band.main);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), band.main);
+
+    // Role selectors.
+    let (v_lo_sel, v_hi_sel, comp_sel, bound_sel): (AB::Expr, AB::Expr, AB::Expr, AB::Expr) = {
+        let p = builder.periodic_values();
+        let b = band.periodic;
+        (
+            p[b + PCOL_V_LO].into(),
+            p[b + PCOL_V_HI].into(),
+            p[b + PCOL_COMP].into(),
+            p[b + PCOL_BOUND].into(),
+        )
+    };
+
+    // β^0 .. β^7 (challenge constants).
+    let beta: AB::ExprEF = builder.permutation_randomness()[1].into();
+    let mut bp: Vec<AB::ExprEF> = Vec::with_capacity(8);
+    bp.push(AB::ExprEF::ONE);
+    for i in 1..8 {
+        bp.push(bp[i - 1].clone() * beta.clone());
+    }
+
+    // `id` register.
+    let id: AB::ExprEF =
+        current_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_id)[0].into();
+    let id_next: AB::ExprEF =
+        next_main::<_, AB::VarEF, 1>(builder.permutation(), band.reg_id)[0].into();
+
+    // Weighted limb sums. Recombined 32-bit (v/comp): r_k = limb[2k] +
+    // 2¹⁶·limb[2k+1]. Direct 32-bit (bound): d_k = limb[k]. k = 0..4.
+    // `v`/`comp`'s low half always lives at cells 0–7 (weighted at
+    // powers 0–3 for the row's own low content, at powers 4–7 for the
+    // row's own high content — since `v` hi's high content sits at
+    // cells 0–7 of *its own* row, while `comp`'s high content sits at
+    // cells 8–15 of the *same* row as its low content).
+    let two16: AB::Expr = AB::Expr::from(Felt::from(1u32 << 16));
+    let mut recomb_lo07 = AB::ExprEF::ZERO;
+    let mut recomb_hi07 = AB::ExprEF::ZERO;
+    let mut recomb_hi815 = AB::ExprEF::ZERO;
+    let mut direct_lo = AB::ExprEF::ZERO;
+    let mut direct_hi = AB::ExprEF::ZERO;
+    for k in 0..4 {
+        let r07: AB::Expr =
+            AB::Expr::from(local[2 * k]) + two16.clone() * AB::Expr::from(local[2 * k + 1]);
+        let r815: AB::Expr =
+            AB::Expr::from(local[8 + 2 * k]) + two16.clone() * AB::Expr::from(local[8 + 2 * k + 1]);
+        recomb_lo07 += bp[k].clone() * r07.clone();
+        recomb_hi07 += bp[4 + k].clone() * r07;
+        recomb_hi815 += bp[4 + k].clone() * r815;
+        direct_lo += bp[k].clone() * AB::Expr::from(local[k]);
+        direct_hi += bp[4 + k].clone() * AB::Expr::from(local[8 + k]);
+    }
+
+    // Carry terms: Σ c_j·(β^{j+1} − t·β^j), t = 2³², hosted on the
+    // bound row — γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
+    let t32: AB::Expr = AB::Expr::from(Felt::new(1u64 << 32).expect("2^32 < Goldilocks p"));
+    let mut carry_lo_term = AB::ExprEF::ZERO;
+    for j in 0..4 {
+        let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+        carry_lo_term += weight * AB::Expr::from(local[CARRY_LO_BEGIN + j]);
+    }
+    let mut carry_hi_term = AB::ExprEF::ZERO;
+    for j in 4..7 {
+        let weight: AB::ExprEF = bp[j + 1].clone() - bp[j].clone() * t32.clone();
+        carry_hi_term += weight * AB::Expr::from(local[CARRY_HI_BEGIN + (j - 4)]);
+    }
+
+    // contrib: v/comp add (β-weighted recombine), bound subtracts
+    // (direct) and adds its carry cells — gated by role. `comp`
+    // contributes both halves from its one row; `bound` likewise.
+    let contrib: AB::ExprEF = recomb_lo07.clone() * (v_lo_sel + comp_sel.clone())
+        + recomb_hi07 * v_hi_sel
+        + recomb_hi815 * comp_sel
+        + (carry_lo_term.clone() - direct_lo.clone() + carry_hi_term.clone() - direct_hi.clone())
+            * bound_sel.clone();
+
+    builder.when_first_row().assert_zero_ext(id.clone());
+    builder.when_transition().assert_zero_ext(id_next - id.clone() - contrib);
+
+    // The closing row (`bound`) has a nonzero contribution of its
+    // own — its `−direct` terms plus its carry share — so the
+    // closure check folds it in directly instead of reading it back
+    // from `id_next`, exactly like `UintMulAir`'s `c` row (see that
+    // module for the full rationale) and `UintAddAir`'s `p` row.
+    let bound_own: AB::ExprEF = carry_lo_term - direct_lo + carry_hi_term - direct_hi;
+    builder.assert_zero_ext((id + bound_own) * bound_sel.clone());
+
+    // Root the bounded positive pointer-gap chain at 1. Even a maximum
+    // 2³²-row trace grows by < 2⁴⁶, so it cannot wrap through 0.
+    let ptr: AB::Expr = local[COL_PTR].into();
+    builder.when_first_row().assert_zero(ptr - AB::Expr::ONE);
+
+    // Carry booleanity (the no-wrap bound needs binary carries):
+    // γ₀..γ₃ in cells 4–7, γ₄..γ₆ in cells 12–14.
+    for &cell in [CARRY_LO_BEGIN, CARRY_LO_BEGIN + 1, CARRY_LO_BEGIN + 2, CARRY_LO_BEGIN + 3].iter()
+    {
+        let lj: AB::Expr = local[cell].into();
+        builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
+    }
+    for &cell in [CARRY_HI_BEGIN, CARRY_HI_BEGIN + 1, CARRY_HI_BEGIN + 2].iter() {
+        let lj: AB::Expr = local[cell].into();
+        builder.assert_zero(bound_sel.clone() * lj.clone() * (AB::Expr::ONE - lj));
+    }
+
+    // Cycle-constancy: ptr / bound_ptr are constant within a block
+    // (every row but the terminal one). The mults need no transport —
+    // they live once, in the hub cells the provides read directly.
+    let not_term: AB::Expr = AB::Expr::ONE - bound_sel.clone();
+    for col in [COL_PTR, COL_BOUND_PTR] {
+        let here: AB::Expr = local[col].into();
+        let there: AB::Expr = next[col].into();
+        builder.assert_zero(not_term.clone() * (there - here));
+    }
+
+    // ptr-gap tie: on a real block boundary (bound row) the witnessed
+    // gap = ptr' − ptr − 1, so its Range16 forces strictly-increasing,
+    // bounded-gap (hence injective) ptrs. when_transition drops the
+    // cyclic last row, where the gap is left free (the prover sets 0).
+    let gap: AB::Expr = local[TERM_CELL_GAP].into();
+    let ptr_here: AB::Expr = local[COL_PTR].into();
+    let ptr_next: AB::Expr = next[COL_PTR].into();
+    builder
+        .when_transition()
+        .assert_zero(bound_sel * (gap + ptr_here + AB::Expr::ONE - ptr_next));
 }
 
 // LOOKUP AIR

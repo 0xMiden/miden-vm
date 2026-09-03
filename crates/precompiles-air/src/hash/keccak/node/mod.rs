@@ -214,74 +214,82 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
-        let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
-
-        let act: AB::Expr = local[COL_ACT].into();
-        let act_next: AB::Expr = next[COL_ACT].into();
-        let out_mult: AB::Expr = local[COL_OUT_MULT].into();
-
-        let sponge_seq_id_head: AB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].into();
-        let sponge_seq_id_head_next: AB::Expr = next[COL_SPONGE_SEQ_ID_HEAD].into();
-        let n_sponge_perms: AB::Expr = local[COL_N_SPONGE_PERMS].into();
-
-        let chunk_seq_id_head: AB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].into();
-        let chunk_seq_id_head_next: AB::Expr = next[COL_CHUNK_SEQ_ID_HEAD].into();
-        let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
-
-        // `absorption_id_chunks` is read only by the LookupAir below
-        // (no local cross-row constraint — see the comment in the
-        // namespace-continuity section).
-        let _ = next[COL_ABSORPTION_ID_CHUNKS];
-
-        // Boundary -----------------------------------------------
-        // Pin `sponge_seq_id_head` and `chunk_seq_id_head` at row 0 to
-        // align the orchestrator's first invocation with the sponge's
-        // and chunk chiplet's row-0 anchors. Ungated by `act` — an
-        // all-inactive trace's prover sets them to 0 anyway, and the
-        // gating cost (one mult) is not worth it.
-        builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
-        builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
-
-        // Activity -----------------------------------------------
-        // Binary, sticky-downward (matches chunk / sponge convention).
-        builder.assert_bool(local[COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
-
-        // out_mult on inactive rows --------------------------------
-        // Pin `out_mult = 0` on dead rows so the `Binding` provide
-        // (mult = `−out_mult`) contributes 0 on padding. Deg 2.
-        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
-
-        // Continuity (gated on `act_next`) -----------------------
-        // sponge namespace: 32 sponge rows per perm.
-        builder.when_transition().assert_zero(
-            act_next.clone()
-                * (sponge_seq_id_head_next
-                    - sponge_seq_id_head
-                    - AB::Expr::from(Felt::from(32u8)) * n_sponge_perms),
-        );
-        // chunk namespace.
-        builder
-            .when_transition()
-            .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
-        // No Eidos chunks-absorption namespace continuity. Other Eidos
-        // callers (transcript-node hashing, the digest-chunks / keccak
-        // one-shots this chiplet drives, …) interleave with chunk-
-        // content absorptions, so `absorption_id_chunks` is *not*
-        // contiguous across keccak-node rows. The `ChunkChain` bus
-        // pins each row's `(chunk_seq_id_head, absorption_id_chunks)`
-        // pair to a real chunk-side chain head, which is what closes
-        // the FK — see the chunk chiplet's `absorption_id` column doc
-        // for the matching shared-namespace argument.
+        eval_main(builder, 0);
 
         // Phase 2: LogUp argument via the LogUp adapter.
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
         lb.finish();
     }
+}
+
+/// Evaluate this component's base constraints in a main-trace column band.
+pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
+    let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
+
+    let act: AB::Expr = local[COL_ACT].into();
+    let act_next: AB::Expr = next[COL_ACT].into();
+    let out_mult: AB::Expr = local[COL_OUT_MULT].into();
+
+    let sponge_seq_id_head: AB::Expr = local[COL_SPONGE_SEQ_ID_HEAD].into();
+    let sponge_seq_id_head_next: AB::Expr = next[COL_SPONGE_SEQ_ID_HEAD].into();
+    let n_sponge_perms: AB::Expr = local[COL_N_SPONGE_PERMS].into();
+
+    let chunk_seq_id_head: AB::Expr = local[COL_CHUNK_SEQ_ID_HEAD].into();
+    let chunk_seq_id_head_next: AB::Expr = next[COL_CHUNK_SEQ_ID_HEAD].into();
+    let n_chunks: AB::Expr = local[COL_N_CHUNKS].into();
+
+    // `absorption_id_chunks` is read only by the LookupAir below
+    // (no local cross-row constraint — see the comment in the
+    // namespace-continuity section).
+    let _ = next[COL_ABSORPTION_ID_CHUNKS];
+
+    // Boundary -----------------------------------------------
+    // Pin `sponge_seq_id_head` and `chunk_seq_id_head` at row 0 to
+    // align the orchestrator's first invocation with the sponge's
+    // and chunk chiplet's row-0 anchors. Ungated by `act` — an
+    // all-inactive trace's prover sets them to 0 anyway, and the
+    // gating cost (one mult) is not worth it.
+    builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
+    builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
+
+    // Activity -----------------------------------------------
+    // Binary, sticky-downward (matches chunk / sponge convention).
+    builder.assert_bool(local[COL_ACT]);
+    builder
+        .when_transition()
+        .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
+
+    // out_mult on inactive rows --------------------------------
+    // Pin `out_mult = 0` on dead rows so the `Binding` provide
+    // (mult = `−out_mult`) contributes 0 on padding. Deg 2.
+    builder.assert_zero((AB::Expr::ONE - act) * out_mult);
+
+    // Continuity (gated on `act_next`) -----------------------
+    // sponge namespace: 32 sponge rows per perm.
+    builder.when_transition().assert_zero(
+        act_next.clone()
+            * (sponge_seq_id_head_next
+                - sponge_seq_id_head
+                - AB::Expr::from(Felt::from(32u8)) * n_sponge_perms),
+    );
+    // chunk namespace.
+    builder
+        .when_transition()
+        .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
+    // No Eidos chunks-absorption namespace continuity. Other Eidos
+    // callers (transcript-node hashing, the digest-chunks / keccak
+    // one-shots this chiplet drives, …) interleave with chunk-
+    // content absorptions, so `absorption_id_chunks` is *not*
+    // contiguous across keccak-node rows. The `ChunkChain` bus
+    // pins each row's `(chunk_seq_id_head, absorption_id_chunks)`
+    // pair to a real chunk-side chain head, which is what closes
+    // the FK — see the chunk chiplet's `absorption_id` column doc
+    // for the matching shared-namespace argument.
 }
 
 // LOOKUP AIR — bus interactions

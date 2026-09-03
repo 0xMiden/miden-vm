@@ -17,7 +17,7 @@
 use core::array;
 
 use miden_core::{Felt, deferred::Tag, field::PrimeCharacteristicRing};
-use miden_lifted_air::{AirBuilder, LiftedAirBuilder};
+use miden_lifted_air::LiftedAirBuilder;
 use miden_precompiles::Keccak256Precompile;
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
         binding::BindingMsg,
         eidos::{EidosChainInputMsg, EidosOutMsg},
     },
-    utils::{current_main, next_main},
+    utils::current_main,
 };
 
 // COLUMN LAYOUT
@@ -55,78 +55,8 @@ pub(crate) fn eval_main<AB>(builder: &mut AB, main_col_offset: usize)
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    // Chunk constraints.
-    {
-        let local: [AB::Var; chunk::NUM_MAIN_COLS] = current_main(builder.main(), main_col_offset);
-        let next: [AB::Var; chunk::NUM_MAIN_COLS] = next_main(builder.main(), main_col_offset);
-
-        let chunk_seq_id: AB::Expr = local[chunk::COL_CHUNK_SEQ_ID].into();
-        let chunk_seq_id_next: AB::Expr = next[chunk::COL_CHUNK_SEQ_ID].into();
-        let absorption_id: AB::Expr = local[chunk::COL_ABSORPTION_ID].into();
-        let absorption_id_next: AB::Expr = next[chunk::COL_ABSORPTION_ID].into();
-        let act: AB::Expr = local[chunk::COL_ACT].into();
-        let act_next: AB::Expr = next[chunk::COL_ACT].into();
-        let is_head: AB::Expr = local[chunk::COL_IS_HEAD].into();
-        let is_head_next: AB::Expr = next[chunk::COL_IS_HEAD].into();
-
-        builder.when_first_row().assert_zero(chunk_seq_id.clone());
-
-        builder
-            .when_transition()
-            .assert_zero(chunk_seq_id_next - chunk_seq_id - AB::Expr::ONE);
-
-        builder.when_transition().assert_zero(
-            (AB::Expr::ONE - is_head_next) * (absorption_id_next - absorption_id - AB::Expr::ONE),
-        );
-
-        builder.assert_bool(local[chunk::COL_ACT]);
-        builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
-
-        builder.assert_bool(local[chunk::COL_IS_HEAD]);
-        builder.assert_zero(is_head * (AB::Expr::ONE - act));
-    }
-
-    // Keccak-node constraints.
-    {
-        let local: [AB::Var; node::NUM_MAIN_COLS] =
-            current_main(builder.main(), main_col_offset + NODE_COL_OFFSET);
-        let next: [AB::Var; node::NUM_MAIN_COLS] =
-            next_main(builder.main(), main_col_offset + NODE_COL_OFFSET);
-
-        let act: AB::Expr = local[node::COL_ACT].into();
-        let act_next: AB::Expr = next[node::COL_ACT].into();
-        let out_mult: AB::Expr = local[node::COL_OUT_MULT].into();
-
-        let sponge_seq_id_head: AB::Expr = local[node::COL_SPONGE_SEQ_ID_HEAD].into();
-        let sponge_seq_id_head_next: AB::Expr = next[node::COL_SPONGE_SEQ_ID_HEAD].into();
-        let n_sponge_perms: AB::Expr = local[node::COL_N_SPONGE_PERMS].into();
-
-        let chunk_seq_id_head: AB::Expr = local[node::COL_CHUNK_SEQ_ID_HEAD].into();
-        let chunk_seq_id_head_next: AB::Expr = next[node::COL_CHUNK_SEQ_ID_HEAD].into();
-        let n_chunks: AB::Expr = local[node::COL_N_CHUNKS].into();
-
-        let _ = next[node::COL_ABSORPTION_ID_CHUNKS];
-
-        builder.when_first_row().assert_zero(sponge_seq_id_head.clone());
-        builder.when_first_row().assert_zero(chunk_seq_id_head.clone());
-
-        builder.assert_bool(local[node::COL_ACT]);
-        builder
-            .when_transition()
-            .assert_zero((AB::Expr::ONE - act.clone()) * act_next.clone());
-
-        builder.assert_zero((AB::Expr::ONE - act) * out_mult);
-
-        builder.when_transition().assert_zero(
-            act_next.clone()
-                * (sponge_seq_id_head_next
-                    - sponge_seq_id_head
-                    - AB::Expr::from(Felt::from(32u8)) * n_sponge_perms),
-        );
-        builder
-            .when_transition()
-            .assert_zero(act_next * (chunk_seq_id_head_next - chunk_seq_id_head - n_chunks));
-    }
+    chunk::eval_main(builder, main_col_offset);
+    node::eval_main(builder, main_col_offset + NODE_COL_OFFSET);
 }
 
 // LOOKUPS
