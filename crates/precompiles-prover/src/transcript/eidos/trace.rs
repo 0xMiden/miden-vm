@@ -3,16 +3,10 @@
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::ops::Range;
 
-use miden_air::trace::and8_lookup::{
-    AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_COUNT,
-    BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7, BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12,
-    BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL,
-    byte_lookup_result,
-};
 use miden_core::{
     Felt, Word,
     deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN},
-    field::{Field, PrimeCharacteristicRing, PrimeField64},
+    field::{Field, PrimeCharacteristicRing},
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -25,6 +19,7 @@ use super::compression::{
     },
 };
 use crate::{
+    primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
         COL_ABSORPTION_ID, COL_CHAIN_CONTEXT_BEGIN, COL_CV_IN_BEGIN, COL_IN_MULTIPLICITY,
@@ -265,13 +260,6 @@ impl EidosRequires {
 // TRACE GENERATION
 // ================================================================================================
 
-/// The integrated PVM Eidos compression trace and its fixed byte-operation lookup trace.
-#[derive(Debug)]
-pub struct EidosTraceBundle {
-    pub compression: RowMajorMatrix<Felt>,
-    pub and8: RowMajorMatrix<Felt>,
-}
-
 #[derive(Debug)]
 struct CompressionCycle {
     absorption_id: u32,
@@ -319,23 +307,20 @@ impl CompressionCycle {
 }
 
 struct EidosCompressionLookupCounter<'a> {
-    counts: &'a mut [u64],
+    requires: &'a mut BytePairLutRequires,
 }
 
 impl ByteLookupRecorder for EidosCompressionLookupCounter<'_> {
     fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32) {
-        let kind = match lookup {
-            EidosCompressionByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            EidosCompressionByteLookup::Rot12 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT12[byte]
+        let expected = match lookup {
+            EidosCompressionByteLookup::And8 => {
+                self.requires.require(BytePairOp::And, lhs, rhs) as u32
             },
-            EidosCompressionByteLookup::Rot7 { byte } => {
-                BYTE_LOOKUP_KIND_EIDOS_COMPRESSION_ROT7[byte]
+            EidosCompressionByteLookup::Rotation { rotation, byte } => {
+                self.requires.require_eidos_rotation(rotation, byte, lhs, rhs)
             },
         };
-        debug_assert_eq!(byte_lookup_result(kind, lhs, rhs), result);
-        let pair = ((lhs as usize) << 8) + rhs as usize;
-        self.counts[kind * BYTE_PAIR_ROWS + pair] += 1;
+        debug_assert_eq!(expected, result);
     }
 }
 
@@ -355,33 +340,18 @@ fn unpack_felts<const N: usize>(values: &[Felt]) -> [u32; N] {
     words
 }
 
-fn record_message_range_checks(counts: &mut [u64], block: [u32; 16]) {
+fn record_message_range_checks(requires: &mut BytePairLutRequires, block: [u32; 16]) {
     for word in block {
         for limb in [word as u16, (word >> 16) as u16] {
-            counts[RANGE_CHECK_COUNT_OFFSET + limb as usize] += 1;
+            requires.require_range16(limb);
         }
     }
 }
 
-fn build_and8_trace(counts: &[u64]) -> RowMajorMatrix<Felt> {
-    assert_eq!(counts.len(), BYTE_LOOKUP_COUNT_LEN);
-    let mut values = vec![Felt::ZERO; AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_COLS];
-    for pair in 0..BYTE_PAIR_ROWS {
-        for kind in 0..BYTE_LOOKUP_KIND_COUNT {
-            let count = counts[kind * BYTE_PAIR_ROWS + pair];
-            assert!(count < Felt::ORDER_U64, "byte lookup multiplicity must be canonical");
-            values[pair * NUM_AND8_LOOKUP_COLS + kind] = Felt::new_unchecked(count);
-        }
-        let count = counts[RANGE_CHECK_COUNT_OFFSET + pair];
-        assert!(count < Felt::ORDER_U64, "range lookup multiplicity must be canonical");
-        values[pair * NUM_AND8_LOOKUP_COLS + RANGE_CHECK_LOOKUP_COL] = Felt::new_unchecked(count);
-    }
-    RowMajorMatrix::new(values, NUM_AND8_LOOKUP_COLS)
-}
-
-fn build_eidos_compression_traces(
+fn build_eidos_compression_trace(
     cycles: &[CompressionCycle],
-) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    byte_pairs: &mut BytePairLutRequires,
+) -> RowMajorMatrix<Felt> {
     let real_cycles = cycles.len();
     let height = (real_cycles * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
@@ -390,8 +360,6 @@ fn build_eidos_compression_traces(
     let mut values = vec![Felt::ZERO; height * NUM_EIDOS_COMPRESSION_COLS];
     let (rows, remainder) = values.as_chunks_mut::<NUM_EIDOS_COMPRESSION_COLS>();
     debug_assert!(remainder.is_empty());
-    let mut counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-
     for (physical_cycle_id, cycle_rows) in
         rows.as_chunks_mut::<EIDOS_COMPRESSION_CYCLE_LEN>().0.iter_mut().enumerate()
     {
@@ -403,8 +371,8 @@ fn build_eidos_compression_traces(
             ([0; 16], [0; 8])
         };
 
-        record_message_range_checks(&mut counts, block);
-        let mut recorder = EidosCompressionLookupCounter { counts: &mut counts };
+        record_message_range_checks(byte_pairs, block);
+        let mut recorder = EidosCompressionLookupCounter { requires: byte_pairs };
         write_felt_trace_block_into_zeroed_with_lookups(
             cycle_rows,
             block,
@@ -415,13 +383,13 @@ fn build_eidos_compression_traces(
     }
 
     debug_assert_eq!(cycle_count, rows.len() / EIDOS_COMPRESSION_CYCLE_LEN);
-    (
-        RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS),
-        build_and8_trace(&counts),
-    )
+    RowMajorMatrix::new(values, NUM_EIDOS_COMPRESSION_COLS)
 }
 
-pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
+pub(crate) fn generate_trace_with_byte_lookups(
+    requires: EidosRequires,
+    byte_pairs: &mut BytePairLutRequires,
+) -> RowMajorMatrix<Felt> {
     let cycle_count = requires.absorptions.iter().map(|rec| rec.blocks.len()).sum();
     let mut cycles = Vec::with_capacity(cycle_count);
 
@@ -453,7 +421,7 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         debug_assert_eq!(EidosDigest(cv.into_elements()), rec.digest);
     }
 
-    let (eidos_compression, and8) = build_eidos_compression_traces(&cycles);
+    let eidos_compression = build_eidos_compression_trace(&cycles, byte_pairs);
     let height = eidos_compression.values.len() / eidos_compression.width;
     debug_assert_eq!(height % EIDOS_COMPRESSION_CYCLE_LEN, 0);
     debug_assert!(cycles.len() * EIDOS_COMPRESSION_CYCLE_LEN <= height);
@@ -471,14 +439,11 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         }
     }
 
-    EidosTraceBundle {
-        compression: RowMajorMatrix::new(values, NUM_MAIN_COLS),
-        and8,
-    }
+    RowMajorMatrix::new(values, NUM_MAIN_COLS)
 }
 
 pub fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
-    generate_traces(requires).compression
+    generate_trace_with_byte_lookups(requires, &mut BytePairLutRequires::new())
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);

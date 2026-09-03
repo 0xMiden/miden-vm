@@ -253,7 +253,7 @@ mod tests {
             ("ChunkNodeSponge", 2),
             ("EidosCompression", 1),
             ("KeccakRound", 2),
-            ("BytePairAnd8", 1),
+            ("BytePairLut", 1),
             ("TranscriptEval", 1),
             ("UintStoreMul", 1),
             ("UintAdd", 1),
@@ -368,26 +368,40 @@ mod tests {
         insta::assert_snapshot!(snapshot);
     }
 
-    /// The PVM aux hook reads twelve quadratic-extension component residues as six MASM words.
-    /// Pin the complete per-chiplet shape so a redistribution cannot preserve only the total.
+    /// The PVM aux hook reads ten quadratic-extension residues, one per AIR, packed into five MASM
+    /// words. Pin the complete per-chiplet shape so a redistribution cannot preserve only the
+    /// total.
     #[test]
     fn pvm_aux_hook_matches_every_chiplets_boundary_shape() {
         const HOOK_PATH: &str =
             concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/aux_trace.masm");
+        const RELATION_PATH: &str =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
 
-        let derived: Vec<usize> = ChipletAir::all()
+        let airs = ChipletAir::all();
+        let derived: Vec<usize> = airs
             .iter()
             .map(miden_lifted_air::LiftedAir::<Felt, QuadFelt>::num_aux_values)
             .collect();
         assert_eq!(
             derived,
-            alloc::vec![1, 2, 1, 2, 1, 1, 1, 1, 1, 1],
+            alloc::vec![1; NUM_CHIPLETS],
             "the PVM aux hook boundary shape drifted"
         );
         assert_eq!(
             derived.iter().sum::<usize>(),
             2 * masm_const(HOOK_PATH, "NUM_AUX_VALUE_WORDS") as usize,
-            "the MASM hook must read every chiplet sigma exactly once"
+            "the MASM hook must read every normalized LogUp value exactly once"
+        );
+        assert_eq!(
+            masm_const(RELATION_PATH, "NUM_AUX_VALUE_FELTS"),
+            2 * derived.iter().sum::<usize>() as u64,
+            "the pointer materializer must span every auxiliary-value coordinate"
+        );
+        assert_eq!(
+            masm_const(RELATION_PATH, "LAST_CHIPLET_INDEX"),
+            u64::try_from(airs.len() - 1).expect("PVM AIR index must fit in u64"),
+            "the reverse proof-order scan must start at the last AIR scratch slot"
         );
     }
 
@@ -495,8 +509,14 @@ mod tests {
             current_trace_row_ptr + current_row_felts as u64,
             "the query-row scratch extent must come from the codegen layout"
         );
+        let aux_value_ptrs_ptr = masm_const(LAYOUT_PATH, "AUX_VALUE_PTRS_PTR");
+        assert_eq!(
+            aux_value_ptrs_ptr,
+            preprocessed_com_ptr + 4,
+            "the per-AIR auxiliary-value pointers must follow the setup commitment"
+        );
         assert!(
-            preprocessed_com_ptr + 4 <= NEXT_VM_REGION,
+            aux_value_ptrs_ptr + NUM_CHIPLETS as u64 <= NEXT_VM_REGION,
             "the complete PVM READ + stream + relation scratch allocation overlaps the next VM region"
         );
     }

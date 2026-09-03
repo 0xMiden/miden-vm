@@ -25,6 +25,7 @@ use super::{
 };
 use crate::{
     Felt, HandwrittenMidenAir, MidenAir,
+    constraints::and8_lookup::eidos::normalize,
     lookup::{ConstraintLookupBuilder, LookupAir},
 };
 
@@ -109,6 +110,7 @@ fn inactive_footer_aux_pins_close_zero_denominator_rows() {
     let air = MidenAir::EidosCompression;
     let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
     LookupAir::eval(&air, &mut lookup_builder);
+    lookup_builder.finish();
 
     // Column zero emits its anchor and recurrence; every later column emits one constraint.
     assert_eq!(builder.extension_evaluations.len(), AUX_COLS + 1);
@@ -300,7 +302,7 @@ fn eval_footer_row(local: &[Felt; NUM_COLS], next: &[Felt; NUM_COLS], row_idx: u
     builder.into_base_evaluations()
 }
 
-fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -> Vec<Felt> {
+pub(super) fn eval_main_row(trace: &[EidosCompressionFeltRow], row_idx: usize) -> Vec<Felt> {
     let next_idx = (row_idx + 1).min(trace.len() - 1);
     let local = &trace[row_idx];
     let next = &trace[next_idx];
@@ -350,13 +352,20 @@ fn rewrite_footer_d_prefix(trace: &mut [EidosCompressionFeltRow], footer: usize)
     let row = &trace[origin];
     let out_even = footer_xor_word_value(row, F_OUTPUT_EVEN_SLOT_BASE);
     let out_odd = footer_xor_word_value(row, F_OUTPUT_ODD_SLOT_BASE);
-    let top_bit = row[F_TOP_BIT_SLOT_BASE_COL + 2].as_canonical_u64() as u32;
+    let top_bit = footer_top_bit_value(row);
     let masked_odd = out_odd - (top_bit << 24);
     let packed = Felt::from_u32(out_even) + Felt::from_u64(1 << 32) * Felt::from_u32(masked_odd);
 
     for later_footer in footer..FOOTER_ROWS {
         trace[FOOTER_START + later_footer][footer_interface_tail_col(footer)] = packed;
     }
+}
+
+fn footer_top_bit_value(row: &EidosCompressionFeltRow) -> u32 {
+    let a = row[F_TOP_BIT_SLOT_BASE_COL];
+    let b = row[F_TOP_BIT_SLOT_BASE_COL + 1];
+    let x = normalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, row[F_TOP_BIT_SLOT_BASE_COL + 2]);
+    (a + b - x).halve().as_canonical_u64() as u32
 }
 
 #[test]
@@ -854,9 +863,7 @@ fn air_footer_constraints_pin_output_high_word_bindings() {
 fn air_footer_constraints_pin_top_bit_mask() {
     let mut trace = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);
     let footer = (0..FOOTER_ROWS)
-        .find(|&footer| {
-            trace.rows[FOOTER_START + footer][F_TOP_BIT_SLOT_BASE_COL + 2] == Felt::from_u8(128)
-        })
+        .find(|&footer| footer_top_bit_value(&trace.rows[FOOTER_START + footer]) == 128)
         .expect("test vector must exercise an odd output word with its top bit set");
     let origin = FOOTER_START + footer;
 
@@ -948,7 +955,7 @@ fn air_footer_constraints_pin_mode_persistence() {
     footer3[F_MODE_COL] = Felt::ZERO;
     let out_even = footer_xor_word_value(footer3, F_OUTPUT_EVEN_SLOT_BASE);
     let out_odd = footer_xor_word_value(footer3, F_OUTPUT_ODD_SLOT_BASE);
-    let top_bit = footer3[F_TOP_BIT_SLOT_BASE_COL + 2].as_canonical_u64() as u32;
+    let top_bit = footer_top_bit_value(footer3);
     let masked_odd = out_odd - (top_bit << 24);
     footer3[footer_interface_tail_col(FOOTER_ROWS - 1)] =
         Felt::from_u32(out_even) + Felt::from_u64(1 << 32) * Felt::from_u32(masked_odd);

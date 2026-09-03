@@ -8,11 +8,12 @@
 
 use std::{vec, vec::Vec};
 
+use miden_air::lookup::debug::{ValidateLayout, ValidateLookupAir};
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_lifted_air::{BaseAir, LiftedAir};
+use miden_lifted_air::{BaseAir, ConstraintDegrees, LiftedAir};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
@@ -21,14 +22,15 @@ use crate::{
         keccak::{
             round::RoundRequires,
             sponge::{
-                COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_LO, COL_CHUNK_PTR, COL_PADDED_HI,
-                COL_SPONGE_SEQ_ID, KeccakSpongeAir, KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS,
-                NUM_MAIN_COLS, NUM_PERIODIC_COLS, SPONGE_PERIOD,
+                CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_B_BEGIN, COL_B_RANGE, COL_CHUNK_PTR,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_HI, COL_STATE_OUT_LO, KeccakSpongeAir,
+                KeccakSpongeMsg, NUM_AUX_COLS, NUM_B_SELECTORS, NUM_MAIN_COLS, NUM_PERIODIC_COLS,
+                PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 trace::{Invocation, SpongeRequires, generate_trace, keccak_oracle},
             },
         },
     },
-    logup::{Challenges, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES},
+    logup::{Challenges, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::eidos::trace::EidosRequires,
@@ -108,14 +110,13 @@ fn keccak_sponge_msg_encoding_is_bus_distinct_from_memory64() {
 }
 
 #[test]
-fn main_column_layout_partitions_67_indices() {
-    // The 67 main witness columns are partitioned into:
+fn main_column_layout_partitions_57_indices() {
+    // The 57 main witness columns are partitioned into:
     //   - structural (5): sponge_seq_id, act, bytes_left, is_first_block, chunk_ptr (indices 0..4).
     //   - padding-state machine (10): is_zero_p, is_chunk_avail, b_0..b_7 (indices 5..14).
-    //   - per-row lane values (12): chunk, state_prev, state_new, state_out, cleared, padded — all
-    //     u32-lo/hi (indices 15..26).
-    //   - byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
-    //     little-endian decomposition (indices 27..66).
+    //   - squeeze value (2): state_out as u32 lo/hi (indices 15..16).
+    //   - byte lanes (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
+    //     little-endian decomposition (indices 17..56).
     //
     // The boundary checks below pin the split so that any future column
     // shuffling fails fast.
@@ -128,10 +129,15 @@ fn main_column_layout_partitions_67_indices() {
     // The b_j run is 8 consecutive indices.
     assert_eq!(NUM_B_SELECTORS, 8);
     assert_eq!(COL_B_RANGE, COL_B_BEGIN..(COL_B_BEGIN + NUM_B_SELECTORS));
-    // Lane-value block ends at PADDED_HI = 26, the byte-shadow block's start.
-    assert_eq!(COL_PADDED_HI, 26);
+    assert_eq!(COL_STATE_OUT_LO, 15);
+    assert_eq!(COL_STATE_OUT_HI, 16);
+    assert_eq!(CHUNK_BYTES_RANGE, 17..25);
+    assert_eq!(STATE_PREV_BYTES_RANGE, 25..33);
+    assert_eq!(STATE_NEW_BYTES_RANGE, 33..41);
+    assert_eq!(CLEARED_BYTES_RANGE, 41..49);
+    assert_eq!(PADDED_BYTES_RANGE, 49..57);
     // Total matches the spec.
-    assert_eq!(NUM_MAIN_COLS, 67);
+    assert_eq!(NUM_MAIN_COLS, 57);
     // `BaseAir::width()` agrees.
     assert_eq!(<KeccakSpongeAir as BaseAir<Felt>>::width(&KeccakSpongeAir), NUM_MAIN_COLS);
 }
@@ -148,8 +154,31 @@ fn lifted_air_validates_and_layout_matches_spec() {
     assert_eq!(layout.num_public_values, NUM_PUBLIC_VALUES);
     assert_eq!(layout.permutation_width, NUM_AUX_COLS);
     assert_eq!(layout.num_permutation_challenges, NUM_RANDOMNESS);
-    assert_eq!(layout.num_permutation_values, NUM_SIGMA_VALUES);
+    assert_eq!(layout.num_permutation_values, NUM_LOGUP_VALUES);
     assert_eq!(layout.num_periodic_columns, NUM_PERIODIC_COLS);
+    assert_eq!(NUM_AUX_COLS, 18);
+    assert_eq!(
+        crate::tests::lookup_column_shape(&air),
+        &[2, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 2, 2],
+    );
+
+    assert_eq!(
+        ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air),
+        ConstraintDegrees { base: 5, ext: 5 },
+    );
+    ValidateLookupAir::validate(
+        &air,
+        ValidateLayout {
+            preprocessed_width: air.preprocessed_width(),
+            trace_width: air.width(),
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: air.periodic_columns().len(),
+            permutation_width: NUM_AUX_COLS,
+            num_permutation_challenges: NUM_RANDOMNESS,
+            num_permutation_values: NUM_LOGUP_VALUES,
+        },
+    )
+    .unwrap_or_else(|err| panic!("KeccakSpongeAir lookup validation failed: {err}"));
 }
 
 #[test]
@@ -167,13 +196,10 @@ fn periodic_columns_match_program() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // The mutex outer flags are folded into each insert's multiplicity and the
-    // 48 fractions are partitioned across 24 columns (≤ 3 each on cols 0-2,
-    // the degree-4 multiplicities `squeeze` / `chunk-consume` kept
-    // low-arity; ≤ 2 each on the byte-request columns), so every closing
-    // constraint is degree ≤ 5 → `log_quotient_degree = 2`. The degree-4
-    // multiplicities are the floor; lqd 1 would need them witness-decomposed.
-    // See the design notes §"Aux columns and σ exposure".
+    // The 48 exact fractions are partitioned across 18 columns with at most
+    // three entries each. The degree-4 `squeeze` and `chunk-consume`
+    // multiplicities remain low-arity, so every constraint stays at degree 5
+    // or below and `log_quotient_degree` remains 2.
     let air = KeccakSpongeAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 2);
 }
@@ -401,11 +427,10 @@ fn corruption_nonzero_chunk_on_chunks_unavailable_breaks_zero_fill() {
     // Single-byte invocation: chunk-tape segment is 1 chunk = 4 lanes,
     // sponge consumes them at slots 0..3 (slot 0 = pad row, slots 1..3
     // = garbage-tail). Slots 4..16 of the period have
-    // `is_chunk_avail = 0` and the zero-fill constraint pins
-    // `chunk_lo = chunk_hi = 0` there. Writing a non-zero value into
-    // `chunk_lo` at row 5 violates Z1.
+    // `is_chunk_avail = 0` and the zero-fill constraint pins the reconstructed
+    // chunk halves to zero there. Writing a non-zero byte at row 5 violates it.
     corrupt_and_check(0xc0_2e, Invocation { input: vec![0xab] }, |main| {
-        main.values[5 * NUM_MAIN_COLS + COL_CHUNK_LO] = Felt::from(1u8);
+        main.values[5 * NUM_MAIN_COLS + CHUNK_BYTES_RANGE.start] = Felt::from(1u8);
     });
 }
 
@@ -442,17 +467,10 @@ fn corruption_seq_id_breaks_row_counter_transition() {
 #[test]
 #[should_panic(expected = "constraint not satisfied")]
 fn corruption_aux_cell_breaks_logup_recurrence() {
-    // Direct main-trace corruption is absorbed by
-    // `build_logup_aux_trace` (the aux just adapts to whatever the
-    // main says). To exercise the per-row σ/n recurrence emitted by
-    // `LookupAir::eval` (constraint of the form
-    // `u(r) · acc(r+1) = u(r) · acc(r) + v(r) − u(r) · σ · inv_n`),
-    // we wrap `KeccakSpongeAir` in an AIR that runs the standard aux
-    // build and then perturbs `aux[row 1, col 0]`. The constraint at
-    // row 0 (and again at row 1) then evaluates to a non-zero residue.
-    // `check_local` builds the aux trace through `LiftedAir::build_aux_trace`,
-    // so the corruption must live in that override (the 0.26 API no longer
-    // accepts a standalone `AuxBuilder` — the AIR owns the aux build).
+    // Rebuilding the auxiliary trace after main-trace corruption produces a consistent witness.
+    // Perturbing the built accumulator instead directly exercises the centered recurrence.
+    // `check_local` obtains the auxiliary trace through `LiftedAir::build_aux_trace`, so the test
+    // wrapper overrides that method to inject the corruption.
     use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
     use miden_lifted_air::{LiftedAir, LiftedAirBuilder};
@@ -496,15 +514,16 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
             aux_inputs: &[Felt],
             challenges: &[QuadFelt],
         ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-            let (mut aux, sigma) = <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
-                &KeccakSpongeAir,
-                main,
-                air_inputs,
-                aux_inputs,
-                challenges,
-            );
+            let (mut aux, normalized_sum) =
+                <KeccakSpongeAir as LiftedAir<Felt, QuadFelt>>::build_aux_trace(
+                    &KeccakSpongeAir,
+                    main,
+                    air_inputs,
+                    aux_inputs,
+                    challenges,
+                );
             aux.values[NUM_AUX_COLS] += QuadFelt::ONE;
-            (aux, sigma)
+            (aux, normalized_sum)
         }
 
         fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {

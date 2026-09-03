@@ -2,10 +2,10 @@
 //!
 //! [`ChipletAir`] wraps the ten heterogeneous AIRs into one enum (the
 //! `MultiAir::Air` type); [`ChipletMultiAir`] owns them and closes the
-//! cross-chiplet LogUp identity — `Σ σ = 0` — in
-//! [`MultiAir::eval_external`].
+//! cross-chiplet LogUp identity in [`MultiAir::eval_external`]. Each AIR commits a normalized
+//! residue, so the external assertion weights it by that AIR's trace length.
 
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 
 use miden_core::{
     Felt,
@@ -19,7 +19,7 @@ use crate::{
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
     logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
-    primitives::{byte_pair_and8::BytePairAnd8Air, byte_pair_lut},
+    primitives::byte_pair_lut::{self, BytePairLutAir},
     transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
@@ -35,7 +35,7 @@ pub enum ChipletAir {
     ChunkNodeSponge,
     EidosCompression,
     KeccakRound,
-    BytePairAnd8,
+    BytePairLut,
     TranscriptEval,
     UintStoreMul,
     UintAdd,
@@ -50,7 +50,7 @@ macro_rules! delegate {
             ChipletAir::ChunkNodeSponge => ChunkNodeSpongeAir.$method($($arg),*),
             ChipletAir::EidosCompression => EidosCompressionAir.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
-            ChipletAir::BytePairAnd8 => BytePairAnd8Air.$method($($arg),*),
+            ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
             ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
@@ -76,7 +76,7 @@ impl ChipletAir {
             ChipletAir::ChunkNodeSponge,
             ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairAnd8,
+            ChipletAir::BytePairLut,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,
@@ -88,12 +88,12 @@ impl ChipletAir {
 
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
-    /// `BytePairAnd8` commits its main and preprocessed traces at
+    /// `BytePairLut` commits its main and preprocessed traces at
     /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
     /// every other instance ranges above its derived minimum.
     pub fn fixed_log_height(&self) -> Option<u32> {
         match self {
-            ChipletAir::BytePairAnd8 => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
+            ChipletAir::BytePairLut => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
             _ => None,
         }
     }
@@ -141,7 +141,7 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
             ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
-            ChipletAir::BytePairAnd8 => eval_lifted(&BytePairAnd8Air, builder),
+            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
             ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
             ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
@@ -152,9 +152,10 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     }
 }
 
-/// The chiplet stack as a [`MultiAir`]: owns the ten AIRs (in canonical
-/// order) and closes the cross-chiplet LogUp identity — `Σ σ = 0` over
-/// every AIR's committed residue — in [`eval_external`](Self::eval_external).
+/// The chiplet stack as a [`MultiAir`].
+///
+/// It owns the ten AIRs in canonical order and closes the cross-chiplet LogUp identity in
+/// [`eval_external`](Self::eval_external), weighting each normalized residue by its trace length.
 #[derive(Debug, Clone)]
 pub struct ChipletMultiAir {
     airs: Vec<ChipletAir>,
@@ -210,32 +211,74 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
         &self.airs
     }
 
-    /// The cross-chiplet σ identity: the sum of every AIR's committed σ residue must vanish (a
-    /// single assertion). Most AIRs expose one residue. Composite AIRs can expose an additional
-    /// centered Miden-family residue, which is lifted by the trace height before aggregation.
+    /// Cross-chiplet LogUp closure. Every AIR exposes one centered residue
+    /// `sigma_prime_i = sigma_i / n_i`; therefore `sum_i(n_i * sigma_prime_i)` plus the fixed
+    /// boundary correction must vanish.
     fn eval_external(
         &self,
         challenges: &[QuadFelt],
-        _air_inputs: &[Felt],
-        _aux_inputs: &[Felt],
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
         log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        // Precompile-native AIRs commit their unnormalized LogUp residue `sigma`. The intrinsic
-        // Eidos compression byte-lookup component and the And8 component retain Miden VM's centered
-        // convention and commit `sigma_prime = sigma / n`, so lift those component residues
-        // by their trace heights before closing the shared relation.
-        let mut sigma = QuadFelt::ZERO;
-        for (idx, values) in aux_values.iter().enumerate() {
-            match self.airs[idx] {
-                ChipletAir::EidosCompression | ChipletAir::BytePairAnd8 => {
-                    let n = Felt::new_unchecked(1u64 << log_trace_heights[idx]);
-                    sigma += values[0] + values[1] * n;
-                },
-                _ => sigma += values[0],
-            }
+        if aux_values.len() != self.airs.len() {
+            return Err(format!(
+                "expected aux values for {} AIRs, got {}",
+                self.airs.len(),
+                aux_values.len()
+            )
+            .into());
         }
-        Ok(vec![sigma + fixed_boundary_correction(challenges)?])
+        if log_trace_heights.len() != self.airs.len() {
+            return Err(format!(
+                "expected log heights for {} AIRs, got {}",
+                self.airs.len(),
+                log_trace_heights.len()
+            )
+            .into());
+        }
+        if challenges.len() != crate::logup::NUM_RANDOMNESS {
+            return Err(format!(
+                "expected {} aux trace challenges, got {}",
+                crate::logup::NUM_RANDOMNESS,
+                challenges.len()
+            )
+            .into());
+        }
+        if air_inputs.len() != crate::logup::NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                crate::logup::NUM_PUBLIC_VALUES,
+                air_inputs.len()
+            )
+            .into());
+        }
+        if !aux_inputs.is_empty() {
+            return Err(format!("expected no auxiliary inputs, got {}", aux_inputs.len()).into());
+        }
+
+        let mut weighted_aux_sum = QuadFelt::ZERO;
+        for ((air, values), &log_height) in self.airs.iter().zip(aux_values).zip(log_trace_heights)
+        {
+            let expected = air.num_aux_values();
+            if values.len() != expected {
+                return Err(format!(
+                    "{air:?} expects {expected} aux boundary values, got {}",
+                    values.len()
+                )
+                .into());
+            }
+
+            let trace_length = 1_u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
+                ReductionError::from(format!(
+                    "{air:?} log trace height {log_height} does not fit in u64"
+                ))
+            })?;
+            weighted_aux_sum +=
+                values.iter().copied().sum::<QuadFelt>() * Felt::new_unchecked(trace_length);
+        }
+        Ok(vec![weighted_aux_sum + fixed_boundary_correction(challenges)?])
     }
 }
 
@@ -246,10 +289,10 @@ mod tests {
     use super::*;
 
     /// The external assertion is part of the production relation but excluded from the ACE
-    /// circuit digest. This test guards its cardinality; raw bus-balance tests cover the
-    /// underlying lookup semantics independently.
+    /// circuit digest. This test guards its weighting; raw bus-balance tests cover the underlying
+    /// lookup semantics independently.
     #[test]
-    fn chiplet_multi_air_exposes_the_sigma_closure() {
+    fn chiplet_multi_air_weights_every_normalized_sum_by_trace_length() {
         let challenges = [
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
             QuadFelt::new([Felt::from(7u32), Felt::from(11u32)]),
@@ -272,12 +315,122 @@ mod tests {
             .collect();
         let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
+        // BytePairLut is fixed at 2^16; every other entry satisfies its AIR's minimum height.
+        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
         let assertions = multi_air
-            .eval_external(&challenges, &[], &[], &aux_refs, &[0; NUM_CHIPLETS])
+            .eval_external(
+                &challenges,
+                &[Felt::ZERO; crate::logup::NUM_PUBLIC_VALUES],
+                &[],
+                &aux_refs,
+                &log_heights,
+            )
             .expect("fixed boundary denominators are non-zero for the fixture");
 
         assert_eq!(assertions.len(), 1, "the relation exposes exactly one external assertion");
-        assert_ne!(assertions[0], QuadFelt::ZERO, "the closure fixture must be non-vacuous");
+        let expected_weighted_sum = aux_values
+            .iter()
+            .zip(log_heights)
+            .map(|(values, log_height)| {
+                values.iter().copied().sum::<QuadFelt>()
+                    * Felt::new_unchecked(1_u64 << u32::from(log_height))
+            })
+            .sum::<QuadFelt>();
+        assert_eq!(
+            assertions[0],
+            expected_weighted_sum + fixed_boundary_correction(&challenges).unwrap(),
+        );
+    }
+
+    #[test]
+    fn chiplet_multi_air_rejects_malformed_external_inputs() {
+        let multi_air = ChipletMultiAir::new();
+        let challenges = [QuadFelt::ONE; crate::logup::NUM_RANDOMNESS];
+        let air_inputs = [Felt::ZERO; crate::logup::NUM_PUBLIC_VALUES];
+        let aux_values: Vec<Vec<QuadFelt>> = multi_air
+            .airs()
+            .iter()
+            .map(|air| vec![QuadFelt::ZERO; air.num_aux_values()])
+            .collect();
+        let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
+        let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
+        let rejects = |case: &str,
+                       challenges: &[QuadFelt],
+                       air_inputs: &[Felt],
+                       aux_inputs: &[Felt],
+                       aux_values: &[&[QuadFelt]],
+                       log_heights: &[u8]| {
+            assert!(
+                multi_air
+                    .eval_external(challenges, air_inputs, aux_inputs, aux_values, log_heights)
+                    .is_err(),
+                "{case} must be rejected",
+            );
+        };
+
+        rejects(
+            "missing AIR values",
+            &challenges,
+            &air_inputs,
+            &[],
+            &aux_refs[..NUM_CHIPLETS - 1],
+            &log_heights,
+        );
+        rejects(
+            "missing log height",
+            &challenges,
+            &air_inputs,
+            &[],
+            &aux_refs,
+            &log_heights[..NUM_CHIPLETS - 1],
+        );
+        rejects(
+            "missing challenge",
+            &challenges[..crate::logup::NUM_RANDOMNESS - 1],
+            &air_inputs,
+            &[],
+            &aux_refs,
+            &log_heights,
+        );
+        rejects(
+            "missing public value",
+            &challenges,
+            &air_inputs[..crate::logup::NUM_PUBLIC_VALUES - 1],
+            &[],
+            &aux_refs,
+            &log_heights,
+        );
+        rejects(
+            "unexpected auxiliary input",
+            &challenges,
+            &air_inputs,
+            &[Felt::ZERO],
+            &aux_refs,
+            &log_heights,
+        );
+
+        let mut malformed_values = aux_values.clone();
+        malformed_values[0].push(QuadFelt::ZERO);
+        let malformed_refs: Vec<&[QuadFelt]> = malformed_values.iter().map(Vec::as_slice).collect();
+        rejects(
+            "wrong AIR value width",
+            &challenges,
+            &air_inputs,
+            &[],
+            &malformed_refs,
+            &log_heights,
+        );
+
+        let mut oversized_height = log_heights;
+        oversized_height[0] = u64::BITS as u8;
+        rejects(
+            "oversized log height",
+            &challenges,
+            &air_inputs,
+            &[],
+            &aux_refs,
+            &oversized_height,
+        );
     }
 
     /// The chiplet instance order fixes proof-order tie-breaks, registry tags, and the
@@ -289,7 +442,7 @@ mod tests {
             ChipletAir::ChunkNodeSponge,
             ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairAnd8,
+            ChipletAir::BytePairLut,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,

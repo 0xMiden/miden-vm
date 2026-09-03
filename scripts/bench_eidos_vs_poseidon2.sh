@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNNER_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
-BASE_COMMIT="5e6ea2ef6828c47267df98f6f4bafe016b164fe8"
+BASE_COMMIT="6c54bf1fd61122086a644c40013f2932abe33e87"
 EIDOS_REV="${EIDOS_REV:-HEAD}"
-EIDOS_REV_EXPLICIT=0
-AWS_CAMPAIGN_EIDOS_REV="da4e59adae00a6a8af53fb691afdbcdd652e6f51"
 FIXTURE_ROOT="$ROOT/bench-baselines/fixtures/bench-tx"
 MODE=""
 # Keep the historical #3306/#3307 comparison default; override it for the host with --threads.
@@ -39,6 +39,7 @@ Usage:
   scripts/bench_eidos_vs_poseidon2.sh --smoke    [OPTIONS]
   scripts/bench_eidos_vs_poseidon2.sh --headline [OPTIONS]
   scripts/bench_eidos_vs_poseidon2.sh --scaling  [OPTIONS]
+  scripts/bench_eidos_vs_poseidon2.sh --composition-scaling [OPTIONS]
   scripts/bench_eidos_vs_poseidon2.sh --full     [OPTIONS]
   scripts/bench_eidos_vs_poseidon2.sh --aws-campaign [OPTIONS]
   scripts/bench_eidos_vs_poseidon2.sh --aws-profile  [OPTIONS]
@@ -52,6 +53,11 @@ Usage:
          default. Linux guest topology selects one allowed vCPU per visible
          core, spreads the pool across NUMA/LLC domains, and interleaves memory
          across its nodes.
+--composition-scaling
+         Prime the recursive fixtures once, require the Poseidon2 5 MVM + 1 PVM
+         versus Eidos 4 MVM + 1 PVM smoke gate to pass, then benchmark both
+         hashes from 3 through 9 MVM proofs plus 1 PVM proof. Uses one visible
+         hardware thread per physical core and emits one compact archive.
 --full   One warmup and ten measurements for all six Falcon/ECDSA transaction
          fixtures and the ECDSA/Falcon 3..9 MVM + 1 PVM recursive curves.
          High-count Eidos compositions require substantial memory; full mode
@@ -69,23 +75,23 @@ Usage:
          and emits one compact archive for the host.
 
 --threads N            Rayon/build threads. Default: 16, matching #3306/#3307.
-                       With scaling or an AWS campaign, cap the symmetric
-                       scaling plan at N physical cores, using one SMT sibling
-                       per core. When omitted, use up to 64 detected physical
-                       cores.
+                       With a scaling mode or AWS campaign, cap execution at N
+                       physical cores, using one SMT sibling per core. When
+                       omitted, use up to 64 detected physical cores.
 --mvm-counts LIST      Benchmark both hashes at these MVM counts, e.g. 4,5.
-                       Supported by smoke, headline, and full modes.
+                       Supported by smoke, headline, composition-scaling, and
+                       full modes. Composition scaling defaults to 3..9.
 --warmups N            Override the mode's number of warmup runs.
 --repeats N            Override the mode's number of measured runs.
 --cpu-profile PROFILE  Rust target CPU: native, x86-64-v3, or x86-64-v4.
                        Default: native.
---dry-run              Validate a scaling host or AWS campaign matrix without
-                       creating worktrees or running benchmarks.
+--dry-run              Validate a scaling host or AWS campaign without creating
+                       worktrees or running benchmarks.
 --eidos-rev REV        Eidos commit or branch. Default: current HEAD.
-                       AWS campaign/profile default: the pinned production candidate.
 
-The script benchmarks detached temporary worktrees at the pinned PR #3467 base
-and the selected Eidos revision. It does not modify either production tree.
+The script benchmarks detached worktrees at the pinned Poseidon2 base of PR #3718
+and the selected Eidos revision. Composition scaling keeps its worktrees and caches
+for later runs; the other modes remove their temporary worktrees on exit.
 
 Scaling campaigns require an explicit malloc huge-page arm on every host:
   GLIBC_TUNABLES=glibc.malloc.hugetlb=0  # requested off
@@ -150,7 +156,7 @@ run_aws_campaign() {
     [[ -z "$REPEATS_OVERRIDE" ]] || child_args+=(--repeats "$REPEATS_OVERRIDE")
     (( DRY_RUN == 0 )) || child_args+=(--dry-run)
     GLIBC_TUNABLES="glibc.malloc.hugetlb=$hugetlb" \
-      "$ROOT/scripts/bench_eidos_vs_poseidon2.sh" \
+      "$RUNNER_PATH" \
         "${child_args[@]}" \
         2>&1 | tee "$arm_log"
 
@@ -336,7 +342,7 @@ run_aws_profile() {
   EIDOS_BENCH_PROFILE=1 \
     EIDOS_BENCH_PERF_EVENTS="$PROFILE_EVENTS" \
     GLIBC_TUNABLES=glibc.malloc.hugetlb=1 \
-    "$ROOT/scripts/bench_eidos_vs_poseidon2.sh" "${child_args[@]}" 2>&1 | tee "$profile_log"
+    "$RUNNER_PATH" "${child_args[@]}" 2>&1 | tee "$profile_log"
 
   if (( DRY_RUN == 1 )); then
     echo "[profile] preflight passed"
@@ -362,7 +368,7 @@ run_aws_profile() {
 
 while (( $# > 0 )); do
   case "$1" in
-    --smoke|--headline|--scaling|--full|--aws-campaign|--aws-profile)
+    --smoke|--headline|--scaling|--composition-scaling|--full|--aws-campaign|--aws-profile)
       [[ -z "$MODE" ]] ||
         die "select exactly one benchmark mode"
       MODE="${1#--}"
@@ -401,7 +407,6 @@ while (( $# > 0 )); do
     --eidos-rev)
       (( $# >= 2 )) || die "--eidos-rev requires a value"
       EIDOS_REV="$2"
-      EIDOS_REV_EXPLICIT=1
       shift 2
       ;;
     -h|--help)
@@ -426,14 +431,12 @@ done
 if [[ "$MODE" == "aws-campaign" ]]; then
   [[ -z "$MVM_COUNTS_RAW" ]] || die "--aws-campaign does not accept --mvm-counts"
   [[ "$CPU_PROFILE" == "native" ]] || die "--aws-campaign selects CPU profiles automatically"
-  (( EIDOS_REV_EXPLICIT == 1 )) || EIDOS_REV="$AWS_CAMPAIGN_EIDOS_REV"
   run_aws_campaign
   exit 0
 fi
 if [[ "$MODE" == "aws-profile" ]]; then
   [[ -z "$MVM_COUNTS_RAW" ]] || die "--aws-profile does not accept --mvm-counts"
   [[ "$CPU_PROFILE" == "native" ]] || die "--aws-profile uses the native CPU profile"
-  (( EIDOS_REV_EXPLICIT == 1 )) || EIDOS_REV="$AWS_CAMPAIGN_EIDOS_REV"
   run_aws_profile
   exit 0
 fi
@@ -464,35 +467,45 @@ esac
 if [[ "$CPU_PROFILE" != "native" && "$(uname -m)" != "x86_64" ]]; then
   die "$CPU_PROFILE requires an x86_64 host"
 fi
-if [[ "$MODE" != "scaling" ]]; then
-  (( DRY_RUN == 0 )) || die "--dry-run is supported only with --scaling"
+if [[ "$MODE" != "scaling" && "$MODE" != "composition-scaling" ]]; then
+  (( DRY_RUN == 0 )) || die "--dry-run is supported only with a scaling mode"
 fi
 
 for command in cargo git perl awk sed cmp tee rustc; do
   command -v "$command" >/dev/null 2>&1 || die "missing required command: $command"
 done
+if [[ "$MODE" == "composition-scaling" ]]; then
+  for command in flock tar; do
+    command -v "$command" >/dev/null 2>&1 || die "composition-scaling requires $command"
+  done
+fi
 if command -v ldd >/dev/null 2>&1; then
   LIBC_VERSION="$(ldd --version 2>&1 | sed -n '1p' || true)"
 fi
-if [[ "$MODE" == "scaling" ]]; then
+if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
   hugetlb_settings=()
   IFS=: read -r -a tunables <<< "${GLIBC_TUNABLES:-}"
   for tunable in "${tunables[@]}"; do
     [[ "$tunable" == glibc.malloc.hugetlb=* ]] && hugetlb_settings+=("$tunable")
   done
   ((${#hugetlb_settings[@]} == 1)) ||
-    die "--scaling requires exactly one GLIBC_TUNABLES malloc hugetlb setting: 0 or 1"
+    die "scaling modes require exactly one GLIBC_TUNABLES malloc hugetlb setting: 0 or 1"
   case "${hugetlb_settings[0]}" in
     glibc.malloc.hugetlb=0) HUGETLB_MODE="requested-off" ;;
     glibc.malloc.hugetlb=1) HUGETLB_MODE="requested-on" ;;
-    *) die "--scaling requires glibc.malloc.hugetlb=0 or glibc.malloc.hugetlb=1" ;;
+    *) die "scaling modes require glibc.malloc.hugetlb=0 or glibc.malloc.hugetlb=1" ;;
   esac
   [[ "$LIBC_VERSION" == *GLIBC* || "$LIBC_VERSION" == *"GNU libc"* ]] ||
-    die "--scaling requires glibc with the malloc hugetlb tunable"
+    die "scaling modes require glibc with the malloc hugetlb tunable"
   [[ -r /sys/kernel/mm/transparent_hugepage/enabled ]] ||
-    die "--scaling cannot read the kernel transparent-hugepage policy"
-  grep -q '\[madvise\]' /sys/kernel/mm/transparent_hugepage/enabled ||
-    die "--scaling requires kernel transparent huge pages in madvise mode"
+    die "scaling modes cannot read the kernel transparent-hugepage policy"
+  if ! grep -q '\[madvise\]' /sys/kernel/mm/transparent_hugepage/enabled; then
+    [[ "$MODE" == "composition-scaling" ]] ||
+      die "scaling modes require kernel transparent huge pages in madvise mode"
+    echo "[setup] setting kernel transparent huge pages to madvise"
+    run_as_root sh -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled' ||
+      die "could not set transparent huge pages to madvise"
+  fi
 fi
 git -C "$ROOT" cat-file -e "$BASE_COMMIT^{commit}" 2>/dev/null ||
   die "pinned base $BASE_COMMIT is unavailable"
@@ -555,6 +568,13 @@ case "$MODE" in
     LABELS=()
     FILES=()
     ;;
+  composition-scaling)
+    WARMUPS=1
+    REPEATS=3
+    RECURSIVE_AUTH="ecdsa"
+    LABELS=()
+    FILES=()
+    ;;
   full)
     WARMUPS=1
     REPEATS=10
@@ -577,6 +597,10 @@ esac
 
 [[ -z "$WARMUPS_OVERRIDE" ]] || WARMUPS="$WARMUPS_OVERRIDE"
 [[ -z "$REPEATS_OVERRIDE" ]] || REPEATS="$REPEATS_OVERRIDE"
+if [[ "$MODE" == "composition-scaling" && ${#MVM_COUNTS[@]} == 0 ]]; then
+  MVM_COUNTS=(3 4 5 6 7 8 9)
+  MVM_COUNTS_RAW="3,4,5,6,7,8,9"
+fi
 
 configure_scaling_plan() {
   ASCENDING_THREAD_PLAN=()
@@ -598,10 +622,19 @@ configure_scaling_plan() {
   BUILD_JOBS="$SCALING_MAX_THREADS"
 }
 
-if [[ "$MODE" == "scaling" ]]; then
+configure_topology_thread_plan() {
+  if [[ "$MODE" == "scaling" ]]; then
+    configure_scaling_plan
+  else
+    THREAD_PLAN=("$SCALING_MAX_THREADS")
+    BUILD_JOBS="$SCALING_MAX_THREADS"
+  fi
+}
+
+if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
   SCALING_MAX_THREADS=64
   (( THREADS_EXPLICIT == 0 )) || SCALING_MAX_THREADS="$THREADS"
-  configure_scaling_plan
+  configure_topology_thread_plan
 else
   SCALING_MAX_THREADS=0
   THREAD_PLAN=("$THREADS")
@@ -626,14 +659,14 @@ cpu_list_contains() {
 }
 
 discover_scaling_topology() {
-  [[ "$(uname -s)" == "Linux" ]] || die "--scaling requires Linux"
+  [[ "$(uname -s)" == "Linux" ]] || die "$MODE requires Linux"
   for command in lscpu taskset numactl; do
-    command -v "$command" >/dev/null 2>&1 || die "--scaling requires $command"
+    command -v "$command" >/dev/null 2>&1 || die "$MODE requires $command"
   done
-  [[ -r /proc/self/status ]] || die "--scaling cannot read inherited CPU affinity"
+  [[ -r /proc/self/status ]] || die "$MODE cannot read inherited CPU affinity"
   local inherited_cpus
   inherited_cpus="$(awk '/^Cpus_allowed_list:/ { print $2; exit }' /proc/self/status)"
-  [[ -n "$inherited_cpus" ]] || die "--scaling could not parse Cpus_allowed_list"
+  [[ -n "$inherited_cpus" ]] || die "$MODE could not parse Cpus_allowed_list"
 
   local candidate_cpus=() candidate_domains=()
   local node_order=() raw_domains=() domain_order=()
@@ -664,15 +697,15 @@ discover_scaling_topology() {
   done < <(LC_ALL=C lscpu --parse=CPU,CORE,SOCKET,NODE,CACHE |
     awk -F, '$1 !~ /^#/ { print $1 "," $2 "," $3 "," $4 "," $NF }')
 
-  ((${#candidate_cpus[@]} > 0)) || die "--scaling found no allowed guest-visible cores"
+  ((${#candidate_cpus[@]} > 0)) || die "$MODE found no allowed guest-visible cores"
   if (( THREADS_EXPLICIT == 0 && ${#candidate_cpus[@]} < SCALING_MAX_THREADS )); then
     SCALING_MAX_THREADS="${#candidate_cpus[@]}"
-    configure_scaling_plan
+    configure_topology_thread_plan
   fi
   ((${#candidate_cpus[@]} >= SCALING_MAX_THREADS)) ||
-    die "--scaling needs $SCALING_MAX_THREADS allowed guest-visible cores; found ${#candidate_cpus[@]}"
+    die "$MODE needs $SCALING_MAX_THREADS allowed guest-visible cores; found ${#candidate_cpus[@]}"
   ((${#node_order[@]} <= THREAD_PLAN[0])) ||
-    die "--scaling cannot spread its ${THREAD_PLAN[0]}-thread point across ${#node_order[@]} NUMA nodes"
+    die "$MODE cannot spread its ${THREAD_PLAN[0]}-thread point across ${#node_order[@]} NUMA nodes"
   LLC_DOMAIN_COUNT="${#raw_domains[@]}"
 
   local ordinal=0 added=0 seen_on_node=0 selected_node selected_domain index
@@ -725,7 +758,7 @@ discover_scaling_topology() {
   NUMA_POLICY="interleave:$NUMA_NODES"
 
   [[ -r /sys/fs/cgroup/cgroup.controllers ]] ||
-    die "--scaling requires cgroup v2 to validate effective CPU quotas"
+    die "$MODE requires cgroup v2 to validate effective CPU quotas"
   local cgroup_path current quota period label limits="" saw_cpu_max=0
   cgroup_path="$(awk -F: '$1 == "0" { print $3; exit }' /proc/self/cgroup)"
   [[ -n "$cgroup_path" ]] || cgroup_path="/"
@@ -742,13 +775,13 @@ discover_scaling_topology() {
       limits+="${limits:+;}$label=$quota/$period"
       saw_cpu_max=1
       if [[ "$quota" != "max" ]]; then
-        die "--scaling requires an unlimited cgroup CPU quota; $label has $quota/$period"
+        die "$MODE requires an unlimited cgroup CPU quota; $label has $quota/$period"
       fi
     fi
     [[ "$current" == "/sys/fs/cgroup" ]] && break
     current="${current%/*}"
   done
-  (( saw_cpu_max == 1 )) || die "--scaling could not validate cgroup-v2 CPU quotas"
+  (( saw_cpu_max == 1 )) || die "$MODE could not validate cgroup-v2 CPU quotas"
   CGROUP_CPU_LIMITS="$limits"
 }
 
@@ -760,7 +793,7 @@ cpu_list_for_threads() {
   printf '%s' "${selected[*]}"
 }
 
-if [[ "$MODE" == "scaling" ]]; then
+if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
   discover_scaling_topology
 fi
 
@@ -851,20 +884,57 @@ if (( DRY_RUN == 1 )); then
   echo "libc:             $LIBC_VERSION"
   exit 0
 fi
+if [[ "$MODE" == "composition-scaling" ]]; then
+  mkdir -p "$ROOT/target"
+  exec 8> "$ROOT/target/eidos-composition-scaling.lock"
+  flock -n 8 || die "another composition-scaling campaign is running in this worktree"
+fi
 RUN_ID="$(date -u +%Y%m%d-%H%M%S)-$$"
 RUN_DIR="$ROOT/target/eidos-vs-poseidon2/$RUN_ID"
-P2_ROOT="$RUN_DIR/worktrees/poseidon2"
-EIDOS_ROOT="$RUN_DIR/worktrees/eidos"
+RUNNER_SHA="$(sha256_file "$RUNNER_PATH")"
+if [[ "$MODE" == "composition-scaling" ]]; then
+  # Stable source paths allow Cargo and proof artifacts to be reused by later runs.
+  PERSISTENT_WORKTREE_ROOT="$ROOT/target/eidos-vs-poseidon2-worktrees"
+  P2_ROOT="$PERSISTENT_WORKTREE_ROOT/poseidon2-$BASE_COMMIT"
+  EIDOS_ROOT="$PERSISTENT_WORKTREE_ROOT/eidos-$CANDIDATE_COMMIT"
+  PROOF_CACHE_ROOT="$ROOT/target/eidos-vs-poseidon2-proof-cache"
+  P2_PROOF_CACHE="$PROOF_CACHE_ROOT/poseidon2-$BASE_COMMIT"
+  EIDOS_PROOF_CACHE="$PROOF_CACHE_ROOT/eidos-$CANDIDATE_COMMIT"
+  mkdir -p "$PERSISTENT_WORKTREE_ROOT" "$P2_PROOF_CACHE" "$EIDOS_PROOF_CACHE"
+else
+  P2_ROOT="$RUN_DIR/worktrees/poseidon2"
+  EIDOS_ROOT="$RUN_DIR/worktrees/eidos"
+  P2_PROOF_CACHE="$RUN_DIR/cache/poseidon2"
+  EIDOS_PROOF_CACHE="$RUN_DIR/cache/eidos"
+  mkdir -p "$P2_PROOF_CACHE" "$EIDOS_PROOF_CACHE"
+fi
 LOG_DIR="$RUN_DIR/logs"
 EIDOS_FIXTURES="$RUN_DIR/fixtures/eidos"
-mkdir -p "$LOG_DIR" "$EIDOS_FIXTURES" "$RUN_DIR/cache"
+mkdir -p "$LOG_DIR" "$EIDOS_FIXTURES"
+RESULT_ARCHIVE="$ROOT/target/eidos-vs-poseidon2/composition-$RUN_ID.tar.gz"
 
-cleanup() {
+cleanup_ephemeral_worktrees() {
   git -C "$ROOT" worktree remove --force "$P2_ROOT" >/dev/null 2>&1 || true
   git -C "$ROOT" worktree remove --force "$EIDOS_ROOT" >/dev/null 2>&1 || true
   git -C "$ROOT" worktree prune >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+if [[ "$MODE" != "composition-scaling" ]]; then
+  trap cleanup_ephemeral_worktrees EXIT
+fi
+
+ensure_benchmark_worktree() {
+  local label="$1" path="$2" commit="$3"
+  if [[ -e "$path" ]]; then
+    [[ -d "$path" ]] || die "$label benchmark worktree path is not a directory: $path"
+    [[ "$(git -C "$path" rev-parse HEAD 2>/dev/null)" == "$commit" ]] ||
+      die "$label benchmark worktree is not at $commit: $path"
+    [[ -z "$(git -C "$path" symbolic-ref -q --short HEAD || true)" ]] ||
+      die "$label benchmark worktree is not detached: $path"
+    echo "[setup] reusing $label worktree $path"
+  else
+    git -C "$ROOT" worktree add --detach "$path" "$commit"
+  fi
+}
 
 if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
   echo "warning: benchmark code uses committed Eidos revision $CANDIDATE_COMMIT; the live runner remains an input and its hash is recorded" >&2
@@ -872,8 +942,13 @@ fi
 echo "[setup] Poseidon2 $BASE_COMMIT"
 echo "[setup] Eidos $CANDIDATE_COMMIT ($EIDOS_REV)"
 echo "[setup] results $RUN_DIR"
-git -C "$ROOT" worktree add --detach "$P2_ROOT" "$BASE_COMMIT"
-git -C "$ROOT" worktree add --detach "$EIDOS_ROOT" "$CANDIDATE_COMMIT"
+if [[ "$MODE" == "composition-scaling" ]]; then
+  ensure_benchmark_worktree Poseidon2 "$P2_ROOT" "$BASE_COMMIT"
+  ensure_benchmark_worktree Eidos "$EIDOS_ROOT" "$CANDIDATE_COMMIT"
+else
+  git -C "$ROOT" worktree add --detach "$P2_ROOT" "$BASE_COMMIT"
+  git -C "$ROOT" worktree add --detach "$EIDOS_ROOT" "$CANDIDATE_COMMIT"
+fi
 
 install_masm_runner() {
   local worktree="$1"
@@ -1046,12 +1121,43 @@ patch_recursive_harness() {
   ' "$measurements"
 }
 
-for worktree in "$P2_ROOT" "$EIDOS_ROOT"; do
-  if ((${#FILES[@]} > 0)); then
-    install_masm_runner "$worktree"
+prepare_persistent_recursive_harness() {
+  local worktree="$1"
+  local config="benches/synthetic-bench/benches/recursive_verify/config.rs"
+  local measurements="benches/synthetic-bench/benches/recursive_verify/measurements.rs"
+  local changed expected untracked
+
+  if ! grep -q 'const PVM_COMPARISON_PROOF_COUNTS' "$worktree/$config"; then
+    [[ -z "$(git -C "$worktree" status --porcelain)" ]] ||
+      die "benchmark worktree is dirty but not prepared: $worktree"
+    patch_recursive_harness "$worktree"
+  else
+    grep -q 'Verifier::new().verify' "$worktree/$measurements" ||
+      die "benchmark worktree is only partially prepared: $worktree"
+    echo "[setup] reusing prepared benchmark harness in $worktree"
   fi
-  patch_recursive_harness "$worktree"
-done
+
+  expected="$(printf '%s\n%s\n' "$config" "$measurements" | LC_ALL=C sort)"
+  changed="$(git -C "$worktree" diff --name-only HEAD | LC_ALL=C sort)"
+  [[ "$changed" == "$expected" ]] || die "unexpected changes in benchmark worktree: $worktree"
+  untracked="$(git -C "$worktree" ls-files --others --exclude-standard)"
+  [[ -z "$untracked" ]] || die "benchmark worktree contains untracked files: $worktree"
+  git -C "$worktree" diff --check
+}
+
+if [[ "$MODE" == "composition-scaling" ]]; then
+  prepare_persistent_recursive_harness "$P2_ROOT"
+  prepare_persistent_recursive_harness "$EIDOS_ROOT"
+  git -C "$P2_ROOT" diff --binary HEAD > "$RUN_DIR/poseidon2-benchmark.patch"
+  git -C "$EIDOS_ROOT" diff --binary HEAD > "$RUN_DIR/eidos-benchmark.patch"
+else
+  for worktree in "$P2_ROOT" "$EIDOS_ROOT"; do
+    if ((${#FILES[@]} > 0)); then
+      install_masm_runner "$worktree"
+    fi
+    patch_recursive_harness "$worktree"
+  done
+fi
 
 logical_hash_calls() {
   local path="$1"
@@ -1110,7 +1216,7 @@ done
   echo "eidos_commit=$CANDIDATE_COMMIT"
   echo "eidos_revision=$EIDOS_REV"
   echo "rayon_thread_plan=$(IFS=,; echo "${THREAD_PLAN[*]}")"
-  if [[ "$MODE" != "scaling" ]]; then
+  if [[ "$MODE" != "scaling" && "$MODE" != "composition-scaling" ]]; then
     echo "threads=$THREADS"
   fi
   if ((${#CPU_POOL[@]} > 0)); then
@@ -1131,6 +1237,10 @@ done
   echo "cpu_profile=$CPU_PROFILE"
   echo "cpu_profile_key=$CPU_PROFILE_KEY"
   echo "build_cache_root=$BUILD_CACHE_ROOT"
+  echo "poseidon2_proof_cache=$P2_PROOF_CACHE"
+  echo "eidos_proof_cache=$EIDOS_PROOF_CACHE"
+  echo "poseidon2_worktree=$P2_ROOT"
+  echo "eidos_worktree=$EIDOS_ROOT"
   echo "rustc=$(rustc --version)"
   echo "cargo=$(cargo --version)"
   echo "uname=$(uname -a)"
@@ -1152,7 +1262,7 @@ done
   if [[ -r /sys/kernel/mm/transparent_hugepage/enabled ]]; then
     echo "transparent_hugepage=$(< /sys/kernel/mm/transparent_hugepage/enabled)"
   fi
-  echo "runner_sha256=$(sha256_file "$ROOT/scripts/bench_eidos_vs_poseidon2.sh")"
+  echo "runner_sha256=$RUNNER_SHA"
   echo "fixture_manifest_sha256=$(sha256_file "$FIXTURE_ROOT/SHA256SUMS")"
   if [[ -r /proc/self/status ]]; then
     awk '/^(Cpus_allowed_list|Mems_allowed_list):/ {
@@ -1164,7 +1274,7 @@ done
 } > "$RUN_DIR/metadata.txt"
 printf '%s\n' "$TARGET_CFG" > "$RUN_DIR/rust-target-cfg.txt"
 rustc -vV > "$RUN_DIR/rustc-vV.txt"
-if [[ "$MODE" == "scaling" ]]; then
+if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]]; then
   LC_ALL=C lscpu > "$RUN_DIR/lscpu.txt"
   LC_ALL=C lscpu -e=CPU,CORE,SOCKET,NODE,CACHE,ONLINE > "$RUN_DIR/cpu-topology.txt"
   numactl --hardware > "$RUN_DIR/numa-hardware.txt"
@@ -1199,6 +1309,7 @@ run_synthetic() {
     cd "$worktree"
     run_with_affinity "$cpu_list" env \
       CARGO_TARGET_DIR="$BUILD_CACHE_ROOT/$protocol" \
+      CARGO_TERM_COLOR=never \
       RAYON_NUM_THREADS="$threads" \
       CARGO_BUILD_JOBS="$BUILD_JOBS" \
       MASM_PROVE_PATH="$fixture" \
@@ -1219,10 +1330,25 @@ for index in "${!FILES[@]}"; do
     "$EIDOS_FIXTURES/${FILES[$index]}" "$DEFAULT_THREADS" "$DEFAULT_CPU_LIST"
 done
 
+benchmark_record_value() {
+  local record="$1" field="$2" log="$3"
+  awk -v record="$record" -v field="$field" '
+    $1 == record {
+      for (i = 2; i <= NF; i++) {
+        split($i, item, "=")
+        if (item[1] == field) {
+          print item[2]
+          exit
+        }
+      }
+    }
+  ' "$log"
+}
+
 run_recursive() {
   local protocol="$1" worktree="$2" auth="$3" count="$4" fixture="$5"
   local threads="$6" cpu_list="$7" block="$8" kind="${9:-measure}"
-  local tx_cache_hits pvm_cache_hits profile_stem perf_output resource_output
+  local tx_cache_hits pvm_cache_hits profile_stem perf_output resource_output proof_cache
   local log_name="recursive-${auth}-${count}mvm-1pvm-${protocol}.log"
   local profile_env=(
     RECURSION_PROFILE_PROVE=1
@@ -1237,8 +1363,13 @@ run_recursive() {
   if [[ -n "$block" ]]; then
     log_name="recursive-${block}-t${threads}-${auth}-${count}mvm-1pvm-${protocol}.log"
   fi
+  if [[ "$protocol" == "poseidon2" ]]; then
+    proof_cache="$P2_PROOF_CACHE"
+  else
+    proof_cache="$EIDOS_PROOF_CACHE"
+  fi
   echo "[$kind] ${block:+$block / }$auth / $protocol / $count MVM + 1 PVM / $threads Rayon threads${cpu_list:+ / CPUs $cpu_list}"
-  local command_prefix=()
+  local command_prefix=(env)
   if (( PROFILE_ENABLED == 1 )) && [[ "$kind" == "measure" ]]; then
     mkdir -p "$RUN_DIR/perf" "$RUN_DIR/resource-usage"
     profile_stem="${log_name%.log}"
@@ -1247,20 +1378,22 @@ run_recursive() {
     command_prefix=(
       /usr/bin/time -v -o "$resource_output"
       perf stat --no-big-num -x ';' -o "$perf_output" -e "$PROFILE_EVENTS" --
+      env
     )
   fi
   (
     cd "$worktree"
-    run_with_affinity "$cpu_list" "${command_prefix[@]}" env \
+    run_with_affinity "$cpu_list" "${command_prefix[@]}" \
       CARGO_TARGET_DIR="$BUILD_CACHE_ROOT/$protocol" \
+      CARGO_TERM_COLOR=never \
       RAYON_NUM_THREADS="$threads" \
       CARGO_BUILD_JOBS="$BUILD_JOBS" \
       RECURSION_BENCH_MASM="$fixture" \
       RECURSION_BENCH_HASH="$protocol" \
       RECURSION_PVM_COMPARISON=1 \
       RECURSION_PROOF_COUNTS="$count" \
-      RECURSION_BENCH_TX_PROOF_CACHE_DIR="$RUN_DIR/cache/$protocol/tx" \
-      RECURSION_BENCH_PVM_PROOF_CACHE_DIR="$RUN_DIR/cache/$protocol/pvm" \
+      RECURSION_BENCH_TX_PROOF_CACHE_DIR="$proof_cache/tx" \
+      RECURSION_BENCH_PVM_PROOF_CACHE_DIR="$proof_cache/pvm" \
       "${profile_env[@]}" \
       cargo bench --locked -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
   ) 2>&1 | tee "$LOG_DIR/$log_name"
@@ -1340,6 +1473,52 @@ elif [[ "$MODE" == "scaling" ]]; then
     else
       run_headline_arm eidos "$threads" "$cpu_list" "$block"
       run_headline_arm poseidon2 "$threads" "$cpu_list" "$block"
+    fi
+  done
+elif [[ "$MODE" == "composition-scaling" ]]; then
+  fixture="${RECURSIVE_FILES[0]}"
+  PRIME_THREADS="$SCALING_MAX_THREADS"
+  PRIME_CPU_LIST="$(cpu_list_for_threads "$PRIME_THREADS")"
+
+  # Build both revisions and populate the exact fixtures used by the smoke gate.
+  run_headline_arm poseidon2 "$PRIME_THREADS" "$PRIME_CPU_LIST" prime-headline prime
+  run_headline_arm eidos "$PRIME_THREADS" "$PRIME_CPU_LIST" prime-headline prime
+
+  matrix_warmups="$WARMUPS"
+  matrix_repeats="$REPEATS"
+  WARMUPS=0
+  REPEATS=1
+  REQUIRE_CACHE_HITS=1
+  run_headline_arm poseidon2 "$PRIME_THREADS" "$PRIME_CPU_LIST" smoke
+  run_headline_arm eidos "$PRIME_THREADS" "$PRIME_CPU_LIST" smoke
+  WARMUPS="$matrix_warmups"
+  REPEATS="$matrix_repeats"
+
+  max_count=0
+  for count in "${MVM_COUNTS[@]}"; do
+    (( count > max_count )) && max_count="$count"
+  done
+  # Populate all inner-proof cache entries before measuring the matrix. This keeps proof generation,
+  # compilation, and file-lock waits outside every timed block.
+  run_recursive poseidon2 "$P2_ROOT" ecdsa "$max_count" "$FIXTURE_ROOT/$fixture" \
+    "$PRIME_THREADS" "$PRIME_CPU_LIST" prime-matrix prime
+  run_recursive eidos "$EIDOS_ROOT" ecdsa "$max_count" "$EIDOS_FIXTURES/$fixture" \
+    "$PRIME_THREADS" "$PRIME_CPU_LIST" prime-matrix prime
+
+  for count_index in "${!MVM_COUNTS[@]}"; do
+    count="${MVM_COUNTS[$count_index]}"
+    printf -v block 'matrix-%02d' "$count"
+    # Alternate which hash runs first to reduce monotonic host-drift bias.
+    if (( count_index % 2 == 0 )); then
+      run_recursive poseidon2 "$P2_ROOT" ecdsa "$count" "$FIXTURE_ROOT/$fixture" \
+        "$PRIME_THREADS" "$PRIME_CPU_LIST" "$block"
+      run_recursive eidos "$EIDOS_ROOT" ecdsa "$count" "$EIDOS_FIXTURES/$fixture" \
+        "$PRIME_THREADS" "$PRIME_CPU_LIST" "$block"
+    else
+      run_recursive eidos "$EIDOS_ROOT" ecdsa "$count" "$EIDOS_FIXTURES/$fixture" \
+        "$PRIME_THREADS" "$PRIME_CPU_LIST" "$block"
+      run_recursive poseidon2 "$P2_ROOT" ecdsa "$count" "$FIXTURE_ROOT/$fixture" \
+        "$PRIME_THREADS" "$PRIME_CPU_LIST" "$block"
     fi
   done
 elif ((${#MVM_COUNTS[@]} > 0)); then
@@ -1435,20 +1614,82 @@ if [[ "$MODE" == "scaling" ]]; then
       }
     }' "$RUN_DIR/scaling-blocks.tsv" > "$RUN_DIR/scaling-by-threads.tsv"
 
-  if [[ -r "$CGROUP_STAT_DIR/cpu.stat" ]]; then
-    cp "$CGROUP_STAT_DIR/cpu.stat" "$RUN_DIR/cgroup-cpu-stat-after.txt"
-    before_throttled="$(awk '$1 == "nr_throttled" { print $2 }' \
-      "$RUN_DIR/cgroup-cpu-stat-before.txt")"
-    after_throttled="$(awk '$1 == "nr_throttled" { print $2 }' \
-      "$RUN_DIR/cgroup-cpu-stat-after.txt")"
-    if [[ -n "$before_throttled" && -n "$after_throttled" ]]; then
-      throttled_delta=$((after_throttled - before_throttled))
-      echo "cgroup_nr_throttled_delta=$throttled_delta" >> "$RUN_DIR/metadata.txt"
-      (( throttled_delta == 0 )) || die "cgroup CPU throttling occurred during the campaign"
-    fi
+fi
+
+if [[ "$MODE" == "scaling" || "$MODE" == "composition-scaling" ]] &&
+  [[ -r "$CGROUP_STAT_DIR/cpu.stat" ]]; then
+  cp "$CGROUP_STAT_DIR/cpu.stat" "$RUN_DIR/cgroup-cpu-stat-after.txt"
+  before_throttled="$(awk '$1 == "nr_throttled" { print $2 }' \
+    "$RUN_DIR/cgroup-cpu-stat-before.txt")"
+  after_throttled="$(awk '$1 == "nr_throttled" { print $2 }' \
+    "$RUN_DIR/cgroup-cpu-stat-after.txt")"
+  if [[ -n "$before_throttled" && -n "$after_throttled" ]]; then
+    throttled_delta=$((after_throttled - before_throttled))
+    echo "cgroup_nr_throttled_delta=$throttled_delta" >> "$RUN_DIR/metadata.txt"
+    (( throttled_delta == 0 )) || die "cgroup CPU throttling occurred during the campaign"
   fi
 fi
+
+if [[ "$MODE" == "composition-scaling" ]]; then
+  printf 'poseidon2_mvm_proofs\teidos_mvm_proofs\trayon_threads\tposeidon2_median_ms\teidos_median_ms\teidos_over_poseidon2\tposeidon2_max_padded_rows\teidos_max_padded_rows\n' \
+    > "$RUN_DIR/headline-smoke.tsv"
+  p2_log="$LOG_DIR/recursive-smoke-t${SCALING_MAX_THREADS}-ecdsa-5mvm-1pvm-poseidon2.log"
+  eidos_log="$LOG_DIR/recursive-smoke-t${SCALING_MAX_THREADS}-ecdsa-4mvm-1pvm-eidos.log"
+  p2_ms="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY median_ms "$p2_log")"
+  eidos_ms="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY median_ms "$eidos_log")"
+  p2_padded="$(benchmark_record_value BENCH_RECURSION_SHAPE max_padded_rows "$p2_log")"
+  eidos_padded="$(benchmark_record_value BENCH_RECURSION_SHAPE max_padded_rows "$eidos_log")"
+  [[ -n "$p2_ms" && -n "$eidos_ms" && -n "$p2_padded" && -n "$eidos_padded" ]] ||
+    die "could not assemble the headline smoke summary"
+  ratio="$(awk -v eidos="$eidos_ms" -v poseidon2="$p2_ms" \
+    'BEGIN { printf "%.6f", eidos / poseidon2 }')"
+  printf '5\t4\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$SCALING_MAX_THREADS" "$p2_ms" "$eidos_ms" "$ratio" "$p2_padded" "$eidos_padded" \
+    >> "$RUN_DIR/headline-smoke.tsv"
+
+  printf 'mvm_proofs\trayon_threads\tposeidon2_median_ms\teidos_median_ms\teidos_over_poseidon2\tposeidon2_core_rows\teidos_core_rows\tposeidon2_native_hash_rows\teidos_native_hash_rows\tposeidon2_max_trace_rows\teidos_max_trace_rows\tposeidon2_max_padded_rows\teidos_max_padded_rows\tposeidon2_proof_bytes\teidos_proof_bytes\n' \
+    > "$RUN_DIR/composition-scaling.tsv"
+  for count in "${MVM_COUNTS[@]}"; do
+    printf -v block 'matrix-%02d' "$count"
+    p2_log="$LOG_DIR/recursive-${block}-t${SCALING_MAX_THREADS}-ecdsa-${count}mvm-1pvm-poseidon2.log"
+    eidos_log="$LOG_DIR/recursive-${block}-t${SCALING_MAX_THREADS}-ecdsa-${count}mvm-1pvm-eidos.log"
+    p2_ms="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY median_ms "$p2_log")"
+    eidos_ms="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY median_ms "$eidos_log")"
+    [[ -n "$p2_ms" && -n "$eidos_ms" ]] ||
+      die "could not assemble the composition summary for $count MVM proofs"
+    ratio="$(awk -v eidos="$eidos_ms" -v poseidon2="$p2_ms" \
+      'BEGIN { printf "%.6f", eidos / poseidon2 }')"
+    p2_core="$(benchmark_record_value BENCH_RECURSION_SHAPE core_rows "$p2_log")"
+    eidos_core="$(benchmark_record_value BENCH_RECURSION_SHAPE core_rows "$eidos_log")"
+    p2_hash="$(benchmark_record_value BENCH_RECURSION_SHAPE poseidon2_permutation_rows "$p2_log")"
+    eidos_hash="$(benchmark_record_value BENCH_RECURSION_SHAPE eidos_compression_rows "$eidos_log")"
+    p2_max="$(benchmark_record_value BENCH_RECURSION_SHAPE max_trace_rows "$p2_log")"
+    eidos_max="$(benchmark_record_value BENCH_RECURSION_SHAPE max_trace_rows "$eidos_log")"
+    p2_padded="$(benchmark_record_value BENCH_RECURSION_SHAPE max_padded_rows "$p2_log")"
+    eidos_padded="$(benchmark_record_value BENCH_RECURSION_SHAPE max_padded_rows "$eidos_log")"
+    p2_bytes="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY avg_proof_bytes "$p2_log")"
+    eidos_bytes="$(benchmark_record_value BENCH_RECURSION_PROOF_SUMMARY avg_proof_bytes "$eidos_log")"
+    [[ -n "$p2_core" && -n "$eidos_core" && -n "$p2_hash" && -n "$eidos_hash" &&
+      -n "$p2_max" && -n "$eidos_max" && -n "$p2_padded" && -n "$eidos_padded" &&
+      -n "$p2_bytes" && -n "$eidos_bytes" ]] ||
+      die "could not parse the composition trace shape for $count MVM proofs"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$count" "$SCALING_MAX_THREADS" "$p2_ms" "$eidos_ms" "$ratio" "$p2_core" \
+      "$eidos_core" "$p2_hash" "$eidos_hash" "$p2_max" "$eidos_max" "$p2_padded" \
+      "$eidos_padded" "$p2_bytes" "$eidos_bytes" >> "$RUN_DIR/composition-scaling.tsv"
+  done
+fi
 echo "finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$RUN_DIR/metadata.txt"
+if [[ "$MODE" == "composition-scaling" ]]; then
+  echo "campaign_status=complete" >> "$RUN_DIR/metadata.txt"
+  mkdir -p "$RUN_DIR/scripts"
+  cp "$RUNNER_PATH" "$RUN_DIR/scripts/"
+  git -C "$ROOT" status --short > "$RUN_DIR/driver-git-status.txt"
+  git -C "$P2_ROOT" status --short > "$RUN_DIR/poseidon2-worktree-status.txt"
+  git -C "$EIDOS_ROOT" status --short > "$RUN_DIR/eidos-worktree-status.txt"
+  tar -czf "$RESULT_ARCHIVE" -C "$(dirname "$RUN_DIR")" "$(basename "$RUN_DIR")"
+  tar -tzf "$RESULT_ARCHIVE" >/dev/null
+fi
 
 echo
 cat "$RUN_DIR/summaries.txt"
@@ -1459,4 +1700,9 @@ if ((${#FILES[@]} > 0)); then
 fi
 if [[ "$MODE" == "scaling" ]]; then
   echo "scaling summary: $RUN_DIR/scaling-by-threads.tsv"
+fi
+if [[ "$MODE" == "composition-scaling" ]]; then
+  echo "composition summary: $RUN_DIR/composition-scaling.tsv"
+  echo "result archive: $RESULT_ARCHIVE"
+  echo "archive sha256: $(sha256_file "$RESULT_ARCHIVE")"
 fi

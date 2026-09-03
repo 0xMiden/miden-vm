@@ -40,14 +40,12 @@
 //! contract** (`κ ≲ 2⁹`) is a completeness condition only — beyond it
 //! the honest carries outgrow their `2³²` window and nothing proves.
 //!
-//! ## Liquid layout (period 8, folded closing)
+//! ## Layout
 //!
-//! Only lookups impose shape: the bus-facing operands keep their limbs
-//! co-resident in a single row (no more lo/hi split), while the local
-//! witnesses `q` / `Γ` flow into every remaining cell — each placement
-//! is one precomputed-weight term in the `id` accumulator plus one
-//! `Range16` fraction. Nineteen cells per row pack the 148 committed
-//! values into exactly 8 live rows:
+//! Bus-facing operands keep all their limbs on one row. The local `q` and `Γ` witnesses occupy the
+//! remaining cells; each placement contributes one precomputed-weight term to the `id` accumulator
+//! and one `Range16` fraction. Nineteen cells per row hold the 148 committed values in eight active
+//! rows:
 //!
 //! | row | role | cells 0–15 / 0–16 | cells past the limbs |
 //! |-----|------|--------------------|------------------------|
@@ -60,19 +58,15 @@
 //! | 6   | `g1` | — | γ (0–14; 15–18 spare) |
 //! | 7   | `c`  | c's 4×32 halves (0–7) | mult, c_ptr, κ_c, is_sub, κ_c_signed (8–12); γ spill (13–18) |
 //!
-//! ([`GAMMA_SLOTS`] is the single placement table the AIR, trace-gen
-//! and prover all read.) The `c` row folds the old dedicated term row's
-//! role: it's both the last operand row of the block *and* the closing
-//! row, so its own contribution — not yet folded into `id` by the time
-//! its own row is evaluated — is reconstructed locally (mirroring
-//! [`UintAdd`](crate::uint::add)'s `p_own` pattern) and asserted
-//! directly instead of relying on a dedicated all-metadata successor
-//! row to stay at a hard-pinned zero.
+//! [`GAMMA_SLOTS`] is the shared placement table used by the AIR and trace generator. The `c` row
+//! holds the term metadata and closes the block. Its local contribution has not yet entered `id`,
+//! so the closing constraint reconstructs that contribution before asserting zero. This mirrors
+//! the `p_own` pattern in [`UintAdd`](crate::uint::add).
 //!
 //! ## Registers
 //!
-//! Two ext-field aux registers beyond the LogUp columns (σ-excluded via
-//! `num_logup_cols`):
+//! Two extension-field auxiliary registers follow the declared LogUp prefix and are excluded from
+//! its sum:
 //!
 //! - **`S`** (staging): builds `κₐ·a(β)` on the `a` row, holds through the `b` row (whose `id`
 //!   contribution `S·b(β)` lands the degree-2 product at constraint degree 3), resets, builds
@@ -103,9 +97,9 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -220,9 +214,7 @@ pub const S_KEEP: [u64; PERIOD] = [1, 0, 1, 0, 0, 0, 0, 0];
 const PCOL_S_KEEP: usize = PERIOD;
 const NUM_PERIODIC: usize = PERIOD + 1;
 
-// Term-metadata cells, now hosted on the `c` row past its 8 raw limbs
-// (the `c` row reads them locally — no more `next`-row access, since
-// there's no separate term row anymore).
+// Term-metadata cells on the `c` row, after its eight raw limbs.
 pub const TERM_CELL_MULT: usize = 8;
 pub const TERM_CELL_C_PTR: usize = 9;
 pub const TERM_CELL_KAPPA_C: usize = 10;
@@ -302,10 +294,10 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
     slots
 }
 
-// Aux layout: col 0 = LogUp running sum (the UintMul provide), the raw
+// Aux layout: col 0 = centered LogUp running sum (the UintMul provide), the raw
 // UintLimbs consumes, Range16 on every cell position, the two κ
 // Range16s, and the 4×32 UintVal consumes, then the Schwartz–Zippel
-// `id` and staging `S` registers (excluded from σ via num_logup_cols).
+// `id` and staging `S` registers (outside the declared LogUp prefix).
 // FLATTENED to lqd 1: every fraction is an act-gated degree-2
 // multiplicity, paired ≤ 2 per column (col 0 a single fraction; the
 // odd cell count leaves one Range16 column a singleton too) → every
@@ -313,9 +305,8 @@ const fn gamma_slots() -> [(usize, usize); NUM_GAMMA_SLOTS] {
 const NUM_RAW_CONSUMES: usize = 3; // a, b, bound
 const NUM_RAW_CONSUME_COLS: usize = NUM_RAW_CONSUMES.div_ceil(2);
 const NUM_RANGE16_COLS: usize = NUM_CELLS.div_ceil(2);
-/// Exposed so [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir)
-/// can concatenate this chiplet's column shape onto the store's own
-/// instead of hand-duplicating the derived column count.
+/// Reused by [`UintStoreMulAir`](crate::uint::store_mul::UintStoreMulAir) to derive its
+/// independently repacked LogUp width.
 pub(crate) const NUM_LOGUP_COLS: usize = 1 // the UintMul provide
     + NUM_RAW_CONSUME_COLS // the three merged raw UintLimbs consumes (a, b, bound)
     + NUM_RANGE16_COLS // Range16 on every cell position
@@ -340,7 +331,7 @@ const fn column_shape() -> [usize; NUM_LOGUP_COLS] {
     }
     shape
 }
-pub(crate) const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = column_shape();
 
 /// The γ sign offset `2³¹` (carries are committed as `γ + 2³¹`).
 pub const GAMMA_OFFSET: u32 = 1 << 31;
@@ -383,7 +374,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -418,9 +409,7 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         let kappa_a: AB::Expr = local[COL_KAPPA_A].into();
         let act: AB::Expr = local[COL_ACT].into();
-        // κ_c_signed is now local to the `c` row (see
-        // `TERM_CELL_KAPPA_C_SIGNED`) — no more `next`-row access, since
-        // the `c` row hosts its own term metadata directly.
+        // The `c` row reads its signed scale from its local term metadata.
         let kappa_c_signed_local: AB::Expr = local[TERM_CELL_KAPPA_C_SIGNED].into();
 
         // Registers.
@@ -565,9 +554,9 @@ impl LiftedAir<Felt, QuadFelt> for UintMulAir {
 
         // Phase 2: LogUp — the UintMul provide + Range16 + the
         // operand consumes.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -578,10 +567,6 @@ impl<LB> LookupAir<LB> for UintMulAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

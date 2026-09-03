@@ -128,11 +128,11 @@ and chaining word, perform feed-forward XOR, enforce canonical field encodings, 
 The eight raw chaining-value words cross the cycle in one atomic, cycle-tagged internal relation;
 the sixteen message words remain independently cycle-tagged.
 
-The compression AIR has two external modes:
+The compression AIR has two external interfaces:
 
-- **compression mode** emits one controller/compression-link provider message on footer row 3,
+- **Compression** emits one controller/compression-link provider message on footer row 3,
   weighted by the aggregate request multiplicity;
-- **AEAD-XOF mode** consumes one clock-tagged AEAD input on footer row 3 and emits low/high raw-XOF
+- **AEAD XOF** consumes one clock-tagged AEAD input on footer row 3 and emits low/high raw-XOF
   output pairs across the four footer rows.
 
 Padding blocks have zero compression multiplicity and cannot masquerade as AEAD cycles.
@@ -159,13 +159,24 @@ to one physical cycle, while the footer-3 compression-link relation ties that cy
 
 The Eidos compression AIR represents its u32 logic with byte-level lookup messages:
 
-- ordinary bytewise AND, from which XOR is reconstructed as `a + b - 2*(a & b)`;
-- weighted byte contributions for rotate-right-by-12;
-- weighted byte contributions for rotate-right-by-7;
+- ordinary bytewise AND witnesses, encoded on the canonical XOR relation as
+  `x = a + b - 2*(a & b)`;
+- physical weighted byte contributions for rotate-right-by-12 and rotate-right-by-7, normalized
+  in lookup messages by a scale that depends only on byte position;
 - range checks for packed u32 limbs.
 
 `And8LookupAir` owns the fixed 256×256 byte table and balances those requests. The same table also
-supports the bytewise XORs in the AEAD stream trace.
+supports the bytewise XORs in the AEAD stream trace. Its fixed columns are
+`[a, b, x, W12(x), W7(x)]`, where `x = a xor b`. Three non-wrapping rotation positions reuse the
+canonical XOR relation after static position normalization; five dedicated relations handle the
+remaining positions. Together with range check, the seven typed table interactions occupy four
+auxiliary columns with shape `[1, 2, 2, 2]`. Pairing preserves the distinct bus and byte-position
+tags and keeps the closing constraints at degree three.
+
+Here `W12(x) = floor(x / 16) + 2^28 * (x mod 16)` and
+`W7(x) = floor(x / 128) + 2^25 * (x mod 128)`. For byte positions zero through three, the lookup
+normalizer divides a physical rotation contribution by `(2^20, 2, 2^4, 1)`, respectively. These
+position-only scales keep the message field affine.
 
 ## Lookup buses {#lookup-buses}
 

@@ -374,10 +374,7 @@ impl CoreAir {
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Core);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::main_air::MAIN_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -473,10 +470,7 @@ impl ChipletsAir {
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::Chiplets);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::chiplet_air::CHIPLET_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -556,10 +550,7 @@ impl EidosCompressionAir {
         }
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::EidosCompression);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -631,10 +622,7 @@ impl And8LookupAir {
     fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::And8Lookup);
         self.lookup_eval(&mut lb);
-    }
-
-    fn lookup_num_columns(self) -> usize {
-        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+        lb.finish();
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
@@ -909,7 +897,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core | Self::Chiplets => ConstraintDegrees { base: 9, ext: 9 },
             Self::EidosCompression => ConstraintDegrees { base: 3, ext: 3 },
-            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 2 },
+            Self::And8Lookup => ConstraintDegrees { base: 0, ext: 3 },
         }
     }
 
@@ -934,15 +922,6 @@ where
         + EidosCompressionLookupBuilder
         + And8LookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        match self {
-            Self::Core => CoreAir.lookup_num_columns(),
-            Self::Chiplets => ChipletsAir.lookup_num_columns(),
-            Self::EidosCompression => EidosCompressionAir.lookup_num_columns(),
-            Self::And8Lookup => And8LookupAir.lookup_num_columns(),
-        }
-    }
-
     fn column_shape(&self) -> &[usize] {
         MidenAir::column_shape(*self)
     }
@@ -1278,6 +1257,38 @@ mod tests {
             let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
             assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
+    }
+
+    #[test]
+    fn core_shape_and_degree_match_design() {
+        let air = MidenAir::CORE;
+        let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&HandwrittenMidenAir(air));
+
+        assert_eq!(air.width(), 48);
+        assert_eq!(constraints::columns::NUM_DECODER_COLS, 23);
+        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
+        assert_eq!(symbolic, ConstraintDegrees { base: 9, ext: 9 });
+        assert_eq!(
+            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
+            symbolic,
+            "Core's declared degree must match its handwritten constraints",
+        );
+        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 3);
+    }
+
+    #[test]
+    fn and8_lookup_shape_and_degree_match_design() {
+        let air = MidenAir::AND8_LOOKUP;
+
+        assert_eq!(air.width(), 7);
+        assert_eq!(air.preprocessed_width(), 5);
+        assert_eq!(LiftedAir::<Felt, QuadFelt>::aux_width(&air), 4);
+        assert_eq!(constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE, [1, 2, 2, 2],);
+        assert_eq!(
+            LiftedAir::<Felt, QuadFelt>::constraint_degree(&air),
+            ConstraintDegrees { base: 0, ext: 3 }
+        );
+        assert_eq!(miden_crypto::stark::log_quotient_degree::<Felt, QuadFelt, _>(&air), 1);
     }
 
     #[test]

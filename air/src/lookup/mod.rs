@@ -30,9 +30,9 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// constraint path visits every row symbolically, the prover path visits
 /// every concrete row).
 ///
-/// The trait carries both the static *shape* (column count, payload
-/// width bound, bus-id upper bound) and the `eval` method that actually
-/// emits the interactions. Adapter constructors take a `&impl
+/// The trait carries both the static *shape* (per-column fraction bounds, payload width bound,
+/// bus-id upper bound) and the `eval` method that actually emits the interactions. Adapter
+/// constructors take a `&impl
 /// LookupAir<Self>` and read the shape via the trait - the `LB` type
 /// parameter is pinned to the adapter itself, so there is no
 /// ambiguity when the blanket `impl<LB: LookupBuilder> LookupAir<LB>
@@ -40,9 +40,12 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 ///
 /// ## Contract
 ///
-/// - [`num_columns()`](Self::num_columns) must match the number of `LookupBuilder::next_column`
-///   calls issued from [`eval`](Self::eval) - the adapter advances its internal column index each
-///   time the closure returns and will panic (or produce undefined constraints) on a mismatch.
+/// - [`column_shape()`](Self::column_shape) has one entry per LogUp permutation column and its
+///   length must match the number of [`LookupBuilder::next_column`] calls issued from
+///   [`eval`](Self::eval). The shared adapters validate this invariant.
+/// - LogUp columns occupy the prefix `0..column_shape().len()` of the auxiliary trace. A
+///   [`LiftedAir`](miden_crypto::stark::air::LiftedAir) may append independently constrained
+///   extension-field registers after that prefix; they are excluded from the LogUp recurrence.
 /// - [`max_message_width()`](Self::max_message_width) must be >= the widest payload any message in
 ///   the AIR emits. It counts **only** contiguous payload slots - the bus identifier is handled
 ///   separately through the precomputed bus-prefix table.
@@ -52,15 +55,19 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// - The auxiliary trace must have a positive row count. Its single committed value is the
 ///   normalized sum `sigma_prime = sigma / n`, bound by the all-row cyclic recurrence.
 pub trait LookupAir<LB: LookupBuilder> {
-    /// Number of permutation columns this argument occupies.
-    fn num_columns(&self) -> usize;
+    /// Number of LogUp permutation columns declared by this AIR.
+    ///
+    /// The column shape defines this count, so the two values cannot drift apart.
+    fn num_columns(&self) -> usize {
+        self.column_shape().len()
+    }
 
     /// Per-column upper bound on the number of fractions a single row can push.
     ///
-    /// Length must equal [`num_columns()`](Self::num_columns). Each entry is the
-    /// Mutual-exclusion-aware max: the largest active branch count taken across all mutually
-    /// exclusive groups inside the column, not the sum of every structural
-    /// `add` / `remove` / `insert` / `batch` push site.
+    /// The slice length is the number of LogUp permutation columns. Each entry is the
+    /// mutual-exclusion-aware maximum: the largest active branch count across mutually exclusive
+    /// groups inside the column, not the sum of every structural `add`, `remove`, `insert`, or
+    /// `batch` site.
     ///
     /// The prover-path adapter uses this to size the dense per-column fraction buffer.
     fn column_shape(&self) -> &[usize];

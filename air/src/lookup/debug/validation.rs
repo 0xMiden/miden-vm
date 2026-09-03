@@ -4,7 +4,7 @@
 //! [`ValidateLookupAir`], so any qualifying [`LookupAir`] can be checked with
 //! `air.validate(layout)`. One short-circuit [`Result<(), ValidationError>`] covers:
 //!
-//! - `num_columns` declared vs observed (the walker counts `next_column` calls).
+//! - `column_shape().len()` declared vs observed (the walker counts `next_column` calls).
 //! - Per-group and per-column `Deg { v, u }` declared vs observed (via
 //!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
@@ -47,8 +47,8 @@ type ExprEF = SymbolicExpressionExt<Felt, QuadFelt>;
 /// semantics; each variant corresponds to one of the checks.
 #[derive(Clone, Debug)]
 pub enum ValidationError {
-    /// [`LookupAir::num_columns`] disagreed with the number of `next_column` calls
-    /// issued by `eval`.
+    /// [`LookupAir::column_shape`] disagreed with the number of `next_column` calls issued by
+    /// `eval`.
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
     /// its accumulated `(V, U)`. Declared degrees are authoritative and must
@@ -320,7 +320,7 @@ impl<'ab, 'r> ValidationBuilder<'ab, 'r> {
             sym_challenges,
             row_valuation,
             column_idx: 0,
-            declared_columns: air.num_columns(),
+            declared_columns: air.column_shape().len(),
             error: None,
         }
     }

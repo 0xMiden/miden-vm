@@ -37,6 +37,9 @@
   And8Lookup AIRs. The fixed 65,536-row And8 table also serves the 16-bit range checks and sets the
   minimum padded trace height. `LOG_DEFERRED` now replaces the statement digest on top of the stack
   with the updated deferred root ([#3718](https://github.com/0xMiden/miden-vm/pull/3718)).
+- [BREAKING] Reduced the native and precompile VM trace widths with centered LogUp accumulators,
+  one PVM lookup closure, compact byte-pair tables, and narrower decoder and chiplet layouts. This
+  changes both proof relations and their recursive-verifier artifacts.
 - [BREAKING] Changed deferred precompile nodes to initialize Eidos from their registered selector,
   payload length, and two tag arguments. Each payload block is compressed once, with no terminal
   tag block. Framework AND and CHUNKS nodes keep separate registered selectors

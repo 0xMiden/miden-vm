@@ -8,13 +8,10 @@
 //!   [`EcPointStoreAir`] implementations remain as component AIRs for isolated tests.
 //! - [`add::EcGroupAddAir`] — the complete group-law addition over the two stores.
 //!
-//! Both stores are **binding stores**, deliberately the thinnest
-//! chiplets in the stack: one row per entity, no periodic columns, a
-//! single aux column each. Everything heavy is delegated downward —
-//! coordinate canonicity to the [UintStore](crate::uint), curve
-//! membership to three [`UintMul`](crate::relations::BusId::UintMul)
-//! MACs sharing a result ptr, group-op field math to the uint relation
-//! chiplets.
+//! Both stores are compact binding chiplets: one row per entity, no periodic columns, and one
+//! auxiliary column each. They delegate coordinate canonicity to the [UintStore](crate::uint),
+//! curve membership to three [`UintMul`](crate::relations::BusId::UintMul) MACs sharing a result
+//! pointer, and group-operation field arithmetic to the uint relation chiplets.
 //!
 //! See the design notes for the full design.
 //!
@@ -65,9 +62,9 @@ use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, frac_col,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::mul::UintMulMsg,
@@ -195,8 +192,7 @@ pub const NUM_MAIN_COLS: usize = 16;
 
 // Aux: five columns, flattened via `frac_col!` so every closing
 // constraint stays at degree ≤ 3 → `log_quotient_degree = 1`. Six
-// fractions total: `EcPoint` provide (col 0, the gated running-sum
-// anchor, alone), `EcGroup` consume paired with the `EcGroupAdd`
+// fractions total: `EcPoint` provide alone in col 0, `EcGroup` consume paired with the `EcGroupAdd`
 // on-curve-cert consume (col 1), and the three trio MAC consumes — each
 // degree 3, so each sits alone (cols 2-4). The trio and the cert are
 // mutually-exclusive membership modes.
@@ -230,7 +226,7 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -247,9 +243,9 @@ impl LiftedAir<Felt, QuadFelt> for EcPointStoreAir {
         eval_point_store_main(builder, 0);
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -313,10 +309,6 @@ impl<LB> LookupAir<LB> for EcPointStoreAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -376,7 +368,7 @@ where
     let single_deg = Deg { v: 1, u: 2 };
     let paired_deg = Deg { v: 3, u: 2 };
 
-    // col 0: the point binding, alone — the gated running-sum anchor.
+    // col 0: the point binding, alone.
     frac_col!(
         builder,
         "ec-points",

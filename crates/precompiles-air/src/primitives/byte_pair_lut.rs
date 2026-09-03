@@ -1,38 +1,32 @@
 //! Byte-pair lookup table chiplet.
 //!
-//! Provides two relations over the same trace rows:
+//! Provides the PVM's canonical byte-pair and 16-bit range relations over one fixed table:
 //!
-//! - [`BytePairLutMsg`]: tuple `(op, a, b, c)` where `op ∈ {AndNot, Xor}`, `a, b ∈ [0, 256)`, and
-//!   `c = op.apply(a, b)`. Used by callers that need a byte-level bitwise op result, with the
-//!   inputs implicitly range-checked to bytes.
+//! - [`BytePairLutMsg`]: tuple `(a, b, x)` where `x = a xor b`. AND and ANDNOT consumers map their
+//!   result to `x` with affine identities, so all three logic operations use one relation.
+//! - five normalized Eidos rotation relations. Three non-wrapping positions reuse the canonical XOR
+//!   relation; the other positions use a row-family-independent normalization.
 //! - [`Range16Msg`]: tuple `(w,)` where `w ∈ [0, 2^16)`. Used by callers that need a 16-bit range
 //!   check on a packed 16-bit Felt without spending a bytewise-op slot. The chiplet splits `w = a +
 //!   256·b` (LSB byte first) and provides for the matching row.
 //!
-//! The data `a`, `b` and the precomputed bytewise results `c_andnot`,
-//! `c_xor` are **preprocessed** (verifier-known) columns; only three
-//! multiplicity columns (one per relation contribution: AndNot, Xor,
-//! Range16) are witness. All three contributions are accumulated into the
-//! chiplet's single LogUp aux column. The lookup eval reads the data and
-//! multiplicities together through a combined `[preprocessed ++ main]`
-//! window (`logup::CombinedWindow`).
+//! Fixed columns are `[a, b, x, W12(x), W7(x)]`, where `x = a xor b` and only the two wrapping
+//! rotation contributions need dedicated fixed outputs. The other six contributions are affine in
+//! `x`. Seven witness columns carry multiplicities for the canonical XOR relation, five normalized
+//! rotation relations, and Range16.
 //!
-//! See [`logup`](crate::logup) and the design notes for the
-//! lookup-argument architecture.
+//! `W12(x) = floor(x / 16) + 2^28 * (x mod 16)` and
+//! `W7(x) = floor(x / 128) + 2^25 * (x mod 128)`. For byte positions zero through three, lookup
+//! messages divide the physical contribution by `(2^20, 2, 2^4, 1)`, respectively.
 //!
 //! # Soundness
 //!
-//! The data columns `a`, `b`, `c_andnot`, `c_xor` are the fixed,
-//! verifier-known `preprocessed_table` — committed once, enumerating
-//! every `(a, b) ∈ [0, 256)²` in lex order with the correct bytewise
-//! results. They are not witness, so a prover cannot forge them:
-//! `a, b ∈ [0, 256)` and `c_andnot = (!a) & b`, `c_xor = a ^ b` hold by
-//! construction. The LogUp `(op, a, b, c)` / `(w,)` tuples the chiplet
-//! provides are therefore pinned to correct values, and callers of
-//! [`BytePairLutMsg`] / [`Range16Msg`] inherit sound range checks and
-//! bitwise-op results. Only the three multiplicity columns are witness
-//! (range-unchecked under the fixed-consume invariant — see
-//! the design notes).
+//! The preprocessed table enumerates every `(a, b) ∈ [0, 256)²` in lexicographic order and fixes
+//! the deterministic outputs. It is verifier-known, so a prover can only choose relation
+//! multiplicities. Global lookup balance determines those multiplicities from consumers.
+
+#[doc(hidden)]
+pub mod eidos;
 
 use alloc::vec::Vec;
 
@@ -43,11 +37,12 @@ use miden_core::{
 };
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
+use self::eidos::{Relation as EidosRelation, Rotation as EidosRotation};
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, build_logup_aux_trace, frac_col,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, build_logup_aux_trace, frac_col,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::current_main,
@@ -58,6 +53,7 @@ use crate::{
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BytePairOp {
+    And,
     /// `(NOT a) AND b` — Keccak χ convention.
     AndNot,
     Xor,
@@ -66,16 +62,18 @@ pub enum BytePairOp {
 impl BytePairOp {
     pub fn apply(self, a: u8, b: u8) -> u8 {
         match self {
+            BytePairOp::And => a & b,
             BytePairOp::AndNot => (!a) & b,
             BytePairOp::Xor => a ^ b,
         }
     }
 
-    /// Numeric tag used in the [`BytePairLutMsg`] relation tuple's `op` slot.
-    pub fn tag(self) -> u8 {
+    /// Applies the same bytewise operation to a 64-bit word.
+    pub fn apply_u64(self, a: u64, b: u64) -> u64 {
         match self {
-            BytePairOp::AndNot => 0,
-            BytePairOp::Xor => 1,
+            BytePairOp::And => a & b,
+            BytePairOp::AndNot => (!a) & b,
+            BytePairOp::Xor => a ^ b,
         }
     }
 }
@@ -83,47 +81,42 @@ impl BytePairOp {
 // COLUMN LAYOUT
 // ================================================================================================
 //
-// Witness `main` carries only the three multiplicity columns. The data
-// columns `a`, `b`, `c_andnot`, `c_xor` are **preprocessed** — the fixed,
-// verifier-known [`preprocessed_table`] — so they are not witness and
-// cannot be forged. The lookup eval reads them via the combined
-// `[preprocessed ++ main]` window (see `logup::CombinedWindow`), where the
-// preprocessed columns come first (`PRE_*`) and the multiplicities follow
-// at `NUM_PREPROCESSED_COLS + COL_MULT_*`.
+// Witness `main` carries only multiplicities. Deterministic byte values and results live in the
+// verifier-known preprocessed table.
 
-pub const COL_MULT_ANDNOT: usize = 0;
-pub const COL_MULT_XOR: usize = 1;
-pub const COL_MULT_RANGE16: usize = 2;
-pub const NUM_MAIN_COLS: usize = 3;
-pub const NUM_AUX_COLS: usize = 2;
-/// Width of the preprocessed (verifier-known) data table: `a`, `b`,
-/// `c_andnot`, `c_xor`. See `preprocessed_table`.
-pub const NUM_PREPROCESSED_COLS: usize = 4;
+pub(crate) const COL_MULT_RANGE16: usize = eidos::NUM_RELATIONS;
+pub const NUM_MAIN_COLS: usize = COL_MULT_RANGE16 + 1;
+pub const NUM_AUX_COLS: usize = 4;
+/// Width of the preprocessed table `[a, b, x, W12(x), W7(x)]`.
+pub const NUM_PREPROCESSED_COLS: usize = 5;
 
-/// Column indices into the preprocessed data table (see
-/// `preprocessed_table`). These are also the lookup eval's indices into
-/// the combined `[preprocessed ++ main]` window, which places the
-/// preprocessed columns first.
+/// Column indices into the preprocessed data table (see [`preprocessed_table`]).
 pub const PRE_A: usize = 0;
 pub const PRE_B: usize = 1;
-pub const PRE_C_ANDNOT: usize = 2;
-pub const PRE_C_XOR: usize = 3;
+pub const PRE_XOR: usize = 2;
+pub const PRE_WRAP12: usize = 3;
+pub const PRE_WRAP7: usize = 4;
 
-/// Width of the combined `[preprocessed ++ main]` window the lookup eval
-/// reads: the 4 preprocessed data columns followed by the 3 witness
-/// multiplicities. `PRE_*` index the data; `NUM_PREPROCESSED_COLS +
-/// COL_MULT_*` index the multiplicities.
-pub const NUM_LOOKUP_COLS: usize = NUM_PREPROCESSED_COLS + NUM_MAIN_COLS;
-// The single exposed σ ([`NUM_SIGMA_VALUES`]) and the shared
-// transcript-root public values ([`NUM_PUBLIC_VALUES`]) follow the
-// VM-wide LogUp contract in [`crate::logup`]; the natural last-row
-// σ-closing needs no `inv_n`, and this chiplet declares the root but
-// does not read it.
+/// Multiplicative inverse of two in the Miden base field.
+const FELT_INV_TWO: Felt = Felt::new_unchecked(9_223_372_034_707_292_161);
+
+/// Recover `a & b` from `x = a xor b` using `(a + b - x) / 2`.
+pub(crate) fn and_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
+    (a + b - x) * FELT_INV_TWO
+}
+
+/// Recover `(!a) & b` from `x = a xor b` using `(x - a + b) / 2`.
+///
+/// The identity is linear, so it also holds when byte tuples are packed with common positional
+/// weights, as in Keccak's 32-bit Memory64 limbs.
+pub(crate) fn andnot_result_from_xor<E: Algebra<Felt>>(a: E, b: E, x: E) -> E {
+    (x - a + b) * FELT_INV_TWO
+}
 
 /// Fixed trace height: every `(a, b) ∈ [0, 256)²` gets a row, in lex
 /// order (`idx = (a << 8) | b`). The preprocessed data table
 /// (`preprocessed_table`) is pinned to this lex enumeration on these
-/// `2^16` rows; the three witness multiplicity columns are committed in
+/// `2^16` rows; the seven witness multiplicity columns are committed in
 /// lockstep at the same height.
 pub const TRACE_HEIGHT: usize = 1 << 16;
 
@@ -132,25 +125,27 @@ const NUM_BYTE_PAIRS: usize = TRACE_HEIGHT;
 // PREPROCESSED TABLE
 // ================================================================================================
 
-/// The fixed `2^16 × 4` data table committed once as preprocessed
+/// The fixed `2^16 × 5` data table committed once as preprocessed
 /// (verifier-known) columns: every `(a, b) ∈ [0, 256)²` in lex order
-/// (`idx = (a << 8) | b`) with `c_andnot = (!a) & b` and `c_xor = a ^ b`.
+/// (`idx = (a << 8) | b`) with `x = a xor b` and the two wrapping Eidos rotation
+/// contributions.
 ///
-/// Column order matches [`PRE_A`], [`PRE_B`], [`PRE_C_ANDNOT`],
-/// [`PRE_C_XOR`]. Because the table is fixed and verifier-committed, the
-/// LogUp `(op, a, b, c)` / `(w,)` tuples it provides are pinned to the
-/// correct bytewise-op results — this is what makes the chiplet sound.
+/// Column order matches [`PRE_A`], [`PRE_B`], [`PRE_XOR`], [`PRE_WRAP12`], and
+/// [`PRE_WRAP7`]. Because the table is fixed and verifier-committed, its byte-pair, rotation, and
+/// range-check relations are pinned to the correct values.
 #[doc(hidden)]
 pub fn preprocessed_table() -> RowMajorMatrix<Felt> {
     let mut values = Vec::with_capacity(TRACE_HEIGHT * NUM_PREPROCESSED_COLS);
     for idx in 0..NUM_BYTE_PAIRS {
         let a = (idx >> 8) as u8;
         let b = (idx & 0xff) as u8;
+        let x = a ^ b;
         values.extend([
             Felt::from(a),
             Felt::from(b),
-            Felt::from(BytePairOp::AndNot.apply(a, b)),
-            Felt::from(BytePairOp::Xor.apply(a, b)),
+            Felt::from(x),
+            Felt::from(eidos::contribution(EidosRotation::Rot12, 1, a, b)),
+            Felt::from(eidos::contribution(EidosRotation::Rot7, 0, a, b)),
         ]);
     }
     RowMajorMatrix::new(values, NUM_PREPROCESSED_COLS)
@@ -159,26 +154,33 @@ pub fn preprocessed_table() -> RowMajorMatrix<Felt> {
 // MESSAGES
 // ================================================================================================
 
-/// LogUp message for the `BytePairLut` relation: a 4-tuple `(op, a, b, c)`
-/// describing an 8-bit bitwise operation result.
-///
-/// - `op ∈ {0 = AndNot, 1 = Xor}` — operation tag (see [`BytePairOp::tag`])
-/// - `a, b ∈ [0, 256)` — 8-bit operands
-/// - `c = op.apply(a, b)` — 8-bit result
-///
-/// Provided by [`BytePairLutAir`] on bus [`BusId::BytePairLut`]. Encoded
-/// as `bus_prefix[BytePairLut] + β⁰·op + β¹·a + β²·b + β³·c`.
-///
-/// Any successful `BytePairLut` lookup constrains `a, b ∈ [0, 256)`, so
-/// it implicitly range-checks the byte pair. For callers that want a
-/// 16-bit RC without picking a specific bytewise op, [`Range16Msg`] is
-/// the more direct interface.
+/// Canonical byte-pair message `(a, b, x)`, where `x = a xor b`.
 #[derive(Debug, Clone)]
 pub struct BytePairLutMsg<E> {
-    pub op: E,
-    pub a: E,
-    pub b: E,
-    pub c: E,
+    a: E,
+    b: E,
+    x: E,
+}
+
+impl<E: Algebra<Felt>> BytePairLutMsg<E> {
+    /// Construct from an ordinary AND result.
+    pub fn from_and(a: E, b: E, h: E) -> Self {
+        let x = a.clone() + b.clone() - h.clone() - h;
+        Self { a, b, x }
+    }
+
+    /// Construct from `c = (!a) & b` using `x = a - b + 2c`.
+    pub fn from_andnot(a: E, b: E, c: E) -> Self {
+        let x = a.clone() - b.clone() + c.clone() + c;
+        Self { a, b, x }
+    }
+}
+
+impl<E> BytePairLutMsg<E> {
+    /// Construct from `x = a xor b` directly.
+    pub fn from_xor(a: E, b: E, x: E) -> Self {
+        Self { a, b, x }
+    }
 }
 
 impl<E, EF> LookupMessage<E, EF> for BytePairLutMsg<E>
@@ -187,9 +189,36 @@ where
     EF: Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges
+            .encode(BusId::BytePairLut as usize, [self.a.clone(), self.b.clone(), self.x.clone()])
+    }
+}
+
+/// Normalized Eidos rotation relation over a byte pair.
+#[derive(Debug, Clone)]
+struct EidosRotationMsg<E> {
+    relation: EidosRelation,
+    a: E,
+    b: E,
+    value: E,
+}
+
+impl<E> EidosRotationMsg<E> {
+    fn from_normalized(relation: EidosRelation, a: E, b: E, value: E) -> Self {
+        assert!(relation != EidosRelation::CanonicalXor);
+        Self { relation, a, b, value }
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for EidosRotationMsg<E>
+where
+    E: Algebra<E>,
+    EF: Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         challenges.encode(
-            BusId::BytePairLut as usize,
-            [self.op.clone(), self.a.clone(), self.b.clone(), self.c.clone()],
+            self.relation.bus() as usize,
+            [self.a.clone(), self.b.clone(), self.value.clone()],
         )
     }
 }
@@ -230,8 +259,6 @@ impl BaseAir<Felt> for BytePairLutAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        // The fixed `(a, b, c_andnot, c_xor)` table — verifier-known,
-        // committed once. Its `2^16` height matches the main trace.
         Some(preprocessed_table())
     }
 
@@ -240,8 +267,6 @@ impl BaseAir<Felt> for BytePairLutAir {
     }
 
     fn num_public_values(&self) -> usize {
-        // The shared 4-felt transcript root (declared, unread by BPL);
-        // the natural last-row σ-closing needs no `inv_n`.
         NUM_PUBLIC_VALUES
     }
 }
@@ -258,12 +283,7 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        // The chiplet's LogUp residue σ = Σ delta_r, exposed for
-        // cross-AIR identity. Col 0 is the plain running sum (no
-        // correction per step); σ is committed separately as the
-        // permutation value at `permutation_values()[0]`, and the
-        // natural last-row σ-closing pins it to Σ delta_r.
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -277,36 +297,25 @@ impl LiftedAir<Felt, QuadFelt> for BytePairLutAir {
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // Phase 1: no non-LogUp constraints. The data columns `a`, `b`,
-        // `c_andnot`, `c_xor` are preprocessed (verifier-known), so they
-        // need no binding constraints — they cannot be forged.
-        //
-        // Phase 2: LogUp argument via the LogUp adapter. Wraps `builder`
-        // in our [`CyclicConstraintLookupBuilder`] and dispatches to the
-        // [`LookupAir`] impl below. The adapter's `main()` presents the
-        // combined `[preprocessed ++ main]` window the eval reads.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
 // LOOKUP AIR
 // ================================================================================================
 
-/// Per-column emission shape: column 0 is the gated running-sum anchor
-/// (the AndNot self-provide alone); column 1 pairs the Xor and Range16
-/// self-provides, keeping each closing constraint at degree ≤ 3.
-const COLUMN_SHAPE: [usize; 2] = [1, 2];
+/// One accumulator interaction followed by three two-interaction fraction columns.
+///
+/// Keeping the singleton in column zero leaves the centered cyclic recurrence at degree two; the
+/// remaining columns are degree three.
+const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2];
 
 impl<LB> LookupAir<LB> for BytePairLutAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -320,63 +329,104 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // The combined `[preprocessed ++ main]` window: `PRE_*` index the
-        // verifier-known data columns, `NUM_PREPROCESSED_COLS + COL_MULT_*`
-        // the witness multiplicities.
-        let local: [LB::Var; NUM_LOOKUP_COLS] = current_main(builder.main(), 0);
+        let preprocessed: [LB::Var; NUM_PREPROCESSED_COLS] =
+            current_main(builder.preprocessed().clone(), 0);
+        let main: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
 
-        let a_value: LB::Expr = local[PRE_A].into();
-        let b_value: LB::Expr = local[PRE_B].into();
-        let c_andnot: LB::Expr = local[PRE_C_ANDNOT].into();
-        let c_xor: LB::Expr = local[PRE_C_XOR].into();
-        let andnot_op: LB::Expr = LB::Expr::from(Felt::from(BytePairOp::AndNot.tag()));
-        let xor_op: LB::Expr = LB::Expr::from(Felt::from(BytePairOp::Xor.tag()));
-        let two_56: LB::Expr = LB::Expr::from(Felt::from(256u16));
-        let w: LB::Expr = a_value.clone() + two_56 * b_value.clone();
+        let a_value: LB::Expr = preprocessed[PRE_A].into();
+        let b_value: LB::Expr = preprocessed[PRE_B].into();
+        let x: LB::Expr = preprocessed[PRE_XOR].into();
+        let wrap12: LB::Expr = preprocessed[PRE_WRAP12].into();
+        let wrap7: LB::Expr = preprocessed[PRE_WRAP7].into();
+        let w = a_value.clone() + LB::Expr::from_u16(256) * b_value.clone();
 
-        let mult_andnot: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_ANDNOT].into();
-        let mult_xor: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_XOR].into();
-        let mult_range16: LB::Expr = local[NUM_PREPROCESSED_COLS + COL_MULT_RANGE16].into();
-        // Provides ⇒ negative multiplicity contribution.
-        let neg_andnot: LB::Expr = LB::Expr::ZERO - mult_andnot;
-        let neg_xor: LB::Expr = LB::Expr::ZERO - mult_xor;
-        let neg_range16: LB::Expr = LB::Expr::ZERO - mult_range16;
+        let neg_relation: [LB::Expr; eidos::NUM_RELATIONS] =
+            core::array::from_fn(|relation| LB::Expr::ZERO - LB::Expr::from(main[relation]));
+        let neg_range16 = LB::Expr::ZERO - LB::Expr::from(main[COL_MULT_RANGE16]);
+
+        let relation_values = eidos::provider_values(x.clone(), wrap12, wrap7);
 
         let interaction_deg = Deg { v: 1, u: 1 };
-        let provides_deg = Deg { v: 1, u: 2 };
-        let pair_deg = Deg { v: 3, u: 2 };
+        let pair_deg = Deg { v: 2, u: 2 };
 
-        // col 0: AndNot self-provide alone — the gated running-sum anchor.
         frac_col!(
             builder,
-            "bpl-self-provides",
-            provides_deg,
+            "byte-pair-table",
+            interaction_deg,
             (
-                "andnot",
-                neg_andnot,
-                BytePairLutMsg {
-                    op: andnot_op,
-                    a: a_value.clone(),
-                    b: b_value.clone(),
-                    c: c_andnot,
-                },
+                "canonical-xor",
+                neg_relation[EidosRelation::CanonicalXor.index()].clone(),
+                BytePairLutMsg::from_xor(a_value.clone(), b_value.clone(), x.clone()),
                 interaction_deg
             ),
         );
-        // col 1 (paired, lqd-1): the Xor and Range16 self-provides.
         frac_col!(
             builder,
-            "bpl-self-provides",
+            "byte-pair-table",
             pair_deg,
             (
-                "xor",
-                neg_xor,
-                BytePairLutMsg {
-                    op: xor_op,
-                    a: a_value.clone(),
-                    b: b_value.clone(),
-                    c: c_xor,
-                },
+                "rot12-pos1",
+                neg_relation[EidosRelation::Rot12Pos1.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot12Pos1,
+                    a_value.clone(),
+                    b_value.clone(),
+                    relation_values[EidosRelation::Rot12Pos1.index()].clone(),
+                ),
+                interaction_deg
+            ),
+            (
+                "rot7-pos0",
+                neg_relation[EidosRelation::Rot7Pos0.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos0,
+                    a_value.clone(),
+                    b_value.clone(),
+                    relation_values[EidosRelation::Rot7Pos0.index()].clone(),
+                ),
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "byte-pair-table",
+            pair_deg,
+            (
+                "rot7-pos2",
+                neg_relation[EidosRelation::Rot7Pos2.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos2,
+                    a_value.clone(),
+                    b_value.clone(),
+                    relation_values[EidosRelation::Rot7Pos2.index()].clone(),
+                ),
+                interaction_deg
+            ),
+            (
+                "rot12-pos3",
+                neg_relation[EidosRelation::Rot12Pos3.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot12Pos3,
+                    a_value.clone(),
+                    b_value.clone(),
+                    relation_values[EidosRelation::Rot12Pos3.index()].clone(),
+                ),
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "byte-pair-table",
+            pair_deg,
+            (
+                "rot7-pos3",
+                neg_relation[EidosRelation::Rot7Pos3.index()].clone(),
+                EidosRotationMsg::from_normalized(
+                    EidosRelation::Rot7Pos3,
+                    a_value,
+                    b_value,
+                    relation_values[EidosRelation::Rot7Pos3.index()].clone(),
+                ),
                 interaction_deg
             ),
             ("range16", neg_range16, Range16Msg { w }, interaction_deg),
@@ -387,43 +437,70 @@ where
 // PROVER
 // ================================================================================================
 
-/// Builds the chiplet's aux trace from the witness (multiplicity) main
-/// trace.
-///
-/// The lookup fractions reference the preprocessed `(a, b, c)` data, which
-/// the constraint side reads through the combined `[preprocessed ++ main]`
-/// window (`logup::CombinedWindow`). The prover reproduces that combined
-/// view here — reconstruct the fixed [`preprocessed_table`], prepend its
-/// columns to the witness multiplicities, and drive the generic
-/// [`build_logup_aux_trace`] over the combined matrix, whose column order
-/// matches the eval's `PRE_*` / `NUM_PREPROCESSED_COLS + COL_MULT_*`
-/// indices.
+/// Builds the chiplet's auxiliary trace from witness multiplicities. The shared driver obtains the
+/// fixed table through [`BaseAir::preprocessed_trace`], matching the constraint-side
+/// `LookupBuilder::preprocessed` window.
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let combined = combine_with_preprocessed(main);
-    build_logup_aux_trace(&BytePairLutAir, &combined, challenges)
+    build_logup_aux_trace(&BytePairLutAir, main, challenges)
 }
 
-/// Row-wise `[preprocessed ++ main]`: the fixed [`preprocessed_table`]
-/// columns followed by the witness multiplicity columns. Mirrors the
-/// constraint-side `logup::CombinedWindow` so prover and verifier read
-/// identical column indices.
-fn combine_with_preprocessed(main: &RowMajorMatrix<Felt>) -> RowMajorMatrix<Felt> {
-    let pre = preprocessed_table();
-    let height = main.values.len() / NUM_MAIN_COLS;
-    debug_assert_eq!(
-        pre.values.len() / NUM_PREPROCESSED_COLS,
-        height,
-        "preprocessed and main trace heights must match",
-    );
-    let mut values = Vec::with_capacity(height * NUM_LOOKUP_COLS);
-    for r in 0..height {
-        let pre_row = &pre.values[r * NUM_PREPROCESSED_COLS..(r + 1) * NUM_PREPROCESSED_COLS];
-        let main_row = &main.values[r * NUM_MAIN_COLS..(r + 1) * NUM_MAIN_COLS];
-        values.extend_from_slice(pre_row);
-        values.extend_from_slice(main_row);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn affine_logic_reconstruction_matches_byte_operations() {
+        for (a, b) in [(0u8, 0u8), (1, 2), (5, 3), (0xab, 0xcd), (255, 255)] {
+            let a_felt = Felt::from(a);
+            let b_felt = Felt::from(b);
+            let x = Felt::from(a ^ b);
+
+            assert_eq!(and_result_from_xor(a_felt, b_felt, x), Felt::from(a & b));
+            assert_eq!(andnot_result_from_xor(a_felt, b_felt, x), Felt::from((!a) & b));
+        }
     }
-    RowMajorMatrix::new(values, NUM_LOOKUP_COLS)
+
+    #[test]
+    fn andnot_reconstruction_commutes_with_packed_bytes() {
+        let a = 0xf0_12_34_56u32;
+        let b = 0xcc_ab_78_9au32;
+        let x = a ^ b;
+        assert_eq!(
+            andnot_result_from_xor(Felt::from(a), Felt::from(b), Felt::from(x)),
+            Felt::from((!a) & b),
+        );
+    }
+
+    #[test]
+    fn normalized_byte_pair_relations_are_domain_separated() {
+        let challenges = Challenges::new(
+            QuadFelt::from_u64(3),
+            QuadFelt::from_u64(5),
+            MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
+        let a = Felt::from_u8(19);
+        let b = Felt::from_u8(23);
+        let x = Felt::from_u8(29);
+
+        let encodings = [
+            BytePairLutMsg::from_xor(a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot12Pos1, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos0, a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos2, a, b, x).encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot12Pos3, a, b, x)
+                .encode(&challenges),
+            EidosRotationMsg::from_normalized(EidosRelation::Rot7Pos3, a, b, x).encode(&challenges),
+        ];
+
+        for left in 0..encodings.len() {
+            for right in left + 1..encodings.len() {
+                assert_ne!(encodings[left], encodings[right]);
+            }
+        }
+    }
 }

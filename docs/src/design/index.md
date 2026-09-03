@@ -49,10 +49,11 @@ The above components are connected via **buses**, which are implemented using [l
 ## VM execution trace
 
 Miden VM is a four-AIR statement: Core, Chiplets, Eidos compression, and And8 lookup. The
-traditional combined row view of the Core and Chiplets matrices consists of $73$ main columns;
+traditional combined row view of the Core and Chiplets matrices consists of $72$ main columns;
 the combined layout reserves $9$ auxiliary LogUp columns. Eidos compression uses its own
 108-column main matrix and $20$ auxiliary LogUp columns in each 32-row cycle, while And8 uses a fixed
-65,536-row byte-pair table and dynamic multiplicity columns.
+65,536-row byte-pair table with five preprocessed columns, seven multiplicity columns, and four
+auxiliary LogUp columns. The And8 constraints have degree three.
 
 The system, decoder, and stack use dedicated columns, while all chiplets share the same $24$
 columns. Binary selector columns identify which chiplet owns each row. Range-check requests do not

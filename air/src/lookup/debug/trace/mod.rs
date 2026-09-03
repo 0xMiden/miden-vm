@@ -255,7 +255,7 @@ where
         );
         (trace.width(), trace.values.borrow())
     });
-    let num_cols = air.num_columns();
+    let num_cols = air.column_shape().len();
 
     let mut state = DebugTraceState {
         balances: HashMap::new(),
@@ -295,6 +295,7 @@ where
                 r,
             );
             air.eval(&mut lb);
+            lb.finish(num_cols);
         }
 
         folds_per_row.push(state.column_folds.clone());

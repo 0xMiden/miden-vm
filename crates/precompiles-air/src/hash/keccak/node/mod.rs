@@ -47,8 +47,8 @@ use miden_precompiles::Keccak256Precompile;
 use crate::{
     hash::{chunk::ChunkChainMsg, keccak::sponge::KeccakSpongeMsg, memory64::Memory64Msg},
     logup::{
-        CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-        LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
+        ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
+        LookupGroup, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
@@ -160,7 +160,7 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 /// Seven aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
-/// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
+/// - col 0: `KeccakSponge` provide alone.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
 /// - col 2: `EidosOut(H_input_chunks)` consume alone (no partner left to pair).
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
@@ -200,7 +200,7 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -278,9 +278,9 @@ impl LiftedAir<Felt, QuadFelt> for KeccakNodeAir {
         // for the matching shared-namespace argument.
 
         // Phase 2: LogUp argument via the LogUp adapter.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -291,10 +291,6 @@ impl<LB> LookupAir<LB> for KeccakNodeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -365,7 +361,7 @@ where
         let provides_deg = Deg { v: 1, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: KeccakSponge request alone — the gated running-sum anchor.
+        // col 0: KeccakSponge request alone.
         frac_col!(
             builder,
             "handshake-and-chunks-digest",

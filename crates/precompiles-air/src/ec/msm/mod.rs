@@ -4,16 +4,17 @@
 //! under the group's scalar bound); an **expression** is a run of term
 //! rows sharing one `expr_ptr`, carrying a **value** point `val_ptr` with
 //! the invariant `deref(val_ptr) = Σ deref(s)·deref(P)`. The prover lays
-//! any addition chain via three rules — `intro` (`⟨P×1⟩`, val = P), `neg`
-//! (every scalar negated), `combine` (term multisets union, scalars on a
-//! shared base merge mod `n`, values add) — and the AIR checks only that
-//! each step is sound, never which steps were taken.
+//! any addition chain via five rules — `intro` (`⟨P×1⟩`, val = P),
+//! `intro_zero` (`⟨P×0⟩`, val = the identity), `intro_endo` (`⟨P×λ⟩`, val = φ(P)),
+//! `neg` (every scalar negated), and `combine` (term multisets union, scalars on a shared base
+//! merge mod `n`, values add) — and the AIR checks only that each step is sound, never which steps
+//! were taken.
 //!
 //! Layout is **variable-block** (the stack's first): one term per row, an
 //! expression is a maximal run sharing `expr_ptr`, and the allocator chain
 //! `expr_ptr' = expr_ptr + is_boundary` (with `is_boundary` marking the
-//! run's last row) makes ptrs injective for free — the EcGroups idiom
-//! generalized. Expression-level traffic (the `MsmExpr` head, the value
+//! run's last row) makes expression pointers injective. Expression-level traffic (the `MsmExpr`
+//! head, the value
 //! `EcGroupAdd`, the operand heads, the ordering checks) fires on the
 //! boundary row, where the final cursors are co-resident.
 //!
@@ -21,12 +22,13 @@
 //! `b_expr < expr` on every combine — grounds the induction against
 //! circular derivations) and on `scalar_bound = #E` (the full curve order
 //! annihilates every point, so the merge's `mod n` wrap is harmless —
-//! cofactor-agnostic). See the design notes.
+//! cofactor-agnostic).
 //!
-//! `intro`, `combine`, and `neg` build the expression; the eval `EcMsm`
-//! absorb seam resolves a claim in-circuit, consuming the positionless
-//! `MsmClaimTerm` set so the absorb — and the transcript root — follow the
-//! caller's declared term order, not the chiplet's `idx` storage order.
+//! `intro`, `intro_zero`, `intro_endo`, `combine`, and `neg` build the expression; the
+//! eval `EcMsm` absorb seam resolves a claim in-circuit, consuming the
+//! positionless `MsmClaimTerm` set so the absorb — and the transcript root
+//! — follow the caller's declared term order, not the chiplet's `idx`
+//! storage order.
 
 use alloc::vec::Vec;
 
@@ -43,9 +45,9 @@ use crate::{
         add::{EcGroupAddMsg, EcOnCurveCertMsg},
     },
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES, frac_col,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS, frac_col,
     },
     primitives::byte_pair_lut::Range16Msg,
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -60,8 +62,8 @@ use crate::{
 /// `(expr_ptr, idx, base_ptr, scalar_ptr)` of an MSM expression — the
 /// point `base_ptr` scaled by the stored uint `scalar_ptr`, at position
 /// `idx` in expression `expr_ptr`. Provided once per term row at the
-/// expression's use count; consumed by combine's term walk and by the
-/// eval `EcMsm` absorb seam.
+/// expression's use count; consumed by combine and neg term walks. The eval
+/// `EcMsm` absorb seam instead consumes positionless [`MsmClaimTermMsg`]s.
 #[derive(Debug, Clone)]
 pub struct MsmTermMsg<E> {
     pub expr_ptr: E,
@@ -179,18 +181,20 @@ pub const COL_VAL: usize = 8;
 /// consumers of a claim — combine-operand vs DAG-resolve — bill separate
 /// provides.)
 pub const COL_MULT: usize = 9;
-/// Op-family one-hot (constant within a run): `is_intro + is_combine =
-/// act`.
+/// Two stored op-family flags. Together with [`COL_IS_NEG`], they determine
+/// the residual `intro_endo` selector and form a one-hot encoding of every
+/// active row.
 pub const COL_IS_INTRO: usize = 10;
 pub const COL_IS_COMBINE: usize = 11;
 
-// --- combine-only columns (0 on intro / pad rows) ---------------------
-/// Operand A / B expression ptrs (constant within a combine run).
+// --- operation witness columns ---------------------------------------
+/// Operand A / B expression ptrs. Combine uses both; neg uses A only.
 pub const COL_A_EXPR: usize = 12;
 pub const COL_B_EXPR: usize = 13;
-/// Merge-walk cursors into A / B (threaded within the run; 0 at run
-/// start). The boundary's `i + take_a + take_both` is `k_a` (and likewise
-/// `k_b`), tying the operand-head consume to its term count.
+/// Walk cursors into A / B (threaded within the run; 0 at run start).
+/// Combine uses both; neg uses A only. At the boundary, `i + take_a +
+/// take_both + is_neg` is `k_a`; B similarly uses `j + take_b + take_both`.
+/// These identities tie each operand-head consume to its term count.
 pub const COL_I: usize = 14;
 pub const COL_J: usize = 15;
 /// Per-row take one-hot: `take_a + take_b + take_both = is_combine`.
@@ -198,39 +202,40 @@ pub const COL_TAKE_A: usize = 16;
 pub const COL_TAKE_B: usize = 17;
 pub const COL_TAKE_BOTH: usize = 18;
 /// Operand term cells consumed from `MsmTerm(A, i, …)` / `MsmTerm(B, j,
-/// …)` (gated by the take flags).
+/// …)`. Combine uses both sides; neg uses A only.
 pub const COL_BASE_A: usize = 19;
 pub const COL_S_A: usize = 20;
 pub const COL_BASE_B: usize = 21;
 pub const COL_S_B: usize = 22;
-/// Operand values (constant within a run; the boundary's `EcGroupAdd`
-/// asserts `val = val_a + val_b`).
+/// Operand values. Combine uses both; neg uses A only. On a combine
+/// boundary, `EcGroupAdd` asserts `val = val_a + val_b`.
 pub const COL_VAL_A: usize = 23;
 pub const COL_VAL_B: usize = 24;
-/// Group curve params, carried only to close the boundary's `EcGroup`
-/// consume that pins `sbound` to the group (constant within a run).
+/// Group curve parameters used by combine, neg, and intro_endo to close the
+/// boundary's `EcGroup` consume and pin `sbound` to the group.
 pub const COL_A_PTR: usize = 25;
 pub const COL_B_PTR: usize = 26;
 pub const COL_BOUND_PTR: usize = 27;
 /// Ordering witnesses (boundary): `expr − a_expr − 1 = a_diff_lo + 2¹⁶·
 /// a_diff_hi ≥ 0`, each half range-checked — enforces `a_expr < expr`
-/// (and `b_expr < expr`), the well-founded order.
+/// for combine and neg (and `b_expr < expr` for combine), the well-founded
+/// order.
 pub const COL_A_DIFF_LO: usize = 28;
 pub const COL_A_DIFF_HI: usize = 29;
 pub const COL_B_DIFF_LO: usize = 30;
 pub const COL_B_DIFF_HI: usize = 31;
 
-// --- neg-only columns (0 on intro / combine / pad rows) ---------------
-/// Op-family flag for `neg` — the third one-hot member (`is_intro +
-/// is_combine + is_neg = act`). A `neg` is a **unary** walk over operand A:
-/// one output term per A term, the base copied and the scalar negated (the
-/// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), the value negated via the
-/// cancel `EcGroupAdd(group, val_a, val, ∞)`.
+// --- shared negation/endomorphism witness and resolve multiplicity -----
+/// Op-family flag for `neg`. Together with `is_intro`, `is_combine`, and `is_intro_zero`, it
+/// leaves `is_intro_endo` as the residual active operation. A `neg` is a **unary** walk over
+/// operand A: one
+/// output term per A term, the base copied and the scalar negated (the
+/// `is_c_zero` `UintAdd` `s_a + out_scalar ≡ 0`), with the value's shared
+/// x-coordinate and negated y-coordinate authenticated on the boundary.
 pub const COL_IS_NEG: usize = 32;
-/// Neg-value cell (boundary only): the **shared x ptr** of the cheap value
-/// negation `R = (x_a, −y_a)` — both the `EcPoint(val_a)` and `EcPoint(R)`
-/// consumes carry it, so they pin `x_R = x_a` for free. (Reuses the slot the
-/// old cancel-`EcGroupAdd` ∞ result used.)
+/// Family value-relation cell (boundary only). For `neg`, this is the
+/// **shared x ptr** of `R = (x_a, −y_a)`; for `intro_endo`, it is `P`'s x
+/// ptr.
 pub const COL_NEG_X: usize = 33;
 /// **Resolve** use count — how often this expression is resolved at the
 /// eval `EcMsm` seam. Drives the `MsmClaimTerm` provide (every term row)
@@ -239,49 +244,33 @@ pub const COL_NEG_X: usize = 33;
 /// positionless `MsmClaimTerm` (set match) while combine consumes
 /// `MsmTerm` (by `idx`) — disjoint consumers, distinct multiplicities.
 pub const COL_CLAIM_MULT: usize = 34;
-/// Neg-value cells (boundary only): the two y ptrs of `R = (x_a, −y_a)` —
-/// `COL_NEG_YA = val_a.y`, `COL_NEG_YR = R.y` — pinned by the `EcPoint`
-/// consumes and tied by the `is_c_zero` `UintAdd(y_a, y_R ≡ 0)` (the y-flip).
+/// Family value-relation cells (boundary only). For `neg`, these are the two
+/// y ptrs of `R = (x_a, −y_a)`; for `intro_endo`, they are the shared y ptr
+/// and `φ(P)`'s x ptr, respectively.
 pub const COL_NEG_YA: usize = 35;
 pub const COL_NEG_YR: usize = 36;
-/// Neg-value flag (boundary only): 1 iff this neg freshly mints `R`, gating
-/// the `EcOnCurveCert(group, R)` provide that vouches R's (trio-free)
-/// membership — R on-curve because `val_a` is.
+/// Family mint flag (boundary only): 1 iff a `neg` or `intro_endo` row
+/// freshly mints its value, gating the common `EcOnCurveCert(group, val)`
+/// provide.
 pub const COL_NEG_MINTED: usize = 37;
-/// The group's GLV endomorphism `β`/`λ` ptrs (carried only to close the
-/// boundary's `EcGroup` consume; the none-sentinel 0 for a group with no
-/// endomorphism). Combine/neg-boundary-only, like [`COL_A_PTR`] /
-/// [`COL_B_PTR`] / [`COL_BOUND_PTR`].
+/// The group's GLV endomorphism `β`/`λ` ptrs, used by combine, neg, and
+/// intro_endo to close the boundary's `EcGroup` consume. Both are the
+/// none-sentinel 0 for a group without an endomorphism.
 pub const COL_BETA_PTR: usize = 38;
 pub const COL_LAMBDA_PTR: usize = 39;
 
-// --- intro_endo-only columns (0 on intro / combine / neg / pad rows) --
-/// Op-family flag for `intro_endo` — one of five mutually exclusive
-/// members (`is_intro + is_intro_endo + is_combine + is_neg +
-/// is_intro_zero = act`). An `intro_endo(φ(P), P)` is a 1-row run
-/// recording the term `⟨P × λ⟩` with value `φ(P)` — GLV's endomorphism
-/// leaf, mirroring plain `intro`'s `⟨P × 1⟩` / `val = P` but with the
-/// value relation `x_φ = β·x_P`, `y_φ = y_P` in place of a ptr equality
-/// (see `msm::require::intro_endo` in the prover crate).
-pub const COL_IS_INTRO_ENDO: usize = 40;
-/// `intro_endo`'s `P`'s x ptr (from the `EcPoint(base)` consume). Also
-/// carries `intro_zero`'s own base's x ptr (from *its* `EcPoint(base,
-/// is_pai = 0)` consume) — the two op-kinds are mutually exclusive, so
-/// the column's meaning never collides.
-pub const COL_ENDO_BASE_X: usize = 41;
-/// `intro_endo`'s shared y ptr: both its `EcPoint(base)` and
-/// `EcPoint(val)` consumes carry it, so they pin `y_φ = y_P` for free.
-/// Also carries `intro_zero`'s own base's y ptr, with no such sharing
-/// (`intro_zero`'s `val` consume uses a literal-zero coordinate pair,
-/// not this column) — see [`COL_ENDO_BASE_X`].
-pub const COL_ENDO_Y: usize = 42;
+// `intro_endo` is the residual active operation after subtracting the four stored selectors. Its
+// value relation reuses the negation columns; `intro_zero` reuses the base-coordinate pair as
+// well. These operations are mutually exclusive, so each row gives the shared columns one meaning.
+/// The introduced base point's x-coordinate pointer.
+pub const COL_ENDO_BASE_X: usize = COL_NEG_X;
+/// The introduced base point's y-coordinate pointer.
+pub const COL_ENDO_Y: usize = COL_NEG_YA;
 /// `φ(P)`'s x ptr (from the `EcPoint(val)` consume; tied to `β·x_P` by the
 /// `UintMul` consume).
-pub const COL_ENDO_VAL_X: usize = 43;
-/// Mint flag: 1 iff this row freshly mints `φ(P)`, gating the
-/// `EcOnCurveCert(group, val)` provide that vouches its (trio-free)
-/// membership — `φ(P)` on-curve because `P` is.
-pub const COL_ENDO_MINTED: usize = 44;
+pub const COL_ENDO_VAL_X: usize = COL_NEG_YR;
+/// Mint flag for `φ(P)`, shared with the negation operation.
+pub const COL_ENDO_MINTED: usize = COL_NEG_MINTED;
 /// Marks a row that introduces the MSM term `P × 0`.
 ///
 /// The term evaluates to the curve's canonical point at infinity. Therefore,
@@ -297,17 +286,16 @@ pub const COL_ENDO_MINTED: usize = 44;
 ///
 /// This is one of five mutually exclusive operation flags:
 /// `is_intro + is_intro_endo + is_combine + is_neg + is_intro_zero = act`.
-pub const COL_IS_INTRO_ZERO: usize = 45;
-pub const NUM_MAIN_COLS: usize = 46;
+pub const COL_IS_INTRO_ZERO: usize = 40;
+pub const NUM_MAIN_COLS: usize = 41;
 
-// Aux: 15 columns, flattened via `frac_col!` over the 27 fractions so
+// Aux: 14 columns, flattened via `frac_col!` over the 27 fractions so
 // every closing constraint stays at degree ≤ 3 → `log_quotient_degree` =
-// 1 (folding the intermediate 12-column flatten and the follow-on
-// singleton-pack into one step):
-//  col 0:  MsmTerm provide — alone, the gated running-sum anchor.
+// 1:
+//  col 0:  MsmTerm provide, alone as the centered running-sum anchor.
 //  col 1:  MsmExpr provide + MsmClaimTerm provide.
-//  col 2:  EcOnCurveCert provide (neg value R) + literal-1 UintVal (intro, one full-value message).
-//  col 3:  MsmTerm consume A — alone, now that the literal-1 UintVal merged into col 2.
+//  col 2:  merged EcOnCurveCert provide (neg/intro_endo value) + literal-1 UintVal.
+//  col 3:  MsmTerm consume A + UintMul (intro_endo's x_φ = β·x_P).
 //  col 4:  MsmTerm consume B + UintAdd (take_both merge).
 //  col 5:  UintAdd (neg scalar) + UintAdd (neg value y-flip).
 //  col 6:  MsmExpr consume A (head) + MsmExpr consume B (head).
@@ -317,12 +305,11 @@ pub const NUM_MAIN_COLS: usize = 46;
 //  col 9:  ordering Range16 — a_lo + a_hi.
 //  col 10: ordering Range16 — b_lo + b_hi.
 //  col 11: EcPoint(base) (intro_endo coord) + EcPoint(val) (intro_endo coord) — the shared-y tie.
-//  col 12: UintMul (intro_endo's x_φ = β·x_P) + EcOnCurveCert provide (intro_endo value).
-//  col 13: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
-//  col 14: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
-const NUM_LOGUP_COLS: usize = 15;
-const AUX_WIDTH: usize = 15;
-const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+//  col 12: literal-0 UintVal (intro_zero) + EcPoint(val, is_pai) tie (intro_zero's value relation).
+//  col 13: EcPoint(base, is_pai = 0) tie (intro_zero's own base membership) — alone.
+const NUM_LOGUP_COLS: usize = 14;
+const AUX_WIDTH: usize = NUM_LOGUP_COLS;
+const COLUMN_SHAPE: [usize; NUM_LOGUP_COLS] = [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
 /// `2¹⁶`, the high-half weight in the ordering decomposition.
 const TWO16: u32 = 1 << 16;
 
@@ -352,7 +339,7 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -373,43 +360,32 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         let act_next: AB::Expr = next[COL_ACT].into();
         let is_boundary: AB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: AB::Expr = local[COL_IS_INTRO].into();
-        let is_intro_endo: AB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: AB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: AB::Expr = local[COL_IS_NEG].into();
         let is_intro_zero: AB::Expr = local[COL_IS_INTRO_ZERO].into();
-        let neg_minted: AB::Expr = local[COL_NEG_MINTED].into();
-        let endo_minted: AB::Expr = local[COL_ENDO_MINTED].into();
+        let is_intro_endo = act.clone()
+            - is_intro.clone()
+            - is_combine.clone()
+            - is_neg.clone()
+            - is_intro_zero.clone();
+        let minted: AB::Expr = local[COL_NEG_MINTED].into();
         let idx: AB::Expr = local[COL_IDX].into();
 
         // Booleans.
         builder.assert_bool(local[COL_ACT]);
         builder.assert_bool(local[COL_IS_BOUNDARY]);
         builder.assert_bool(local[COL_IS_INTRO]);
-        builder.assert_bool(local[COL_IS_INTRO_ENDO]);
         builder.assert_bool(local[COL_IS_COMBINE]);
         builder.assert_bool(local[COL_IS_NEG]);
         builder.assert_bool(local[COL_IS_INTRO_ZERO]);
-        // The neg-value mint flag is boolean and lives only on neg rows — so a
-        // forged `neg_minted` elsewhere can't provide a phantom `EcOnCurveCert`
-        // (the provide is gated `−neg_minted · is_boundary`).
+        builder.assert_zero(is_intro_endo.clone() * (is_intro_endo.clone() - AB::Expr::ONE));
         builder.assert_bool(local[COL_NEG_MINTED]);
-        builder.assert_zero((AB::Expr::ONE - is_neg.clone()) * neg_minted);
-        // Likewise the intro_endo value mint flag.
-        builder.assert_bool(local[COL_ENDO_MINTED]);
-        builder.assert_zero((AB::Expr::ONE - is_intro_endo.clone()) * endo_minted);
+        builder.assert_zero((AB::Expr::ONE - is_neg.clone() - is_intro_endo.clone()) * minted);
 
-        // Activity is sticky-downward (pads are a tail), and the op-family
-        // one-hot sums to `act` (so every active row is exactly one op and
-        // pads are no op).
+        // Activity is sticky-downward (pads are a tail). The residual's
+        // Boolean constraint above makes every active row exactly one op and
+        // every pad no op.
         builder.when_transition().assert_zero((AB::Expr::ONE - act.clone()) * act_next);
-        builder.assert_zero(
-            is_intro.clone()
-                + is_intro_endo.clone()
-                + is_combine.clone()
-                + is_neg.clone()
-                + is_intro_zero.clone()
-                - act.clone(),
-        );
         // A boundary only on active rows; pads carry `is_boundary = 0` so
         // the allocator freezes `expr_ptr` across the tail.
         builder.assert_zero((AB::Expr::ONE - act.clone()) * is_boundary.clone());
@@ -438,9 +414,8 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             .when_transition()
             .assert_zero(idx_next - (AB::Expr::ONE - is_boundary.clone()) * (idx + AB::Expr::ONE));
 
-        // Within-run constancy of the expression-level columns (vacuous on
-        // intro's 1-row runs; load-bearing once combine lays multi-row
-        // runs). Gated to non-boundary transitions.
+        // Expression-level columns remain constant within a run. This is vacuous for one-row intro
+        // runs and required for multi-row combine runs. Boundary transitions are excluded.
         let not_boundary = AB::Expr::ONE - is_boundary.clone();
         for col in [
             COL_GROUP_PTR,
@@ -449,7 +424,6 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
             COL_MULT,
             COL_CLAIM_MULT,
             COL_IS_INTRO,
-            COL_IS_INTRO_ENDO,
             COL_IS_COMBINE,
             COL_IS_NEG,
             COL_IS_INTRO_ZERO,
@@ -567,9 +541,9 @@ impl LiftedAir<Felt, QuadFelt> for EcMsmAir {
         builder.assert_zero(bnd_b * (here_expr - b_expr - AB::Expr::ONE - b_lo - two16 * b_hi));
 
         // Phase 2: LogUp.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -580,10 +554,6 @@ impl<LB> LookupAir<LB> for EcMsmAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }
@@ -601,12 +571,14 @@ where
 
         let neg_mult: LB::Expr = LB::Expr::ZERO - local[COL_MULT].into();
         let neg_claim_mult: LB::Expr = LB::Expr::ZERO - local[COL_CLAIM_MULT].into();
+        let act: LB::Expr = local[COL_ACT].into();
         let is_boundary: LB::Expr = local[COL_IS_BOUNDARY].into();
         let is_intro: LB::Expr = local[COL_IS_INTRO].into();
-        let is_intro_endo: LB::Expr = local[COL_IS_INTRO_ENDO].into();
         let is_combine: LB::Expr = local[COL_IS_COMBINE].into();
         let is_neg: LB::Expr = local[COL_IS_NEG].into();
         let is_intro_zero: LB::Expr = local[COL_IS_INTRO_ZERO].into();
+        let is_intro_endo =
+            act - is_intro.clone() - is_combine.clone() - is_neg.clone() - is_intro_zero.clone();
 
         let expr_ptr: LB::Expr = local[COL_EXPR_PTR].into();
         let group_ptr: LB::Expr = local[COL_GROUP_PTR].into();
@@ -638,19 +610,15 @@ where
         let a_hi: LB::Expr = local[COL_A_DIFF_HI].into();
         let b_lo: LB::Expr = local[COL_B_DIFF_LO].into();
         let b_hi: LB::Expr = local[COL_B_DIFF_HI].into();
-        // Cheap value-negation cells (boundary only): R = (neg_x, neg_yr) =
-        // (val_a.x, −val_a.y); neg_ya = val_a.y. neg_minted gates R's cert.
+        // The neg and intro_endo families reuse these four value-relation
+        // cells. Their bus gates assign each cell its family-specific role.
         let neg_x: LB::Expr = local[COL_NEG_X].into();
         let neg_ya: LB::Expr = local[COL_NEG_YA].into();
         let neg_yr: LB::Expr = local[COL_NEG_YR].into();
-        let neg_minted: LB::Expr = local[COL_NEG_MINTED].into();
-        // intro_endo coordinate cells (always the boundary — intro_endo is
-        // a 1-row run): P's x, the shared y (P.y = φ(P).y), φ(P)'s x, and
-        // the mint flag gating φ(P)'s cert.
-        let endo_base_x: LB::Expr = local[COL_ENDO_BASE_X].into();
-        let endo_y: LB::Expr = local[COL_ENDO_Y].into();
-        let endo_val_x: LB::Expr = local[COL_ENDO_VAL_X].into();
-        let endo_minted: LB::Expr = local[COL_ENDO_MINTED].into();
+        let minted: LB::Expr = local[COL_NEG_MINTED].into();
+        let endo_base_x = neg_x.clone();
+        let endo_y = neg_ya.clone();
+        let endo_val_x = neg_yr.clone();
 
         // Cursor advances (= the MsmTerm consume gates) and the boundary
         // gates for expression-level traffic. A neg advances cursor i every
@@ -675,14 +643,15 @@ where
 
         let one_deg = Deg { v: 1, u: 1 };
         let two_deg = Deg { v: 2, u: 1 };
-        let single_deg = Deg { v: 1, u: 2 };
+        let anchor_deg = Deg { v: 1, u: 1 };
+        let linear_pair_deg = Deg { v: 2, u: 2 };
         let pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: the MsmTerm provide, alone — the gated running-sum anchor.
+        // col 0: the MsmTerm provide, alone as the centered accumulator anchor.
         frac_col!(
             builder,
             "ec-msm-provide",
-            single_deg,
+            anchor_deg,
             (
                 "provide-msmterm",
                 neg_mult.clone(),
@@ -725,19 +694,16 @@ where
                 one_deg
             ),
         );
-        // col 2 (paired, lqd-1): neg's value `R = −val_a` is a trio-free
-        // cert point — vouch its on-curve membership here (R is on-curve
-        // because val_a is), once, when this neg freshly mints R
-        // (`neg_minted` on the boundary) — paired with intro's literal-1
-        // UintVal, now sent as one full-value message instead of a
-        // lo/hi pair.
+        // col 2 (paired, lqd-1): neg and intro_endo share their mint flag and
+        // mint the same typed `EcOnCurveCert(group_ptr, val)` tuple, then pair
+        // it with intro's literal-1 UintVal.
         frac_col!(
             builder,
             "ec-msm-provide",
             pair_deg,
             (
-                "provide-oncurvecert-neg",
-                LB::Expr::ZERO - neg_minted.clone() * is_boundary.clone(),
+                "provide-oncurvecert-neg-or-endo",
+                LB::Expr::ZERO - minted * is_boundary.clone(),
                 EcOnCurveCertMsg {
                     group_ptr: group_ptr.clone(),
                     r_ptr: val.clone()
@@ -764,12 +730,12 @@ where
                 one_deg
             ),
         );
-        // col 3: the combine term walk's operand-A consume, alone now
-        // that the literal-1 UintVal it was paired with merged into col 2.
+        // col 3 (paired, lqd-1): the combine/neg term walk's operand-A
+        // consume, paired with intro_endo's x_φ = β·x_P certificate.
         frac_col!(
             builder,
             "ec-msm-walk",
-            single_deg,
+            pair_deg,
             (
                 "consume-term-a",
                 adv_i.clone(),
@@ -781,6 +747,21 @@ where
                 },
                 one_deg
             ),
+            (
+                "consume-uintmul-endo",
+                bnd_endo.clone(),
+                UintMulMsg {
+                    kappa_a: LB::Expr::ONE,
+                    kappa_c: LB::Expr::ZERO,
+                    a_ptr: beta_ptr.clone(),
+                    b_ptr: endo_base_x.clone(),
+                    c_ptr: bound_ptr.clone(),
+                    r_ptr: endo_val_x.clone(),
+                    bound_ptr: bound_ptr.clone(),
+                    is_sub: LB::Expr::ZERO,
+                },
+                two_deg
+            ),
         );
         // col 4 (paired, lqd-1): the combine term walk's operand-B consume,
         // paired with the take_both scalar merge `s_a + s_b ≡ scalar (mod
@@ -788,7 +769,7 @@ where
         frac_col!(
             builder,
             "ec-msm-walk",
-            pair_deg,
+            linear_pair_deg,
             (
                 "consume-term-b",
                 adv_j.clone(),
@@ -967,9 +948,8 @@ where
         );
 
         // col 11 (paired, lqd-1): intro_endo's coordinate relation — `P`'s
-        // and `φ(P)`'s `EcPoint` consumes, sharing `endo_y` so the store's
-        // provides pin `y_φ = y_P` for free (mirroring `neg`'s shared-x
-        // trick, transposed to the shared coordinate GLV needs).
+        // and `φ(P)`'s `EcPoint` consumes. Both messages use `endo_y`, so their matching store
+        // providers constrain `y_φ = y_P`, analogous to the shared x-coordinate in `neg`.
         frac_col!(
             builder,
             "ec-msm-endo",
@@ -999,41 +979,7 @@ where
                 two_deg
             ),
         );
-        // col 12 (paired, lqd-1): the value relation's only genuinely new
-        // certificate — `x_φ = β·x_P` — paired with the on-curve cert
-        // provide for a freshly-minted `φ(P)` (φ(P) on-curve because P is,
-        // same closure-cert idiom `neg` uses for its value).
-        frac_col!(
-            builder,
-            "ec-msm-endo",
-            pair_deg,
-            (
-                "consume-uintmul-endo",
-                bnd_endo,
-                UintMulMsg {
-                    kappa_a: LB::Expr::ONE,
-                    kappa_c: LB::Expr::ZERO,
-                    a_ptr: beta_ptr,
-                    b_ptr: endo_base_x.clone(),
-                    c_ptr: bound_ptr.clone(),
-                    r_ptr: endo_val_x,
-                    bound_ptr,
-                    is_sub: LB::Expr::ZERO,
-                },
-                two_deg
-            ),
-            (
-                "provide-oncurvecert-endo",
-                LB::Expr::ZERO - endo_minted,
-                EcOnCurveCertMsg {
-                    group_ptr: group_ptr.clone(),
-                    r_ptr: val.clone()
-                },
-                two_deg
-            ),
-        );
-
-        // col 13 (paired, lqd-1): intro_zero's own two ties — the literal-0
+        // col 12 (paired, lqd-1): intro_zero's own two ties — the literal-0
         // scalar `UintVal`, mirroring intro's literal-1 (col 2), and the
         // `EcPoint(val, is_pai = 1)` consume tying `val` to `group_ptr`'s
         // canonical PAI row (unlike plain intro's `val = base` native
@@ -1075,7 +1021,7 @@ where
                 two_deg
             ),
         );
-        // col 14: intro_zero's own base-membership tie — unlike `val`,
+        // col 13: intro_zero's own base-membership tie — unlike `val`,
         // `base` must be a genuine finite point of `group_ptr` (`is_pai =
         // 0`), not a literal PAI, so this reuses the coordinate cells
         // `intro_endo` uses for the analogous tie on its own base (see
@@ -1084,7 +1030,7 @@ where
         frac_col!(
             builder,
             "ec-msm-intro-zero",
-            single_deg,
+            two_deg,
             (
                 "consume-ecpoint-intro-zero-base",
                 bnd_intro_zero,

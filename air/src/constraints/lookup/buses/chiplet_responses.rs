@@ -22,8 +22,8 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceInitMsg, And8Msg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
-                MemoryResponseMsg,
+                AceInitMsg, BitwiseMsg, BusId, BytePairLookupMsg, HasherMsg, HasherPayload,
+                KernelRomMsg, MemoryResponseMsg,
             },
         },
         utils::{BoolNot, pack_u32_bytes_le},
@@ -224,7 +224,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 for idx in 0..4 {
                                     b.remove(
                                         "aead_stream_byte",
-                                        And8Msg::new(
+                                        BytePairLookupMsg::from_and(
                                             bytes[idx].into(),
                                             bytes[4 + idx].into(),
                                             bytes[8 + idx].into(),

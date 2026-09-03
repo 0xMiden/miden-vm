@@ -9,10 +9,7 @@
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 pub use miden_air::security::ProofSecurityParameters;
-use miden_air::{
-    MidenAir,
-    security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT},
-};
+use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -35,10 +32,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
     stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    transcript::{
-        eidos::{EidosCompressionInterfaceAir, EidosCompressionNarrowAir},
-        eval::TranscriptEvalAir,
-    },
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -54,11 +48,11 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 780,
+    num_composed_constraints: 722,
     max_constraint_degree: 5,
-    num_deep_terms: Some(922),
+    num_deep_terms: Some(826),
     lookup: LookupShape {
-        fractions_per_row: 283,
+        fractions_per_row: 274,
         max_message_width: 18,
     },
 };
@@ -247,13 +241,9 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
 
     match air {
         ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::EidosCompression => {
-            shape_of(EidosCompressionInterfaceAir) + shape_of(EidosCompressionNarrowAir)
-        },
+        ChipletAir::EidosCompression => shape_of(EidosCompressionAir),
         ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairAnd8 => {
-            shape_of(BytePairLutAir) + MidenAir::And8Lookup.column_shape().iter().sum::<usize>()
-        },
+        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
         ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
         ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
         ChipletAir::UintAdd => shape_of(UintAddAir),
@@ -416,10 +406,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_571_595;
-        const COMPOSITION_TERM_FP: u64 = 7_758_980;
+        const LOOKUP_BASE_FP: u64 = 7_574_651;
+        const COMPOSITION_TERM_FP: u64 = 7_766_285;
         const OOD_BASE_FP: u64 = 8_219_197;
-        const DEEP_BASE_FP: u64 = 7_743_166;
+        const DEEP_BASE_FP: u64 = 7_753_562;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -500,32 +490,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_178_337, 7_758_980, 7_825_981, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_181_391, 7_766_285, 7_825_981, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_523_018, 7_758_980, 7_170_621, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
+                [6_526_074, 7_766_285, 7_170_621, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_326_410, 7_758_980, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
+                [6_329_466, 7_766_285, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_260_874, 7_758_980, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_263_930, 7_766_285, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_998_730, 7_758_980, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
+                [6_001_786, 7_766_285, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_523_018, 7_758_980, 7_170_621, 7_743_166, 6_974_013, 1_353_667, 8_257_536],
+                [6_526_074, 7_766_285, 7_170_621, 7_753_562, 6_974_013, 1_353_667, 8_257_536],
                 20,
             ),
         ];

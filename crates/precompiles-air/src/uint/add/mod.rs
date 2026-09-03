@@ -98,9 +98,9 @@ use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
 
 use crate::{
     logup::{
-        Challenges, CyclicConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
-        LookupColumn, LookupGroup, LookupMessage, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch, LookupBuilder,
+        LookupColumn, LookupGroup, LookupMessage, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS,
     },
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     uint::UintValMsg,
@@ -309,7 +309,7 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -326,10 +326,9 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-        // The one role selector: 1 on the open row, its complement marking
-        // the closing row. Every next-reading constraint is ab_sel-gated,
-        // so the cyclic last → first window (whose local row is a closing
-        // row) is dropped for free.
+        // The role selector is one on the open row; its complement marks the closing row. Every
+        // next-row constraint is gated by `ab_sel`, so none applies across the cyclic last-to-first
+        // boundary.
         let ab_sel: AB::Expr = builder.periodic_values()[0].into();
         let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
 
@@ -460,9 +459,9 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         }
 
         // Phase 2: LogUp — UintVal consumes + the UintAdd provide.
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -517,10 +516,6 @@ impl<LB> LookupAir<LB> for UintAddAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_LOGUP_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

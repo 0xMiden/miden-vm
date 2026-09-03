@@ -2,7 +2,6 @@
 
 use alloc::vec;
 
-use miden_air::and8_lookup::columns::eidos_compression_rotation_contribution;
 use miden_core::{
     Felt,
     field::{PrimeField64, batch_inversion_allow_zeros},
@@ -14,6 +13,7 @@ use super::{
     model::{initial_working_state, low_output},
     schedule::fused_step_at,
 };
+use crate::primitives::byte_pair_lut::eidos::{self as eidos_lookup, Rotation};
 #[cfg(test)]
 pub type EidosCompressionRow = [u64; NUM_COLS];
 
@@ -55,16 +55,16 @@ pub struct EidosCompressionFeltTraceBlock {
 
 /// Byte-table relation used while materializing an Eidos compression trace.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum EidosCompressionByteLookup {
     /// Ordinary bytewise AND.
     And8,
-    /// Contribution of one byte to a 32-bit rotate-right-by-12 result.
-    Rot12 { byte: usize },
-    /// Contribution of one byte to a 32-bit rotate-right-by-7 result.
-    Rot7 { byte: usize },
+    /// Contribution of one byte to the selected 32-bit rotation.
+    Rotation { rotation: Rotation, byte: usize },
 }
 
 /// Receives byte-table lookups generated alongside an Eidos compression trace.
+#[doc(hidden)]
 pub trait ByteLookupRecorder {
     /// Records one lookup, including its two byte inputs and reconstructed result contribution.
     fn record(&mut self, lookup: EidosCompressionByteLookup, lhs: u8, rhs: u8, result: u32);
@@ -447,10 +447,14 @@ where
 {
     let top_byte = odd_output.to_le_bytes()[3];
     let masked = top_byte & F_TOP_BIT_MASK;
+    // This footer tuple overlays rotation byte position 0. Store the position-0 contribution so
+    // the lookup path can apply one row-independent normalization on both fused and footer rows.
+    let x = Felt::from(top_byte ^ F_TOP_BIT_MASK);
+    let scaled_x = eidos_lookup::denormalize(F_TOP_BIT_LOOKUP_BYTE_POSITION, x).as_canonical_u64();
     write_lookup_slot(
         row,
         F_TOP_BIT_SLOT_BASE_COL,
-        [top_byte as u64, F_TOP_BIT_MASK as u64, masked as u64],
+        [top_byte as u64, F_TOP_BIT_MASK as u64, scaled_x],
     );
     recorder.record(EidosCompressionByteLookup::And8, top_byte, F_TOP_BIT_MASK, masked as u32);
 }
@@ -562,25 +566,17 @@ fn write_second_half_slots<T, R>(
     T: TraceRow,
     R: ByteLookupRecorder,
 {
+    let rotation = Rotation::from_bits(rotation);
     let b_bytes = b.to_le_bytes();
     let c_new_bytes = c_new.to_le_bytes();
     for byte in 0..BYTES_PER_WORD {
-        let result = eidos_compression_rotation_contribution(
-            byte,
-            b_bytes[byte],
-            c_new_bytes[byte],
-            rotation,
-        );
+        let result = eidos_lookup::contribution(rotation, byte, b_bytes[byte], c_new_bytes[byte]);
         row.set_u64(g_bd_rot_slot_col(g, byte, 0), b_bytes[byte] as u64);
         row.set_u64(g_bd_rot_slot_col(g, byte, 1), c_new_bytes[byte] as u64);
         if let Some(result_col) = g_bd_rot_result_col(g, byte) {
             row.set_u64(result_col, result as u64);
         }
-        let lookup = match rotation {
-            12 => EidosCompressionByteLookup::Rot12 { byte },
-            7 => EidosCompressionByteLookup::Rot7 { byte },
-            _ => panic!("unsupported EidosCompression byte-rotation lookup"),
-        };
+        let lookup = EidosCompressionByteLookup::Rotation { rotation, byte };
         recorder.record(lookup, b_bytes[byte], c_new_bytes[byte], result);
     }
 }

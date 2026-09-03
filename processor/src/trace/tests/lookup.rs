@@ -9,14 +9,15 @@
 //!    `ProverLookupBuilder::column` panics on overflow).
 //! 2. **Zero-denominator bugs**: every encoded `LookupMessage` evaluates to a non-zero
 //!    extension-field element, so per-fraction `try_inverse` inside the accumulator does not panic.
-//! 3. **Pipeline plumbing**: row slicing with wraparound, per-row periodic composition, `RowWindow`
-//!    construction over a real matrix, and the dense `LookupFractions` buffer all line up.
+//! 3. **Pipeline integration**: row slicing with wraparound, per-row periodic composition,
+//!    `RowWindow` construction over a real matrix, and the dense `LookupFractions` buffer all line
+//!    up.
 //! 4. **Prover/constraint agreement**: the fused `accumulate` prover path must agree with the
 //!    constraint-path `(V_col, U_col)` oracle bit-exactly on every `(row, col)` delta. If any pair
 //!    disagrees, either the prover path or the oracle has a bug.
 //!
 //! The oracle cross-check in (4) subsumes the "does it run to completion?" shape of a
-//! separate plumbing test, so both live in one function below.
+//! separate integration test, so both live in one function below.
 
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use std::collections::HashMap;
@@ -31,7 +32,10 @@ use miden_air::{
     },
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
-        and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
+        and8_lookup::{
+            AND8_TABLE_ROWS, BYTE_PAIR_RELATION_COUNT, BytePairRelation, NUM_AND8_LOOKUP_COLS,
+            RANGE_CHECK_LOOKUP_COL,
+        },
         eidos_compression::{
             EIDOS_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
             NUM_EIDOS_COMPRESSION_COLS,
@@ -41,7 +45,7 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word,
     crypto::merkle::{MerkleStore, MerkleTree},
-    field::{Field, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 
@@ -53,6 +57,12 @@ const EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS: usize = 18;
 const EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE: [usize; 2] = [2, 2];
 const EIDOS_COMPRESSION_LOOKUP_COLUMNS: usize =
     EIDOS_COMPRESSION_NARROW_LOOKUP_COLUMNS + EIDOS_COMPRESSION_FOOTER_LOOKUP_COLUMN_SHAPE.len();
+const AND8_COLUMN_SHAPE: [usize; 4] = [1, 2, 2, 2];
+const AND8_PAIRED_MAIN_COLUMNS: [(usize, usize); 3] = [
+    (BytePairRelation::Rot12Pos1 as usize, BytePairRelation::Rot7Pos0 as usize),
+    (BytePairRelation::Rot7Pos2 as usize, BytePairRelation::Rot12Pos3 as usize),
+    (BytePairRelation::Rot7Pos3 as usize, RANGE_CHECK_LOOKUP_COL),
+];
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
@@ -207,6 +217,65 @@ fn assert_prover_matches_oracle(
     }
 }
 
+/// Checks the exact cross-multiplied constraints emitted by the lookup AIR. Column zero is the
+/// normalized cyclic accumulator; the remaining columns store their row-local batched fractions.
+fn and8_aux_constraints_hold(
+    aux: &RowMajorMatrix<QuadFelt>,
+    sigma_prime: QuadFelt,
+    oracle_folds: &[Vec<(QuadFelt, QuadFelt)>],
+) -> bool {
+    let num_rows = oracle_folds.len();
+    let width = aux.width();
+    if width != AND8_COLUMN_SHAPE.len()
+        || aux.height() != num_rows
+        || aux.values[0] != QuadFelt::ZERO
+    {
+        return false;
+    }
+
+    for (row, folds) in oracle_folds.iter().enumerate() {
+        if folds.len() != width {
+            return false;
+        }
+
+        let current = &aux.values[row * width..(row + 1) * width];
+        let current_sum: QuadFelt = current.iter().copied().sum();
+        let next_acc = aux.values[((row + 1) % num_rows) * width];
+        let (v, u) = folds[0];
+        if u * (next_acc - current_sum + sigma_prime) != v {
+            return false;
+        }
+
+        for col in 1..width {
+            let (v, u) = folds[col];
+            if u * current[col] != v {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn and8_aux_column_constraint_holds_at(
+    aux: &RowMajorMatrix<QuadFelt>,
+    sigma_prime: QuadFelt,
+    oracle_folds: &[Vec<(QuadFelt, QuadFelt)>],
+    row: usize,
+    col: usize,
+) -> bool {
+    let width = aux.width();
+    let current = &aux.values[row * width..(row + 1) * width];
+    let (v, u) = oracle_folds[row][col];
+    if col == 0 {
+        let current_sum: QuadFelt = current.iter().copied().sum();
+        let next_acc = aux.values[((row + 1) % aux.height()) * width];
+        u * (next_acc - current_sum + sigma_prime) == v
+    } else {
+        u * current[col] == v
+    }
+}
+
 #[test]
 fn lookup_global_balance_closes_for_tiny_span() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
@@ -323,6 +392,8 @@ fn lookup_global_balance_closes_for_fibonacci_span() {
 
 #[test]
 fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
+    const CANONICAL_REQUESTS_PER_BLOCK: u64 = 684;
+    const REQUESTS_PER_DEDICATED_ROTATION_RELATION: u64 = 56;
     const BYTE_LOOKUP_REQUESTS_PER_EIDOS_COMPRESSION_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
@@ -380,7 +451,7 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
     let mut actual_eidos_compression_byte_lookup_total = 0;
     for row in 0..AND8_TABLE_ROWS {
         let row_start = row * NUM_AND8_LOOKUP_COLS;
-        for col in 0..BYTE_LOOKUP_KIND_COUNT {
+        for col in 0..BYTE_PAIR_RELATION_COUNT {
             actual_eidos_compression_byte_lookup_total +=
                 and8_matrix.values[row_start + col].as_canonical_u64();
         }
@@ -389,6 +460,32 @@ fn eidos_compression_lookup_row_shape_matches_expected_interactions() {
         actual_eidos_compression_byte_lookup_total, expected_eidos_compression_byte_lookup_total,
         "EidosCompression byte-lookup multiplicities do not match EidosCompression requests",
     );
+
+    // Each block has fourteen rows per rotation family. Canonical XOR aggregates 16 ordinary
+    // ANDs per fused row, rot12 positions 0/2, rot7 position 1, and 17 ANDs per footer row. Each
+    // dedicated rotation relation receives four requests on each of its fourteen active fused rows.
+    let relation_totals: [u64; BYTE_PAIR_RELATION_COUNT] = core::array::from_fn(|relation| {
+        (0..AND8_TABLE_ROWS)
+            .map(|row| and8_matrix.values[row * NUM_AND8_LOOKUP_COLS + relation].as_canonical_u64())
+            .sum()
+    });
+    assert_eq!(
+        relation_totals[BytePairRelation::CanonicalXor.index()],
+        block_count as u64 * CANONICAL_REQUESTS_PER_BLOCK,
+    );
+    for relation in [
+        BytePairRelation::Rot12Pos1,
+        BytePairRelation::Rot7Pos0,
+        BytePairRelation::Rot7Pos2,
+        BytePairRelation::Rot12Pos3,
+        BytePairRelation::Rot7Pos3,
+    ] {
+        assert_eq!(
+            relation_totals[relation.index()],
+            block_count as u64 * REQUESTS_PER_DEDICATED_ROTATION_RELATION,
+            "unexpected multiplicity total for {relation:?}",
+        );
+    }
 
     let padding_start = AND8_TABLE_ROWS * NUM_AND8_LOOKUP_COLS;
     let padding_byte_lookup_total: u64 =
@@ -671,7 +768,7 @@ fn assert_eidos_compression_oracle_coverage(
     );
 }
 
-fn assert_global_lookup_balance(trace: &VmTrace) {
+pub(super) fn assert_global_lookup_balance(trace: &VmTrace) {
     let (core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
         trace.main_trace().clone_air_matrices();
     let residuals = global_lookup_residuals(
@@ -689,7 +786,7 @@ fn assert_global_lookup_balance(trace: &VmTrace) {
     );
 }
 
-fn assert_global_lookup_balance_rejects(
+pub(super) fn assert_global_lookup_balance_rejects(
     label: &str,
     trace: &VmTrace,
     core_matrix: &RowMajorMatrix<Felt>,
@@ -898,6 +995,141 @@ fn build_lookup_fractions_matches_constraint_path_oracle_for_aead_stream() {
 fn build_lookup_fractions_matches_constraint_path_oracle_for_mixed_bitwise_aead_stream() {
     let trace = mixed_bitwise_aead_stream_trace();
     assert_lookup_fractions_match_constraint_path_oracle("mixed bitwise/AEAD stream", &trace);
+}
+
+#[test]
+fn and8_columns_bind_every_aux_column_through_the_cyclic_wrap() {
+    let trace = build_trace_from_ops(tiny_span(), &[]);
+    let (_, _, _, and8_matrix) = trace.main_trace().clone_air_matrices();
+    let public_values = trace.to_public_values();
+    let preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("And8 AIR must declare its fixed byte-pair table");
+
+    let raw = rand_array::<Felt, 4>();
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([raw[0], raw[1]]),
+        QuadFelt::new([raw[2], raw[3]]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+    let fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    assert_eq!(fractions.shape(), &AND8_COLUMN_SHAPE);
+
+    let (aux, sigma_prime) = accumulate(&fractions);
+    let folds = collect_column_oracle_folds(
+        &MidenAir::AND8_LOOKUP,
+        &and8_matrix,
+        &[],
+        &public_values,
+        &challenges,
+    );
+    assert!(
+        and8_aux_constraints_hold(&aux, sigma_prime, &folds),
+        "honest And8 auxiliary trace must satisfy every cross-multiplied equation",
+    );
+
+    let final_row = aux.height() - 1;
+    assert!(
+        and8_aux_column_constraint_holds_at(&aux, sigma_prime, &folds, final_row, 0),
+        "the last-row accumulator constraint must close through the wrapped next row",
+    );
+
+    for row in [AND8_TABLE_ROWS / 2 + 37, final_row] {
+        for col in 0..AND8_COLUMN_SHAPE.len() {
+            let mut tampered = aux.clone();
+            tampered.values[row * AND8_COLUMN_SHAPE.len() + col] += QuadFelt::ONE;
+            assert!(
+                !and8_aux_column_constraint_holds_at(&tampered, sigma_prime, &folds, row, col,),
+                "And8 auxiliary mutation survived at row {row}, column {col}",
+            );
+        }
+    }
+}
+
+#[test]
+fn and8_paired_columns_reject_opposite_multiplicity_deltas_across_domains() {
+    let trace = build_trace_from_ops(tiny_span(), &[]);
+    let (core_matrix, chip_matrix, eidos_compression_matrix, honest_and8_matrix) =
+        trace.main_trace().clone_air_matrices();
+    let public_values = trace.to_public_values();
+    let preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("And8 AIR must declare its fixed byte-pair table");
+
+    let raw = rand_array::<Felt, 4>();
+    let challenges = Challenges::<QuadFelt>::new(
+        QuadFelt::new([raw[0], raw[1]]),
+        QuadFelt::new([raw[2], raw[3]]),
+        MIDEN_MAX_MESSAGE_WIDTH,
+        BusId::COUNT,
+    );
+    let honest_fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &honest_and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    let (honest_aux, honest_sigma_prime) = accumulate(&honest_fractions);
+
+    // Each attack preserves the untagged sum of the two multiplicities. Distinct bus prefixes
+    // and payloads must nevertheless keep both denominators independently binding.
+    let attack_rows = [1025, 4097, AND8_TABLE_ROWS - 1];
+    let mut attacked_and8_matrix = honest_and8_matrix;
+    let main_width = attacked_and8_matrix.width();
+    for (pair, &row) in AND8_PAIRED_MAIN_COLUMNS.iter().zip(&attack_rows) {
+        attacked_and8_matrix.values[row * main_width + pair.0] += Felt::ONE;
+        attacked_and8_matrix.values[row * main_width + pair.1] -= Felt::ONE;
+    }
+
+    let attacked_folds = collect_column_oracle_folds(
+        &MidenAir::AND8_LOOKUP,
+        &attacked_and8_matrix,
+        &[],
+        &public_values,
+        &challenges,
+    );
+    for (pair_idx, &row) in attack_rows.iter().enumerate() {
+        let col = pair_idx + 1;
+        assert!(
+            !and8_aux_column_constraint_holds_at(
+                &honest_aux,
+                honest_sigma_prime,
+                &attacked_folds,
+                row,
+                col,
+            ),
+            "opposite multiplicity deltas survived in And8 pair column {col}",
+        );
+    }
+
+    // A prover can rebuild locally valid auxiliary columns for the mutated provider trace, but
+    // the tagged global buses must still reject those changed multiplicities.
+    let attacked_fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &attacked_and8_matrix,
+        Some(&preprocessed),
+        &[],
+        &challenges,
+    );
+    let (attacked_aux, attacked_sigma_prime) = accumulate(&attacked_fractions);
+    assert!(and8_aux_constraints_hold(&attacked_aux, attacked_sigma_prime, &attacked_folds,));
+    assert_global_lookup_balance_rejects(
+        "opposite And8 pair multiplicity deltas",
+        &trace,
+        &core_matrix,
+        &chip_matrix,
+        &eidos_compression_matrix,
+        &attacked_and8_matrix,
+        "EidosRotationMsg",
+    );
 }
 
 fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &VmTrace) {

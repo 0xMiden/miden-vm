@@ -4,7 +4,7 @@
 //!
 //! - [`LookupBuilder`] — the top-level handle mirroring the subset of `LiftedAirBuilder` a lookup
 //!   author actually needs (trace access plus per-column scoping). It hides `assert_*` / `when_*` /
-//!   permutation plumbing and does not expose the verifier challenges.
+//!   permutation-column details and does not expose the verifier challenges.
 //! - [`LookupColumn`] — per-column handle returned by [`LookupBuilder::next_column`]. It owns the
 //!   boundary between groups; its only job is to open a group (either the simple path or the
 //!   cached-encoding dual path).
@@ -52,9 +52,9 @@ use super::message::LookupMessage;
 /// - **Batch outer** ([`LookupGroup::batch`]): the post-flag contribution the *whole* batch makes
 ///   to the enclosing group's `(V_g, U_g)` — `(deg(N) + deg(f), deg(D) + deg(f))` where `(N, D)` is
 ///   the running pair the inner-loop body accumulates and `f` is the batch flag. The pre-flag `(N,
-///   D)` is mechanically derivable from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k`
-///   interactions of inner denominator degree `d_v` — so it is documented inline at each batch site
-///   rather than carried in the struct.
+///   D)` follows from the inner-loop body — `((k − 1) · d_v, k · d_v)` for `k` interactions of
+///   inner denominator degree `d_v` — so it is documented inline at each batch site rather than
+///   carried in the struct.
 ///
 /// - **Group / column scope** ([`LookupColumn::group`], `group_with_cached_encoding`,
 ///   [`LookupBuilder::next_column`]): the total post-flag `(V, U)` contribution of the group /
@@ -76,7 +76,8 @@ pub struct Deg {
 ///
 /// Implementors must not shortcut the per-column scoping: a [`super::LookupAir`]
 /// author that opens `n` columns must issue exactly `n` calls to
-/// [`LookupBuilder::next_column`], matching [`super::LookupAir::num_columns`].
+/// [`LookupBuilder::next_column`], matching the length of
+/// [`super::LookupAir::column_shape`].
 pub trait LookupBuilder: Sized {
     // --- base field stack (copied from AirBuilder) ---
 

@@ -75,13 +75,13 @@ pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],
 ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-    let (logup, sigma) = build_logup_aux_trace(&UintStoreMulAir, main, challenges);
+    let (logup, normalized_sum) = build_logup_aux_trace(&UintStoreMulAir, main, challenges);
     let logup_width = logup.width();
     let n = main.height();
     let beta = challenges[1];
 
     // STORE's own register math (mirrors `uint::trace::build_aux`
-    // exactly, reading cols 0..10).
+    // exactly, reading cols 0..18).
     let mut bp8 = [QuadFelt::ZERO; 8];
     bp8[0] = QuadFelt::ONE;
     for i in 1..8 {
@@ -214,5 +214,5 @@ pub(crate) fn build_aux(
         mul_s = mul_s * keep + build;
     }
 
-    (RowMajorMatrix::new(data, AUX_WIDTH), sigma)
+    (RowMajorMatrix::new(data, AUX_WIDTH), normalized_sum)
 }

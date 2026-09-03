@@ -26,10 +26,10 @@ use serde_wincode::{SerdeCompat, wincode};
 
 /// Commitment to the fixed And8 table under the canonical Eidos PCS parameters.
 const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4] = [
-    6547037438551888543,
-    5332594494244509749,
-    8439887896402127641,
-    4048810480047996444,
+    6268951225194987386,
+    4849911536323772979,
+    8427269700199674086,
+    7952151839024097748,
 ];
 const _: () = assert!(config::LOG_BLOWUP == 3);
 

@@ -20,9 +20,9 @@ use super::{
 #[cfg(test)]
 use crate::{constraints::lookup::MIDEN_MAX_MESSAGE_WIDTH, lookup::LookupAir};
 use crate::{
-    constraints::lookup::messages::{
-        AeadEidosCompressionOutputPairMsg, BusId, eidos_compression_rot7_bus,
-        eidos_compression_rot12_bus,
+    constraints::{
+        and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation},
+        lookup::messages::{AeadEidosCompressionOutputPairMsg, BusId, byte_pair_relation_bus},
     },
     lookup::{
         Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
@@ -189,10 +189,6 @@ impl<LB> LookupAir<LB> for EidosCompressionLookupAir
 where
     LB: EidosCompressionLookupBuilder,
 {
-    fn num_columns(&self) -> usize {
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len()
-    }
-
     fn column_shape(&self) -> &[usize] {
         &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
     }
@@ -402,11 +398,11 @@ where
             encoded += group.bus_prefix(BusId::And8Lookup as usize) * fused.clone();
         },
         NarrowSlotBus::Rotation(byte) => {
-            let byte = byte as usize;
-            encoded +=
-                group.bus_prefix(eidos_compression_rot12_bus(byte) as usize) * selectors.is_ab();
-            encoded +=
-                group.bus_prefix(eidos_compression_rot7_bus(byte) as usize) * selectors.is_cd();
+            let byte_position = byte as usize;
+            let rot12 = BytePairRelation::for_rotation(Rotation::Rot12, byte_position);
+            let rot7 = BytePairRelation::for_rotation(Rotation::Rot7, byte_position);
+            encoded += group.bus_prefix(byte_pair_relation_bus(rot12) as usize) * selectors.is_ab();
+            encoded += group.bus_prefix(byte_pair_relation_bus(rot7) as usize) * selectors.is_cd();
         },
         NarrowSlotBus::MessageWord => {
             let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
@@ -547,11 +543,15 @@ where
     match NARROW_SLOTS[slot].fields {
         NarrowSlotFields::StoredByte(stored_slot) => {
             let base = byte_slot_base(0, stored_slot as usize);
-            [
-                LB::Expr::from(local.columns[base]),
-                LB::Expr::from(local.columns[base + 1]),
-                LB::Expr::from(local.columns[base + 2]),
-            ]
+            let a = LB::Expr::from(local.columns[base]);
+            let b = LB::Expr::from(local.columns[base + 1]);
+            let stored = LB::Expr::from(local.columns[base + 2]);
+            let value = if slot <= 15 {
+                xor_from_and(a.clone(), b.clone(), stored)
+            } else {
+                eidos_lookup::normalize(slot % BYTES_PER_WORD, stored)
+            };
+            [a, b, value]
         },
         NarrowSlotFields::MissingRotation => [
             LB::Expr::from(
@@ -560,9 +560,12 @@ where
             LB::Expr::from(
                 local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)],
             ),
-            missing_rotation_result(
-                |col| LB::Expr::from(local.columns[col]),
-                |col| LB::Expr::from(next.columns[col]),
+            eidos_lookup::normalize(
+                MISSING_ROTATION_BYTE,
+                missing_rotation_result(
+                    |col| LB::Expr::from(local.columns[col]),
+                    |col| LB::Expr::from(next.columns[col]),
+                ),
             ),
         ],
         NarrowSlotFields::MessageWord(g) => {

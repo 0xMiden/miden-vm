@@ -2,14 +2,15 @@
 
 use core::borrow::Borrow;
 
-use miden_air::{
-    eidos_compression::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields},
-    logup::{BusId, eidos_compression_rot7_bus, eidos_compression_rot12_bus},
-    lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup},
-};
+use miden_air::eidos_compression::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields};
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::{algebra::missing_rotation_result, layout::*, selectors::EidosCompressionSelectors};
+use crate::{
+    logup::{Deg, LookupBuilder, LookupColumn, LookupGroup},
+    primitives::byte_pair_lut::eidos::{self as eidos_lookup, Relation, Rotation},
+    relations::BusId,
+};
 
 /// Typed view of the PVM-owned Eidos compression main-trace columns.
 #[repr(C)]
@@ -38,14 +39,6 @@ pub(crate) const EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE: [usize; AUX_COLS] = [2; 
 
 const _: () = assert!(AUX_COLS * 2 == NARROW_SLOTS.len());
 
-/// Lookup builder accepted by the Eidos compression AIR.
-pub(in crate::transcript::eidos) trait EidosCompressionLookupBuilder:
-    LookupBuilder<F = Felt>
-{
-}
-
-impl<T> EidosCompressionLookupBuilder for T where T: LookupBuilder<F = Felt> {}
-
 /// Emits all Eidos compression lookup groups in their fixed auxiliary-column order.
 pub(in crate::transcript::eidos) fn emit_lookup_columns<LB>(
     builder: &mut LB,
@@ -53,7 +46,7 @@ pub(in crate::transcript::eidos) fn emit_lookup_columns<LB>(
     next: &EidosCompressionCols<LB::Var>,
     selectors: &EidosCompressionSelectors<LB::Expr>,
 ) where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     for aux_col in 0..EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len() {
         let column_deg = Deg { v: 2, u: 2 };
@@ -62,19 +55,19 @@ pub(in crate::transcript::eidos) fn emit_lookup_columns<LB>(
                 col.group(
                     "eidos_compression",
                     |group| {
-                        // Narrow columns pair adjacent slots under their row-specific
+                        // Each column pairs adjacent slots under their row-specific
                         // multiplicities.
                         let slot0 = 2 * aux_col;
                         let slot1 = slot0 + 1;
-                        let slot0_multiplicity = narrow_slot_multiplicity::<LB>(slot0, selectors);
-                        let slot1_multiplicity = narrow_slot_multiplicity::<LB>(slot1, selectors);
+                        let slot0_multiplicity = slot_multiplicity::<LB>(slot0, selectors);
+                        let slot1_multiplicity = slot_multiplicity::<LB>(slot1, selectors);
                         let slot0_encoding =
-                            narrow_slot_encoding::<LB, _>(&*group, local, next, selectors, slot0);
+                            slot_encoding::<LB, _>(&*group, local, next, selectors, slot0);
                         let slot1_encoding =
-                            narrow_slot_encoding::<LB, _>(&*group, local, next, selectors, slot1);
+                            slot_encoding::<LB, _>(&*group, local, next, selectors, slot1);
 
                         group.selected_batch2_encoded(
-                            "narrow_pair",
+                            "lookup_pair",
                             "slot0",
                             slot0_multiplicity,
                             || slot0_encoding,
@@ -91,12 +84,9 @@ pub(in crate::transcript::eidos) fn emit_lookup_columns<LB>(
     }
 }
 
-fn narrow_slot_multiplicity<LB>(
-    slot: usize,
-    selectors: &EidosCompressionSelectors<LB::Expr>,
-) -> LB::Expr
+fn slot_multiplicity<LB>(slot: usize, selectors: &EidosCompressionSelectors<LB::Expr>) -> LB::Expr
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     let fused = is_fused::<LB>(selectors);
     let footer = selectors.is_footer();
@@ -107,12 +97,12 @@ where
             fused - LB::Expr::from_u64(7) * footer
         },
         (NarrowSlotBus::MessageWord, None) => fused,
-        (_, Some(_)) => -(fused + footer),
-        (_, None) => -fused,
+        (_, Some(_)) => fused + footer,
+        (_, None) => fused,
     }
 }
 
-fn narrow_slot_encoding<LB, G>(
+fn slot_encoding<LB, G>(
     group: &G,
     local: &EidosCompressionCols<LB::Var>,
     next: &EidosCompressionCols<LB::Var>,
@@ -120,7 +110,7 @@ fn narrow_slot_encoding<LB, G>(
     slot: usize,
 ) -> G::ExprEF
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let spec = NARROW_SLOTS[slot];
@@ -130,14 +120,14 @@ where
 
     match spec.fused_bus {
         NarrowSlotBus::And8 => {
-            encoded += group.bus_prefix(BusId::And8Lookup as usize) * fused.clone();
+            encoded += group.bus_prefix(BusId::BytePairLut as usize) * fused.clone();
         },
         NarrowSlotBus::Rotation(byte) => {
-            let byte = byte as usize;
-            encoded +=
-                group.bus_prefix(eidos_compression_rot12_bus(byte) as usize) * selectors.is_ab();
-            encoded +=
-                group.bus_prefix(eidos_compression_rot7_bus(byte) as usize) * selectors.is_cd();
+            let byte_position = byte as usize;
+            let rot12 = Relation::for_rotation(Rotation::Rot12, byte_position);
+            let rot7 = Relation::for_rotation(Rotation::Rot7, byte_position);
+            encoded += group.bus_prefix(rot12.bus() as usize) * selectors.is_ab();
+            encoded += group.bus_prefix(rot7.bus() as usize) * selectors.is_cd();
         },
         NarrowSlotBus::MessageWord => {
             let activity = if matches!(spec.footer_bus, Some(NarrowSlotBus::MessageWord)) {
@@ -145,7 +135,7 @@ where
             } else {
                 fused.clone()
             };
-            encoded += group.bus_prefix(BusId::EidosCompressionMessageWord as usize) * activity;
+            encoded += group.bus_prefix(BusId::EidosWord as usize) * activity;
         },
         NarrowSlotBus::RangeCheck => {
             unreachable!("range checks are not used on fused rows")
@@ -154,10 +144,10 @@ where
 
     match spec.footer_bus {
         Some(NarrowSlotBus::And8) => {
-            encoded += group.bus_prefix(BusId::And8Lookup as usize) * footer.clone();
+            encoded += group.bus_prefix(BusId::BytePairLut as usize) * footer.clone();
         },
         Some(NarrowSlotBus::RangeCheck) => {
-            encoded += group.bus_prefix(BusId::RangeCheck as usize) * footer.clone();
+            encoded += group.bus_prefix(BusId::Range16 as usize) * footer.clone();
         },
         Some(NarrowSlotBus::MessageWord) => {},
         Some(NarrowSlotBus::Rotation(_)) => {
@@ -173,7 +163,7 @@ where
         } else {
             LB::Expr::ZERO
         };
-    encoded += group.bus_prefix(BusId::RangeCheck as usize) * (LB::Expr::ONE - activity);
+    encoded += group.bus_prefix(BusId::Range16 as usize) * (LB::Expr::ONE - activity);
     let fields = narrow_slot_fields::<LB>(local, next, selectors, slot);
     for (idx, field) in fields.into_iter().enumerate() {
         encoded += group.beta_powers()[idx].clone() * field;
@@ -188,16 +178,20 @@ fn narrow_slot_fields<LB>(
     slot: usize,
 ) -> [LB::Expr; 3]
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     match NARROW_SLOTS[slot].fields {
         NarrowSlotFields::StoredByte(stored_slot) => {
             let base = byte_slot_base(0, stored_slot as usize);
-            [
-                LB::Expr::from(local.columns[base]),
-                LB::Expr::from(local.columns[base + 1]),
-                LB::Expr::from(local.columns[base + 2]),
-            ]
+            let a = LB::Expr::from(local.columns[base]);
+            let b = LB::Expr::from(local.columns[base + 1]);
+            let stored = LB::Expr::from(local.columns[base + 2]);
+            let value = if slot <= 15 {
+                a.clone() + b.clone() - stored.clone() - stored
+            } else {
+                eidos_lookup::normalize(slot % BYTES_PER_WORD, stored)
+            };
+            [a, b, value]
         },
         NarrowSlotFields::MissingRotation => [
             LB::Expr::from(
@@ -206,9 +200,12 @@ where
             LB::Expr::from(
                 local.columns[g_bd_rot_slot_col(MISSING_ROTATION_G, MISSING_ROTATION_BYTE, 1)],
             ),
-            missing_rotation_result(
-                |col| LB::Expr::from(local.columns[col]),
-                |col| LB::Expr::from(next.columns[col]),
+            eidos_lookup::normalize(
+                MISSING_ROTATION_BYTE,
+                missing_rotation_result(
+                    |col| LB::Expr::from(local.columns[col]),
+                    |col| LB::Expr::from(next.columns[col]),
+                ),
             ),
         ],
         NarrowSlotFields::MessageWord(g) => {
@@ -224,7 +221,7 @@ where
 
 fn message_index<LB>(selectors: &EidosCompressionSelectors<LB::Expr>, g: usize) -> LB::Expr
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     let footer = selectors.is_footer();
     let footer_idx = selectors.is_footer_row(1)
@@ -237,7 +234,7 @@ where
 
 fn is_fused<LB>(selectors: &EidosCompressionSelectors<LB::Expr>) -> LB::Expr
 where
-    LB: EidosCompressionLookupBuilder,
+    LB: LookupBuilder<F = Felt>,
 {
     selectors.is_ab() + selectors.is_cd()
 }

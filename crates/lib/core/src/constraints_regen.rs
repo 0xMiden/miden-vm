@@ -296,8 +296,10 @@ struct VmGeometry {
     row_width: usize,
     ood_row_felts: usize,
     ood_frame_felts: usize,
+    preprocessed_pipe_blocks: usize,
     main_pipe_blocks: usize,
     aux_pipe_blocks: usize,
+    quotient_pipe_blocks: usize,
     ood_pipe_blocks: usize,
     ood_evaluations_ptr: usize,
     aux_bus_boundary_ptr: usize,
@@ -344,9 +346,13 @@ impl VmGeometry {
             }
         }
 
-        for (name, width) in
-            [("main", main_width), ("auxiliary", aux_width), ("ACE row", row_width)]
-        {
+        for (name, width) in [
+            ("preprocessed", preprocessed_width),
+            ("main", main_width),
+            ("auxiliary", aux_width),
+            ("quotient", quotient_width),
+            ("ACE row", row_width),
+        ] {
             if !width.is_multiple_of(LMCS_ALIGNMENT) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -404,8 +410,10 @@ impl VmGeometry {
             row_width,
             ood_row_felts,
             ood_frame_felts,
+            preprocessed_pipe_blocks: preprocessed_width / LMCS_ALIGNMENT,
             main_pipe_blocks: main_width / LMCS_ALIGNMENT,
             aux_pipe_blocks: aux_width / LMCS_ALIGNMENT,
+            quotient_pipe_blocks: quotient_width / LMCS_ALIGNMENT,
             ood_pipe_blocks: ood_row_felts / LMCS_ALIGNMENT,
             ood_evaluations_ptr,
             aux_bus_boundary_ptr,
@@ -540,6 +548,19 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
     let mut deep_queries = read_file(VM_DEEP_QUERIES_PATH)?;
     replace_line_with_prefix(
         &mut deep_queries,
+        "# Load the aligned preprocessed leaf:",
+        &format!(
+            "    # Load the aligned preprocessed leaf: {} base felts.",
+            geometry.preprocessed_width,
+        ),
+    )?;
+    replace_repeat_in_proc(
+        &mut deep_queries,
+        "load_preprocessed_segment",
+        geometry.preprocessed_pipe_blocks,
+    )?;
+    replace_line_with_prefix(
+        &mut deep_queries,
         "# Load the aligned main leaf:",
         &format!(
             "    # Load the aligned main leaf: {} = {} base felts.",
@@ -565,6 +586,11 @@ fn render_vm_deep_queries(geometry: &VmGeometry) -> io::Result<String> {
         &mut deep_queries,
         "load_aux_segment_execution_trace",
         geometry.aux_pipe_blocks,
+    )?;
+    replace_repeat_in_proc(
+        &mut deep_queries,
+        "load_constraints_composition_polys_trace",
+        geometry.quotient_pipe_blocks,
     )?;
     Ok(deep_queries)
 }
@@ -1264,19 +1290,30 @@ mod tests {
     }
 
     #[test]
-    fn vm_geometry_tracks_aligned_108_main_and_20_aux_widths() {
+    fn deep_query_loader_repeats_follow_air_geometry() {
         let factory = RecursiveAceCircuitFactory::new().expect("recursive ACE factory");
         let geometry = VmGeometry::from_input_layout(factory.input_layout()).expect("VM geometry");
+        let deep_queries = render_vm_deep_queries(&geometry).expect("render DEEP-query loaders");
 
-        assert_eq!(geometry.main_widths, [56, 24, 112, 16]);
-        assert_eq!(geometry.main_width, 208);
-        assert_eq!(geometry.aux_widths, [8, 8, 40, 24]);
-        assert_eq!(geometry.aux_width, 80);
-        assert_eq!(geometry.row_width, 320);
-        assert_eq!(geometry.ood_row_felts, 640);
-        assert_eq!(geometry.ood_frame_felts, 1_280);
-        assert_eq!(geometry.main_pipe_blocks, 26);
-        assert_eq!(geometry.aux_pipe_blocks, 10);
-        assert_eq!(geometry.ood_pipe_blocks, 80);
+        for (proc_name, expected) in [
+            ("load_preprocessed_segment", geometry.preprocessed_pipe_blocks),
+            ("load_main_segment_execution_trace", geometry.main_pipe_blocks),
+            ("load_aux_segment_execution_trace", geometry.aux_pipe_blocks),
+            ("load_constraints_composition_polys_trace", geometry.quotient_pipe_blocks),
+        ] {
+            let proc_marker = format!("proc {proc_name}");
+            let proc_body = deep_queries
+                .split_once(&proc_marker)
+                .unwrap_or_else(|| panic!("missing {proc_name}"))
+                .1
+                .split_once("\nend")
+                .unwrap_or_else(|| panic!("missing end of {proc_name}"))
+                .0;
+            let actual = proc_body
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("repeat.")?.parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("missing repeat in {proc_name}"));
+            assert_eq!(actual, expected, "stale query loader geometry in {proc_name}");
+        }
     }
 }

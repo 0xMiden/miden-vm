@@ -1,8 +1,9 @@
 //! Composite AIR for the chunk, Keccak-node, and Keccak-sponge chiplets.
 //!
 //! The three components share a row range in disjoint column bands. Their
-//! constraints and LogUp interactions delegate to the same offset-aware
-//! evaluators used by the standalone component AIRs.
+//! base constraints delegate to offset-aware component evaluators. The
+//! Sponge lookup evaluator is shared with its standalone AIR; the chunk and
+//! node lookup fractions are repacked without changing their messages.
 
 use alloc::vec::Vec;
 
@@ -15,8 +16,8 @@ use crate::{
         keccak::sponge::{self, sponge_program},
     },
     logup::{
-        CyclicConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_PUBLIC_VALUES, NUM_RANDOMNESS,
-        NUM_SIGMA_VALUES,
+        ConstraintLookupBuilder, LookupAir, LookupBuilder, NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES,
+        NUM_RANDOMNESS,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
 };
@@ -70,7 +71,7 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
     }
 
     fn num_aux_values(&self) -> usize {
-        NUM_SIGMA_VALUES
+        NUM_LOGUP_VALUES
     }
 
     fn build_aux_trace(
@@ -87,9 +88,9 @@ impl LiftedAir<Felt, QuadFelt> for ChunkNodeSpongeAir {
         chunk_node::eval_main(builder, 0);
         sponge::eval_main(builder, SPONGE_COL_OFFSET);
 
-        let mut lb =
-            CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
+        let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
+        lb.finish();
     }
 }
 
@@ -97,10 +98,6 @@ impl<LB> LookupAir<LB> for ChunkNodeSpongeAir
 where
     LB: LookupBuilder<F = Felt>,
 {
-    fn num_columns(&self) -> usize {
-        NUM_AUX_COLS
-    }
-
     fn column_shape(&self) -> &[usize] {
         &COLUMN_SHAPE
     }

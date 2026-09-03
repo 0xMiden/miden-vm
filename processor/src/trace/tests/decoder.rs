@@ -13,8 +13,13 @@
 //! `build_lookup_fractions_matches_constraint_path_oracle` in `tests/lookup.rs`.
 
 use alloc::vec::Vec;
+use core::borrow::BorrowMut;
 
-use miden_air::logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg};
+use miden_air::{
+    CoreCols,
+    logup::{BlockHashMsg, BlockStackMsg, OpGroupMsg},
+    trace::decoder::{OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+};
 use miden_core::{
     Felt, ONE, ZERO,
     mast::{
@@ -23,6 +28,7 @@ use miden_core::{
     },
     operations::{Operation, opcodes},
     program::Program,
+    utils::{Matrix, RowMajorMatrix},
 };
 
 use super::{
@@ -58,6 +64,51 @@ where
         let idx = RowIndex::from(row);
         f(row, main.get_op_code(idx));
     }
+}
+
+fn batch_row(trace: &VmTrace, expected_encoding: [Felt; 2]) -> usize {
+    let main = trace.main_trace();
+    (0..main.core_height())
+        .find(|&row| {
+            let row = RowIndex::from(row);
+            let op = main.get_op_code(row);
+            (op == Felt::from_u8(opcodes::SPAN) || op == Felt::from_u8(opcodes::RESPAN))
+                && main.op_batch_encoding(row) == expected_encoding
+        })
+        .unwrap_or_else(|| panic!("trace does not contain batch encoding {expected_encoding:?}"))
+}
+
+fn non_batch_row(trace: &VmTrace) -> usize {
+    let main = trace.main_trace();
+    (0..main.core_height())
+        .find(|&row| {
+            let op = main.get_op_code(RowIndex::from(row));
+            op != Felt::from_u8(opcodes::SPAN) && op != Felt::from_u8(opcodes::RESPAN)
+        })
+        .expect("trace must contain a non-SPAN/RESPAN row")
+}
+
+fn core_row_mut(core_matrix: &mut RowMajorMatrix<Felt>, row: usize) -> &mut CoreCols<Felt> {
+    let width = core_matrix.width();
+    let start = row * width;
+    core_matrix.values[start..start + width].borrow_mut()
+}
+
+fn assert_core_mutation_rejected(
+    trace: &VmTrace,
+    row: usize,
+    mutate: impl FnOnce(&mut CoreCols<Felt>),
+) {
+    let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
+        trace.main_trace().clone_air_matrices();
+    mutate(core_row_mut(&mut core_matrix, row));
+    super::lookup::assert_trace_constraints_reject(
+        trace,
+        core_matrix,
+        chip_matrix,
+        eidos_compression_matrix,
+        and8_matrix,
+    );
 }
 
 // BLOCK STACK TABLE (M1) TESTS
@@ -618,7 +669,7 @@ fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
 ///
 /// A batch of 64 simple stack-depth-neutral ops was picked because each op group packs 9 seven-bit
 /// opcodes into a 63-bit group value, so 8 groups hold 72 ops max; 64 ops reliably fills the
-/// batch up to the g8 threshold (`c0 == 1`) without spilling into a second batch.
+/// batch up to the g8 threshold without spilling into a second batch.
 #[test]
 fn op_group_span_8_groups_inserts() {
     let pattern = [Operation::Noop, Operation::Incr, Operation::Neg, Operation::Eqz];
@@ -634,8 +685,7 @@ fn op_group_span_8_groups_inserts() {
         if op != Felt::from_u8(opcodes::SPAN) && op != Felt::from_u8(opcodes::RESPAN) {
             return;
         }
-        let batch_flags = main.op_batch_flag(idx);
-        if batch_flags[0] != ONE {
+        if main.op_batch_encoding(idx) != OP_BATCH_8_GROUPS {
             return;
         }
         g8_rows_seen += 1;
@@ -737,17 +787,20 @@ fn op_group_span_removal_covers_decode_rows() {
 
 /// A SPAN that spans two batches exercises the RESPAN-boundary op-group dispatch. Runs with
 /// op counts that force each non-g8 batch variant in the second batch to catch off-by-one /
-/// batch-flag muxing bugs at the transition:
+/// batch-encoding dispatch bugs at the transition:
 ///
 /// - 80 Noops: first batch g8 (7 adds) + RESPAN + g1 second batch (0 adds — single group consumed
-///   inline; emitter has no branch for `(c0, c1, c2) = (0, 1, 1)`).
+///   inline; emitter has no g1 branch).
+/// - 88 Noops: first batch g8 + RESPAN + g2 second batch (1 add for position 1).
 /// - 100 Noops: first batch g8 + RESPAN + g4 second batch (3 adds for positions 1..=3).
+/// - 144 Noops: two full g8 batches.
 ///
-/// The batch-flag dispatch below mirrors the emitter exactly: `c0` is the g8 selector,
-/// `(1-c0)·c1·(1-c2)` is g4, `(1-c0)·(1-c1)·c2` is g2, and `(1-c0)·c1·c2` is g1.
+/// The dispatch below matches the canonical two-column operation-batch encoding.
 #[rstest::rstest]
 #[case::g8_plus_g1(80, 1, 0, 0, 1)]
+#[case::g8_plus_g2(88, 1, 0, 1, 0)]
 #[case::g8_plus_g4(100, 1, 1, 0, 0)]
+#[case::g8_plus_g8(144, 2, 0, 0, 0)]
 fn op_group_span_two_batch_transition_inserts(
     #[case] noop_count: usize,
     #[case] expected_g8_rows: usize,
@@ -774,14 +827,13 @@ fn op_group_span_two_batch_transition_inserts(
         if op == Felt::from_u8(opcodes::RESPAN) {
             respan_observed = true;
         }
-        let batch_flags = main.op_batch_flag(idx);
-        let (c0, c1, c2) = (batch_flags[0], batch_flags[1], batch_flags[2]);
+        let batch_encoding = main.op_batch_encoding(idx);
         let addr_next = main.addr(RowIndex::from(row + 1));
         let gc = main.group_count(idx);
         let first = main.decoder_hasher_state_first_half(idx);
         let second = main.decoder_hasher_state_second_half(idx);
 
-        if c0 == ONE && c1 == ZERO && c2 == ZERO {
+        if batch_encoding == OP_BATCH_8_GROUPS {
             g8_rows += 1;
             for i in 1u16..=3 {
                 exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, first[i as usize]));
@@ -789,19 +841,19 @@ fn op_group_span_two_batch_transition_inserts(
             for i in 4u16..=7 {
                 exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, second[(i - 4) as usize]));
             }
-        } else if c0 == ZERO && c1 == ONE && c2 == ZERO {
+        } else if batch_encoding == OP_BATCH_4_GROUPS {
             g4_rows += 1;
             for i in 1u16..=3 {
                 exp.add(row, &OpGroupMsg::new(&addr_next, gc, i, first[i as usize]));
             }
-        } else if c0 == ZERO && c1 == ZERO && c2 == ONE {
+        } else if batch_encoding == OP_BATCH_2_GROUPS {
             g2_rows += 1;
             exp.add(row, &OpGroupMsg::new(&addr_next, gc, 1, first[1]));
-        } else if c0 == ZERO && c1 == ONE && c2 == ONE {
+        } else if batch_encoding == OP_BATCH_1_GROUPS {
             // g1 batch: single group consumed inline by the RESPAN decode row; no inserts.
             g1_rows += 1;
         } else {
-            panic!("unexpected batch_flags on SPAN/RESPAN row: ({c0:?}, {c1:?}, {c2:?})");
+            panic!("unexpected operation-batch encoding on SPAN/RESPAN row: {batch_encoding:?}");
         }
     });
 
@@ -814,6 +866,118 @@ fn op_group_span_two_batch_transition_inserts(
     assert_eq!(exp.count_removes(), 0);
 
     log.assert_contains(&exp);
+}
+
+#[rstest::rstest]
+#[case::g8(64, OP_BATCH_8_GROUPS)]
+#[case::g4(100, OP_BATCH_4_GROUPS)]
+#[case::g2(88, OP_BATCH_2_GROUPS)]
+#[case::g1(80, OP_BATCH_1_GROUPS)]
+fn canonical_op_batch_encodings_satisfy_the_full_air(
+    #[case] noop_count: usize,
+    #[case] encoding: [Felt; 2],
+) {
+    let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
+    batch_row(&trace, encoding);
+    trace.check_constraints();
+    super::lookup::assert_global_lookup_balance(&trace);
+}
+
+#[test]
+fn op_batch_encoding_rejects_invalid_and_off_batch_values() {
+    let trace = build_trace_from_ops(vec![Operation::Noop; 100], &[]);
+    let active_row = batch_row(&trace, OP_BATCH_4_GROUPS);
+
+    assert_core_mutation_rejected(&trace, active_row, |row| {
+        row.decoder.full_batch = Felt::from_u8(2);
+    });
+    assert_core_mutation_rejected(&trace, active_row, |row| {
+        row.decoder.full_batch = -ONE;
+    });
+    assert_core_mutation_rejected(&trace, active_row, |row| {
+        row.decoder.batch_size_code = Felt::from_u8(2);
+    });
+    assert_core_mutation_rejected(&trace, active_row, |row| {
+        row.decoder.full_batch = ONE;
+        row.decoder.batch_size_code = ONE;
+    });
+
+    let inactive_row = non_batch_row(&trace);
+    assert_core_mutation_rejected(&trace, inactive_row, |row| {
+        row.decoder.full_batch = ONE;
+    });
+    assert_core_mutation_rejected(&trace, inactive_row, |row| {
+        row.decoder.batch_size_code = -ONE;
+    });
+}
+
+#[rstest::rstest]
+#[case::g4(100, OP_BATCH_4_GROUPS, 4..8)]
+#[case::g2(88, OP_BATCH_2_GROUPS, 2..8)]
+#[case::g1(80, OP_BATCH_1_GROUPS, 1..8)]
+fn op_batch_encoding_pins_every_unused_hasher_lane(
+    #[case] noop_count: usize,
+    #[case] encoding: [Felt; 2],
+    #[case] unused_lanes: core::ops::Range<usize>,
+) {
+    let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
+    let row = batch_row(&trace, encoding);
+    let (honest_core, chip_matrix, eidos_compression_matrix, and8_matrix) =
+        trace.main_trace().clone_air_matrices();
+
+    for lane in unused_lanes {
+        let mut core_matrix = honest_core.clone();
+        let decoder = &mut core_row_mut(&mut core_matrix, row).decoder;
+        assert_eq!(decoder.hasher_state[lane], ZERO, "lane h{lane} must start unused");
+        decoder.hasher_state[lane] = ONE;
+        super::lookup::assert_trace_constraints_reject(
+            &trace,
+            core_matrix,
+            chip_matrix.clone(),
+            eidos_compression_matrix.clone(),
+            and8_matrix.clone(),
+        );
+    }
+}
+
+/// Every directed substitution between otherwise valid encodings must change the OpGroup
+/// multiset. This checks global lookup balance directly, independently of whether a smaller
+/// replacement also violates the unused-lane constraints.
+#[rstest::rstest]
+#[case::g8_to_g4(64, OP_BATCH_8_GROUPS, OP_BATCH_4_GROUPS)]
+#[case::g8_to_g2(64, OP_BATCH_8_GROUPS, OP_BATCH_2_GROUPS)]
+#[case::g8_to_g1(64, OP_BATCH_8_GROUPS, OP_BATCH_1_GROUPS)]
+#[case::g4_to_g8(100, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS)]
+#[case::g4_to_g2(100, OP_BATCH_4_GROUPS, OP_BATCH_2_GROUPS)]
+#[case::g4_to_g1(100, OP_BATCH_4_GROUPS, OP_BATCH_1_GROUPS)]
+#[case::g2_to_g8(88, OP_BATCH_2_GROUPS, OP_BATCH_8_GROUPS)]
+#[case::g2_to_g4(88, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS)]
+#[case::g2_to_g1(88, OP_BATCH_2_GROUPS, OP_BATCH_1_GROUPS)]
+#[case::g1_to_g8(80, OP_BATCH_1_GROUPS, OP_BATCH_8_GROUPS)]
+#[case::g1_to_g2(80, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS)]
+#[case::g1_to_g4(80, OP_BATCH_1_GROUPS, OP_BATCH_4_GROUPS)]
+fn valid_op_batch_encoding_swaps_unbalance_the_op_group_bus(
+    #[case] noop_count: usize,
+    #[case] original_encoding: [Felt; 2],
+    #[case] replacement_encoding: [Felt; 2],
+) {
+    let trace = build_trace_from_ops(vec![Operation::Noop; noop_count], &[]);
+    let row = batch_row(&trace, original_encoding);
+    let (mut core_matrix, chip_matrix, eidos_compression_matrix, and8_matrix) =
+        trace.main_trace().clone_air_matrices();
+    let decoder = &mut core_row_mut(&mut core_matrix, row).decoder;
+    decoder.full_batch = replacement_encoding[0];
+    decoder.batch_size_code = replacement_encoding[1];
+
+    super::lookup::assert_global_lookup_balance_rejects(
+        "valid operation-batch encoding swap",
+        &trace,
+        &core_matrix,
+        &chip_matrix,
+        &eidos_compression_matrix,
+        &and8_matrix,
+        "OpGroupMsg",
+    );
 }
 
 // DYNCALL REGRESSION TESTS

@@ -13,10 +13,10 @@ use miden::core::stark::verifier
 # zero because Lifted STARK does not grind lookup challenges.
 const LOOKUP_POW_BITS = 0
 const MAX_MESSAGE_WIDTH = 18
-const NUM_COMPOSED_CONSTRAINTS = 780
+const NUM_COMPOSED_CONSTRAINTS = 722
 const MAX_CONSTRAINT_DEGREE = 5
-const NUM_DEEP_TERMS = 922
-const LOOKUP_FRACTIONS_PER_ROW = 283
+const NUM_DEEP_TERMS = 826
+const LOOKUP_FRACTIONS_PER_ROW = 274
 const FIXED_BOUNDARY_LOOKUP_TERMS = 8
 
 # Inclusive upper bound used by the PVM shape checks.
@@ -24,6 +24,9 @@ const LOG_HEIGHT_MAX = 29
 
 # Fixed ChipletAir::all() cardinality and registry metadata.
 const NUM_CHIPLETS = 10
+const LAST_CHIPLET_INDEX = 9
+# Every AIR exposes one quadratic-extension value, stored as two base-field elements.
+const NUM_AUX_VALUE_FELTS = 20
 
 # The host request used to obtain a PVM proof package for the deferred root on the operand stack.
 const PROOF_REQUEST_EVENT = event("miden::core::sys::pvm::request_proof")
@@ -43,26 +46,27 @@ const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 
 # PVM_RELATION_DIGEST = Eidos(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 12637848500052756
-const RELATION_DIGEST_1 = 7745077750716969170
-const RELATION_DIGEST_2 = 1694247062558353544
-const RELATION_DIGEST_3 = 2860241919844715102
+const RELATION_DIGEST_0 = 1343014258601518641
+const RELATION_DIGEST_1 = 9076820302092083746
+const RELATION_DIGEST_2 = 7102860409392076119
+const RELATION_DIGEST_3 = 8428538352472289356
 
 # Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
-const ACE_REGISTRY_ROOT_0 = 9136257309689600636
-const ACE_REGISTRY_ROOT_1 = 3553453949102634939
-const ACE_REGISTRY_ROOT_2 = 726388499322436239
-const ACE_REGISTRY_ROOT_3 = 6752224499054982241
+const ACE_REGISTRY_ROOT_0 = 7974810249840898517
+const ACE_REGISTRY_ROOT_1 = 4075718488425796651
+const ACE_REGISTRY_ROOT_2 = 5877811957563926885
+const ACE_REGISTRY_ROOT_3 = 3123587770109982413
 
 # Trusted setup commitment. Regeneration updates this for the native Eidos configuration.
-const PREPROCESSED_COMMITMENT_0 = 9149270939093594297
-const PREPROCESSED_COMMITMENT_1 = 2028653132461848430
-const PREPROCESSED_COMMITMENT_2 = 2018267977717471602
-const PREPROCESSED_COMMITMENT_3 = 8243292716395241032
+const PREPROCESSED_COMMITMENT_0 = 6268951225194987386
+const PREPROCESSED_COMMITMENT_1 = 4849911536323772979
+const PREPROCESSED_COMMITMENT_2 = 8427269700199674086
+const PREPROCESSED_COMMITMENT_3 = 7952151839024097748
 
 #! Loads the fixed PVM relation context.
 #!
 #! Stores the ten AIR heights in `ChipletAir::all()` order, their maximum, the proof-order tag,
+#! absolute addresses of each AIR's auxiliary boundary value in the proof-ordered buffer,
 #! relation commitments, and fixed OOD/query-row addresses.
 #!
 #! Advice order: [h0, ..., h9].
@@ -91,6 +95,7 @@ pub proc load_air_context
     push.NUM_CHIPLETS
     exec.utils::derive_order_tag_from_heights
     exec.constants::set_order_tag
+    exec.materialize_aux_value_ptrs
 
     exec.store_relation_digest
     exec.store_ace_registry_root
@@ -103,6 +108,38 @@ pub proc load_air_context
     exec.constants::set_auxiliary_ace_inputs_address
     exec.layout::aux_rand_elem_ptr
     exec.constants::set_aux_rand_elem_address
+end
+
+#! Stores the address of each AIR's auxiliary boundary value, indexed by canonical AIR order.
+#!
+#! `derive_order_tag_from_heights` leaves the proof order in `tmp1..tmp3`. Reading those ten
+#! entries in reverse address order yields the canonical AIR indices in proof order. Each AIR
+#! exposes one quadratic-extension value, so the boundary pointer advances by two felts per AIR.
+#!
+#! Inputs:  [...]
+#! Outputs: [...]
+proc materialize_aux_value_ptrs
+    exec.layout::aux_bus_boundary_ptr
+    exec.constants::tmp1 add.LAST_CHIPLET_INDEX
+    # => [reverse_order_ptr, next_value_ptr, ...]
+
+    repeat.NUM_CHIPLETS
+        dup mem_load
+        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+
+        dup
+        exec.layout::aux_value_ptrs_ptr add
+        dup.3 swap mem_store
+        # => [air_index, reverse_order_ptr, next_value_ptr, ...]
+
+        drop
+        swap add.2 swap sub.1
+        # => [reverse_order_ptr - 1, next_value_ptr', ...]
+    end
+
+    drop
+    exec.layout::aux_bus_boundary_ptr add.NUM_AUX_VALUE_FELTS
+    assert_eq.err="PVM auxiliary-value layout width drifted"
 end
 
 #! Loads, validates, stores, and folds one instance's log height into the running maximum.

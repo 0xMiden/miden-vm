@@ -96,8 +96,9 @@ mod tests {
 
     use miden_core::{
         field::{PrimeCharacteristicRing, QuadFelt},
-        utils::RowMajorMatrix,
+        utils::{Matrix, RowMajorMatrix},
     };
+    use miden_crypto::stark::air::BaseAir;
 
     use crate::{
         ChipletsAir, EidosCompressionAir, Felt, MidenAir, NUM_EIDOS_COMPRESSION_COLS,
@@ -111,7 +112,7 @@ mod tests {
             },
         },
         lookup::{
-            Challenges,
+            Challenges, build_lookup_fractions,
             debug::{ValidateLayout, ValidateLookupAir, check_trace_balance},
         },
         trace::AUX_TRACE_RAND_CHALLENGES,
@@ -229,6 +230,47 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
             .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
+        assert_eq!(
+            crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE,
+            [1, 2, 2, 2],
+        );
+    }
+
+    #[test]
+    fn and8_lookup_packs_seven_live_interactions_into_four_columns() {
+        const NUM_ROWS: usize = 2;
+
+        let air = MidenAir::AND8_LOOKUP;
+        let full_preprocessed =
+            air.preprocessed_trace().expect("And8 lookup AIR declares a preprocessed table");
+        let preprocessed_width = full_preprocessed.width();
+        let last_row = full_preprocessed.height() - 1;
+        let mut preprocessed_values = Vec::with_capacity(NUM_ROWS * preprocessed_width);
+        for row in [0, last_row] {
+            let start = row * preprocessed_width;
+            preprocessed_values
+                .extend_from_slice(&full_preprocessed.values[start..start + preprocessed_width]);
+        }
+        let preprocessed = RowMajorMatrix::new(preprocessed_values, preprocessed_width);
+        let main = RowMajorMatrix::new(
+            vec![
+                Felt::ONE;
+                NUM_ROWS * crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+            ],
+            crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
+        );
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::from_u32(7),
+            QuadFelt::from_u32(11),
+            MIDEN_MAX_MESSAGE_WIDTH,
+            BusId::COUNT,
+        );
+
+        let fractions = build_lookup_fractions(&air, &main, Some(&preprocessed), &[], &challenges);
+
+        assert_eq!(fractions.shape(), &[1, 2, 2, 2]);
+        assert_eq!(fractions.counts(), &[1, 2, 2, 2, 1, 2, 2, 2]);
+        assert_eq!(fractions.fractions().len(), NUM_ROWS * 7);
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued

@@ -1,39 +1,9 @@
-//! LogUp adapter — natural last-row σ-closing.
+//! PVM relation definitions over the shared Miden LogUp framework.
 //!
-//! Re-uses miden-vm's closure-based lookup framework (`LookupAir`,
-//! `LookupBuilder`, `LookupColumn`, `LookupGroup`, `LookupBatch`,
-//! `LookupMessage`, `Challenges`, `LookupFractions`, `accumulate`) but
-//! swaps the constraint-side column-0 finalization (and the matching
-//! prover-side residue) for a **natural last-row σ-closing**.
-//!
-//! ## Closing the running sum
-//!
-//! Where miden's stock
-//! [`ConstraintLookupBuilder`](miden_air::lookup::ConstraintLookupBuilder)
-//! uses a normalized cyclic recurrence, this adapter closes the unnormalized running sum on the
-//! **live last row**:
-//!
-//! ```text
-//! when_first:      acc[0] = 0
-//! when_transition: D₀·(acc_next[0] − Σ_{i<L} acc[i]) − N₀ = 0
-//! when_last:       D₀·(σ          − Σ_{i<L} acc[i]) − N₀ = 0
-//! ungated (i>0):   D_i · acc[i] − N_i = 0
-//! ```
-//!
-//! where `σ` lives at `permutation_values()[0]` and `L = num_logup_cols`
-//! bounds the sum to the LogUp columns (trailing Schwartz–Zippel register
-//! columns stay out of σ). The `acc[0] = 0` boundary plus the last-row
-//! bind pin `σ = Σ_r delta_r` — the column's full LogUp residue — folding
-//! the final row's interactions into the committed σ, so even a packed
-//! chiplet whose last row fires (e.g. the 2^16 byte-pair table) closes
-//! correctly. No padding row reserved, no `inv_n` public input. The col-0
-//! transition/last gate costs +1 degree over the older ungated σ/n-cyclic
-//! form; 0.26's per-AIR quotient coset absorbs it.
-//!
-//! Prover-side: [`build_logup_aux_trace`] runs miden's stock `build_lookup_fractions` +
-//! normalized `accumulate`, adds `r * sigma_prime` back to column 0 to recover the plain running
-//! sum (`aux[r] = Σ_{i<r} delta_i`), and commits `sigma = n * sigma_prime`. Fraction columns are
-//! kept verbatim.
+//! Prover-side fraction collection, centered cyclic accumulation, constraint emission, and the
+//! preprocessed/main window contract come directly from [`miden_air::lookup`]. LogUp columns occupy
+//! the declared auxiliary prefix; chiplet-specific extension-field registers may follow that
+//! prefix without entering the bus balance.
 //!
 //! ## Encoding
 //!
@@ -53,17 +23,13 @@
 //! sized to [`MAX_MESSAGE_WIDTH`] / [`NUM_BUS_IDS`] so prover and
 //! verifier see identical prefixes.
 
-mod aux_builder;
-mod constraint;
-
 /// Emit one **flattened** LogUp column — a single batch of its fractions —
 /// inside a chiplet's `LookupAir::eval` (where the builder param is `LB` and
 /// the `LookupColumn` / `LookupGroup` / `LookupBatch` traits are in scope).
 ///
-/// Each fraction is `(name, multiplicity, message, deg)`. Keep <= 2 degree-2
-/// fractions (or 1 degree-3) per column, and <= 1 in column 0 (the gated
-/// running sum), so every closing constraint stays at degree <= 3 -> lqd 1.
-/// `$cd` is the (ignored, on the constraint path) column-degree hint.
+/// Each fraction is `(name, multiplicity, message, deg)`. The column packing determines the
+/// resulting constraint degree; column 0 is also the centered cyclic accumulator. `$cd` is the
+/// (ignored, on the constraint path) column-degree hint.
 macro_rules! frac_col {
     ($builder:expr, $group:expr, $cd:expr, $( ($name:expr, $mult:expr, $msg:expr, $deg:expr) ),+ $(,)?) => {
         $builder.next_column(
@@ -78,19 +44,14 @@ macro_rules! frac_col {
         );
     };
 }
-pub use aux_builder::build_logup_aux_trace;
-pub use constraint::{
-    CombinedWindow, CyclicConstraintBatch, CyclicConstraintColumn, CyclicConstraintGroup,
-    CyclicConstraintLookupBuilder, LookupMainWindow,
-};
 pub(crate) use frac_col;
 // Re-export miden-vm's framework so chiplets only need one `use`.
 pub use miden_air::lookup::{
-    BoundaryBuilder, Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn,
-    LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder, accumulate,
-    build_lookup_fractions,
+    BoundaryBuilder, Challenges, ConstraintLookupBuilder, Deg, LookupAir, LookupBatch,
+    LookupBuilder, LookupColumn, LookupFractions, LookupGroup, LookupMessage, ProverLookupBuilder,
+    accumulate, build_logup_aux_trace, build_lookup_fractions,
 };
-use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+use miden_core::field::QuadFelt;
 
 use crate::relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
 
@@ -121,34 +82,17 @@ pub fn lookup_challenges_from_slice(s: &[QuadFelt]) -> Challenges<QuadFelt> {
 /// Number of base-field public inputs the VM exposes: the 4-felt
 /// transcript root (an Eidos digest).
 ///
-/// 0.26's `air_inputs` is a single slice every AIR reads, so every chiplet
-/// declares the *same* count and they must agree. The root is the VM's one
-/// genuine public input; only the transcript-eval chip reads it (pinning
-/// its row-0 hash to `public_values()[0..4]`), the others just declare it.
-/// The σ/n `inv_n` slot is gone — the natural last-row closing
-/// (`constraint.rs`) needs no per-AIR height input, which is what lets a
-/// per-AIR value drop out of the now-shared public inputs.
+/// Every chiplet declares the same public-input count. Only the transcript-eval chip reads the
+/// root, pinning its row-0 hash to `public_values()[0..4]`. Trace lengths are supplied to the
+/// external multi-AIR closure and are not duplicated in the AIR public inputs.
 pub const NUM_PUBLIC_VALUES: usize = 4;
 
-// PERMUTATION (σ) CONTRACT
+// COMMITTED LOGUP-VALUE CONTRACT
 // ================================================================================================
 
-/// Number of permutation (σ) values every chiplet exposes: exactly
-/// **one** — the running `σ = Σ_r delta_r` committed at aux column 0
-/// and pinned by the last-row σ-closing constraint. (Aux *column* counts vary
-/// per chiplet; this exposed-σ count does not.) Backs the
-/// `LiftedAir::num_aux_values` method / the layout's
-/// `num_permutation_values`. Shared so the single-σ shape reads as a
-/// VM-wide convention, not a per-chiplet choice.
-pub const NUM_SIGMA_VALUES: usize = 1;
-
-/// Cross-AIR σ closure for
-/// [`MultiAir::eval_external`](miden_lifted_air::MultiAir::eval_external):
-/// sum every AIR's committed σ residue. Each AIR exposes exactly one —
-/// aux column 0's full LogUp residue (see [`NUM_SIGMA_VALUES`]) — so
-/// `aux_values[i][0]` is AIR `i`'s contribution. The cross-chiplet bus
-/// identity `Σ σ = 0` holds iff the returned value is zero, which
-/// `eval_external` surfaces as its single assertion expression.
-pub fn sigma_sum(aux_values: &[&[QuadFelt]]) -> QuadFelt {
-    aux_values.iter().fold(QuadFelt::ZERO, |acc, av| acc + av[0])
-}
+/// Number of centered LogUp residues exposed by every chiplet.
+///
+/// Auxiliary column counts vary, and some chiplets horizontally compose several logical
+/// components, but every physical AIR contributes to one shared accumulator and exposes exactly
+/// one `sigma_prime = sigma / n`.
+pub const NUM_LOGUP_VALUES: usize = 1;

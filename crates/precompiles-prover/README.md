@@ -3,8 +3,8 @@
 `miden-precompiles-prover` proves STARK-backed deferred precompile claims for
 Miden VM execution proofs.
 
-The public entry point is `prove_deferred_state`. The chiplet and session
-modules remain private.
+The public entry point is `prove_deferred_state`. The AIR definitions live in
+`miden-precompiles-air`; this crate owns witness generation and proof orchestration.
 
 ## What's here
 
@@ -23,16 +23,16 @@ make test-fast
 ```
 src/
 ├── lib.rs              crate root
-├── relations.rs        global relation-tag (bus-id) registry
+├── relations.rs        witness multiplicity types
 ├── math.rs             field and integer helpers
-├── logup/              LogUp encoding + natural last-row σ-closing adapter
+├── logup/              shared LogUp framework re-exports
 ├── stark_config.rs     selectable STARK proof-hash configurations (Eidos default)
 ├── utils.rs            shared field-element helpers
 ├── session/            orchestration facade + addition-chain strategies
-├── primitives/         shared bit / lookup primitives (byte_pair_lut, bitwise64)
-├── hash/               Keccak round / sponge / node + chunk + Memory64 bus
-├── transcript/         native 32-row Eidos compression + transcript DAG evaluation
-├── uint/               256-bit store + add / mul relation chiplets
-├── ec/                 group table, point store, group-law add, and msm/
+├── primitives/         byte-pair lookup witness collection
+├── hash/               Keccak, chunk, and Memory64 witness generation
+├── transcript/         Eidos-compression and transcript-DAG witnesses
+├── uint/               256-bit store, add, and mul witnesses
+├── ec/                 group, point-store, group-add, and MSM witnesses
 └── tests/              per-chiplet + integration tests
 ```

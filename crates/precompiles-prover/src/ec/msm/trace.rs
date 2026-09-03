@@ -16,10 +16,9 @@ use super::{
     COL_B_EXPR, COL_B_PTR, COL_BASE, COL_BASE_A, COL_BASE_B, COL_BETA_PTR, COL_BOUND_PTR,
     COL_CLAIM_MULT, COL_ENDO_BASE_X, COL_ENDO_MINTED, COL_ENDO_VAL_X, COL_ENDO_Y, COL_EXPR_PTR,
     COL_GROUP_PTR, COL_I, COL_IDX, COL_IS_BOUNDARY, COL_IS_COMBINE, COL_IS_INTRO,
-    COL_IS_INTRO_ENDO, COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT,
-    COL_NEG_MINTED, COL_NEG_X, COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR,
-    COL_SCALAR, COL_TAKE_A, COL_TAKE_B, COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir,
-    NUM_MAIN_COLS,
+    COL_IS_INTRO_ZERO, COL_IS_NEG, COL_J, COL_LAMBDA_PTR, COL_MULT, COL_NEG_MINTED, COL_NEG_X,
+    COL_NEG_YA, COL_NEG_YR, COL_S_A, COL_S_B, COL_SBOUND_PTR, COL_SCALAR, COL_TAKE_A, COL_TAKE_B,
+    COL_TAKE_BOTH, COL_VAL, COL_VAL_A, COL_VAL_B, EcMsmAir, NUM_MAIN_COLS,
 };
 use crate::{
     ec::trace::{EcGroupPtr, EcPointPtr},
@@ -661,7 +660,6 @@ pub fn generate_trace(
             set(COL_MULT, e.mult);
             set(COL_CLAIM_MULT, e.claim_mult);
             set(COL_IS_INTRO, is_intro as u32);
-            set(COL_IS_INTRO_ENDO, is_intro_endo as u32);
             set(COL_IS_COMBINE, is_combine as u32);
             set(COL_IS_NEG, is_neg as u32);
             set(COL_IS_INTRO_ZERO, is_intro_zero as u32);

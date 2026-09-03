@@ -1,7 +1,7 @@
 use miden_ace_codegen::{ShuffleEncodeBuffer, order_tag, padding_leaf};
 use miden_core::{Felt, field::QuadFelt};
 use miden_lifted_air::MultiAir;
-use miden_precompiles_air::{ChipletMultiAir, NUM_CHIPLETS};
+use miden_precompiles_air::{ChipletMultiAir, NUM_CHIPLETS, logup::NUM_PUBLIC_VALUES};
 
 use super::*;
 use crate::ace::{PVM_REGISTRY_LAYOUT, structured_orders};
@@ -15,27 +15,19 @@ fn external_assertion_matches_the_protocol_version() {
         QuadFelt::new([Felt::from(7u32), Felt::from(11u32)]),
     ];
     let aux_values: Vec<Vec<QuadFelt>> = (0..NUM_CHIPLETS)
-        .map(|i| {
-            let count = if matches!(i, 1 | 3) { 2 } else { 1 };
-            (0..count)
-                .map(|j| {
-                    QuadFelt::new([
-                        Felt::from((i + j + 1) as u32),
-                        Felt::from((2 * i + j + 1) as u32),
-                    ])
-                })
-                .collect()
-        })
+        .map(|i| vec![QuadFelt::new([Felt::from((i + 1) as u32), Felt::from((2 * i + 1) as u32)])])
         .collect();
     let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
+    // BytePairLut is fixed at 2^16; every other entry satisfies its AIR's minimum height.
+    let log_heights: [u8; NUM_CHIPLETS] = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
     let actual = ChipletMultiAir::new()
-        .eval_external(&challenges, &[], &[], &aux_refs, &[0; NUM_CHIPLETS])
+        .eval_external(&challenges, &[Felt::ZERO; NUM_PUBLIC_VALUES], &[], &aux_refs, &log_heights)
         .expect("fixture denominators are non-zero");
     let expected = match PVM_PROTOCOL_ID {
         2 => QuadFelt::new([
-            Felt::new_unchecked(17_120_654_257_594_545_933),
-            Felt::new_unchecked(12_713_559_468_620_802_530),
+            Felt::new_unchecked(17_120_654_257_595_085_294),
+            Felt::new_unchecked(12_713_559_468_621_733_906),
         ]),
         version => panic!("add an external-assertion vector for protocol version {version}"),
     };
