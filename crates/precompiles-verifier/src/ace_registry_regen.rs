@@ -266,7 +266,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     sample_orders.sort_unstable();
     sample_orders.dedup();
     let sample_order_slices: Vec<&[usize]> =
-        sample_orders.iter().map(|order| order.as_slice()).collect();
+        sample_orders.iter().map(<[usize; NUM_CHIPLETS]>::as_slice).collect();
     let mut packed_scratch = PackedLeafScratch::new();
     let mut packed_leaves = Vec::with_capacity(sample_orders.len());
     factory

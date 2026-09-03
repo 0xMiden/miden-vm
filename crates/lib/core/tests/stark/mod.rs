@@ -842,7 +842,7 @@ fn run_recursive_verifier(data: &VerifierData) -> ProofOrder {
 
     // Pin the full common descriptor and deferred root so any value or ordering drift is caught
     // across every end-to-end configuration.
-    let params = miden_air::config::pcs_params();
+    let params = config::pcs_params();
     let height_start = 4 + WORD_SIZE;
     let log_max_height = data.proof_stream[height_start..height_start + MIDEN_AIR_COUNT - 1]
         .iter()
