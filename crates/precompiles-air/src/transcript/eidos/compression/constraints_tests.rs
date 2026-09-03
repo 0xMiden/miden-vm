@@ -195,7 +195,7 @@ fn mvm_and_pvm_shared_constraints_match() {
 }
 
 #[test]
-fn cross_row_cycle_id_constancy_is_independently_load_bearing() {
+fn cross_row_cycle_id_constancy_rejects_internal_changes() {
     let block = core::array::from_fn(|i| 10 + i as u32);
     let cv = core::array::from_fn(|i| 1_000 + i as u32);
     let first = generate_felt_trace_block_with_cycle_id(block, cv, 0);

@@ -56,7 +56,7 @@ const KERNEL_WITNESS_PTR = 3223322844
 ##   pi_ptr             -->  [ stack I/O public inputs  ]
 ##   AUX_RAND_ELEM_PTR  -->  [ aux randomness           ]  4 felts
 ##                           [ alignment pad            ]  4 felts
-##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  1280 felts
+##   OOD_EVALUATIONS_PTR --> [ OOD evaluations          ]  1120 felts
 ##   AUX_BUS_BOUNDARY_PTR -> [ four LogUp finals        ]  8 felts
 ##   AUXILIARY_ACE_INPUTS_PTR
 ##                       --> [ fixed stark vars         ]  slots 0..10
@@ -72,25 +72,25 @@ const KERNEL_WITNESS_PTR = 3223322844
 const AUX_RAND_ELEM_PTR = 3225419776
 
 ### OOD evaluations in the VM ACE READ section. Each aligned current/next row has
-### 320 scalar evaluations: 16 preprocessed, 208 main, 80 auxiliary-coordinate, and 16
-### quotient. Each evaluation is quadratic-extension valued, so advice supplies 640 base felts
+### 280 scalar evaluations: 8 preprocessed, 192 main, 64 auxiliary-coordinate, and 16
+### quotient. Each evaluation is quadratic-extension valued, so advice supplies 560 base felts
 ### per row.
 const OOD_EVALUATIONS_PTR = 3225419784
 
 ### Four LogUp finals in proof order (8 base felts).
-const AUX_BUS_BOUNDARY_PTR = 3225421064
+const AUX_BUS_BOUNDARY_PTR = 3225420904
 
 ### Twenty-four extension-field stark-var slots: 11 fixed slots, three selector slots for each of
 ### the four AIRs, and one alignment slot.
-const AUXILIARY_ACE_INPUTS_PTR = 3225421072
+const AUXILIARY_ACE_INPUTS_PTR = 3225420912
 
 ### Factored ACE circuit stream, sized by the generated evaluator's `ACE_PREFIX_BLOCKS` and
 ### `ACE_COMMON_BLOCKS`. The reserved tail beyond the stream keeps the
 ### PVM READ section's base address (`sys/pvm/layout.masm`) fixed.
-const ACE_CIRCUIT_STREAM_PTR = 3225421120
+const ACE_CIRCUIT_STREAM_PTR = 3225420960
 
-### Scratch row for DEEP query openings: 16 preprocessed, 208 main, 80
-### auxiliary-coordinate, and 16 quotient felts (320 total).
+### Scratch row for DEEP query openings: 8 preprocessed, 192 main, 64
+### auxiliary-coordinate, and 16 quotient felts (280 total).
 const CURRENT_TRACE_ROW_PTR = 3238002688
 
 pub proc set_core_trace_length_log
