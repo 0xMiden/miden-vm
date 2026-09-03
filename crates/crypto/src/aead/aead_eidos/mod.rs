@@ -464,7 +464,7 @@ impl AeadScheme for AeadEidos {
         })))
     }
 
-    fn encrypt_bytes<R: rand::CryptoRng>(
+    fn encrypt_bytes<R: CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[u8],
@@ -484,7 +484,7 @@ impl AeadScheme for AeadEidos {
         key.decrypt_bytes_with_associated_data(&encrypted, associated_data)
     }
 
-    fn encrypt_elements<R: rand::CryptoRng>(
+    fn encrypt_elements<R: CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[Felt],
