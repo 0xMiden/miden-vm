@@ -141,7 +141,7 @@ where
     miden_lifted_stark::log_quotient_degree::<Felt, QuadFelt, A>(air)
 }
 
-/// Returns an AIR's LogUp column shape without exposing its backing constant.
+/// Return an AIR's LogUp column shape without exposing its private backing constant.
 pub(crate) fn lookup_column_shape<A>(air: &A) -> &[usize]
 where
     A: for<'a> LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,

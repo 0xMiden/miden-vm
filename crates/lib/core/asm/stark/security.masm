@@ -19,8 +19,8 @@ const LOG2_E_FP = 94548
 
 # Inputs outside these bounds are not supported. The bounds prevent overflow and underflow in the
 # lookup calculation and are also the assumptions used below to prove that the other native
-# security terms cannot determine the result. Descriptors returned by the MVM and PVM recursive
-# verifiers satisfy these bounds.
+# security terms cannot determine the result. Tests in the MVM and PVM crates check that every
+# descriptor produced by either verifier remains within these bounds.
 const MIN_LOG_HEIGHT = 6
 const MAX_LOG_HEIGHT = 29
 const MAX_NUM_QUERIES = 150
@@ -97,11 +97,12 @@ end
 #!
 #! The dominance argument constrains the product `A`. Each factor is also limited to 65536 so the
 #! multiplication cannot wrap, but the estimator imposes no tighter bound on either factor by
-#! itself. The MVM descriptor uses `(16 + 2) * 81 = 1458`; the PVM descriptor uses
-#! `(18 + 2) * 287 = 5740`. Both products are inside the accepted range of 257 through 65536.
+#! itself. The MVM descriptor uses `(16 + 2) * 78 = 1404`; the PVM descriptor uses
+#! `(18 + 2) * 278 = 5560`. Both products are inside the accepted range of 257 through 65536.
 #! For example, a message width of 12 needs only 19 fractions per row to exceed the lower limit.
 #! At message widths 16 and 18, the upper limit allows 3640 MVM fractions or 3276 PVM fractions.
-#! The descriptor constants are derived from their AIR shapes and must remain within these limits.
+#! The verifier-specific drift tests derive both factors from the AIRs and check their product
+#! against these limits.
 #!
 #! The value `delta` accounts for the fractional part discarded when the lookup term is converted
 #! from Q16 to whole bits. Set `P = 2^q`, `g = P - A`, and
