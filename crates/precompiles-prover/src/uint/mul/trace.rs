@@ -200,6 +200,10 @@ impl UintMulRequires {
         Self::default()
     }
 
+    pub(crate) fn trace_height(&self) -> Option<usize> {
+        self.ops.len().max(1).checked_mul(PERIOD)?.checked_next_power_of_two()
+    }
+
     /// Record `κₐ·a·b + κ_c·c ≡ r (mod p)` over stored uints sharing the
     /// modulus at `bound`, providing the op's `UintMul` tuple at
     /// multiplicity `mult` (the consumer count; 0 = dormant). `r` is the
@@ -350,7 +354,9 @@ pub fn generate_trace(
     store: &mut UintStoreRequires,
     bpl: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
-    let height = (requires.ops.len().max(1) * PERIOD).next_power_of_two();
+    let height = requires
+        .trace_height()
+        .expect("uint-mul trace height exceeds the host power-of-two range");
     let mut vals = Vec::with_capacity(height * NUM_MAIN_COLS);
     for (op, mult) in &requires.ops {
         store.require_uintlimbs(op.a);
