@@ -6,13 +6,11 @@
 
 use miden_core::field::{BasedVectorSpace, PrimeField64, QuadFelt};
 use miden_crypto::{hash::poseidon2::Poseidon2, stark::pcs::PcsParams};
-use p3_security::{
-    budget::{
-        AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-        report::LOOKUP_LABEL,
-    },
-    fixed,
+/// Security-estimation types used by verified Miden proofs.
+pub use p3_security::budget::{
+    AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
 };
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{
     AIRS, ConstraintCounts, ConstraintDegrees, Felt, MidenAir, config,
