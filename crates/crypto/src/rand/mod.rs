@@ -4,14 +4,14 @@ use rand::Rng;
 
 use crate::{Felt, Word};
 
-mod coin;
-pub use coin::RandomCoin;
-
 mod eidos_coin;
 pub use eidos_coin::{
     EidosRandomCoin, RANDOM_COIN_OUTPUT_DOMAIN_ID, RANDOM_COIN_OUTPUT_SELECTOR,
     RANDOM_COIN_STATE_DOMAIN_ID, RANDOM_COIN_STATE_SELECTOR,
 };
+
+/// Eidos-based random coin used by Miden.
+pub type RandomCoin = EidosRandomCoin;
 
 // Test utilities for generating random data (used in tests and benchmarks)
 #[cfg(any(test, feature = "std"))]

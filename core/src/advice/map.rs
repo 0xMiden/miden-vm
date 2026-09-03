@@ -9,7 +9,7 @@ use alloc::{
 
 use crate::{
     Felt, WORD_SIZE, Word,
-    crypto::hash::Poseidon2,
+    chiplets::hasher,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -86,9 +86,8 @@ impl AdviceMap {
     /// Returns a commitment to this advice map.
     ///
     /// Entries are committed in key order. Each entry is hashed as the key elements followed by the
-    /// value elements. [`Poseidon2::hash_elements`] binds the entry length, and
-    /// [`Poseidon2::merge_many`] folds the ordered entry commitments into the final map
-    /// commitment.
+    /// value elements. [`hasher::hash_elements`] binds the entry length, and
+    /// [`hasher::merge_many`] folds the ordered entry commitments into the final map commitment.
     pub fn commitment(&self) -> Word {
         let entry_commitments = self
             .iter()
@@ -96,11 +95,11 @@ impl AdviceMap {
                 let mut elements = Vec::with_capacity(WORD_SIZE + values.len());
                 elements.extend_from_slice(key.as_elements());
                 elements.extend_from_slice(values);
-                Poseidon2::hash_elements(&elements)
+                hasher::hash_elements(&elements)
             })
             .collect::<Vec<_>>();
 
-        Poseidon2::merge_many(&entry_commitments)
+        hasher::merge_many(&entry_commitments)
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
@@ -219,6 +218,8 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::hash::eidos::Eidos;
+
     use super::*;
 
     #[test]
@@ -231,5 +232,30 @@ mod tests {
         let map2 = AdviceMap::read_from_bytes(&bytes).unwrap();
 
         assert_eq!(map1, map2);
+    }
+
+    #[test]
+    fn advice_map_commitment_matches_eidos_primitive() {
+        let low_key =
+            Word::new([Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+        let high_key =
+            Word::new([Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6)]);
+        let low_values = [Felt::from_u32(11), Felt::from_u32(12)];
+        let high_values = [Felt::from_u32(21), Felt::from_u32(22), Felt::from_u32(23)];
+
+        // Insert in reverse key order to pin that the BTreeMap's canonical key order is what gets
+        // committed.
+        let map = AdviceMap::from_iter([
+            (high_key, high_values.to_vec()),
+            (low_key, low_values.to_vec()),
+        ]);
+        let low_entry = [low_key.as_elements(), low_values.as_slice()].concat();
+        let high_entry = [high_key.as_elements(), high_values.as_slice()].concat();
+        let expected = Eidos::merge_many(&[
+            Eidos::hash_elements(&low_entry),
+            Eidos::hash_elements(&high_entry),
+        ]);
+
+        assert_eq!(map.commitment(), expected);
     }
 }

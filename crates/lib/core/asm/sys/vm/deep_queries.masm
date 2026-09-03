@@ -1,19 +1,32 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::stark::constants
 use miden::core::stark::deep_queries
+use miden::core::sys::vm::layout
 
 # ERRORS
 # =================================================================================================
 
-const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value from the Merkle tree"
+const PREPROCESSED_LEAF_VALUE_MISMATCH = "preprocessed query leaf hash mismatch"
+const MAIN_LEAF_VALUE_MISMATCH = "main query leaf hash mismatch"
+const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
+const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
+
+# Eidos::init_chaining_word(0, 0).
+const EIDOS_LMCS_INIT_CV_0 = 4280581857092829184
+const EIDOS_LMCS_INIT_CV_1 = 2688637132020383744
+const EIDOS_LMCS_INIT_CV_2 = 1947077364412317696
+const EIDOS_LMCS_INIT_CV_3 = 6620516959492505600
+
+# 2^(AND8_LOOKUP_LOG_HEIGHT + BLOWUP_FACTOR_LOG) - 1 = 2^(16 + 3) - 1.
+const AND8_LDE_INDEX_MASK = 524287
 
 # MAIN PROCEDURE
 # =================================================================================================
 
 #! Computes the DEEP composition polynomial FRI queries.
 #!
-#! This procedure iterates over all FRI query indices stored in memory at `query_ptr` and
-#! overwrites each word with `[poe, index, eval0, eval1]` where:
+#! This procedure iterates over all FRI query indices stored in memory at `query_ptr` in
+#! a word-aligned region and overwrites each word with `[poe, index, eval0, eval1]` where:
 #!
 #! 1. `index` is the FRI query index,
 #! 2. `poe := g^index`, with `g` being the evaluation domain generator,
@@ -30,10 +43,13 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #! 3. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in
 #!    storing the computed FRI queries,
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
-#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
+#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI query computations.
 pub proc compute_deep_composition_polynomial_queries
-    # Iterate over all FRI query indices and compute the corresponding DEEP query.
-    # The verifier checks earlier that there is at least one query.
+
+    # Iterate over all FRI query indices and compute their corresponding DEEP query.
+    # The following assumes the existence of at least one query to compute which is a necessary
+    # requirement for FRI soundness. This assumption is validated at
+    # the start of the verification procedure.
     push.1
     while.true
         # Load the (main, aux, constraint)-traces rows associated with the current query and get
@@ -76,6 +92,10 @@ end
 #! where:
 #! - Y is a "garbage" word.
 proc load_query_row
+    # Process the preprocessed segment of the query
+    exec.process_preprocessed_segment
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
     # Process the main segment of the execution trace portion of the query
     exec.process_main_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -89,6 +109,74 @@ proc load_query_row
     #=> [Y, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, index, query_ptr]
 end
 
+# PREPROCESSED TRACE SEGMENT PROCESSING
+# =================================================================================================
+
+#! Handles the logic for processing the preprocessed trace segment.
+#!
+#! Inputs: [Y, query_ptr]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+proc process_preprocessed_segment
+    # Load the query index.
+    dup.4 mem_loadw_le
+    #=> [index, depth, y, y, query_ptr]
+
+    # Get commitment to the preprocessed trace group.
+    movdn.3 movdn.2
+    push.0.0
+    exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    #=> [PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+
+    # The setup-fixed AND8 table LDE can be shorter than the query domain. LMCS
+    # proofs fold query index `i` to the committed tree leaf
+    # `i mod 2^(log_and8_height + log_blowup)` and authenticate against the
+    # preprocessed tree depth. The original `(depth, index)` stays on the stack
+    # for the DEEP evaluation of the lifted polynomial.
+    dup.5
+    push.AND8_LDE_INDEX_MASK
+    u32and
+    exec.layout::get_and8_lookup_trace_length_log
+    exec.constants::get_blowup_factor_log
+    add
+    #=> [preprocessed_depth, masked_index, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+    #=> [LEAF_VALUE, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+
+    exec.constants::tmp2 mem_loadw_le
+    swapw
+    #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    # Load the aligned preprocessed leaf. The AND8 table contributes one
+    # 11-column preprocessed matrix, padded to 16 base felts by LMCS.
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw
+    padw
+    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    exec.load_preprocessed_segment
+    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    swapw.2
+    padw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
+    dropw
+end
+
+#! Loads the portion of the query associated to the preprocessed trace segment.
+#!
+#! Inputs:  [ZERO, LEAF, CV, ptr]
+#! Outputs: [CV, ZERO, DIGEST, ptr]
+proc load_preprocessed_segment
+    repeat.2
+        adv_pipe
+        horner_eval_base
+        exec.eidos::compress
+    end
+end
+
 # MAIN TRACE SEGMENT PROCESSING
 # =================================================================================================
 
@@ -97,54 +185,40 @@ end
 #! Inputs: [Y, query_ptr]
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_main_segment_execution_trace
-    # Load the query index
-    dup.4 mem_loadw_le
-    #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
-
-    # Get commitment to main segment of the execution trace
-    movdn.3 movdn.2
-    push.0.0
+    # Load main trace commitment and get leaf.
     exec.constants::main_trace_com_ptr mem_loadw_le
-    #=>[MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    # Use the commitment to get the leaf and save it
-    dup.5 dup.5
+    dup.9 dup.9
     mtree_get
     exec.constants::tmp3 mem_storew_le
     adv.push_mapval
-    #=>[LEAF_VALUE, MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
+    #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw_le
-    swapw
-    #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
+    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the values of the main segment of the execution trace at the current query. We also
-    # compute their hash and the value of their random linear combination using powers of a
-    # single random value alpha.
-
-    # Load the multi-AIR aligned main columns. Per-leaf width is
-    # aligned(51) + aligned(22) + aligned(16) = 56 + 24 + 16 = 96 base felts.
-    padw swapw padw
-    #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
-
+    # Load the aligned main leaf: 56 + 24 + 112 + 16 = 208 base felts.
     exec.load_main_segment_execution_trace
-    #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=MAIN_LEAF_VALUE_MISMATCH
+    dropw
 end
 
 #! Loads the portion of the query associated to the main segment of the execution trace.
 #!
-#! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
-#! Outputs: [Y, D, C, ptr]
+#! Inputs:  [ZERO, LEAF, CV, ptr]
+#! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_main_segment_execution_trace
-    repeat.12
+    repeat.26
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end
 
@@ -167,34 +241,32 @@ proc process_aux_segment_execution_trace
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the values of the auxiliary segment of the execution trace at the current query
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
+    #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # The leaf was saved in tmp3 and the root is no longer needed. Reuse both words as
-    # the rate words and insert zero capacity.
-    padw swapw.2
-    #=> [Y, Y, 0, 0, 0, 0, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
-
-    # Load the 12 aligned auxiliary extension-field values as 24 base felts.
+    # Load the aligned aux leaf: 8 + 8 + 40 + 24 = 80 base felts.
     exec.load_aux_segment_execution_trace
-    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=AUX_LEAF_VALUE_MISMATCH
+    dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 end
 
 #! Loads the portion of the query associated to the auxiliary segment of the execution trace.
 #!
-#! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
-#! Outputs: [Y, D, C, ptr]
-#!
+#! Inputs:  [ZERO, LEAF, CV, ptr]
+#! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_aux_segment_execution_trace
-    repeat.3
+    repeat.10
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end
 
@@ -217,16 +289,17 @@ proc process_constraints_composition_poly_trace
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
-    # Load the 8 columns as quadratic extension field elements in batches of 4.
-    padw
-    swapw.2
+    dropw
+    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    swapw padw
     exec.load_constraints_composition_polys_trace
-    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
+    #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
-    # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    swapw
+    swapw.2
+    padw
     exec.constants::tmp3 mem_loadw_le
-    assert_eqw.err=LEAF_VALUE_MISMATCH
+    assert_eqw.err=QUOTIENT_LEAF_VALUE_MISMATCH
+    dropw
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
     # Re-order the stack
@@ -238,13 +311,12 @@ end
 
 #! Loads the portion of the query associated to the constraints composition polynomials trace.
 #!
-#! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
-#! Outputs: [Y, D, C, ptr]
-#!
+#! Inputs:  [ZERO, LEAF, CV, ptr]
+#! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
 end

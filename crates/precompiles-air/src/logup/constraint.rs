@@ -191,6 +191,7 @@ where
     type PeriodicVar = AB::PeriodicVar;
 
     type MainWindow = LookupMainWindow<AB::MainWindow, AB::Var>;
+    type PreprocessedWindow = AB::PreprocessedWindow;
 
     type Column<'a>
         = CyclicConstraintColumn<'a, AB>
@@ -210,6 +211,10 @@ where
         } else {
             LookupMainWindow::Plain(self.ab.main())
         }
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {

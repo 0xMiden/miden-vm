@@ -18,9 +18,9 @@ use crate::{
     ec::{add::EcGroupAddAir, msm::EcMsmAir, point_store_groups::EcPointStoreGroupsAir},
     fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs},
     hash::{chunk_node_sponge::ChunkNodeSpongeAir, keccak::round::KeccakRoundAir},
-    logup::{Challenges, LookupMessage, lookup_challenges_from_slice, sigma_sum},
-    primitives::byte_pair_lut::{self, BytePairLutAir},
-    transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
+    logup::{Challenges, LookupMessage, lookup_challenges_from_slice},
+    primitives::{byte_pair_and8::BytePairAnd8Air, byte_pair_lut},
+    transcript::{eidos::EidosCompressionAir, eval::TranscriptEvalAir},
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -33,9 +33,9 @@ pub const NUM_CHIPLETS: usize = 10;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChipletAir {
     ChunkNodeSponge,
-    Poseidon2,
+    EidosCompression,
     KeccakRound,
-    BytePairLut,
+    BytePairAnd8,
     TranscriptEval,
     UintStoreMul,
     UintAdd,
@@ -48,9 +48,9 @@ macro_rules! delegate {
     ($self:ident, $method:ident $(, $arg:expr)*) => {
         match $self {
             ChipletAir::ChunkNodeSponge => ChunkNodeSpongeAir.$method($($arg),*),
-            ChipletAir::Poseidon2 => Poseidon2Air.$method($($arg),*),
+            ChipletAir::EidosCompression => EidosCompressionAir.$method($($arg),*),
             ChipletAir::KeccakRound => KeccakRoundAir.$method($($arg),*),
-            ChipletAir::BytePairLut => BytePairLutAir.$method($($arg),*),
+            ChipletAir::BytePairAnd8 => BytePairAnd8Air.$method($($arg),*),
             ChipletAir::TranscriptEval => TranscriptEvalAir.$method($($arg),*),
             ChipletAir::UintStoreMul => UintStoreMulAir.$method($($arg),*),
             ChipletAir::UintAdd => UintAddAir.$method($($arg),*),
@@ -74,9 +74,9 @@ impl ChipletAir {
     pub fn all() -> [ChipletAir; NUM_CHIPLETS] {
         [
             ChipletAir::ChunkNodeSponge,
-            ChipletAir::Poseidon2,
+            ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairLut,
+            ChipletAir::BytePairAnd8,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,
@@ -88,12 +88,12 @@ impl ChipletAir {
 
     /// The fixed log2 trace height of this instance, if the relation pins one.
     ///
-    /// `BytePairLut` commits its main and preprocessed traces at
+    /// `BytePairAnd8` commits its main and preprocessed traces at
     /// [`byte_pair_lut::TRACE_HEIGHT`], so its proof shapes must carry exactly that height;
     /// every other instance ranges above its derived minimum.
     pub fn fixed_log_height(&self) -> Option<u32> {
         match self {
-            ChipletAir::BytePairLut => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
+            ChipletAir::BytePairAnd8 => Some(byte_pair_lut::TRACE_HEIGHT.ilog2()),
             _ => None,
         }
     }
@@ -139,9 +139,9 @@ impl LiftedAir<Felt, QuadFelt> for ChipletAir {
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             ChipletAir::ChunkNodeSponge => eval_lifted(&ChunkNodeSpongeAir, builder),
-            ChipletAir::Poseidon2 => eval_lifted(&Poseidon2Air, builder),
+            ChipletAir::EidosCompression => eval_lifted(&EidosCompressionAir, builder),
             ChipletAir::KeccakRound => eval_lifted(&KeccakRoundAir, builder),
-            ChipletAir::BytePairLut => eval_lifted(&BytePairLutAir, builder),
+            ChipletAir::BytePairAnd8 => eval_lifted(&BytePairAnd8Air, builder),
             ChipletAir::TranscriptEval => eval_lifted(&TranscriptEvalAir, builder),
             ChipletAir::UintStoreMul => eval_lifted(&UintStoreMulAir, builder),
             ChipletAir::UintAdd => eval_lifted(&UintAddAir, builder),
@@ -210,18 +210,32 @@ impl MultiAir<Felt, QuadFelt> for ChipletMultiAir {
         &self.airs
     }
 
-    /// The cross-chiplet σ identity: the sum of every AIR's committed
-    /// σ residue must vanish (a single assertion). `aux_values[i]` is AIR
-    /// `i`'s exposed permutation values — exactly one, its σ.
+    /// The cross-chiplet σ identity: the sum of every AIR's committed σ residue must vanish (a
+    /// single assertion). Most AIRs expose one residue. Composite AIRs can expose an additional
+    /// centered Miden-family residue, which is lifted by the trace height before aggregation.
     fn eval_external(
         &self,
         challenges: &[QuadFelt],
         _air_inputs: &[Felt],
         _aux_inputs: &[Felt],
         aux_values: &[&[QuadFelt]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<QuadFelt>, ReductionError> {
-        Ok(vec![sigma_sum(aux_values) + fixed_boundary_correction(challenges)?])
+        // Precompile-native AIRs commit their unnormalized LogUp residue `sigma`. The intrinsic
+        // Eidos compression byte-lookup component and the And8 component retain Miden VM's centered
+        // convention and commit `sigma_prime = sigma / n`, so lift those component residues
+        // by their trace heights before closing the shared relation.
+        let mut sigma = QuadFelt::ZERO;
+        for (idx, values) in aux_values.iter().enumerate() {
+            match self.airs[idx] {
+                ChipletAir::EidosCompression | ChipletAir::BytePairAnd8 => {
+                    let n = Felt::new_unchecked(1u64 << log_trace_heights[idx]);
+                    sigma += values[0] + values[1] * n;
+                },
+                _ => sigma += values[0],
+            }
+        }
+        Ok(vec![sigma + fixed_boundary_correction(challenges)?])
     }
 }
 
@@ -240,13 +254,26 @@ mod tests {
             QuadFelt::new([Felt::from(3u32), Felt::from(5u32)]),
             QuadFelt::new([Felt::from(7u32), Felt::from(11u32)]),
         ];
-        let aux_values: [[QuadFelt; 1]; NUM_CHIPLETS] = core::array::from_fn(|i| {
-            [QuadFelt::new([Felt::from((i + 1) as u32), Felt::from((2 * i + 1) as u32)])]
-        });
-        let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(<[QuadFelt; 1]>::as_slice).collect();
+        let multi_air = ChipletMultiAir::new();
+        let aux_values: Vec<Vec<QuadFelt>> = multi_air
+            .airs()
+            .iter()
+            .enumerate()
+            .map(|(i, air)| {
+                (0..air.num_aux_values())
+                    .map(|j| {
+                        QuadFelt::new([
+                            Felt::from((i + j + 1) as u32),
+                            Felt::from((2 * i + j + 1) as u32),
+                        ])
+                    })
+                    .collect()
+            })
+            .collect();
+        let aux_refs: Vec<&[QuadFelt]> = aux_values.iter().map(Vec::as_slice).collect();
 
-        let assertions = ChipletMultiAir::new()
-            .eval_external(&challenges, &[], &[], &aux_refs, &[])
+        let assertions = multi_air
+            .eval_external(&challenges, &[], &[], &aux_refs, &[0; NUM_CHIPLETS])
             .expect("fixed boundary denominators are non-zero for the fixture");
 
         assert_eq!(assertions.len(), 1, "the relation exposes exactly one external assertion");
@@ -260,9 +287,9 @@ mod tests {
     fn chiplet_instance_order_is_protocol_pinned() {
         let pinned = [
             ChipletAir::ChunkNodeSponge,
-            ChipletAir::Poseidon2,
+            ChipletAir::EidosCompression,
             ChipletAir::KeccakRound,
-            ChipletAir::BytePairLut,
+            ChipletAir::BytePairAnd8,
             ChipletAir::TranscriptEval,
             ChipletAir::UintStoreMul,
             ChipletAir::UintAdd,

@@ -36,7 +36,9 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Flow control.** Miden VM is Turing-complete and supports familiar flow control structures such as conditional statements and counter/condition-controlled loops. There are no restrictions on the maximum number of loop iterations or the depth of control flow logic.
 - **Procedures and execution contexts.** Miden assembly programs can be broken into subroutines called _procedures_, and program execution can span multiple isolated contexts, each with its own dedicated memory space. The contexts are separated into the _root context_ and _user contexts_. The root context can be accessed from user contexts via customizable kernel calls.
 - **Memory.** Miden VM supports read-write random-access memory. Procedures can reserve portions of global memory for easier management of local variables.
-- **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers (arithmetic, comparison, and bitwise operations) as well as built-in instructions for computing hashes and verifying Merkle paths using the Poseidon2 hash function (the native hash function of the VM).
+- **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers
+  (arithmetic, comparison, and bitwise operations), Eidos hashing and AEAD streaming, and
+  built-in Merkle-path verification.
 - **External libraries.** Miden VM supports compiling programs against pre-defined libraries. The VM ships with one such library: Miden `miden-core-lib` which adds support for such things as 64-bit unsigned integers. Developers can build other similar libraries to extend the VM's functionality in ways which fit their use cases.
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
 - **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
@@ -136,7 +138,14 @@ once before timing proof-heavy axes.
 
 ### Single-core prover performance
 
-When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.
+The following two performance tables predate the native Eidos cutover and are retained as
+historical reference points. They must not be read as measurements of the current four-AIR Eidos
+topology; refreshed producer and prover measurements are still pending.
+
+When these measurements were collected, Miden VM operated at around 20 - 25 KHz on a single CPU
+core. In the benchmarks below, the VM executes a
+[Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on Apple M4 Max CPU in a
+single thread. The generated proofs have a target security level of 96 bits.
 
 |   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
 | :------------: | :------------: | :----------: | :----------: | :--------: |
@@ -149,7 +158,10 @@ As can be seen from the above, proving time roughly doubles with every doubling 
 
 ### Multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
+STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU
+cores we can dramatically reduce proof generation time. In the historical measurements below,
+the VM operated at around 170 KHz on a 16-core Apple M4 Max and around 200 KHz on a 64-core Amazon
+Graviton 4.
 
 In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
 
@@ -164,9 +176,14 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ### Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3. While BLAKE3 is fast on conventional
+processors, it is not efficient to execute inside the VM. The VM-native Eidos construction—its
+framed transcript and underlying compression—is designed for recursive proof verification.
+Optional proof-hash configurations, including Poseidon2, remain available for prover experiments
+and comparison.
 
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+The historical comparison below uses the optional Poseidon2 STARK proof-hash configuration. It
+predates the native Eidos cutover and does not describe the current VM hash topology:
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |

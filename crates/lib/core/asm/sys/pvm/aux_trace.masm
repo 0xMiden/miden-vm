@@ -1,35 +1,84 @@
-use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::random_coin
+use miden::core::stark::utils
 use miden::core::sys::pvm::layout
 
 # Bus-domain scale factors (`bus_id + 1`) from precompiles-prover/src/relations.rs.
 const UINT_VAL_BUS_SCALE = 11
 const EC_GROUP_BUS_SCALE = 15
 const MAX_LOGUP_MESSAGE_WIDTH = 18
-const NUM_AUX_VALUE_WORDS = 5
+const NUM_CHIPLETS = 10
+const EIDOS_COMPRESSION_AIR_INDEX = 1
+const BYTE_PAIR_AND8_AIR_INDEX = 3
+const NUM_AUX_VALUE_WORDS = 6
 
-#! Observes the PVM auxiliary trace commitment and its ten per-chiplet sigma values.
+#! Loads `(2^log_height - 1) * sigma_prime` for one normalized committed boundary. Adding this
+#! adjustment to the unweighted sum changes that component's coefficient from one to `n`.
 #!
-#! The advice provider supplies `[commitment, sigma_0, ..., sigma_9]`, with the sigmas in proof
-#! order. Every chiplet exposes exactly one extension-field sigma. Their sum is order-invariant,
-#! so no proof-to-instance reorder is needed for the external LogUp assertion.
+#! Input:  [boundary_offset, log_height, ...]
+#! Output: [adjustment_0, adjustment_1, ...]
+proc load_normalization_adjustment
+    swap pow2 sub.1
+    exec.layout::aux_bus_boundary_ptr movup.2 add
+
+    dup mem_load
+    dup.2 mul
+
+    swap add.1 mem_load
+    movup.2 mul swap
+end
+
+#! Felt offset of Eidos compression's second boundary value in the proof-ordered flat stream.
+proc eidos_compression_second_value_offset
+    # BytePairAnd8 contributes one extra value before EidosCompression iff it has a smaller height.
+    exec.constants::air_trace_length_logs_ptr add.BYTE_PAIR_AND8_AIR_INDEX mem_load
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
+    u32lt
+
+    exec.constants::air_trace_length_logs_ptr
+    push.NUM_CHIPLETS
+    push.EIDOS_COMPRESSION_AIR_INDEX
+    exec.utils::proof_order_position_from_heights
+    add add.1 mul.2
+end
+
+#! Felt offset of BytePairAnd8's second boundary value in the proof-ordered flat stream.
+proc byte_pair_and8_second_value_offset
+    # EidosCompression contributes one extra value before BytePairAnd8 when it sorts first. Equal heights
+    # preserve canonical order, where Eidos compression's index is smaller.
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
+    exec.constants::air_trace_length_logs_ptr add.BYTE_PAIR_AND8_AIR_INDEX mem_load
+    u32lte
+
+    exec.constants::air_trace_length_logs_ptr
+    push.NUM_CHIPLETS
+    push.BYTE_PAIR_AND8_AIR_INDEX
+    exec.utils::proof_order_position_from_heights
+    add add.1 mul.2
+end
+
+#! Observes the PVM auxiliary trace commitment and its twelve component sigma values.
 #!
-#! Unlike the Miden VM's word-plus-tail layout, this stream is exactly 24 base felts: the
-#! four-felt commitment followed by twenty sigma coordinates. It is absorbed as three complete
-#! eight-felt rate blocks, each carrying its own absorbed-length tag.
+#! The advice provider supplies the commitment followed by each AIR's exposed values in proof
+#! order. Eight AIRs expose one sigma; EidosCompression and BytePairAnd8 expose two apiece. The
+#! second value of each composite uses Miden's normalized `sigma_prime` convention, so the
+#! verifier locates those two values from the stable height order and weights them by that AIR's
+#! trace length before closing the external LogUp identity.
+#!
+#! The stream is 28 base felts: the four-felt commitment followed by twenty-four sigma
+#! coordinates. Three Eidos blocks are compressed and the final four felts remain buffered,
+#! matching the lifted-STARK transcript before it samples composition challenges.
 #!
 #! The hook also adds the verifier-side consumes for the fixed uint/curve environment and asserts
 #! `fixed_boundary_correction + sum(sigma_i) == 0` coordinate-wise.
 #!
 #! Precondition:  input_len=0 (the main commitment was flushed before this hook).
-#! Postcondition: input_len=0, output_len=8.
+#! Postcondition: input_len=4, output_len=0.
 #!
 #! Input:  [...]
 #! Output: [...]
 pub proc observe_aux_trace
-    # Draw [alpha, beta] and store [beta0, beta1, alpha0, alpha1] at the PVM READ boundary.
-    exec.layout::aux_rand_elem_ptr
+    # Draw [alpha, beta] and store [beta0, beta1, alpha0, alpha1] at the staged PVM READ boundary.
     exec.random_coin::generate_aux_randomness
 
     # The eight fixed-environment consumes depend on the sampled challenges but not on proof data.
@@ -37,35 +86,38 @@ pub proc observe_aux_trace
 
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="PVM observe_aux_trace: input buffer must be empty"
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-
-    # Rate block 1: [aux commitment | sigma_0 | sigma_1].
+    # Store and absorb the commitment plus all twelve proof-ordered boundary values.
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
+    exec.random_coin::eidos_observe_word
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr mem_storew_le
-    swapw
-    exec.absorb_full_rate_block
+    exec.random_coin::eidos_observe_word
 
-    # Rate block 2: [sigma_2 | sigma_3 | sigma_4 | sigma_5].
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr add.4 mem_storew_le
+    exec.random_coin::eidos_observe_word
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr add.8 mem_storew_le
-    swapw
-    exec.absorb_full_rate_block
+    exec.random_coin::eidos_observe_word
 
-    # Rate block 3: [sigma_6 | sigma_7 | sigma_8 | sigma_9].
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr add.12 mem_storew_le
+    exec.random_coin::eidos_observe_word
     padw adv_loadw
     exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
-    swapw
-    exec.absorb_full_rate_block
+    exec.random_coin::eidos_observe_word
 
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    padw adv_loadw
+    exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
+    exec.random_coin::eidos_observe_word
 
-    # Sum the ten sigmas as five words, two extension elements per word.
+    exec.constants::random_coin_input_len_ptr mem_load
+    push.4 assert_eq.err="PVM observe_aux_trace: boundary transcript framing drifted"
+    exec.constants::random_coin_output_len_ptr mem_load
+    assertz.err="PVM observe_aux_trace: observed input exposed stale output"
+
+    # Start with the unweighted sum of all twelve values.
     push.0.0
     exec.layout::aux_bus_boundary_ptr movdn.2
     # => [sum0, sum1, ptr]
@@ -76,23 +128,24 @@ pub proc observe_aux_trace
     end
     movup.2 drop
 
+    # Lift the two Miden-normalized component residues from sigma_prime to n*sigma_prime.
+    exec.eidos_compression_second_value_offset
+    exec.constants::air_trace_length_logs_ptr add.EIDOS_COMPRESSION_AIR_INDEX mem_load
+    swap
+    exec.load_normalization_adjustment
+    ext2add
+
+    exec.byte_pair_and8_second_value_offset
+    exec.constants::air_trace_length_logs_ptr add.BYTE_PAIR_AND8_AIR_INDEX mem_load
+    swap
+    exec.load_normalization_adjustment
+    ext2add
+
     exec.layout::c_total_ptr add.1 mem_load
     exec.layout::c_total_ptr mem_load
     ext2add
     assertz.err="PVM fixed-boundary mismatch: correction + sigma sum coord 0"
     assertz.err="PVM fixed-boundary mismatch: correction + sigma sum coord 1"
-end
-
-#! Absorbs one complete eight-felt rate block already arranged as `[R1, R2]`.
-#!
-#! Input:  [R1, R2, ...]
-#! Output: [...]
-proc absorb_full_rate_block
-    exec.random_coin::get_capacity
-    add.8
-    movdnw.2
-    exec.poseidon2::permute
-    exec.random_coin::store_random_coin_state
 end
 
 #! Computes gamma = beta^18 for `MAX_LOGUP_MESSAGE_WIDTH`.

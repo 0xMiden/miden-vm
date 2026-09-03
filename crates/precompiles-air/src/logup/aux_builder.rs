@@ -45,7 +45,9 @@ where
         Challenges::<EF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
     let periodic = air.periodic_columns();
 
-    let fractions = build_lookup_fractions(air, main, &periodic, &lookup_challenges);
+    // Preprocessed columns are already prepended to `main` by the only AIR which uses them
+    // (BytePairLut); passing them a second time would shift its lookup column indices.
+    let fractions = build_lookup_fractions(air, main, None, &periodic, &lookup_challenges);
 
     let (mut aux_trace, sigma_prime) = accumulate(&fractions);
     let num_cols = aux_trace.width;

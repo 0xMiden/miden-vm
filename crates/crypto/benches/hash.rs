@@ -11,7 +11,7 @@
 //! - RPX256
 //! - Poseidon2
 //! - Eidos
-//! - Blake3 variants (256, 192, 160)
+//! - Blake3 variants (256, 192)
 //! - Keccak256
 //!
 //! Each algorithm has two benchmarks:

@@ -2,7 +2,7 @@
 //!
 //! Verifies that the batch implementation produces identical query indices to a reference
 //! implementation that calls `sample_bits` in a loop. Both programs start from the same
-//! sponge state and parameters, and we compare the resulting query words stored in memory.
+//! challenger state and parameters, and we compare the resulting query words stored in memory.
 
 use miden_core::Felt;
 use miden_processor::ContextId;
@@ -11,14 +11,14 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
 // Must match the constants in `crates/lib/core/asm/stark/constants.masm`.
-const R1_PTR: u32 = 3223322672;
-const R2_PTR: u32 = 3223322676;
-const C_PTR: u32 = 3223322668;
+const RANDOM_COIN_CV_PTR: u32 = 3223322668;
+const RANDOM_COIN_OUTPUT_WORD_PTR: u32 = 3223322672;
 const NUM_QUERIES_PTR: u32 = 3223322628;
 const LDE_DOMAIN_LOG_SIZE_PTR: u32 = 3223322625;
 const FRI_QUERIES_ADDRESS_PTR: u32 = 3223322633;
-const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322759;
-const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322760;
+const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322767;
+const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322768;
+const RANDOM_COIN_COUNTER_PTR: u32 = 3223322769;
 
 // Fixed query storage address.
 const QUERY_PTR: u32 = 100_000;
@@ -27,45 +27,39 @@ const QUERY_PTR: u32 = 100_000;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build the MASM preamble that initializes the sponge state and verifier parameters.
+/// Build the MASM preamble that initializes the Eidos challenger state and verifier parameters.
 ///
-/// `sponge` is 12 field-element values `[r1_0..r1_3, r2_0..r2_3, c_0..c_3]`.
-fn setup_masm(sponge: &[u64; 12], output_len: u32, num_queries: u32, depth: u32) -> String {
+/// `state` supplies `[cv0..cv3, output0..output3, unused0..unused3]`.
+fn setup_masm(state: &[u64; 12], output_len: u32, num_queries: u32, depth: u32) -> String {
+    assert!(output_len <= 4, "Eidos caches one four-Felt output word");
     format!(
         r#"
-    # Store R1 (rate word 1)
-    push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-    push.{R1_PTR} mem_storew_le dropw
+    # Store the Eidos chaining value.
+    push.{cv3}.{cv2}.{cv1}.{cv0}
+    push.{RANDOM_COIN_CV_PTR} mem_storew_le dropw
 
-    # Store R2 (rate word 2)
-    push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-    push.{R2_PTR} mem_storew_le dropw
-
-    # Store C (capacity)
-    push.{c_3}.{c_2}.{c_1}.{c_0}
-    push.{C_PTR} mem_storew_le dropw
+    # Store the current four-Felt output cache.
+    push.{out3}.{out2}.{out1}.{out0}
+    push.{RANDOM_COIN_OUTPUT_WORD_PTR} mem_storew_le dropw
 
     # Random coin buffer state
     push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
     push.{output_len} push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
+    push.1 push.{RANDOM_COIN_COUNTER_PTR} mem_store
 
     # Verifier parameters
     push.{num_queries} push.{NUM_QUERIES_PTR} mem_store
     push.{depth} push.{LDE_DOMAIN_LOG_SIZE_PTR} mem_store
     push.{QUERY_PTR} push.{FRI_QUERIES_ADDRESS_PTR} mem_store
     "#,
-        r1_0 = sponge[0],
-        r1_1 = sponge[1],
-        r1_2 = sponge[2],
-        r1_3 = sponge[3],
-        r2_0 = sponge[4],
-        r2_1 = sponge[5],
-        r2_2 = sponge[6],
-        r2_3 = sponge[7],
-        c_0 = sponge[8],
-        c_1 = sponge[9],
-        c_2 = sponge[10],
-        c_3 = sponge[11],
+        cv0 = state[0],
+        cv1 = state[1],
+        cv2 = state[2],
+        cv3 = state[3],
+        out0 = state[4],
+        out1 = state[5],
+        out2 = state[6],
+        out3 = state[7],
     )
 }
 
@@ -88,39 +82,6 @@ fn reference_source(setup: &str) -> String {
         r#"
     use miden::core::stark::random_coin
     use miden::core::stark::constants
-    use miden::core::crypto::hashes::poseidon2
-
-    #! Sample a felt, permuting first if the output buffer is empty.
-    proc sample_felt_safe
-        push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_load
-        push.0 eq
-        if.true
-            exec.random_coin::load_random_coin_state
-            exec.poseidon2::permute
-            exec.random_coin::store_random_coin_state
-            push.8 push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
-        end
-        exec.random_coin::sample_felt
-    end
-
-    #! sample_bits using the safe wrapper.
-    proc sample_bits_safe
-        dup eq.32
-        if.true
-            push.0xffffffff
-        else
-            dup
-            pow2
-            u32assert u32overflowing_sub.1 assertz
-        end
-        exec.sample_felt_safe
-        u32split
-        swap
-        drop
-        u32and
-        swap
-        drop
-    end
 
     begin
         {setup}
@@ -128,23 +89,38 @@ fn reference_source(setup: &str) -> String {
         exec.constants::get_number_queries
         exec.constants::get_fri_queries_address
         exec.constants::get_lde_domain_depth
-        dup push.32 swap u32wrapping_sub pow2
-        movdn.2 swap
-        dup.3 push.0 neq
+        swap movup.2 swap
+        # => [query_ptr, num_queries, depth]
+
+        dup.1 push.0 neq
         while.true
+            dup.2
+            eq.32
+            if.true
+                exec.random_coin::sample_felt
+                u32split swap drop
+            else
+                dup.2
+                exec.random_coin::sample_bits
+            end
+            # => [index, query_ptr, num_queries, depth]
+
+            movdn.3
+            push.0
+            dup.4
+            dup.4
             dup.1
-            exec.sample_bits_safe
-            dup.2 swap dup movdn.2
-            push.0 movdn.3
+            # => [index, depth, index, 0, query_ptr, num_queries, depth, index]
+
             dup.4
             mem_storew_le
             dropw
             add.4
-            movup.3 sub.1 movdn.3
-            dup.3 push.0 neq
+            movup.3 drop
+            swap sub.1 swap
+            dup.1 push.0 neq
         end
-        push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
-        drop drop drop drop
+        drop drop drop
     end
     "#,
     )
@@ -153,12 +129,12 @@ fn reference_source(setup: &str) -> String {
 /// Run both batch and reference programs with identical initial state, then compare
 /// all generated query words and the final `output_len`.
 fn assert_batch_matches_reference(
-    sponge: &[u64; 12],
+    challenger_state: &[u64; 12],
     output_len: u32,
     num_queries: u32,
     depth: u32,
 ) {
-    let setup = setup_masm(sponge, output_len, num_queries, depth);
+    let setup = setup_masm(challenger_state, output_len, num_queries, depth);
     let batch_src = batch_source(&setup);
     let ref_src = reference_source(&setup);
 
@@ -210,8 +186,8 @@ fn assert_batch_matches_reference(
     );
 }
 
-/// Generate a deterministic sponge state from a seed.
-fn random_sponge(seed: u64) -> [u64; 12] {
+/// Generate a deterministic challenger state from a seed.
+fn random_challenger_state(seed: u64) -> [u64; 12] {
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
     core::array::from_fn(|_| rng.random::<u64>())
 }
@@ -220,22 +196,21 @@ fn random_sponge(seed: u64) -> [u64; 12] {
 // Parametric tests
 // ---------------------------------------------------------------------------
 
-/// Test across a range of num_queries values with fixed sponge and depth.
-/// Covers: 1 query, small batches, exact rate boundary (7), one past (8, 9),
-/// typical (27), and a larger value (40 = 5 permutations).
+/// Test across a range of `num_queries` values with fixed challenger state and depth.
+/// Covers small batches, refill boundaries, the typical query count, and multiple refills.
 #[rstest]
 #[case::single_query(1)]
 #[case::two_queries(2)]
 #[case::three_queries(3)]
 #[case::seven_queries_exact_first_batch(7)]
-#[case::eight_queries_triggers_permute(8)]
-#[case::nine_queries_one_past_permute(9)]
+#[case::eight_queries_triggers_refill(8)]
+#[case::nine_queries_one_past_refill(9)]
 #[case::fifteen_queries_two_batches(15)]
 #[case::twentyseven_queries_typical(27)]
-#[case::forty_queries_five_permutes(40)]
+#[case::forty_queries_multiple_refills(40)]
 fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
-    let sponge = random_sponge(42);
-    assert_batch_matches_reference(&sponge, 7, num_queries, 17);
+    let state = random_challenger_state(42);
+    assert_batch_matches_reference(&state, 3, num_queries, 17);
 }
 
 /// Depth 32 requires an all-ones u32 mask.
@@ -247,31 +222,31 @@ fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
 #[case::depth_24(24)]
 #[case::depth_32(32)]
 fn batch_vs_reference_depth(#[case] depth: u32) {
-    let sponge = random_sponge(99);
-    assert_batch_matches_reference(&sponge, 7, 27, depth);
+    let state = random_challenger_state(99);
+    assert_batch_matches_reference(&state, 3, 27, depth);
 }
 
 /// Test different initial output_len values.
-/// After PoW the typical value is 7, but we test the range 1..=8 to ensure
-/// the permute-on-exhaustion logic is correct at every boundary.
+/// Exercise every valid cache occupancy, including an empty cache refill.
 #[rstest]
+#[case::output_len_0(0)]
 #[case::output_len_1(1)]
 #[case::output_len_2(2)]
+#[case::output_len_3(3)]
 #[case::output_len_4(4)]
-#[case::output_len_7(7)]
-#[case::output_len_8(8)]
 fn batch_vs_reference_output_len(#[case] output_len: u32) {
-    let sponge = random_sponge(77);
-    assert_batch_matches_reference(&sponge, output_len, 27, 17);
+    let state = random_challenger_state(77);
+    assert_batch_matches_reference(&state, output_len, 27, 17);
 }
 
-/// Test with several different random sponge states to exercise varied rate element values.
+/// Test with several deterministic challenger states to exercise varied CV and cached-output
+/// values.
 #[rstest]
 #[case::seed_0(0)]
 #[case::seed_1(1)]
 #[case::seed_12345(12345)]
 #[case::seed_999999(999999)]
-fn batch_vs_reference_random_sponge(#[case] seed: u64) {
-    let sponge = random_sponge(seed);
-    assert_batch_matches_reference(&sponge, 7, 27, 17);
+fn batch_vs_reference_random_challenger_state(#[case] seed: u64) {
+    let state = random_challenger_state(seed);
+    assert_batch_matches_reference(&state, 3, 27, 17);
 }

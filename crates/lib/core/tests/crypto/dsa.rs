@@ -14,7 +14,7 @@ use miden_core_lib::{
 use miden_crypto::{
     SequentialCommit, Word,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey},
-    hash::keccak::Keccak256,
+    hash::{eidos::Eidos, keccak::Keccak256},
     utils::hex_to_bytes,
 };
 use miden_precompiles::{K1Scalar, SECP256K1_LAMBDA, scalar_mul_mod_n};
@@ -26,7 +26,6 @@ use miden_processor::{
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
     event::{EventError, EventHandler},
 };
-use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 use crate::{
@@ -296,7 +295,7 @@ fn core_ecdsa_k256_keccak_verify_accepts_glv_base_repeating_public_keys() {
         let output = run_verify(&fixture)
             .unwrap_or_else(|e| panic!("{name} must verify through the 2-base fallback: {e}"));
 
-        let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
+        let proof = prove_deferred_state(&output.deferred_state, HashFunction::Eidos)
             .unwrap_or_else(|_| panic!("{name}: the fallback's deferred claims must be provable"));
         verify_deferred(&proof, output.deferred_state.root()).unwrap_or_else(|_| {
             panic!("{name}: the fallback's deferred proof must verify against the committed root")
@@ -336,7 +335,9 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let output = run_core_program_with_advice(&verify_cycle_source(&fixture), &fixture.advice)
         .expect("valid core ECDSA K256/Keccak signature must verify");
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
-    assert_eq!(cycles, 1325);
+    // This includes the Eidos compression-and-framing work for every deferred node registered by
+    // the Keccak and secp256k1 precompile wrappers.
+    assert_eq!(cycles, 1546);
 }
 
 #[test]
@@ -351,7 +352,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_wrong_pk_comm() {
 fn core_ecdsa_k256_keccak_verify_traps_on_off_curve_public_key() {
     let mut fixture = valid_fixture();
     fixture.advice[8..16].copy_from_slice(&[Felt::from_u32(0); 8]);
-    fixture.public_key_commitment = Poseidon2::hash_elements(&fixture.advice[..16]);
+    fixture.public_key_commitment = Eidos::hash_elements(&fixture.advice[..16]);
 
     run_verify(&fixture).expect_err("off-curve public key advice must trap");
 }
@@ -362,7 +363,7 @@ fn core_ecdsa_k256_keccak_verify_traps_on_non_u32_limb() {
 
     let mut pubkey_fixture = valid_fixture();
     pubkey_fixture.advice[0] = non_u32;
-    pubkey_fixture.public_key_commitment = Poseidon2::hash_elements(&pubkey_fixture.advice[..16]);
+    pubkey_fixture.public_key_commitment = Eidos::hash_elements(&pubkey_fixture.advice[..16]);
     run_verify(&pubkey_fixture).expect_err("non-u32 public-key limb must trap");
 
     let mut r_fixture = valid_fixture();
@@ -703,7 +704,7 @@ fn assert_deferred_state_round_trips(output: &ExecutionOutput) {
 }
 
 fn assert_deferred_proof_verifies(output: &ExecutionOutput) {
-    let proof = prove_deferred_state(&output.deferred_state, HashFunction::Blake3_256)
+    let proof = prove_deferred_state(&output.deferred_state, HashFunction::Eidos)
         .expect("the GLV-decomposed deferred claims must be provable");
     verify_deferred(&proof, output.deferred_state.root())
         .expect("the GLV-decomposed deferred proof must verify against the committed root");

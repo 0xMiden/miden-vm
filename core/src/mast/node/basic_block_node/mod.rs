@@ -668,12 +668,22 @@ impl core::ops::Index<usize> for PaddedToRawPrefix {
 fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
     // Group the operations into batches.
     let batches = batch_ops(ops);
-
-    // Compute the hash of all operation groups.
-    let op_groups: Vec<Felt> = batches.iter().flat_map(|batch| batch.groups).collect();
-    let hash = hasher::hash_elements(&op_groups);
+    let hash = hash_op_batches(&batches);
 
     (batches, hash)
+}
+
+pub(crate) fn hash_op_batches(batches: &[OpBatch]) -> Word {
+    let mut op_groups = Vec::new();
+    for (idx, batch) in batches.iter().enumerate() {
+        let num_groups = if idx + 1 == batches.len() {
+            batch.num_groups().next_power_of_two()
+        } else {
+            BATCH_SIZE
+        };
+        op_groups.extend_from_slice(&batch.groups[..num_groups]);
+    }
+    hasher::hash_elements(&op_groups)
 }
 
 fn fingerprint_basic_block_error_codes(block_digest: Word, op_batches: &[OpBatch]) -> Word {

@@ -12,7 +12,7 @@ const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_FIELD_WHOLE_BITS = 127
 const CHALLENGE_FIELD_OFFSET_FP = 2
 # Whole-bit floor of the field/hash security cap used by the native report.
-const SECURITY_CAP_BITS = 127
+const SECURITY_CAP_BITS = 126
 # Whole-bit FRI folding bound before subtracting trace height or adding grinding.
 const FRI_FOLDING_BASE_BITS = 122
 const LOG2_E_FP = 94548
@@ -99,8 +99,8 @@ end
 #!
 #! The dominance argument constrains the product `A`. Each factor is also limited to 65536 so the
 #! multiplication cannot wrap, but the estimator imposes no tighter bound on either factor by
-#! itself. The current MVM value is `(16 + 2) * 28 = 504`; the current PVM value is
-#! `(18 + 2) * 247 = 4940`. These values are well inside the accepted range of 257 through 65536.
+#! itself. The current MVM value is `(16 + 2) * 81 = 1458`; the current PVM value is
+#! `(18 + 2) * 283 = 5660`. These values are well inside the accepted range of 257 through 65536.
 #! For example, a message width of 12 needs only 19 fractions per row to exceed the lower limit.
 #! At the current message widths, the upper limit allows 3640 MVM fractions or 3276 PVM fractions.
 #! The verifier-specific drift tests derive both factors from the AIRs and check their product
@@ -156,7 +156,7 @@ end
 #!   `119 - height`;
 #! - composition: `composed <= 8192` gives `127 - floor(log2(composed)) >= 114 > 113`;
 #! - DEEP: `deep_terms <= 8192` gives `127 - floor(log2(deep)) + deep_pow >= 114`;
-#! - collision cap: `SECURITY_CAP_BITS = 127 > 113`, so neither the cap nor a query clamp is
+#! - collision cap: `SECURITY_CAP_BITS = 126 > 113`, so neither the cap nor a query clamp is
 #!   needed.
 #!
 #! Both the out-of-domain and FRI folding terms subtract the same height as the lookup term, so

@@ -2051,7 +2051,6 @@ dependencies = [
  "miden-constraint-compiler",
  "miden-core",
  "miden-crypto",
- "miden-field",
  "proptest",
  "thiserror",
 ]
@@ -2532,6 +2531,7 @@ dependencies = [
  "miden-lifted-stark",
  "miden-precompiles",
  "p3-security",
+ "rand 0.10.2",
  "ruint",
 ]
 
@@ -2580,7 +2580,6 @@ dependencies = [
 name = "miden-processor"
 version = "0.31.0"
 dependencies = [
- "hashbrown 0.17.1",
  "insta",
  "itertools 0.15.0",
  "miden-air",
@@ -2825,6 +2824,7 @@ name = "miden-vm-synthetic-bench"
 version = "0.31.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-core-lib",

@@ -5,11 +5,12 @@
 
 use alloc::vec;
 
-use miden_core::{Felt, Word, crypto::hash::Poseidon2, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
         blake::Blake3Hasher,
+        eidos::{Eidos, EidosLmcs, MidenEidosChallenger, lmcs_config},
         keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
         poseidon2::Poseidon2Permutation256,
         rpo::RpoPermutation256,
@@ -51,8 +52,8 @@ const COMPRESSION_INPUTS: usize = 2;
 // PCS PARAMETERS
 // ================================================================================================
 
-/// Log2 of the FRI blowup factor (blowup = 8).
-pub(crate) const LOG_BLOWUP: u8 = 3;
+/// Base-two logarithm of the low-degree extension blowup used by canonical VM proofs.
+pub const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
 pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
@@ -68,6 +69,9 @@ const NUM_QUERIES: usize = 27;
 const QUERY_POW_BITS: usize = 17;
 
 /// Default PCS parameters shared by all hash function configurations.
+///
+/// These are protocol constants. They must not depend on the process environment or benchmark
+/// settings because the same factory is used by production provers and verifiers.
 pub fn pcs_params() -> PcsParams {
     PcsParams::new(
         LOG_BLOWUP,
@@ -96,30 +100,30 @@ pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest
         registry_root[2],
         registry_root[3],
     ];
-    let digest = Poseidon2::hash_elements(&input);
+    let digest = Eidos::hash_elements(&input);
     let elements = digest.as_elements();
     [elements[0], elements[1], elements[2], elements[3]]
 }
 
-/// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
+/// RELATION_DIGEST = Eidos::hash_elements([PROTOCOL_ID, ACE_CIRCUIT_REGISTRY_ROOT]).
 ///
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(8509919582315365814),
-    Felt::new_unchecked(12865978328275266043),
-    Felt::new_unchecked(12073117316737140237),
-    Felt::new_unchecked(5647109555087128169),
+    Felt::new_unchecked(5386642688186435407),
+    Felt::new_unchecked(6538706076452792969),
+    Felt::new_unchecked(9112338682580750753),
+    Felt::new_unchecked(4367732112936953739),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(8563712008625779037),
-    Felt::new_unchecked(2346635758357605862),
-    Felt::new_unchecked(17725435322360039753),
-    Felt::new_unchecked(12106900609136090006),
+    Felt::new_unchecked(6867412142867451962),
+    Felt::new_unchecked(2481413844695882715),
+    Felt::new_unchecked(5303340724979295925),
+    Felt::new_unchecked(8468512126931593944),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -134,10 +138,18 @@ const _: () = assert!(
     "ACE_CIRCUIT_REGISTRY_DEPTH must cover every proof-order variant",
 );
 
+/// Domain tag distinguishing unused native registry slots from circuit commitments.
+const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
+
+/// Native registry padding follows upstream's shared-leaf framing, hashed with Eidos.
+fn ace_registry_padding_leaf() -> Word {
+    Eidos::hash_elements(&[Felt::new_unchecked(ACE_REGISTRY_PADDING_DOMAIN)])
+}
+
 // NOTE: registry leaves are not checked in. They are recomputed per process from the AIR
 // (see `ace_registry_path`) and authenticated against `ACE_CIRCUIT_REGISTRY_ROOT`, which
 // is the registry commitment. Checking in the six active Miden VM leaves would be cheap but
-// redundant; recomputing them also keeps the Miden VM and PVM on one serving model.
+// redundant; recomputing them keeps registry serving derived from the deployed AIR.
 
 /// Authentication data for one ACE registry slot: its leaf and Merkle path.
 ///
@@ -179,7 +191,8 @@ fn miden_vm_ace_registry() -> &'static MerkleTree {
         .get_or_init(|| build_miden_vm_ace_registry_with(crate::ace::shared_recursive_factory()))
 }
 
-/// Rebuilds the Miden VM's eight-leaf ACE registry and authenticates it against the protocol root.
+/// Rebuilds the Miden VM's power-of-two ACE registry and authenticates it against the protocol
+/// root.
 ///
 /// `std` caches this tree process-wide; `no_std` callers rebuild it on demand so recursive advice
 /// generation remains available without global state or synchronization support.
@@ -190,13 +203,13 @@ fn build_miden_vm_ace_registry() -> MerkleTree {
     build_miden_vm_ace_registry_with(&factory)
 }
 
-/// Builds the eight-leaf registry from an existing factory and authenticates it against
+/// Builds the registry from an existing factory and authenticates it against
 /// the protocol root, so callers holding a factory pay no second composition build.
 pub(crate) fn build_miden_vm_ace_registry_with(
     factory: &crate::ace::RecursiveAceCircuitFactory,
 ) -> MerkleTree {
     let mut buffer = miden_ace_codegen::ShuffleEncodeBuffer::new();
-    let mut leaves = vec![miden_ace_codegen::padding_leaf(); ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
+    let mut leaves = vec![ace_registry_padding_leaf(); ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
     for order in ProofOrder::variants() {
         let leaf = factory
             .leaf_for_order(&order, &mut buffer)
@@ -263,7 +276,6 @@ pub type RpoConfig = MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<
 /// Concrete STARK configuration type for Poseidon2.
 pub type Poseidon2Config =
     MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
-
 /// Concrete STARK configuration type for RPX.
 pub type RpxConfig = MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>>;
 
@@ -341,6 +353,23 @@ pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> 
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
+// EIDOS
+// ================================================================================================
+
+/// Registered selector for the Miden VM STARK transcript's Eidos challenger.
+const EIDOS_VM_STARK_TRANSCRIPT_SELECTOR: u32 = 0x00000201;
+
+/// Concrete STARK configuration type for Eidos.
+pub type EidosConfig = MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
+
+/// Creates an Eidos-based STARK configuration bound to `relation_digest`.
+pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
+    let lmcs = lmcs_config();
+    let transcript_init_cv = Eidos::transcript_init_cv(EIDOS_VM_STARK_TRANSCRIPT_SELECTOR);
+    let challenger = MidenEidosChallenger::new(transcript_init_cv, relation_digest.into());
+    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
 // KECCAK
 // ================================================================================================
 
@@ -392,7 +421,6 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_ace_codegen::padding_leaf;
     use miden_core::{Felt, Word};
     use miden_crypto::{
         merkle::MerkleTree,
@@ -436,7 +464,8 @@ mod tests {
     /// ```
     #[test]
     fn relation_digest_matches_current_air() {
-        let mut expected_leaves = vec![padding_leaf(); super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
+        let mut expected_leaves =
+            vec![super::ace_registry_padding_leaf(); super::ACE_CIRCUIT_REGISTRY_LEAF_COUNT];
         let mut snapshot_lines = Vec::new();
         let mut expected_metadata = None;
 
@@ -445,13 +474,8 @@ mod tests {
         for order in ProofOrder::variants() {
             let circuit = factory.circuit_for_order(&order).unwrap();
 
-            // Dual-path leaf equality for EVERY order: the encode-only path (which the
-            // runtime registry uses) against the assembled-stream path. This catches
-            // encoding divergence between the two stream constructions; it is blind to
-            // hash-implementation faults, which hit both paths identically (they share
-            // the cached sponge states) — those are guarded by the one-shot builder
-            // sweep in air/tests/ace_codegen.rs and miden-crypto's packed-vs-scalar
-            // differential test.
+            // Registry-builder leaf equality for every order: the runtime registry path must
+            // agree with the assembled Eidos circuit commitment.
             assert_eq!(
                 factory.leaf_for_order(&order, &mut buffer).unwrap(),
                 circuit.commitment,

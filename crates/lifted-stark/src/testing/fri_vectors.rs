@@ -5,8 +5,8 @@
 //! FRI verifier tests) can repackage without access to this crate's internals.
 //!
 //! The caller supplies the LMCS and challenger so the vectors can be generated with production
-//! hashing components (the Miden VM tests need the miden-crypto Poseidon2 permutation, not the
-//! plain Plonky3 one used by this crate's own test configs).
+//! hashing components (the Miden VM tests use its production Eidos configuration, not the plain
+//! Plonky3 components used by this crate's own test configs).
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -105,7 +105,7 @@ pub struct Fold4Ext2TestVectors {
 /// Panics if the extension degree is not 2, the final degree exceeds the source degree, fold-4
 /// cannot land exactly on the requested final degree, the domain parameters are invalid, or
 /// `num_queries` is outside `2..=lde_size`.
-pub fn fold4_ext2_test_vectors<F, EF, L, Chal>(
+pub fn fold4_ext2_test_vectors<F, EF, L, Chal, CommitmentToLimbs>(
     lmcs: &L,
     challenger: &Chal,
     log_poly_degree: u8,
@@ -113,14 +113,15 @@ pub fn fold4_ext2_test_vectors<F, EF, L, Chal>(
     log_final_degree: u8,
     num_queries: usize,
     seed: u64,
+    commitment_to_limbs: CommitmentToLimbs,
 ) -> Fold4Ext2TestVectors
 where
     F: TwoAdicField + PrimeField64,
     EF: ExtensionField<F>,
     StandardUniform: Distribution<EF>,
     L: Lmcs<F = F>,
-    L::Commitment: Into<[F; DIGEST_WIDTH]>,
     Chal: Clone + TranscriptChallenger<F, L::Commitment>,
+    CommitmentToLimbs: Fn(L::Commitment) -> [u64; DIGEST_WIDTH],
 {
     assert_eq!(
         EF::DIMENSION,
@@ -215,20 +216,14 @@ where
         for index in batch.indices() {
             let rows = batch.opening(index).expect("opening must exist for query index");
             let siblings = batch.path(index).expect("path must exist for query index");
-            let leaf_digest: [F; DIGEST_WIDTH] = lmcs.hash(rows.iter_rows()).into();
+            let leaf_digest = commitment_to_limbs(lmcs.hash(rows.iter_rows()));
             let row: [F; OPENING_ROW_WIDTH] =
                 rows.as_slice().try_into().expect("fold-4/ext2 opening has the expected width");
             openings.push(FriRoundOpening {
                 index,
                 row: row.map(|v| v.as_canonical_u64()),
-                leaf_digest: leaf_digest.map(|d| d.as_canonical_u64()),
-                path: siblings
-                    .into_iter()
-                    .map(|sibling| {
-                        let digest: [F; DIGEST_WIDTH] = sibling.into();
-                        digest.map(|d| d.as_canonical_u64())
-                    })
-                    .collect(),
+                leaf_digest,
+                path: siblings.into_iter().map(&commitment_to_limbs).collect(),
             });
         }
         round_openings.push(openings);
@@ -253,10 +248,7 @@ where
         commitments: proof
             .rounds
             .iter()
-            .map(|r| {
-                let com: [F; DIGEST_WIDTH] = r.commitment.clone().into();
-                com.map(|c| c.as_canonical_u64())
-            })
+            .map(|r| commitment_to_limbs(r.commitment.clone()))
             .collect(),
         betas: proof
             .rounds

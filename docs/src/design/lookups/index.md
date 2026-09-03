@@ -47,14 +47,21 @@ Miden VM uses multiple communication buses:
 - The chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, ACE, and Kernel ROM). It is implemented using multiset checks.
 - The hash/kernel bus [$b_{hash\_kernel}$](../chiplets/index.md#chiplets-bus), which combines several multiset-backed channels (hash sibling table, kernel ROM procedure table, ACE memory requests, and deferred-root updates).
 - The ACE wiring bus [$v_{wiring}$](../chiplets/ace.md#circuit-evaluation), which ties together ACE node wiring. It is implemented using LogUp.
-- The domain-separated `RangeCheck` [bus](../range.md#communication-bus), which matches the [range checker's](../range.md) table multiplicities against requests from [u32 operations](../stack/u32_ops.md), Merkle-depth checks and canonical-index witnesses from [Merkle operations](../stack/crypto_ops.md#merkle-range-checks), and the [memory chiplet](../chiplets/memory.md). It is implemented using LogUp and packed into shared lookup columns rather than a dedicated $b_{range}$ column.
+- The domain-separated `RangeCheck` [bus](../range.md#communication-bus), which matches requests
+  from [u32 operations](../stack/u32_ops.md), Merkle depth and canonical-index checks from
+  [Merkle operations](../stack/crypto_ops.md#merkle-range-checks), the
+  [memory chiplet](../chiplets/memory.md), and the Eidos compression AIR against the fixed 16-bit
+  table in [`And8LookupAir`](../range.md#fixed-byte-pair-table). It is implemented using LogUp and packed
+  into shared lookup columns rather than a dedicated $b_{range}$ column.
 
 
 ## Length of auxiliary columns for lookup arguments
 
 The auxiliary columns used for buses and virtual tables are computed by including information from the *current* row of the main execution trace into the *next* row of the auxiliary trace column. Thus, in order to ensure that the trace is long enough to give the auxiliary column space for its final value, a padding row may be required at the end of the trace of the component upon which the auxiliary column depends.
 
-This is true when the data in the main trace could go all the way to the end of the trace, such as in the case of the range checker.
+This is true when interactions in a main trace can continue through its final row. The fixed And8
+table uses a wrapped accumulator, so its final byte-pair row remains a real table row rather than
+an extra padding row.
 
 ## Cost of auxiliary columns for lookup arguments
 It is important to note that depending on the field in which we operate, an auxiliary column implementing a lookup argument may actually require more than one trace column. This is specifically true for small fields.

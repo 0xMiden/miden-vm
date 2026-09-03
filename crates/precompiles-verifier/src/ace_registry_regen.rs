@@ -1,12 +1,16 @@
 //! Regeneration tool for the PVM ACE registry and generated MASM artifacts.
 //!
-//! `--write` compares packed encode-only and scalar assembled commitments for every
-//! ordering before writing the registry constants, relation wrapper constants, memory layout, and
-//! constraint evaluator. `--check` recomputes the same artifacts and byte-compares them with the
-//! checked-in files. A from-scratch `hash_elements` cross-check over a structured order sample
-//! separately covers the resumed-sponge arithmetic.
+//! `--check` hashes every ordering through the packed encode-only path and pins the resulting
+//! registry row, root, and generated artifacts against the checked-in files. `--write` additionally
+//! compares every packed leaf with the scalar encode-only path before minting those artifacts. A
+//! structured order sample cross-checks both encode-only paths against fully assembled streams and
+//! from-scratch `hash_elements` commitments.
 //!
-//! Both modes cover all proof orders; sampling is confined to the independent hash oracle.
+//! Full circuit assembly is deliberately sampled: its order-invariant common section would
+//! otherwise be cloned and encoded 10! times even though assembly and encode-only generation share
+//! their shuffle emitter and operation encoder. Packed-versus-scalar hash validation remains
+//! exhaustive when minting; leaf generation, tag inversion, and root construction are exhaustive
+//! in both modes.
 
 use std::{
     fmt::Write as _,
@@ -20,13 +24,13 @@ use miden_ace_codegen::{
     ShuffleEncodeBuffer, fold_row_to_root, order_from_tag, order_tag, render_masm_constraints_eval,
     subtree_leaves,
 };
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::merkle::MerkleTree;
 use miden_lifted_air::BaseAir;
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{
     ChipletAir, NUM_CHIPLETS, preprocessed,
-    stark_config::{poseidon2_config, precompile_pcs_params},
+    stark_config::{eidos_config, precompile_pcs_params},
 };
 use rayon::prelude::*;
 
@@ -50,7 +54,9 @@ const PVM_RELATION_MOD_PATH: &str = "../lib/core/asm/sys/pvm/mod.masm";
 /// First felt after the VM relation's fixed ACE stream reservation. The PVM's complete READ
 /// section starts here; its aux-randomness anchor is later because four public EF inputs precede
 /// it.
-const PVM_READ_START: u32 = 3_225_426_416;
+// The narrowed four-AIR VM evaluator occupies 8,520 felts; place the PVM frame at the next
+// 4-Ki-felt boundary after that stream so the two relation-owned allocations cannot overlap.
+const PVM_READ_START: u32 = 3_225_432_064;
 /// Start of the VM relation's next scratch region; the PVM allocation must end before it.
 const NEXT_VM_REGION_START: u32 = 3_238_002_688;
 
@@ -81,7 +87,7 @@ struct GeneratedArtifacts {
     row: Vec<Word>,
     root: Word,
     digest: [Felt; 4],
-    /// Commitment to the preprocessed (setup) LDE tree under the Poseidon2 config —
+    /// Commitment to the preprocessed (setup) LDE tree under the Eidos config —
     /// the configuration an in-VM verifier targets.
     ///
     /// This is a trusted verifier input rather than proof data: the Rust verifier
@@ -251,23 +257,42 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     let canonical = factory.circuit_for_order(&canonical_order).map_err(|err| err.to_string())?;
     let shape = CircuitShape::of(&canonical)?;
 
-    // From-scratch hash cross-check on the structured sample: the resumed sponge must
-    // reproduce full-stream `hash_elements` digests. This is the hash-fault oracle the
-    // per-order dual path below cannot be (both its sides share the resumed states).
+    // From-scratch hash cross-check on the structured sample: the resumed compression chain must
+    // reproduce full-stream `hash_elements` digests. Full assembly shares the shuffle emitter and
+    // operation encoder with the encode-only path, so sampling it retains the useful structural
+    // cross-check without cloning the invariant common section for every order. The mint path below
+    // separately compares packed and scalar hashes for every realizable order.
+    let mut sample_orders = structured_orders();
+    sample_orders.sort_unstable();
+    sample_orders.dedup();
+    let sample_order_slices: Vec<&[usize]> =
+        sample_orders.iter().map(<[usize; NUM_CHIPLETS]>::as_slice).collect();
+    let mut packed_scratch = PackedLeafScratch::new();
+    let mut packed_leaves = Vec::with_capacity(sample_orders.len());
+    factory
+        .leaves_for_orders(&sample_order_slices, &mut packed_scratch, &mut packed_leaves)
+        .map_err(|e| format!("{e}"))?;
+    if packed_leaves.len() != sample_orders.len() {
+        return Err("packed registry leaf sample has the wrong length".into());
+    }
+
     let mut scalar_buffer = ShuffleEncodeBuffer::new();
-    for order in structured_orders() {
-        let circuit = factory.circuit_for_order(&order).map_err(|e| format!("{e}"))?;
+    for (order, packed_leaf) in sample_orders.iter().zip(&packed_leaves) {
+        let circuit = factory.circuit_for_order(order.as_slice()).map_err(|e| format!("{e}"))?;
         let instructions = circuit.encoded.instructions();
-        let scalar_leaf =
-            factory.leaf_for_order(&order, &mut scalar_buffer).map_err(|e| format!("{e}"))?;
-        if Poseidon2::hash_elements(&instructions[..circuit.shuffle_prefix_len])
+        let scalar_leaf = factory
+            .leaf_for_order(order.as_slice(), &mut scalar_buffer)
+            .map_err(|e| format!("{e}"))?;
+        if Eidos::hash_elements(&instructions[..circuit.shuffle_prefix_len])
             != circuit.shuffle_commitment
-            || Poseidon2::hash_elements(&instructions[circuit.shuffle_prefix_len..])
+            || Eidos::hash_elements(&instructions[circuit.shuffle_prefix_len..])
                 != circuit.common_commitment
             || scalar_leaf != circuit.commitment
+            || packed_leaf != &scalar_leaf
         {
             return Err(format!(
-                "resumed-sponge commitments diverge from from-scratch hashing for {order:?}"
+                "packed or resumed-chain commitments diverge from the assembled circuit for \
+                 {order:?}"
             ));
         }
     }
@@ -276,10 +301,16 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     // is here because the generic subtree unit is deliberately serial.
     let completed = std::sync::atomic::AtomicUsize::new(0);
     let total = PVM_REGISTRY_LAYOUT.row_len();
-    println!(
-        "computing {} leaves over {total} subtrees, checking every assembled order ({mode:?})",
-        PVM_REGISTRY_LAYOUT.order_count(),
-    );
+    match mode {
+        Mode::Check => println!(
+            "computing {} packed leaves over {total} subtrees",
+            PVM_REGISTRY_LAYOUT.order_count(),
+        ),
+        Mode::Write => println!(
+            "computing {} packed leaves over {total} subtrees with exhaustive scalar validation",
+            PVM_REGISTRY_LAYOUT.order_count(),
+        ),
+    }
     let row: Vec<Word> = (0..PVM_REGISTRY_LAYOUT.row_len())
         .into_par_iter()
         .map_init(
@@ -290,52 +321,32 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
                         .map_err(|e| format!("{e}"))?;
 
                 let start = subtree_index * PVM_REGISTRY_LAYOUT.leaves_per_subtree();
-                for (offset, leaf) in leaves.iter().enumerate() {
+                let realizable = PVM_REGISTRY_LAYOUT
+                    .order_count()
+                    .saturating_sub(start)
+                    .min(PVM_REGISTRY_LAYOUT.leaves_per_subtree());
+                for (offset, packed_leaf) in leaves.iter().take(realizable).enumerate() {
                     let tag = (start + offset) as u32;
-                    let Some(order) = order_from_tag(tag, PVM_REGISTRY_LAYOUT.num_airs()) else {
-                        continue;
-                    };
+                    let order =
+                        order_from_tag(tag, PVM_REGISTRY_LAYOUT.num_airs()).ok_or_else(|| {
+                            format!("proof-order decoder rejected realizable tag {tag}")
+                        })?;
                     if order_tag(&order) != tag {
                         return Err(format!(
                             "proof-order encoder does not invert the decoder at tag {tag}; \
                              refusing to mint"
                         ));
                     }
-
-                    match mode {
-                        Mode::Write => {
-                            // Minting keeps the strongest hash differential: packed encode-only
-                            // against the scalar commitment of the fully assembled stream.
-                            let assembled =
-                                factory.circuit_for_order(&order).map_err(|e| format!("{e}"))?;
-                            if *leaf != assembled.commitment {
-                                return Err(format!(
-                                    "batched encode-only registry leaf diverges from the scalar \
-                                     assembled circuit at tag {tag}; refusing to mint"
-                                ));
-                            }
-                        },
-                        Mode::Check => {
-                            // Drift checks still cover every assembled order, but compare exact
-                            // preimages instead of repeating 3.6 million scalar sponge runs.
-                            let assembled = factory
-                                .factored()
-                                .circuit_for_order(&order)
-                                .and_then(|circuit| circuit.to_ace())
-                                .map_err(|e| format!("{e}"))?;
-                            let fast = factory
-                                .factored()
-                                .encode_shuffle_section_for_order(&order, scalar_buffer)
-                                .map_err(|e| format!("{e}"))?;
-                            let shuffle_start = factory.const_felts();
-                            let shuffle_end = shuffle_start + factory.factored().num_shuffle_ops();
-                            if fast != &assembled.instructions()[shuffle_start..shuffle_end] {
-                                return Err(format!(
-                                    "encode-only shuffle stream diverges from the assembled \
-                                     circuit at tag {tag}"
-                                ));
-                            }
-                        },
+                    if mode == Mode::Write {
+                        let scalar_leaf = factory
+                            .leaf_for_order(&order, scalar_buffer)
+                            .map_err(|e| format!("{e}"))?;
+                        if *packed_leaf != scalar_leaf {
+                            return Err(format!(
+                                "packed registry leaf diverges from the scalar encode-only leaf at \
+                                 tag {tag}; refusing to mint"
+                            ));
+                        }
                     }
                 }
                 let finished = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -370,6 +381,13 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
             felt.as_canonical_u64(),
         )?;
     }
+    for (index, felt) in preprocessed_commitment.iter().enumerate() {
+        replace_masm_const(
+            &mut relation_mod_masm,
+            &format!("PREPROCESSED_COMMITMENT_{index}"),
+            felt.as_canonical_u64(),
+        )?;
+    }
 
     Ok(GeneratedArtifacts {
         row,
@@ -383,7 +401,7 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
     })
 }
 
-/// Commitment to the setup (preprocessed) trace tree under the Poseidon2 config.
+/// Commitment to the setup (preprocessed) trace tree under the Eidos config.
 ///
 /// Built through the same preprocessing code as the prover and Rust verifier, seeded with the
 /// freshly minted relation digest, so the config matches production exactly and the minted
@@ -391,10 +409,10 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
 /// itself is digest-independent; threading the digest avoids relying on that property here.)
 fn preprocessed_commitment(digest: [Felt; 4]) -> Word {
     let params = precompile_pcs_params();
-    let config = poseidon2_config(params, digest);
+    let config = eidos_config(params, digest);
     // The LMCS commitment is a 4-felt hash; Word is the MASM-facing representation.
-    let commitment: [Felt; 4] = preprocessed::build_uncached(&config).commitment().into();
-    Word::new(commitment)
+    let commitment: [u64; 4] = preprocessed::build_uncached(&config).commitment().into();
+    Word::new(commitment.map(Felt::new_unchecked))
 }
 
 fn render_pvm_layout(layout: &PvmReadLayout, stream_len: usize) -> Result<String, String> {
@@ -606,7 +624,7 @@ fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
          against the root at first use (`verified_pyramid`), so it carries no trust; the\n//! \
          root is protocol-visible.\n\n/// Root of the PVM ACE circuit registry (raw canonical \
          u64 limbs).\npub const PVM_ACE_REGISTRY_ROOT: [u64; 4] = [\n{root}];\n\n/// \
-         Commitment to the preprocessed (setup) trace tree under the Poseidon2 config (raw \
+         Commitment to the preprocessed (setup) trace tree under the Eidos config (raw \
          canonical\n/// u64 limbs). A trusted verifier input, not proof data: an in-VM verifier \
          cannot\n/// rebuild the bundle, so it observes this pinned value into the transcript.\n#[cfg(test)]\npub \
          const PVM_PREPROCESSED_COMMITMENT: [u64; 4] = [\n{preprocessed}];\n\n/// Encoded \
@@ -620,10 +638,16 @@ fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
 }
 
 fn render_protocol(artifacts: &GeneratedArtifacts) -> String {
-    let digest = format_word(&Word::new(artifacts.digest));
+    let digest = artifacts
+        .digest
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .map(|felt| felt.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
         "/// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.\n\
-         pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{digest}];\n"
+         pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [{digest}];\n"
     )
 }
 

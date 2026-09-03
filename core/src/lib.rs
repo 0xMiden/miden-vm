@@ -51,6 +51,7 @@ pub mod crypto {
     pub mod hash {
         pub use miden_crypto::hash::{
             blake::{Blake3_256, Blake3Digest},
+            eidos::Eidos,
             keccak::Keccak256,
             poseidon2::Poseidon2,
             rpo::Rpo256,
@@ -64,7 +65,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::{ecdsa_k256_keccak, falcon512_poseidon2};
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, falcon512_eidos};
     }
 }
 

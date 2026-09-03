@@ -3,19 +3,20 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::mem::size_of;
 
-use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
+use miden_crypto::{ONE, ZERO, hash::eidos::Eidos};
 
-use super::DeferredError;
+use super::{DEFERRED_AND_DOMAIN, DEFERRED_CHUNKS_DOMAIN, DeferredError};
 use crate::{
     Felt, Word,
+    program::domain::{MAX_EIDOS_INIT_VALUE, has_domain_selector_encoding},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
 
-/// Stable address of a deferred [`Node`], computed as a 4-felt Poseidon2 digest.
+/// Stable address of a deferred [`Node`], computed as a 4-felt Eidos digest.
 pub type Digest = Word;
 
-/// One Poseidon2 rate block, used as the unit of deferred data payloads.
+/// One eight-Felt Eidos block, used as the unit of deferred data payloads.
 pub type DataChunk = [Felt; 8];
 
 /// Digest of [`Node::TRUE`], root for an empty deferred state, and terminal of the AND-chain.
@@ -27,16 +28,18 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 // TAG
 // ================================================================================================
 
-/// Identifies the precompile that owns a node and carries its local immediates.
+/// Identifies the precompile that owns a node and carries its two local parameters.
 ///
 /// Framework ids are reserved for built-in nodes: `0` is TRUE, `1` is semantic AND, and
-/// `2` is opaque framework chunks. The remaining three felts are opaque to the framework and are
-/// decoded only by the owning [`super::Precompile`]. The canonical layout is
-/// `[id, arg0, arg1, arg2]` for hashing and wire encoding.
+/// `2` is opaque framework chunks. The next two felts are interpreted only by the owning
+/// [`super::Precompile`]. The fourth tag felt is reserved and must be zero, preserving the
+/// word-aligned stack and wire representation. The canonical layout is
+/// `[selector, arg0, arg1, 0]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     id: Felt,
-    args: [Felt; 3],
+    args: [Felt; 2],
+    reserved: Felt,
 }
 
 impl Tag {
@@ -44,13 +47,21 @@ impl Tag {
     const CHUNKS_ID: Felt = Felt::new_unchecked(2);
 
     /// Framework-owned tag for the canonical TRUE node.
-    pub const TRUE: Tag = Tag { id: ZERO, args: [ZERO; 3] };
+    pub const TRUE: Tag = Tag {
+        id: ZERO,
+        args: [ZERO; 2],
+        reserved: ZERO,
+    };
 
     /// Framework-owned tag for semantic conjunction nodes.
-    pub const AND: Tag = Tag { id: ONE, args: [ZERO; 3] };
+    pub const AND: Tag = Tag { id: ONE, args: [ZERO; 2], reserved: ZERO };
 
     /// Framework-owned tag for opaque chunk-list data nodes.
-    pub const CHUNKS: Tag = Tag { id: Self::CHUNKS_ID, args: [ZERO; 3] };
+    pub const CHUNKS: Tag = Tag {
+        id: Self::CHUNKS_ID,
+        args: [ZERO; 2],
+        reserved: ZERO,
+    };
 
     /// Returns whether an id is reserved by the deferred framework.
     pub(crate) fn is_framework_reserved_id(id: Felt) -> bool {
@@ -62,16 +73,19 @@ impl Tag {
         Self::is_framework_reserved_id(self.id)
     }
 
-    /// Creates a tag from a precompile id and its three local immediates.
+    /// Creates a tag from a registered precompile selector and its two local parameters.
     ///
     /// Framework ids are reserved for [`Tag::TRUE`], [`Tag::AND`], and [`Tag::CHUNKS`]. Use
     /// [`Tag::from_word`] only for raw stack/wire decoding that must preserve untrusted tags before
     /// validation.
-    pub fn precompile(id: Felt, args: [Felt; 3]) -> Result<Self, DeferredError> {
-        if Self::is_framework_reserved_id(id) {
+    pub fn precompile(id: Felt, args: [Felt; 2]) -> Result<Self, DeferredError> {
+        if Self::is_framework_reserved_id(id)
+            || !has_domain_selector_encoding(id)
+            || args.iter().any(|arg| arg.as_canonical_u64() > u64::from(MAX_EIDOS_INIT_VALUE))
+        {
             return Err(DeferredError::InvalidTag);
         }
-        Ok(Self { id, args })
+        Ok(Self { id, args, reserved: ZERO })
     }
 
     /// Returns the precompile/framework id component.
@@ -79,19 +93,37 @@ impl Tag {
         self.id
     }
 
-    /// Returns the three local immediate arguments.
-    pub const fn args(&self) -> [Felt; 3] {
+    /// Returns the two local parameters.
+    pub const fn args(&self) -> [Felt; 2] {
         self.args
+    }
+
+    /// Returns whether the reserved fourth tag lane is canonical zero.
+    pub fn has_canonical_reserved_lane(&self) -> bool {
+        self.reserved == ZERO
+    }
+
+    /// Returns whether every tag value can be injected into an Eidos initial CV without carry.
+    pub fn has_canonical_init_values(&self) -> bool {
+        self.id.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE)
+            && self
+                .args
+                .iter()
+                .all(|arg| arg.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE))
     }
 
     /// Returns the canonical layout used by hashing and wire encoding.
     pub const fn as_word(&self) -> [Felt; 4] {
-        [self.id, self.args[0], self.args[1], self.args[2]]
+        [self.id, self.args[0], self.args[1], self.reserved]
     }
 
     /// Restores a tag from the canonical 4-felt layout without validation.
     pub const fn from_word(w: [Felt; 4]) -> Self {
-        Self { id: w[0], args: [w[1], w[2], w[3]] }
+        Self {
+            id: w[0],
+            args: [w[1], w[2]],
+            reserved: w[3],
+        }
     }
 }
 
@@ -330,6 +362,8 @@ impl Node {
     };
 
     /// Creates a value-like single-chunk data node.
+    ///
+    /// Returns [`DeferredError::InvalidTag`] if `tag` is not a canonical precompile tag.
     pub fn value(tag: Tag, chunk: DataChunk) -> Result<Self, DeferredError> {
         let tag = Self::require_precompile_tag(tag)?;
         Ok(Self { tag, payload: Payload::value(chunk) })
@@ -338,7 +372,7 @@ impl Node {
     /// Creates a data node from a non-empty chunk collection.
     ///
     /// Returns [`DeferredError::InvalidPayload`] if `chunks` is empty and
-    /// [`DeferredError::InvalidTag`] if `tag` uses a framework-reserved id.
+    /// [`DeferredError::InvalidTag`] if `tag` is not a canonical precompile tag.
     pub fn try_data(tag: Tag, chunks: impl Into<Arc<[DataChunk]>>) -> Result<Self, DeferredError> {
         let tag = Self::require_precompile_tag(tag)?;
         Ok(Self { tag, payload: Payload::try_data(chunks)? })
@@ -374,12 +408,17 @@ impl Node {
     }
 
     /// Creates a join-shaped node that references two child digests.
+    ///
+    /// Returns [`DeferredError::InvalidTag`] if `tag` is not a canonical precompile tag.
     pub fn join(tag: Tag, lhs: Digest, rhs: Digest) -> Result<Self, DeferredError> {
         let tag = Self::require_precompile_tag(tag)?;
         Ok(Self { tag, payload: Payload::join(lhs, rhs) })
     }
 
     /// Creates a pair-list-shaped node that references one or more structural digest pairs.
+    ///
+    /// Returns [`DeferredError::InvalidPayload`] if `pairs` is empty and
+    /// [`DeferredError::InvalidTag`] if `tag` is not a canonical precompile tag.
     pub fn try_pair_list(
         tag: Tag,
         pairs: impl Into<Arc<[(Digest, Digest)]>>,
@@ -392,6 +431,9 @@ impl Node {
     }
 
     /// Creates a pair-list-shaped node from non-empty chunks encoded as `lhs_digest || rhs_digest`.
+    ///
+    /// Returns [`DeferredError::InvalidPayload`] if `chunks` is empty and
+    /// [`DeferredError::InvalidTag`] if `tag` is not a canonical precompile tag.
     pub fn try_pair_list_chunks(
         tag: Tag,
         chunks: impl Into<Arc<[DataChunk]>>,
@@ -412,7 +454,11 @@ impl Node {
     }
 
     fn require_precompile_tag(tag: Tag) -> Result<Tag, DeferredError> {
-        if tag.is_framework_reserved() {
+        if tag.is_framework_reserved()
+            || !has_domain_selector_encoding(tag.id())
+            || !tag.has_canonical_reserved_lane()
+            || !tag.has_canonical_init_values()
+        {
             return Err(DeferredError::InvalidTag);
         }
         Ok(tag)
@@ -490,14 +536,49 @@ impl Node {
             return TRUE_DIGEST;
         }
 
-        let mut state = [ZERO; 12];
-        state[Self::DATA_CHUNK_FELT_LEN..Self::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-            .copy_from_slice(&self.tag.as_word());
-        for chunk in self.payload.as_chunks() {
-            state[0..Self::DATA_CHUNK_FELT_LEN].copy_from_slice(chunk);
-            Poseidon2::apply_permutation(&mut state);
+        let chunks = self.payload.as_chunks();
+        if self.tag == Tag::AND {
+            let [chunk] = chunks else {
+                unreachable!("AND nodes always contain exactly one digest pair")
+            };
+            return Eidos::hash_elements_in_domain(chunk, DEFERRED_AND_DOMAIN);
         }
-        Word::new([state[0], state[1], state[2], state[3]])
+        if self.tag == Tag::CHUNKS {
+            let logical_len = Self::DATA_CHUNK_FELT_LEN
+                .checked_mul(chunks.len())
+                .and_then(|len| u32::try_from(len).ok())
+                .expect("deferred CHUNKS felt length must fit in u32");
+            let mut cv = Eidos::init_chaining_word(
+                DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32,
+                logical_len,
+            );
+            for chunk in chunks {
+                cv = Eidos::compress(cv, *chunk);
+            }
+            return cv;
+        }
+
+        // Precompile-owned nodes bind their registered selector, complete payload length, and two
+        // local arguments into the initial chaining value. The payload is an aligned sequence of
+        // complete Eidos blocks.
+        assert!(
+            self.tag.has_canonical_reserved_lane(),
+            "deferred tag reserved lane must be zero"
+        );
+        assert!(self.tag.has_canonical_init_values(), "deferred tag values must fit in u32");
+        let payload_len = Self::DATA_CHUNK_FELT_LEN
+            .checked_mul(chunks.len())
+            .and_then(|len| u32::try_from(len).ok())
+            .expect("deferred node payload length must fit in u32");
+        let [arg0, arg1] = self.tag.args();
+        let mut cv = Eidos::init_chaining_word_with_params(
+            self.tag.id().as_canonical_u64() as u32,
+            [payload_len, arg0.as_canonical_u64() as u32, arg1.as_canonical_u64() as u32],
+        );
+        for chunk in chunks {
+            cv = Eidos::compress(cv, *chunk);
+        }
+        cv
     }
 }
 
@@ -543,32 +624,50 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
+    use crate::deferred::precompile::test_precompile_selector;
 
-    const TAG_A: Tag = Tag::from_word([Felt::new_unchecked(42), ZERO, ZERO, ZERO]);
+    const TAG_A: Tag = Tag::from_word([test_precompile_selector(1), ZERO, ZERO, ZERO]);
     const TAG_B: Tag =
-        Tag::from_word([Felt::new_unchecked(42), ZERO, Felt::new_unchecked(1), ZERO]);
+        Tag::from_word([test_precompile_selector(1), ZERO, Felt::new_unchecked(1), ZERO]);
 
     fn block(seed: u64) -> DataChunk {
         core::array::from_fn(|i| Felt::new_unchecked(seed.wrapping_add(i as u64)))
     }
 
     #[test]
-    fn tag_precompile_rejects_framework_reserved_ids_but_from_word_is_raw() {
-        assert_eq!(Tag::precompile(Tag::TRUE.id(), [ZERO; 3]), Err(DeferredError::InvalidTag));
-        assert_eq!(Tag::precompile(Tag::AND.id(), [ZERO; 3]), Err(DeferredError::InvalidTag));
-        assert_eq!(Tag::precompile(Tag::CHUNKS.id(), [ZERO; 3]), Err(DeferredError::InvalidTag));
+    fn tag_precompile_rejects_reserved_and_unregistered_selectors_but_from_word_is_raw() {
+        assert_eq!(Tag::precompile(Tag::TRUE.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
+        assert_eq!(Tag::precompile(Tag::AND.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
+        assert_eq!(Tag::precompile(Tag::CHUNKS.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
         assert_eq!(
-            Tag::precompile(Tag::CHUNKS.id(), [Felt::new_unchecked(9), ZERO, ZERO]),
+            Tag::precompile(Tag::CHUNKS.id(), [Felt::new_unchecked(9), ZERO]),
+            Err(DeferredError::InvalidTag)
+        );
+        assert_eq!(
+            Tag::precompile(Felt::from_u32(u32::from(crate::operations::opcodes::JOIN)), [ZERO; 2],),
+            Err(DeferredError::InvalidTag)
+        );
+        assert_eq!(
+            Tag::precompile(Felt::from_u32(0x100), [ZERO; 2]),
             Err(DeferredError::InvalidTag)
         );
 
         let raw_true = Tag::from_word([ZERO, Felt::new_unchecked(9), ZERO, ZERO]);
         assert_eq!(raw_true.id(), Tag::TRUE.id());
-        assert_eq!(raw_true.args(), [Felt::new_unchecked(9), ZERO, ZERO]);
+        assert_eq!(raw_true.args(), [Felt::new_unchecked(9), ZERO]);
+        assert!(raw_true.has_canonical_reserved_lane());
 
         let raw_chunks = Tag::from_word([Tag::CHUNKS.id(), Felt::new_unchecked(9), ZERO, ZERO]);
         assert_eq!(raw_chunks.id(), Tag::CHUNKS.id());
-        assert_eq!(raw_chunks.args(), [Felt::new_unchecked(9), ZERO, ZERO]);
+        assert_eq!(raw_chunks.args(), [Felt::new_unchecked(9), ZERO]);
+        assert!(raw_chunks.has_canonical_reserved_lane());
+    }
+
+    #[test]
+    fn tag_precompile_accepts_full_u32_selector_and_arguments() {
+        let max = Felt::from_u32(u32::MAX);
+        let tag = Tag::precompile(max, [max; 2]).expect("u32::MAX is a valid framing value");
+        assert_eq!(tag.as_word(), [max, max, max, ZERO]);
     }
 
     #[test]
@@ -586,6 +685,38 @@ mod tests {
         let and = Node::and(TRUE_DIGEST, TRUE_DIGEST);
         assert_eq!(and.tag(), Tag::AND);
         assert_eq!(and.payload().as_join().unwrap(), (TRUE_DIGEST, TRUE_DIGEST));
+    }
+
+    #[test]
+    fn public_node_constructors_reject_noncanonical_precompile_tags() {
+        let chunk = block(1);
+        let too_large = Felt::new_unchecked(u64::from(u32::MAX) + 1);
+        let malformed = [
+            Tag::from_word([Felt::new_unchecked(42), ZERO, ZERO, ONE]),
+            Tag::from_word([
+                Felt::from_u32(u32::from(crate::operations::opcodes::JOIN)),
+                ZERO,
+                ZERO,
+                ZERO,
+            ]),
+            Tag::from_word([too_large, ZERO, ZERO, ZERO]),
+            Tag::from_word([test_precompile_selector(1), too_large, ZERO, ZERO]),
+            Tag::from_word([test_precompile_selector(1), ZERO, too_large, ZERO]),
+        ];
+
+        for tag in malformed {
+            assert_eq!(Node::value(tag, chunk), Err(DeferredError::InvalidTag));
+            assert_eq!(Node::try_data(tag, alloc::vec![chunk]), Err(DeferredError::InvalidTag));
+            assert_eq!(Node::join(tag, TRUE_DIGEST, TRUE_DIGEST), Err(DeferredError::InvalidTag));
+            assert_eq!(
+                Node::try_pair_list(tag, alloc::vec![(TRUE_DIGEST, TRUE_DIGEST)]),
+                Err(DeferredError::InvalidTag)
+            );
+            assert_eq!(
+                Node::try_pair_list_chunks(tag, alloc::vec![chunk]),
+                Err(DeferredError::InvalidTag)
+            );
+        }
     }
 
     #[test]

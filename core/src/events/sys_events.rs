@@ -274,12 +274,12 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: [A, B, C, D]} (16 elements)
     ///
     /// Where:
-    /// - KEY is computed as hash_elements([A, B, C, D]) using the sponge construction (sequential
-    ///   absorption; two rounds for four words).
+    /// - KEY is computed as the canonical Eidos hash of `[A, B, C, D]`, using two 8-Felt
+    ///   compression blocks with the full 16-Felt length bound into the initial chaining value.
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying a Poseidon2 permutation to all three words.
+    /// under the key `Eidos::compress(C, A || B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, C, ...]
@@ -289,9 +289,9 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
-    /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-    HpermToMap,
+    /// In particular, setting `C = Eidos::init_chaining_word(d, 8)` produces
+    /// `Eidos::hash_elements_in_domain(A || B, d)`.
+    CompressToMap,
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
@@ -361,13 +361,12 @@ pub enum SystemEvent {
 
     /// Evaluates a registered deferred node and pushes only its canonical payload as advice.
     ///
-    /// This is the payload-only compatibility event. Data payloads push two words per 8-felt chunk
-    /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
-    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join payloads use
-    /// the same two-word LIFO convention, leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE`
-    /// pushes no advice. These felts are unbound host hints. Before proof-relevant use, assembly
-    /// code must relate them with VM instructions to values established independently of that
-    /// advice.
+    /// Data payloads push two words per 8-felt chunk in advice order `HIGH, LOW` so
+    /// `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack for that chunk. Chunks
+    /// are emitted in canonical chunk order. Join payloads use the same two-word LIFO convention,
+    /// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These felts are
+    /// unbound host hints. Before proof-relevant use, assembly code must relate them with VM
+    /// instructions to values established independently of that advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -394,11 +393,11 @@ pub enum SystemEvent {
     ///
     /// This event does not push advice or return the node digest. A program that relies on the
     /// registered node must compute its digest with VM instructions from the same `TAG` and ordered
-    /// chunk sequence. The `register_mem` MASM wrapper does this by applying a Poseidon2 linear
-    /// hash to the same range, with one absorption per chunk and `TAG` as the initial capacity
-    /// word. If the event and the VM hash different chunk sequences, the VM-computed digest
-    /// does not identify the host-registered node and cannot bind that registration into a
-    /// proof-relevant deferred claim.
+    /// chunk sequence. The `register_mem` MASM wrapper does this with the canonical Eidos deferred
+    /// framing: the tag selector, payload length, and tag arguments initialize the chaining word,
+    /// then payload chunks are compressed in order. If the event and the VM hash different chunk
+    /// sequences, the VM-computed digest does not identify the host-registered node and cannot bind
+    /// that registration into a proof-relevant deferred claim.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, n_chunks, ...]
@@ -501,7 +500,7 @@ impl SystemEvent {
             Self::HdwordToMap,
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
-            Self::HpermToMap,
+            Self::CompressToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
             Self::DeferredEvaluateTag,
@@ -647,9 +646,12 @@ impl SystemEvent {
             name: "sys::hqword_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(6190830263511605775),
-            event: SystemEvent::HpermToMap,
-            name: "sys::hperm_to_map",
+            // This string is part of the event identity and is hashed into compiled programs.
+            // Changing it requires a MAST format transition even though the assembly instruction is
+            // spelled `adv.insert_compress`.
+            id: EventId::from_u64(454105713963103935),
+            event: SystemEvent::CompressToMap,
+            name: "sys::bcompress_to_map",
         },
         SystemEventEntry {
             id: EventId::from_u64(3200266522440553751),
@@ -788,7 +790,7 @@ mod test {
                 | SystemEvent::HdwordToMap
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::HpermToMap
+                | SystemEvent::CompressToMap
                 | SystemEvent::DeferredRegister
                 | SystemEvent::DeferredEvaluate
                 | SystemEvent::DeferredEvaluateTag
@@ -797,5 +799,12 @@ mod test {
                 | SystemEvent::TraceEvent => {},
             }
         }
+    }
+
+    #[test]
+    fn compress_to_map_preserves_its_wire_identity() {
+        assert_eq!(SystemEvent::CompressToMap as usize, 18);
+        assert_eq!(SystemEvent::CompressToMap.event_id(), EventId::from_u64(454105713963103935));
+        assert_eq!(SystemEvent::CompressToMap.event_name().as_str(), "sys::bcompress_to_map");
     }
 }

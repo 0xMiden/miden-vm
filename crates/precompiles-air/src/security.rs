@@ -2,14 +2,17 @@
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
 //! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
-//! field. Their recursive verifiers both use Poseidon2. Native verification derives alignment and
+//! field. Their recursive verifiers both use Eidos. Native verification derives alignment and
 //! collision resistance from the commitment scheme used for each proof.
 //!
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
 pub use miden_air::security::ProofSecurityParameters;
-use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
+use miden_air::{
+    MidenAir,
+    security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT},
+};
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, QuadFelt},
@@ -32,7 +35,10 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutAir,
     relations::MAX_MESSAGE_WIDTH,
     stark_config::{LOG_BLOWUP, LOG_FOLDING_ARITY},
-    transcript::{eval::TranscriptEvalAir, poseidon2::Poseidon2Air},
+    transcript::{
+        eidos::{EidosCompressionInterfaceAir, EidosCompressionNarrowAir},
+        eval::TranscriptEvalAir,
+    },
     uint::{add::UintAddAir, store_mul::UintStoreMulAir},
 };
 
@@ -48,11 +54,11 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 591,
+    num_composed_constraints: 780,
     max_constraint_degree: 5,
-    num_deep_terms: Some(770),
+    num_deep_terms: Some(922),
     lookup: LookupShape {
-        fractions_per_row: 247,
+        fractions_per_row: 283,
         max_message_width: 18,
     },
 };
@@ -101,7 +107,7 @@ pub fn derive_air_shape() -> AirShape {
 /// [`AIR_SHAPE`]'s `max_constraint_degree` for the quotient group's chunk count. Native
 /// verification of a proof committed under a non-algebraic LMCS (Blake3, alignment 1; Keccak,
 /// alignment 17) calls this instead of using the alignment-[`COMMITMENT_ALIGNMENT`] [`AIR_SHAPE`]
-/// fixed for the Poseidon2 preset.
+/// fixed for the default Eidos preset.
 pub fn num_deep_terms(alignment: usize) -> u32 {
     let mut num_columns = 0;
     for air in ChipletAir::all() {
@@ -241,9 +247,13 @@ fn fractions_per_row_of(air: ChipletAir) -> usize {
 
     match air {
         ChipletAir::ChunkNodeSponge => shape_of(ChunkNodeSpongeAir),
-        ChipletAir::Poseidon2 => shape_of(Poseidon2Air),
+        ChipletAir::EidosCompression => {
+            shape_of(EidosCompressionInterfaceAir) + shape_of(EidosCompressionNarrowAir)
+        },
         ChipletAir::KeccakRound => shape_of(KeccakRoundAir),
-        ChipletAir::BytePairLut => shape_of(BytePairLutAir),
+        ChipletAir::BytePairAnd8 => {
+            shape_of(BytePairLutAir) + MidenAir::And8Lookup.column_shape().iter().sum::<usize>()
+        },
         ChipletAir::TranscriptEval => shape_of(TranscriptEvalAir),
         ChipletAir::UintStoreMul => shape_of(UintStoreMulAir),
         ChipletAir::UintAdd => shape_of(UintAddAir),
@@ -332,7 +342,7 @@ pub fn proof_security_parameters(
     }
 }
 
-/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, per protocol round.
+/// Computes an Eidos chiplet-stack proof's conjectured security level, per protocol round.
 ///
 /// `log_max_height` is the largest chiplet trace height bound by the proof transcript. The lookup
 /// term includes the additional fractions added by the fixed `UintVal` and `EcGroup`
@@ -348,7 +358,7 @@ pub fn security_report(params: &ProtocolParams, log_max_height: u32) -> Security
     apply_fixed_boundary_correction(report, log_max_height)
 }
 
-/// Computes a Poseidon2 chiplet-stack proof's conjectured security level, in bits.
+/// Computes an Eidos chiplet-stack proof's conjectured security level, in bits.
 pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u32 {
     proof_security_parameters(params, log_max_height, COMMITMENT_ALIGNMENT, COLLISION_RESISTANCE)
         .conjectured_security_level()
@@ -358,16 +368,17 @@ pub fn conjectured_security_level(params: &PcsParams, log_max_height: u32) -> u3
 /// under a commitment scheme with the given column alignment.
 ///
 /// Every AIR shape input but `num_deep_terms` is alignment-independent, so this reuses
-/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] uses the Poseidon2 preset's alignment
-/// [`COMMITMENT_ALIGNMENT`]. This helper accepts a different alignment but still assumes the
-/// commitment scheme has [`COLLISION_RESISTANCE`] bits; verification returns
-/// [`ProofSecurityParameters`] built with both properties of the proof's actual hash function.
+/// [`AIR_SHAPE`] otherwise. [`conjectured_security_level`] is exact only at the Eidos preset's
+/// alignment [`COMMITMENT_ALIGNMENT`]; verification calls this instead for every hash function, so
+/// a proof committed under a different LMCS (Blake3, alignment 1; Keccak, alignment 17) is graded
+/// under its own DEEP term count and collision-resistance cap rather than the Eidos ones.
 pub fn conjectured_security_level_for_alignment(
     params: &PcsParams,
     log_max_height: u32,
     alignment: usize,
+    collision_resistance: u32,
 ) -> u32 {
-    proof_security_parameters(params, log_max_height, alignment, COLLISION_RESISTANCE)
+    proof_security_parameters(params, log_max_height, alignment, collision_resistance)
         .conjectured_security_level()
 }
 
@@ -404,11 +415,11 @@ mod tests {
         const FP_SHIFT: u32 = 16;
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
-        const SECURITY_CAP_FP: u64 = 8_388_606;
-        const LOOKUP_BASE_FP: u64 = 7_584_459;
-        const COMPOSITION_TERM_FP: u64 = 7_785_215;
+        const SECURITY_CAP_FP: u64 = 8_257_536;
+        const LOOKUP_BASE_FP: u64 = 7_571_595;
+        const COMPOSITION_TERM_FP: u64 = 7_758_980;
         const OOD_BASE_FP: u64 = 8_219_197;
-        const DEEP_BASE_FP: u64 = 7_760_199;
+        const DEEP_BASE_FP: u64 = 7_743_166;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -429,7 +440,7 @@ mod tests {
 
     /// [`num_deep_terms`] at [`COMMITMENT_ALIGNMENT`] must reproduce [`AIR_SHAPE`]'s stored
     /// `num_deep_terms` exactly, so [`conjectured_security_level_for_alignment`] computes the same
-    /// level for a Poseidon2 proof as [`conjectured_security_level`].
+    /// level for an Eidos proof as [`conjectured_security_level`].
     #[test]
     fn num_deep_terms_matches_the_reference_alignment() {
         assert_eq!(num_deep_terms(COMMITMENT_ALIGNMENT), AIR_SHAPE.num_deep_terms.unwrap());
@@ -489,32 +500,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_191_195, 7_785_215, 7_825_981, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_178_337, 7_758_980, 7_825_981, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_535_882, 7_785_215, 7_170_621, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
+                [6_523_018, 7_758_980, 7_170_621, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_339_274, 7_785_215, 6_974_013, 8_388_606, 7_039_549, 6_335_399, 8_388_606],
+                [6_326_410, 7_758_980, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_273_738, 7_785_215, 6_908_477, 8_388_606, 6_974_013, 6_335_399, 8_388_606],
+                [6_260_874, 7_758_980, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [6_011_594, 7_785_215, 6_646_333, 8_388_606, 6_711_869, 6_335_399, 8_388_606],
+                [5_998_730, 7_758_980, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_535_882, 7_785_215, 7_170_621, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
+                [6_523_018, 7_758_980, 7_170_621, 7_743_166, 6_974_013, 1_353_667, 8_257_536],
                 20,
             ),
         ];

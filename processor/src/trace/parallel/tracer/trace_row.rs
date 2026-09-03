@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use miden_air::{
     CoreCols, DecoderCols, StackCols, SystemCols,
     trace::{
-        chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
+        chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
         decoder::{NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };
@@ -217,7 +217,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         }
 
         // Update block address for the upcoming block
-        self.decoder_state.current_addr += CONTROLLER_ROWS_PER_PERM_FELT;
+        self.decoder_state.current_addr += CONTROLLER_ROWS_PER_HASHER_OP_FELT;
 
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;

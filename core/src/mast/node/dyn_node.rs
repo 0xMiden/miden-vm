@@ -33,18 +33,18 @@ impl DynNode {
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(16830415514927835337),
-        Felt::new_unchecked(12164645914672292987),
-        Felt::new_unchecked(13192574193032437705),
-        Felt::new_unchecked(4604554596675732269),
+        Felt::new_unchecked(6476724603839187224),
+        Felt::new_unchecked(5450330173526611787),
+        Felt::new_unchecked(4088400361287163243),
+        Felt::new_unchecked(4572720451963309439),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(16952228088962355159),
-        Felt::new_unchecked(5793482471479538911),
-        Felt::new_unchecked(14446299416172848527),
-        Felt::new_unchecked(13522295374716441620),
+        Felt::new_unchecked(5563719660626502405),
+        Felt::new_unchecked(4038275711031562481),
+        Felt::new_unchecked(3063270655631705004),
+        Felt::new_unchecked(9126879465998661348),
     ]);
 }
 
@@ -236,9 +236,8 @@ impl proptest::prelude::Arbitrary for DynNodeBuilder {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::poseidon2::Poseidon2;
-
     use super::*;
+    use crate::chiplets::hasher;
 
     /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
     /// domain.
@@ -249,17 +248,14 @@ mod tests {
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
-            Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+            hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         let dyncall_node_id = forest.push_node(DynNodeBuilder::new_dyncall()).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
-            Poseidon2::merge_in_domain(
-                &[Word::default(), Word::default()],
-                DynNode::DYNCALL_DOMAIN
-            )
+            hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
         );
     }
 }

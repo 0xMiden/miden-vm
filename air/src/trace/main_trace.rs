@@ -11,14 +11,14 @@ use miden_core::{
 
 use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
+    and8_lookup::NUM_AND8_LOOKUP_COLS,
     chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
     decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS},
-    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
+    eidos_compression::NUM_EIDOS_COMPRESSION_COLS,
 };
 use crate::constraints::{
     columns::{ChipletCols, CoreCols, NUM_CHIPLETS_COLS, NUM_CORE_COLS},
     decoder::columns::DecoderCols,
-    range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
@@ -33,7 +33,6 @@ pub struct MainTraceRow<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
-    pub range: RangeCols<T>,
     pub chiplets: ChipletCols<T>,
 }
 
@@ -69,8 +68,10 @@ struct TraceStorage {
     core_rm: RowMajorMatrix<Felt>,
     /// Chiplets matrix (`CHIPLETS_WIDTH` cols), at its own per-AIR height.
     chiplets_rm: RowMajorMatrix<Felt>,
-    /// Poseidon2 permutation matrix, at its own per-AIR height.
-    poseidon2_permutation_rm: RowMajorMatrix<Felt>,
+    /// Eidos compression matrix, at its own per-AIR height.
+    eidos_compression_rm: RowMajorMatrix<Felt>,
+    /// Byte-pair lookup matrix, at its fixed table height.
+    and8_lookup_rm: RowMajorMatrix<Felt>,
 }
 
 #[derive(Debug)]
@@ -79,15 +80,15 @@ pub struct MainTrace {
     last_program_row: RowIndex,
 }
 
-/// Physical row width of `core_rm`: the full per-AIR Core matrix width (`NUM_CORE_COLS`),
-/// i.e. system+decoder+stack columns plus the two trailing range-checker columns.
+/// Physical row width of `core_rm`: the full per-AIR Core matrix width (`NUM_CORE_COLS`).
 const CORE_STORAGE_WIDTH: usize = NUM_CORE_COLS;
 
 impl MainTrace {
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
-        poseidon2_permutation_rm: Vec<Felt>,
+        eidos_compression_rm: Vec<Felt>,
+        and8_lookup_rm: Vec<Felt>,
         last_program_row: RowIndex,
     ) -> Self {
         assert_eq!(
@@ -101,27 +102,35 @@ impl MainTrace {
             "chiplets buffer not a multiple of CHIPLETS_WIDTH"
         );
         assert_eq!(
-            poseidon2_permutation_rm.len() % NUM_POSEIDON2_PERMUTATION_COLS,
+            eidos_compression_rm.len() % NUM_EIDOS_COMPRESSION_COLS,
             0,
-            "Poseidon2 buffer not a multiple of NUM_POSEIDON2_PERMUTATION_COLS"
+            "Eidos compression buffer not a multiple of NUM_EIDOS_COMPRESSION_COLS"
+        );
+        assert_eq!(
+            and8_lookup_rm.len() % NUM_AND8_LOOKUP_COLS,
+            0,
+            "AND8 lookup buffer not a multiple of NUM_AND8_LOOKUP_COLS"
         );
         let core_rows = core_rm.len() / CORE_STORAGE_WIDTH;
         let chiplets_rows = chiplets_rm.len() / CHIPLETS_WIDTH;
-        let poseidon2_rows = poseidon2_permutation_rm.len() / NUM_POSEIDON2_PERMUTATION_COLS;
+        let eidos_compression_rows = eidos_compression_rm.len() / NUM_EIDOS_COMPRESSION_COLS;
+        let and8_rows = and8_lookup_rm.len() / NUM_AND8_LOOKUP_COLS;
         assert!(core_rows.is_power_of_two(), "core height must be a power of two");
         assert!(chiplets_rows.is_power_of_two(), "chiplets height must be a power of two");
         assert!(
-            poseidon2_rows.is_power_of_two(),
-            "Poseidon2 permutation height must be a power of two"
+            eidos_compression_rows.is_power_of_two(),
+            "Eidos compression height must be a power of two"
         );
+        assert!(and8_rows.is_power_of_two(), "AND8 lookup height must be a power of two");
         Self {
             storage: TraceStorage {
                 core_rm: RowMajorMatrix::new(core_rm, CORE_STORAGE_WIDTH),
                 chiplets_rm: RowMajorMatrix::new(chiplets_rm, CHIPLETS_WIDTH),
-                poseidon2_permutation_rm: RowMajorMatrix::new(
-                    poseidon2_permutation_rm,
-                    NUM_POSEIDON2_PERMUTATION_COLS,
+                eidos_compression_rm: RowMajorMatrix::new(
+                    eidos_compression_rm,
+                    NUM_EIDOS_COMPRESSION_COLS,
                 ),
+                and8_lookup_rm: RowMajorMatrix::new(and8_lookup_rm, NUM_AND8_LOOKUP_COLS),
             },
             last_program_row,
         }
@@ -130,7 +139,7 @@ impl MainTrace {
     /// Returns the stored core trace row at index `i`.
     ///
     /// # Panics
-    /// Panics if `i` is past the core trace height — see [`Self::core_height`]. Callers
+    /// Panics if `i` is past the core trace height; see [`Self::core_height`]. Callers
     /// iterating the unified trace must bound by [`Self::core_height`] for Core accessors.
     #[inline]
     pub fn core_row(&self, i: RowIndex) -> &CoreCols<Felt> {
@@ -141,12 +150,12 @@ impl MainTrace {
     /// Returns the stored chiplets trace row at index `i`.
     ///
     /// The returned [`ChipletCols`] is the raw column layout shared across all chiplets;
-    /// use one of the per-chiplet overlays (`.controller()`, `.bitwise()`,
-    /// `.memory()`, `.ace()`, `.kernel_rom()`) to name the physical columns according to
-    /// the chiplet active on that row.
+    /// use one of the per-chiplet overlays (`.controller()`, `.bitwise()`, `.memory()`,
+    /// `.ace()`, `.kernel_rom()`) to name the physical columns according to the chiplet
+    /// active on that row.
     ///
     /// # Panics
-    /// Panics if `i` is past the chiplets trace height — see [`Self::chiplets_height`]. The
+    /// Panics if `i` is past the chiplets trace height; see [`Self::chiplets_height`]. The
     /// four `is_*_row` classifiers short-circuit past the chiplets height, so they can be
     /// used as bound-aware filters when iterating the unified trace.
     #[inline]
@@ -155,26 +164,38 @@ impl MainTrace {
         rows[i.as_usize()].as_slice().borrow()
     }
 
-    /// Splits the trace into the per-AIR matrices used by the multi-AIR proving path.
-    pub fn to_air_matrices(
+    /// Clones the stored buffers into the per-AIR matrices used by the multi-AIR proving path.
+    pub fn clone_air_matrices(
         &self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         // Each buffer is already stored at exactly its per-AIR height.
         (
             self.storage.core_rm.clone(),
             self.storage.chiplets_rm.clone(),
-            self.storage.poseidon2_permutation_rm.clone(),
+            self.storage.eidos_compression_rm.clone(),
+            self.storage.and8_lookup_rm.clone(),
         )
     }
 
-    /// Like [`Self::to_air_matrices`], but consumes the trace and moves buffers.
+    /// Like [`Self::clone_air_matrices`], but consumes the trace and moves buffers.
     pub fn into_air_matrices(
         self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         (
             self.storage.core_rm,
             self.storage.chiplets_rm,
-            self.storage.poseidon2_permutation_rm,
+            self.storage.eidos_compression_rm,
+            self.storage.and8_lookup_rm,
         )
     }
 
@@ -182,7 +203,8 @@ impl MainTrace {
     pub fn num_rows(&self) -> usize {
         self.core_height()
             .max(self.chiplets_height())
-            .max(self.poseidon2_permutation_height())
+            .max(self.eidos_compression_height())
+            .max(self.byte_pair_lookup_height())
     }
 
     /// Returns the Core-AIR trace height.
@@ -197,10 +219,16 @@ impl MainTrace {
         self.storage.chiplets_rm.height()
     }
 
-    /// Returns the Poseidon2-permutation AIR trace height.
+    /// Returns the Eidos compression AIR trace height.
     #[inline]
-    pub fn poseidon2_permutation_height(&self) -> usize {
-        self.storage.poseidon2_permutation_rm.height()
+    pub fn eidos_compression_height(&self) -> usize {
+        self.storage.eidos_compression_rm.height()
+    }
+
+    /// Returns the byte-pair lookup AIR trace height.
+    #[inline]
+    pub fn byte_pair_lookup_height(&self) -> usize {
+        self.storage.and8_lookup_rm.height()
     }
 
     pub fn last_program_row(&self) -> RowIndex {
@@ -210,7 +238,7 @@ impl MainTrace {
     /// Returns one column as a new vector.
     ///
     /// Returns a column of length [`Self::core_height`] for Core columns and
-    /// [`Self::chiplets_height`] for Chiplets columns — there is no unified projection.
+    /// [`Self::chiplets_height`] for Chiplets columns; there is no unified projection.
     // Test/debug-only, the proving path never materializes columns.
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column(&self, col_idx: usize) -> Vec<Felt> {
@@ -470,15 +498,20 @@ impl MainTrace {
         self.chiplet_cols(i).chiplets[4]
     }
 
-    /// Returns `true` if a row is part of the hash-controller chiplet.
+    /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
+    pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).chiplets[5]
+    }
+
+    /// Returns `true` if a row is part of the hasher-controller chiplet.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; rows past `chiplets_height()`
-    /// are outside the chiplets trace.
+    /// are not part of any chiplet by definition in the split-trace model.
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO
+        self.chiplet_selector_0(i) == ONE
     }
 
     /// Returns the (full) state of the hasher chiplet at row i.
@@ -486,26 +519,56 @@ impl MainTrace {
         self.chiplet_cols(i).controller().state
     }
 
-    /// Returns the hasher's node index column at row i
+    /// Returns the Merkle current-node index carried by a controller row.
     pub fn chiplet_node_index(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().node_index
+        self.chiplet_cols(i).controller().merkle_node_index()
+    }
+
+    /// Returns the Merkle parent-node index carried by a controller row.
+    pub fn chiplet_node_index_next(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).controller().merkle_node_index_next()
     }
 
     /// Returns the hasher's mrupdate_id column at row i (domain separator for sibling table).
     pub fn chiplet_mrupdate_id(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().mrupdate_id
+        self.chiplet_cols(i).controller_mrupdate_id()
     }
 
-    /// Returns the hasher's is_boundary column at row i (1 on boundary rows: first input or last
-    /// output of an operation).
-    pub fn chiplet_is_boundary(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().is_boundary
+    /// Returns the Merkle start flag carried by a controller row.
+    pub fn chiplet_merkle_is_start(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).controller().merkle_is_start()
     }
 
-    /// Returns the hasher's direction_bit column at row i. On Merkle controller rows this holds
-    /// the direction bit extracted from the node index; zero on non-Merkle rows.
-    pub fn chiplet_direction_bit(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().direction_bit
+    /// Returns the virtual Merkle direction bit `node_index - 2 * node_index_next`.
+    pub fn chiplet_merkle_direction_bit(&self, i: RowIndex) -> Felt {
+        let ctrl = self.chiplet_cols(i).controller();
+        ctrl.merkle_node_index() - ctrl.merkle_node_index_next().double()
+    }
+
+    /// Returns the chiplet row clock at row i.
+    pub fn chiplet_clk(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).chip_clk
+    }
+
+    /// Returns the chiplet stream-mode column at row i.
+    ///
+    /// # Panics
+    /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
+    /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
+    /// height, so they can be used as bound-aware filters.
+    pub fn chiplet_stream_mode(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).bitwise_stream_mode()
+    }
+
+    /// Returns the derived AEAD stream flag at row i. No physical column stores this flag.
+    pub fn chiplet_aead_stream_active(&self, i: RowIndex) -> Felt {
+        let cols = self.chiplet_cols(i);
+        if cols.chiplets[0] == ZERO && cols.chiplets[1] == ZERO && cols.bitwise_stream_mode() == ONE
+        {
+            ONE
+        } else {
+            ZERO
+        }
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.
@@ -519,7 +582,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
-    /// Active when `s0=1` and `s1=0`.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height so the classifier is safe to
     /// call on any row of the unified trace.
@@ -527,33 +590,41 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE && self.chiplet_selector_1(i) == ZERO
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
+            && self.chiplet_selector_1(i) == ZERO
     }
 
-    /// Returns the bitwise column holding the aggregated value of input `a` at row i.
+    /// Returns bitwise input `a`, recomposed from little-endian byte witnesses at row i.
     pub fn chiplet_bitwise_a(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().a
+        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().a_bytes)
     }
 
-    /// Returns the bitwise column holding the aggregated value of input `b` at row i.
+    /// Returns bitwise input `b`, recomposed from little-endian byte witnesses at row i.
     pub fn chiplet_bitwise_b(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().b
+        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().b_bytes)
     }
 
-    /// Returns the bitwise column holding the aggregated value of the output at row i.
+    /// Returns the bitwise result recomposed from the byte witnesses at row i.
     pub fn chiplet_bitwise_z(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().output
+        let cols = self.chiplet_cols(i).bitwise();
+        let a = u32_from_bitwise_bytes(cols.a_bytes);
+        let b = u32_from_bitwise_bytes(cols.b_bytes);
+        let and = u32_from_bitwise_bytes(cols.and_bytes);
+        let xor = a + b - and.double();
+        and + cols.op_flag * (xor - and)
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
-    /// Active when `s0=1`, `s1=1`, and `s2=0`.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ZERO
     }
@@ -604,14 +675,15 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
-    /// Active when `s0=1`, `s1=1`, `s2=1`, and `s3=0`.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ZERO
@@ -722,14 +794,15 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the kernel chiplet.
-    /// Active when `s0=1`, `s1=1`, `s2=1`, `s3=1`, and `s4=0`.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=1, s4=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
@@ -775,26 +848,26 @@ impl MainTrace {
     //
     // MPVERIFY (read-only path verification) does not interact with the sibling table.
 
-    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) hasher controller input row.
+    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) controller row.
     ///
     /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
-    /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
+    /// MV rows insert siblings into the virtual sibling table via the hash-kernel bus.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mv(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO        // chiplet s0=0 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // controller s0=1 (input row)
-            && self.chiplet_selector_2(i) == ONE  // controller s1=1 (MR_UPDATE_OLD)
-            && self.chiplet_selector_3(i) == ZERO // controller s2=0
+        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
+            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
+            && self.chiplet_selector_3(i) == ZERO // s2=0
     }
 
-    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) hasher controller input row.
+    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) controller row.
     ///
     /// These rows appear during the new-path leg of a Merkle root update (MRUPDATE). Each
-    /// MU input row removes a sibling from the virtual sibling table via the hash_kernel bus.
+    /// MU rows remove siblings from the virtual sibling table via the hash-kernel bus.
     /// The sibling table balance ensures the old and new paths use the same siblings.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
@@ -802,11 +875,18 @@ impl MainTrace {
         if i.as_usize() >= self.chiplets_height() {
             return false;
         }
-        self.chiplet_selector_0(i) == ZERO        // chiplet s0=0 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // controller s0=1 (input row)
-            && self.chiplet_selector_2(i) == ONE  // controller s1=1 (MR_UPDATE_NEW)
-            && self.chiplet_selector_3(i) == ONE // controller s2=1
+        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
+            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
+            && self.chiplet_selector_3(i) == ONE // s2=1
     }
+}
+
+fn u32_from_bitwise_bytes(bytes: [Felt; 4]) -> Felt {
+    let bytes = bytes.map(|byte| {
+        u8::try_from(byte.as_canonical_u64()).expect("bitwise byte witness should fit in u8")
+    });
+    Felt::from_u32(u32::from_le_bytes(bytes))
 }
 
 #[cfg(test)]
@@ -820,10 +900,11 @@ mod tests {
     /// holds `Felt::from_u32(row * TRACE_WIDTH + col)` for col positions matching the
     /// equivalent unified-trace column index.
     fn deterministic_parts_trace(num_rows: usize) -> MainTrace {
-        // `core_rm` is the full per-AIR Core matrix (range columns in trailing slots).
+        // `core_rm` is the full per-AIR Core matrix.
         let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
-        let mut poseidon2_rm = Vec::with_capacity(num_rows * NUM_POSEIDON2_PERMUTATION_COLS);
+        let mut eidos_compression_rm = Vec::with_capacity(num_rows * NUM_EIDOS_COMPRESSION_COLS);
+        let mut and8_rm = Vec::with_capacity(num_rows * NUM_AND8_LOOKUP_COLS);
 
         for row in 0..num_rows {
             for col in 0..CORE_STORAGE_WIDTH {
@@ -833,27 +914,38 @@ mod tests {
                 chiplets_rm
                     .push(Felt::from_u32((row * TRACE_WIDTH + CORE_STORAGE_WIDTH + c) as u32));
             }
-            for c in 0..NUM_POSEIDON2_PERMUTATION_COLS {
-                poseidon2_rm.push(Felt::from_u32((row * 100 + c) as u32));
+            for c in 0..NUM_EIDOS_COMPRESSION_COLS {
+                eidos_compression_rm.push(Felt::from_u32(c as u32));
+            }
+            for c in 0..NUM_AND8_LOOKUP_COLS {
+                and8_rm.push(Felt::from_u32(c as u32));
             }
         }
 
-        MainTrace::from_parts(core_rm, chiplets_rm, poseidon2_rm, RowIndex::from(0))
+        MainTrace::from_parts(
+            core_rm,
+            chiplets_rm,
+            eidos_compression_rm,
+            and8_rm,
+            RowIndex::from(0),
+        )
     }
 
     #[test]
-    fn into_split_matches_borrowed_split() {
+    fn owned_matrices_match_cloned_matrices() {
         const NUM_ROWS: usize = 8;
-        let (ref_core, ref_chip, ref_poseidon2) =
-            deterministic_parts_trace(NUM_ROWS).to_air_matrices();
-        let (moved_core, moved_chip, moved_poseidon2) =
+        let (ref_core, ref_chip, ref_eidos, ref_and8) =
+            deterministic_parts_trace(NUM_ROWS).clone_air_matrices();
+        let (moved_core, moved_chip, moved_eidos, moved_and8) =
             deterministic_parts_trace(NUM_ROWS).into_air_matrices();
 
         assert_eq!(ref_core.width(), moved_core.width());
         assert_eq!(ref_chip.width(), moved_chip.width());
-        assert_eq!(ref_poseidon2.width(), moved_poseidon2.width());
+        assert_eq!(ref_eidos.width(), moved_eidos.width());
+        assert_eq!(ref_and8.width(), moved_and8.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
-        assert_eq!(ref_poseidon2.values, moved_poseidon2.values);
+        assert_eq!(ref_eidos.values, moved_eidos.values);
+        assert_eq!(ref_and8.values, moved_and8.values);
     }
 }

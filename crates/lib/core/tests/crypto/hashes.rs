@@ -3,13 +3,13 @@ use std::sync::Arc;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, deferred::DeferredState, utils::bytes_to_packed_u32_elements};
 use miden_core_lib::CoreLibrary;
-use miden_crypto::hash::keccak::Keccak256;
+use miden_crypto::hash::{eidos::Eidos, keccak::Keccak256};
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
 };
 
-use crate::helpers::{masm_push_felts, masm_store_felts};
+use crate::helpers::{masm_push_felts, masm_push_word, masm_store_felts};
 
 const IN_PTR: u32 = 128;
 
@@ -81,11 +81,20 @@ fn core_hash_wrapper_cycle_baselines() {
     let short = b"core hash compatibility";
 
     let mut mismatches = Vec::new();
-    // Core invokes the separately packaged precompile wrappers through dynamic MAST calls.
+    // Core invokes the bundled precompile wrappers. Eidos content addressing makes deferred-node
+    // registration compression-based, so pin the resulting wrapper choreography explicitly.
     for (name, source, expected) in [
-        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 212),
-        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 232),
-        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 248),
+        ("eidos_init_8", cycle_eidos_init_source(8), 33),
+        ("eidos_precomputed_init_8", cycle_eidos_precomputed_init_source(8), 25),
+        ("eidos_domain_init_8", cycle_eidos_domain_init_source(42, 8), 34),
+        (
+            "eidos_precomputed_domain_init_8",
+            cycle_eidos_precomputed_domain_init_source(42, 8),
+            25,
+        ),
+        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 227),
+        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 244),
+        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 266),
     ] {
         let output =
             run_core_program(&source).unwrap_or_else(|err| panic!("{name} failed: {err:?}"));
@@ -96,6 +105,72 @@ fn core_hash_wrapper_cycle_baselines() {
     }
 
     assert!(mismatches.is_empty(), "cycle count changed:\n{}", mismatches.join("\n"));
+}
+
+fn cycle_eidos_init_source(num_elements: u32) -> String {
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            push.{num_elements}
+            exec.::miden::core::crypto::hashes::eidos::init
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_precomputed_init_source(num_elements: u32) -> String {
+    let cv = masm_push_word(&Eidos::init_chaining_word(0, num_elements));
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            {cv}
+            exec.::miden::core::crypto::hashes::eidos::init_with_chaining_word
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_domain_init_source(domain: u32, num_elements: u32) -> String {
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            push.{domain} push.{num_elements}
+            exec.::miden::core::crypto::hashes::eidos::init_in_domain
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
+}
+
+fn cycle_eidos_precomputed_domain_init_source(domain: u32, num_elements: u32) -> String {
+    let cv = masm_push_word(&Eidos::init_chaining_word(domain, num_elements));
+    format!(
+        r#"
+        {TRUNCATE_STACK_TO_1_PROC}
+
+        begin
+            clk push.512 mem_store
+            {cv}
+            exec.::miden::core::crypto::hashes::eidos::init_with_chaining_word
+            clk push.512 mem_load sub
+            exec.truncate_stack_to_1
+        end
+        "#,
+    )
 }
 
 fn run_core_hash_bytes(module: &str, input: &[u8]) -> Result<ExecutionOutput, ExecutionError> {

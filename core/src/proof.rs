@@ -28,17 +28,17 @@ const COMPLETE_PROOF_DISCRIMINANT: u8 = 1;
 
 /// The recursive VM verifier root declared by proofs from the current prover.
 pub const CURRENT_VM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(3472736072004736895),
-    crate::Felt::new_unchecked(9258997376938263475),
-    crate::Felt::new_unchecked(2749074330562194466),
-    crate::Felt::new_unchecked(16770332914073895013),
+    crate::Felt::new_unchecked(6176909342753683440),
+    crate::Felt::new_unchecked(3632221958757928181),
+    crate::Felt::new_unchecked(3463159499691012341),
+    crate::Felt::new_unchecked(445533937532840762),
 ]);
 /// The recursive precompile verifier root declared by proofs from the current prover.
 pub const CURRENT_PVM_VERIFIER_ROOT: Word = Word::new([
-    crate::Felt::new_unchecked(9567976034529193007),
-    crate::Felt::new_unchecked(16098679426107462596),
-    crate::Felt::new_unchecked(270852360285345822),
-    crate::Felt::new_unchecked(12812280715059172950),
+    crate::Felt::new_unchecked(2138983471985760303),
+    crate::Felt::new_unchecked(5983557862143112800),
+    crate::Felt::new_unchecked(7455914928205599507),
+    crate::Felt::new_unchecked(691561539498361881),
 ]);
 
 // HASH FUNCTION
@@ -62,6 +62,8 @@ pub enum HashFunction {
     Poseidon2 = 0x04,
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
+    /// Eidos hash function with 252-bit packed output.
+    Eidos = 0x06,
 }
 
 impl HashFunction {
@@ -73,6 +75,7 @@ impl HashFunction {
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
+            HashFunction::Eidos => 126,
         }
     }
 }
@@ -80,7 +83,7 @@ impl HashFunction {
 /// Error type for invalid hash function strings.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
+    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak, eidos"
 )]
 pub struct InvalidHashFunctionError {
     pub hash_function: String,
@@ -96,6 +99,7 @@ impl TryFrom<u8> for HashFunction {
             0x03 => Ok(Self::Rpx256),
             0x04 => Ok(Self::Poseidon2),
             0x05 => Ok(Self::Keccak),
+            0x06 => Ok(Self::Eidos),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -113,6 +117,7 @@ impl TryFrom<&str> for HashFunction {
             "rpx" => Ok(Self::Rpx256),
             "poseidon2" => Ok(Self::Poseidon2),
             "keccak" => Ok(Self::Keccak),
+            "eidos" => Ok(Self::Eidos),
             _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
         }
     }
@@ -125,12 +130,13 @@ impl Arbitrary for HashFunction {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         any::<u8>()
-            .prop_map(|tag| match tag % 5 {
+            .prop_map(|tag| match tag % 6 {
                 0 => Self::Blake3_256,
                 1 => Self::Rpo256,
                 2 => Self::Rpx256,
                 3 => Self::Poseidon2,
-                _ => Self::Keccak,
+                4 => Self::Keccak,
+                _ => Self::Eidos,
             })
             .boxed()
     }
@@ -596,7 +602,14 @@ mod tests {
     };
 
     fn dummy_stark_proof(bytes: &[u8]) -> StarkProof {
-        StarkProof::new(bytes.to_vec(), HashFunction::Blake3_256)
+        StarkProof::new(bytes.to_vec(), HashFunction::Eidos)
+    }
+
+    #[test]
+    fn eidos_hash_function_wire_tag_is_pinned() {
+        assert_eq!(HashFunction::Eidos as u8, 0x06);
+        assert_eq!(HashFunction::Eidos.to_bytes(), [0x06]);
+        assert_eq!(HashFunction::read_from_bytes(&[0x06]).unwrap(), HashFunction::Eidos);
     }
 
     fn root(value: u64) -> DeferredRoot {
@@ -746,7 +759,7 @@ mod tests {
 
     #[test]
     fn proof_minimum_serialized_sizes_match_shortest_canonical_encodings() {
-        let stark = StarkProof::new(Vec::new(), HashFunction::Blake3_256);
+        let stark = StarkProof::new(Vec::new(), HashFunction::Eidos);
         assert_eq!(StarkProof::min_serialized_size(), stark.to_bytes().len());
         assert_eq!(StarkProof::min_serialized_size(), 2);
 
@@ -758,14 +771,14 @@ mod tests {
         assert_eq!(VmProof::min_serialized_size(), 34);
 
         let empty = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: Vec::new(),
         };
         assert_eq!(PrecompileProof::min_serialized_size(), empty.to_bytes().len());
         assert_eq!(PrecompileProof::min_serialized_size(), 3);
 
         let singleton = PrecompileProof {
-            proof: StarkProof::new(Vec::new(), HashFunction::Blake3_256),
+            proof: StarkProof::new(Vec::new(), HashFunction::Eidos),
             roots: alloc::vec![root(1)],
         };
         assert_eq!(singleton.to_bytes().len(), 35);

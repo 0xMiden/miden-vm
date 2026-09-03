@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::mem
 use miden::core::word
 
@@ -14,9 +14,17 @@ const LEAF_DEPTH = 64
 const MAX_LEAF_SIZE = 8192
 
 # Domain identifier used when hashing SMT leaves. Matches `SmtLeaf::LEAF_DOMAIN` in miden-crypto
-# and is mixed into the Poseidon2 capacity word to domain-separate leaf hashes from ordinary
-# inner Merkle nodes.
+# and is mixed into the Eidos chaining word to domain-separate leaf hashes from ordinary inner
+# Merkle nodes.
 const LEAF_DOMAIN = 0x13af
+
+# Eidos chaining word for one 8-Felt block under LEAF_DOMAIN.
+const LEAF_MERGE_INIT_CV = [
+    4280581857092834223,
+    2688637132020383752,
+    1947077364412317696,
+    6620516959492505600
+]
 
 # EXPORTS
 # =================================================================================================
@@ -109,7 +117,7 @@ pub proc get
 
             # Hash leaf preimage with domain separation and ensure that it equals node value
             # (28 cycles)
-            push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
+            push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word assert_eqw
             # => [V, R]
         else
             # => [leaf_size, NV, K, R]
@@ -210,7 +218,7 @@ pub proc set
             # hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
-            dupw dupw.2 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+            dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
             # => [hash_in_domain(K_l, V_l, LEAF_DOMAIN), V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
@@ -562,7 +570,7 @@ proc set_empty_leaf
 
         # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
         # (21 cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        dupw.1 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
@@ -646,7 +654,7 @@ proc insert_single_leaf
 
         # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
         # (X cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        dupw.1 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
         # => [NV, K, V_l, R]
 
         # Prepare stack to update Merkle store
@@ -1212,7 +1220,7 @@ proc memmove_word_range_left_and_advance_ptrs
     dup.1 neq.0
     # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
 
-    # fewer cycles than xor.
+    # This is true exactly when `read_end != cur_read` and subtraction did not underflow.
     u32xor
     # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
 
@@ -1315,7 +1323,7 @@ proc hash_and_insert_mem
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    push.LEAF_DOMAIN exec.poseidon2::hash_words_with_domain
+    push.LEAF_DOMAIN exec.eidos::hash_words_with_domain
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem
