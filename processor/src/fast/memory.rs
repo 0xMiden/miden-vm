@@ -2,6 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
+use miden_event_handler::EventContextError;
 
 use crate::{ContextId, ExecutionOptions, MemoryAddress, MemoryError, processor::MemoryInterface};
 
@@ -212,6 +213,80 @@ impl Memory {
         let word = self.memory.get(&(ctx, addr)).copied();
 
         Ok(word)
+    }
+
+    /// Strictly reads a contiguous range without modifying `output` when validation fails.
+    pub(crate) fn read_range_for_event(
+        &self,
+        ctx: ContextId,
+        start: MemoryAddress,
+        output: &mut [Felt],
+    ) -> Result<(), EventContextError> {
+        let start = start.as_u32();
+        let count = output.len();
+        let count_u64 = u64::try_from(count).unwrap_or(u64::MAX);
+        let end = u64::from(start).saturating_add(count_u64);
+        if end > u64::from(u32::MAX) + 1 {
+            return Err(EventContextError::RangeOverflow {
+                start: u64::from(start),
+                count: count_u64,
+            });
+        }
+        if output.is_empty() {
+            return Ok(());
+        }
+
+        // Scalar and aligned-word reads are the common paths behind EventContext's derived
+        // `memory_value` and `memory_word` operations. Handle them with one map lookup while
+        // preserving the buffer on an uninitialized read.
+        if output.len() == 1 {
+            let value = self.read_element_impl(ctx, start).ok_or(
+                EventContextError::UninitializedMemory { context_id: ctx, address: start },
+            )?;
+            output[0] = value;
+            return Ok(());
+        }
+        if output.len() == WORD_SIZE && start.is_multiple_of(WORD_SIZE as u32) {
+            let word = self.memory.get(&(ctx, start)).copied().ok_or(
+                EventContextError::UninitializedMemory { context_id: ctx, address: start },
+            )?;
+            output.copy_from_slice(word.as_elements());
+            return Ok(());
+        }
+
+        let last = (end - 1) as u32;
+        let mut word_addr = start - start % WORD_SIZE as u32;
+        let last_word_addr = last - last % WORD_SIZE as u32;
+        loop {
+            if !self.memory.contains_key(&(ctx, word_addr)) {
+                return Err(EventContextError::UninitializedMemory {
+                    context_id: ctx,
+                    address: word_addr.max(start),
+                });
+            }
+            if word_addr == last_word_addr {
+                break;
+            }
+            word_addr += WORD_SIZE as u32;
+        }
+
+        let start = u64::from(start);
+        let mut word_addr = start - start % WORD_SIZE as u64;
+        while word_addr < end {
+            let word = self
+                .memory
+                .get(&(ctx, word_addr as u32))
+                .expect("all words touched by the range were validated above");
+            let copy_start = start.max(word_addr);
+            let copy_end = end.min(word_addr + WORD_SIZE as u64);
+            let source_start = (copy_start - word_addr) as usize;
+            let target_start = (copy_start - start) as usize;
+            let copy_len = (copy_end - copy_start) as usize;
+            output[target_start..target_start + copy_len]
+                .copy_from_slice(&word.as_elements()[source_start..source_start + copy_len]);
+            word_addr += WORD_SIZE as u64;
+        }
+        Ok(())
     }
 
     // TEST HELPERS

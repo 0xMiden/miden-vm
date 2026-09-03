@@ -743,5 +743,5 @@ where
 /// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
 /// context.
 fn get_next_ctx_id(processor: &impl Processor) -> ContextId {
-    (processor.system().clock() + 1).into()
+    ContextId::from((processor.system().clock() + 1).as_u32())
 }

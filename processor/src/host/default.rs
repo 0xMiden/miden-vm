@@ -6,14 +6,14 @@ use miden_core::{
     mast::MastForest,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_event_handler::{
+    AdviceMutation, EventContext, EventError, EventHandler, TraceError, TraceHandler,
+};
 use miden_mast_package::{PackageDebugInfoError, debug_info::PackageDebugInfo};
 
-use super::handlers::{
-    EventError, EventHandler, EventHandlerRegistry, TraceError, TraceHandler, TraceHandlerRegistry,
-};
+use super::handlers::{EventHandlerRegistry, TraceHandlerRegistry};
 use crate::{
-    BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, advice::AdviceMutation,
+    BaseHost, ExecutionError, LoadedMastForest, MastForestStore, MemMastForestStore, SyncHost,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -99,7 +99,7 @@ where
     /// Registers a single [`EventHandler`] into this host.
     ///
     /// The handler can be either a closure or a free function with signature
-    /// `fn(&mut ProcessorState) -> Result<(), EventHandler>`
+    /// `fn(&EventContext) -> Result<Vec<AdviceMutation>, EventError>`
     pub fn register_handler(
         &mut self,
         event: EventName,
@@ -192,12 +192,9 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        process: &ProcessorState<'_>,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = EventId::from_felt(process.get_stack_item(0));
-        match self.event_handlers.handle_event(event_id, process) {
+    fn on_event(&mut self, context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = context.id();
+        match self.event_handlers.handle_event(event_id, context) {
             Ok(Some(mutations)) => Ok(mutations),
             Ok(None) => {
                 #[derive(Debug, thiserror::Error)]
@@ -210,10 +207,9 @@ where
         }
     }
 
-    fn on_trace(&mut self, process: &ProcessorState<'_>) -> Result<(), TraceError> {
-        // The trace id sits one below the `SystemEvent::TraceEvent` id.
-        let trace_id = EventId::from_felt(process.get_stack_item(1));
-        match self.trace_handlers.handle_trace(trace_id, process) {
+    fn on_trace(&mut self, context: &EventContext<'_>) -> Result<(), TraceError> {
+        let trace_id = context.id();
+        match self.trace_handlers.handle_trace(trace_id, context) {
             Ok(Some(())) => Ok(()),
             // Traces are optional/readonly, so an unhandled trace is not an error.
             Ok(None) => Ok(()),
@@ -245,10 +241,7 @@ impl SyncHost for NoopHost {
     }
 
     #[inline(always)]
-    fn on_event(
-        &mut self,
-        _process: &ProcessorState<'_>,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, _context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }

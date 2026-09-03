@@ -4,15 +4,12 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt, Word, ZERO,
+    advice::AdviceStack,
     deferred::{DeferredError, Node},
     events::EventName,
 };
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 use miden_precompiles::{Limbs, UintDomain, UintPrecompile};
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
 
 /// Event used by generated field uint wrappers to request an inverse witness from the host.
 pub const UINT_FIELD_INV_EVENT_NAME: EventName =
@@ -21,10 +18,10 @@ pub const UINT_FIELD_INV_EVENT_NAME: EventName =
 /// Resolves the input uint value digest from deferred state, computes its inverse in the encoded
 /// prime-field domain, and pushes the inverse limbs onto the advice stack for MASM validation.
 pub fn handle_uint_field_inv(
-    process: &ProcessorState<'_>,
+    context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    let input_digest = process.get_stack_word(1);
-    let (_, canonical_node) = process.require_canonical_deferred_node(input_digest)?;
+    let input_digest = context.stack_word(1);
+    let (_, canonical_node) = context.builtins().require_canonical_deferred_node(input_digest)?;
 
     let tag = canonical_node.tag();
     let [op_id, bound_ptr, reserved] = tag.args();

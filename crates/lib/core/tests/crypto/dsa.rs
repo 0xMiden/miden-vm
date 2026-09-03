@@ -22,9 +22,9 @@ use miden_precompiles_prover::{HashFunction, prove_deferred_state};
 use miden_precompiles_verifier::verify_deferred;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, MemoryError,
-    ProcessorState, StackInputs,
+    StackInputs,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::{EventError, EventHandler},
+    event::{EventContext, EventError, EventHandler},
 };
 use miden_utils_testing::crypto::Poseidon2;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
@@ -684,7 +684,7 @@ fn run_core_program(
 
 fn recovery_public_key_handler(public_key: &PublicKey) -> Arc<dyn EventHandler> {
     let elements = public_key_elements(public_key);
-    Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
+    Arc::new(move |_context: &EventContext<'_>| -> Result<Vec<AdviceMutation>, EventError> {
         let mut advice_stack = AdviceStack::new();
         advice_stack.append_for_adv_pipe(&elements);
         Ok(vec![AdviceMutation::extend_advice_stack(advice_stack)])

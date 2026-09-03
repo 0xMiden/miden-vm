@@ -2,7 +2,7 @@
 //!
 //! A Wasm event handler is an untrusted core Wasm module that ships inside a Miden package. This
 //! crate loads such a module, validates it, and adapts each declared handler to the processor's
-//! [`EventHandler`](miden_processor::event::EventHandler) trait, so that the existing host and
+//! [`EventHandler`](miden_event_handler::EventHandler) trait, so that the existing host and
 //! registry machinery runs it like a native handler.
 //!
 //! # Model

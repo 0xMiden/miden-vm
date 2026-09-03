@@ -2,14 +2,11 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    Felt, Word,
-    advice::{AdviceMap, AdviceStack},
-    crypto::merkle::InnerNodeInfo,
+    Word,
     events::{EventId, EventName},
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-
-use crate::ProcessorState;
+use miden_event_handler::{AdviceMutation, EventContext, EventError, TraceError};
 
 pub(super) mod advice;
 
@@ -18,45 +15,10 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{EventError, TraceError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
-// ADVICE MAP MUTATIONS
-// ================================================================================================
-
-/// Any possible way an event can modify the advice provider.
-#[derive(Debug, PartialEq, Eq)]
-pub enum AdviceMutation {
-    ExtendStack { stack: AdviceStack },
-    ExtendMap { map: AdviceMap },
-    ExtendMerkleStore { inner_nodes: Vec<InnerNodeInfo> },
-}
-
-impl AdviceMutation {
-    pub fn extend_advice_stack(stack: AdviceStack) -> Self {
-        Self::ExtendStack { stack }
-    }
-
-    /// Extends the advice stack with `elements`, ordered from the top of the stack down.
-    ///
-    /// The typed [`AdviceMutation::extend_advice_stack`] is the one to reach for when the caller
-    /// already holds an [`AdviceStack`], or needs its element/word/dword layout helpers. This one
-    /// covers the common case of a host reply that is just a handful of field elements, which
-    /// would otherwise have to build an [`AdviceStack`] only to hand it straight over.
-    pub fn extend_advice_stack_with(elements: impl IntoIterator<Item = Felt>) -> Self {
-        Self::ExtendStack { stack: elements.into_iter().collect() }
-    }
-
-    pub fn extend_map(map: AdviceMap) -> Self {
-        Self::ExtendMap { map }
-    }
-
-    pub fn extend_merkle_store(inner_nodes: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
-        Self::ExtendMerkleStore { inner_nodes: Vec::from_iter(inner_nodes) }
-    }
-}
 // HOST TRAIT
 // ================================================================================================
 
@@ -122,31 +84,25 @@ pub trait SyncHost: BaseHost {
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
     ///
-    /// The event ID is available at the top of the stack (position 0) when this handler is called.
-    /// This allows the handler to access both the event ID and any additional context data that
-    /// may have been pushed onto the stack prior to the emit operation.
+    /// The semantic event ID and invocation metadata are available directly from `context`.
     ///
     /// ## Implementation notes
-    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
-    fn on_event(&mut self, process: &ProcessorState<'_>)
-    -> Result<Vec<AdviceMutation>, EventError>;
+    fn on_event(&mut self, context: &EventContext<'_>) -> Result<Vec<AdviceMutation>, EventError>;
 
     /// Handles a trace event emitted from the VM.
     ///
-    /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
-    /// position 0 and the user trace event ID is at position 1 when this handler is called. The
-    /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
-    /// a trace event for which no handler is registered.
+    /// Trace events are optional and read-only. The semantic trace ID is available directly from
+    /// `context`; handlers do not decode its stack position. Hosts that do not care about trace
+    /// events can use this default no-op implementation.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
     /// [`BaseHost::resolve_trace()`].
     ///
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
-    fn on_trace(&mut self, _process: &ProcessorState<'_>) -> Result<(), TraceError> {
+    fn on_trace(&mut self, _context: &EventContext<'_>) -> Result<(), TraceError> {
         Ok(())
     }
 }
@@ -167,27 +123,21 @@ pub trait Host: BaseHost {
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
     ///
-    /// The event ID is available at the top of the stack (position 0) when this handler is called.
-    /// This allows the handler to access both the event ID and any additional context data that
-    /// may have been pushed onto the stack prior to the emit operation.
+    /// The semantic event ID and invocation metadata are available directly from `context`.
     ///
     /// ## Implementation notes
-    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events are handled by the VM before and don't call this method
     fn on_event(
         &mut self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 
     /// Handles a trace event emitted from the VM.
     ///
-    /// Trace events are optional, read-only events. [`SystemEvent::TraceEvent`] is at stack
-    /// position 0 and the user trace event ID is at position 1 when this handler is called. The
-    /// handler cannot mutate the advice provider. Hosts that do not care about trace events can use
-    /// this default no-op implementation. Hosts are expected not to raise an error on encountering
-    /// a trace event for which no handler is registered.
+    /// Trace events are optional and read-only. The semantic trace ID is available directly from
+    /// `context`; handlers do not decode its stack position.
     ///
     /// Return errors without event names or IDs - the caller will enrich them via
     /// [`BaseHost::resolve_trace()`].
@@ -195,7 +145,7 @@ pub trait Host: BaseHost {
     /// [`SystemEvent::TraceEvent`]: miden_core::events::SystemEvent::TraceEvent
     fn on_trace(
         &mut self,
-        _process: &ProcessorState<'_>,
+        _context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<(), TraceError>> {
         async move { Ok(()) }
     }
@@ -215,17 +165,17 @@ where
 
     fn on_event(
         &mut self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = SyncHost::on_event(self, process);
+        let result = SyncHost::on_event(self, context);
         async move { result }
     }
 
     fn on_trace(
         &mut self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<(), TraceError>> {
-        let result = SyncHost::on_trace(self, process);
+        let result = SyncHost::on_trace(self, context);
         async move { result }
     }
 }
@@ -252,7 +202,8 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
 
 #[cfg(test)]
 mod tests {
-    use super::{AdviceMutation, AdviceStack, Felt};
+    use miden_core::{Felt, advice::AdviceStack};
+    use miden_event_handler::AdviceMutation;
 
     /// The iterator helper must be indistinguishable from building the stack by hand, so that a
     /// handler can switch to it without changing what the VM sees.

@@ -1,6 +1,6 @@
 use miden_processor::{
-    ExecutionError, ProcessorState, ZERO,
-    event::{EventName, NoopEventHandler},
+    ExecutionError, ZERO,
+    event::{EventContext, EventName, NoopEventHandler},
     mast,
     operation::OperationError,
 };
@@ -111,6 +111,6 @@ fn emit_trace_event_with_handler() {
 
     let source = format!("trace.event(\"{trace_name}\")");
     let test = build_op_test!(&source, &[0, 0, 0, 0])
-        .with_trace_handler(EventName::new(trace_name), |_: &ProcessorState| Ok(()));
+        .with_trace_handler(EventName::new(trace_name), |_: &EventContext| Ok(()));
     test.check_constraints();
 }

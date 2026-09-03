@@ -15,8 +15,9 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{Word, events::EventName, mast::MastForest};
+use miden_event_handler::EventHandler;
 use miden_mast_package::Package;
-use miden_processor::{HostLibrary, event::EventHandler};
+use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{

@@ -79,10 +79,10 @@ impl MemorySegmentTrace {
                 Ok(i) => {
                     let word_addr = addr_trace[i].word();
                     result.extend([
-                        (MemoryAddress(addr), word_addr[0]),
-                        (MemoryAddress(addr + 1), word_addr[1]),
-                        (MemoryAddress(addr + 2), word_addr[2]),
-                        (MemoryAddress(addr + 3), word_addr[3]),
+                        (MemoryAddress::new(addr), word_addr[0]),
+                        (MemoryAddress::new(addr + 1), word_addr[1]),
+                        (MemoryAddress::new(addr + 2), word_addr[2]),
+                        (MemoryAddress::new(addr + 3), word_addr[3]),
                     ]);
                 },
                 Err(i) => {
@@ -92,10 +92,10 @@ impl MemorySegmentTrace {
                     if i > 0 {
                         let word_addr = addr_trace[i - 1].word();
                         result.extend([
-                            (MemoryAddress(addr), word_addr[0]),
-                            (MemoryAddress(addr + 1), word_addr[1]),
-                            (MemoryAddress(addr + 2), word_addr[2]),
-                            (MemoryAddress(addr + 3), word_addr[3]),
+                            (MemoryAddress::new(addr), word_addr[0]),
+                            (MemoryAddress::new(addr + 1), word_addr[1]),
+                            (MemoryAddress::new(addr + 2), word_addr[2]),
+                            (MemoryAddress::new(addr + 3), word_addr[3]),
                         ]);
                     }
                 },

@@ -4,10 +4,17 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::DeferredState,
+    advice::{AdviceMap, AdviceStack},
+    crypto::merkle::{MerklePath, NodeIndex},
+    deferred::{DeferredState, Digest, Node, PrecompileError},
+    events::EventId,
     mast::{ExecutableMastForest, MastForest},
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
+};
+use miden_event_handler::{
+    BuiltinEventContextProvider, EventContext, EventContextError, EventContextProvider, Invocation,
+    MerkleReadError,
 };
 use miden_mast_package::{
     Package,
@@ -15,7 +22,7 @@ use miden_mast_package::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, MemoryAddress,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -495,10 +502,20 @@ impl FastProcessor {
         &self.options
     }
 
-    /// Returns a narrowed interface for reading and updating the processor state.
+    /// Returns a processor-independent read-only context for compatibility callers.
     #[inline(always)]
-    pub fn state(&self) -> ProcessorState<'_> {
-        ProcessorState { processor: self }
+    pub fn state(&self) -> EventContext<'_> {
+        self.event_context(Invocation::event(
+            EventId::from_felt(self.stack_get_safe(0)),
+            self.clk.as_u32(),
+            self.ctx,
+        ))
+    }
+
+    /// Creates a handler context carrying invocation metadata captured by the dispatcher.
+    #[inline(always)]
+    pub(super) fn event_context(&self, invocation: Invocation) -> EventContext<'_> {
+        EventContext::new(self, self, invocation)
     }
 
     // MUTATORS
@@ -666,6 +683,97 @@ impl FastProcessor {
         // Update indices.
         self.stack_bot_idx = new_stack_bot_idx;
         self.stack_top_idx = new_stack_top_idx;
+    }
+}
+
+// EVENT CONTEXT ADAPTER
+// ================================================================================================
+
+impl EventContextProvider for FastProcessor {
+    #[inline(always)]
+    fn stack_depth(&self) -> u32 {
+        FastProcessor::stack_depth(self)
+    }
+
+    fn read_stack(&self, start: u64, output: &mut [Felt]) {
+        let depth = self.stack_size();
+        let Ok(start) = usize::try_from(start) else {
+            output.fill(ZERO);
+            return;
+        };
+        if let [target] = output {
+            *target = if start < depth { self.stack_get(start) } else { ZERO };
+            return;
+        }
+
+        output.fill(ZERO);
+        if start >= depth {
+            return;
+        }
+
+        let count = output.len().min(depth - start);
+        let end = self.stack_top_idx - start;
+        let begin = end - count;
+        for (target, value) in output[..count].iter_mut().zip(self.stack[begin..end].iter().rev()) {
+            *target = *value;
+        }
+    }
+
+    #[inline(always)]
+    fn read_memory(
+        &self,
+        context_id: ContextId,
+        start: MemoryAddress,
+        output: &mut [Felt],
+    ) -> Result<(), EventContextError> {
+        self.memory.read_range_for_event(context_id, start, output)
+    }
+
+    fn memory_snapshot(&self, context_id: ContextId) -> Vec<(MemoryAddress, Felt)> {
+        self.memory.get_memory_state(context_id)
+    }
+
+    #[inline(always)]
+    fn advice_stack(&self) -> &AdviceStack {
+        self.advice.stack_ref()
+    }
+
+    #[inline(always)]
+    fn advice_map(&self) -> &AdviceMap {
+        self.advice.map()
+    }
+
+    fn merkle_node(&self, root: Word, index: NodeIndex) -> Result<Word, MerkleReadError> {
+        self.advice.get_merkle_node(root, index).map_err(Into::into)
+    }
+
+    fn merkle_path(&self, root: Word, index: NodeIndex) -> Result<MerklePath, MerkleReadError> {
+        self.advice.get_merkle_path_at(root, index).map_err(Into::into)
+    }
+}
+
+impl BuiltinEventContextProvider for FastProcessor {
+    fn max_hash_len_bytes(&self) -> usize {
+        self.options.max_hash_len_bytes()
+    }
+
+    fn max_advice_size_bytes(&self) -> usize {
+        self.options.max_advice_size_bytes()
+    }
+
+    fn canonical_deferred_digest(&self, digest: Digest) -> Option<Digest> {
+        self.deferred_state.get_canonical_digest(digest)
+    }
+
+    fn canonical_deferred_node(&self, digest: Digest) -> Option<(Digest, &Node)> {
+        self.deferred_state.get_canonical_node(digest)
+    }
+
+    fn require_canonical_deferred_node(
+        &self,
+        digest: Digest,
+    ) -> Result<(Digest, &Node), PrecompileError> {
+        self.deferred_state.require_canonical_node(digest)
     }
 }
 

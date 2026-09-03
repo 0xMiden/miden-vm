@@ -6,7 +6,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{ZERO, events::EventName};
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -36,9 +36,9 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// # Errors
 /// - Returns an error if the divisor is ZERO.
 /// - Returns an error if either a0 or a1 is not a u32.
-pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    let dividend_hi = process.get_stack_item(1).as_canonical_u64();
-    let dividend_lo = process.get_stack_item(2).as_canonical_u64();
+pub fn handle_falcon_div(context: &EventContext) -> Result<Vec<AdviceMutation>, EventError> {
+    let dividend_hi = context.stack_item(1).as_canonical_u64();
+    let dividend_lo = context.stack_item(2).as_canonical_u64();
 
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {

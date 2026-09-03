@@ -30,6 +30,7 @@ default = ["std"]
 arbitrary = ["std", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 std = [
     "miden-assembly/std",
+    "miden-event-handler/std",
     "miden-precompiles/std",
     "miden-processor/std",
     "miden-utils-sync/std",
@@ -42,6 +43,7 @@ constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen", "dep:miden
 miden-mast-package.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+miden-event-handler.workspace = true
 miden-precompiles.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true

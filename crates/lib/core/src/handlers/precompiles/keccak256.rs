@@ -5,15 +5,12 @@ use core::mem::size_of;
 
 use miden_core::{
     WORD_SIZE,
+    advice::AdviceStack,
     events::EventName,
     utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes},
 };
 use miden_crypto::hash::keccak::Keccak256;
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 
 use crate::handlers::read_uninitialized_memory_region;
 
@@ -28,19 +25,19 @@ const KECCAK256_DIGEST_FELTS: usize = 8;
 /// Reads the requested u32-packed memory preimage, computes Keccak-256, and pushes the digest limbs
 /// onto the advice stack for the MASM wrapper to bind with deferred assertions.
 pub fn handle_keccak256_digest(
-    process: &ProcessorState<'_>,
+    context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    let ptr = process.get_stack_item(1).as_canonical_u64();
-    let len_bytes = process.get_stack_item(2).as_canonical_u64();
+    let ptr = context.stack_item(1).as_canonical_u64();
+    let len_bytes = context.stack_item(2).as_canonical_u64();
 
-    let max = process.execution_options().max_hash_len_bytes();
+    let max = context.builtins().max_hash_len_bytes();
     if len_bytes > max as u64 {
         return Err(Keccak256DigestEventError::InputTooLong { len_bytes, max }.into());
     }
     let len_bytes = usize::try_from(len_bytes)
         .map_err(|_| Keccak256DigestEventError::InputLengthTooLarge { len_bytes })?;
 
-    let input = read_memory_packed_u32(process, ptr, len_bytes)?;
+    let input = read_memory_packed_u32(context, ptr, len_bytes)?;
     let digest = <[u8; 32]>::from(Keccak256::hash(&input));
     let digest_felts = bytes_to_packed_u32_elements(&digest);
     if digest_felts.len() != KECCAK256_DIGEST_FELTS {
@@ -58,7 +55,7 @@ pub fn handle_keccak256_digest(
 }
 
 fn read_memory_packed_u32(
-    process: &ProcessorState<'_>,
+    context: &EventContext<'_>,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, Keccak256DigestEventError> {
@@ -80,7 +77,7 @@ fn read_memory_packed_u32(
         .checked_next_multiple_of(BYTES_PER_U32)
         .ok_or(Keccak256DigestEventError::AddressOverflow { start, len_bytes })?;
 
-    let felts = read_uninitialized_memory_region(process, start, len_felts_u64)
+    let felts = read_uninitialized_memory_region(context, start, len_felts_u64)
         .ok_or(Keccak256DigestEventError::MemoryAccessFailed { address: start_u32 })?;
 
     for (offset, felt) in felts.iter().enumerate() {

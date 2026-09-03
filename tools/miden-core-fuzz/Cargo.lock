@@ -942,6 +942,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-event-handler"
+version = "0.31.0"
+dependencies = [
+ "miden-core",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-event-handler-abi"
 version = "0.31.0"
 dependencies = [
@@ -1090,6 +1098,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-debug-types",
+ "miden-event-handler",
  "miden-mast-package",
  "miden-precompiles",
  "miden-utils-diagnostics",
@@ -1195,6 +1204,7 @@ name = "miden-wasm-event-handlers"
 version = "0.31.0"
 dependencies = [
  "miden-crypto",
+ "miden-event-handler",
  "miden-event-handler-abi",
  "miden-mast-package",
  "miden-processor",

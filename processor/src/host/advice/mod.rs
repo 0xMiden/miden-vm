@@ -13,11 +13,12 @@ use miden_core::{
 };
 #[cfg(test)]
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use miden_event_handler::AdviceMutation;
 
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInterface};
+use crate::{ExecutionOptions, processor::AdviceProviderInterface};
 
 // CONSTANTS
 // ================================================================================================
@@ -410,6 +411,11 @@ impl AdviceProvider {
         self.stack.iter()
     }
 
+    /// Returns the borrowed typed advice stack.
+    pub(crate) fn stack_ref(&self) -> &AdviceStack {
+        &self.stack
+    }
+
     /// Extends the stack with typed advice stack values.
     pub fn extend_advice_stack(&mut self, stack: AdviceStack) -> Result<(), AdviceError> {
         self.check_stack_capacity(stack.len())?;
@@ -580,6 +586,15 @@ impl AdviceProvider {
         self.store.get_node(root, index).map_err(AdviceError::MerkleStoreLookupFailed)
     }
 
+    /// Returns a node addressed by an already-validated typed index.
+    pub(crate) fn get_merkle_node(
+        &self,
+        root: Word,
+        index: NodeIndex,
+    ) -> Result<Word, MerkleError> {
+        self.store.get_node(root, index)
+    }
+
     /// Returns true if a path to a node at the specified depth and index in a Merkle tree with the
     /// specified root exists in this Merkle store.
     ///
@@ -618,6 +633,15 @@ impl AdviceProvider {
             .get_path(root, index)
             .map(|value| value.path)
             .map_err(AdviceError::MerkleStoreLookupFailed)
+    }
+
+    /// Returns a path addressed by an already-validated typed index.
+    pub(crate) fn get_merkle_path_at(
+        &self,
+        root: Word,
+        index: NodeIndex,
+    ) -> Result<MerklePath, MerkleError> {
+        self.store.get_path(root, index).map(|value| value.path)
     }
 
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;

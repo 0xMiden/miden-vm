@@ -1,74 +1,18 @@
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, btree_map::Entry},
     sync::Arc,
     vec::Vec,
 };
-use core::{error::Error, fmt, fmt::Debug};
+use core::{fmt, fmt::Debug};
 
 use miden_core::events::{EventId, EventName};
+use miden_event_handler::{AdviceMutation, EventContext};
+#[allow(unused_imports)]
+pub use miden_event_handler::{
+    EventError, EventHandler, NoopEventHandler, NoopTraceHandler, TraceError, TraceHandler,
+};
 
-use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
-
-// EVENT HANDLER TRAIT
-// ================================================================================================
-
-/// An [`EventHandler`] defines a function that that can be called from the processor which can
-/// read the VM state and modify the state of the advice provider.
-///
-/// A struct implementing this trait can access its own state, but any output it produces must
-/// be stored in the process's advice provider.
-pub trait EventHandler: Send + Sync + 'static {
-    /// Handles the event when triggered.
-    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError>;
-}
-
-/// Default implementation for both free functions and closures with signature
-/// `fn(&ProcessorState) -> Result<Vec<AdviceMutation>, EventError>`
-impl<F> EventHandler for F
-where
-    F: for<'a> Fn(&'a ProcessorState) -> Result<Vec<AdviceMutation>, EventError>
-        + Send
-        + Sync
-        + 'static,
-{
-    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        self(process)
-    }
-}
-
-/// A handler which ignores the process state and leaves the `AdviceProvider` unchanged.
-pub struct NoopEventHandler;
-
-impl EventHandler for NoopEventHandler {
-    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
-    }
-}
-
-// EVENT ERROR
-// ================================================================================================
-
-/// A generic [`Error`] wrapper allowing handlers to return errors to the Host caller.
-///
-/// Error handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-///
-/// # Example
-///
-/// ```rust, ignore
-/// pub struct MyError{ /* ... */ };
-///
-/// fn try_something() -> Result<(), MyError> { /* ... */ }
-///
-/// fn my_handler(process: &mut ProcessorState) -> Result<(), HandlerError> {
-///     // ...
-///     try_something()?;
-///     // ...
-///     Ok(())
-/// }
-/// ```
-pub type EventError = Box<dyn Error + Send + Sync + 'static>;
+use crate::ExecutionError;
 
 // EVENT NAME VALIDATION
 // ================================================================================================
@@ -103,21 +47,18 @@ pub(crate) fn validate_event_name(event: &EventName) -> Result<(), ExecutionErro
 /// impl Host for MyHost {
 ///     fn on_event(
 ///         &mut self,
-///         process: &mut ProcessorState,
-///         event_id: u32,
-///     ) -> Result<(), EventError> {
-///         if self
+///         context: &EventContext,
+///     ) -> Result<Vec<AdviceMutation>, EventError> {
+///         if let Some(mutations) = self
 ///             .event_handlers
-///             .handle_event(event_id, process)
-///             .map_err(|err| EventError::HandlerError { id: event_id, err })?
+///             .handle_event(context.id(), context)?
 ///         {
-///             // the event was handled by the registered event handlers; just return
-///             return Ok(());
+///             return Ok(mutations);
 ///         }
 ///
 ///         // implement custom event handling
 ///
-///         Err(EventError::UnhandledEvent { id: event_id })
+///         Ok(Vec::new())
 ///     }
 /// }
 /// ```
@@ -197,10 +138,10 @@ impl EventHandlerRegistry {
     pub fn handle_event(
         &self,
         id: EventId,
-        process: &ProcessorState,
+        context: &EventContext,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
         if let Some((_event_name, handler)) = self.handlers.get(&id) {
-            let mutations = handler.on_event(process)?;
+            let mutations = handler.on_event(context)?;
             return Ok(Some(mutations));
         }
 
@@ -214,46 +155,6 @@ impl Debug for EventHandlerRegistry {
         f.debug_struct("EventHandlerRegistry").field("handlers", &events).finish()
     }
 }
-
-// TRACE HANDLER TRAIT
-// ================================================================================================
-
-/// Handles an optional, read-only trace event emitted by the VM.
-///
-/// Assembly programs emit trace events with `trace`, `trace.CONST`, or `trace.event("...")`. When
-/// the handler runs, [`SystemEvent::TraceEvent`](miden_core::events::SystemEvent::TraceEvent) is
-/// at stack position 0 and the user trace event ID is at position 1. The handler receives a
-/// read-only [`ProcessorState`] and cannot return advice mutations.
-///
-/// The instruction expansions are:
-///
-/// - `trace` expands to `push.<sys::trace_event> emit drop`.
-/// - `trace.CONST` and `trace.event("...")` expand to `push.<trace_id> push.<sys::trace_event> emit
-///   drop drop`.
-pub trait TraceHandler: Send + Sync + 'static {
-    /// Handles the trace event when triggered.
-    fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError>;
-}
-
-/// Default implementation for both free functions and closures with signature
-/// `fn(&ProcessorState) -> Result<(), TraceError>`
-impl<F> TraceHandler for F
-where
-    F: for<'a> Fn(&'a ProcessorState) -> Result<(), TraceError> + Send + Sync + 'static,
-{
-    fn on_trace(&self, process: &ProcessorState) -> Result<(), TraceError> {
-        self(process)
-    }
-}
-
-// TRACE ERROR
-// ================================================================================================
-
-/// Error type returned by trace handlers.
-///
-/// Handlers should return errors without event names or IDs; the processor enriches them with the
-/// trace event ID and any name registered in the host's trace handler registry.
-pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
 
 // TRACE HANDLER REGISTRY
 // ================================================================================================
@@ -333,10 +234,10 @@ impl TraceHandlerRegistry {
     pub fn handle_trace(
         &self,
         id: EventId,
-        process: &ProcessorState,
+        context: &EventContext,
     ) -> Result<Option<()>, TraceError> {
         if let Some((_event_name, handler)) = self.handlers.get(&id) {
-            handler.on_trace(process)?;
+            handler.on_trace(context)?;
             return Ok(Some(()));
         }
 
@@ -358,12 +259,12 @@ mod tests {
     use miden_core::events::{EventId, EventName, SystemEvent};
 
     use super::{
-        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError, TraceHandler,
-        TraceHandlerRegistry,
+        EventContext, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler, TraceError,
+        TraceHandler, TraceHandlerRegistry,
     };
     use crate::{
-        BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, ProcessorState,
-        StackInputs, advice::AdviceMutation,
+        BaseHost, DefaultHost, ExecutionError, FastProcessor, HostError, StackInputs,
+        advice::AdviceMutation,
     };
 
     #[derive(Debug, thiserror::Error)]
@@ -373,7 +274,7 @@ mod tests {
     /// An event handler that always errors.
     struct FailingEventHandler;
     impl EventHandler for FailingEventHandler {
-        fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        fn on_event(&self, _context: &EventContext) -> Result<Vec<AdviceMutation>, EventError> {
             Err(HandlerFailed.into())
         }
     }
@@ -381,23 +282,23 @@ mod tests {
     /// A trace handler that always errors.
     struct FailingTraceHandler;
     impl TraceHandler for FailingTraceHandler {
-        fn on_trace(&self, _process: &ProcessorState) -> Result<(), TraceError> {
+        fn on_trace(&self, _context: &EventContext) -> Result<(), TraceError> {
             Err(HandlerFailed.into())
         }
     }
 
     struct NoopTraceHandler;
     impl TraceHandler for NoopTraceHandler {
-        fn on_trace(&self, _process: &ProcessorState) -> Result<(), TraceError> {
+        fn on_trace(&self, _context: &EventContext) -> Result<(), TraceError> {
             Ok(())
         }
     }
 
-    /// Builds a default processor and runs `f` against its [`ProcessorState`].
+    /// Builds a default processor and runs `f` against its [`EventContext`].
     ///
     /// Allows exercising the handlers defined above without spinning up a full execution. This is
     /// fine since these handlers ignore processor state.
-    fn with_fresh_processor_state(f: impl FnOnce(&ProcessorState)) {
+    fn with_fresh_processor_state(f: impl FnOnce(&EventContext)) {
         let processor = FastProcessor::new(StackInputs::default());
         let state = processor.state();
         f(&state);

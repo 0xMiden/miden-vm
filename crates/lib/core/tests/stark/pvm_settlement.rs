@@ -17,9 +17,9 @@ use miden_precompiles_verifier::masm_verifier::{
 };
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend, Host,
-    LoadedMastForest, ProcessorState, StackInputs, SyncHost,
+    LoadedMastForest, StackInputs, SyncHost,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
-    event::EventError,
+    event::{EventContext, EventError},
 };
 use miden_prover::{Prover, ProverError};
 use miden_verifier::{Verifier, recursive::RecursiveVerifierInputs};
@@ -243,16 +243,16 @@ impl Host for PvmSettlementHost {
 
     fn on_event(
         &mut self,
-        process: &ProcessorState<'_>,
+        context: &EventContext<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async move {
-            let event_id = EventId::from_felt(process.get_stack_item(0));
+            let event_id = context.id();
             if event_id != PVM_PROOF_REQUEST_EVENT_NAME.to_event_id() {
-                return SyncHost::on_event(&mut self.inner, process);
+                return SyncHost::on_event(&mut self.inner, context);
             }
 
-            let verifier_root = process.get_stack_word(1);
-            let requested_root = process.get_stack_word(5);
+            let verifier_root = context.stack_word(1);
+            let requested_root = context.stack_word(5);
             if verifier_root != self.expected_verifier_root {
                 return Err(SettlementEventError::VerifierRootMismatch {
                     requested: verifier_root,
@@ -269,7 +269,7 @@ impl Host for PvmSettlementHost {
             }
 
             let proof_key = proof_request_key(verifier_root, requested_root);
-            if process.advice_provider().map().get(&proof_key).is_some() {
+            if context.advice_map().contains_key(&proof_key) {
                 return Err(SettlementEventError::PackageAlreadyLoaded.into());
             }
 

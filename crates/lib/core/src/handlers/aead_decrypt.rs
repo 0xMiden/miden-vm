@@ -7,16 +7,12 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{Word, events::EventName};
+use miden_core::{Word, advice::AdviceStack, events::EventName};
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 
 use crate::handlers::read_memory_region;
 
@@ -54,7 +50,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 1. The MASM procedure re-verifies the tag when decrypting
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
-pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_aead_decrypt(context: &EventContext) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [event_id, key:Word(4), nonce:Word(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)
@@ -66,17 +62,17 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     // so the actual parameters start at position 1. Words on the stack are
     // interpreted in little-endian (memory) order, i.e. element at stack index N
     // becomes the first limb of the word.
-    let key_word = process.get_stack_word(1);
-    let nonce_word = process.get_stack_word(5);
+    let key_word = context.stack_word(1);
+    let nonce_word = context.stack_word(5);
 
-    let src_ptr = process.get_stack_item(9).as_canonical_u64();
-    let num_blocks = process.get_stack_item(11).as_canonical_u64();
+    let src_ptr = context.stack_item(9).as_canonical_u64();
+    let num_blocks = context.stack_item(11).as_canonical_u64();
 
     let (num_ciphertext_elements, tag_ptr, data_blocks_count) =
-        compute_sizes(num_blocks, src_ptr, process.execution_options().max_advice_size_bytes())?;
+        compute_sizes(num_blocks, src_ptr, context.builtins().max_advice_size_bytes())?;
 
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
-    let ciphertext = read_memory_region(process, src_ptr, num_ciphertext_elements).ok_or(
+    let ciphertext = read_memory_region(context, src_ptr, num_ciphertext_elements).ok_or(
         AeadDecryptError::MemoryReadFailed {
             addr: src_ptr,
             len: num_ciphertext_elements,
@@ -84,14 +80,8 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     )?;
 
     // Read authentication tag: 4 elements (1 word) immediately after ciphertext
-    let tag_addr: u32 = tag_ptr
-        .try_into()
-        .ok()
-        .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
-
-    let ctx = process.ctx();
-    let tag_word = process
-        .get_mem_word(ctx, tag_addr)
+    let tag_word = context
+        .memory_word(tag_ptr)
         .map_err(|_| AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?
         .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
 

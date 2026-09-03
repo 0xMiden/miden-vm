@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
 use miden_core::events::{EventId, SystemEvent};
+use miden_event_handler::Invocation;
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
@@ -136,10 +137,11 @@ impl FastProcessor {
         match SystemEvent::from_event_id(event_id) {
             // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
             Some(SystemEvent::TraceEvent) => {
-                let processor_state = self.state();
-                let result = host.on_trace(&processor_state);
                 // The trace id is below `SystemEvent::TraceEvent`.
                 let trace_id = EventId::from_felt(self.stack_get(1));
+                let context =
+                    self.event_context(Invocation::trace(trace_id, self.clk.as_u32(), self.ctx));
+                let result = host.on_trace(&context);
                 self.handle_trace_result(
                     host,
                     op_idx,
@@ -159,8 +161,9 @@ impl FastProcessor {
             ),
             // If it's not a system event, forward it to the host.
             None => {
-                let processor_state = self.state();
-                let mutations = host.on_event(&processor_state);
+                let context =
+                    self.event_context(Invocation::event(event_id, self.clk.as_u32(), self.ctx));
+                let mutations = host.on_event(&context);
                 self.apply_host_event_mutations(
                     host,
                     op_idx,
@@ -186,10 +189,11 @@ impl FastProcessor {
         match SystemEvent::from_event_id(event_id) {
             // `SystemEvent::TraceEvent` is forwarded to the hosts trace handler.
             Some(SystemEvent::TraceEvent) => {
-                let processor_state = self.state();
-                let result = host.on_trace(&processor_state).await;
                 // The trace id is below `SystemEvent::TraceEvent`.
                 let trace_id = EventId::from_felt(self.stack_get(1));
+                let context =
+                    self.event_context(Invocation::trace(trace_id, self.clk.as_u32(), self.ctx));
+                let result = host.on_trace(&context).await;
                 self.handle_trace_result(
                     host,
                     op_idx,
@@ -209,8 +213,9 @@ impl FastProcessor {
             ),
             // If it's not a system event, forward it to the host.
             None => {
-                let processor_state = self.state();
-                let mutations = host.on_event(&processor_state).await;
+                let context =
+                    self.event_context(Invocation::event(event_id, self.clk.as_u32(), self.ctx));
+                let mutations = host.on_event(&context).await;
                 self.apply_host_event_mutations(
                     host,
                     op_idx,

@@ -3,9 +3,8 @@ use miden_core_lib::{
     handlers::sorted_array::{LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME},
 };
 use miden_processor::{
-    ProcessorState,
     advice::{AdviceMutation, AdviceStack},
-    event::EventError,
+    event::{EventContext, EventError},
 };
 
 use super::*;
@@ -975,7 +974,7 @@ fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
 /// Returns `(was_found = false, maybe_value_ptr = 204)` regardless of the actual array. 204 is
 /// past the array's `end_ptr = 112`, so the bounds check must fire.
 fn malicious_lowerbound_oob_above(
-    _process: &ProcessorState,
+    _context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     Ok(vec![advice_stack_mutation([Felt::new_unchecked(204), Felt::ZERO])])
 }
@@ -983,7 +982,7 @@ fn malicious_lowerbound_oob_above(
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_value_ptr = 40)` which is below `start_ptr = 100`.
 fn malicious_lowerbound_oob_below(
-    _process: &ProcessorState,
+    _context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     Ok(vec![advice_stack_mutation([Felt::new_unchecked(40), Felt::ZERO])])
 }
@@ -991,7 +990,7 @@ fn malicious_lowerbound_oob_below(
 #[allow(clippy::unnecessary_wraps)]
 /// Returns `(was_found = false, maybe_ptr = start_ptr)` regardless of the actual range.
 fn malicious_lowerbound_start_ptr(
-    _process: &ProcessorState,
+    _context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     Ok(vec![advice_stack_mutation([Felt::new_unchecked(100), Felt::ZERO])])
 }

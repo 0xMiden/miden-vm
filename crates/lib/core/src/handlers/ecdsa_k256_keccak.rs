@@ -5,16 +5,14 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{Felt, events::EventName, utils::packed_u32_elements_to_bytes};
+use miden_core::{
+    Felt, advice::AdviceStack, events::EventName, utils::packed_u32_elements_to_bytes,
+};
 use miden_crypto::{
     SequentialCommit,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
 };
-use miden_processor::{
-    ProcessorState,
-    advice::{AdviceMutation, AdviceStack},
-    event::EventError,
-};
+use miden_event_handler::{AdviceMutation, EventContext, EventError};
 
 use crate::handlers::read_uninitialized_memory_region;
 
@@ -40,14 +38,14 @@ const SCALAR_LIMBS: usize = 8;
 /// native memory format is distinct from external EVM wire bytes, whose scalar components are
 /// fixed-width big-endian byte strings.
 pub fn handle_ecdsa_k256_keccak_recover(
-    process: &ProcessorState<'_>,
+    context: &EventContext<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    let digest_ptr = process.get_stack_item(1).as_canonical_u64();
-    let signature_ptr = process.get_stack_item(2).as_canonical_u64();
+    let digest_ptr = context.stack_item(1).as_canonical_u64();
+    let signature_ptr = context.stack_item(2).as_canonical_u64();
 
-    let digest_felts = read_uninitialized_memory_region(process, digest_ptr, DIGEST_FELTS)
+    let digest_felts = read_uninitialized_memory_region(context, digest_ptr, DIGEST_FELTS)
         .ok_or(RecoveryEventError::InvalidDigestPointer { digest_ptr })?;
-    let signature_felts = read_uninitialized_memory_region(process, signature_ptr, SIGNATURE_FELTS)
+    let signature_felts = read_uninitialized_memory_region(context, signature_ptr, SIGNATURE_FELTS)
         .ok_or(RecoveryEventError::InvalidSignaturePointer { signature_ptr })?;
 
     validate_u32_limbs(&digest_felts, digest_ptr)?;

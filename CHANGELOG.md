@@ -14,6 +14,16 @@
 
 #### Changes
 
+- [BREAKING] Added the processor-independent `miden-event-handler` crate and migrated native event
+  and trace callbacks from concrete `ProcessorState` access to an explicit `EventContext`
+  capability interface. Native memory access validates `u64` addresses before the canonical strict
+  provider read; the public interface derives value, word, slice `(start, count)`, and half-open
+  range `[start, end)` reads and reports handler-facing failures as `EventContextError`. Operand-
+  and advice-stack positions use `u64`, while `stack_depth()` remains `u32`. `miden-processor`
+  retains the deprecated `ProcessorState` alias and SDK-base `get_*` methods for v0.31, except for
+  the concrete advice provider and unrestricted execution options; `clock()` now returns `u32`, and
+  processor `MemoryError` types are not exposed
+  ([#3438](https://github.com/0xMiden/miden-vm/pull/3438)).
 - [BREAKING] Split precompile AIR and verification code from `miden-precompiles-prover` into `miden-precompiles-air` and `miden-precompiles-verifier`. Verifier users no longer build prover-only trace and witness code. Existing PVM proof bytes remain compatible ([#3734](https://github.com/0xMiden/miden-vm/pull/3734)).
 - Split the assembly crate's monolithic `tests.rs` into thematic modules under `crates/assembly/src/tests/` ([#3379](https://github.com/0xMiden/miden-vm/pull/3379)).
 

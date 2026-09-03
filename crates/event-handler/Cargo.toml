@@ -1,0 +1,27 @@
+[package]
+name = "miden-event-handler"
+version = "0.31.0"
+description = "Processor-independent native event-handler interface for Miden VM"
+documentation = "https://docs.rs/miden-event-handler"
+readme = "README.md"
+categories = ["emulators", "no-std"]
+keywords = ["events", "handlers", "miden", "virtual-machine"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+test = false
+
+[features]
+default = ["std"]
+std = ["miden-core/std", "thiserror/std"]
+
+[dependencies]
+miden-core.workspace = true
+thiserror.workspace = true

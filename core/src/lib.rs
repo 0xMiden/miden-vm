@@ -11,6 +11,9 @@ extern crate std;
 
 pub use miden_crypto::{EMPTY_WORD, Felt, ONE, Word, ZERO};
 
+mod execution;
+pub use execution::{ContextId, MemoryAddress};
+
 /// The number of field elements in a Miden word.
 pub const WORD_SIZE: usize = Word::NUM_ELEMENTS;
 
