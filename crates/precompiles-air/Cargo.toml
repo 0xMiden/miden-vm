@@ -40,4 +40,5 @@ p3-security.workspace = true
 ruint.workspace = true
 
 [dev-dependencies]
+miden-air = { workspace = true, features = ["testing"] }
 rand = { workspace = true, features = ["std_rng"] }
