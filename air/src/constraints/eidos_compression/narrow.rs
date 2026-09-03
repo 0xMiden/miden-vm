@@ -50,7 +50,7 @@ const fn stored(
 const fn missing_rotation(byte: u8) -> NarrowSlotSpec {
     NarrowSlotSpec {
         fields: NarrowSlotFields::MissingRotation,
-        fused_bus: NarrowSlotBus::Rotation(byte),
+        fused_bus: Rotation(byte),
         footer_bus: None,
     }
 }
