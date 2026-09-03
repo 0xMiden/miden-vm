@@ -359,9 +359,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
             .assert_zero(is_and.clone() + is_chunks.clone() + is_generic.clone() - active.clone());
         builder.assert_zero(payload.clone() - active.clone());
         builder.assert_zero(output.clone() * (AB::Expr::ONE - active.clone()));
-        builder.assert_zero(
-            AB::Expr::from(local[COL_IN_MULTIPLICITY]) * (AB::Expr::ONE - payload.clone()),
-        );
+        builder.assert_zero(AB::Expr::from(local[COL_IN_MULTIPLICITY]) * (AB::Expr::ONE - payload));
         builder.assert_zero(
             AB::Expr::from(local[COL_OUT_MULTIPLICITY]) * (AB::Expr::ONE - output.clone()),
         );
@@ -389,7 +387,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
         // consecutive.
         builder.when_transition().assert_zero(
             is_last.clone()
-                * next_active.clone()
+                * next_active
                 * (AB::Expr::from(next[COL_ABSORPTION_ID])
                     - AB::Expr::from(local[COL_ABSORPTION_ID])
                     - AB::Expr::ONE),
@@ -403,7 +401,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
         builder
             .when_transition()
             .assert_zero(is_last.clone() * output.clone() * next_absorb.clone());
-        builder.when_last_row().assert_zero(active.clone() * (AB::Expr::ONE - output));
+        builder.when_last_row().assert_zero(active * (AB::Expr::ONE - output));
 
         builder.when_transition().assert_zero(
             is_last.clone()
