@@ -41,7 +41,10 @@
 //!
 //! The full grid is `KECCAK_LEVELS` × `ECDSA_LEVELS`; pairs already listed
 //! in `ALREADY_MEASURED` are skipped so a run only fills gaps left by
-//! prior sweeps.
+//! prior sweeps on *this* branch's code — repopulate it from your own
+//! `results.jsonl` before pruning combos, since a list inherited from a
+//! different commit or codegen state doesn't mean those combos were
+//! measured here.
 
 #[path = "../../precompiles/benches/precompiles_bench/support.rs"]
 #[allow(dead_code, unused_imports, reason = "reusing the shared bench fixture module as-is")]
@@ -59,58 +62,7 @@ const ECDSA_LEVELS: &[usize] = &[1, 4, 8, 10, 16, 25, 32, 50, 64, 100, 128];
 /// so this sweep only fills the gaps in the full `KECCAK_LEVELS` ×
 /// `ECDSA_LEVELS` grid. Clear this list (or remove pairs from it) to
 /// re-measure combos that were already covered.
-const ALREADY_MEASURED: &[(usize, usize)] = &[
-    (10, 4),
-    (10, 8),
-    (10, 16),
-    (10, 32),
-    (10, 64),
-    (16, 1),
-    (16, 10),
-    (16, 25),
-    (16, 50),
-    (16, 100),
-    (50, 4),
-    (50, 8),
-    (50, 16),
-    (50, 32),
-    (50, 64),
-    (64, 1),
-    (64, 10),
-    (64, 25),
-    (64, 50),
-    (64, 100),
-    (100, 4),
-    (100, 8),
-    (100, 16),
-    (100, 32),
-    (100, 64),
-    (200, 4),
-    (200, 8),
-    (200, 16),
-    (200, 32),
-    (200, 64),
-    (256, 1),
-    (256, 10),
-    (256, 25),
-    (256, 50),
-    (256, 100),
-    (300, 4),
-    (300, 8),
-    (300, 16),
-    (300, 32),
-    (300, 64),
-    (512, 1),
-    (512, 10),
-    (512, 25),
-    (512, 50),
-    (512, 100),
-    (1024, 1),
-    (1024, 10),
-    (1024, 25),
-    (1024, 50),
-    (1024, 100),
-];
+const ALREADY_MEASURED: &[(usize, usize)] = &[];
 
 fn main() {
     // SAFETY: single-threaded at this point in `main`, before any fixture
