@@ -20,17 +20,17 @@ const INITIAL_CV: [u64; 4] = [19, 20, 21, 22];
 const COMMITMENT: [u64; 4] = [31, 32, 33, 34];
 type LogHeights = [u8; 10];
 
-// BytePairAnd8 is fixed at 2^16. The other entries meet their AIRs' minimum heights while
-// exercising the proof-order positions which affect composite-value offsets.
-const EQUAL_COMPOSITE_HEIGHTS: LogHeights = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
+// BytePairLut is fixed at 2^16. The other entries meet their AIRs' minimum heights while
+// exercising distinct proof-order positions, including an equal-height tie.
+const EQUAL_EIDOS_BYTE_PAIR_HEIGHTS: LogHeights = [8, 16, 7, 16, 5, 9, 10, 11, 12, 13];
 const EIDOS_PRECEDES_ORDINARY_HEIGHTS: LogHeights = [8, 5, 7, 16, 6, 9, 10, 11, 12, 13];
 const BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS: LogHeights = [18, 17, 19, 16, 20, 21, 22, 23, 24, 25];
 const PROOF_ORDER_CASES: [(&str, LogHeights); 3] = [
-    ("equal composite heights", EQUAL_COMPOSITE_HEIGHTS),
+    ("equal Eidos and byte-pair heights", EQUAL_EIDOS_BYTE_PAIR_HEIGHTS),
     ("Eidos before ordinary AIRs", EIDOS_PRECEDES_ORDINARY_HEIGHTS),
-    ("BytePairAnd8 before Eidos", BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS),
+    ("BytePairLut before Eidos", BYTE_PAIR_PRECEDES_EIDOS_HEIGHTS),
 ];
-const AUX_VALUE_WIDTHS: [usize; 10] = [1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
+const AUX_VALUE_WIDTHS: [usize; 10] = [1; 10];
 
 fn random_coin_setup_masm() -> String {
     let cv = INITIAL_CV;
@@ -157,8 +157,7 @@ fn air_context_source() -> &'static str {
      end"
 }
 
-/// A deliberately straightforward transcript path: consume the same seven advice words through
-/// the public buffered word API, compressing three complete Eidos blocks and buffering one word.
+/// Reference transcript path using the public buffered word API for the same six advice words.
 fn reference_source(log_heights: &LogHeights) -> String {
     format!(
         r#"
@@ -189,9 +188,6 @@ fn reference_source(log_heights: &LogHeights) -> String {
             exec.random_coin::observe_word
             padw adv_loadw
             exec.layout::aux_bus_boundary_ptr add.16 mem_storew_le
-            exec.random_coin::observe_word
-            padw adv_loadw
-            exec.layout::aux_bus_boundary_ptr add.20 mem_storew_le
             exec.random_coin::observe_word
         end
         "#,

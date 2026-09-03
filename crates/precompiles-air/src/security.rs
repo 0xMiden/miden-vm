@@ -45,12 +45,12 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 ///
 /// `air_shape_matches_symbolic` checks this stored value against the current chiplet AIRs.
 pub const AIR_SHAPE: AirShape = AirShape {
-    num_composed_constraints: 725,
+    num_composed_constraints: 665,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(922),
+    num_deep_terms: Some(818),
     lookup: LookupShape {
-        fractions_per_row: 287,
+        fractions_per_row: 278,
         max_message_width: 18,
     },
 };
@@ -413,10 +413,10 @@ mod tests {
         const FP_ONE: u64 = 65_536;
         const BITS_PER_QUERY_FP: u64 = 193_381;
         const SECURITY_CAP_FP: u64 = 8_257_536;
-        const LOOKUP_BASE_FP: u64 = 7_570_268;
-        const COMPOSITION_TERM_FP: u64 = 7_765_893;
+        const LOOKUP_BASE_FP: u64 = 7_573_281;
+        const COMPOSITION_TERM_FP: u64 = 7_774_061;
         const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_743_166;
+        const DEEP_BASE_FP: u64 = 7_754_482;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -497,32 +497,32 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_177_010, 7_765_893, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
+                [7_180_022, 7_774_061, 7_825_002, 8_257_536, 7_891_517, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_521_691, 7_765_893, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
+                [6_524_704, 7_774_061, 7_170_620, 8_257_536, 7_236_157, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 19),
-                [6_325_083, 7_765_893, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
+                [6_328_096, 7_774_061, 6_974_013, 8_257_536, 7_039_549, 6_335_399, 8_257_536],
                 96,
             ),
             (
                 (27, 17, 12, 4, 20),
-                [6_259_547, 7_765_893, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
+                [6_262_560, 7_774_061, 6_908_477, 8_257_536, 6_974_013, 6_335_399, 8_257_536],
                 95,
             ),
             (
                 (27, 17, 12, 4, 24),
-                [5_997_403, 7_765_893, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
+                [6_000_416, 7_774_061, 6_646_333, 8_257_536, 6_711_869, 6_335_399, 8_257_536],
                 91,
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_521_691, 7_765_893, 7_170_620, 7_743_166, 6_974_013, 1_353_667, 8_257_536],
+                [6_524_704, 7_774_061, 7_170_620, 7_754_482, 6_974_013, 1_353_667, 8_257_536],
                 20,
             ),
         ];

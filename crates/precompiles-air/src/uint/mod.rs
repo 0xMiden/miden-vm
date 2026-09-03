@@ -17,14 +17,10 @@
 //!
 //! ## Range-membership via vertical Schwartz–Zippel
 //!
-//! Each uint occupies a **period-4 block** (16 cells/row); a one-hot
-//! periodic selector marks each row's role. `v` and `comp` each keep
-//! their own row per half (`v_lo`/`v_hi` adjacent, so a merged
-//! full-value message can read both from one local/next window); `comp`
-//! packs both its own halves onto one row (no external consumer needs a
-//! `comp` message, so nothing forces it apart); `bound` folds the old
-//! dedicated term row's role, hosting both its halves plus every carry
-//! plus the ptr gap on one closing row:
+//! Each uint occupies a four-row block with 16 cells per row. A one-hot periodic selector marks
+//! each row's role. The two `v` halves are adjacent so a full-value message can read them through
+//! one local/next window. Both `comp` halves share a row because `comp` has no external consumer.
+//! The closing `bound` row holds both bound halves, every carry, and the pointer gap:
 //!
 //! | row | role    | cells 0–7                | cells 8–15                              |
 //! |-----|---------|---------------------------|------------------------------------------|
@@ -33,12 +29,8 @@
 //! | 2   | `comp`  | comp lo (8×16-bit)        | comp hi (8×16-bit)                       |
 //! | 3   | `bound` (closing) | 4×32-bit lo (0–3) + γ₀..γ₃ (4–7) | 4×32-bit hi (8–11) + γ₄..γ₆ (12–14) + gap (15) |
 //!
-//! The hub (the two provide multiplicities) now sits **on the `v` hi
-//! row** rather than a dedicated row between the halves: the offset-0
-//! provide (on `v` lo) still reads the mult via *next* (now `v` hi
-//! itself, one row over), and the offset-1 provide reads both the mult
-//! and its own limbs *locally* — no more cross-row limb read for the hi
-//! half.
+//! The `v` high row holds both provide multiplicities. The low-row provider reads its multiplicity
+//! from the next row, while the high-row provider reads its multiplicity and limbs locally.
 //!
 //! A single extension-field register `id` (aux col — see
 //! `REGISTER_COL`) accumulates, per row, the signed `β`-weighted limb
@@ -46,21 +38,18 @@
 //! (β−t)·Γ(β)` with `t = 2³²` — the Schwartz–Zippel image of `v + comp =
 //! bound` (the carry term accumulates from the bound row, where the γ
 //! cells live). Each valid block sums to 0, so the *global* accumulator
-//! returns to 0 at every boundary. Since `bound` is now the block's last
-//! row *and* hosts a nonzero contribution of its own (its `−direct`
-//! terms plus its carry share), the closing check folds that
-//! contribution in directly (mirroring [`UintAdd`](crate::uint::add)'s
-//! `p_own` pattern) rather than depending on a dedicated all-zero
-//! successor row. The register follows the declared LogUp prefix and is therefore excluded from
-//! the LogUp sum (see [`crate::logup`]).
+//! returns to 0 at every boundary. The closing check includes the bound row's local contribution
+//! before asserting that the accumulator returns to zero. This mirrors the `p_own` pattern in
+//! [`UintAdd`](crate::uint::add). The register follows the declared LogUp prefix and is therefore
+//! excluded from the LogUp sum (see [`crate::logup`]).
 //!
 //! ## Buses
 //!
 //! `ptr` and `bound_ptr` are cycle-constant per block.
 //!
 //! - **`UintVal`** (aux col 0): the `v` lo row and the `v` hi row *provide* `UintVal(ptr,
-//!   bound_ptr, offset, recombined-4×32)` with multiplicity `−uintval_mult` (the hub cells, both
-//!   now on `v` hi); the `bound` row *consumes* `UintVal(bound_ptr, bound_ptr, offset,
+//!   bound_ptr, offset, recombined-4×32)` with multiplicity `−uintval_mult` (both multiplicity
+//!   cells are on `v` hi); the `bound` row *consumes* `UintVal(bound_ptr, bound_ptr, offset,
 //!   direct-4×32)` with `+1` for both offsets. Both ptr-slots of the consume are `bound_ptr`, so it
 //!   only matches a *self-referential* provider — the modulus row. With `uintval_mult` = the
 //!   consumer count, the bus self-balances.
