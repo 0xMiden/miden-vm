@@ -18,7 +18,7 @@ use crate::{
 
 /// Fold one chiplet's per-denominator balance into the cross-chiplet accumulator.
 ///
-/// `net[denom] = (multiplicity summed across chiplets, sample message repr for diagnostics)`.
+/// `net[denom] = (multiplicity summed across chiplets, sample AIR type for diagnostics)`.
 pub(crate) fn fold_balance<A>(
     air: &A,
     main: &RowMajorMatrix<Felt>,
@@ -33,7 +33,9 @@ pub(crate) fn fold_balance<A>(
     let lookup_main = combined.as_ref().unwrap_or(main);
     let fractions = build_lookup_fractions(air, lookup_main, &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
-        net.entry(denom).or_insert((Felt::ZERO, String::new())).0 += multiplicity;
+        net.entry(denom)
+            .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
+            .0 += multiplicity;
     }
 }
 

@@ -11,6 +11,7 @@
 //!    extension-field element, so per-fraction `try_inverse` inside the accumulator does not panic.
 //! 3. **Pipeline plumbing**: row slicing with wraparound, per-row periodic composition, `RowWindow`
 //!    construction over a real matrix, and the dense `LookupFractions` buffer all line up.
+//! 4. **Constraint agreement**: the trace and its prover-built auxiliary columns satisfy the AIR.
 
 use alloc::{boxed::Box, vec::Vec};
 use core::{
@@ -169,6 +170,8 @@ fn build_lookup_fractions_runs_on_execution_trace() {
         "no Poseidon2 fractions collected; trace is degenerate or emitters are broken",
     );
     let _ = accumulate(&poseidon2_fractions);
+
+    trace.check_constraints();
 }
 
 #[test]

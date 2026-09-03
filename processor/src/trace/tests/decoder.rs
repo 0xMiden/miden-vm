@@ -10,7 +10,7 @@
 //! Coverage is targeted rather than exhaustive: the tests below hit the control-flow variants
 //! prone to off-by-one or selector-muxing bugs (JOIN, LOOP+REPEAT, CALL, SPAN/RESPAN op-group
 //! batching). Broader end-to-end soundness comes from
-//! `build_lookup_fractions_matches_constraint_path_oracle` in `tests/lookup.rs`.
+//! `build_lookup_fractions_runs_on_execution_trace` in `tests/lookup.rs`.
 
 use alloc::vec::Vec;
 
