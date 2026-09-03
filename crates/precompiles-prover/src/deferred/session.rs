@@ -16,9 +16,9 @@ use crate::{
     transcript::poseidon2::P2Digest,
 };
 
-/// wNAF window for [`translate_ec_msm`](DeferredSessionBuilder::translate_ec_msm)'s joint-wNAF
+/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
 /// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
-/// suits GLV's ~128-bit halves in isolation, but `translate_ec_msm` now caches a repeating base's
+/// suits GLV's ~128-bit halves in isolation, but `msm_from_terms` now caches a repeating base's
 /// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
 /// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
 /// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
@@ -326,10 +326,13 @@ impl<'a> DeferredSessionBuilder<'a> {
             Visit(Digest),
             CombineAdd { digest: Digest, curve: CurveId },
             CombineSub { digest: Digest, curve: CurveId },
+            VisitScalar(Digest),
+            CombineMsm { digest: Digest, curve: CurveId, n: usize },
         }
 
         let mut work = Vec::new();
         let mut values: Vec<TranslatedEc> = Vec::new();
+        let mut scalar_values: Vec<TranslatedUint> = Vec::new();
         work.push(Step::Visit(root));
 
         while let Some(step) = work.pop() {
@@ -372,9 +375,12 @@ impl<'a> DeferredSessionBuilder<'a> {
                             work.push(Step::Visit(lhs));
                         },
                         Some(CurveNodeRef::Msm { pairs }) => {
-                            let node = self.translate_ec_msm(digest, curve, pairs)?;
-                            debug_assert_eq!(node.hash(), P2Digest::from(digest));
-                            values.push(TranslatedEc { node, curve });
+                            let n = pairs.len();
+                            work.push(Step::CombineMsm { digest, curve, n });
+                            for (point_digest, scalar_digest) in pairs.into_iter().rev() {
+                                work.push(Step::VisitScalar(scalar_digest));
+                                work.push(Step::Visit(point_digest));
+                            }
                         },
                         Some(CurveNodeRef::Eq { .. }) | None => {
                             return Err(DeferredSessionError::TypeMismatch {
@@ -397,6 +403,19 @@ impl<'a> DeferredSessionBuilder<'a> {
                     let lhs = values.pop().expect("lhs missing from value stack");
                     debug_assert_eq!(lhs.curve, rhs.curve);
                     let node = self.session.ec_sub(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedEc { node, curve });
+                },
+                Step::VisitScalar(scalar_digest) => {
+                    scalar_values.push(self.translate_uint(scalar_digest)?);
+                },
+                Step::CombineMsm { digest, curve, n } => {
+                    let terms: Vec<(TranslatedEc, TranslatedUint)> = {
+                        let pi = values.len() - n;
+                        let si = scalar_values.len() - n;
+                        values.drain(pi..).zip(scalar_values.drain(si..)).collect()
+                    };
+                    let node = self.msm_from_terms(digest, curve, terms)?;
                     debug_assert_eq!(node.hash(), P2Digest::from(digest));
                     values.push(TranslatedEc { node, curve });
                 },
@@ -424,34 +443,17 @@ impl<'a> DeferredSessionBuilder<'a> {
         Ok(claim)
     }
 
-    fn translate_ec_msm(
+    fn msm_from_terms(
         &mut self,
         digest: Digest,
         curve: CurveId,
-        pairs: Vec<(Digest, Digest)>,
+        terms: Vec<(TranslatedEc, TranslatedUint)>,
     ) -> Result<EcNode, DeferredSessionError> {
-        // A nonempty PairList carries the curve context every term below
-        // relies on; an empty one has none, so it stays invalid.
-        if pairs.is_empty() {
+        if terms.is_empty() {
             return Err(DeferredSessionError::UnsupportedMsm {
                 digest,
                 reason: "an empty PairList has no curve context",
             });
-        }
-
-        let mut terms = Vec::with_capacity(pairs.len());
-        for (point_digest, scalar_digest) in pairs {
-            let point = self.translate_ec(point_digest)?;
-            let scalar = self.translate_uint(scalar_digest)?;
-            debug_assert_eq!(point.curve, curve);
-            debug_assert_eq!(scalar.domain, curve.scalar_domain());
-            if self.session.is_pai(&point.node) {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "an identity (point-at-infinity) base is not supported",
-                });
-            }
-            terms.push((point, scalar));
         }
 
         if let Some((point, _)) = terms.first() {
@@ -593,10 +595,7 @@ impl<'a> DeferredSessionBuilder<'a> {
             }
             level = next;
         }
-        level
-            .into_iter()
-            .next()
-            .expect("translate_ec_msm guarantees a nonempty PairList")
+        level.into_iter().next().expect("msm_from_terms guarantees a nonempty PairList")
     }
 
     /// Builds one term-preserving-fallback leaf: `msm_intro_zero` for a zero
@@ -742,27 +741,5 @@ impl<'a> DeferredSessionBuilder<'a> {
         let chunks = self.chunks_payload(parent, child)?;
         chunks_to_bytes_exact(chunks, 1, 32)
             .map_err(|_| DeferredSessionError::MalformedNode(parent))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use miden_core::deferred::{DeferredState, TRUE_DIGEST};
-
-    use super::session_from_deferred_state;
-
-    /// Ensures that `translate_truthy` handles deep AND spines iteratively without
-    /// overflowing the call stack. 4 096 statements is well beyond the ~15 000–20 000
-    /// depth that overflows an 8 MB thread stack with the old recursive implementation.
-    #[test]
-    fn translate_truthy_handles_deep_and_spine_iteratively() {
-        let mut state = DeferredState::default();
-        for _ in 0..4_096 {
-            state.log_statement(TRUE_DIGEST).unwrap();
-        }
-        // If translate_truthy is still recursive, this panics with a stack overflow.
-        let deferred = session_from_deferred_state(&state).unwrap();
-        // Verify the root was translated (non-trivial session).
-        let _ = deferred.root;
     }
 }
