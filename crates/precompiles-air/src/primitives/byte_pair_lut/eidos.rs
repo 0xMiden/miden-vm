@@ -38,8 +38,8 @@ impl Rotation {
 
 /// Normalized relation selected by one byte-pair interaction.
 ///
-/// Each discriminant is also the relation's multiplicity-column index and its position in
-/// [`provider_values`].
+/// Each discriminant is also the relation's multiplicity-column index and its position in the
+/// provider's value array.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Relation {
