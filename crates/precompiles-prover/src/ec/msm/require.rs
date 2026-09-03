@@ -1,4 +1,4 @@
-//! EcMsm recording layer — building MSM expressions (`intro` /
+//! EcMsm recording layer — building MSM expressions (`intro` / `intro_zero` /
 //! `intro_endo` / `combine` / `neg`) is *chiplet mechanism*: it walks term
 //! lists and authenticates scalar and point relations through the uint and
 //! EC buses. That belongs here, beside the chiplet, not in the DAG-only
@@ -101,9 +101,8 @@ pub fn intro_endo(
     let sbound = ec.store.group_sbound(group);
     let (px, py) = ec.store.point_params(base).1.expect("intro_endo of the point at infinity");
 
-    // x_φ = β·x_P (the plain `κ_a = 1, κ_c = 0` product arrangement, like
-    // the membership trio's `u ≡ x² + a`); y_φ = y_P rides the shared
-    // `endo_y` ptr for free.
+    // x_φ = β·x_P uses the plain `κ_a = 1, κ_c = 0` product arrangement. Reusing the
+    // `endo_y` pointer constrains y_φ = y_P.
     let phi_x = uint.require().mac(1, beta_ptr, px, 0, bound_ptr);
     let (val, minted) = ec.store.add_point_cert(group, phi_x, py);
     ec.store.require_ecpoint(base);
@@ -224,7 +223,7 @@ pub fn neg(
 
     // Value: −val_a as a TRIO-FREE on-curve cert point R = (x_a, −y_a) — no
     // group law. The boundary pins it: an is_c_zero `UintAdd(y_a, y_R ≡ 0)`
-    // (the y-flip), `x` shared (so `x_R = x_a` for free), and R's membership
+    // (the y-flip), a shared `x` pointer that constrains `x_R = x_a`, and R's membership
     // rides the `EcOnCurveCert` the boundary provides when it freshly mints R
     // (R is on-curve because val_a is). The `−y_a` value is interned by the
     // store's `neg`; the boundary consumes the resulting `UintAdd`.

@@ -326,10 +326,9 @@ impl LiftedAir<Felt, QuadFelt> for UintAddAir {
         let local: [AB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
         let next: [AB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
 
-        // The one role selector: 1 on the open row, its complement marking
-        // the closing row. Every next-reading constraint is ab_sel-gated,
-        // so the cyclic last → first window (whose local row is a closing
-        // row) is dropped for free.
+        // The role selector is one on the open row; its complement marks the closing row. Every
+        // next-row constraint is gated by `ab_sel`, so none applies across the cyclic last-to-first
+        // boundary.
         let ab_sel: AB::Expr = builder.periodic_values()[0].into();
         let cp_sel: AB::Expr = AB::Expr::ONE - ab_sel.clone();
 
