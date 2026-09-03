@@ -11,9 +11,9 @@ const PREPROCESSED_INDEX_MASK = 524287
 
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
-const PREPROCESSED_ROW_DOUBLE_WORDS = 2
-const MAIN_ROW_DOUBLE_WORDS = 68
-const AUX_ROW_DOUBLE_WORDS = 44
+const PREPROCESSED_ROW_DOUBLE_WORDS = 1
+const MAIN_ROW_DOUBLE_WORDS = 66
+const AUX_ROW_DOUBLE_WORDS = 35
 const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS

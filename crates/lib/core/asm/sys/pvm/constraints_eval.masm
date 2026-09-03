@@ -8,10 +8,10 @@ use miden::core::sys::pvm::layout
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 3422
+const NUM_INPUTS_CIRCUIT = 3228
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 12440
+const NUM_EVAL_GATES_CIRCUIT = 11968
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 7
@@ -27,8 +27,8 @@ const ORDER_TAG_COUNT = 3628800
 const NUM_AIRS = 10
 
 # Number of 8-felt blocks in each authenticated ACE circuit segment.
-const ACE_PREFIX_BLOCKS = 612
-const ACE_COMMON_BLOCKS = 1323
+const ACE_PREFIX_BLOCKS = 588
+const ACE_COMMON_BLOCKS = 1288
 
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
 # relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;
@@ -41,10 +41,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 # Eidos digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 454080348568980697
-const ACE_COMMON_COMMITMENT_1 = 7245680556981636643
-const ACE_COMMON_COMMITMENT_2 = 2412717027958044909
-const ACE_COMMON_COMMITMENT_3 = 8827988376058962724
+const ACE_COMMON_COMMITMENT_0 = 2363401287938653721
+const ACE_COMMON_COMMITMENT_1 = 6403965880424816766
+const ACE_COMMON_COMMITMENT_2 = 7269808684029710479
+const ACE_COMMON_COMMITMENT_3 = 8160696873028220667
 
 # ERRORS
 # =================================================================================================
@@ -94,7 +94,7 @@ proc load_and_authenticate_ace_circuit
     # => [LEAF]
     adv.push_mapval
     exec.layout::ace_circuit_stream_ptr
-    push.4896 exec.eidos::init_chaining_word
+    push.4704 exec.eidos::init_chaining_word
     padw padw
     # => [ZERO, ZERO, CV, ptr, LEAF]
     repeat.ACE_PREFIX_BLOCKS
@@ -105,7 +105,7 @@ proc load_and_authenticate_ace_circuit
     # => [PREFIX_COMMITMENT, ptr, LEAF]
     movup.4
     # => [ptr, PREFIX_COMMITMENT, LEAF]
-    push.10584 exec.eidos::init_chaining_word
+    push.10304 exec.eidos::init_chaining_word
     padw padw
     repeat.ACE_COMMON_BLOCKS
         adv_pipe

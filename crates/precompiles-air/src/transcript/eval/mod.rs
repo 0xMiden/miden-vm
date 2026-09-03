@@ -5,9 +5,8 @@
 //! active row evaluates one node: it hashes the node's preimage on
 //! Eidos and settles the node's `Binding`-bus tuple. The eval chip
 //! is the sole provider of the `Binding` bus, except the Keccak-node
-//! band of `ChunkNodeSpongeAir`, which fuses its own terminal keccak
-//! `True` (there is no transient Keccak — see the design notes). Domain
-//! chiplets (the `UintStore`, `UintAdd` / `UintMul`, EC store/add/MSM
+//! band of `ChunkNodeSpongeAir`, which provides its terminal Keccak `True` binding directly.
+//! Domain chiplets (the `UintStore`, `UintAdd` / `UintMul`, EC store/add/MSM
 //! chiplets) stay ptr-only and never touch `Binding`; this chip hashes
 //! their DAG nodes and ptr-references their relations.
 //!
@@ -54,12 +53,9 @@
 //!   as any node's child.
 //!
 //! Bus balance: every node's `out_mult` equals its consumer count, so the
-//! `Binding` σ nets to zero internally — the only external anchor is the
+//! `Binding` relation balances internally — the only external anchor is the
 //! first-row `h = public_root`. An empty transcript is `is_zero = 1` on
 //! the first row: `public_root = 0`, nothing provided or consumed.
-//!
-//! See the design notes for the binding-bus model and
-//! the design notes for the node formats.
 
 use alloc::vec::Vec;
 use core::array;
@@ -271,8 +267,8 @@ pub const COL_EC_CREATE_Y_PTR: usize = COL_B_PTR;
 // `is_msm_last` (the boundary). Reuses lhs/rhs = (Pᵢ.hash, sᵢ.hash),
 // h = this term's Eidos compression output, a_ptr/b_ptr = (Pᵢ_ptr, sᵢ_ptr),
 // ptr = val_ptr (the claim's value point), group_ptr = the group, bound_ptr =
-// the scalar bound. The run is one contiguous VM-style Eidos absorption span
-// (the design notes): see [`COL_MSM_IS_HEAD`].
+// the scalar bound. The run is one contiguous VM-style Eidos absorption span; see
+// [`COL_MSM_IS_HEAD`].
 // ================================================================
 
 /// EcMsm family flag — set on every absorb row of an MSM-claim run. In
@@ -310,9 +306,7 @@ pub const NUM_MAIN_COLS: usize = COL_MSM_IS_HEAD + 1;
 // `[public_root[0], …, public_root[3]]` — just the transcript's target root
 // (`PUBLIC_ROOT_BEGIN = 0`).
 
-/// Index of the first `public_root` felt. Under 0.26 the transcript root is
-/// the *whole* shared public-input vector (`air_inputs`); the old `inv_n`
-/// slot is gone (see `crate::logup`), so it starts at 0.
+/// Index of the first `public_root` felt in the shared public-input vector.
 pub const PUBLIC_ROOT_BEGIN: usize = 0;
 pub const PUBLIC_ROOT_END: usize = PUBLIC_ROOT_BEGIN + DIGEST_WIDTH;
 /// Total public-values count: the 4-felt `public_root`. Equals
@@ -326,7 +320,7 @@ pub const NUM_PUBLIC_VALUES: usize = PUBLIC_ROOT_END;
 // mutually exclusive typed relations in col 3 share a direct group. Every
 // closing constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 //
-// - col 0:  Binding bus, True path — `consume-lhs`, alone (the gated running-sum anchor).
+// - col 0:  Binding bus, True path — `consume-lhs`, alone.
 // - col 1:  `consume-rhs` + `provide-h` (the True-binding provide, heavy — a degree-2 message).
 // - col 2:  one atomic Eidos chaining input + `EidosOut`.
 // - col 3:  Typed value relations — one of `consume-uint`, `consume-uintmul`, or `consume-ecpoint`
@@ -629,16 +623,12 @@ impl LiftedAir<Felt, QuadFelt> for TranscriptEvalAir {
             .when_transition()
             .assert_zero(continues.clone() * (msm_idx_next - msm_idx - AB::Expr::ONE));
 
-        // The claim `expr_ptr` (and its `group_ptr`) are **constant across an
-        // absorb run**: every row of a claim names the same expression. This
-        // is load-bearing, not cosmetic — each absorb row attributes its term
-        // via `MsmClaimTerm(msm_expr, …)`, while the boundary binds the node's
-        // value and witnessed group via `MsmExpr(msm_expr, group, val, k)`. If
-        // `msm_expr` could vary mid-run a prover could hash one expression's
-        // terms (a correct, root-matching hash) while binding the node to
-        // *another* expression's value — a forged value under a correct hash,
-        // which root-comparison cannot catch. Holding `group_ptr` constant
-        // aligns the boundary `MsmExpr` with the whole run.
+        // The claim's `expr_ptr` and `group_ptr` are constant across an absorb run. Each absorb row
+        // attributes its term through `MsmClaimTerm(msm_expr, …)`, while the boundary binds the
+        // node's value and group through `MsmExpr(msm_expr, group, val, k)`. Without constancy, a
+        // prover could hash the terms of one expression while binding the node to another
+        // expression's value. Holding `group_ptr` constant also aligns the boundary message with
+        // the complete run.
         let msm_expr: AB::Expr = local[COL_MSM_EXPR].into();
         let msm_expr_next: AB::Expr = next[COL_MSM_EXPR].into();
         let group_local: AB::Expr = local[COL_EC_CONTEXT_GROUP_PTR].into();
@@ -789,8 +779,7 @@ where
         let linear_pair_deg = Deg { v: 2, u: 2 };
         let selected_pair_deg = Deg { v: 3, u: 2 };
 
-        // col 0: Binding bus, True path — consume-lhs alone, the gated
-        // running-sum anchor.
+        // col 0: Binding bus, True path — consume-lhs alone.
         frac_col!(
             builder,
             "binding-and",

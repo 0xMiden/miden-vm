@@ -171,15 +171,10 @@ fn msm_two_intro_combine_proves() {
         .expect("EcMsm intro+combine round-trip must verify");
 }
 
-/// The same `⟨G×1⟩ ⊕ ⟨2G×1⟩` copy-walk as [`msm_two_intro_traces`], but the
-/// group's **scalar field** is constrained to the curve order `n ≠ p`
-/// ([`Session::constrain_scalar_bound`]) *before* the intros — so their
-/// literal-1 scalars (and the group's `EcGroup` tuple) ride `n` while the
-/// coordinates stay under `p`. This is the regression for the eval
-/// scalar-bound plumbing: point-store rows and MSM consumes must read the
-/// group's canonical scalar bound `n`, not fall back to the coordinate bound
-/// `p`. The old `scalar_bound = coord_bound` hardcode dangled the `EcGroup`
-/// bus here (provide `n`, consume `p`), so `check` tripped.
+/// The same `⟨G×1⟩ ⊕ ⟨2G×1⟩` copy walk as [`msm_two_intro_traces`], with the
+/// group's scalar field constrained to the curve order `n ≠ p` before the intro operations.
+/// Point-store rows and MSM consumers must use this scalar bound while coordinates remain bounded
+/// by `p`.
 fn msm_scalar_bound_n_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
     let (gx, gy) = k256_coords(&g);

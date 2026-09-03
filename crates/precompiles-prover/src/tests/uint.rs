@@ -466,11 +466,8 @@ fn uint_store_mul_lookup_matches_its_standalone_components() {
 }
 
 #[test]
-fn comp_hi_range_checks_are_load_bearing_at_its_new_position() {
-    // `comp`'s hi half now lives at cells 8–15 of the `comp` row (not
-    // cells 0–7, where `v`'s halves and `comp`'s own lo half sit) — a
-    // regression exercising specifically that this new cell-position
-    // range is actually gated. Re-encode comp_hi's first limb pair with
+fn comp_hi_range_checks_cover_the_upper_comp_cells() {
+    // `comp`'s high half occupies cells 8–15 of the `comp` row. Re-encode its first limb pair with
     // an out-of-range 17-bit split (cell 8 += 2¹⁶, cell 9 -= 1): the
     // recombined 32-bit value — and so the SZ identity — is unchanged,
     // but cell 8 now sits outside Range16's [0, 2¹⁶) window.
@@ -500,8 +497,5 @@ fn comp_hi_range_checks_are_load_bearing_at_its_new_position() {
     fold_balance(&UintStoreAir, &main, &challenges, &mut net);
     fold_balance(&BytePairLutAir, &bpl_main, &challenges, &mut net);
     let residual = net.values().filter(|m| **m != Felt::ZERO).count();
-    assert_ne!(
-        residual, 0,
-        "an oversized comp_hi limb must unbalance Range16 — the checks are load-bearing",
-    );
+    assert_ne!(residual, 0, "an oversized comp_hi limb must unbalance Range16",);
 }

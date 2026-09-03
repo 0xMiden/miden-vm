@@ -257,7 +257,7 @@ fn keccak_round_shape_and_degree_match_design() {
 }
 
 #[test]
-fn pure_rol_raw_b_is_load_bearing_in_every_byte_and_lane() {
+fn pure_rol_raw_b_affects_every_byte_and_lane() {
     let states = [[0x0123_4567_89ab_cdef; 25], [0xfedc_ba98_7654_3210; 25]];
     let main = generate_trace_from_states(&states, &KECCAK_RC);
     let row = SLOT_D_ROL_BEGIN;

@@ -7,12 +7,12 @@
 #! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations
     # Per-row OOD layout uses LMCS alignment 8:
-    #   preprocessed: 16 scalar evaluations
-    #   main:         56 + 24 + 112 + 16 = 208 scalar evaluations
-    #   aux:          8 + 8 + 40 + 24 = 80 scalar evaluations
+    #   preprocessed: 8 scalar evaluations
+    #   main:         48 + 24 + 112 + 8 = 192 scalar evaluations
+    #   aux:          8 + 8 + 40 + 8 = 64 scalar evaluations
     #   quotient:     16 scalar evaluations
-    # The advice stream supplies 640 base felts, read as 80 `adv_pipe` blocks.
-    repeat.80
+    # The advice stream supplies 560 base felts, read as 70 `adv_pipe` blocks.
+    repeat.70
         adv_pipe
         horner_eval_ext
         compress

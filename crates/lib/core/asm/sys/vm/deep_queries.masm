@@ -148,8 +148,7 @@ proc process_preprocessed_segment
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned preprocessed leaf. The AND8 table contributes one
-    # 11-column preprocessed matrix, padded to 16 base felts by LMCS.
+    # Load the aligned preprocessed leaf: 8 base felts.
     push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
     swapw
     padw
@@ -170,7 +169,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_preprocessed_segment
-    repeat.2
+    repeat.1
         adv_pipe
         horner_eval_base
         exec.eidos::compress
@@ -199,7 +198,7 @@ proc process_main_segment_execution_trace
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned main leaf: 56 + 24 + 112 + 16 = 208 base felts.
+    # Load the aligned main leaf: 48 + 24 + 112 + 8 = 192 base felts.
     exec.load_main_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -215,7 +214,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_main_segment_execution_trace
-    repeat.26
+    repeat.24
         adv_pipe
         horner_eval_base
         exec.eidos::compress
@@ -246,7 +245,7 @@ proc process_aux_segment_execution_trace
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned aux leaf: 8 + 8 + 40 + 24 = 80 base felts.
+    # Load the aligned aux leaf: 8 + 8 + 40 + 8 = 64 base felts.
     exec.load_aux_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -263,7 +262,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_aux_segment_execution_trace
-    repeat.10
+    repeat.8
         adv_pipe
         horner_eval_base
         exec.eidos::compress
