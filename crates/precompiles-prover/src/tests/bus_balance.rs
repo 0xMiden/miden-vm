@@ -2,10 +2,7 @@
 
 use std::{collections::HashMap, fmt::Debug, format, string::String, vec::Vec};
 
-use miden_air::lookup::{
-    Challenges, LookupAir,
-    debug::{check_trace_balance, trace::DebugTraceBuilder},
-};
+use miden_air::lookup::{Challenges, LookupAir, ProverLookupBuilder, build_lookup_fractions};
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::LiftedAir;
 
@@ -28,21 +25,15 @@ pub(crate) fn fold_balance<A>(
     challenges: &Challenges<QuadFelt>,
     net: &mut HashMap<QuadFelt, (Felt, String)>,
 ) where
-    A: LiftedAir<Felt, QuadFelt>,
-    for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
+    A: LiftedAir<Felt, QuadFelt> + Sync,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, QuadFelt>>,
 {
     let periodic = air.periodic_columns();
     let combined = crate::tests::combined_lookup_main(air, main);
     let lookup_main = combined.as_ref().unwrap_or(main);
-    let report = check_trace_balance(air, lookup_main, &periodic, &[], &[], challenges);
-    for u in report.unmatched {
-        let entry = net.entry(u.denom).or_insert((Felt::ZERO, String::new()));
-        entry.0 += u.net_multiplicity;
-        if entry.1.is_empty()
-            && let Some(c) = u.contributions.first()
-        {
-            entry.1 = c.msg_repr.clone();
-        }
+    let fractions = build_lookup_fractions(air, lookup_main, &periodic, challenges);
+    for &(multiplicity, denom) in fractions.fractions() {
+        net.entry(denom).or_insert((Felt::ZERO, String::new())).0 += multiplicity;
     }
 }
 
