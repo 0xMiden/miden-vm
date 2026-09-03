@@ -94,9 +94,10 @@ fn canonical_deferred_ecdsa4_keccak100_example_executes() {
             Felt::new(value).expect("advice-stack value must be canonical")
         })
         .collect::<Vec<_>>();
-    let fixtures = advice_values.chunks_exact(40);
-    assert!(fixtures.remainder().is_empty(), "ECDSA fixtures must contain 40 Felts each");
+    let (fixtures, remainder) = advice_values.as_chunks::<40>();
+    assert!(remainder.is_empty(), "ECDSA fixtures must contain 40 Felts each");
     let (stored_commitments, derived_commitments): (Vec<_>, Vec<_>) = fixtures
+        .iter()
         .map(|fixture| {
             let stored = Word::new(fixture[4..8].try_into().expect("commitment is one word"));
             let derived = Eidos::hash_elements(&fixture[8..24]);
