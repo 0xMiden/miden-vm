@@ -12,7 +12,7 @@ use miden_air::{
     ace::RecursiveAceCircuitFactory,
     config::{ACE_CIRCUIT_REGISTRY_DEPTH, relation_digest},
 };
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Poseidon2, program::KernelDescriptor};
 use miden_crypto::{
     merkle::MerkleTree,
     stark::{QuotientRecompositionInputs, air::BaseAir, quotient_recomposition_inputs},
@@ -33,6 +33,8 @@ const VM_AUX_TRACE_PATH: &str = "asm/sys/vm/aux_trace.masm";
 const VM_LAYOUT_PATH: &str = "asm/sys/vm/layout.masm";
 const VM_PUBLIC_INPUTS_PATH: &str = "asm/sys/vm/public_inputs.masm";
 const PVM_LAYOUT_PATH: &str = "asm/sys/pvm/layout.masm";
+const SECURITY_ESTIMATOR_PATH: &str = "asm/stark/security.masm";
+const GENERIC_UTILS_PATH: &str = "asm/stark/utils.masm";
 
 /// Computes the relation digest used by recursive verification.
 pub fn compute_relation_digest(registry_root: &[Felt; 4]) -> [Felt; 4] {
@@ -458,25 +460,113 @@ pub fn public_inputs_masm_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-/// Verify that the conjectured round-budget literals in `sys/vm/mod.masm` match the values
-/// `miden_air::security` derives from the current AIR set.
+/// Checks the common estimator constants and the MVM descriptor against the shared PCS and current
+/// AIRs.
 ///
-/// The exhaustive cross-test in `crates/lib/core/tests/sys` only exercises whichever round binds
-/// under the deployed shape (lookup and query); a stale composition, out-of-domain, DEEP, or
-/// folding literal moves no output in that sweep. Reading the literals straight out of the
-/// checked-in source is what actually catches that drift.
+/// The parity tests compare final native and MASM levels. This check covers the constants and
+/// bounds independently, including values from rounds that do not determine the final level for
+/// the current MVM configuration.
 pub fn security_masm_matches_air() -> Result<(), String> {
-    let masm = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
-
-    let literals: [(&str, u64); 10] = [
+    let estimator = read_file(SECURITY_ESTIMATOR_PATH).map_err(|e| e.to_string())?;
+    // These literals define the shared fixed-point format and the PCS values used to bound the
+    // terms omitted by the MASM estimator. The remaining limits are checked below against the MVM
+    // relation and the generic verifier.
+    let fractional_bits = miden_air::security::FIXED_POINT_FRACTIONAL_BITS;
+    let fixed_point_one = miden_air::security::FIXED_POINT_ONE;
+    let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
+    let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
+    let shared_literals: [(&str, u64); 10] = [
+        ("FP_SHIFT", u64::from(fractional_bits)),
+        ("FP_ONE", fixed_point_one),
+        ("MAX_Q16_FRACTION", fixed_point_one - 1),
         ("BITS_PER_QUERY_FP", miden_air::security::BITS_PER_QUERY),
-        ("SECURITY_CAP_FP", miden_air::security::SECURITY_CAP),
-        ("LOOKUP_BASE_FP", miden_air::security::LOOKUP_BASE),
-        ("COMPOSITION_TERM_FP", miden_air::security::COMPOSITION_TERM),
-        ("OOD_BASE_FP", miden_air::security::OOD_BASE),
-        ("DEEP_BASE_FP", miden_air::security::DEEP_BASE),
-        ("FOLDING_BASE_FP", miden_air::security::FOLDING_BASE),
+        ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
+        ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
+        ("SECURITY_CAP_BITS", miden_air::security::SECURITY_CAP >> fractional_bits),
+        ("FRI_FOLDING_BASE_BITS", miden_air::security::FOLDING_BASE >> fractional_bits),
         ("LOG2_E_FP", miden_air::security::LOG2_E),
+        (
+            "MAX_CONSTRAINT_DEGREE",
+            (1u64 << miden_air::config::pcs_params().log_blowup()) + 1,
+        ),
+    ];
+
+    for (name, expected) in shared_literals {
+        let actual = parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH)?;
+        if actual != expected {
+            return Err(format!("{name} in {SECURITY_ESTIMATOR_PATH} is stale"));
+        }
+    }
+
+    // The estimator omits five native security terms only while the MVM shape and the generic
+    // verifier's parameter ranges satisfy its documented bounds. `air_shape_matches_symbolic`
+    // checks the stored shape against the AIRs; the checks below fail if that shape leaves the
+    // estimator envelope. This function also pins the generic verifier bounds directly.
+    let wrapper = read_file(RELATION_DIGEST_PATH).map_err(|e| e.to_string())?;
+    let utils = read_file(GENERIC_UTILS_PATH).map_err(|e| e.to_string())?;
+    let air_shape = miden_air::security::AIR_SHAPE;
+    let parsed = |name: &str| parse_masm_const::<u64>(&estimator, name, SECURITY_ESTIMATOR_PATH);
+    let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
+        * u64::from(air_shape.lookup.fractions_per_row);
+    let max_boundary_terms = u64::from(miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS)
+        + KernelDescriptor::MAX_NUM_PROCEDURES as u64;
+    if u64::from(air_shape.num_composed_constraints) > parsed("MAX_COMPOSED_CONSTRAINTS")? {
+        return Err("the MVM composed-constraint count exceeds the estimator envelope".into());
+    }
+    if u64::from(air_shape.max_constraint_degree) > parsed("MAX_CONSTRAINT_DEGREE")? {
+        return Err("the MVM constraint degree exceeds the estimator envelope".into());
+    }
+    if u64::from(air_shape.num_deep_terms.expect("the MVM uses DEEP composition"))
+        > parsed("MAX_DEEP_TERMS")?
+    {
+        return Err("the MVM DEEP term count exceeds the estimator envelope".into());
+    }
+    if lookup_coefficient < parsed("MIN_LOOKUP_COEFFICIENT")? {
+        return Err("the MVM lookup coefficient falls below the estimator envelope".into());
+    }
+    if lookup_coefficient > parsed("MAX_LOOKUP_COEFFICIENT")? {
+        return Err("the MVM lookup coefficient exceeds the estimator envelope".into());
+    }
+    if max_boundary_terms > parsed("MAX_BOUNDARY_TERMS")? {
+        return Err("the MVM boundary-term maximum exceeds the estimator envelope".into());
+    }
+    if parsed("MIN_LOG_HEIGHT")?
+        != parse_masm_const::<u64>(&wrapper, "LOG_HEIGHT_MIN", RELATION_DIGEST_PATH)?
+    {
+        return Err(format!("MIN_LOG_HEIGHT in {SECURITY_ESTIMATOR_PATH} is stale"));
+    }
+    let estimator_heights = parsed("MAX_LOG_HEIGHT")?;
+    if parsed("MAX_NUM_QUERIES")?
+        != parse_masm_const::<u64>(&utils, "NUM_QUERIES_MAX", GENERIC_UTILS_PATH)?
+    {
+        return Err(format!("MAX_NUM_QUERIES in {SECURITY_ESTIMATOR_PATH} is stale"));
+    }
+    if parsed("MAX_POW_BITS")?
+        != parse_masm_const::<u64>(&utils, "POW_BITS_MAX", GENERIC_UTILS_PATH)?
+    {
+        return Err(format!("MAX_POW_BITS in {SECURITY_ESTIMATOR_PATH} is stale"));
+    }
+
+    let descriptor_literals: [(&str, u64); 9] = [
+        ("LOOKUP_POW_BITS", miden_air::security::LOOKUP_POW_BITS as u64),
+        (
+            "MAX_MESSAGE_WIDTH",
+            miden_air::security::AIR_SHAPE.lookup.max_message_width as u64,
+        ),
+        (
+            "NUM_COMPOSED_CONSTRAINTS",
+            miden_air::security::AIR_SHAPE.num_composed_constraints as u64,
+        ),
+        (
+            "MAX_CONSTRAINT_DEGREE",
+            miden_air::security::AIR_SHAPE.max_constraint_degree as u64,
+        ),
+        (
+            "NUM_DEEP_TERMS",
+            miden_air::security::AIR_SHAPE
+                .num_deep_terms
+                .expect("the MVM uses DEEP composition") as u64,
+        ),
         (
             "CORE_BOUNDARY_LOOKUP_TERMS",
             miden_air::security::CORE_BOUNDARY_LOOKUP_TERMS as u64,
@@ -485,12 +575,14 @@ pub fn security_masm_matches_air() -> Result<(), String> {
             "LOOKUP_FRACTIONS_PER_ROW",
             miden_air::security::AIR_SHAPE.lookup.fractions_per_row as u64,
         ),
+        ("MAX_NUM_KERNEL_PROCEDURES", KernelDescriptor::MAX_NUM_PROCEDURES as u64),
+        ("LOG_HEIGHT_MAX", estimator_heights),
     ];
 
-    for (name, expected) in literals {
-        let actual = parse_masm_const::<u64>(&masm, name, "sys/vm/mod.masm")?;
+    for (name, expected) in descriptor_literals {
+        let actual = parse_masm_const::<u64>(&wrapper, name, RELATION_DIGEST_PATH)?;
         if actual != expected {
-            return Err(format!("{name} in sys/vm/mod.masm is stale"));
+            return Err(format!("{name} in {RELATION_DIGEST_PATH} is stale"));
         }
     }
 

@@ -385,7 +385,7 @@ fn bench_one_scenario(
             b.iter(|| {
                 let outcome = Verifier::new().verify(&claim, &proof).expect("verify");
                 assert!(outcome.is_complete());
-                black_box(outcome.security_level())
+                black_box(outcome.vm_security_parameters().conjectured_security_level())
             });
         });
     }

@@ -4,7 +4,7 @@ use alloc::{
     sync::Arc,
     vec,
 };
-use core::{assert_matches, str::FromStr};
+use core::{assert_matches, cell::Cell, str::FromStr};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
@@ -40,7 +40,7 @@ use super::*;
 use crate::{
     AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, ProgramExecutor,
     SyncHost,
-    advice::AdviceMutation,
+    advice::{AdviceMap, AdviceMutation},
     event::EventError,
     operation::OperationError,
     processor::{StackInterface, SystemInterface},
@@ -1510,6 +1510,60 @@ struct MalformedExternalHost {
     loaded_mast_forest: LoadedMastForest,
 }
 
+struct CountingMastForestHost {
+    mast_forests: Vec<LoadedMastForest>,
+    lookup_count: Cell<usize>,
+}
+
+impl CountingMastForestHost {
+    fn new(mast_forests: impl IntoIterator<Item = Arc<MastForest>>) -> Self {
+        Self {
+            mast_forests: mast_forests.into_iter().map(LoadedMastForest::new).collect(),
+            lookup_count: Cell::new(0),
+        }
+    }
+
+    fn lookup_count(&self) -> usize {
+        self.lookup_count.get()
+    }
+}
+
+impl BaseHost for CountingMastForestHost {
+    fn get_label_and_source_file(
+        &self,
+        _location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+}
+
+impl SyncHost for CountingMastForestHost {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
+        self.lookup_count.set(self.lookup_count.get() + 1);
+        self.mast_forests
+            .iter()
+            .find(|loaded| loaded.mast_forest().find_procedure_root(*node_digest).is_some())
+            .cloned()
+    }
+
+    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
+}
+
+fn program_calling_external_procedures(procedure_digests: [Word; 2]) -> Program {
+    let mut forest = MastForest::new();
+    let first = ExternalNodeBuilder::new(procedure_digests[0])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = ExternalNodeBuilder::new(procedure_digests[1])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let root = JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(root);
+    Program::new(forest.into(), root)
+}
+
 impl BaseHost for MalformedExternalHost {
     fn get_label_and_source_file(
         &self,
@@ -1529,6 +1583,116 @@ impl SyncHost for MalformedExternalHost {
     fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
+}
+
+#[test]
+fn caches_all_procedures_and_advice_from_a_loaded_mast_forest() {
+    let mut mast_forest = MastForest::new();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
+    mast_forest.make_root(first);
+    mast_forest.make_root(second);
+    let procedure_digests = [mast_forest[first].digest(), mast_forest[second].digest()];
+    let advice_key = Word::from([ONE, ZERO, ZERO, ZERO]);
+    let mast_forest =
+        Arc::new(mast_forest.with_advice_map(AdviceMap::from_iter([(advice_key, vec![ONE])])));
+    let forest_commitment = mast_forest.commitment();
+    let program = program_calling_external_procedures(procedure_digests);
+    let mut host = CountingMastForestHost::new([mast_forest]);
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    processor.execute_mut_sync(&program, &mut host).unwrap();
+
+    assert_eq!(host.lookup_count(), 1);
+    assert_eq!(processor.loaded_mast_forests.len(), 2);
+    assert!(
+        procedure_digests
+            .iter()
+            .all(|digest| { processor.loaded_mast_forests.contains_key(digest) })
+    );
+    assert_eq!(processor.merged_mast_forests.len(), 1);
+    assert!(processor.merged_mast_forests.contains(&forest_commitment));
+    assert!(processor.advice.contains_map_key(&advice_key));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn caches_advice_from_distinct_mast_forests() {
+    let first_advice_key = Word::from([ONE, ZERO, ZERO, ZERO]);
+    let second_advice_key = Word::from([ZERO, ONE, ZERO, ZERO]);
+
+    let mut first_forest = MastForest::new();
+    let first_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut first_forest)
+        .unwrap();
+    first_forest.make_root(first_root);
+    let first_digest = first_forest[first_root].digest();
+    let first_forest = Arc::new(
+        first_forest.with_advice_map(AdviceMap::from_iter([(first_advice_key, vec![ONE])])),
+    );
+
+    let mut second_forest = MastForest::new();
+    let second_root = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut second_forest)
+        .unwrap();
+    second_forest.make_root(second_root);
+    let second_digest = second_forest[second_root].digest();
+    let second_forest = Arc::new(
+        second_forest.with_advice_map(AdviceMap::from_iter([(second_advice_key, vec![ONE])])),
+    );
+
+    let program = program_calling_external_procedures([first_digest, second_digest]);
+    let mut host = CountingMastForestHost::new([first_forest, second_forest]);
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    processor.execute_mut(&program, &mut host).await.unwrap();
+
+    assert_eq!(host.lookup_count(), 2);
+    assert_eq!(processor.loaded_mast_forests.len(), 2);
+    assert_eq!(processor.merged_mast_forests.len(), 2);
+    assert!(processor.advice.contains_map_key(&first_advice_key));
+    assert!(processor.advice.contains_map_key(&second_advice_key));
+}
+
+#[test]
+fn preserves_first_cached_forest_for_a_shared_procedure() {
+    let mut first_forest = MastForest::new();
+    let shared_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut first_forest)
+        .unwrap();
+    let first_unique_root = BasicBlockNodeBuilder::new(vec![Operation::Incr])
+        .add_to_forest(&mut first_forest)
+        .unwrap();
+    first_forest.make_root(shared_root);
+    first_forest.make_root(first_unique_root);
+    let shared_digest = first_forest[shared_root].digest();
+    let first_unique_digest = first_forest[first_unique_root].digest();
+    let first_forest = Arc::new(first_forest);
+    let first_commitment = first_forest.commitment();
+
+    let mut second_forest = MastForest::new();
+    let second_shared_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut second_forest)
+        .unwrap();
+    let second_unique_root = BasicBlockNodeBuilder::new(vec![Operation::Neg])
+        .add_to_forest(&mut second_forest)
+        .unwrap();
+    second_forest.make_root(second_shared_root);
+    second_forest.make_root(second_unique_root);
+    let second_unique_digest = second_forest[second_unique_root].digest();
+    let second_forest = Arc::new(second_forest);
+
+    let program = program_calling_external_procedures([first_unique_digest, second_unique_digest]);
+    let mut host = CountingMastForestHost::new([first_forest, second_forest]);
+    let mut processor = FastProcessor::new(StackInputs::default());
+
+    processor.execute_mut_sync(&program, &mut host).unwrap();
+
+    let cached_shared_forest = processor.loaded_mast_forests.get(&shared_digest).unwrap();
+    assert_eq!(cached_shared_forest.mast_forest().commitment(), first_commitment);
 }
 
 #[test]

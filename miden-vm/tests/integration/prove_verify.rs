@@ -12,8 +12,18 @@ use miden_utils_testing::{
 };
 use miden_vm::{
     DefaultHost, ExecutionOptions, FastProcessor, HashFunction, ProgramInfo, Prover, StackInputs,
-    StackOutputs, Verifier, advice::AdviceInputs,
+    StackOutputs, VerificationOutcome, Verifier, advice::AdviceInputs,
 };
+
+/// Applies the integration tests' policy to all STARK components in a verification outcome.
+fn minimum_conjectured_security_level(outcome: &VerificationOutcome) -> u32 {
+    let vm_security_level = outcome.vm_security_parameters().conjectured_security_level();
+    outcome
+        .precompile_security_parameters()
+        .map_or(vm_security_level, |precompile_parameters| {
+            vm_security_level.min(precompile_parameters.conjectured_security_level())
+        })
+}
 
 fn masm_push_felts(felts: &[Felt]) -> String {
     felts
@@ -62,7 +72,10 @@ fn assert_prove_verify(
     let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
     assert!(outcome.is_complete());
 
-    println!("Verification successful! Security level: {}", outcome.security_level());
+    println!(
+        "Verification successful! Security level: {}",
+        minimum_conjectured_security_level(&outcome)
+    );
 }
 
 fn assert_recursive_verify(
@@ -72,7 +85,7 @@ fn assert_recursive_verify(
     proof: &ExecutionProof,
 ) {
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
-    let verifier_root = CoreLibrary::default().recursive_verifier_root();
+    let verifier_root = CoreLibrary::default().vm_recursive_verifier_root();
     let verifier_inputs = generate_request_inputs(verifier_root, proof, &claim)
         .expect("recursive verifier request construction failed");
 
@@ -83,10 +96,10 @@ fn assert_recursive_verify(
         begin
             # Initial stack: [CLAIM_COMMITMENT].
             dupw
-            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
-            exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            exec.vm::verify_proof
+            # => [security_descriptor, D]
             exec.sys::truncate_stack
         end
     ";
@@ -187,7 +200,7 @@ fn test_keccak_precompile_wrapper_prove_verify_final() {
         .prove_full(witness)
         .expect("failed to prove Keccak precompile execution");
 
-    assert!(matches!(proof, ExecutionProof::Complete { precompile: Some(_), .. }));
+    assert!(matches!(proof.precompile(), miden_vm::PrecompileStatus::Proven(_)));
     let claim = ExecutionClaim::from_program_info(program.into(), stack_inputs, stack_outputs);
     let outcome = Verifier::new().verify(&claim, &proof).expect("Verification failed");
     assert!(outcome.is_complete());
@@ -249,10 +262,12 @@ mod prover_api_lifecycle {
     };
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
-        FastProcessor, HashFunction, PrecompileProof, PrecompileWitness, Program, Prover,
-        StackInputs, StackOutputs, StarkProof, VerificationError, Verifier, advice::AdviceInputs,
-        precompile_witness_from_wire, prove_sync,
+        FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
+        Prover, StackInputs, StackOutputs, StarkProof, VerificationError, Verifier,
+        advice::AdviceInputs, precompile_witness_from_wire, prove_sync,
     };
+
+    use super::minimum_conjectured_security_level;
 
     fn assemble(source: &str) -> Program {
         Assembler::default()
@@ -334,8 +349,9 @@ mod prover_api_lifecycle {
         let outcome = Verifier::new()
             .verify(&claim, proof)
             .expect("complete execution proof should verify");
-        assert_eq!(outcome.security_level(), 96);
         assert!(outcome.is_complete());
+        assert!(outcome.precompile_security_parameters().is_none());
+        assert_eq!(minimum_conjectured_security_level(&outcome), 96);
         assert_eq!(outcome.outstanding_precompile_root(), None);
     }
 
@@ -386,19 +402,18 @@ mod prover_api_lifecycle {
             .with_hash_fn(HashFunction::Blake3_256)
             .prove(one_witness)
             .expect("root-one execution should produce a deferred proof");
-        let ExecutionProof::Deferred { vm: one_vm, .. } = &one_deferred else {
-            panic!("root-one execution should remain deferred");
-        };
-        let one_root = one_vm.precompile_root;
+        assert!(matches!(one_deferred.precompile(), PrecompileStatus::Deferred(_)));
+        let one_root = one_deferred.vm().precompile_root;
         let deferred_outcome = Verifier::new()
             .verify(&one_claim, &one_deferred)
             .expect("deferred VM proof should verify");
         assert_eq!(deferred_outcome.outstanding_precompile_root(), Some(one_root));
+        assert!(deferred_outcome.precompile_security_parameters().is_none());
 
-        let unrelated_wire = ExecutionProof::Deferred {
-            vm: one_vm.clone(),
-            precompile: DeferredStateWire::default(),
-        };
+        let unrelated_wire = ExecutionProof::new(
+            one_deferred.vm().clone(),
+            PrecompileStatus::Deferred(DeferredStateWire::default()),
+        );
         let unrelated_outcome = Verifier::new()
             .verify(&one_claim, &unrelated_wire)
             .expect("deferred verification should authenticate only the VM root");
@@ -417,13 +432,13 @@ mod prover_api_lifecycle {
         let two_transported = ExecutionProof::read_from_bytes(&two_deferred.to_bytes())
             .expect("root-two deferred proof transport should decode without hydrating its wire");
 
-        let ExecutionProof::Deferred { precompile: one_wire, .. } = &one_transported else {
+        let PrecompileStatus::Deferred(one_wire) = one_transported.precompile() else {
             panic!("transported root-one proof should remain deferred");
         };
-        let ExecutionProof::Deferred { vm: two_vm, precompile: two_wire } = &two_transported else {
+        let PrecompileStatus::Deferred(two_wire) = two_transported.precompile() else {
             panic!("transported root-two proof should remain deferred");
         };
-        let two_root = two_vm.precompile_root;
+        let two_root = two_transported.vm().precompile_root;
         let one_witness = precompile_witness_from_wire(one_wire)
             .expect("transported root-one wire should hydrate under the standard registry");
         let two_witness = precompile_witness_from_wire(two_wire)
@@ -440,19 +455,15 @@ mod prover_api_lifecycle {
         assert_eq!(shared_precompile.roots, ordered_roots);
 
         let verifier = Verifier::new();
-        assert_eq!(
-            verifier
-                .verify_precompile(&shared_precompile, one_root)
-                .expect("shared precompile proof should directly verify root one"),
-            96
-        );
+        let root_one_security_parameters = verifier
+            .verify_precompile(&shared_precompile, one_root)
+            .expect("shared precompile proof should directly verify root one");
+        assert_eq!(root_one_security_parameters.conjectured_security_level(), 96);
 
-        assert_eq!(
-            verifier
-                .verify_precompile(&shared_precompile, two_root)
-                .expect("compatible extra roots should directly verify root two"),
-            96
-        );
+        let root_two_security_parameters = verifier
+            .verify_precompile(&shared_precompile, two_root)
+            .expect("compatible extra roots should directly verify root two");
+        assert_eq!(root_two_security_parameters.conjectured_security_level(), 96);
 
         let mut reordered_precompile = shared_precompile.clone();
         reordered_precompile.roots.swap(1, 2);
@@ -468,28 +479,29 @@ mod prover_api_lifecycle {
             Err(VerificationError::PrecompileStarkVerification(_))
         ));
 
-        let mut mutated_vm_root = one_transported.clone();
-        let ExecutionProof::Deferred { vm, .. } = &mut mutated_vm_root else {
-            panic!("transported root-one proof should remain deferred");
-        };
-        vm.precompile_root = two_root;
-        let mutated_vm_root = mutated_vm_root
-            .complete(shared_precompile.clone())
-            .expect("completion should attach a compatible precompile proof");
+        let mutated_vm_root = ExecutionProof::new(
+            miden_vm::VmProof {
+                proof: one_transported.vm().proof.clone(),
+                precompile_root: two_root,
+            },
+            one_transported.precompile().clone(),
+        )
+        .complete(shared_precompile.clone())
+        .expect("completion should attach a compatible precompile proof");
         assert!(matches!(
             verifier.verify(&one_claim, &mutated_vm_root),
             Err(VerificationError::StarkVerificationError(..))
         ));
 
-        let mut trailing_vm_bytes = one_vm.proof.bytes().to_vec();
+        let mut trailing_vm_bytes = one_deferred.vm().proof.bytes().to_vec();
         trailing_vm_bytes.push(0);
-        let trailing_vm_proof = ExecutionProof::Deferred {
-            vm: miden_vm::VmProof {
-                proof: StarkProof::new(trailing_vm_bytes, one_vm.proof.hash_fn()),
+        let trailing_vm_proof = ExecutionProof::new(
+            miden_vm::VmProof {
+                proof: StarkProof::new(trailing_vm_bytes, one_deferred.vm().proof.hash_fn()),
                 precompile_root: one_root,
             },
-            precompile: DeferredStateWire::default(),
-        };
+            PrecompileStatus::Deferred(DeferredStateWire::default()),
+        );
         assert!(matches!(
             verifier.verify(&one_claim, &trailing_vm_proof),
             Err(VerificationError::StarkVerificationError(..))
@@ -521,6 +533,16 @@ mod prover_api_lifecycle {
             .expect("completed root-two execution should verify");
         assert!(one_outcome.is_complete());
         assert!(two_outcome.is_complete());
+        assert_eq!(
+            one_outcome.precompile_security_parameters(),
+            Some(&root_one_security_parameters)
+        );
+        assert_eq!(
+            two_outcome.precompile_security_parameters(),
+            Some(&root_two_security_parameters)
+        );
+        assert_eq!(minimum_conjectured_security_level(&one_outcome), 96);
+        assert_eq!(minimum_conjectured_security_level(&two_outcome), 96);
     }
 }
 
@@ -536,16 +558,12 @@ mod execution_witness_serialization {
             BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt,
         },
         operations::Operation,
-        proof::ExecutionProof,
     };
     use miden_processor::{
         DefaultHost, FastProcessor, HostLibrary, StackInputs, advice::AdviceInputs,
         trace::build_trace,
     };
-    use miden_prover::{
-        HashFunction, Prover,
-        serde::{Deserializable, Serializable},
-    };
+    use miden_prover::{HashFunction, Prover, serde::Serializable};
     #[cfg(feature = "arbitrary")]
     use miden_utils_testing::proptest::prelude::*;
     use miden_verifier::Verifier;
@@ -618,9 +636,8 @@ mod execution_witness_serialization {
         witness: ExecutionWitness,
     ) {
         let bytes = witness.to_bytes();
-        let budget = bytes.len().saturating_mul(4);
-        ExecutionWitness::read_from_bytes_with_budget(&bytes, budget)
-            .expect("witness seed should decode within the fuzzing budget");
+        ExecutionWitness::read_from_bytes(&bytes)
+            .expect("witness seed should pass adversarial byte-slice decoding");
         std::fs::write(corpus_dir.join(name), bytes).expect("witness seed should be writable");
     }
 
@@ -655,15 +672,8 @@ mod execution_witness_serialization {
 
             let expected_claim = witness.claim();
             let witness_bytes = witness.to_bytes();
-            let witness_budget = witness_bytes
-                .len()
-                .checked_mul(4)
-                .expect("generated witness budget should fit usize");
-            let restored = ExecutionWitness::read_from_bytes_with_budget(
-                &witness_bytes,
-                witness_budget,
-            )
-            .expect("generated witness should round trip");
+            let restored = ExecutionWitness::read_from_bytes(&witness_bytes)
+                .expect("generated witness should round trip");
 
             prop_assert_eq!(restored.claim(), expected_claim);
             prop_assert_eq!(restored.to_bytes(), witness_bytes);
@@ -732,11 +742,8 @@ mod execution_witness_serialization {
             original_trace.public_inputs().to_air_inputs()
         );
 
-        let witness_budget =
-            witness_bytes.len().checked_mul(4).expect("test input budget overflow");
-        let restored_witness =
-            ExecutionWitness::read_from_bytes_with_budget(&witness_bytes, witness_budget)
-                .expect("execution witness round trip");
+        let restored_witness = ExecutionWitness::read_from_bytes(&witness_bytes)
+            .expect("execution witness round trip");
         let proof = Prover::new()
             .with_hash_fn(HashFunction::Blake3_256)
             .prove(restored_witness)
@@ -787,7 +794,7 @@ mod execution_witness_serialization {
             .expect("wire-backed partial proof should be produced from the restored witness");
 
         assert!(!proof.is_complete());
-        let ExecutionProof::Deferred { precompile: wire, .. } = &proof else {
+        let miden_vm::PrecompileStatus::Deferred(wire) = proof.precompile() else {
             panic!("partial proving should keep the deferred proof wire-backed");
         };
         assert_eq!(wire, &expected_wire);

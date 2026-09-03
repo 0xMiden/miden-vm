@@ -9,6 +9,19 @@ use miden::core::stark::constants
 use miden::core::stark::utils
 use miden::core::stark::verifier
 
+# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
+# zero because Lifted STARK does not grind lookup challenges.
+const LOOKUP_POW_BITS = 0
+const MAX_MESSAGE_WIDTH = 18
+const NUM_COMPOSED_CONSTRAINTS = 591
+const MAX_CONSTRAINT_DEGREE = 5
+const NUM_DEEP_TERMS = 770
+const LOOKUP_FRACTIONS_PER_ROW = 247
+const FIXED_BOUNDARY_LOOKUP_TERMS = 8
+
+# Inclusive upper bound used by the PVM shape checks.
+const LOG_HEIGHT_MAX = 29
+
 # Fixed ChipletAir::all() cardinality and registry metadata.
 const NUM_CHIPLETS = 10
 
@@ -30,16 +43,16 @@ const MIN_LOG_HEIGHT_8 = 2
 const MIN_LOG_HEIGHT_9 = 1
 
 # PVM_RELATION_DIGEST = Poseidon2(PVM_PROTOCOL_ID || PVM_ACE_REGISTRY_ROOT).
-const RELATION_DIGEST_0 = 12765330256215748392
-const RELATION_DIGEST_1 = 11318082190661185302
-const RELATION_DIGEST_2 = 11045448100533503580
-const RELATION_DIGEST_3 = 1141539045039940094
+const RELATION_DIGEST_0 = 12484196935672772437
+const RELATION_DIGEST_1 = 3477320138365322110
+const RELATION_DIGEST_2 = 6979635564408716733
+const RELATION_DIGEST_3 = 16634898497425374784
 
 # Root of the accepted PVM ACE circuit registry. Leaves are indexed by the ten-AIR order tag.
-const ACE_REGISTRY_ROOT_0 = 2842017067341903454
-const ACE_REGISTRY_ROOT_1 = 16707971856776838831
-const ACE_REGISTRY_ROOT_2 = 806847535208234121
-const ACE_REGISTRY_ROOT_3 = 14144940089702641586
+const ACE_REGISTRY_ROOT_0 = 8757348742711293875
+const ACE_REGISTRY_ROOT_1 = 6538879707987301428
+const ACE_REGISTRY_ROOT_2 = 17356837600309008648
+const ACE_REGISTRY_ROOT_3 = 13870270840525555445
 
 #! Loads the fixed PVM relation context.
 #!
@@ -123,7 +136,7 @@ end
 #! Outputs: [height, ...]
 proc assert_shape_log
     u32assert.err="AIR log height must be u32"
-    dup u32lt.30 assert.err="AIR log height above maximum"
+    dup u32lte.LOG_HEIGHT_MAX assert.err="AIR log height above maximum"
     dup.1 dup.1 u32lte assert.err="AIR log height below relation minimum"
     swap drop
 end
@@ -138,6 +151,28 @@ proc store_ace_registry_root
     push.ACE_REGISTRY_ROOT_3.ACE_REGISTRY_ROOT_2.ACE_REGISTRY_ROOT_1.ACE_REGISTRY_ROOT_0
     exec.constants::ace_registry_root_ptr mem_storew_le
     dropw
+end
+
+#! Builds the common security descriptor from the four transcript-bound proof parameters returned
+#! by the generic STARK verifier and the PVM relation data.
+#!
+#! The relation fields are fixed except for the maximum trace height, which the proof transcript
+#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages;
+#! the native AIR tests derive and check this count.
+#!
+#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+proc build_security_descriptor
+    exec.constants::get_trace_length_log
+    push.LOOKUP_FRACTIONS_PER_ROW
+    push.FIXED_BOUNDARY_LOOKUP_TERMS
+    push.MAX_MESSAGE_WIDTH
+    push.NUM_DEEP_TERMS
+    push.MAX_CONSTRAINT_DEGREE
+    push.NUM_COMPOSED_CONSTRAINTS
+    push.LOOKUP_POW_BITS
 end
 
 #! Requests and stages a PVM proof package for the deferred root.
@@ -170,28 +205,53 @@ pub proc request_proof
     adv.push_mapval dropw
 end
 
-#! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the proof's
-#! transcript-bound security parameters.
+#! Verifies a lifted-STARK proof for the ten-chiplet PVM relation and returns the common security
+#! descriptor.
 #!
-#! The deferred root is the relation's four public base-field values. The caller supplies it as
-#! the obligation being settled; all proof data and security/shape metadata are read from advice.
-#! Successful verification authenticates the root at the returned security parameters. The generic
-#! verifier enforces structural bounds and binds the supplied parameters into the Fiat-Shamir
-#! transcript. This procedure applies no acceptance policy: the caller grades the returned
-#! parameters under its own policy.
+#! The deferred root is the relation's four public base-field values, supplied by the caller as the
+#! obligation being settled. The advice stream provides the proof data, four security parameters,
+#! and AIR heights. Successful verification authenticates the root. The returned descriptor
+#! combines those transcript-bound parameters and the maximum AIR height with relation-shape
+#! constants compiled into this verifier. The caller passes all twelve elements unchanged to
+#! `stark::security::compute_conjectured_security_level`, then applies its own acceptance policy.
+#! Changing only the formula therefore changes the estimator root without changing this verifier's
+#! root. A change to the proof format or to any value supplied by the verifier still changes this
+#! procedure.
+#!
+#! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
+#! lookup grinding, and AIR log trace heights from each relation-specific minimum through 29; the
+#! fixed BytePairLut height makes the returned maximum log height 16..=29.
 #!
 #! Fails if the advice does not encode a supported PVM proof, or if any transcript, opening,
 #! commitment, constraint, or public-root check fails.
 #!
 #! Inputs:  [D]
-#! Outputs: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
 #!
 #! Invocation: exec
-pub proc verify_proof
-    exec.utils::load_security_params
+pub proc verify_proof(deferred_root: word) -> (
+    lookup_pow_bits: u32,
+    num_composed_constraints: u32,
+    max_constraint_degree: u32,
+    num_deep_terms: u32,
+    max_message_width: u32,
+    num_lookup_boundary_terms: u32,
+    lookup_fractions_per_row: u32,
+    log_max_height: u32,
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+)
+    # --- Prepare PVM verifier state --------------------------------------------------------------
 
+    exec.utils::load_security_params
     exec.public_inputs::stage_public_root
     exec.load_air_context
+
+    # --- Verify ----------------------------------------------------------------------------------
 
     # Dynamic hook digests in the generic verifier's ABI order.
     procref.deep_queries::compute_deep_composition_polynomial_queries
@@ -199,6 +259,13 @@ pub proc verify_proof
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
+    # => [D0, D1, D2, D3, D4]
 
     exec.verifier::verify
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+
+    # --- Return result ---------------------------------------------------------------------------
+
+    exec.build_security_descriptor
+    # => [security_descriptor, ...]
 end

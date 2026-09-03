@@ -7,47 +7,25 @@ pub mod ood_frames
 pub mod public_inputs
 
 use miden::core::mem
-use miden::core::stark::utils
 use miden::core::stark::constants
+use miden::core::stark::utils
 use miden::core::stark::verifier
 
-# Conjectured round budget, in fixed point with 16 fractional bits.
-#
-# Fiat-Shamir security is the minimum over the protocol's rounds. Each algebraic round bounds its
-# error as `coefficient * size / |E|`, i.e. `log2|E| - log2(coefficient) - log2(size)` bits, plus
-# the grinding sited before its challenge. The constants below fold `log2|E| - log2(coefficient)`
-# — and, for the folding round, the fixed blowup — into a single base, leaving only the
-# instance-dependent height and grinding terms for run time.
-#
-# Every value is derived by `miden_air::security`, whose constants carry the same names.
-# `constraints_regen::security_masm_matches_air` parses these literals from source and checks each
-# against its derived Rust constant directly, so a stale literal fails there regardless of which
-# round determines the reported level. The output cross-test in `crates/lib/core/tests/sys`
-# additionally checks the two implementations' computed security level against each other over
-# four two-dimensional slices of the input domain, which exercises only the lookup and query
-# rounds — the ones that determine the level under the deployed shape.
-#
-# log2|E| = 8388606 (quadratic extension of Goldilocks, rounded down).
-const BITS_PER_QUERY_FP = 193381        # blowup 8, random-words rate of 2025/2010 section 1.5
-const SECURITY_CAP_FP = 8323072         # min(log2|E|, hash collision resistance) = 127 bits
-const LOOKUP_BASE_FP = 7800270          # 8388606 - 588336 ((message width + 2) * fractions per row)
-const COMPOSITION_TERM_FP = 7815946     # 8388606 - 572660 (batched constraint slots)
-const OOD_BASE_FP = 8170900             # 8388606 - 217706 (max constraint degree + 1)
-const DEEP_BASE_FP = 7922741            # 8388606 - 465865 (batched DEEP terms)
-const FOLDING_BASE_FP = 8022589         # 8388606 - 169409 (2 * (arity - 1)) - 196608 (blowup)
-
-# Lookup-round boundary correction: `emit_core_boundary`/`emit_chiplets_boundary` add one-time
-# fractions on top of the per-row bus terms LOOKUP_BASE_FP already counts. `log2(1 + x) <= x *
-# log2(e)` bounds the correction, with `x = boundary / (fractions_per_row * 2^log_max_height)`.
-const LOG2_E_FP = 94548                 # log2(e), rounded down
-const CORE_BOUNDARY_LOOKUP_TERMS = 3    # emit_core_boundary: block-hash seed + 2 log-deferred terms
+# Relation constants returned with the transcript-bound proof parameters. `LOOKUP_POW_BITS` is
+# zero because Lifted STARK does not grind lookup challenges.
+const LOOKUP_POW_BITS = 0
+const MAX_MESSAGE_WIDTH = 16
+const NUM_COMPOSED_CONSTRAINTS = 427
+const MAX_CONSTRAINT_DEGREE = 9
+const NUM_DEEP_TERMS = 138
 const LOOKUP_FRACTIONS_PER_ROW = 28     # matches AIR_SHAPE.lookup.fractions_per_row
+const CORE_BOUNDARY_LOOKUP_TERMS = 3    # emit_core_boundary: block-hash seed + 2 log-deferred terms
 
-# Bounds on an AIR log trace height, matching `assert_shape_log`. The upper bound keeps the
-# height-bearing subtractions above well inside the field; the lower one rejects the zero a caller
-# reading uninitialized memory would supply.
+# Bounds on an AIR log trace height, matching `assert_shape_log`. They reject invalid relation
+# shapes before a security descriptor is constructed and keep its fixed-point arithmetic in the
+# common estimator's supported u32 domain.
 const LOG_HEIGHT_MIN = 6
-const LOG_HEIGHT_BOUND = 30
+const LOG_HEIGHT_MAX = 29
 
 # Offset of K in the P | K | I | O claim encoding.
 const KERNEL_COMMITMENT_OFFSET = 4
@@ -76,123 +54,6 @@ const ACE_REGISTRY_ROOT_0 = 8563712008625779037
 const ACE_REGISTRY_ROOT_1 = 2346635758357605862
 const ACE_REGISTRY_ROOT_2 = 17725435322360039753
 const ACE_REGISTRY_ROOT_3 = 12106900609136090006
-
-#! Bounds `log2(1 + boundary / (fractions_per_row * 2^log_max_height))` in fixed point via
-#! `log2(1 + x) <= x * log2(e)`, where `boundary` is the one-time lookup fractions
-#! `emit_core_boundary`/`emit_chiplets_boundary` add on top of the per-row bus terms
-#! LOOKUP_BASE_FP already counts. Every division rounds up, so the correction never understates
-#! the true log term, keeping the corrected lookup round conservative.
-#!
-#! `boundary >= CORE_BOUNDARY_LOOKUP_TERMS >= 1`, so the intermediate `- 1` subtractions below
-#! never underflow.
-#!
-#! Inputs:  [log_max_height, num_kernel_procedures]
-#! Outputs: [correction]
-#!
-#! Invocation: exec
-proc lookup_boundary_correction
-    # numerator = (CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures) * LOG2_E_FP
-    swap add.CORE_BOUNDARY_LOOKUP_TERMS mul.LOG2_E_FP
-    # => [numerator, log_max_height]
-
-    # step1 = ceil(numerator / LOOKUP_FRACTIONS_PER_ROW) = floor((numerator - 1) / LOOKUP_FRACTIONS_PER_ROW) + 1
-    sub.1 u32div.LOOKUP_FRACTIONS_PER_ROW add.1
-    # => [step1, log_max_height]
-
-    # H = 2^log_max_height
-    swap pow2
-    # => [H, step1]
-
-    # correction = ceil(step1 / H) = floor((step1 - 1) / H) + 1
-    swap sub.1 swap u32div add.1
-    # => [correction]
-end
-
-#! Computes the conjectured security level, in bits, for the given proof parameters.
-#!
-#! Takes the minimum over the protocol's rounds — lookup challenge, constraint composition,
-#! out-of-domain evaluation, DEEP composition, FRI folding, FRI queries — and the commitment
-#! collision cap, each in the fixed point described above the constants. The lookup round is
-#! further corrected by `lookup_boundary_correction` for the boundary fractions
-#! `emit_core_boundary`/`emit_chiplets_boundary` add. The lookup, out-of-domain, and folding
-#! rounds degrade with trace height, so the level is a property of the proof and not of the
-#! parameter preset alone.
-#!
-#! Must match `miden_air::security::conjectured_security_level` bit-for-bit (enforced by
-#! cross-tests). Holds no policy: the caller applies its own acceptance threshold to the result.
-#!
-#! Capping only at the end is equivalent to capping every round, because the cap is itself one of
-#! the terms the minimum ranges over.
-#!
-#! PRECONDITION: `num_queries <= 150`, so the query product fits in a u32. Parameters returned by
-#! `verify_vm_proof` satisfy this bound: the generic verifier enforces it.
-#!
-#! `log_max_height` and `num_kernel_procedures` come from verifier-owned memory, so this must run
-#! in the context `verify_vm_proof` ran in; the height bounds below reject the zero a fresh
-#! context would yield.
-#!
-#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_max_height, num_kernel_procedures, ...]
-#! Outputs: [level, ...]
-#!
-#! Invocation: exec
-pub proc compute_conjectured_security_level(
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
-    log_max_height: u32,
-    num_kernel_procedures: u32,
-) -> u32
-    dup.4 u32assert.err="log trace height must be a u32"
-    dup u32lt.LOG_HEIGHT_BOUND assert.err="log trace height above supported maximum"
-    u32gte.LOG_HEIGHT_MIN assert.err="log trace height below supported minimum"
-
-    dup.5 u32assert.err="num_kernel_procedures must be a u32"
-    u32lte.MAX_NUM_KERNEL_PROCEDURES
-    assert.err="num_kernel_procedures exceeds KernelDescriptor::MAX_NUM_PROCEDURES"
-
-    # Hoist the height in fixed point; the height-bearing rounds all subtract it.
-    dup.4 mul.65536
-    # => [log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height, num_kernel_procedures,
-    #     ...]
-
-    # FRI queries: each query contributes the random-words rate, plus the query grinding.
-    dup.1 mul.BITS_PER_QUERY_FP dup.3 mul.65536 add
-    # => [query_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-
-    # Lookup challenges: sampled once after the main-trace commitment, with no grinding, corrected
-    # for the emit_core_boundary/emit_chiplets_boundary boundary fractions.
-    dup.6 dup.8 swap exec.lookup_boundary_correction
-    # => [correction, query_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow,
-    #     log_height, num_kernel_procedures, ...]
-    push.LOOKUP_BASE_FP dup.3 sub swap sub u32min
-    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-
-    # Out-of-domain point: rejection-sampled, with no grinding.
-    push.OOD_BASE_FP dup.2 sub u32min
-    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-
-    # FRI folding: worst at the first round, where the domain is largest.
-    push.FOLDING_BASE_FP dup.2 sub dup.6 mul.65536 add u32min
-    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-
-    # DEEP composition, then the height-independent constraint composition and the collision cap.
-    push.DEEP_BASE_FP dup.5 mul.65536 add u32min
-    # => [min_level_fp, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-    push.COMPOSITION_TERM_FP u32min
-    push.SECURITY_CAP_FP u32min
-    u32shr.16
-    # => [level, log_height_fp, nq, query_pow, deep_pow, folding_pow, log_height,
-    #     num_kernel_procedures, ...]
-
-    movdn.7 dropw drop drop drop
-    # => [level, ...]
-end
 
 #! Loads the VM-specific AIR context used by the generic STARK verifier.
 #!
@@ -235,7 +96,7 @@ end
 proc assert_shape_log
     dup u32assert.err="AIR log height must be u32"
     dup u32gte.LOG_HEIGHT_MIN assert.err="AIR log height below minimum"
-    dup u32lt.LOG_HEIGHT_BOUND assert.err="AIR log height above maximum"
+    dup u32lte.LOG_HEIGHT_MAX assert.err="AIR log height above maximum"
     drop
 end
 
@@ -389,25 +250,53 @@ proc materialize_kernel_witness
     # => [...]
 end
 
-#! Verifies a STARK proof of the execution claim named by the caller-provided commitment and
-#! returns the deferred obligation and transcript-bound security parameters.
+#! Builds the common security descriptor from the four transcript-bound proof parameters returned
+#! by the generic STARK verifier and the MVM relation data.
+#!
+#! The AIR shape and per-row lookup count are fixed by this relation. The one-time lookup boundary
+#! count is `CORE_BOUNDARY_LOOKUP_TERMS + num_kernel_procedures`; the latter was derived from the
+#! kernel witness and authenticated against the claim's kernel commitment before proof
+#! verification.
+#!
+#! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+proc build_security_descriptor
+    exec.constants::get_trace_length_log
+    push.LOOKUP_FRACTIONS_PER_ROW
+    exec.layout::num_kernel_procedures_ptr mem_load
+    add.CORE_BOUNDARY_LOOKUP_TERMS
+    push.MAX_MESSAGE_WIDTH
+    push.NUM_DEEP_TERMS
+    push.MAX_CONSTRAINT_DEGREE
+    push.NUM_COMPOSED_CONSTRAINTS
+    push.LOOKUP_POW_BITS
+end
+
+#! Verifies a lifted-STARK proof of the Miden VM execution claim named by the caller-provided
+#! commitment and returns the common security descriptor followed by the deferred obligation.
 #!
 #! The claim preimage is fetched from the advice map under the caller-provided claim commitment,
 #! authenticated, and stored in verifier-owned memory. The proof is consumed from the advice
 #! stack; request keys name this procedure's MAST root
-#! (`CoreLibrary::recursive_verifier_root` on the operator side). A consumer that fetches the
+#! (`CoreLibrary::vm_recursive_verifier_root` on the operator side). A consumer that fetches the
 #! proof by content derives the identical root in-VM via `procref` of this procedure, computes
 #! `proof_request_key(verifier_root, claim_commitment)` with `sys::build_proof_request_key`, and
 #! moves the registered proof package onto the advice stack before calling it.
 #!
-#! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are loaded
-#! from the advice stack and stored in memory for the generic verifier, which enforces their
-#! structural bounds and binds them into the Fiat-Shamir transcript - so a proof cannot claim
-#! parameters it was not produced with. This procedure holds no security-estimate formula and
-#! no acceptance policy: it returns the transcript-bound parameters for the caller to compute a
-#! security level from (e.g. with `compute_conjectured_security_level`) under its own policy. An
-#! estimate or policy change therefore never moves this procedure's root - request keys and
-#! registered proof packages stay valid across such changes.
+#! The four proof parameters are loaded from advice, structurally validated, and bound into the
+#! Fiat-Shamir transcript. The maximum trace height is likewise transcript-bound. The remaining
+#! descriptor fields are fixed by this verifier's relation, except for the boundary count derived
+#! from the kernel witness authenticated against the claim. The caller passes the returned twelve
+#! elements unchanged to `stark::security::compute_conjectured_security_level`, then applies its
+#! own acceptance policy. The estimation formula and policy remain outside this procedure.
+#! Changing only the formula therefore changes the estimator root without changing this verifier's
+#! root. A change to the proof format or to any value supplied by the verifier still changes this
+#! procedure.
+#!
+#! This verifier accepts 7..=150 queries, 0..=31 query/DEEP/folding grinding bits, fixed zero
+#! lookup grinding, 6..=29 for every AIR log trace height, and 0..=255 kernel procedures.
 #!
 #! The claim preimage is encoded as `P (+0) | K (+4) | I (+8) | O (+24)`. The verifier checks its
 #! commitment before using these values as AIR public inputs.
@@ -420,19 +309,31 @@ end
 #! include it in its own statement. `D == TRUE_DIGEST` means no deferred statements were logged.
 #!
 #! Inputs:  [CLAIM_COMMITMENT, ...]
-#! Outputs: [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!           max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!           log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
 #!
 #! Where:
 #! - CLAIM_COMMITMENT is supplied by the caller and binds the advice-supplied claim preimage.
+#! - The first twelve elements are the common security descriptor documented by
+#!   `stark::security::compute_conjectured_security_level`.
 #! - D is the deferred root bound by the verified statement.
-#! - num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits are the proof's
-#!   transcript-bound security parameters.
-pub proc verify_vm_proof(claim_commitment: word) -> (
-    deferred_root: word,
+#!
+#! Invocation: exec
+pub proc verify_proof(claim_commitment: word) -> (
+    lookup_pow_bits: u32,
+    num_composed_constraints: u32,
+    max_constraint_degree: u32,
+    num_deep_terms: u32,
+    max_message_width: u32,
+    num_lookup_boundary_terms: u32,
+    lookup_fractions_per_row: u32,
+    log_max_height: u32,
     num_queries: u32,
     query_pow_bits: u32,
     deep_pow_bits: u32,
     folding_pow_bits: u32,
+    deferred_root: word,
 )
     # --- Authenticate execution claim -----------------------------------------------------------
 
@@ -441,7 +342,7 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
     exec.layout::claim_ptr exec.claim::materialize_claim
     # => [...]
 
-    # --- Prepare VM verifier state ---------------------------------------------------------------
+    # --- Prepare MVM verifier state --------------------------------------------------------------
 
     exec.utils::load_security_params
     exec.materialize_kernel_witness
@@ -450,6 +351,7 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
 
     # --- Verify ----------------------------------------------------------------------------------
 
+    # Dynamic hook digests in the generic verifier's ABI order.
     procref.deep_queries::compute_deep_composition_polynomial_queries
     procref.constraints_eval::execute_constraint_evaluation_check
     procref.ood_frames::process_row_ood_evaluations
@@ -458,11 +360,14 @@ pub proc verify_vm_proof(claim_commitment: word) -> (
     # => [D0, D1, D2, D3, D4]
 
     exec.verifier::verify
-    # => [...]
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 
     # --- Return result ---------------------------------------------------------------------------
 
-    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
     exec.public_inputs::load_deferred_root
     # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+    swapw
+    # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D, ...]
+    exec.build_security_descriptor
+    # => [security_descriptor, D, ...]
 end

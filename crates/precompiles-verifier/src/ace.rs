@@ -175,6 +175,13 @@ mod tests {
     use super::*;
     use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_CIRCUIT_SHAPE, PVM_RELATION_DIGEST};
 
+    const PVM_WRAPPER_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
+    const SECURITY_ESTIMATOR_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/stark/security.masm");
+    const GENERIC_UTILS_PATH: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/stark/utils.masm");
+
     fn canonical_order() -> Vec<usize> {
         (0..NUM_CHIPLETS).collect()
     }
@@ -185,7 +192,9 @@ mod tests {
         let prefix = alloc::format!("const {name} = ");
         source
             .lines()
-            .find_map(|line| line.trim().strip_prefix(&prefix)?.parse().ok())
+            .find_map(|line| {
+                line.trim().strip_prefix(&prefix)?.split('#').next()?.trim().parse().ok()
+            })
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
     }
 
@@ -532,17 +541,134 @@ mod tests {
         );
     }
 
+    /// Checks the common estimator constants and bounds against the PVM configuration.
+    ///
+    /// Comparing only the final native and MASM levels would not detect a stale bound for a round
+    /// that does not currently determine the result.
+    #[test]
+    fn pvm_security_masm_matches_air() {
+        use miden_precompiles_air::security as pvm_security;
+
+        let fractional_bits = pvm_security::FIXED_POINT_FRACTIONAL_BITS;
+        let fixed_point_one = pvm_security::FIXED_POINT_ONE;
+        let field_bits = miden_air::security::CHALLENGE_FIELD_BITS;
+        let field_ceiling = field_bits.div_ceil(fixed_point_one) * fixed_point_one;
+        for (name, expected) in [
+            ("FP_SHIFT", u64::from(fractional_bits)),
+            ("FP_ONE", fixed_point_one),
+            ("MAX_Q16_FRACTION", fixed_point_one - 1),
+            ("BITS_PER_QUERY_FP", pvm_security::BITS_PER_QUERY),
+            ("CHALLENGE_FIELD_WHOLE_BITS", field_bits >> fractional_bits),
+            ("CHALLENGE_FIELD_OFFSET_FP", field_ceiling - field_bits),
+            ("SECURITY_CAP_BITS", pvm_security::SECURITY_CAP >> fractional_bits),
+            ("FRI_FOLDING_BASE_BITS", pvm_security::FOLDING_BASE >> fractional_bits),
+            ("LOG2_E_FP", pvm_security::LOG2_E),
+            (
+                "MAX_CONSTRAINT_DEGREE",
+                (1u64 << miden_precompiles_air::stark_config::precompile_pcs_params().log_blowup())
+                    + 1,
+            ),
+        ] {
+            assert_eq!(
+                masm_const(SECURITY_ESTIMATOR_PATH, name),
+                expected,
+                "common estimator {name} drifted from the PVM's native security constant"
+            );
+        }
+
+        // The estimator omits five native security terms only while the PVM shape satisfies these
+        // bounds. `air_shape_matches_symbolic` checks the stored shape against the chiplet AIRs;
+        // the checks below fail if that shape leaves the estimator envelope.
+        let air_shape = pvm_security::AIR_SHAPE;
+        let lookup_coefficient = (u64::from(air_shape.lookup.max_message_width) + 2)
+            * u64::from(air_shape.lookup.fractions_per_row);
+        assert!(
+            u64::from(air_shape.num_composed_constraints)
+                <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_COMPOSED_CONSTRAINTS"),
+            "the PVM composed-constraint count exceeds the estimator envelope"
+        );
+        assert!(
+            u64::from(air_shape.max_constraint_degree)
+                <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_CONSTRAINT_DEGREE"),
+            "the PVM constraint degree exceeds the estimator envelope"
+        );
+        assert!(
+            u64::from(air_shape.num_deep_terms.expect("the PVM uses DEEP composition"))
+                <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_DEEP_TERMS"),
+            "the PVM DEEP term count exceeds the estimator envelope"
+        );
+        assert!(
+            lookup_coefficient >= masm_const(SECURITY_ESTIMATOR_PATH, "MIN_LOOKUP_COEFFICIENT"),
+            "the PVM lookup coefficient falls below the estimator envelope"
+        );
+        assert!(
+            lookup_coefficient <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_LOOKUP_COEFFICIENT"),
+            "the PVM lookup coefficient exceeds the estimator envelope"
+        );
+        assert!(
+            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS)
+                <= masm_const(SECURITY_ESTIMATOR_PATH, "MAX_BOUNDARY_TERMS"),
+            "the PVM boundary-term count exceeds the estimator envelope"
+        );
+        assert_eq!(
+            masm_const(PVM_WRAPPER_PATH, "LOG_HEIGHT_MAX"),
+            masm_const(SECURITY_ESTIMATOR_PATH, "MAX_LOG_HEIGHT"),
+            "the PVM height bound drifted from the estimator envelope"
+        );
+        // BytePairLut has a fixed log height of 16, so the maximum PVM trace height can never fall
+        // below the estimator's minimum of 6.
+        assert!(
+            masm_const(PVM_WRAPPER_PATH, "FIXED_LOG_HEIGHT_3")
+                >= masm_const(SECURITY_ESTIMATOR_PATH, "MIN_LOG_HEIGHT"),
+            "the PVM height floor fell below the estimator envelope"
+        );
+        assert_eq!(
+            masm_const(GENERIC_UTILS_PATH, "POW_BITS_MAX"),
+            masm_const(SECURITY_ESTIMATOR_PATH, "MAX_POW_BITS"),
+            "the grinding bound drifted from the estimator envelope"
+        );
+
+        for (name, expected) in [
+            ("LOOKUP_POW_BITS", u64::from(pvm_security::LOOKUP_POW_BITS)),
+            ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::AIR_SHAPE.lookup.max_message_width)),
+            (
+                "NUM_COMPOSED_CONSTRAINTS",
+                u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
+            ),
+            (
+                "MAX_CONSTRAINT_DEGREE",
+                u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
+            ),
+            (
+                "NUM_DEEP_TERMS",
+                u64::from(
+                    pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
+                ),
+            ),
+            (
+                "LOOKUP_FRACTIONS_PER_ROW",
+                u64::from(pvm_security::AIR_SHAPE.lookup.fractions_per_row),
+            ),
+            (
+                "FIXED_BOUNDARY_LOOKUP_TERMS",
+                u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+            ),
+        ] {
+            assert_eq!(
+                masm_const(PVM_WRAPPER_PATH, name),
+                expected,
+                "PVM wrapper {name} drifted from its native security constant"
+            );
+        }
+    }
+
     #[test]
     fn pvm_wrapper_matches_the_relation_contract() {
         use miden_core::utils::Matrix;
         use miden_lifted_air::{BaseAir, LiftedAir};
 
-        use crate::ace_registry::{PVM_ACE_REGISTRY_ROOT, PVM_RELATION_DIGEST};
+        assert_eq!(masm_const(PVM_WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
 
-        const WRAPPER_PATH: &str =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/core/asm/sys/pvm/mod.masm");
-
-        assert_eq!(masm_const(WRAPPER_PATH, "NUM_CHIPLETS"), NUM_CHIPLETS as u64);
         let airs = ChipletAir::all();
         let derived_minima: Vec<u64> = airs
             .iter()
@@ -569,7 +695,7 @@ mod tests {
                     Some(_) => alloc::format!("FIXED_LOG_HEIGHT_{i}"),
                     None => alloc::format!("MIN_LOG_HEIGHT_{i}"),
                 };
-                masm_const(WRAPPER_PATH, &name)
+                masm_const(PVM_WRAPPER_PATH, &name)
             })
             .collect();
         assert_eq!(masm_minima, derived_minima, "PVM wrapper per-AIR lower bounds drifted",);
@@ -579,7 +705,7 @@ mod tests {
         ] {
             for (i, expected) in expected.into_iter().enumerate() {
                 assert_eq!(
-                    masm_const(WRAPPER_PATH, &alloc::format!("{prefix}_{i}")),
+                    masm_const(PVM_WRAPPER_PATH, &alloc::format!("{prefix}_{i}")),
                     expected,
                     "PVM wrapper {prefix} limb {i} drifted"
                 );

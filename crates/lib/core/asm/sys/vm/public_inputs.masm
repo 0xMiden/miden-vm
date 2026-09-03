@@ -52,7 +52,7 @@ use miden::core::sys::vm::layout
 #   - claim region: verifier memory at `claim_ptr`, populated from advice and authenticated against
 #     the caller-provided claim commitment before any fields are used.
 #   - kernel digests: verifier memory at `KERNEL_WITNESS_PTR`, N word-aligned digests.
-#     `verify_vm_proof` fetches them from the advice map and asserts they hash to
+#     `vm::verify_proof` fetches them from the advice map and asserts they hash to
 #     the claim's K before calling into this module; the step-II boundary fold reads them
 #     from the same region.
 #   - deferred_root: advice (4 canonical felts), loaded by `stage_boundary_inputs`.

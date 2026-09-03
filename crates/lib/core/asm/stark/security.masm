@@ -1,0 +1,290 @@
+# Shared constants for the conjectured security calculation and its Q16 arithmetic.
+#
+# The MVM and PVM recursive verifiers use the same PCS and security model. None of these constants
+# describes a particular AIR; relation-specific values arrive in the descriptor. The native
+# estimator represents the challenge-field size with a conservative Q16 bound. It obtains that
+# bound by rounding down the Goldilocks base-field value before doubling it, which gives
+# `128 * 65536 - 2`.
+const FP_SHIFT = 16
+const FP_ONE = 65536
+const MAX_Q16_FRACTION = 65535
+const BITS_PER_QUERY_FP = 193381
+const CHALLENGE_FIELD_WHOLE_BITS = 127
+const CHALLENGE_FIELD_OFFSET_FP = 2
+# Whole-bit floor of the field/hash security cap used by the native report.
+const SECURITY_CAP_BITS = 127
+# Whole-bit FRI folding bound before subtracting trace height or adding grinding.
+const FRI_FOLDING_BASE_BITS = 122
+const LOG2_E_FP = 94548
+
+# Inputs outside these bounds are not supported. The bounds prevent overflow and underflow in the
+# lookup calculation and are also the assumptions used below to prove that the other native
+# security terms cannot determine the result. Tests in the MVM and PVM crates check that every
+# descriptor produced by either verifier remains within these bounds.
+const MIN_LOG_HEIGHT = 6
+const MAX_LOG_HEIGHT = 29
+const MAX_NUM_QUERIES = 150
+const MAX_POW_BITS = 31
+# With log_blowup = 3, the PCS permits at most eight quotient chunks and therefore a symbolic
+# constraint degree of at most nine.
+const MAX_CONSTRAINT_DEGREE = 9
+const MAX_COMPOSED_CONSTRAINTS = 8192
+const MAX_DEEP_TERMS = 8192
+const MIN_LOOKUP_COEFFICIENT = 257
+const MAX_LOOKUP_COEFFICIENT = 65536
+const MAX_BOUNDARY_TERMS = 4096
+
+#! Computes the fixed-point lookup-boundary correction
+#! `ceil(ceil(num_boundary_terms * log2(e) / fractions_per_row) / 2^log_max_height)`.
+#!
+#! A zero boundary count needs no correction. A nonzero count requires nonzero lookup fractions.
+#!
+#! Inputs:  [num_boundary_terms, fractions_per_row, log_max_height, ...]
+#! Outputs: [correction_fp, log_max_height, ...]
+proc lookup_boundary_correction
+    dup eq.0
+    if.true
+        drop drop push.0
+    else
+        # ceil(num_boundary_terms * log2(e) / fractions_per_row)
+        mul.LOG2_E_FP sub.1 swap u32div add.1
+
+        # ceil(step1 / 2^log_max_height), retaining the height for the lookup term.
+        dup.1 swap
+        sub.1 swap pow2 u32div add.1
+    end
+end
+
+#! Computes a proof's conjectured security level from the descriptor returned by the MVM or PVM
+#! recursive verifier.
+#!
+#!   level = min(query, lookup)
+#!
+#! The native security report takes the minimum of seven terms: query sampling, lookup challenges,
+#! constraint composition, out-of-domain evaluation, DEEP composition, FRI folding, and the
+#! field/hash security cap. Within the bounds enforced by this procedure, the last five terms are
+#! always greater than the lookup term. It is therefore sufficient to calculate `query` and
+#! `lookup`.
+#!
+#! Six of the twelve descriptor fields are used in those two calculations. The remaining fields
+#! are validated before they are discarded. The AIR-shape bounds are assumptions in the proof
+#! below, while the grinding bounds match the range accepted by the generic verifier. Lifted STARK
+#! currently applies grinding before the DEEP challenge, before each FRI folding challenge, and
+#! before query sampling. It does not apply grinding before sampling the lookup challenges, so
+#! both verifiers return `lookup_pow_bits = 0` and this procedure requires that value. Keeping the
+#! field in the descriptor avoids changing the descriptor layout when lookup grinding is added to
+#! the backend.
+#!
+#! # Query term
+#!
+#! Each FRI query contributes `BITS_PER_QUERY_FP` Q16 bits. Query grinding contributes an integer
+#! number of bits, giving
+#!
+#!   query = floor(num_queries * BITS_PER_QUERY_FP / 2^16) + query_pow_bits
+#!
+#! exactly as in the native fixed-point calculation.
+#!
+#! # Lookup term
+#!
+#! Let
+#!
+#!   A = (max_message_width + 2) * fractions_per_row,
+#!   q = ceil(log2(A)),
+#!   R = r_w * 65536 + r_f.
+#!
+#! `R` is the Q16 correction for lookup fractions consumed once at the proof boundary rather than
+#! once per trace row. With these definitions, the whole-bit lookup term is
+#!
+#!   lookup = (127 - q - height - r_w) + delta.
+#!
+#! The dominance argument constrains the product `A`. Each factor is also limited to 65536 so the
+#! multiplication cannot wrap, but the estimator imposes no tighter bound on either factor by
+#! itself. The current MVM value is `(16 + 2) * 28 = 504`; the current PVM value is
+#! `(18 + 2) * 247 = 4940`. These values are well inside the accepted range of 257 through 65536.
+#! For example, a message width of 12 needs only 19 fractions per row to exceed the lower limit.
+#! At the current message widths, the upper limit allows 3640 MVM fractions or 3276 PVM fractions.
+#! The verifier-specific drift tests derive both factors from the AIRs and check their product
+#! against these limits.
+#!
+#! The value `delta` accounts for the fractional part discarded when the lookup term is converted
+#! from Q16 to whole bits. Set `P = 2^q`, `g = P - A`, and
+#!
+#!   s = q * FP_ONE - ceil(FP_ONE * log2(A))
+#!     = floor(FP_ONE * -log2(1 - g/P)).
+#!
+#! Here `s` is the Q16 difference between `log2(A)` and the next whole bit. The lookup term's Q16
+#! remainder is `FP_ONE - CHALLENGE_FIELD_OFFSET_FP + s - r_f`. Here
+#! `CHALLENGE_FIELD_OFFSET_FP = 2` is the difference between `128 * FP_ONE` and the conservative
+#! Q16 challenge-field bound used by the native estimator. Consequently,
+#!
+#!   delta = +1 if s >= r_f + CHALLENGE_FIELD_OFFSET_FP  (the remainder reaches FP_ONE)
+#!   delta = -1 if s = 0 and r_f = MAX_Q16_FRACTION     (the remainder falls below zero)
+#!   delta =  0 otherwise.
+#!
+#! Computing `s` directly would require a fixed-point logarithm. Instead, the procedure computes a
+#! lower bound from the first two terms of
+#!
+#!   -log2(1 - x) = log2(e) * (x + x^2/2 + x^3/3 + ...).
+#!
+#! For `x = g/P` and `t1 = floor(LOG2_E_FP * g / P)`, that lower bound is
+#!
+#!   b = t1 + floor(t1 * g / (2 * P)) <= s,
+#!
+#! because truncating the positive series and rounding each intermediate value down can only make
+#! `b` smaller. The estimator adds one bit only when this lower bound is sufficient to prove that
+#! the native calculation adds it. If the bound is inconclusive, the estimator can be one bit
+#! below the native result but never above it. The `-1` case is determined exactly because `s = 0`
+#! precisely when `A` is a power of two (`g = 0`). The bound is conclusive for every descriptor
+#! currently returned by either verifier, so the MASM and native lookup terms agree there.
+#!
+#! # Why the other five terms can be omitted
+#!
+#! Since `A >= 257`, `q` is at least 9. Since `height >= 6`, `r_w >= 0`, and `delta <= 1`,
+#!
+#!   lookup <= 127 - 9 - height + 1 = 119 - height <= 113.
+#!
+#! Each of the other five terms has a larger lower bound:
+#!
+#! - out-of-domain: the configured PCS has `log_blowup = 3`. For an AIR whose largest symbolic
+#!   constraint degree is `M`, Lifted STARK splits the quotient into the smallest power-of-two
+#!   number of chunks that is at least `max(M - 1, 1)`. The prover and verifier reject the AIR
+#!   configuration if it requires more than `2^3` chunks. Therefore every proof accepted under
+#!   this configuration has `M <= 9`. Its out-of-domain term is at least
+#!   `127 - floor(log2(10)) - height = 124 - height`, which is greater than the lookup bound
+#!   `119 - height`;
+#! - FRI folding: `FRI_FOLDING_BASE_BITS - height + folding_pow >= 122 - height`, above
+#!   `119 - height`;
+#! - composition: `composed <= 8192` gives `127 - floor(log2(composed)) >= 114 > 113`;
+#! - DEEP: `deep_terms <= 8192` gives `127 - floor(log2(deep)) + deep_pow >= 114`;
+#! - collision cap: `SECURITY_CAP_BITS = 127 > 113`, so neither the cap nor a query clamp is
+#!   needed.
+#!
+#! Both the out-of-domain and FRI folding terms subtract the same height as the lookup term, so
+#! their margins do not shrink for taller traces. The composition and DEEP bounds retain a one-bit
+#! margin at the edge of the accepted range. DEEP and FRI folding grinding are nonnegative and can
+#! only increase those terms, so their minimum occurs at zero grinding.
+#!
+#! It follows that the minimum of the native seven-term report is the minimum of `query` and
+#! `lookup` throughout the accepted range. The query expression uses the same fixed-point floor as
+#! the native calculation. If it exceeds the native cap, the lookup term is already smaller, so
+#! omitting that cap cannot change the result. The lookup calculation is exact for both deployed
+#! relations and, for any other accepted descriptor, is either exact or one bit lower than the
+#! native value. Taking the minimum preserves those guarantees.
+#!
+#! # Contract
+#!
+#! Every descriptor field is checked before it is used or discarded. The lower bounds on height
+#! and the lookup coefficient support the proof that the other terms cannot determine the result.
+#! The upper bounds on height, coefficient, and boundary terms keep the arithmetic in range, and
+#! the explicit `base >= 2` check validates the lookup subtraction after applying the correction.
+#! Requiring zero lookup grinding keeps the native cap irrelevant to the lookup term. An
+#! unsupported input traps instead of returning a security level.
+#!
+#! This is not a general-purpose estimator for caller-assembled parameters. Its input must be the
+#! descriptor returned by a successful MVM or PVM recursive verifier, without modification. The
+#! procedure is loop-free and has bounded execution cost for every accepted descriptor.
+#!
+#! The meaning of `num_lookup_boundary_terms` is the same for both relations even though its source
+#! differs. The MVM adds the kernel-procedure count to three fixed core-boundary terms. The PVM
+#! uses the number of fixed `UintVal` and `EcGroup` messages added at its verifier boundary. The
+#! estimator needs only the resulting count. It does not enforce an acceptance policy; the caller
+#! compares the returned level with the threshold required by its application.
+#!
+#! Inputs:  [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,
+#!          max_message_width, num_lookup_boundary_terms, lookup_fractions_per_row,
+#!          log_max_height, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
+#! Outputs: [level, ...]
+#!
+#! Invocation: exec
+pub proc compute_conjectured_security_level(
+    lookup_pow_bits: u32,
+    num_composed_constraints: u32,
+    max_constraint_degree: u32,
+    num_deep_terms: u32,
+    max_message_width: u32,
+    num_lookup_boundary_terms: u32,
+    lookup_fractions_per_row: u32,
+    log_max_height: u32,
+    num_queries: u32,
+    query_pow_bits: u32,
+    deep_pow_bits: u32,
+    folding_pow_bits: u32,
+) -> u32
+    # Assert the validity envelope documented above. Each comparison also range-checks its
+    # operand as a u32. Inputs not used by query or lookup are consumed after validation.
+    # Lifted STARK currently has no grinding step before lookup-challenge sampling.
+    assertz.err="lookup grinding must be zero"
+    dup eq.0 assertz.err="num_composed_constraints must be positive"
+    u32lte.MAX_COMPOSED_CONSTRAINTS assert.err="num_composed_constraints exceeds the estimator envelope"
+    u32lte.MAX_CONSTRAINT_DEGREE assert.err="max_constraint_degree exceeds the estimator envelope"
+    dup eq.0 assertz.err="num_deep_terms must be positive"
+    u32lte.MAX_DEEP_TERMS assert.err="num_deep_terms exceeds the estimator envelope"
+    movup.6 u32lte.MAX_POW_BITS assert.err="deep_pow_bits exceeds the estimator envelope"
+    movup.6 u32lte.MAX_POW_BITS assert.err="folding_pow_bits exceeds the estimator envelope"
+    # => [max_message_width, boundary_terms, fractions_per_row, log_height, num_queries,
+    #     query_pow, ...]
+
+    # A = (max_message_width + 2) * fractions_per_row. Each factor is bounded before the
+    # multiplication, so the product is at most 2^32 and remains below the field modulus. The
+    # subsequent bound on A rejects values above 65536 and keeps the slack calculations in u32.
+    # Both factors are consumed.
+    u32assert.err="max_message_width must be a u32" add.2
+    dup u32lte.MAX_LOOKUP_COEFFICIENT assert.err="lookup message width exceeds the estimator envelope"
+    dup.2 u32lte.MAX_LOOKUP_COEFFICIENT assert.err="lookup fractions exceed the estimator envelope"
+    dup.1 u32lte.MAX_BOUNDARY_TERMS assert.err="boundary terms exceed the estimator envelope"
+    dup.3 dup u32gte.MIN_LOG_HEIGHT assert.err="log trace height below the estimator envelope"
+    u32lte.MAX_LOG_HEIGHT assert.err="log trace height exceeds the estimator envelope"
+    dup.2 mul
+    dup u32gte.MIN_LOOKUP_COEFFICIENT assert.err="lookup coefficient below the estimator envelope"
+    dup u32lte.MAX_LOOKUP_COEFFICIENT assert.err="lookup coefficient exceeds the estimator envelope"
+    # => [A, boundary_terms, fractions_per_row, log_height, num_queries, query_pow, ...]
+
+    # Compute the boundary correction while retaining the height, then split it into whole and
+    # fractional Q16 parts.
+    movdn.3 exec.lookup_boundary_correction
+    u32divmod.FP_ONE
+    movup.3
+    # => [A, r_f, r_w, log_height, num_queries, query_pow, ...]
+
+    # q = ceil(log2(A)) = 32 - clz(A - 1), and g = 2^q - A.
+    dup sub.1 u32clz push.32 swap sub
+    dup pow2 dup movup.3 sub
+    # => [g, P, q, r_f, r_w, log_height, num_queries, query_pow, ...]
+
+    # Slack lower bound b = floor(LOG2_E_FP * g / P) + floor(t1 * g / (2 * P)).
+    dup mul.LOG2_E_FP dup.2 u32div
+    dup dup.2 mul
+    movup.3 mul.2 u32div
+    add
+    # => [b, g, q, r_f, r_w, log_height, num_queries, query_pow, ...]
+
+    # Replace g with a flag indicating whether A is a power of two.
+    swap eq.0
+    swap
+    # => [b, is_power_of_two, q, r_f, r_w, log_height, num_queries, query_pow, ...]
+
+    # Add the fractional bit only when the lower bound proves that the slack covers the correction.
+    dup.3 add.CHALLENGE_FIELD_OFFSET_FP u32gte
+    # => [recovered_bit, is_power_of_two, q, r_f, r_w, log_height, num_queries, query_pow, ...]
+
+    # Subtract one only when A is a power of two and the correction has the largest possible Q16
+    # fraction. This is the only case in which the Q16 remainder is negative. Consume r_f here.
+    swap movup.3 eq.MAX_Q16_FRACTION mul
+    # => [guard_bit, recovered_bit, q, r_w, log_height, num_queries, query_pow, ...]
+
+    # base = 127 - q - height - r_w. Consume all three operands as they are subtracted. The stated
+    # envelope implies base >= 13; this local assertion keeps the subtraction fail-closed if those
+    # bounds change without a matching proof update.
+    push.CHALLENGE_FIELD_WHOLE_BITS movup.3 sub movup.4 sub movup.3 sub
+    dup u32gte.2 assert.err="lookup correction exceeds the estimator envelope"
+    movup.2 add swap sub
+    # => [lookup, num_queries, query_pow, ...]
+
+    # FRI queries. The lookup round is at most 113 bits inside the envelope, so neither this
+    # term nor the final minimum needs the collision/field cap. Validate and consume both inputs.
+    dup.1 u32lte.MAX_NUM_QUERIES assert.err="num_queries exceeds the estimator envelope"
+    dup.2 u32lte.MAX_POW_BITS assert.err="query_pow_bits exceeds the estimator envelope"
+    movdn.2 mul.BITS_PER_QUERY_FP u32shr.FP_SHIFT add
+    u32min
+    # => [level, ...]
+end

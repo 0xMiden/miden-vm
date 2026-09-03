@@ -1,16 +1,10 @@
 use miden::core::stark::constants
 
-# Fixed-point (16 fractional bits) conjectured security bits per FRI query for the shared
-# log_blowup = 3 Goldilocks/QuadFelt PCS, per the random-words formula
-# (https://eprint.iacr.org/2025/2010, section 1.5). Must match
-# miden_air::config::CONJECTURED_BITS_PER_QUERY_FP (enforced by cross-tests).
-const CONJECTURED_BITS_PER_QUERY_FP = 193382
-
-# Number of fractional bits in CONJECTURED_BITS_PER_QUERY_FP.
-const CONJECTURED_SECURITY_FP_SHIFT = 16
-
-# Cap on any reported security level: min(challenge-field bits, hash collision resistance).
-const MAX_SECURITY_LEVEL = 128
+# Accepted transcript-bound security-parameter envelope for the recursive verifier. These bounds
+# also define the domain over which its returned descriptor may be passed to the common estimator.
+const NUM_QUERIES_MIN = 7
+const NUM_QUERIES_MAX = 150
+const POW_BITS_MAX = 31
 
 # Largest AIR count whose complete proof-order tag range fits in u32. The factorial table in
 # `derive_order_tag_from_heights` reserves one felt per supported AIR.
@@ -43,26 +37,6 @@ pub proc load_security_params
     adv_push exec.constants::set_folding_pow_bits
 end
 
-#! Computes the conjectured security level (in bits) attained by the given proof parameters.
-#!
-#! Evaluates `min(((num_queries * 193382) >> 16) + query_pow_bits, 128)`. The fixed-point
-#! coefficient is specific to the shared log_blowup = 3 Goldilocks/QuadFelt PCS. This procedure
-#! holds no policy: the caller applies its own acceptance threshold. A relation using a different
-#! PCS configuration must supply its own estimator.
-#!
-#! PRECONDITION: `num_queries <= 150`, so `num_queries * 193382` fits in a u32 (the `u32shr`
-#! below requires that). Parameters returned by the generic verifier satisfy this bound.
-#!
-#! Inputs:  [num_queries, query_pow_bits, ...]
-#! Outputs: [level, ...]
-pub proc conjectured_security_level
-    push.CONJECTURED_BITS_PER_QUERY_FP mul
-    u32shr.CONJECTURED_SECURITY_FP_SHIFT
-    add
-    push.MAX_SECURITY_LEVEL u32min
-    # => [level, ...]
-end
-
 #! Compute the LDE domain generator from the log2 of its size.
 #!
 #! Input: [log2(domain_size), ..]
@@ -87,23 +61,20 @@ end
 #! Input: [...]
 #! Output: [...]
 pub proc validate_inputs
-    # Assert that the number of FRI queries is at most 150. This restriction is a soft one
-    #    and is due to the memory layout in the `constants.masm` files but can be updated
-    #    therein.
-    #    We also make sure that the number of FRI queries is at least 7.
+    # The query upper bound is a soft restriction imposed by the current verifier memory layout.
     exec.constants::get_number_queries
-    dup u32lt.151 assert.err="num_queries must be less than 151"
-    u32gt.6 assert.err="num_queries must be greater than 6"
+    dup u32lte.NUM_QUERIES_MAX assert.err="num_queries must be at most 150"
+    u32gte.NUM_QUERIES_MIN assert.err="num_queries must be at least 7"
 
-    # Assert that PoW bit counts are less than 32 (must fit in u32 bit masking).
+    # PoW bit counts must fit in the verifier's u32 bit masking.
     exec.constants::get_query_pow_bits
-    u32lt.32 assert.err="query_pow_bits must be less than 32"
+    u32lte.POW_BITS_MAX assert.err="query_pow_bits must be less than 32"
 
     exec.constants::get_deep_pow_bits
-    u32lt.32 assert.err="deep_pow_bits must be less than 32"
+    u32lte.POW_BITS_MAX assert.err="deep_pow_bits must be less than 32"
 
     exec.constants::get_folding_pow_bits
-    u32lt.32 assert.err="folding_pow_bits must be less than 32"
+    u32lte.POW_BITS_MAX assert.err="folding_pow_bits must be less than 32"
 end
 
 #! Reverse the lowest `bits` bits of `index` using parallel bit-swap.
