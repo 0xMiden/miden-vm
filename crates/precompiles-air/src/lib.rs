@@ -10,6 +10,7 @@ pub mod fixed;
 pub mod hash;
 pub mod logup;
 pub mod math;
+pub mod memory;
 pub mod preprocessed;
 pub mod primitives;
 pub mod protocol;

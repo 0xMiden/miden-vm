@@ -9,21 +9,24 @@ use miden_core::{
     },
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
+    utils::Matrix,
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
+use miden_precompiles_air::{NUM_CHIPLETS, memory, stark_config::precompile_pcs_params};
 use miden_precompiles_verifier::{VerifyError, verify_deferred};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
+    ProveDeferredStateError,
     deferred::{DeferredSession, session_from_deferred_state},
     hash::{
         chunk_node_sponge::SPONGE_COL_OFFSET,
         keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
     },
     math::{U256, from_hex, to_limbs32},
-    prove_deferred_state,
+    prove_deferred_state, prove_deferred_state_with_budget,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     session::{Session, SessionTraces},
     tests::{
@@ -420,6 +423,44 @@ fn prove_deferred_state_proves_non_empty_root() {
     assert!(
         verify_deferred(&proof, VM_TRUE_DIGEST).is_err(),
         "the proof must be bound to the state's exact root",
+    );
+}
+
+/// Tests `prove_deferred_state_with_budget` behavior at the exact byte-budget boundary computed
+/// from the actual padded per-chiplet heights of a small Keccak deferred state.
+#[test]
+fn prove_deferred_state_with_budget_corner_cases() {
+    let synthetic = synthetic_keccak_state(b"abc");
+
+    // Measure the exact modelled peak for the state's real (small) padded chiplet heights.
+    let deferred = session_from_deferred_state(&synthetic.state)
+        .expect("Keccak-only deferred state should translate");
+    let traces = deferred.session.finish(deferred.root);
+    let heights: [usize; NUM_CHIPLETS] = traces.mains().map(|main| main.height());
+    let params = precompile_pcs_params();
+    let exact_peak =
+        memory::prover_peak_bytes(&heights, &params).expect("modelled peak fits in u64");
+
+    // At the exact peak, the budget check passes and the state proves.
+    prove_deferred_state_with_budget(&synthetic.state, HashFunction::Blake3_256, exact_peak)
+        .expect("budget equal to the exact modelled peak must succeed");
+
+    // One byte under the exact peak, the budget check must fail with the typed error.
+    let err = prove_deferred_state_with_budget(
+        &synthetic.state,
+        HashFunction::Blake3_256,
+        exact_peak - 1,
+    )
+    .expect_err("budget one byte under the exact modelled peak must fail");
+    assert!(
+        matches!(
+            err,
+            ProveDeferredStateError::MemoryBudgetExceeded { estimated_bytes, budget_bytes }
+                if estimated_bytes == exact_peak && budget_bytes == exact_peak - 1
+        ),
+        "expected MemoryBudgetExceeded {{ estimated_bytes: {exact_peak}, budget_bytes: {} }}, \
+         got: {err:?}",
+        exact_peak - 1
     );
 }
 
