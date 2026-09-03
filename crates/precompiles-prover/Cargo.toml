@@ -50,6 +50,9 @@ wincode.workspace = true
 # cross-validation tests (RustCrypto, pure Rust, no C deps).
 k256 = { workspace = true, features = ["arithmetic"] }
 miden-air = { workspace = true, features = ["std", "testing"] }
+miden-core-lib = { workspace = true }
 miden-precompiles-air = { workspace = true, features = ["testing"] }
 miden-precompiles-verifier = { workspace = true, features = ["std"] }
+miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }
 rand = { workspace = true, features = ["std_rng"] }
+rand_chacha = { workspace = true }

@@ -353,6 +353,11 @@ fn build_eidos_compression_trace(
     byte_pairs: &mut BytePairLutRequires,
 ) -> RowMajorMatrix<Felt> {
     let real_cycles = cycles.len();
+    #[cfg(feature = "std")]
+    if std::env::var_os("DUMP_TRACE_HEIGHTS").is_some() {
+        let real = real_cycles * EIDOS_COMPRESSION_CYCLE_LEN;
+        std::eprintln!("REAL_HEIGHT EidosCompression {real}");
+    }
     let height = (real_cycles * EIDOS_COMPRESSION_CYCLE_LEN)
         .next_power_of_two()
         .max(EIDOS_COMPRESSION_CYCLE_LEN);
