@@ -8,6 +8,7 @@
 #### Changes
 
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
+- [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
 
 #### Fixes
 
