@@ -2,7 +2,7 @@ use alloc::{string::ToString, vec::Vec};
 use core::marker::PhantomData;
 
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
-use num::{Complex, Float};
+use num::{Complex, Float, Zero};
 use num_complex::Complex64;
 use rand::Rng;
 
@@ -11,8 +11,8 @@ use super::{
         FalconVariant, LOG_N, MODULUS, N, Nonce, SIG_L2_BOUND, SIGMA, SK_LEN, ShortLatticeBasis,
         Signature,
         math::{
-            FalconFelt, FastFft, LdlTree, Polynomial, ffldl, ffsampling, gram, normalize_tree,
-            ntru_gen,
+            FalconFelt, FastFft, LdlTree, Polynomial, check_coefficients_bound, ffldl, ffsampling,
+            gram, has_acceptable_gram_schmidt_norm, normalize_tree, ntru_gen,
         },
         signature::SignaturePoly,
     },
@@ -145,13 +145,9 @@ impl<V: FalconVariant> SecretKey<V> {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        let mut seed = self.generate_seed(&message);
-        let mut rng = ChaCha20Rng::from_seed(seed);
-        let signature = self.sign_with_rng(message, &mut rng);
-
-        seed.zeroize();
-
-        signature
+        let seed = Zeroizing::new(self.generate_seed(&message));
+        let mut rng = ChaCha20Rng::from_seed(*seed);
+        self.sign_with_rng(message, &mut rng)
     }
 
     /// Signs a message using randomness from the provided generator.
@@ -268,14 +264,13 @@ impl<V: FalconVariant> SecretKey<V> {
     ///
     /// [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
     fn generate_seed(&self, message: &Word) -> [u8; 32] {
-        let mut buffer = Vec::with_capacity(1 + SK_LEN + Word::SERIALIZED_SIZE);
+        let serialized_key = Zeroizing::new(self.to_bytes());
+        let mut buffer = Zeroizing::new(Vec::with_capacity(1 + SK_LEN + Word::SERIALIZED_SIZE));
         buffer.push(LOG_N);
-        buffer.extend_from_slice(&self.to_bytes());
+        buffer.extend_from_slice(&serialized_key);
         buffer.extend_from_slice(&message.to_bytes());
 
         let digest = Blake3_256::hash(&buffer);
-        buffer.zeroize();
-
         digest.into()
     }
 }
@@ -283,7 +278,10 @@ impl<V: FalconVariant> SecretKey<V> {
 impl<V: FalconVariant> PartialEq for SecretKey<V> {
     fn eq(&self, other: &Self) -> bool {
         use subtle::ConstantTimeEq;
-        self.to_bytes().ct_eq(&other.to_bytes()).into()
+
+        let self_bytes = Zeroizing::new(self.to_bytes());
+        let other_bytes = Zeroizing::new(other.to_bytes());
+        self_bytes.ct_eq(&other_bytes).into()
     }
 }
 
@@ -305,35 +303,46 @@ impl<V: FalconVariant> Serializable for SecretKey<V> {
         let g = &basis[0];
         let neg_big_f = &basis[3];
 
-        let mut buffer = Vec::with_capacity(SK_LEN);
+        let mut buffer = Zeroizing::new(Vec::with_capacity(SK_LEN));
         buffer.push(header);
 
-        let mut f_i8: Vec<i8> = neg_f
-            .coefficients
-            .iter()
-            .map(|&a| FalconFelt::new(-a).balanced_value() as i8)
-            .collect();
-        let f_i8_encoded = encode_i8(&f_i8, WIDTH_SMALL_POLY_COEFFICIENT).unwrap();
+        let f_i8 = Zeroizing::new(
+            neg_f
+                .coefficients
+                .iter()
+                .map(|&a| secret_key_coefficient_to_i8(-FalconFelt::new(a)))
+                .collect::<Vec<i8>>(),
+        );
+        let f_i8_encoded = Zeroizing::new(
+            encode_i8(&f_i8, WIDTH_SMALL_POLY_COEFFICIENT)
+                .expect("valid Falcon key coefficients must be encodable"),
+        );
         buffer.extend_from_slice(&f_i8_encoded);
-        f_i8.zeroize();
 
-        let mut g_i8: Vec<i8> = g
-            .coefficients
-            .iter()
-            .map(|&a| FalconFelt::new(a).balanced_value() as i8)
-            .collect();
-        let g_i8_encoded = encode_i8(&g_i8, WIDTH_SMALL_POLY_COEFFICIENT).unwrap();
+        let g_i8 = Zeroizing::new(
+            g.coefficients
+                .iter()
+                .map(|&a| secret_key_coefficient_to_i8(FalconFelt::new(a)))
+                .collect::<Vec<i8>>(),
+        );
+        let g_i8_encoded = Zeroizing::new(
+            encode_i8(&g_i8, WIDTH_SMALL_POLY_COEFFICIENT)
+                .expect("valid Falcon key coefficients must be encodable"),
+        );
         buffer.extend_from_slice(&g_i8_encoded);
-        g_i8.zeroize();
 
-        let mut big_f_i8: Vec<i8> = neg_big_f
-            .coefficients
-            .iter()
-            .map(|&a| FalconFelt::new(-a).balanced_value() as i8)
-            .collect();
-        let big_f_i8_encoded = encode_i8(&big_f_i8, WIDTH_BIG_POLY_COEFFICIENT).unwrap();
+        let big_f_i8 = Zeroizing::new(
+            neg_big_f
+                .coefficients
+                .iter()
+                .map(|&a| secret_key_coefficient_to_i8(-FalconFelt::new(a)))
+                .collect::<Vec<i8>>(),
+        );
+        let big_f_i8_encoded = Zeroizing::new(
+            encode_i8(&big_f_i8, WIDTH_BIG_POLY_COEFFICIENT)
+                .expect("valid Falcon key coefficients must be encodable"),
+        );
         buffer.extend_from_slice(&big_f_i8_encoded);
-        big_f_i8.zeroize();
 
         target.write_bytes(&buffer);
     }
@@ -376,7 +385,9 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
                 &byte_vector[chunk_size_f + 1..(chunk_size_f + chunk_size_g + 1)],
                 WIDTH_SMALL_POLY_COEFFICIENT,
             )
-            .unwrap(),
+            .ok_or(DeserializationError::InvalidValue(
+                "Failed to decode g coefficients".to_string(),
+            ))?,
         );
         let big_f = Zeroizing::new(
             decode_i8(
@@ -384,21 +395,54 @@ impl<V: FalconVariant> Deserializable for SecretKey<V> {
                     ..(chunk_size_f + chunk_size_g + chunk_size_big_f + 1)],
                 WIDTH_BIG_POLY_COEFFICIENT,
             )
-            .unwrap(),
+            .ok_or(DeserializationError::InvalidValue(
+                "Failed to decode F coefficients".to_string(),
+            ))?,
         );
 
-        let f = Polynomial::new(f.iter().map(|&c| FalconFelt::new(c.into())).collect());
-        let g = Polynomial::new(g.iter().map(|&c| FalconFelt::new(c.into())).collect());
-        let big_f = Polynomial::new(big_f.iter().map(|&c| FalconFelt::new(c.into())).collect());
+        let mut f = Polynomial::new(f.iter().map(|&c| i16::from(c)).collect());
+        let g = Polynomial::new(g.iter().map(|&c| i16::from(c)).collect());
+        let mut big_f = Polynomial::new(big_f.iter().map(|&c| i16::from(c)).collect());
 
-        // big_g * f - g * big_f = p (mod X^n + 1)
-        let big_g = g.fft().hadamard_div(&f.fft()).hadamard_mul(&big_f.fft()).ifft();
-        let basis = [
-            Polynomial::new(g.to_balanced_values()),
-            -Polynomial::new(f.to_balanced_values()),
-            Polynomial::new(big_g.to_balanced_values()),
-            -Polynomial::new(big_f.to_balanced_values()),
-        ];
+        let f_fft = Polynomial::<FalconFelt>::from(&f).fft();
+        if f_fft.coefficients.iter().any(Zero::is_zero) {
+            return Err(DeserializationError::InvalidValue(
+                "Falcon secret key polynomial f is not invertible".to_string(),
+            ));
+        }
+
+        if !has_acceptable_gram_schmidt_norm(&f, &g) {
+            return Err(DeserializationError::InvalidValue(
+                "Falcon secret key exceeds the Gram-Schmidt norm bound".to_string(),
+            ));
+        }
+
+        let g_fft = Polynomial::<FalconFelt>::from(&g).fft();
+        let big_f_fft = Polynomial::<FalconFelt>::from(&big_f).fft();
+        let big_g = g_fft.hadamard_div(&f_fft).hadamard_mul(&big_f_fft).ifft();
+        let big_g = Polynomial::new(big_g.to_balanced_values());
+
+        let big_coefficient_bound = (1 << (WIDTH_BIG_POLY_COEFFICIENT - 1)) - 1;
+        if !check_coefficients_bound(&big_g, big_coefficient_bound as i16) {
+            return Err(DeserializationError::InvalidValue(
+                "Falcon secret key polynomial G exceeds its coefficient bound".to_string(),
+            ));
+        }
+
+        if !satisfies_ntru_relation(&f, &g, &big_f, &big_g) {
+            return Err(DeserializationError::InvalidValue(
+                "Falcon secret key does not satisfy the NTRU equation".to_string(),
+            ));
+        }
+
+        for coefficient in &mut f.coefficients {
+            *coefficient = -*coefficient;
+        }
+        for coefficient in &mut big_f.coefficients {
+            *coefficient = -*coefficient;
+        }
+
+        let basis = [g, f, big_g, big_f];
         Ok(Self::from_short_lattice_basis(basis))
     }
 }
@@ -414,6 +458,27 @@ fn to_complex_fft(basis: &[Polynomial<i16>; 4]) -> [Polynomial<Complex<f64>>; 4]
     let big_g_fft = big_g.map(|cc| Complex64::new(*cc as f64, 0.0)).fft();
     let minus_big_f_fft = big_f.map(|cc| -Complex64::new(*cc as f64, 0.0)).fft();
     [g_fft, minus_f_fft, big_g_fft, minus_big_f_fft]
+}
+
+/// Checks `f * G - g * F = q` in `Z[x] / (x^N + 1)`.
+fn satisfies_ntru_relation(
+    f: &Polynomial<i16>,
+    g: &Polynomial<i16>,
+    big_f: &Polynomial<i16>,
+    big_g: &Polynomial<i16>,
+) -> bool {
+    let f = f.map(|&coefficient| i64::from(coefficient));
+    let g = g.map(|&coefficient| i64::from(coefficient));
+    let big_f = big_f.map(|&coefficient| i64::from(coefficient));
+    let big_g = big_g.map(|&coefficient| i64::from(coefficient));
+
+    let determinant = (f * big_g - g * big_f).reduce_by_cyclotomic(N);
+    determinant == Polynomial::constant(i64::from(MODULUS))
+}
+
+fn secret_key_coefficient_to_i8(coefficient: FalconFelt) -> i8 {
+    i8::try_from(coefficient.balanced_value())
+        .expect("valid Falcon secret-key coefficients must fit in i8")
 }
 
 /// Encodes a sequence of signed integers such that each integer x satisfies |x| < 2^(bits-1)
@@ -456,7 +521,7 @@ pub fn encode_i8(x: &[i8], bits: usize) -> Option<Vec<u8>> {
 /// Decodes a sequence of bytes into a sequence of signed integers such that each integer x
 /// satisfies |x| < 2^(bits-1) for a given parameter bits. bits can take either the value 6 or 8.
 pub fn decode_i8(buf: &[u8], bits: usize) -> Option<Vec<i8>> {
-    let mut x = [0_i8; N];
+    let mut x = Zeroizing::new([0_i8; N]);
 
     let mut i = 0;
     let mut j = 0;
@@ -475,6 +540,10 @@ pub fn decode_i8(buf: &[u8], bits: usize) -> Option<Vec<i8>> {
             acc_len -= bits;
             let w = (acc >> acc_len) & mask;
 
+            if w == 1 << (bits - 1) {
+                return None;
+            }
+
             let w = w as u8;
 
             let z = if w > b { w as i8 - a as i8 } else { w as i8 };
@@ -488,5 +557,115 @@ pub fn decode_i8(buf: &[u8], bits: usize) -> Option<Vec<i8>> {
         Some(x.to_vec())
     } else {
         None
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+
+    use super::*;
+
+    type TestSecretKey = SecretKey<super::super::super::TestVariant>;
+
+    #[test]
+    fn secret_key_deserialization_rejects_noninvertible_f() {
+        let mut encoded = vec![0u8; SK_LEN];
+        encoded[0] = (5 << 4) | LOG_N;
+
+        assert_invalid_key(&encoded, "Falcon secret key polynomial f is not invertible");
+    }
+
+    #[test]
+    fn secret_key_deserialization_rejects_excessive_norm() {
+        let mut f = Polynomial::new(vec![0i16; N]);
+        f.coefficients[0] = 1;
+        let g = Polynomial::new(vec![31i16; N]);
+        let big_f = Polynomial::new(vec![0i16; N]);
+        let encoded = encode_secret_key(&f, &g, &big_f);
+
+        assert_invalid_key(&encoded, "Falcon secret key exceeds the Gram-Schmidt norm bound");
+    }
+
+    #[test]
+    fn secret_key_deserialization_rejects_invalid_ntru_relation() {
+        let (f, g) = acceptable_f_and_g();
+        let big_f = Polynomial::new(vec![0i16; N]);
+        let encoded = encode_secret_key(&f, &g, &big_f);
+
+        assert_invalid_key(&encoded, "Falcon secret key does not satisfy the NTRU equation");
+    }
+
+    #[test]
+    fn secret_key_deserialization_rejects_out_of_range_reconstructed_big_g() {
+        let (f, g) = acceptable_f_and_g();
+        // This deterministic pair reconstructs a coefficient of G outside the signed 8-bit
+        // encoding range when F is the constant polynomial 127.
+        let big_f = constant_polynomial(127);
+        let encoded = encode_secret_key(&f, &g, &big_f);
+
+        assert_invalid_key(
+            &encoded,
+            "Falcon secret key polynomial G exceeds its coefficient bound",
+        );
+    }
+
+    #[test]
+    fn secret_key_deserialization_rejects_forbidden_minimum_coefficients() {
+        let f_offset = 1;
+        let g_offset = f_offset + N * WIDTH_SMALL_POLY_COEFFICIENT / 8;
+        let big_f_offset = g_offset + N * WIDTH_SMALL_POLY_COEFFICIENT / 8;
+
+        for (offset, polynomial) in [(f_offset, "f"), (g_offset, "g"), (big_f_offset, "F")] {
+            let mut encoded = vec![0u8; SK_LEN];
+            encoded[0] = (5 << 4) | LOG_N;
+            encoded[offset] = 0b1000_0000;
+
+            assert_invalid_key(&encoded, &format!("Failed to decode {polynomial} coefficients"));
+        }
+    }
+
+    fn constant_polynomial(value: i16) -> Polynomial<i16> {
+        let mut polynomial = Polynomial::new(vec![0i16; N]);
+        polynomial.coefficients[0] = value;
+        polynomial
+    }
+
+    fn acceptable_f_and_g() -> (Polynomial<i16>, Polynomial<i16>) {
+        let mut rng = ChaCha20Rng::from_seed([9u8; 32]);
+        let [g, minus_f, _, _] = ntru_gen(N, &mut rng);
+        (-minus_f, g)
+    }
+
+    fn encode_secret_key(
+        f: &Polynomial<i16>,
+        g: &Polynomial<i16>,
+        big_f: &Polynomial<i16>,
+    ) -> Vec<u8> {
+        let encode = |polynomial: &Polynomial<i16>, width| {
+            let coefficients = polynomial
+                .coefficients
+                .iter()
+                .map(|&coefficient| coefficient as i8)
+                .collect::<Vec<_>>();
+            encode_i8(&coefficients, width).unwrap()
+        };
+
+        let mut encoded = Vec::with_capacity(SK_LEN);
+        encoded.push((5 << 4) | LOG_N);
+        encoded.extend_from_slice(&encode(f, WIDTH_SMALL_POLY_COEFFICIENT));
+        encoded.extend_from_slice(&encode(g, WIDTH_SMALL_POLY_COEFFICIENT));
+        encoded.extend_from_slice(&encode(big_f, WIDTH_BIG_POLY_COEFFICIENT));
+        assert_eq!(encoded.len(), SK_LEN);
+        encoded
+    }
+
+    fn assert_invalid_key(encoded: &[u8], expected_message: &str) {
+        let error = TestSecretKey::read_from_bytes(encoded).unwrap_err();
+        assert_eq!(error, DeserializationError::InvalidValue(expected_message.to_string()),);
     }
 }

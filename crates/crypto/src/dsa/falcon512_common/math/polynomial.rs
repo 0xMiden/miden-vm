@@ -10,10 +10,7 @@ use core::{
 use num::{One, Zero};
 
 use super::{Inverse, MODULUS, N, field::FalconFelt};
-use crate::{
-    Felt,
-    utils::zeroize::{Zeroize, ZeroizeOnDrop},
-};
+use crate::{Felt, utils::zeroize::Zeroize};
 
 /// Represents a polynomial with coefficients of type F.
 #[derive(Debug, Clone, Default)]
@@ -693,8 +690,6 @@ impl<F: Zeroize> Zeroize for Polynomial<F> {
         self.coefficients.zeroize();
     }
 }
-
-impl<F: Zeroize> ZeroizeOnDrop for Polynomial<F> {}
 
 // TESTS
 // ================================================================================================

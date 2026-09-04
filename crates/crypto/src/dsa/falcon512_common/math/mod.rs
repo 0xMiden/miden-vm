@@ -106,8 +106,7 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
         if f_ntt.coefficients.iter().any(Zero::is_zero) {
             continue;
         }
-        let gamma = gram_schmidt_norm_squared(&f, &g);
-        if gamma > 1.3689f64 * (MODULUS as f64) {
+        if !has_acceptable_gram_schmidt_norm(&f, &g) {
             continue;
         }
 
@@ -208,6 +207,12 @@ fn gram_schmidt_norm_squared(f: &Polynomial<i16>, g: &Polynomial<i16>) -> f64 {
     let gamma2 = norm_f_over_ffgg_squared + norm_g_over_ffgg_squared;
 
     f64::max(gamma1, gamma2)
+}
+
+/// Returns whether `f` and `g` satisfy Falcon's Gram-Schmidt norm bound.
+pub(crate) fn has_acceptable_gram_schmidt_norm(f: &Polynomial<i16>, g: &Polynomial<i16>) -> bool {
+    let norm_squared = gram_schmidt_norm_squared(f, g);
+    norm_squared.is_finite() && norm_squared <= 1.3689 * (MODULUS as f64)
 }
 
 /// Reduces the vector (F,G) relative to (f,g). This method follows the python implementation [1].
@@ -323,7 +328,7 @@ fn xgcd(a: &BigInt, b: &BigInt) -> (BigInt, BigInt, BigInt) {
 
 /// Asserts that the balanced values of the coefficients of a polynomial are within the interval
 /// [-bound, bound].
-fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16) -> bool {
+pub(crate) fn check_coefficients_bound(polynomial: &Polynomial<i16>, bound: i16) -> bool {
     polynomial.to_balanced_values().iter().all(|c| *c <= bound && *c >= -bound)
 }
 
