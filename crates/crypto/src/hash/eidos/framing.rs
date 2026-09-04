@@ -1,51 +1,31 @@
 //! Eidos message framing and block scheduling.
 //!
-//! Eidos binds a registered construction selector and three selector-defined parameters into the
+//! Eidos binds a registered domain tag and three domain-defined parameters into the
 //! initial chaining value. The scheduler then compresses full blocks, zero-pads only a final
 //! partial block, and represents an empty input by one all-zero block compression.
 
-use super::{BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, encoding, primitive::IV};
+use super::{
+    DIGEST_WIDTH, PACKED_LANES, domain::EidosDomain, domains::GenericFeltSequenceDomain, encoding,
+    primitive::IV,
+};
 use crate::Felt;
 
-/// Registered selector for the Eidos byte-string construction.
+pub(super) const GENERIC_FELT_TAG: u32 = GenericFeltSequenceDomain::TAG.as_u32();
+
+/// Initial CV for the reserved fixed, one-block Merkle inner-node compression.
 ///
-/// This uses domain id `0x000003`, version 1, from the miden-crypto registry range. Felt-sequence
-/// hashing uses selector zero or an explicitly supplied registered selector.
-const BYTE_STRING_DOMAIN_ID: u32 = 0x000003;
-pub(super) const BYTE_STRING_SELECTOR: u32 = (BYTE_STRING_DOMAIN_ID << 8) | 1;
-
-pub(super) const FELT_BLOCK_INIT_CV: [u32; 8] = init_cv_unchecked(0, [BLOCK_LEN as u32, 0, 0]);
-
-const FELT_INIT_CV: [u32; 8] = init_cv_unchecked(0, [0; 3]);
-
-/// Felt-sequence initial chaining word before compressing the required zero block for empty input.
-pub(super) const FELT_INIT_CV_U64: [u64; DIGEST_WIDTH] = [
-    encoding::pack_output_pair_u64(FELT_INIT_CV[0], FELT_INIT_CV[1]),
-    encoding::pack_output_pair_u64(FELT_INIT_CV[2], FELT_INIT_CV[3]),
-    encoding::pack_output_pair_u64(FELT_INIT_CV[4], FELT_INIT_CV[5]),
-    encoding::pack_output_pair_u64(FELT_INIT_CV[6], FELT_INIT_CV[7]),
-];
-
-#[inline]
-pub(super) fn selector_to_u32(selector: Felt) -> u32 {
-    let selector = selector.as_canonical_u64();
-    assert!(u32::try_from(selector).is_ok(), "selector must fit in a u32");
-    selector as u32
-}
+/// All four injected u32 lanes are zero. This construction is intentionally outside the domain
+/// registry and must not be reused for ordinary Felt-sequence hashing.
+pub(super) const MERKLE_NODE_INIT_CV: [u32; 8] = init_cv(0, [0; 3]);
 
 /// Construct an Eidos initial chaining value from the BLAKE3 IV layout.
 ///
-/// The selector and three selector-defined parameters occupy the four even u32 lanes. The four
+/// The tag and three domain-defined parameters occupy the four even u32 lanes. The four
 /// odd lanes are fixed and masked, so the initial CV is already in the same 252-bit subspace as
 /// every Eidos compression output. Each parameter may use its complete u32 lane.
-#[inline]
-pub(super) fn init_cv(selector: u32, params: [u32; 3]) -> [u32; 8] {
-    init_cv_unchecked(selector, params)
-}
-
-const fn init_cv_unchecked(selector: u32, params: [u32; 3]) -> [u32; 8] {
+pub(super) const fn init_cv(tag: u32, params: [u32; 3]) -> [u32; 8] {
     [
-        selector,
+        tag,
         IV[1] & encoding::ODD_LANE_MASK,
         params[0],
         IV[3] & encoding::ODD_LANE_MASK,
@@ -57,20 +37,17 @@ const fn init_cv_unchecked(selector: u32, params: [u32; 3]) -> [u32; 8] {
 }
 
 #[inline]
-pub(super) fn init_packed_cv(
-    selector: u32,
-    params: [u32; 3],
-) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = init_cv(selector, params);
+pub(super) fn init_packed_cv(tag: u32, params: [u32; 3]) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
+    let cv = init_cv(tag, params);
     encoding::pack_cv_to_felts(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
 }
 
 #[inline]
 pub(super) fn init_packed_u64_cv(
-    selector: u32,
+    tag: u32,
     params: [u32; 3],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = init_cv(selector, params);
+    let cv = init_cv(tag, params);
     encoding::pack_cv_to_packed_u64s(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
 }
 
@@ -124,12 +101,13 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
+    use crate::hash::eidos::domains::GenericByteStringDomain;
 
     #[test]
     fn initial_cv_is_derived_from_blake3_iv() {
-        for (selector, params) in [(0, [0, 0, 0]), (u32::MAX, [u32::MAX; 3]), (7, [42, 11, 9])] {
-            let cv = init_cv(selector, params);
-            assert_eq!(cv[0], selector);
+        for (tag, params) in [(0, [0, 0, 0]), (u32::MAX, [u32::MAX; 3]), (7, [42, 11, 9])] {
+            let cv = init_cv(tag, params);
+            assert_eq!(cv[0], tag);
             assert_eq!(cv[1], IV[1] & encoding::ODD_LANE_MASK);
             assert_eq!(cv[2], params[0]);
             assert_eq!(cv[3], IV[3] & encoding::ODD_LANE_MASK);
@@ -141,13 +119,12 @@ mod tests {
     }
 
     #[test]
-    fn byte_and_felt_constructions_use_distinct_selectors() {
-        assert_ne!(init_cv(0, [0; 3]), init_cv(BYTE_STRING_SELECTOR, [0; 3]));
-    }
-
-    #[test]
-    fn felt_init_cv_u64_matches_initial_cv() {
-        assert_eq!(FELT_INIT_CV_U64, encoding::pack_cv_to_u64s(FELT_INIT_CV));
+    fn registered_byte_and_felt_constructions_are_distinct_from_each_other_and_merkle() {
+        let felt = init_cv(GENERIC_FELT_TAG, [0; 3]);
+        let bytes = init_cv(GenericByteStringDomain::TAG.as_u32(), [0; 3]);
+        assert_ne!(felt, bytes);
+        assert_ne!(felt, MERKLE_NODE_INIT_CV);
+        assert_ne!(bytes, MERKLE_NODE_INIT_CV);
     }
 
     #[test]

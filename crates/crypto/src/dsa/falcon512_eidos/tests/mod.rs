@@ -8,7 +8,10 @@ use prng::Shake256Testing;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use super::{Serializable, math::Polynomial};
+use super::{
+    N, PublicKey, Serializable,
+    math::{FalconFelt, Polynomial},
+};
 use crate::{
     SequentialCommit,
     dsa::{
@@ -17,7 +20,10 @@ use crate::{
         },
         falcon512_poseidon2,
     },
-    hash::{eidos::Eidos, poseidon2::Poseidon2},
+    hash::{
+        eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
+        poseidon2::Poseidon2,
+    },
 };
 
 mod data;
@@ -29,9 +35,10 @@ fn eidos_and_poseidon2_falcon_coexist() {
     let mut eidos_rng = ChaCha20Rng::from_seed([3_u8; 32]);
     let eidos_public_key = SecretKey::with_rng(&mut eidos_rng).public_key();
     let elements = eidos_public_key.to_elements();
+    let commitment = eidos_public_key.to_commitment();
 
-    assert_eq!(eidos_public_key.to_commitment(), Eidos::hash_elements(&elements));
-    assert_ne!(eidos_public_key.to_commitment(), Poseidon2::hash_elements(&elements));
+    assert_eq!(commitment, Eidos::hash_elements_in_domain(&elements, FALCON_PUBLIC_KEY));
+    assert_ne!(commitment, Poseidon2::hash_elements(&elements));
 
     let mut poseidon2_rng = ChaCha20Rng::from_seed([5_u8; 32]);
     let poseidon2_public_key =
@@ -39,6 +46,23 @@ fn eidos_and_poseidon2_falcon_coexist() {
     assert_eq!(
         poseidon2_public_key.to_commitment(),
         Poseidon2::hash_elements(&poseidon2_public_key.to_elements())
+    );
+}
+
+#[test]
+fn eidos_public_key_commitment_is_frozen() {
+    let public_key = PublicKey::from(Polynomial::new(
+        (0..N).map(|value| FalconFelt::new(value as i16)).collect(),
+    ));
+
+    assert_eq!(
+        public_key.to_commitment().into_elements().map(|value| value.as_canonical_u64()),
+        [
+            1_503_226_522_383_133_554,
+            9_124_963_703_222_507_410,
+            4_170_264_538_401_487_428,
+            5_215_050_092_812_883_080,
+        ],
     );
 }
 
@@ -181,7 +205,7 @@ fn build_preversioned_fixed_nonce() -> [u8; PREVERSIONED_NONCE_LEN] {
     let mut result = [0_u8; 39];
     result[0] = LOG_N;
     // This protocol-defined byte string contributes to deterministic signature outputs.
-    let domain_separator = b"FALCON-BLAKEG-DET";
+    let domain_separator = b"FALCON-EIDOS-DET";
 
     result
         .iter_mut()

@@ -32,7 +32,7 @@ use crate::Word;
 /// Main differences from the Falcon reference implementation:
 ///
 /// 1. Hash-to-point uses Eidos and a fixed nonce. The nonce is `nonce_version_byte ||
-///    preversioned_nonce`, where `preversioned_nonce` is `log2(512) || "FALCON-BLAKEG-DET" || zero
+///    preversioned_nonce`, where `preversioned_nonce` is `log2(512) || "FALCON-EIDOS-DET" || zero
 ///    padding` and is not serialized. The byte string is part of the deterministic-signature
 ///    protocol and contributes to signature outputs.
 /// 2. The trapdoor sampler uses `ChaCha20Rng` seeded with `Blake3(log2(512) || sk || message)`.

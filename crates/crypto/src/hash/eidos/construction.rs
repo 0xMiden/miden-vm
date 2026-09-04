@@ -7,18 +7,24 @@ use p3_symmetric::CryptographicHasher;
 
 use super::{
     BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, PackedBlock, PackedChainingValue, PackedDigest,
-    PackedFelt, compression, encoding,
-    framing::{self, BYTE_STRING_SELECTOR, FELT_BLOCK_INIT_CV},
+    PackedFelt, compression,
+    domain::{ByteString, EidosDomain, FeltSequence, Transcript},
+    domains::{GENERIC_BYTE_STRING, GENERIC_FELT_SEQUENCE},
+    encoding,
+    framing::{self, GENERIC_FELT_TAG, MERKLE_NODE_INIT_CV},
 };
 use crate::{Felt, Word, field::BasedVectorSpace};
 
 /// Eidos hash construction.
 ///
-/// Byte strings and field-element strings use distinct registered selectors. Field hashing
-/// additionally accepts a u32 selector, and both constructions bind the exact input length into
-/// the initial chaining value.
-/// The `CryptographicHasher<u64, _>` implementation hashes exact 64-bit words; it does not reduce
-/// them modulo the Goldilocks field order.
+/// Byte strings and field-element strings use distinct typed, registered domains. Both
+/// constructions bind the exact input length into the initial chaining value. The fixed
+/// two-to-one Merkle compression exposed by [`Self::merge`] is the sole reserved zero-tag
+/// construction and is deliberately distinct from ordinary Felt-sequence hashing.
+/// The `CryptographicHasher<u64, _>` implementations are bit-level adapters for the generic
+/// Felt-sequence construction. Canonical Goldilocks encodings produce exactly the same digest as
+/// their `Felt` counterparts. Other `u64` values are split into their two limbs without reduction;
+/// this deterministic extension is not a separate registered message domain.
 ///
 /// Digests occupy a 252-bit packed subspace and therefore provide at most 126 bits of generic
 /// collision resistance.
@@ -59,48 +65,74 @@ impl Eidos {
         compression::compress_xof_cv(encoding::word_to_cv(cv), encoding::encode_felt_block(&block))
     }
 
-    /// Construct the seed CV used by the Fiat-Shamir challenger.
+    /// Construct the framed initial CV used by a Fiat-Shamir challenger.
     ///
-    /// This is one raw compression from the zero CV. The first u32 block lane contains the
-    /// registered transcript selector and the remaining fifteen lanes are zero. It is a dedicated
-    /// challenger seed construction, not a framed message hash.
+    /// The registered transcript tag occupies the domain lane and all three parameter lanes are
+    /// zero. The transcript's subsequent absorb and squeeze schedule is defined by its domain.
     #[inline]
-    pub fn transcript_init_cv(selector: u32) -> Word {
-        let mut block = [0u32; 16];
-        block[0] = selector;
-        encoding::output_cv_to_word(compression::compress_cv([0u32; 8], block))
+    pub fn transcript_init_cv<D>(domain: D) -> Word
+    where
+        D: EidosDomain<Encoding = Transcript>,
+    {
+        Self::init_chaining_word_with_params(domain, [0; 3])
     }
 
-    /// Construct the felt-sequence initial chaining value as a packed word.
+    /// Construct an initial chaining word with `param0` in the first parameter lane.
     ///
-    /// `n` is the total number of felts in the complete message, not the size of the next block.
+    /// The remaining two parameter lanes are zero. Standard Felt- and byte-sequence domains use
+    /// `param0` for the complete logical input length; custom domains define it in their registry
+    /// schema.
     #[inline]
-    pub fn init_chaining_word(selector: u32, n: u32) -> Word {
-        Self::init_chaining_word_with_params(selector, [n, 0, 0])
+    pub fn init_chaining_word<D: EidosDomain>(domain: D, param0: u32) -> Word {
+        Self::init_chaining_word_with_params(domain, [param0, 0, 0])
     }
 
-    /// Construct an initial chaining value from a registered selector and three parameters.
+    /// Construct an initial chaining value from a registered domain tag and three parameters.
     ///
-    /// The selector defines the construction and the meaning of its parameters. Every supplied
+    /// The domain defines the construction and the meaning of its parameters. Every supplied
     /// value occupies one complete low u32 lane; the corresponding high lane is a fixed masked IV
     /// word.
     #[inline]
-    pub fn init_chaining_word_with_params(selector: u32, params: [u32; 3]) -> Word {
-        encoding::output_cv_to_word(framing::init_cv(selector, params))
+    pub fn init_chaining_word_with_params<D: EidosDomain>(_: D, params: [u32; 3]) -> Word {
+        Self::init_chaining_word_with_tag(D::TAG, params)
     }
 
-    /// Construct the same felt-sequence initial chaining word in every native packed lane.
+    /// Construct an initial chaining value from a structurally valid runtime tag and three
+    /// parameters.
     ///
-    /// `n` is the total number of felts in each complete message, not the size of the next block.
+    /// This is the dynamic counterpart of [`Self::init_chaining_word_with_params`] for registries
+    /// such as deferred precompiles, where the concrete domain is selected at runtime. Constructing
+    /// a [`super::DomainTag`] establishes only its structural and namespace rules; the caller
+    /// remains responsible for checking membership in the relevant owner registry and enforcing
+    /// that domain's parameter and payload schema.
     #[inline]
-    pub fn init_packed_chaining_word(selector: u32, n: u32) -> PackedChainingValue {
-        framing::init_packed_cv(selector, [n, 0, 0])
+    pub fn init_chaining_word_with_tag(tag: super::DomainTag, params: [u32; 3]) -> Word {
+        encoding::output_cv_to_word(framing::init_cv(tag.as_u32(), params))
     }
 
-    /// Hash a byte string with the registered byte-string selector.
+    /// Construct the same one-parameter initial chaining word in every native packed lane.
+    ///
+    /// The interpretation of `param0` is defined by the registered domain.
+    #[inline]
+    pub fn init_packed_chaining_word<D: EidosDomain>(_: D, param0: u32) -> PackedChainingValue {
+        framing::init_packed_cv(D::TAG.as_u32(), [param0, 0, 0])
+    }
+
+    /// Hash a byte string with the registered generic byte-string domain.
+    #[inline]
     pub fn hash(bytes: &[u8]) -> Word {
+        Self::hash_in_domain(bytes, GENERIC_BYTE_STRING)
+    }
+
+    /// Hash a byte string under a typed byte-string domain.
+    ///
+    /// A Felt-sequence or custom-schedule domain cannot be passed to this function.
+    pub fn hash_in_domain<D>(bytes: &[u8], _: D) -> Word
+    where
+        D: EidosDomain<Encoding = ByteString>,
+    {
         let len = u32::try_from(bytes.len()).expect("input too long: byte count must fit in u32");
-        let mut cv = framing::init_cv(BYTE_STRING_SELECTOR, [len, 0, 0]);
+        let mut cv = framing::init_cv(D::TAG.as_u32(), [len, 0, 0]);
 
         if bytes.is_empty() {
             cv = compression::compress_cv(cv, [0; 16]);
@@ -113,18 +145,37 @@ impl Eidos {
         encoding::output_cv_to_word(cv)
     }
 
-    /// Hash a field-element sequence under selector zero.
+    /// Hash a field-element sequence under the registered generic Felt-sequence domain.
     #[inline]
     pub fn hash_elements<E: BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
-        Self::hash_elements_in_domain(elements, Felt::ZERO)
+        Self::hash_elements_in_domain(elements, GENERIC_FELT_SEQUENCE)
     }
 
-    /// Hash a field-element sequence under a caller-supplied selector.
-    pub fn hash_elements_in_domain<E: BasedVectorSpace<Felt>>(
-        elements: &[E],
-        domain: Felt,
-    ) -> Word {
-        let domain = framing::selector_to_u32(domain);
+    /// Hash a field-element sequence under a typed Felt-sequence domain.
+    ///
+    /// A byte-string or custom-schedule domain cannot be passed to this function.
+    ///
+    /// ```compile_fail
+    /// use miden_crypto::{Felt, hash::eidos::{Eidos, domains::GENERIC_BYTE_STRING}};
+    ///
+    /// let values = [Felt::ZERO];
+    /// let _ = Eidos::hash_elements_in_domain(&values, GENERIC_BYTE_STRING);
+    /// ```
+    ///
+    /// Raw field elements are not domain declarations either:
+    ///
+    /// ```compile_fail
+    /// use miden_crypto::{Felt, hash::eidos::Eidos};
+    ///
+    /// let values = [Felt::ZERO];
+    /// let byte_tag = Felt::new_unchecked(0x0000_0301);
+    /// let _ = Eidos::hash_elements_in_domain(&values, byte_tag);
+    /// ```
+    pub fn hash_elements_in_domain<E, D>(elements: &[E], _: D) -> Word
+    where
+        E: BasedVectorSpace<Felt>,
+        D: EidosDomain<Encoding = FeltSequence>,
+    {
         let len = elements
             .len()
             .checked_mul(E::DIMENSION)
@@ -132,16 +183,29 @@ impl Eidos {
         let iter = elements
             .iter()
             .flat_map(|element| E::as_basis_coefficients_slice(element).iter().copied());
-        Word::new(hash_felt_iter_in_domain_with_len(iter, len, domain))
+        Word::new(hash_felt_iter_in_domain_with_len(iter, len, D::TAG.as_u32()))
     }
 
-    /// Hash two digest words under selector zero.
+    /// Compress two digest words as one reserved Merkle inner node.
+    ///
+    /// This fixed, one-block construction uses the all-zero domain tuple and is intentionally not
+    /// equivalent to [`Self::hash_elements`] over the same eight Felts.
     #[inline]
     pub fn merge(values: &[Word; 2]) -> Word {
-        compress_digest_pair(values, FELT_BLOCK_INIT_CV)
+        compress_digest_pair(values, MERKLE_NODE_INIT_CV)
     }
 
-    /// Hash two packed digest words under selector zero in every native packed lane.
+    /// Return the initial chaining word reserved for Merkle inner-node compression.
+    ///
+    /// Its four injected framing lanes are all zero. It is exposed for implementations which
+    /// schedule [`Self::merge`] through a separate compression engine; ordinary callers should
+    /// use [`Self::merge`] directly.
+    #[inline]
+    pub fn merkle_node_init_chaining_word() -> Word {
+        encoding::output_cv_to_word(MERKLE_NODE_INIT_CV)
+    }
+
+    /// Compress two packed digest words as reserved Merkle inner nodes in every native packed lane.
     ///
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]
@@ -153,22 +217,20 @@ impl Eidos {
                 values[1][i - DIGEST_WIDTH]
             }
         });
-        Self::compress_packed(framing::init_packed_cv(0, [BLOCK_LEN as u32, 0, 0]), block)
+        Self::compress_packed(framing::init_packed_cv(0, [0; 3]), block)
     }
 
-    /// Hash two digest words under a caller-supplied selector.
+    /// Hash two digest words under a typed Felt-sequence domain.
     #[inline]
-    pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
-        let domain = framing::selector_to_u32(domain);
-        let cv = if domain == 0 {
-            FELT_BLOCK_INIT_CV
-        } else {
-            framing::init_cv(domain, [BLOCK_LEN as u32, 0, 0])
-        };
+    pub fn merge_in_domain<D>(values: &[Word; 2], _: D) -> Word
+    where
+        D: EidosDomain<Encoding = FeltSequence>,
+    {
+        let cv = framing::init_cv(D::TAG.as_u32(), [BLOCK_LEN as u32, 0, 0]);
         compress_digest_pair(values, cv)
     }
 
-    /// Hash a sequence of digest words under selector zero.
+    /// Hash a sequence of digest words under the generic Felt-sequence domain.
     #[inline]
     pub fn merge_many(values: &[Word]) -> Word {
         Self::hash_elements(Word::words_as_elements(values))
@@ -216,7 +278,7 @@ where
     let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
-        framing::init_cv(0, [len_u32, 0, 0]),
+        framing::init_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         0,
         compression::compress_u64_cv,
     );
@@ -231,7 +293,7 @@ where
     framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
-        framing::init_packed_cv(0, [len_u32, 0, 0]),
+        framing::init_packed_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [Felt::ZERO; PACKED_LANES],
         compression::compress_packed_felt_cv,
     )
@@ -245,7 +307,7 @@ where
     framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
-        framing::init_packed_u64_cv(0, [len_u32, 0, 0]),
+        framing::init_packed_u64_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [0; PACKED_LANES],
         compression::compress_packed_u64_cv,
     )
@@ -258,11 +320,11 @@ impl CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]> for Eidos {
     {
         let iter = input.into_iter();
         if let Some(len) = exact_size_hint(&iter) {
-            hash_felt_iter_in_domain_with_len(iter, len, 0)
+            hash_felt_iter_in_domain_with_len(iter, len, GENERIC_FELT_TAG)
         } else {
             let elements: Vec<Felt> = iter.collect();
             let len = elements.len();
-            hash_felt_iter_in_domain_with_len(elements.into_iter(), len, 0)
+            hash_felt_iter_in_domain_with_len(elements.into_iter(), len, GENERIC_FELT_TAG)
         }
     }
 }
@@ -317,10 +379,23 @@ impl CryptographicHasher<[u64; PACKED_LANES], [[u64; PACKED_LANES]; DIGEST_WIDTH
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
-
     use super::*;
-    use crate::hash::eidos::PackedBlock;
+    use crate::hash::eidos::{
+        DomainTag, DomainVersion, PackedBlock,
+        domain::namespace,
+        domains::{GenericByteStringDomain, GenericFeltSequenceDomain},
+    };
+
+    #[derive(Debug, Copy, Clone)]
+    struct TestTranscriptDomain;
+
+    impl EidosDomain for TestTranscriptDomain {
+        type Encoding = Transcript;
+
+        const NAME: &'static str = "TEST_TRANSCRIPT";
+        const TAG: DomainTag =
+            DomainTag::new(namespace::MIDEN_VM, 0xffff, DomainVersion::numbered(1));
+    }
 
     struct LooseSizeHint<I>(I);
 
@@ -355,8 +430,8 @@ mod tests {
 
     #[test]
     fn empty_constructions_each_compress_one_zero_block() {
-        let byte_cv = framing::init_cv(BYTE_STRING_SELECTOR, [0; 3]);
-        let felt_cv = framing::init_cv(0, [0; 3]);
+        let byte_cv = framing::init_cv(GenericByteStringDomain::TAG.as_u32(), [0; 3]);
+        let felt_cv = framing::init_cv(GenericFeltSequenceDomain::TAG.as_u32(), [0; 3]);
         assert_eq!(
             Eidos::hash(&[]),
             encoding::output_cv_to_word(compression::compress_cv(byte_cv, [0; 16]))
@@ -369,30 +444,37 @@ mod tests {
     }
 
     #[test]
-    fn transcript_init_cv_matches_one_raw_compression() {
-        let selector = 0x0201u32;
-        let mut block = [Felt::ZERO; BLOCK_LEN];
-        block[0] = Felt::from_u32(selector);
-        assert_eq!(Eidos::transcript_init_cv(selector), Eidos::compress(Word::default(), block));
+    fn transcript_init_cv_uses_registered_framing() {
+        assert_eq!(
+            Eidos::transcript_init_cv(TestTranscriptDomain),
+            Eidos::init_chaining_word_with_params(TestTranscriptDomain, [0; 3]),
+        );
+    }
+
+    #[test]
+    fn runtime_tag_initializer_matches_the_typed_initializer() {
+        let params = [1, 2, 3];
+        assert_eq!(
+            Eidos::init_chaining_word_with_tag(TestTranscriptDomain::TAG, params),
+            Eidos::init_chaining_word_with_params(TestTranscriptDomain, params),
+        );
     }
 
     #[test]
     fn framed_full_block_matches_manual_init_then_compress() {
-        let domain = 17u32;
         let block: [Felt; BLOCK_LEN] =
             array::from_fn(|i| Felt::new_unchecked((i as u64 + 1) * 0x0101_0101));
-        let cv = Eidos::init_chaining_word(domain, BLOCK_LEN as u32);
+        let cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
 
-        let framed = Eidos::hash_elements_in_domain(&block, Felt::from_u32(domain));
+        let framed = Eidos::hash_elements_in_domain(&block, GENERIC_FELT_SEQUENCE);
         assert_eq!(Eidos::compress(cv, block), framed);
         assert_ne!(Eidos::compress(Word::default(), block), framed);
     }
 
     #[test]
     fn packed_compression_and_merge_match_scalar_lanes() {
-        let domain = 17;
         let input_len = (2 * BLOCK_LEN) as u32;
-        let packed_cv = Eidos::init_packed_chaining_word(domain, input_len);
+        let packed_cv = Eidos::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, input_len);
         let packed_block: PackedBlock = array::from_fn(|element| {
             array::from_fn(|lane| Felt::new_unchecked((element * 101 + lane * 17 + 3) as u64))
         });
@@ -404,7 +486,7 @@ mod tests {
         let packed_merged = Eidos::merge_packed(&packed_values);
 
         for lane in 0..PACKED_LANES {
-            let scalar_cv = Eidos::init_chaining_word(domain, input_len);
+            let scalar_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, input_len);
             let scalar_block = array::from_fn(|element| packed_block[element][lane]);
             let scalar = Eidos::compress(scalar_cv, scalar_block);
             let actual = Word::new(array::from_fn(|word| packed[word][lane]));
@@ -515,11 +597,5 @@ mod tests {
             claimed: 3,
         };
         let _: [Felt; DIGEST_WIDTH] = Eidos.hash_iter(iter);
-    }
-
-    #[test]
-    fn hash_elements_is_deterministic() {
-        let elements = vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        assert_eq!(Eidos::hash_elements(&elements), Eidos::hash_elements(&elements));
     }
 }
