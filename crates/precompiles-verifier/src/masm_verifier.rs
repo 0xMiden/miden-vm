@@ -258,7 +258,7 @@ fn build_advice(
     advice_stack.extend(final_poly);
     advice_stack.push(pcs.query_pow_witness);
 
-    let (store, advice_map) = build_merkle_data(config, stark, &log_heights, &proof_order)?;
+    let (store, advice_map) = build_merkle_data(stark, &log_heights, &proof_order)?;
     Ok(AdviceInputs::default()
         .with_stack(advice_stack.into())
         .with_map(advice_map)
@@ -295,19 +295,17 @@ where
 }
 
 fn build_merkle_data(
-    config: &Poseidon2Config,
     stark: &StarkProof<Challenge, P2Lmcs>,
     log_heights: &[u8; NUM_CHIPLETS],
     proof_order: &[usize; NUM_CHIPLETS],
 ) -> Result<MerkleAdvice, PvmRecursiveVerifierInputsError> {
-    let lmcs = config.lmcs();
     let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
 
     // The first DEEP witness is the setup-fixed preprocessed tree. The remaining witnesses are
     // main, auxiliary, and quotient. FRI witnesses follow them in proof order.
     for batch_proof in stark.pcs_proof.deep_witnesses.iter().chain(&stark.pcs_proof.fri_witnesses) {
-        let (tree, entries) = batch_proof_to_merkle(lmcs, batch_proof)?;
+        let (tree, entries) = batch_proof_to_merkle::<P2Lmcs>(batch_proof)?;
         store.extend(tree.inner_nodes());
         advice_map.extend(entries);
     }
@@ -338,7 +336,6 @@ fn build_merkle_data(
 }
 
 fn batch_proof_to_merkle<L>(
-    lmcs: &L,
     batch_proof: &L::BatchProof,
 ) -> Result<BatchMerkleResult, PvmRecursiveVerifierInputsError>
 where
@@ -370,7 +367,9 @@ where
             ));
         }
         let leaf_data = rows.as_slice().to_vec();
-        let leaf_hash = lmcs.hash(rows.iter_rows());
+        let leaf_hash = *batch_proof.leaf_hash(index).ok_or(
+            PvmRecursiveVerifierInputsError::InvalidProofShape("missing leaf hash for query index"),
+        )?;
         let leaf_word = Word::new(leaf_hash.into());
         let merkle_path =
             MerklePath::new(siblings.into_iter().map(|commit| Word::new(commit.into())).collect());

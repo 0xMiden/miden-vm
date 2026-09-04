@@ -215,7 +215,11 @@ where
         for index in batch.indices() {
             let rows = batch.opening(index).expect("opening must exist for query index");
             let siblings = batch.path(index).expect("path must exist for query index");
-            let leaf_digest: [F; DIGEST_WIDTH] = lmcs.hash(rows.iter_rows()).into();
+            let leaf_digest: [F; DIGEST_WIDTH] = batch
+                .leaf_hash(index)
+                .expect("leaf hash must exist for query index")
+                .clone()
+                .into();
             let row: [F; OPENING_ROW_WIDTH] =
                 rows.as_slice().try_into().expect("fold-4/ext2 opening has the expected width");
             openings.push(FriRoundOpening {

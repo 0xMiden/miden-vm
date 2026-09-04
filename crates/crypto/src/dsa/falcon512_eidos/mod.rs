@@ -30,18 +30,6 @@ pub use self::{
     signature::{Signature, SignatureHeader, SignaturePoly},
 };
 
-/// Registered Eidos domain id for the Falcon hash-to-point construction.
-pub const FALCON_HASH_TO_POINT_DOMAIN_ID: u32 = 0x000004;
-
-/// Registered Eidos selector for the Falcon hash-to-point construction.
-pub const FALCON_HASH_TO_POINT_SELECTOR: u32 = (FALCON_HASH_TO_POINT_DOMAIN_ID << 8) | 1;
-
-/// Registered Eidos domain ID for the Falcon product-check transcript.
-pub const FALCON_PRODUCT_CHECK_DOMAIN_ID: u32 = 0x000005;
-
-/// Registered Eidos selector for the Falcon product-check transcript.
-pub const FALCON_PRODUCT_CHECK_SELECTOR: u32 = (FALCON_PRODUCT_CHECK_DOMAIN_ID << 8) | 1;
-
 // CONSTANTS
 // ================================================================================================
 
@@ -77,7 +65,7 @@ const NONCE_VERSION_BYTE: u8 = 2;
 ///
 /// [1]: <https://github.com/algorand/falcon/blob/main/falcon-det.pdf>
 const PREVERSIONED_NONCE: [u8; PREVERSIONED_NONCE_LEN] = [
-    9, 70, 65, 76, 67, 79, 78, 45, 66, 76, 65, 75, 69, 71, 45, 68, 69, 84, 0, 0, 0, 0, 0, 0, 0, 0,
+    9, 70, 65, 76, 67, 79, 78, 45, 69, 73, 68, 79, 83, 45, 68, 69, 84, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
@@ -122,7 +110,7 @@ impl Nonce {
     ///
     /// 1. a byte serving as a version byte,
     /// 2. a pre-versioned fixed nonce containing the UTF-8 encoding of the protocol-defined domain
-    ///    separator "FALCON-BLAKEG-DET" padded with enough zeros to make it 39 bytes. The separator
+    ///    separator "FALCON-EIDOS-DET" padded with enough zeros to make it 39 bytes. The separator
     ///    contributes to deterministic signature outputs and must remain stable.
     ///
     /// Section 2.1 of [1] explains why the fixed nonce is versioned.
