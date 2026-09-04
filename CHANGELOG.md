@@ -18,6 +18,9 @@
 
 - Added `has_precompiles()` to `ExecutionWitness` and `ExecutionProof` so callers can check for precompile work without consuming the witness or inspecting proof variants ([#3757](https://github.com/0xMiden/miden-vm/pull/3757)).
 - [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
+- Added the Eidos hash construction, including scalar and SIMD compression, framed byte and
+  field-element hashing, a Fiat-Shamir challenger, LMCS, Eidos-based Falcon512 signatures and
+  authenticated encryption, and an Eidos random coin.
 
 #### Changes
 
@@ -27,6 +30,8 @@
 - [BREAKING] Removed the unused `SmtForest` type from `miden-crypto`. Use `LargeSmtForest` for shared SMT storage ([#3746](https://github.com/0xMiden/miden-vm/pull/3746)).
 - [BREAKING] Made native MVM and PVM verifiers return proof security parameters and their MASM counterparts return a common descriptor for a shared estimator, renamed the MVM MASM entry point to `sys::vm::verify_proof` and its root accessor to `vm_recursive_verifier_root`, and removed the legacy query-only estimator ([#3752](https://github.com/0xMiden/miden-vm/pull/3752)).
 - [BREAKING] Added format and compatible VM and PVM verifier roots to `ExecutionProof`. Its precompile state now uses `PrecompileStatus`. Duplicate roots and old unversioned proof bytes are rejected ([#3753](https://github.com/0xMiden/miden-vm/pull/3753)).
+- [BREAKING] Replaced the Poseidon2-backed IES variants with `K256AeadEidos` and
+  `X25519AeadEidos`. Their numeric scheme identifiers remain 2 and 3.
 
 #### Fixes
 
