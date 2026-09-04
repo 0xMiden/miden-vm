@@ -92,12 +92,7 @@ pub(crate) fn emit_chiplets_boundary<B: BoundaryBuilder>(boundary: &mut B) {
 mod tests {
     extern crate std;
 
-    use std::{vec, vec::Vec};
-
-    use miden_core::{
-        field::{PrimeCharacteristicRing, QuadFelt},
-        utils::RowMajorMatrix,
-    };
+    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
     use crate::{
         ChipletsAir, Felt, MidenAir, NUM_PUBLIC_VALUES,
@@ -108,10 +103,7 @@ mod tests {
                 main_air::MAIN_COLUMN_SHAPE,
             },
         },
-        lookup::{
-            Challenges,
-            debug::{ValidateLayout, ValidateLookupAir, check_trace_balance},
-        },
+        lookup::debug::{ValidateLayout, ValidateLookupAir},
         trace::AUX_TRACE_RAND_CHALLENGES,
     };
 
@@ -192,34 +184,5 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::Chiplets, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
-    }
-
-    /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued
-    /// Core trace without panicking. A zero-valued trace is not a valid program execution
-    /// so the report is expected to contain unmatched entries; this test only asserts that
-    /// the checker produces a report (instead of crashing).
-    #[test]
-    fn trace_balance_runs_on_zero_trace() {
-        const NUM_ROWS: usize = 4;
-        // CoreAir has no periodic columns.
-        let data = vec![Felt::ZERO; NUM_CORE_COLS * NUM_ROWS];
-        let main_trace = RowMajorMatrix::new(data, NUM_CORE_COLS);
-        let periodic: Vec<Vec<Felt>> = Vec::new();
-        let publics: Vec<Felt> = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
-        let challenges = Challenges::<QuadFelt>::new(
-            QuadFelt::ONE,
-            QuadFelt::ONE,
-            MIDEN_MAX_MESSAGE_WIDTH,
-            BusId::COUNT,
-        );
-
-        let _ = check_trace_balance(
-            &MidenAir::Core,
-            &main_trace,
-            &periodic,
-            &publics,
-            &[],
-            &challenges,
-        );
     }
 }

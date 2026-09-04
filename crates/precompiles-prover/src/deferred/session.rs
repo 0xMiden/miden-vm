@@ -16,9 +16,9 @@ use crate::{
     transcript::poseidon2::P2Digest,
 };
 
-/// wNAF window for [`translate_ec_msm`](DeferredSessionBuilder::translate_ec_msm)'s joint-wNAF
+/// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
 /// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
-/// suits GLV's ~128-bit halves in isolation, but `translate_ec_msm` now caches a repeating base's
+/// suits GLV's ~128-bit halves in isolation, but `msm_from_terms` now caches a repeating base's
 /// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
 /// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
 /// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
@@ -121,23 +121,62 @@ struct TranslatedEc {
 }
 
 impl<'a> DeferredSessionBuilder<'a> {
-    fn translate_truthy(&mut self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
-        self.require_truthy_metadata(digest)?;
-
-        if digest == TRUE_DIGEST {
-            return Ok(self.session.zero());
+    /// Translates a truthy digest tree into a [`Truthy`] session handle.
+    ///
+    /// Uses an iterative post-order traversal with an explicit work stack to avoid
+    /// stack overflow on deep left-leaning AND spines produced by many
+    /// [`DeferredState::log_statement`] calls.
+    fn translate_truthy(&mut self, root: Digest) -> Result<Truthy, DeferredSessionError> {
+        enum Step {
+            Visit(Digest),
+            CombineAnd(Digest),
         }
 
-        let tag = self.node_tag(digest)?;
-        if tag == Tag::AND {
-            let (lhs, rhs) = self.join_payload(digest)?;
-            let lhs = self.translate_truthy(lhs)?;
-            let rhs = self.translate_truthy(rhs)?;
-            let node = self.session.assert_and(lhs, rhs);
-            debug_assert_eq!(node.hash(), P2Digest::from(digest));
-            return Ok(node);
+        let mut work = Vec::new();
+        let mut values: Vec<Truthy> = Vec::new();
+        work.push(Step::Visit(root));
+
+        while let Some(step) = work.pop() {
+            match step {
+                Step::Visit(digest) => {
+                    self.require_truthy_metadata(digest)?;
+
+                    if digest == TRUE_DIGEST {
+                        values.push(self.session.zero());
+                        continue;
+                    }
+
+                    let tag = self.node_tag(digest)?;
+                    if tag == Tag::AND {
+                        let (lhs, rhs) = self.join_payload(digest)?;
+                        work.push(Step::CombineAnd(digest));
+                        // Push rhs first so lhs is visited first (LIFO).
+                        work.push(Step::Visit(rhs));
+                        work.push(Step::Visit(lhs));
+                        continue;
+                    }
+
+                    // Leaf node: delegate to the appropriate precompile decoder.
+                    values.push(self.translate_truthy_leaf(digest)?);
+                },
+                Step::CombineAnd(digest) => {
+                    // Children were visited in order; lhs was pushed first onto values.
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    let node = self.session.assert_and(lhs, rhs);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(node);
+                },
+            }
         }
 
+        debug_assert_eq!(values.len(), 1);
+        Ok(values.pop().expect("value stack empty after traversal"))
+    }
+
+    /// Translates a non-AND truthy leaf node (keccak assertion, uint equality, or curve
+    /// equality).
+    fn translate_truthy_leaf(&mut self, digest: Digest) -> Result<Truthy, DeferredSessionError> {
         if let Some(assertion) = Keccak256Precompile::decode_assert_node(self.node(digest)?)
             .map_err(|_| DeferredSessionError::MalformedNode(digest))?
         {
@@ -179,91 +218,212 @@ impl<'a> DeferredSessionBuilder<'a> {
         }
     }
 
-    fn translate_uint(&mut self, digest: Digest) -> Result<TranslatedUint, DeferredSessionError> {
-        let (value, domain) = self.canonical_uint_metadata(digest)?;
-        let decoded = UintPrecompile::decode_node(self.node(digest)?)
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
+    /// Translates a uint digest tree into a [`TranslatedUint`].
+    ///
+    /// Uses an iterative post-order traversal with an explicit work stack to avoid
+    /// stack overflow on deeply nested arithmetic expression trees.
+    fn translate_uint(&mut self, root: Digest) -> Result<TranslatedUint, DeferredSessionError> {
+        enum Step {
+            Visit(Digest),
+            CombineAdd {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
+            CombineSub {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
+            CombineMul {
+                digest: Digest,
+                value: U256,
+                domain: UintDomain,
+            },
+        }
 
-        let node = match decoded {
-            Some(UintNodeRef::Value { domain: structural_domain, limbs }) => {
-                if structural_domain != domain {
-                    return Err(DeferredSessionError::MalformedNode(digest));
-                }
-                debug_assert_eq!(from_limbs32(&limbs), value);
-                self.session.uint_leaf(value, domain.bound_ptr())
-            },
-            Some(UintNodeRef::Add { lhs, rhs }) => {
-                let lhs = self.translate_uint(lhs)?;
-                let rhs = self.translate_uint(rhs)?;
-                debug_assert_eq!(lhs.domain, rhs.domain);
-                self.session.uint_add(&lhs.node, &rhs.node)
-            },
-            Some(UintNodeRef::Sub { lhs, rhs }) => {
-                let lhs = self.translate_uint(lhs)?;
-                let rhs = self.translate_uint(rhs)?;
-                debug_assert_eq!(lhs.domain, rhs.domain);
-                self.session.uint_sub(&lhs.node, &rhs.node)
-            },
-            Some(UintNodeRef::Mul { lhs, rhs }) => {
-                let lhs = self.translate_uint(lhs)?;
-                let rhs = self.translate_uint(rhs)?;
-                debug_assert_eq!(lhs.domain, rhs.domain);
-                self.session.uint_mul(&lhs.node, &rhs.node)
-            },
-            Some(UintNodeRef::Eq { .. }) | None => {
-                return Err(DeferredSessionError::TypeMismatch { digest, expected: "uint value" });
-            },
-        };
+        let mut work = Vec::new();
+        let mut values: Vec<TranslatedUint> = Vec::new();
+        work.push(Step::Visit(root));
 
-        debug_assert_eq!(node.hash(), P2Digest::from(digest));
-        Ok(TranslatedUint { node, value, domain })
+        while let Some(step) = work.pop() {
+            match step {
+                Step::Visit(digest) => {
+                    let (value, domain) = self.canonical_uint_metadata(digest)?;
+                    let decoded = UintPrecompile::decode_node(self.node(digest)?)
+                        .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
+
+                    match decoded {
+                        Some(UintNodeRef::Value { domain: structural_domain, limbs }) => {
+                            if structural_domain != domain {
+                                return Err(DeferredSessionError::MalformedNode(digest));
+                            }
+                            debug_assert_eq!(from_limbs32(&limbs), value);
+                            let node = self.session.uint_leaf(value, domain.bound_ptr());
+                            debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                            values.push(TranslatedUint { node, value, domain });
+                        },
+                        Some(UintNodeRef::Add { lhs, rhs }) => {
+                            work.push(Step::CombineAdd { digest, value, domain });
+                            work.push(Step::Visit(rhs));
+                            work.push(Step::Visit(lhs));
+                        },
+                        Some(UintNodeRef::Sub { lhs, rhs }) => {
+                            work.push(Step::CombineSub { digest, value, domain });
+                            work.push(Step::Visit(rhs));
+                            work.push(Step::Visit(lhs));
+                        },
+                        Some(UintNodeRef::Mul { lhs, rhs }) => {
+                            work.push(Step::CombineMul { digest, value, domain });
+                            work.push(Step::Visit(rhs));
+                            work.push(Step::Visit(lhs));
+                        },
+                        Some(UintNodeRef::Eq { .. }) | None => {
+                            return Err(DeferredSessionError::TypeMismatch {
+                                digest,
+                                expected: "uint value",
+                            });
+                        },
+                    }
+                },
+                Step::CombineAdd { digest, value, domain } => {
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    debug_assert_eq!(lhs.domain, rhs.domain);
+                    let node = self.session.uint_add(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedUint { node, value, domain });
+                },
+                Step::CombineSub { digest, value, domain } => {
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    debug_assert_eq!(lhs.domain, rhs.domain);
+                    let node = self.session.uint_sub(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedUint { node, value, domain });
+                },
+                Step::CombineMul { digest, value, domain } => {
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    debug_assert_eq!(lhs.domain, rhs.domain);
+                    let node = self.session.uint_mul(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedUint { node, value, domain });
+                },
+            }
+        }
+
+        debug_assert_eq!(values.len(), 1);
+        Ok(values.pop().expect("value stack empty after traversal"))
     }
 
-    fn translate_ec(&mut self, digest: Digest) -> Result<TranslatedEc, DeferredSessionError> {
-        let curve = self.canonical_ec_metadata(digest)?;
-        let decoded = CurvePrecompile::decode_node(self.node(digest)?)
-            .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
+    /// Translates an EC digest tree into a [`TranslatedEc`].
+    ///
+    /// Uses an iterative post-order traversal with an explicit work stack to avoid
+    /// stack overflow on deeply nested EC expression trees.
+    fn translate_ec(&mut self, root: Digest) -> Result<TranslatedEc, DeferredSessionError> {
+        enum Step {
+            Visit(Digest),
+            CombineAdd { digest: Digest, curve: CurveId },
+            CombineSub { digest: Digest, curve: CurveId },
+            VisitScalar(Digest),
+            CombineMsm { digest: Digest, curve: CurveId, n: usize },
+        }
 
-        let node = match decoded {
-            Some(CurveNodeRef::Value { curve: structural_curve, x, y }) => {
-                if structural_curve != curve {
-                    return Err(DeferredSessionError::MalformedNode(digest));
-                }
+        let mut work = Vec::new();
+        let mut values: Vec<TranslatedEc> = Vec::new();
+        let mut scalar_values: Vec<TranslatedUint> = Vec::new();
+        work.push(Step::Visit(root));
 
-                match (x == TRUE_DIGEST, y == TRUE_DIGEST) {
-                    (true, true) => self.session.ec_pai(curve.group_ptr()),
-                    (true, false) | (false, true) => {
-                        return Err(DeferredSessionError::MalformedNode(digest));
-                    },
-                    (false, false) => {
-                        let x = self.translate_uint(x)?;
-                        let y = self.translate_uint(y)?;
-                        debug_assert_eq!(x.domain, curve.base_domain());
-                        debug_assert_eq!(y.domain, curve.base_domain());
-                        self.session.ec_create(curve.group_ptr(), &x.node, &y.node)
-                    },
-                }
-            },
-            Some(CurveNodeRef::Add { lhs, rhs }) => {
-                let lhs = self.translate_ec(lhs)?;
-                let rhs = self.translate_ec(rhs)?;
-                debug_assert_eq!(lhs.curve, rhs.curve);
-                self.session.ec_add(&lhs.node, &rhs.node)
-            },
-            Some(CurveNodeRef::Sub { lhs, rhs }) => {
-                let lhs = self.translate_ec(lhs)?;
-                let rhs = self.translate_ec(rhs)?;
-                debug_assert_eq!(lhs.curve, rhs.curve);
-                self.session.ec_sub(&lhs.node, &rhs.node)
-            },
-            Some(CurveNodeRef::Msm { pairs }) => self.translate_ec_msm(digest, curve, pairs)?,
-            Some(CurveNodeRef::Eq { .. }) | None => {
-                return Err(DeferredSessionError::TypeMismatch { digest, expected: "curve value" });
-            },
-        };
+        while let Some(step) = work.pop() {
+            match step {
+                Step::Visit(digest) => {
+                    let curve = self.canonical_ec_metadata(digest)?;
+                    let decoded = CurvePrecompile::decode_node(self.node(digest)?)
+                        .map_err(|_| DeferredSessionError::MalformedNode(digest))?;
 
-        debug_assert_eq!(node.hash(), P2Digest::from(digest));
-        Ok(TranslatedEc { node, curve })
+                    match decoded {
+                        Some(CurveNodeRef::Value { curve: structural_curve, x, y }) => {
+                            if structural_curve != curve {
+                                return Err(DeferredSessionError::MalformedNode(digest));
+                            }
+
+                            let node = match (x == TRUE_DIGEST, y == TRUE_DIGEST) {
+                                (true, true) => self.session.ec_pai(curve.group_ptr()),
+                                (true, false) | (false, true) => {
+                                    return Err(DeferredSessionError::MalformedNode(digest));
+                                },
+                                (false, false) => {
+                                    let x = self.translate_uint(x)?;
+                                    let y = self.translate_uint(y)?;
+                                    debug_assert_eq!(x.domain, curve.base_domain());
+                                    debug_assert_eq!(y.domain, curve.base_domain());
+                                    self.session.ec_create(curve.group_ptr(), &x.node, &y.node)
+                                },
+                            };
+                            debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                            values.push(TranslatedEc { node, curve });
+                        },
+                        Some(CurveNodeRef::Add { lhs, rhs }) => {
+                            work.push(Step::CombineAdd { digest, curve });
+                            work.push(Step::Visit(rhs));
+                            work.push(Step::Visit(lhs));
+                        },
+                        Some(CurveNodeRef::Sub { lhs, rhs }) => {
+                            work.push(Step::CombineSub { digest, curve });
+                            work.push(Step::Visit(rhs));
+                            work.push(Step::Visit(lhs));
+                        },
+                        Some(CurveNodeRef::Msm { pairs }) => {
+                            let n = pairs.len();
+                            work.push(Step::CombineMsm { digest, curve, n });
+                            for (point_digest, scalar_digest) in pairs.into_iter().rev() {
+                                work.push(Step::VisitScalar(scalar_digest));
+                                work.push(Step::Visit(point_digest));
+                            }
+                        },
+                        Some(CurveNodeRef::Eq { .. }) | None => {
+                            return Err(DeferredSessionError::TypeMismatch {
+                                digest,
+                                expected: "curve value",
+                            });
+                        },
+                    }
+                },
+                Step::CombineAdd { digest, curve } => {
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    debug_assert_eq!(lhs.curve, rhs.curve);
+                    let node = self.session.ec_add(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedEc { node, curve });
+                },
+                Step::CombineSub { digest, curve } => {
+                    let rhs = values.pop().expect("rhs missing from value stack");
+                    let lhs = values.pop().expect("lhs missing from value stack");
+                    debug_assert_eq!(lhs.curve, rhs.curve);
+                    let node = self.session.ec_sub(&lhs.node, &rhs.node);
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedEc { node, curve });
+                },
+                Step::VisitScalar(scalar_digest) => {
+                    scalar_values.push(self.translate_uint(scalar_digest)?);
+                },
+                Step::CombineMsm { digest, curve, n } => {
+                    let terms: Vec<(TranslatedEc, TranslatedUint)> = {
+                        let pi = values.len() - n;
+                        let si = scalar_values.len() - n;
+                        values.drain(pi..).zip(scalar_values.drain(si..)).collect()
+                    };
+                    let node = self.msm_from_terms(digest, curve, terms)?;
+                    debug_assert_eq!(node.hash(), P2Digest::from(digest));
+                    values.push(TranslatedEc { node, curve });
+                },
+            }
+        }
+
+        debug_assert_eq!(values.len(), 1);
+        Ok(values.pop().expect("value stack empty after traversal"))
     }
 
     fn translate_keccak_assertion(
@@ -283,34 +443,17 @@ impl<'a> DeferredSessionBuilder<'a> {
         Ok(claim)
     }
 
-    fn translate_ec_msm(
+    fn msm_from_terms(
         &mut self,
         digest: Digest,
         curve: CurveId,
-        pairs: Vec<(Digest, Digest)>,
+        terms: Vec<(TranslatedEc, TranslatedUint)>,
     ) -> Result<EcNode, DeferredSessionError> {
-        // A nonempty PairList carries the curve context every term below
-        // relies on; an empty one has none, so it stays invalid.
-        if pairs.is_empty() {
+        if terms.is_empty() {
             return Err(DeferredSessionError::UnsupportedMsm {
                 digest,
                 reason: "an empty PairList has no curve context",
             });
-        }
-
-        let mut terms = Vec::with_capacity(pairs.len());
-        for (point_digest, scalar_digest) in pairs {
-            let point = self.translate_ec(point_digest)?;
-            let scalar = self.translate_uint(scalar_digest)?;
-            debug_assert_eq!(point.curve, curve);
-            debug_assert_eq!(scalar.domain, curve.scalar_domain());
-            if self.session.is_pai(&point.node) {
-                return Err(DeferredSessionError::UnsupportedMsm {
-                    digest,
-                    reason: "an identity (point-at-infinity) base is not supported",
-                });
-            }
-            terms.push((point, scalar));
         }
 
         if let Some((point, _)) = terms.first() {
@@ -452,10 +595,7 @@ impl<'a> DeferredSessionBuilder<'a> {
             }
             level = next;
         }
-        level
-            .into_iter()
-            .next()
-            .expect("translate_ec_msm guarantees a nonempty PairList")
+        level.into_iter().next().expect("msm_from_terms guarantees a nonempty PairList")
     }
 
     /// Builds one term-preserving-fallback leaf: `msm_intro_zero` for a zero
