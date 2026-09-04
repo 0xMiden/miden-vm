@@ -5,7 +5,16 @@
 //! `primitive.rs` and `framing.rs`. The local schedule accepts batches of caller-supplied chaining
 //! values and message blocks and exposes the raw CV and XOF folds required by Eidos.
 
+#[cfg(any(
+    test,
+    not(target_arch = "x86_64"),
+    feature = "std",
+    not(target_feature = "avx512f")
+))]
 use core::array;
+
+#[cfg(target_arch = "x86_64")]
+mod row_x86;
 
 /// BLAKE3 IV.
 pub(super) const IV: [u32; 8] = [
@@ -19,9 +28,11 @@ pub(super) const IV: [u32; 8] = [
     0x5be0_cd19,
 ];
 
+#[cfg(any(test, not(target_arch = "x86_64")))]
 const ROUNDS: usize = 7;
 
 /// BLAKE3 message-word schedule for the compression rounds.
+#[cfg(any(test, not(target_arch = "x86_64")))]
 const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
@@ -203,6 +214,7 @@ mod native_backend {
 }
 
 #[inline(always)]
+#[cfg(any(test, not(target_arch = "x86_64")))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
     v[d] = (v[d] ^ v[a]).rotate_right(16);
@@ -270,6 +282,7 @@ fn g_packed<const LANES: usize>(
 }
 
 #[inline(always)]
+#[cfg(any(test, not(target_arch = "x86_64")))]
 fn permuted_state_with_parameter_words(
     cv: [u32; 8],
     block: [u32; 16],
@@ -296,14 +309,30 @@ fn permuted_state_with_parameter_words(
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-    let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-    array::from_fn(|i| v[i] ^ v[i + 8])
+    #[cfg(target_arch = "x86_64")]
+    {
+        row_x86::compress_raw(&cv, &block)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        array::from_fn(|i| v[i] ^ v[i + 8])
+    }
 }
 
 /// Returns the raw 16-word XOF fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
-    let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-    array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
+    #[cfg(target_arch = "x86_64")]
+    {
+        row_x86::compress_raw_xof(&cv, &block)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
+    }
 }
 
 #[cfg(test)]
