@@ -5,8 +5,8 @@
 //! partial block, and represents an empty input by one all-zero block compression.
 
 use super::{
-    DIGEST_WIDTH, PACKED_LANES, domain::EidosDomain, domains::GenericFeltSequenceDomain, encoding,
-    primitive::IV,
+    DIGEST_WIDTH, PACKED_LANES, PackedU32ChainingValue, domain::EidosDomain,
+    domains::GenericFeltSequenceDomain, encoding, primitive::IV,
 };
 use crate::Felt;
 
@@ -37,9 +37,14 @@ pub(super) const fn init_cv(tag: u32, params: [u32; 3]) -> [u32; 8] {
 }
 
 #[inline]
-pub(super) fn init_packed_cv(tag: u32, params: [u32; 3]) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
+pub(super) fn init_packed_u32_cv(tag: u32, params: [u32; 3]) -> PackedU32ChainingValue {
     let cv = init_cv(tag, params);
-    encoding::pack_cv_to_felts(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
+    core::array::from_fn(|word| [cv[word]; PACKED_LANES])
+}
+
+#[inline]
+pub(super) fn init_packed_cv(tag: u32, params: [u32; 3]) -> [[Felt; PACKED_LANES]; DIGEST_WIDTH] {
+    encoding::pack_cv_to_felts(init_packed_u32_cv(tag, params))
 }
 
 #[inline]
@@ -47,8 +52,7 @@ pub(super) fn init_packed_u64_cv(
     tag: u32,
     params: [u32; 3],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = init_cv(tag, params);
-    encoding::pack_cv_to_packed_u64s(core::array::from_fn(|word| [cv[word]; PACKED_LANES]))
+    encoding::pack_cv_to_packed_u64s(init_packed_u32_cv(tag, params))
 }
 
 /// Fold an exact logical input into fixed-size, zero-padded physical blocks.

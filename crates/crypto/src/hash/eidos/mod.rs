@@ -46,6 +46,11 @@ pub const PACKED_LANES: usize = primitive::PACKED_LANES;
 /// One packed base-field element, with one independent value per native SIMD lane.
 pub type PackedFelt = [crate::Felt; PACKED_LANES];
 
+/// Lane-oriented chaining value retained between packed compression calls.
+///
+/// Packing into field elements is reserved for API boundaries.
+type PackedU32ChainingValue = [[u32; PACKED_LANES]; 8];
+
 /// One packed Eidos chaining value, with one independent CV per native SIMD lane.
 ///
 /// Raw compression accepts arbitrary canonical field elements here; callers must not assume that
