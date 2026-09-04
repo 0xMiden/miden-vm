@@ -11,10 +11,10 @@ const MAX_Q16_FRACTION = 65535
 const BITS_PER_QUERY_FP = 193381
 const CHALLENGE_FIELD_WHOLE_BITS = 127
 const CHALLENGE_FIELD_OFFSET_FP = 2
-# Whole-bit floor of the field/hash security cap used by the native report.
-const SECURITY_CAP_BITS = 127
-# Whole-bit FRI folding bound before subtracting trace height or adding grinding.
-const FRI_FOLDING_BASE_BITS = 122
+# whole-bit floor of the field/hash security cap used by the native report
+pub const SECURITY_CAP_BITS = 127
+# whole-bit FRI folding bound before subtracting trace height or adding grinding
+pub const FRI_FOLDING_BASE_BITS = 122
 const LOG2_E_FP = 94548
 
 # Inputs outside these bounds are not supported. The bounds prevent overflow and underflow in the

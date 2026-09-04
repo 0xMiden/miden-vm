@@ -189,11 +189,16 @@ mod tests {
     fn masm_const(path: &str, name: &str) -> u64 {
         let source = std::fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        let prefix = alloc::format!("const {name} = ");
+        let private_prefix = alloc::format!("const {name} = ");
+        let public_prefix = alloc::format!("pub const {name} = ");
         source
             .lines()
             .find_map(|line| {
-                line.trim().strip_prefix(&prefix)?.split('#').next()?.trim().parse().ok()
+                let line = line.trim();
+                let value = line
+                    .strip_prefix(&private_prefix)
+                    .or_else(|| line.strip_prefix(&public_prefix))?;
+                value.split('#').next()?.trim().parse().ok()
             })
             .unwrap_or_else(|| panic!("constant {name} not found in {path}"))
     }
