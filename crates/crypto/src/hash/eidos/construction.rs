@@ -290,13 +290,14 @@ where
     I: Iterator<Item = PackedFelt>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    framing::fold_blocks::<BLOCK_LEN, _, _>(
+    let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
-        framing::init_packed_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
+        framing::init_packed_u32_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [Felt::ZERO; PACKED_LANES],
-        compression::compress_packed_felt_cv,
-    )
+        compression::compress_packed_felt_block,
+    );
+    encoding::pack_cv_to_felts(cv)
 }
 
 fn hash_packed_u64_iter_with_len<I>(iter: I, len: usize) -> [[u64; PACKED_LANES]; DIGEST_WIDTH]
@@ -304,13 +305,14 @@ where
     I: Iterator<Item = [u64; PACKED_LANES]>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    framing::fold_blocks::<BLOCK_LEN, _, _>(
+    let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
-        framing::init_packed_u64_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
+        framing::init_packed_u32_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [0; PACKED_LANES],
-        compression::compress_packed_u64_cv,
-    )
+        compression::compress_packed_u64_block,
+    );
+    compression::pack_packed_u64_cv(cv)
 }
 
 impl CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]> for Eidos {
@@ -326,6 +328,11 @@ impl CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]> for Eidos {
             let len = elements.len();
             hash_felt_iter_in_domain_with_len(elements.into_iter(), len, GENERIC_FELT_TAG)
         }
+    }
+
+    #[inline]
+    fn hash_slice(&self, input: &[Felt]) -> [Felt; DIGEST_WIDTH] {
+        hash_felt_iter_in_domain_with_len(input.iter().copied(), input.len(), GENERIC_FELT_TAG)
     }
 }
 
@@ -343,6 +350,11 @@ impl CryptographicHasher<u64, [u64; DIGEST_WIDTH]> for Eidos {
             hash_u64_iter_with_len(elements.into_iter(), len)
         }
     }
+
+    #[inline]
+    fn hash_slice(&self, input: &[u64]) -> [u64; DIGEST_WIDTH] {
+        hash_u64_iter_with_len(input.iter().copied(), input.len())
+    }
 }
 
 impl CryptographicHasher<PackedFelt, PackedDigest> for Eidos {
@@ -359,6 +371,11 @@ impl CryptographicHasher<PackedFelt, PackedDigest> for Eidos {
             hash_packed_felt_iter_with_len(elements.into_iter(), len)
         }
     }
+
+    #[inline]
+    fn hash_slice(&self, input: &[PackedFelt]) -> PackedDigest {
+        hash_packed_felt_iter_with_len(input.iter().copied(), input.len())
+    }
 }
 
 impl CryptographicHasher<[u64; PACKED_LANES], [[u64; PACKED_LANES]; DIGEST_WIDTH]> for Eidos {
@@ -374,6 +391,11 @@ impl CryptographicHasher<[u64; PACKED_LANES], [[u64; PACKED_LANES]; DIGEST_WIDTH
             let len = elements.len();
             hash_packed_u64_iter_with_len(elements.into_iter(), len)
         }
+    }
+
+    #[inline]
+    fn hash_slice(&self, input: &[[u64; PACKED_LANES]]) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
+        hash_packed_u64_iter_with_len(input.iter().copied(), input.len())
     }
 }
 
@@ -511,10 +533,12 @@ mod tests {
                 &Eidos,
                 felts.iter().copied(),
             );
+            assert_eq!(felt_digest, Eidos.hash_slice(&felts));
             let u64_digest = <Eidos as CryptographicHasher<u64, [u64; DIGEST_WIDTH]>>::hash_iter(
                 &Eidos,
                 u64s.iter().copied(),
             );
+            assert_eq!(u64_digest, Eidos.hash_slice(&u64s));
             assert_eq!(felt_digest, u64_digest.map(Felt::new_unchecked));
 
             let packed_felts: Vec<PackedFelt> =
@@ -524,12 +548,14 @@ mod tests {
             let packed_felt_digest =
                 <Eidos as CryptographicHasher<PackedFelt, PackedDigest>>::hash_iter(
                     &Eidos,
-                    packed_felts,
+                    packed_felts.iter().copied(),
                 );
             let packed_u64_digest = <Eidos as CryptographicHasher<
                 [u64; PACKED_LANES],
                 [[u64; PACKED_LANES]; DIGEST_WIDTH],
-            >>::hash_iter(&Eidos, packed_u64s);
+            >>::hash_iter(&Eidos, packed_u64s.iter().copied());
+            assert_eq!(packed_felt_digest, Eidos.hash_slice(&packed_felts));
+            assert_eq!(packed_u64_digest, Eidos.hash_slice(&packed_u64s));
 
             for lane in 0..PACKED_LANES {
                 assert_eq!(

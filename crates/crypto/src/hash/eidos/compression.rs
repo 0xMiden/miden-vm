@@ -6,8 +6,8 @@
 //! subspace.
 
 use super::{
-    BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, PackedBlock, PackedChainingValue, encoding,
-    primitive::CompressionCore,
+    BLOCK_LEN, DIGEST_WIDTH, PACKED_LANES, PackedBlock, PackedChainingValue,
+    PackedU32ChainingValue, encoding, primitive::CompressionCore,
 };
 use crate::{Felt, Word};
 
@@ -18,9 +18,9 @@ pub(super) fn compress_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
 
 #[inline]
 pub(super) fn compress_cv_packed(
-    cv: [[u32; PACKED_LANES]; 8],
+    cv: PackedU32ChainingValue,
     block: [[u32; PACKED_LANES]; 16],
-) -> [[u32; PACKED_LANES]; 8] {
+) -> PackedU32ChainingValue {
     CompressionCore::compress_packed_native(cv, block)
 }
 
@@ -50,9 +50,15 @@ pub(super) fn compress_packed_felt_cv(
     cv: PackedChainingValue,
     block: PackedBlock,
 ) -> PackedChainingValue {
-    let cv = encoding::unpack_packed_cv(cv);
-    let block = encoding::encode_packed_felt_block(block);
-    encoding::pack_cv_to_felts(CompressionCore::compress_packed_native(cv, block))
+    encoding::pack_cv_to_felts(compress_packed_felt_block(encoding::unpack_packed_cv(cv), block))
+}
+
+#[inline]
+pub(super) fn compress_packed_felt_block(
+    cv: PackedU32ChainingValue,
+    block: PackedBlock,
+) -> PackedU32ChainingValue {
+    compress_cv_packed(cv, encoding::encode_packed_felt_block(block))
 }
 
 #[inline]
@@ -65,24 +71,35 @@ pub(super) fn compress_packed_u64_cv(
     cv: [[u64; PACKED_LANES]; DIGEST_WIDTH],
     block: [[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = encoding::unpack_packed_u64_cv(cv);
+    pack_packed_u64_cv(compress_packed_u64_block(encoding::unpack_packed_u64_cv(cv), block))
+}
 
+#[inline]
+pub(super) fn compress_packed_u64_block(
+    cv: PackedU32ChainingValue,
+    block: [[u64; PACKED_LANES]; BLOCK_LEN],
+) -> PackedU32ChainingValue {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
     let block = avx512_u64_adapter::unpack_block(block);
 
     #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
     let block = encoding::encode_packed_u64_block(block);
 
-    let output = CompressionCore::compress_packed_native(cv, block);
+    compress_cv_packed(cv, block)
+}
 
+#[inline]
+pub(super) fn pack_packed_u64_cv(
+    cv: PackedU32ChainingValue,
+) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
     {
-        avx512_u64_adapter::pack_cv(output)
+        avx512_u64_adapter::pack_cv(cv)
     }
 
     #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
     {
-        encoding::pack_cv_to_packed_u64s(output)
+        encoding::pack_cv_to_packed_u64s(cv)
     }
 }
 
