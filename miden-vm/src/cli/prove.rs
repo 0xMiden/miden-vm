@@ -1,4 +1,7 @@
-use std::{path::PathBuf, time::Instant};
+use std::{
+    path::{Component, Path, PathBuf},
+    time::Instant,
+};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
@@ -108,7 +111,7 @@ impl ProveCmd {
         // common case-insensitive filesystems.
         let proof_path = self.resolved_proof_path();
         let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
-        if output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()) {
+        if paths_are_equal(&output_path, &proof_path) {
             return Err(Report::msg(format!(
                 "The outputs file `{}` would overwrite the proof file `{}`. Choose a different \
                  --proof or --output path.",
@@ -214,15 +217,46 @@ impl ProveCmd {
 
     /// Resolves the proof path the same way as ProofFile::write.
     fn resolved_proof_path(&self) -> PathBuf {
-        self.proof_file
-            .clone()
-            .unwrap_or_else(|| self.program_file.with_extension("proof"))
+        ProofFile::resolve_path(&self.proof_file, &self.program_file)
     }
 
     /// Derives verify's default outputs path from the resolved proof path.
     fn default_output_path(&self) -> PathBuf {
         self.resolved_proof_path().with_extension("outputs")
     }
+}
+
+fn paths_are_equal(left: &Path, right: &Path) -> bool {
+    let left = normalize_path(left);
+    let right = normalize_path(right);
+    left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let is_absolute = path.is_absolute();
+    let mut components = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {},
+            Component::ParentDir => match components.last() {
+                Some(Component::Normal(_)) => {
+                    components.pop();
+                },
+                Some(Component::ParentDir) | None if !is_absolute => {
+                    components.push(Component::ParentDir);
+                },
+                _ => {},
+            },
+            component => components.push(component),
+        }
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in components {
+        normalized.push(component.as_os_str());
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -289,5 +323,10 @@ mod tests {
             output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()),
             "but they name the same file on a case-insensitive filesystem"
         );
+    }
+
+    #[test]
+    fn paths_are_equal_after_normalizing_dot_and_dot_dot_components() {
+        assert!(paths_are_equal(Path::new("sub/../same.proof"), Path::new("same.proof")));
     }
 }

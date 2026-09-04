@@ -190,6 +190,30 @@ fn prove_rejects_an_explicit_output_that_repeats_the_proof_path() {
 }
 
 #[test]
+fn prove_rejects_an_explicit_output_that_collides_after_path_normalization() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "begin add end").unwrap();
+    fs::write(working_dir.path().join("program.inputs"), r#"{ "operand_stack": [] }"#).unwrap();
+    let proof_path = working_dir.path().join("same.proof");
+    let aliased_proof_path = working_dir.path().join("./sub/../same.proof");
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove")
+        .arg(&program_path)
+        .arg("--proof")
+        .arg(&aliased_proof_path)
+        .arg("--output")
+        .arg(&proof_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("overwrite"))
+        .stdout(predicate::str::contains("Proving program with hash").not());
+
+    assert!(!proof_path.exists(), "nothing should be written when the paths collide");
+}
+
+#[test]
 fn prove_rejects_invalid_program_extension_before_inferred_inputs_file() {
     let working_dir = TempDir::new().unwrap();
     let program_path = working_dir.path().join("miden-vm-cli-invalid-prove-extension-test.txt");
