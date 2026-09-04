@@ -1,6 +1,10 @@
 use super::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Felt, Serializable, Signature,
+    Signature,
     math::{FalconFelt, Polynomial},
+};
+use crate::{
+    Felt,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 mod public_key;
@@ -18,11 +22,13 @@ mod tests {
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
 
+    use super::{super::TestVariant, SecretKey};
     use crate::{
         ONE, Word,
-        dsa::falcon512_poseidon2::SecretKey,
         utils::{Deserializable, Serializable},
     };
+
+    type TestSecretKey = SecretKey<TestVariant>;
 
     #[test]
     fn test_falcon_verification() {
@@ -30,13 +36,13 @@ mod tests {
         let mut rng = ChaCha20Rng::from_seed(seed);
 
         // generate random keys
-        let sk = SecretKey::with_rng(&mut rng);
+        let sk = TestSecretKey::with_rng(&mut rng);
         let pk = sk.public_key();
 
         // test secret key serialization/deserialization
         let mut buffer = vec![];
         sk.write_into(&mut buffer);
-        let sk_deserialized = SecretKey::read_from_bytes(&buffer).unwrap();
+        let sk_deserialized = TestSecretKey::read_from_bytes(&buffer).unwrap();
         assert_eq!(sk.short_lattice_basis(), sk_deserialized.short_lattice_basis());
 
         // sign a random message
@@ -51,7 +57,7 @@ mod tests {
         assert!(!pk.verify(message2, &signature));
 
         // a signature should not verify against a wrong public key
-        let sk2 = SecretKey::with_rng(&mut rng);
+        let sk2 = TestSecretKey::with_rng(&mut rng);
         assert!(!sk2.public_key().verify(message, &signature))
     }
 }

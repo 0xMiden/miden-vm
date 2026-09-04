@@ -13,7 +13,7 @@ use num_complex::Complex64;
 use rand::Rng;
 
 use super::{
-    MODULUS,
+    MODULUS, N,
     keys::{WIDTH_BIG_POLY_COEFFICIENT, WIDTH_SMALL_POLY_COEFFICIENT},
 };
 

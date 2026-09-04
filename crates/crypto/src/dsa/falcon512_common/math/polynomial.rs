@@ -9,10 +9,9 @@ use core::{
 
 use num::{One, Zero};
 
-use super::{Inverse, field::FalconFelt};
+use super::{Inverse, MODULUS, N, field::FalconFelt};
 use crate::{
     Felt,
-    dsa::falcon512_poseidon2::{MODULUS, N},
     utils::zeroize::{Zeroize, ZeroizeOnDrop},
 };
 
@@ -476,8 +475,8 @@ where
     /// `(a / b) * b` can leave a nonzero residue).
     ///
     /// # Panics
-    /// Panics if `denominator` is zero, or if a step's leading term does not cancel — with a
-    /// non-field `F` the loop would otherwise repeat forever on an unchanged remainder.
+    /// Panics if `denominator` is zero or if a step's leading term does not cancel. With a
+    /// non-field `F`, the loop would otherwise repeat forever on an unchanged remainder.
     fn div(self, denominator: Self) -> Self::Output {
         assert!(!denominator.is_zero(), "cannot divide a polynomial by the zero polynomial");
         if self.is_zero() {

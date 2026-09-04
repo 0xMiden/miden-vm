@@ -8,7 +8,7 @@ use super::{Inverse, MODULUS, fft::CyclotomicFourier};
 /// An element of the Falcon base field Z_q for q = [`MODULUS`] = 12289 = 3 * 2^12 + 1, stored as
 /// its canonical representative in [0, q).
 ///
-/// The derived equality compares stored representatives, so every constructor must canonicalize —
+/// The derived equality compares stored representatives, so every constructor must canonicalize.
 /// [`Self::new`] reduces arbitrary signed inputs, and the arithmetic impls preserve canonicity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FalconFelt(u32);
@@ -208,8 +208,7 @@ mod tests {
 
     use num::{One, Zero};
 
-    use super::{FalconFelt, Inverse, MODULUS};
-    use crate::dsa::falcon512_poseidon2::math::fft::CyclotomicFourier;
+    use super::{super::CyclotomicFourier, FalconFelt, Inverse, MODULUS};
 
     const Q: i64 = MODULUS as i64;
 
@@ -236,8 +235,7 @@ mod tests {
 
     #[test]
     fn new_identifies_negative_multiples_of_q_with_zero() {
-        // Regression: the previous branchless reduction mapped -q and -2q to the non-canonical
-        // internal value q, so they compared unequal to zero.
+        // Negative multiples of q must use the canonical zero representative.
         assert_eq!(FalconFelt::new(-(Q as i16)), FalconFelt::zero());
         assert_eq!(FalconFelt::new(-2 * Q as i16), FalconFelt::zero());
     }
