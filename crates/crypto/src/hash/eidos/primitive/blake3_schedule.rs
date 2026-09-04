@@ -213,6 +213,45 @@ mod native_backend {
     }
 }
 
+/// Runtime dispatch for `row_x86`'s single-block path: `compress_pre` keeps up to 13 live
+/// 128-bit vectors, which spills under the legacy 16-register SSE/AVX file on a default build
+/// (measured ~30-37% slower than with a wider register file available). AVX-512VL's EVEX
+/// encoding reaches XMM16-31 even for plain 128-bit operations, eliminating those spills with
+/// the exact same instructions — so, like `native_backend` above, this is detected once at
+/// runtime and cached under the `std` feature. Without `std` (or off x86_64), selection falls
+/// back to `target_feature` cfg.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+mod row_dispatch {
+    use once_cell::sync::Lazy;
+
+    use super::row_x86;
+
+    static HAS_AVX512VL: Lazy<bool> = Lazy::new(|| {
+        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl")
+    });
+
+    #[inline]
+    pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
+        if *HAS_AVX512VL {
+            // SAFETY: `HAS_AVX512VL` only true after `is_x86_feature_detected!` confirmed both
+            // "avx512f" and "avx512vl" for the running CPU.
+            unsafe { row_x86::compress_raw_avx512vl(cv, block) }
+        } else {
+            row_x86::compress_raw(cv, block)
+        }
+    }
+
+    #[inline]
+    pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
+        if *HAS_AVX512VL {
+            // SAFETY: see `compress_raw` above.
+            unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
+        } else {
+            row_x86::compress_raw_xof(cv, block)
+        }
+    }
+}
+
 #[inline(always)]
 #[cfg(any(test, not(target_arch = "x86_64")))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
@@ -309,7 +348,20 @@ fn permuted_state_with_parameter_words(
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        row_dispatch::compress_raw(&cv, &block)
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
+    {
+        // SAFETY: this module only compiles when `target_feature = "avx512vl"` (and its
+        // prerequisite `"avx512f"`) are enabled crate-wide (e.g. via `-C target-cpu=native` or
+        // explicit `+avx512f,+avx512vl`).
+        unsafe { row_x86::compress_raw_avx512vl(&cv, &block) }
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
     {
         row_x86::compress_raw(&cv, &block)
     }
@@ -323,7 +375,18 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
 
 /// Returns the raw 16-word XOF fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        row_dispatch::compress_raw_xof(&cv, &block)
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
+    {
+        // SAFETY: see `compress_raw` above.
+        unsafe { row_x86::compress_raw_xof_avx512vl(&cv, &block) }
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
     {
         row_x86::compress_raw_xof(&cv, &block)
     }
