@@ -92,8 +92,8 @@ impl CompressionCore {
     /// Apply compression to the build's selected native packed lane width.
     #[inline]
     pub(super) fn compress_packed_native(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         let mut cv_new = blake3_schedule::compress_packed_native(cv, block);
         apply_packed_output_mask(&mut cv_new);
@@ -415,7 +415,7 @@ mod tests {
         let packed_block: [[u32; LANES]; 16] =
             core::array::from_fn(|word| core::array::from_fn(|lane| blocks[lane][word]));
         let portable = CompressionCore::compress_packed(packed_cv, packed_block);
-        let native = CompressionCore::compress_packed_native(packed_cv, packed_block);
+        let native = CompressionCore::compress_packed_native(&packed_cv, &packed_block);
 
         for lane in 0..LANES {
             let scalar = CompressionCore::compress(cvs[lane], blocks[lane]);
