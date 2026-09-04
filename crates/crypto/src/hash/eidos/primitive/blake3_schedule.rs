@@ -5,7 +5,16 @@
 //! `primitive.rs` and `framing.rs`. The local schedule accepts batches of caller-supplied chaining
 //! values and message blocks and exposes the raw CV and XOF folds required by Eidos.
 
+#[cfg(any(
+    test,
+    not(target_arch = "x86_64"),
+    feature = "std",
+    not(target_feature = "avx512f")
+))]
 use core::array;
+
+#[cfg(target_arch = "x86_64")]
+mod row_x86;
 
 /// BLAKE3 IV.
 pub(super) const IV: [u32; 8] = [
@@ -19,9 +28,11 @@ pub(super) const IV: [u32; 8] = [
     0x5be0_cd19,
 ];
 
+#[cfg(any(test, not(target_arch = "x86_64")))]
 const ROUNDS: usize = 7;
 
 /// BLAKE3 message-word schedule for the compression rounds.
+#[cfg(any(test, not(target_arch = "x86_64")))]
 const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
@@ -32,46 +43,217 @@ const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13],
 ];
 
-/// Lane count for the selected raw compression backend.
+/// Fixed logical width of a packed compression batch.
 ///
-/// Backend selection is compile-time only. A native x86 build can use
-/// `-C target-cpu=native`, or explicit target features such as `+avx2` or `+avx512f`.
-pub(super) const PACKED_LANES: usize = native_backend::LANES;
+/// This is independent of any particular SIMD backend. Every backend below fills a 16-lane
+/// batch using as many physical-width calls as its vector registers need: one call of 16 for
+/// AVX-512, two calls of 8 for AVX2, four calls of 4 for SSE2 or NEON. A stable logical width
+/// keeps `PackedFelt` and friends the same public type regardless of which physical backend
+/// ends up selected.
+pub(super) const PACKED_LANES: usize = 16;
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+/// Splits a `PACKED_LANES`-wide batch into `PACKED_LANES / W` sub-batches of width `W`, applies
+/// `f` to each, and reassembles the results.
+#[cfg(any(
+    all(target_arch = "x86_64", feature = "std"),
+    all(target_arch = "x86_64", not(target_feature = "avx512f")),
+    all(target_arch = "aarch64", target_feature = "neon"),
+))]
+#[inline]
+fn compress_via_sub_batches<const W: usize>(
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
+    f: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 8],
+) -> [[u32; PACKED_LANES]; 8] {
+    let mut out = [[0u32; PACKED_LANES]; 8];
+    for chunk in 0..(PACKED_LANES / W) {
+        let base = chunk * W;
+        let sub_cv: [[u32; W]; 8] =
+            array::from_fn(|word| array::from_fn(|lane| cv[word][base + lane]));
+        let sub_block: [[u32; W]; 16] =
+            array::from_fn(|word| array::from_fn(|lane| block[word][base + lane]));
+        let sub_out = f(sub_cv, sub_block);
+        for (word, sub_word) in out.iter_mut().zip(sub_out) {
+            word[base..base + W].copy_from_slice(&sub_word);
+        }
+    }
+    out
+}
+
+/// Backend selection: on x86_64 with the `std` feature, the physical SIMD tier (AVX-512, AVX2,
+/// or SSE2) is detected once at runtime and cached, so an off-the-shelf build picks up whatever
+/// the host CPU actually supports. Without `std` (or off x86_64), selection falls back to
+/// `target_feature` cfg, exactly as before: a native build needs `-C target-cpu=native` or an
+/// explicit `+avx2`/`+avx512f` to get past the SSE2/NEON baseline.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
 mod native_backend {
-    pub(super) const LANES: usize = 16;
+    use once_cell::sync::Lazy;
 
-    #[inline(always)]
-    pub(super) fn compress(cv: [[u32; LANES]; 8], block: [[u32; LANES]; 16]) -> [[u32; LANES]; 8] {
-        super::x86_64_avx512::compress_packed_16(cv, block)
+    use super::{PACKED_LANES, compress_via_sub_batches, x86_64_avx2, x86_64_avx512, x86_64_sse2};
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Tier {
+        Avx512,
+        Avx2,
+        Sse2,
+    }
+
+    fn detect() -> Tier {
+        if std::is_x86_feature_detected!("avx512f") {
+            Tier::Avx512
+        } else if std::is_x86_feature_detected!("avx2") {
+            Tier::Avx2
+        } else {
+            Tier::Sse2
+        }
+    }
+
+    static TIER: Lazy<Tier> = Lazy::new(detect);
+
+    #[inline]
+    pub(super) fn compress(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+    ) -> [[u32; PACKED_LANES]; 8] {
+        match *TIER {
+            Tier::Avx512 => {
+                // SAFETY: `TIER` only reports `Avx512` after `is_x86_feature_detected!("avx512f")`
+                // returned true for the running CPU.
+                unsafe { x86_64_avx512::compress_packed_16(*cv, *block) }
+            },
+            Tier::Avx2 => compress_via_sub_batches::<8>(cv, block, |cv, block| {
+                // SAFETY: `TIER` only reports `Avx2` after `is_x86_feature_detected!("avx2")`
+                // returned true for the running CPU.
+                unsafe { x86_64_avx2::compress_packed_8(cv, block) }
+            }),
+            Tier::Sse2 => compress_via_sub_batches::<4>(cv, block, |cv, block| {
+                // SAFETY: SSE2 is part of the x86_64 architectural baseline.
+                unsafe { x86_64_sse2::compress_packed_4(cv, block) }
+            }),
+        }
     }
 }
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
+#[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512f"))]
 mod native_backend {
-    pub(super) const LANES: usize = 8;
+    use super::PACKED_LANES;
 
     #[inline(always)]
-    pub(super) fn compress(cv: [[u32; LANES]; 8], block: [[u32; LANES]; 16]) -> [[u32; LANES]; 8] {
-        super::x86_64_avx2::compress_packed_8(cv, block)
+    pub(super) fn compress(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+    ) -> [[u32; PACKED_LANES]; 8] {
+        // SAFETY: this module only compiles when `target_feature = "avx512f"` is enabled
+        // crate-wide (e.g. via `-C target-cpu=native` or `-C target-feature=+avx512f`).
+        unsafe { super::x86_64_avx512::compress_packed_16(*cv, *block) }
     }
 }
 
-#[cfg(not(any(
-    all(target_arch = "x86_64", target_feature = "avx2"),
-    all(target_arch = "x86_64", target_feature = "avx512f"),
-)))]
+#[cfg(all(
+    target_arch = "x86_64",
+    not(feature = "std"),
+    target_feature = "avx2",
+    not(target_feature = "avx512f")
+))]
 mod native_backend {
-    pub(super) const LANES: usize = 4;
+    use super::{PACKED_LANES, compress_via_sub_batches};
 
     #[inline(always)]
-    pub(super) fn compress(cv: [[u32; LANES]; 8], block: [[u32; LANES]; 16]) -> [[u32; LANES]; 8] {
-        super::compress_packed_4(cv, block)
+    pub(super) fn compress(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+    ) -> [[u32; PACKED_LANES]; 8] {
+        compress_via_sub_batches::<8>(cv, block, |cv, block| {
+            // SAFETY: this module only compiles when `target_feature = "avx2"` is enabled
+            // crate-wide (e.g. via `-C target-cpu=native` or `-C target-feature=+avx2`).
+            unsafe { super::x86_64_avx2::compress_packed_8(cv, block) }
+        })
+    }
+}
+
+#[cfg(all(
+    target_arch = "x86_64",
+    not(feature = "std"),
+    not(target_feature = "avx2"),
+    not(target_feature = "avx512f")
+))]
+mod native_backend {
+    use super::{PACKED_LANES, compress_via_sub_batches};
+
+    #[inline(always)]
+    pub(super) fn compress(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+    ) -> [[u32; PACKED_LANES]; 8] {
+        compress_via_sub_batches::<4>(cv, block, |cv, block| {
+            // SAFETY: SSE2 is part of the x86_64 architectural baseline.
+            unsafe { super::x86_64_sse2::compress_packed_4(cv, block) }
+        })
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+mod native_backend {
+    use super::PACKED_LANES;
+
+    #[inline(always)]
+    pub(super) fn compress(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+    ) -> [[u32; PACKED_LANES]; 8] {
+        #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+        {
+            super::compress_via_sub_batches::<4>(cv, block, super::neon::compress_packed_4)
+        }
+
+        #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
+        {
+            super::compress_packed(*cv, *block)
+        }
+    }
+}
+
+/// Runtime dispatch for `row_x86`'s single-block path: `compress_pre` keeps up to 13 live
+/// 128-bit vectors, which spills under the legacy 16-register SSE/AVX file on a default build
+/// (measured ~30-37% slower than with a wider register file available). AVX-512VL's EVEX
+/// encoding reaches XMM16-31 even for plain 128-bit operations, eliminating those spills with
+/// the exact same instructions — so, like `native_backend` above, this is detected once at
+/// runtime and cached under the `std` feature. Without `std` (or off x86_64), selection falls
+/// back to `target_feature` cfg.
+#[cfg(all(target_arch = "x86_64", feature = "std"))]
+mod row_dispatch {
+    use once_cell::sync::Lazy;
+
+    use super::row_x86;
+
+    static HAS_AVX512VL: Lazy<bool> = Lazy::new(|| {
+        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl")
+    });
+
+    #[inline]
+    pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
+        if *HAS_AVX512VL {
+            // SAFETY: `HAS_AVX512VL` only true after `is_x86_feature_detected!` confirmed both
+            // "avx512f" and "avx512vl" for the running CPU.
+            unsafe { row_x86::compress_raw_avx512vl(cv, block) }
+        } else {
+            row_x86::compress_raw(cv, block)
+        }
+    }
+
+    #[inline]
+    pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
+        if *HAS_AVX512VL {
+            // SAFETY: see `compress_raw` above.
+            unsafe { row_x86::compress_raw_xof_avx512vl(cv, block) }
+        } else {
+            row_x86::compress_raw_xof(cv, block)
+        }
     }
 }
 
 #[inline(always)]
+#[cfg(any(test, not(target_arch = "x86_64")))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
     v[d] = (v[d] ^ v[a]).rotate_right(16);
@@ -139,6 +321,7 @@ fn g_packed<const LANES: usize>(
 }
 
 #[inline(always)]
+#[cfg(any(test, not(target_arch = "x86_64")))]
 fn permuted_state_with_parameter_words(
     cv: [u32; 8],
     block: [u32; 16],
@@ -165,14 +348,54 @@ fn permuted_state_with_parameter_words(
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
-    let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-    array::from_fn(|i| v[i] ^ v[i + 8])
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        row_dispatch::compress_raw(&cv, &block)
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
+    {
+        // SAFETY: this module only compiles when `target_feature = "avx512vl"` (and its
+        // prerequisite `"avx512f"`) are enabled crate-wide (e.g. via `-C target-cpu=native` or
+        // explicit `+avx512f,+avx512vl`).
+        unsafe { row_x86::compress_raw_avx512vl(&cv, &block) }
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
+    {
+        row_x86::compress_raw(&cv, &block)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        array::from_fn(|i| v[i] ^ v[i + 8])
+    }
 }
 
 /// Returns the raw 16-word XOF fold with Eidos compression's fixed parameter words.
 pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
-    let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
-    array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        row_dispatch::compress_raw_xof(&cv, &block)
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), target_feature = "avx512vl"))]
+    {
+        // SAFETY: see `compress_raw` above.
+        unsafe { row_x86::compress_raw_xof_avx512vl(&cv, &block) }
+    }
+
+    #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
+    {
+        row_x86::compress_raw_xof(&cv, &block)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+        array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
+    }
 }
 
 #[cfg(test)]
@@ -228,34 +451,11 @@ pub(super) fn compress_packed<const LANES: usize>(
     array::from_fn(|i| xor_packed(v[i], v[i + 8]))
 }
 
-/// Applies the raw BLAKE3 schedule to four independent lanes.
-#[cfg(not(all(target_arch = "x86_64", any(target_feature = "avx2", target_feature = "avx512f"))))]
-#[inline]
-pub(super) fn compress_packed_4(cv: [[u32; 4]; 8], block: [[u32; 4]; 16]) -> [[u32; 4]; 8] {
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-    {
-        neon::compress_packed_4(cv, block)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        x86_64_sse2::compress_packed_4(cv, block)
-    }
-
-    #[cfg(any(
-        all(target_arch = "aarch64", not(target_feature = "neon")),
-        not(any(target_arch = "aarch64", target_arch = "x86_64")),
-    ))]
-    {
-        compress_packed(cv, block)
-    }
-}
-
 /// Applies the raw BLAKE3 schedule to the build's selected native lane width.
 #[inline]
 pub(super) fn compress_packed_native(
-    cv: [[u32; PACKED_LANES]; 8],
-    block: [[u32; PACKED_LANES]; 16],
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
 ) -> [[u32; PACKED_LANES]; 8] {
     native_backend::compress(cv, block)
 }
@@ -263,9 +463,10 @@ pub(super) fn compress_packed_native(
 #[cfg(target_arch = "x86_64")]
 #[rustfmt::skip]
 macro_rules! define_x86_packed_compress {
-    ($name:ident, $lanes:literal) => {
-        #[inline(always)]
-        pub(super) fn $name(
+    ($(#[$attr:meta])* $name:ident, $lanes:literal) => {
+        $(#[$attr])*
+        #[inline]
+        pub(super) unsafe fn $name(
             cv: [[u32; $lanes]; 8],
             block: [[u32; $lanes]; 16],
         ) -> [[u32; $lanes]; 8] {
@@ -414,7 +615,7 @@ macro_rules! define_x86_packed_compress {
 
 #[cfg(all(
     target_arch = "x86_64",
-    not(any(target_feature = "avx2", target_feature = "avx512f"))
+    any(feature = "std", not(any(target_feature = "avx2", target_feature = "avx512f")))
 ))]
 mod x86_64_sse2 {
     use core::arch::x86_64::*;
@@ -471,7 +672,10 @@ mod x86_64_sse2 {
     define_x86_packed_compress!(compress_packed_4, 4);
 }
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
+#[cfg(all(
+    target_arch = "x86_64",
+    any(feature = "std", all(target_feature = "avx2", not(target_feature = "avx512f")))
+))]
 mod x86_64_avx2 {
     use core::arch::x86_64::*;
 
@@ -504,9 +708,17 @@ mod x86_64_avx2 {
         unsafe { _mm256_xor_si256(a, b) }
     }
 
+    /// Rotate each 32-bit lane right by 16 bits via a single byte shuffle: this is cheaper than
+    /// the shift-or sequence because the rotation amount is byte-aligned.
     #[inline(always)]
     fn rotr16(x: __m256i) -> __m256i {
-        unsafe { _mm256_or_si256(_mm256_srli_epi32::<16>(x), _mm256_slli_epi32::<16>(x)) }
+        unsafe {
+            let mask = _mm256_setr_epi8(
+                2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13, 2, 3, 0, 1, 6, 7, 4, 5, 10,
+                11, 8, 9, 14, 15, 12, 13,
+            );
+            _mm256_shuffle_epi8(x, mask)
+        }
     }
 
     #[inline(always)]
@@ -514,9 +726,16 @@ mod x86_64_avx2 {
         unsafe { _mm256_or_si256(_mm256_srli_epi32::<12>(x), _mm256_slli_epi32::<20>(x)) }
     }
 
+    /// Rotate each 32-bit lane right by 8 bits via a single byte shuffle (see [`rotr16`]).
     #[inline(always)]
     fn rotr8(x: __m256i) -> __m256i {
-        unsafe { _mm256_or_si256(_mm256_srli_epi32::<8>(x), _mm256_slli_epi32::<24>(x)) }
+        unsafe {
+            let mask = _mm256_setr_epi8(
+                1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12, 1, 2, 3, 0, 5, 6, 7, 4, 9,
+                10, 11, 8, 13, 14, 15, 12,
+            );
+            _mm256_shuffle_epi8(x, mask)
+        }
     }
 
     #[inline(always)]
@@ -524,10 +743,14 @@ mod x86_64_avx2 {
         unsafe { _mm256_or_si256(_mm256_srli_epi32::<7>(x), _mm256_slli_epi32::<25>(x)) }
     }
 
-    define_x86_packed_compress!(compress_packed_8, 8);
+    define_x86_packed_compress!(
+        #[target_feature(enable = "avx2")]
+        compress_packed_8,
+        8
+    );
 }
 
-#[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+#[cfg(all(target_arch = "x86_64", any(feature = "std", target_feature = "avx512f")))]
 mod x86_64_avx512 {
     use core::arch::x86_64::*;
 
@@ -580,7 +803,11 @@ mod x86_64_avx512 {
         unsafe { _mm512_ror_epi32::<7>(x) }
     }
 
-    define_x86_packed_compress!(compress_packed_16, 16);
+    define_x86_packed_compress!(
+        #[target_feature(enable = "avx512f")]
+        compress_packed_16,
+        16
+    );
 }
 
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]

@@ -92,8 +92,8 @@ impl CompressionCore {
     /// Apply compression to the build's selected native packed lane width.
     #[inline]
     pub(super) fn compress_packed_native(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         let mut cv_new = blake3_schedule::compress_packed_native(cv, block);
         apply_packed_output_mask(&mut cv_new);
@@ -219,6 +219,32 @@ mod tests {
         let expected = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
 
         assert_eq!(CompressionCore::compress_raw(cv, block), expected);
+    }
+
+    /// `compress_raw`/`compress_raw_xof` dispatch to an architecture- and (on x86_64, under the
+    /// `std` feature) runtime-CPU-selected backend; this checks every reachable backend against
+    /// the portable scalar reference over many pseudo-random inputs, not just the single fixed
+    /// vector above.
+    #[test]
+    fn compress_raw_and_xof_match_scalar_reference_over_random_inputs() {
+        let mut state = 0x243f_6a88_85a3_08d3u64;
+        let mut next_u32 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u32
+        };
+
+        for _ in 0..10_000 {
+            let cv: [u32; 8] = core::array::from_fn(|_| next_u32());
+            let block: [u32; 16] = core::array::from_fn(|_| next_u32());
+
+            let expected_raw = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+            assert_eq!(CompressionCore::compress_raw(cv, block), expected_raw);
+
+            let expected_xof = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+            assert_eq!(CompressionCore::compress_raw_xof(cv, block), expected_xof);
+        }
     }
 
     #[test]
@@ -389,7 +415,7 @@ mod tests {
         let packed_block: [[u32; LANES]; 16] =
             core::array::from_fn(|word| core::array::from_fn(|lane| blocks[lane][word]));
         let portable = CompressionCore::compress_packed(packed_cv, packed_block);
-        let native = CompressionCore::compress_packed_native(packed_cv, packed_block);
+        let native = CompressionCore::compress_packed_native(&packed_cv, &packed_block);
 
         for lane in 0..LANES {
             let scalar = CompressionCore::compress(cvs[lane], blocks[lane]);

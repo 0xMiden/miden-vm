@@ -18,8 +18,8 @@ pub(super) fn compress_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
 
 #[inline]
 pub(super) fn compress_cv_packed(
-    cv: [[u32; PACKED_LANES]; 8],
-    block: [[u32; PACKED_LANES]; 16],
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
 ) -> [[u32; PACKED_LANES]; 8] {
     CompressionCore::compress_packed_native(cv, block)
 }
@@ -47,12 +47,12 @@ pub(super) fn compress_felt_block_for_test(
 
 #[inline]
 pub(super) fn compress_packed_felt_cv(
-    cv: PackedChainingValue,
-    block: PackedBlock,
+    cv: &PackedChainingValue,
+    block: &PackedBlock,
 ) -> PackedChainingValue {
-    let cv = encoding::unpack_packed_cv(cv);
-    let block = encoding::encode_packed_felt_block(block);
-    encoding::pack_cv_to_felts(CompressionCore::compress_packed_native(cv, block))
+    let cv = encoding::unpack_packed_cv(*cv);
+    let block = encoding::encode_packed_felt_block(*block);
+    encoding::pack_cv_to_felts(CompressionCore::compress_packed_native(&cv, &block))
 }
 
 #[inline]
@@ -62,18 +62,18 @@ pub(super) fn compress_u64_cv(cv: [u32; 8], block: [u64; BLOCK_LEN]) -> [u32; 8]
 
 #[inline]
 pub(super) fn compress_packed_u64_cv(
-    cv: [[u64; PACKED_LANES]; DIGEST_WIDTH],
-    block: [[u64; PACKED_LANES]; BLOCK_LEN],
+    cv: &[[u64; PACKED_LANES]; DIGEST_WIDTH],
+    block: &[[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
-    let cv = encoding::unpack_packed_u64_cv(cv);
+    let cv = encoding::unpack_packed_u64_cv(*cv);
 
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
-    let block = avx512_u64_adapter::unpack_block(block);
+    let block = avx512_u64_adapter::unpack_block(*block);
 
     #[cfg(not(all(target_arch = "x86_64", target_feature = "avx512f")))]
-    let block = encoding::encode_packed_u64_block(block);
+    let block = encoding::encode_packed_u64_block(*block);
 
-    let output = CompressionCore::compress_packed_native(cv, block);
+    let output = CompressionCore::compress_packed_native(&cv, &block);
 
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
     {
@@ -238,7 +238,7 @@ mod tests {
         let cv = super::super::framing::init_packed_u64_cv(0, [0; 3]);
         for batch in 0..32 {
             let block = mixed_packed_u64_block(batch);
-            let packed = compress_packed_u64_cv(cv, block);
+            let packed = compress_packed_u64_cv(&cv, &block);
 
             for lane in 0..PACKED_LANES {
                 let scalar_cv = array::from_fn(|word| cv[word][lane]);
