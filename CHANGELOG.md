@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Features
+
+- [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed IES, random-coin, and length-bound LMCS implementations; existing Poseidon2 variants remain available.
+
 ## v0.32.0 (2026-09-05)
 
 #### Changes
@@ -25,7 +29,6 @@
 
 - Added `has_precompiles()` to `ExecutionWitness` and `ExecutionProof` so callers can check for precompile work without consuming the witness or inspecting proof variants ([#3757](https://github.com/0xMiden/miden-vm/pull/3757)).
 - [BREAKING] Added a conjectured security estimator for the main VM and the precompiles VM ([#3688](https://github.com/0xMiden/miden-vm/pull/3688)).
-- [BREAKING] Added Eidos hashing with typed domain separation, including Eidos-backed Falcon512, IES, random-coin, and length-bound LMCS implementations; existing Poseidon2 variants remain available.
 
 #### Changes
 
