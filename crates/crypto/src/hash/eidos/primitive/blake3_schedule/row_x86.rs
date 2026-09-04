@@ -7,8 +7,18 @@
 //! shuffles (instead of one scalar 32-bit lane per `g` call) does the same seven rounds in
 //! roughly a quarter of the vector instructions of the portable loop in `super`.
 //!
-//! SSE2 is part of the x86_64 architectural baseline, so every function here runs
-//! unconditionally on x86_64 with no runtime feature check.
+//! SSE2 is part of the x86_64 architectural baseline, so the plain `compress_raw`/
+//! `compress_raw_xof` below run unconditionally on x86_64 with no runtime feature check.
+//!
+//! `compress_pre` keeps up to 13 `__m128i` values alive at once (`row0..row3`, `m0..m3`,
+//! `t0..t3`, `tt`), which exceeds the 16-register legacy SSE/AVX file once ABI and spill
+//! bookkeeping are accounted for, forcing real stack spills on a default (non
+//! `target-cpu=native`) build — measured at ~30-37% slower than with a wider register file
+//! available. AVX-512VL's EVEX encoding reaches XMM16-31 even for plain 128-bit operations, so
+//! the `_avx512vl` variants below are the exact same logic (generated from one macro body, so
+//! there is no copy-paste divergence risk) recompiled with that attribute purely for the wider
+//! register file — no wider vectors, no different instructions selected by us. `avx512f` is
+//! AVX-512VL's prerequisite.
 
 use core::arch::x86_64::*;
 
@@ -144,100 +154,177 @@ unsafe fn blend_epi16(a: __m128i, b: __m128i, imm8: i32) -> __m128i {
 /// Returns `[row0, row1, row2, row3] = [v[0..4], v[4..8], v[8..12], v[12..16]]` of the standard
 /// BLAKE3 permuted state after all seven rounds, with Eidos's fixed parameter-word tail
 /// (`v[12..16] = IV[4..8]`, matching `super::permuted_state_with_parameter_words`).
-#[inline(always)]
-unsafe fn compress_pre(cv: &[u32; 8], block: &[u32; 16]) -> [__m128i; 4] {
-    unsafe {
-        let row0 = &mut loadu(cv.as_ptr());
-        let row1 = &mut loadu(cv.as_ptr().add(4));
-        let row2 = &mut set4(IV[0], IV[1], IV[2], IV[3]);
-        let row3 = &mut set4(IV[4], IV[5], IV[6], IV[7]);
+///
+/// Generated twice (see module docs): a plain variant with no feature requirement beyond SSE2,
+/// and an `avx512f,avx512vl`-attributed variant that is bit-for-bit the same logic, recompiled
+/// for the wider register file. Both bodies come from this one macro, so they cannot diverge.
+macro_rules! define_compress_pre {
+    ($(#[$attr:meta])* $name:ident) => {
+        $(#[$attr])*
+        #[inline]
+        unsafe fn $name(cv: &[u32; 8], block: &[u32; 16]) -> [__m128i; 4] {
+            unsafe {
+                let row0 = &mut loadu(cv.as_ptr());
+                let row1 = &mut loadu(cv.as_ptr().add(4));
+                let row2 = &mut set4(IV[0], IV[1], IV[2], IV[3]);
+                let row3 = &mut set4(IV[4], IV[5], IV[6], IV[7]);
 
-        let mut m0 = loadu(block.as_ptr());
-        let mut m1 = loadu(block.as_ptr().add(4));
-        let mut m2 = loadu(block.as_ptr().add(8));
-        let mut m3 = loadu(block.as_ptr().add(12));
+                let mut m0 = loadu(block.as_ptr());
+                let mut m1 = loadu(block.as_ptr().add(4));
+                let mut m2 = loadu(block.as_ptr().add(8));
+                let mut m3 = loadu(block.as_ptr().add(12));
 
-        let mut t0;
-        let mut t1;
-        let mut t2;
-        let mut t3;
-        let mut tt;
+                let mut t0;
+                let mut t1;
+                let mut t2;
+                let mut t3;
+                let mut tt;
 
-        // Round 1 permutes the message words from the original input order into the groups
-        // that get mixed in parallel.
-        t0 = shuffle2!(m0, m1, mm_shuffle!(2, 0, 2, 0));
-        g1(row0, row1, row2, row3, t0);
-        t1 = shuffle2!(m0, m1, mm_shuffle!(3, 1, 3, 1));
-        g2(row0, row1, row2, row3, t1);
-        diagonalize(row0, row2, row3);
-        t2 = shuffle2!(m2, m3, mm_shuffle!(2, 0, 2, 0));
-        t2 = _mm_shuffle_epi32(t2, mm_shuffle!(2, 1, 0, 3));
-        g1(row0, row1, row2, row3, t2);
-        t3 = shuffle2!(m2, m3, mm_shuffle!(3, 1, 3, 1));
-        t3 = _mm_shuffle_epi32(t3, mm_shuffle!(2, 1, 0, 3));
-        g2(row0, row1, row2, row3, t3);
-        undiagonalize(row0, row2, row3);
-        m0 = t0;
-        m1 = t1;
-        m2 = t2;
-        m3 = t3;
+                // Round 1 permutes the message words from the original input order into the
+                // groups that get mixed in parallel.
+                t0 = shuffle2!(m0, m1, mm_shuffle!(2, 0, 2, 0));
+                g1(row0, row1, row2, row3, t0);
+                t1 = shuffle2!(m0, m1, mm_shuffle!(3, 1, 3, 1));
+                g2(row0, row1, row2, row3, t1);
+                diagonalize(row0, row2, row3);
+                t2 = shuffle2!(m2, m3, mm_shuffle!(2, 0, 2, 0));
+                t2 = _mm_shuffle_epi32(t2, mm_shuffle!(2, 1, 0, 3));
+                g1(row0, row1, row2, row3, t2);
+                t3 = shuffle2!(m2, m3, mm_shuffle!(3, 1, 3, 1));
+                t3 = _mm_shuffle_epi32(t3, mm_shuffle!(2, 1, 0, 3));
+                g2(row0, row1, row2, row3, t3);
+                undiagonalize(row0, row2, row3);
+                m0 = t0;
+                m1 = t1;
+                m2 = t2;
+                m3 = t3;
 
-        // Rounds 2-7 apply a fixed permutation to the message words produced by the round
-        // before, so the same shuffle sequence repeats.
-        for _ in 0..6 {
-            t0 = shuffle2!(m0, m1, mm_shuffle!(3, 1, 1, 2));
-            t0 = _mm_shuffle_epi32(t0, mm_shuffle!(0, 3, 2, 1));
-            g1(row0, row1, row2, row3, t0);
-            t1 = shuffle2!(m2, m3, mm_shuffle!(3, 3, 2, 2));
-            tt = _mm_shuffle_epi32(m0, mm_shuffle!(0, 0, 3, 3));
-            t1 = blend_epi16(tt, t1, 0xcc);
-            g2(row0, row1, row2, row3, t1);
-            diagonalize(row0, row2, row3);
-            t2 = _mm_unpacklo_epi64(m3, m1);
-            tt = blend_epi16(t2, m2, 0xc0);
-            t2 = _mm_shuffle_epi32(tt, mm_shuffle!(1, 3, 2, 0));
-            g1(row0, row1, row2, row3, t2);
-            t3 = _mm_unpackhi_epi32(m1, m3);
-            tt = _mm_unpacklo_epi32(m2, t3);
-            t3 = _mm_shuffle_epi32(tt, mm_shuffle!(0, 1, 3, 2));
-            g2(row0, row1, row2, row3, t3);
-            undiagonalize(row0, row2, row3);
-            m0 = t0;
-            m1 = t1;
-            m2 = t2;
-            m3 = t3;
+                // Rounds 2-7 apply a fixed permutation to the message words produced by the
+                // round before, so the same shuffle sequence repeats.
+                for _ in 0..6 {
+                    t0 = shuffle2!(m0, m1, mm_shuffle!(3, 1, 1, 2));
+                    t0 = _mm_shuffle_epi32(t0, mm_shuffle!(0, 3, 2, 1));
+                    g1(row0, row1, row2, row3, t0);
+                    t1 = shuffle2!(m2, m3, mm_shuffle!(3, 3, 2, 2));
+                    tt = _mm_shuffle_epi32(m0, mm_shuffle!(0, 0, 3, 3));
+                    t1 = blend_epi16(tt, t1, 0xcc);
+                    g2(row0, row1, row2, row3, t1);
+                    diagonalize(row0, row2, row3);
+                    t2 = _mm_unpacklo_epi64(m3, m1);
+                    tt = blend_epi16(t2, m2, 0xc0);
+                    t2 = _mm_shuffle_epi32(tt, mm_shuffle!(1, 3, 2, 0));
+                    g1(row0, row1, row2, row3, t2);
+                    t3 = _mm_unpackhi_epi32(m1, m3);
+                    tt = _mm_unpacklo_epi32(m2, t3);
+                    t3 = _mm_shuffle_epi32(tt, mm_shuffle!(0, 1, 3, 2));
+                    g2(row0, row1, row2, row3, t3);
+                    undiagonalize(row0, row2, row3);
+                    m0 = t0;
+                    m1 = t1;
+                    m2 = t2;
+                    m3 = t3;
+                }
+
+                [*row0, *row1, *row2, *row3]
+            }
         }
-
-        [*row0, *row1, *row2, *row3]
-    }
+    };
 }
+
+define_compress_pre!(
+    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    compress_pre
+);
+define_compress_pre!(
+    #[cfg(any(feature = "std", target_feature = "avx512vl"))]
+    #[target_feature(enable = "avx512f,avx512vl")]
+    compress_pre_avx512vl
+);
 
 /// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words:
 /// `out[i] = v[i] ^ v[i + 8]`.
-#[inline]
-pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
-    unsafe {
-        let [row0, row1, row2, row3] = compress_pre(cv, block);
-        let mut out = [0u32; 8];
-        storeu(xor(row0, row2), out.as_mut_ptr());
-        storeu(xor(row1, row3), out.as_mut_ptr().add(4));
-        out
-    }
+///
+/// Generated twice (see module docs): a plain SSE2 variant needing no runtime feature check, and
+/// an `avx512f,avx512vl`-attributed variant for a wider register file.
+macro_rules! define_compress_raw {
+    ($(#[$attr:meta])* $name:ident, $compress_pre:ident) => {
+        $(#[$attr])*
+        #[inline]
+        pub(super) unsafe fn $name(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
+            unsafe {
+                let [row0, row1, row2, row3] = $compress_pre(cv, block);
+                let mut out = [0u32; 8];
+                storeu(xor(row0, row2), out.as_mut_ptr());
+                storeu(xor(row1, row3), out.as_mut_ptr().add(4));
+                out
+            }
+        }
+    };
 }
+
+define_compress_raw!(
+    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    compress_raw_impl,
+    compress_pre
+);
+define_compress_raw!(
+    #[cfg(any(feature = "std", target_feature = "avx512vl"))]
+    #[target_feature(enable = "avx512f,avx512vl")]
+    compress_raw_avx512vl,
+    compress_pre_avx512vl
+);
 
 /// Returns the raw sixteen-word XOF fold with Eidos compression's fixed parameter words:
 /// `out[i] = v[i] ^ v[i + 8]` for `i < 8`, `out[i] = v[i] ^ cv[i - 8]` for `i >= 8`.
+///
+/// Generated twice (see module docs): a plain SSE2 variant needing no runtime feature check, and
+/// an `avx512f,avx512vl`-attributed variant for a wider register file.
+macro_rules! define_compress_raw_xof {
+    ($(#[$attr:meta])* $name:ident, $compress_pre:ident) => {
+        $(#[$attr])*
+        #[inline]
+        pub(super) unsafe fn $name(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
+            unsafe {
+                let [row0, row1, row2, row3] = $compress_pre(cv, block);
+                let cv_row0 = loadu(cv.as_ptr());
+                let cv_row1 = loadu(cv.as_ptr().add(4));
+                let mut out = [0u32; 16];
+                storeu(xor(row0, row2), out.as_mut_ptr());
+                storeu(xor(row1, row3), out.as_mut_ptr().add(4));
+                storeu(xor(row2, cv_row0), out.as_mut_ptr().add(8));
+                storeu(xor(row3, cv_row1), out.as_mut_ptr().add(12));
+                out
+            }
+        }
+    };
+}
+
+define_compress_raw_xof!(
+    #[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+    compress_raw_xof_impl,
+    compress_pre
+);
+define_compress_raw_xof!(
+    #[cfg(any(feature = "std", target_feature = "avx512vl"))]
+    #[target_feature(enable = "avx512f,avx512vl")]
+    compress_raw_xof_avx512vl,
+    compress_pre_avx512vl
+);
+
+/// Returns the raw eight-word CV fold with Eidos compression's fixed parameter words. Needs no
+/// runtime feature check: SSE2 is part of the x86_64 architectural baseline.
+#[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
+#[inline]
+pub(super) fn compress_raw(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 8] {
+    // SAFETY: SSE2 is part of the x86_64 architectural baseline.
+    unsafe { compress_raw_impl(cv, block) }
+}
+
+/// Returns the raw sixteen-word XOF fold with Eidos compression's fixed parameter words. Needs no
+/// runtime feature check: SSE2 is part of the x86_64 architectural baseline.
+#[cfg(any(feature = "std", not(target_feature = "avx512vl")))]
 #[inline]
 pub(super) fn compress_raw_xof(cv: &[u32; 8], block: &[u32; 16]) -> [u32; 16] {
-    unsafe {
-        let [row0, row1, row2, row3] = compress_pre(cv, block);
-        let cv_row0 = loadu(cv.as_ptr());
-        let cv_row1 = loadu(cv.as_ptr().add(4));
-        let mut out = [0u32; 16];
-        storeu(xor(row0, row2), out.as_mut_ptr());
-        storeu(xor(row1, row3), out.as_mut_ptr().add(4));
-        storeu(xor(row2, cv_row0), out.as_mut_ptr().add(8));
-        storeu(xor(row3, cv_row1), out.as_mut_ptr().add(12));
-        out
-    }
+    // SAFETY: SSE2 is part of the x86_64 architectural baseline.
+    unsafe { compress_raw_xof_impl(cv, block) }
 }
