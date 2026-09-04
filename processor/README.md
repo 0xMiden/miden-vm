@@ -66,7 +66,7 @@ Miden processor can be compiled with the following features:
 
 The `std` feature is enabled by default and relies on the Rust standard library. The `concurrent`
 feature enables concurrency across parts of execution. The `testing` feature enables APIs used in
-tests. The `bus-debugger` feature helps debug the buses, but it slows down the processor.
+tests.
 
 To compile with `no_std`, disable default features via `--no-default-features` flag, in which case only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

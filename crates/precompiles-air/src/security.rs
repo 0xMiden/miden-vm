@@ -1,14 +1,17 @@
 //! Conjectured security level computation for the precompile chiplet stack.
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
-//! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
-//! field. Their recursive verifiers both use Poseidon2. Native verification derives alignment and
-//! collision resistance from the commitment scheme used for each proof.
+//! Both statements use the same round-budget formulas and challenge field. Their recursive
+//! verifiers both use Poseidon2. Native verification derives alignment and collision resistance
+//! from the commitment scheme used for each proof.
 //!
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
-pub use miden_air::security::ProofSecurityParameters;
+pub use miden_air::security::{
+    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
+    SecurityTerm,
+};
 use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
@@ -16,13 +19,7 @@ use miden_core::{
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
-use p3_security::{
-    budget::{
-        AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-        report::LOOKUP_LABEL,
-    },
-    fixed,
-};
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{
     ChipletAir,
