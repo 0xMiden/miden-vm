@@ -1,4 +1,5 @@
 use alloc::{string::ToString, vec::Vec};
+use core::marker::PhantomData;
 
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use num::{Complex, Float};
@@ -7,18 +8,21 @@ use rand::Rng;
 
 use super::{
     super::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, MODULUS, N, Nonce,
-        SIG_L2_BOUND, SIGMA, Serializable, ShortLatticeBasis, Signature,
-        math::{FalconFelt, FastFft, LdlTree, Polynomial, ffldl, ffsampling, gram, normalize_tree},
+        FalconVariant, LOG_N, MODULUS, N, Nonce, SIG_L2_BOUND, SIGMA, SK_LEN, ShortLatticeBasis,
+        Signature,
+        math::{
+            FalconFelt, FastFft, LdlTree, Polynomial, ffldl, ffsampling, gram, normalize_tree,
+            ntru_gen,
+        },
         signature::SignaturePoly,
     },
     PublicKey,
 };
 use crate::{
     Word,
-    dsa::falcon512_eidos::{LOG_N, SK_LEN, hash_to_point::hash_to_point_eidos, math::ntru_gen},
     hash::blake::Blake3_256,
     utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         read_sensitive_array,
         zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
@@ -57,12 +61,13 @@ pub(crate) const WIDTH_SMALL_POLY_COEFFICIENT: usize = 6;
 ///
 /// [1]: <https://falcon-sign.info/falcon.pdf>
 #[derive(Clone, SilentDebug, SilentDisplay)]
-pub struct SecretKey {
+pub struct SecretKey<V: FalconVariant> {
     secret_key: ShortLatticeBasis,
     tree: LdlTree,
+    variant: PhantomData<fn() -> V>,
 }
 
-impl Zeroize for SecretKey {
+impl<V: FalconVariant> Zeroize for SecretKey<V> {
     fn zeroize(&mut self) {
         self.secret_key.zeroize();
         self.tree.zeroize();
@@ -71,16 +76,16 @@ impl Zeroize for SecretKey {
 
 // Implement `Drop` manually because the `ZeroizeOnDrop` derive is unavailable when `zeroize`
 // comes through `k256`.
-impl Drop for SecretKey {
+impl<V: FalconVariant> Drop for SecretKey<V> {
     fn drop(&mut self) {
         self.zeroize();
     }
 }
 
-impl ZeroizeOnDrop for SecretKey {}
+impl<V: FalconVariant> ZeroizeOnDrop for SecretKey<V> {}
 
 #[allow(clippy::new_without_default)]
-impl SecretKey {
+impl<V: FalconVariant> SecretKey<V> {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
@@ -98,7 +103,7 @@ impl SecretKey {
     }
 
     /// Computes the normalized Falcon LDL tree from the short basis [[g, -f], [G, -F]].
-    pub(crate) fn from_short_lattice_basis(basis: ShortLatticeBasis) -> SecretKey {
+    pub(crate) fn from_short_lattice_basis(basis: ShortLatticeBasis) -> Self {
         // FFT each polynomial of the short basis.
         let basis_fft = to_complex_fft(&basis);
         // Compute the Gram matrix.
@@ -107,7 +112,11 @@ impl SecretKey {
         let mut tree = ffldl(&gram_fft);
         // Normalize the leaves of the LDL tree.
         normalize_tree(&mut tree, SIGMA);
-        Self { secret_key: basis, tree }
+        Self {
+            secret_key: basis,
+            tree,
+            variant: PhantomData,
+        }
     }
 
     // PUBLIC ACCESSORS
@@ -119,7 +128,7 @@ impl SecretKey {
     }
 
     /// Returns the public key corresponding to this secret key.
-    pub fn public_key(&self) -> PublicKey {
+    pub fn public_key(&self) -> PublicKey<V> {
         self.compute_pub_key_poly()
     }
 
@@ -132,7 +141,7 @@ impl SecretKey {
     // --------------------------------------------------------------------------------------------
 
     /// Signs a message with this secret key.
-    pub fn sign(&self, message: Word) -> Signature {
+    pub fn sign(&self, message: Word) -> Signature<V> {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
@@ -140,18 +149,17 @@ impl SecretKey {
         let mut rng = ChaCha20Rng::from_seed(seed);
         let signature = self.sign_with_rng(message, &mut rng);
 
-        // Zeroize the seed to prevent leakage.
         seed.zeroize();
 
         signature
     }
 
     /// Signs a message using randomness from the provided generator.
-    pub fn sign_with_rng<R: Rng>(&self, message: Word, rng: &mut R) -> Signature {
+    pub fn sign_with_rng<R: Rng>(&self, message: Word, rng: &mut R) -> Signature<V> {
         let nonce = Nonce::deterministic();
 
         let h = self.compute_pub_key_poly();
-        let c = hash_to_point_eidos(message, &nonce);
+        let c = V::hash_message_to_point(message, &nonce);
         let s2 = self.sign_helper(&c, rng);
 
         Signature::new(nonce, h, s2)
@@ -167,12 +175,12 @@ impl SecretKey {
     /// It therefore uses separate random-number generators for the nonce and trapdoor sampling,
     /// matching the reference implementation.
     #[cfg(test)]
-    pub(in crate::dsa::falcon512_eidos) fn sign_with_rng_testing<R: Rng>(
+    pub(crate) fn sign_with_rng_testing<R: Rng>(
         &self,
         message: &[u8],
         rng: &mut R,
-    ) -> Signature {
-        use crate::dsa::falcon512_eidos::{hash_to_point::hash_to_point_shake256, tests::ChaCha};
+    ) -> Signature<V> {
+        use super::super::test_utils::{ChaCha, hash_to_point_shake256};
 
         let nonce = Nonce::random(rng);
 
@@ -189,7 +197,7 @@ impl SecretKey {
     // --------------------------------------------------------------------------------------------
 
     /// Derives the public key corresponding to this secret key using h = g /f [mod ϕ][mod p].
-    fn compute_pub_key_poly(&self) -> PublicKey {
+    fn compute_pub_key_poly(&self) -> PublicKey<V> {
         let g: Polynomial<FalconFelt> = self.secret_key[0].clone().into();
         let g_fft = g.fft();
         let minus_f: Polynomial<FalconFelt> = self.secret_key[1].clone().into();
@@ -266,27 +274,25 @@ impl SecretKey {
         buffer.extend_from_slice(&message.to_bytes());
 
         let digest = Blake3_256::hash(&buffer);
-
-        // Zeroize the buffer because it contains secret key material.
         buffer.zeroize();
 
         digest.into()
     }
 }
 
-impl PartialEq for SecretKey {
+impl<V: FalconVariant> PartialEq for SecretKey<V> {
     fn eq(&self, other: &Self) -> bool {
         use subtle::ConstantTimeEq;
         self.to_bytes().ct_eq(&other.to_bytes()).into()
     }
 }
 
-impl Eq for SecretKey {}
+impl<V: FalconVariant> Eq for SecretKey<V> {}
 
 // SERIALIZATION / DESERIALIZATION
 // ================================================================================================
 
-impl Serializable for SecretKey {
+impl<V: FalconVariant> Serializable for SecretKey<V> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let basis = &self.secret_key;
 
@@ -299,7 +305,7 @@ impl Serializable for SecretKey {
         let g = &basis[0];
         let neg_big_f = &basis[3];
 
-        let mut buffer = Vec::with_capacity(1281);
+        let mut buffer = Vec::with_capacity(SK_LEN);
         buffer.push(header);
 
         let mut f_i8: Vec<i8> = neg_f
@@ -330,12 +336,10 @@ impl Serializable for SecretKey {
         big_f_i8.zeroize();
 
         target.write_bytes(&buffer);
-        // Note: buffer is not zeroized here as it's being passed to write_bytes which consumes it
-        // The caller should ensure proper handling of the written bytes
     }
 }
 
-impl Deserializable for SecretKey {
+impl<V: FalconVariant> Deserializable for SecretKey<V> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let byte_vector = read_sensitive_array::<SK_LEN, _>(source)?;
 

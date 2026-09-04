@@ -2,19 +2,16 @@ use alloc::string::{String, ToString};
 
 use data::{
     DETERMINISTIC_SIGNATURE, EXPECTED_SIG, EXPECTED_SIG_POLYS, NUM_TEST_VECTORS, SK_POLYS,
-    SYNC_DATA_FOR_TEST_VECTOR,
+    SYNC_DATA, SYNC_DATA_FOR_TEST_VECTOR,
 };
-use prng::Shake256Testing;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-use super::{
-    N, PublicKey, Serializable,
-    math::{FalconFelt, Polynomial},
-};
+use super::{FalconFelt, N, Polynomial, PublicKey};
 use crate::{
     SequentialCommit,
     dsa::{
+        falcon512_common::test_utils::Shake256Testing,
         falcon512_eidos::{
             PREVERSIONED_NONCE, PREVERSIONED_NONCE_LEN, SIG_NONCE_LEN, SIG_POLY_BYTE_LEN, SecretKey,
         },
@@ -24,11 +21,10 @@ use crate::{
         eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
         poseidon2::Poseidon2,
     },
+    utils::Serializable,
 };
 
 mod data;
-mod prng;
-pub(crate) use prng::ChaCha;
 
 #[test]
 fn eidos_and_poseidon2_falcon_coexist() {
@@ -86,7 +82,7 @@ fn test_signature_gen_reference_impl() {
     // N = 512.
     // The following makes the necessary calls to the PRNG in order to prepare it for use with
     // the test vectors for N = 512.
-    rng_shake.sync_rng();
+    rng_shake.sync_rng(&SYNC_DATA);
 
     for i in 0..NUM_TEST_VECTORS {
         // construct the four polynomials defining the secret key for this test vector
@@ -160,6 +156,7 @@ fn test_signature_determinism() {
     let serialized_signature = signature.to_bytes();
 
     assert_eq!(serialized_signature, DETERMINISTIC_SIGNATURE);
+    assert!(sk.public_key().verify(message.into(), &signature));
 }
 
 #[test]
