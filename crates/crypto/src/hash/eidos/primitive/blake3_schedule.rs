@@ -61,8 +61,8 @@ pub(super) const PACKED_LANES: usize = 16;
 ))]
 #[inline]
 fn compress_via_sub_batches<const W: usize>(
-    cv: [[u32; PACKED_LANES]; 8],
-    block: [[u32; PACKED_LANES]; 16],
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
     f: impl Fn([[u32; W]; 8], [[u32; W]; 16]) -> [[u32; W]; 8],
 ) -> [[u32; PACKED_LANES]; 8] {
     let mut out = [[0u32; PACKED_LANES]; 8];
@@ -112,14 +112,14 @@ mod native_backend {
 
     #[inline]
     pub(super) fn compress(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         match *TIER {
             Tier::Avx512 => {
                 // SAFETY: `TIER` only reports `Avx512` after `is_x86_feature_detected!("avx512f")`
                 // returned true for the running CPU.
-                unsafe { x86_64_avx512::compress_packed_16(cv, block) }
+                unsafe { x86_64_avx512::compress_packed_16(*cv, *block) }
             },
             Tier::Avx2 => compress_via_sub_batches::<8>(cv, block, |cv, block| {
                 // SAFETY: `TIER` only reports `Avx2` after `is_x86_feature_detected!("avx2")`
@@ -140,12 +140,12 @@ mod native_backend {
 
     #[inline(always)]
     pub(super) fn compress(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         // SAFETY: this module only compiles when `target_feature = "avx512f"` is enabled
         // crate-wide (e.g. via `-C target-cpu=native` or `-C target-feature=+avx512f`).
-        unsafe { super::x86_64_avx512::compress_packed_16(cv, block) }
+        unsafe { super::x86_64_avx512::compress_packed_16(*cv, *block) }
     }
 }
 
@@ -160,8 +160,8 @@ mod native_backend {
 
     #[inline(always)]
     pub(super) fn compress(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         compress_via_sub_batches::<8>(cv, block, |cv, block| {
             // SAFETY: this module only compiles when `target_feature = "avx2"` is enabled
@@ -182,8 +182,8 @@ mod native_backend {
 
     #[inline(always)]
     pub(super) fn compress(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         compress_via_sub_batches::<4>(cv, block, |cv, block| {
             // SAFETY: SSE2 is part of the x86_64 architectural baseline.
@@ -198,8 +198,8 @@ mod native_backend {
 
     #[inline(always)]
     pub(super) fn compress(
-        cv: [[u32; PACKED_LANES]; 8],
-        block: [[u32; PACKED_LANES]; 16],
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
     ) -> [[u32; PACKED_LANES]; 8] {
         #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
         {
@@ -208,7 +208,7 @@ mod native_backend {
 
         #[cfg(not(all(target_arch = "aarch64", target_feature = "neon")))]
         {
-            super::compress_packed(cv, block)
+            super::compress_packed(*cv, *block)
         }
     }
 }
@@ -454,8 +454,8 @@ pub(super) fn compress_packed<const LANES: usize>(
 /// Applies the raw BLAKE3 schedule to the build's selected native lane width.
 #[inline]
 pub(super) fn compress_packed_native(
-    cv: [[u32; PACKED_LANES]; 8],
-    block: [[u32; PACKED_LANES]; 16],
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
 ) -> [[u32; PACKED_LANES]; 8] {
     native_backend::compress(cv, block)
 }
