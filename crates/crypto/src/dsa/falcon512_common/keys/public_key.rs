@@ -1,50 +1,46 @@
-//! Public key types for Falcon 512 signatures over Eidos.
+//! Public key types for the Miden Falcon 512 variants.
 
 use alloc::{string::ToString, vec::Vec};
-use core::{fmt, ops::Deref};
+use core::{fmt, marker::PhantomData, ops::Deref};
 
 use num::Zero;
 
 use super::{
-    super::{LOG_N, N, PK_LEN},
+    super::{FALCON_ENCODING_BITS, FalconVariant, LOG_N, N, PK_LEN},
     ByteReader, ByteWriter, Deserializable, DeserializationError, FalconFelt, Felt, Polynomial,
     Serializable, Signature,
 };
-use crate::{
-    SequentialCommit, Word,
-    dsa::falcon512_eidos::FALCON_ENCODING_BITS,
-    hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
-};
+use crate::{SequentialCommit, Word};
 
 // PUBLIC KEY
 // ================================================================================================
 
 /// Public key represented as a polynomial with coefficients over the Falcon prime field.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicKey(Polynomial<FalconFelt>);
+#[derive(Clone, PartialEq, Eq)]
+pub struct PublicKey<V: FalconVariant>(Polynomial<FalconFelt>, PhantomData<fn() -> V>);
 
-impl PublicKey {
+impl<V: FalconVariant> PublicKey<V> {
     /// Verifies the provided signature against the provided message and this public key.
-    pub fn verify(&self, message: Word, signature: &Signature) -> bool {
+    pub fn verify(&self, message: Word, signature: &Signature<V>) -> bool {
         signature.verify(message, self)
     }
 
     /// Returns the public key embedded in the signature.
-    pub fn recover_from(_message: Word, signature: &Signature) -> Self {
+    pub fn recover_from(_message: Word, signature: &Signature<V>) -> Self {
         signature.public_key().clone()
     }
 
-    /// Returns the Eidos commitment to the public key in its registered domain.
+    /// Returns this Falcon variant's commitment to the public key.
     pub fn to_commitment(&self) -> Word {
         <Self as SequentialCommit>::to_commitment(self)
     }
 }
 
-impl SequentialCommit for PublicKey {
+impl<V: FalconVariant> SequentialCommit for PublicKey<V> {
     type Commitment = Word;
 
     fn to_commitment(&self) -> Self::Commitment {
-        Eidos::hash_elements_in_domain(&self.to_elements(), FALCON_PUBLIC_KEY)
+        V::public_key_commitment(&self.to_elements())
     }
 
     fn to_elements(&self) -> Vec<Felt> {
@@ -52,7 +48,7 @@ impl SequentialCommit for PublicKey {
     }
 }
 
-impl Deref for PublicKey {
+impl<V: FalconVariant> Deref for PublicKey<V> {
     type Target = Polynomial<FalconFelt>;
 
     fn deref(&self) -> &Self::Target {
@@ -60,13 +56,19 @@ impl Deref for PublicKey {
     }
 }
 
-impl From<Polynomial<FalconFelt>> for PublicKey {
+impl<V: FalconVariant> From<Polynomial<FalconFelt>> for PublicKey<V> {
     fn from(pk_poly: Polynomial<FalconFelt>) -> Self {
-        Self(pk_poly)
+        Self(pk_poly, PhantomData)
     }
 }
 
-impl Serializable for &PublicKey {
+impl<V: FalconVariant> fmt::Debug for PublicKey<V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PublicKey").field(&self.0).finish()
+    }
+}
+
+impl<V: FalconVariant> Serializable for &PublicKey<V> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let mut buf = [0_u8; PK_LEN];
         buf[0] = LOG_N;
@@ -93,13 +95,13 @@ impl Serializable for &PublicKey {
     }
 }
 
-impl fmt::Display for PublicKey {
+impl<V: FalconVariant> fmt::Display for PublicKey<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         crate::utils::write_hex(f, &self.to_bytes())
     }
 }
 
-impl Deserializable for PublicKey {
+impl<V: FalconVariant> Deserializable for PublicKey<V> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let buf = source.read_array::<PK_LEN>()?;
 
