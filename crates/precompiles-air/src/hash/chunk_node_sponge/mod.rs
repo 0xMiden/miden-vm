@@ -56,7 +56,7 @@ impl BaseAir<Felt> for ChunkNodeSpongeAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(sponge_program().to_vec())
+        Cow::Owned(sponge_program().into())
     }
 }
 

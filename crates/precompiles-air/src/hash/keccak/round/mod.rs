@@ -161,7 +161,7 @@ impl BaseAir<Felt> for KeccakRoundAir {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(round_program().to_vec())
+        Cow::Owned(round_program().into())
     }
 }
 

@@ -143,7 +143,7 @@ impl BaseAir<Felt> for Poseidon2Air {
     }
 
     fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
-        Cow::Owned(poseidon2_program().to_vec())
+        Cow::Owned(poseidon2_program().into())
     }
 }
 

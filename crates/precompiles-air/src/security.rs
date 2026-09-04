@@ -172,7 +172,8 @@ pub const COMPOSITION_COEFFICIENT: u64 =
 /// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
 /// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
 /// round.
-pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 2);
+pub const OOD_COEFFICIENT: u64 =
+    fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
 
 /// Q16 upper bound on the log2 of the DEEP round's error coefficient.
 pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
