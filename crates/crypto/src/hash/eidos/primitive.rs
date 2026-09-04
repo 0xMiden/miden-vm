@@ -221,6 +221,32 @@ mod tests {
         assert_eq!(CompressionCore::compress_raw(cv, block), expected);
     }
 
+    /// `compress_raw`/`compress_raw_xof` dispatch to an architecture- and (on x86_64, under the
+    /// `std` feature) runtime-CPU-selected backend; this checks every reachable backend against
+    /// the portable scalar reference over many pseudo-random inputs, not just the single fixed
+    /// vector above.
+    #[test]
+    fn compress_raw_and_xof_match_scalar_reference_over_random_inputs() {
+        let mut state = 0x243f_6a88_85a3_08d3u64;
+        let mut next_u32 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u32
+        };
+
+        for _ in 0..10_000 {
+            let cv: [u32; 8] = core::array::from_fn(|_| next_u32());
+            let block: [u32; 16] = core::array::from_fn(|_| next_u32());
+
+            let expected_raw = reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+            assert_eq!(CompressionCore::compress_raw(cv, block), expected_raw);
+
+            let expected_xof = reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
+            assert_eq!(CompressionCore::compress_raw_xof(cv, block), expected_xof);
+        }
+    }
+
     #[test]
     fn xof_reference_matches_official_blake3_compress_xof() {
         let cv = TEST_CV;
