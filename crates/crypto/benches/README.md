@@ -56,7 +56,6 @@ Notes:
 We benchmark the digital signature algorithms provided by `miden-crypto`:
 
 * **Falcon512-Poseidon2** - Falcon512 signature scheme using Poseidon2 for message hashing
-* **Falcon512-Eidos** - Falcon512 signature scheme using Eidos for message hashing
 * **ECDSA over secp256k1** - Elliptic Curve Digital Signature Algorithm using Keccak256 for message hashing
 * **EdDSA over Ed25519** - Edwards-curve Digital Signature Algorithm using SHA-512 for message hashing
 
@@ -141,7 +140,7 @@ cargo bench hash
 
 #### Digital Signature Algorithm (DSA) Benchmarks
 
-To run the benchmarks for all DSA implementations (Falcon512-Poseidon2, Falcon512-Eidos, ECDSA k256, and EdDSA), from the root directory run:
+To run the benchmarks for all DSA implementations (Falcon512-Poseidon2, ECDSA k256, and EdDSA), from the root directory run:
 
 ```
 cargo bench dsa
