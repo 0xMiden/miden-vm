@@ -9,28 +9,20 @@ use super::{Felt, FeltRng};
 use crate::{
     Word, ZERO,
     field::ExtensionField,
-    hash::eidos::{BLOCK_LEN, Eidos, encoding},
+    hash::eidos::{
+        BLOCK_LEN, Eidos,
+        domains::{RANDOM_COIN_OUTPUT, RANDOM_COIN_STATE},
+        encoding,
+    },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-
-/// Registered Eidos domain ID for random-coin state derivation.
-pub const RANDOM_COIN_STATE_DOMAIN_ID: u32 = 0x000008;
-
-/// Registered Eidos selector for random-coin state derivation.
-pub const RANDOM_COIN_STATE_SELECTOR: u32 = (RANDOM_COIN_STATE_DOMAIN_ID << 8) | 1;
-
-/// Registered Eidos domain ID for random-coin output generation.
-pub const RANDOM_COIN_OUTPUT_DOMAIN_ID: u32 = 0x000009;
-
-/// Registered Eidos selector for random-coin output generation.
-pub const RANDOM_COIN_OUTPUT_SELECTOR: u32 = (RANDOM_COIN_OUTPUT_DOMAIN_ID << 8) | 1;
 
 const OUTPUT_LANES: usize = 8;
 
 /// A reseedable random coin built from Eidos compression.
 ///
 /// State derivation uses framed Eidos hashes. Output generation compresses the current state under
-/// a separate selector and uses the high half of the raw XOF output as the random stream. The low
+/// a separate domain and uses the high half of the raw XOF output as the random stream. The low
 /// half becomes the next state. Base-field elements are sampled by rejecting raw `u64` values at
 /// or above the Goldilocks modulus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +35,7 @@ pub struct EidosRandomCoin {
 impl EidosRandomCoin {
     /// Returns a random coin initialized with `seed`.
     pub fn new(seed: Word) -> Self {
-        let state = Eidos::hash_elements_in_domain(
-            seed.as_elements(),
-            Felt::from_u32(RANDOM_COIN_STATE_SELECTOR),
-        );
+        let state = Eidos::hash_elements_in_domain(seed.as_elements(), RANDOM_COIN_STATE);
         Self {
             state,
             output: [0; OUTPUT_LANES],
@@ -98,10 +87,8 @@ impl EidosRandomCoin {
     /// Mixes four additional field elements into the random-coin state.
     pub fn reseed(&mut self, data: Word) {
         let words = [self.state, data];
-        self.state = Eidos::hash_elements_in_domain(
-            Word::words_as_elements(&words),
-            Felt::from_u32(RANDOM_COIN_STATE_SELECTOR),
-        );
+        self.state =
+            Eidos::hash_elements_in_domain(Word::words_as_elements(&words), RANDOM_COIN_STATE);
         self.output = [0; OUTPUT_LANES];
         self.current = OUTPUT_LANES;
     }
@@ -117,8 +104,7 @@ impl EidosRandomCoin {
     }
 
     fn refill_output(&mut self) {
-        let init_cv =
-            Eidos::init_chaining_word(RANDOM_COIN_OUTPUT_SELECTOR, Word::NUM_ELEMENTS as u32);
+        let init_cv = Eidos::init_chaining_word(RANDOM_COIN_OUTPUT, Word::NUM_ELEMENTS as u32);
         let mut block = [ZERO; BLOCK_LEN];
         block[..Word::NUM_ELEMENTS].copy_from_slice(self.state.as_elements());
         let xof = Eidos::compress_xof_lanes(init_cv, block);
@@ -201,10 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn seed_is_framed_under_the_state_selector() {
+    fn seed_is_framed_under_the_state_domain() {
         let coin = EidosRandomCoin::new(seed());
-        let init_cv =
-            Eidos::init_chaining_word(RANDOM_COIN_STATE_SELECTOR, Word::NUM_ELEMENTS as u32);
+        let init_cv = Eidos::init_chaining_word(RANDOM_COIN_STATE, Word::NUM_ELEMENTS as u32);
         let mut block = [ZERO; BLOCK_LEN];
         block[..Word::NUM_ELEMENTS].copy_from_slice(seed().as_elements());
         let expected = Eidos::compress(init_cv, block);
@@ -212,10 +197,7 @@ mod tests {
         assert_eq!(coin.state, expected);
         assert_eq!(
             coin.state,
-            Eidos::hash_elements_in_domain(
-                seed().as_elements(),
-                Felt::from_u32(RANDOM_COIN_STATE_SELECTOR),
-            )
+            Eidos::hash_elements_in_domain(seed().as_elements(), RANDOM_COIN_STATE)
         );
         assert_eq!(coin.current, OUTPUT_LANES);
     }
@@ -224,8 +206,7 @@ mod tests {
     fn raw_output_matches_the_registered_xof_construction() {
         let mut coin = EidosRandomCoin::new(seed());
         let initial_state = coin.state;
-        let init_cv =
-            Eidos::init_chaining_word(RANDOM_COIN_OUTPUT_SELECTOR, Word::NUM_ELEMENTS as u32);
+        let init_cv = Eidos::init_chaining_word(RANDOM_COIN_OUTPUT, Word::NUM_ELEMENTS as u32);
         let mut block = [ZERO; BLOCK_LEN];
         block[..Word::NUM_ELEMENTS].copy_from_slice(initial_state.as_elements());
         let expected_xof = Eidos::compress_xof_lanes(init_cv, block);
@@ -282,7 +263,7 @@ mod tests {
         coin.reseed(data);
 
         let expected = Eidos::compress(
-            Eidos::init_chaining_word(RANDOM_COIN_STATE_SELECTOR, BLOCK_LEN as u32),
+            Eidos::init_chaining_word(RANDOM_COIN_STATE, BLOCK_LEN as u32),
             [
                 state_after_refill[0],
                 state_after_refill[1],

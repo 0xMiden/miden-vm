@@ -48,18 +48,6 @@ pub const NONCE_SIZE_BYTES: usize = NONCE_SIZE * Felt::NUM_BYTES;
 /// Number of field elements in an Eidos AEAD authentication tag.
 pub const AUTH_TAG_SIZE: usize = 2;
 
-/// Registered Eidos domain ID for deriving the AEAD counter-mode chaining value.
-pub const AEAD_CTR_DOMAIN_ID: u32 = 0x000006;
-
-/// Registered Eidos selector for deriving the AEAD counter-mode chaining value.
-pub const AEAD_CTR_SELECTOR: u32 = (AEAD_CTR_DOMAIN_ID << 8) | 1;
-
-/// Registered Eidos domain ID for deriving the AEAD MAC key.
-pub const AEAD_MAC_DOMAIN_ID: u32 = 0x000007;
-
-/// Registered Eidos selector for deriving the AEAD MAC key.
-pub const AEAD_MAC_SELECTOR: u32 = (AEAD_MAC_DOMAIN_ID << 8) | 1;
-
 /// Maximum number of base-field elements in the padded polynomial-MAC input.
 ///
 /// This count includes the nonce, associated data, expanded ciphertext, encoded lengths, and

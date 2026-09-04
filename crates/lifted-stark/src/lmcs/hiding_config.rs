@@ -103,6 +103,7 @@ where
     H: StatefulHasher<PF::Value, [PD::Value; DIGEST], State = [PD::Value; WIDTH]>
         + StatefulHasher<PF, [PD; DIGEST], State = [PD; WIDTH]>
         + Alignable<PF::Value, PD::Value>
+        + Alignable<PF, PD>
         + Sync,
     C: PseudoCompressionFunction<[PD::Value; DIGEST], 2>
         + PseudoCompressionFunction<[PD; DIGEST], 2>

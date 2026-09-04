@@ -4,6 +4,7 @@
 //! use a different, intentionally lossy operation: bit 31 of every odd output lane is
 //! cleared before each lane pair is packed into a field element. Keeping those operations
 //! distinct prevents callers from accidentally treating an arbitrary input CV as an Eidos output.
+//! These lane-order and packing rules are protocol-visible: changing them changes Eidos digests.
 
 use core::array;
 

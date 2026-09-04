@@ -12,6 +12,8 @@
 mod challenger;
 mod compression;
 mod construction;
+pub mod domain;
+pub mod domains;
 pub mod encoding;
 mod framing;
 mod lmcs;
@@ -22,6 +24,11 @@ mod tests;
 
 pub use challenger::{EidosChallenger, MidenEidosChallenger};
 pub use construction::Eidos;
+pub use domain::{
+    ByteString, Custom, DELEGATED_VERSIONING, DomainDescriptor, DomainEncoding, DomainNamespace,
+    DomainTag, DomainVersion, EidosDomain, EidosDomainRegistry, EidosEncoding, FeltSequence,
+    NAMESPACE_REGISTRY, Transcript, namespace, render_masm_constants,
+};
 pub use lmcs::{EidosLmcs, config as lmcs_config};
 
 /// Number of Felts in one Eidos message block.
