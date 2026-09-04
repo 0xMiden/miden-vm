@@ -207,7 +207,12 @@ where
 
     let periodic_columns = air.periodic_columns();
     let shared_period = max_period(&periodic_columns);
-    build_ace_dag_for_air_with_periodic_columns(air, config, periodic_columns, shared_period)
+    build_ace_dag_for_air_with_periodic_columns(
+        air,
+        config,
+        periodic_columns.into_owned(),
+        shared_period,
+    )
 }
 
 /// Build verifier-equivalent DAGs against one shared periodic-column basis.
@@ -232,7 +237,7 @@ where
             build_ace_dag_for_air_with_periodic_columns(
                 air,
                 config,
-                periodic_columns,
+                periodic_columns.into_owned(),
                 shared_period,
             )
         })

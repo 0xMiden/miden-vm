@@ -27,7 +27,7 @@
 
 mod aux;
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -151,7 +151,7 @@ impl BaseAir<Felt> for UintStoreMulAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         let mut cols = Vec::with_capacity(NUM_PERIODIC);
         for row in 0..MUL_PERIOD {
             let mut c = vec![Felt::ZERO; MUL_PERIOD];
@@ -166,7 +166,7 @@ impl BaseAir<Felt> for UintStoreMulAir {
             }
             cols.push(c);
         }
-        cols
+        Cow::Owned(cols)
     }
 }
 

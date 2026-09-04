@@ -51,15 +51,86 @@
 //! halved scaling `s'(z²) = 2·s(z)`, so the interpolation identity is preserved.
 
 use alloc::{collections::BTreeSet, vec::Vec};
-use core::marker::PhantomData;
+use core::{marker::PhantomData, ops::Deref};
 
-use p3_field::{ExtensionField, FieldArray, TwoAdicField, batch_multiplicative_inverse};
+use p3_field::{
+    ExtensionField, FieldArray, PackedValue, TwoAdicField, batch_multiplicative_inverse,
+};
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
 use p3_util::{linear_map::LinearMap, log2_strict_usize, reconstitute_from_base};
 use tracing::{debug_span, info_span};
 
 use crate::lmcs::row_list::RowList;
+
+/// A view of the first `height` rows of `inner`.
+///
+/// The barycentric sum runs over the size-`d` coset `gH`, while the committed matrix holds its
+/// low-degree extension over the size-`d * 2^log_blowup` coset. Bit reversal sends the first `d`
+/// indices of the larger coset to `gH`, in the same bit-reversed order the weights use, so the
+/// sum reads a prefix of the extension. Row indices are unchanged, so every accessor forwards
+/// straight through.
+struct RowPrefix<'a, M> {
+    inner: &'a M,
+    height: usize,
+}
+
+impl<T: Send + Sync + Clone, M: Matrix<T>> Matrix<T> for RowPrefix<'_, M> {
+    fn width(&self) -> usize {
+        self.inner.width()
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    unsafe fn get_unchecked(&self, r: usize, c: usize) -> T {
+        // Safety: `r < self.height <= inner.height()`, and the column range is unchanged.
+        unsafe { self.inner.get_unchecked(r, c) }
+    }
+
+    unsafe fn row_subseq_unchecked(
+        &self,
+        r: usize,
+        start: usize,
+        end: usize,
+    ) -> impl IntoIterator<Item = T, IntoIter = impl Iterator<Item = T> + Send + Sync> {
+        // Safety: `r < self.height <= inner.height()`, and the column range is unchanged.
+        unsafe { self.inner.row_subseq_unchecked(r, start, end) }
+    }
+
+    unsafe fn row_subslice_unchecked(
+        &self,
+        r: usize,
+        start: usize,
+        end: usize,
+    ) -> impl Deref<Target = [T]> {
+        // Safety: `r < self.height <= inner.height()`, and the column range is unchanged.
+        unsafe { self.inner.row_subslice_unchecked(r, start, end) }
+    }
+
+    fn horizontally_packed_row<'a, P>(
+        &'a self,
+        r: usize,
+    ) -> (impl Iterator<Item = P> + Send + Sync, impl Iterator<Item = T> + Send + Sync)
+    where
+        P: PackedValue<Value = T>,
+        T: Clone + 'a,
+    {
+        self.inner.horizontally_packed_row(r)
+    }
+
+    fn padded_horizontally_packed_row<'a, P>(
+        &'a self,
+        r: usize,
+    ) -> impl Iterator<Item = P> + Send + Sync
+    where
+        P: PackedValue<Value = T>,
+        T: Clone + Default + 'a,
+    {
+        self.inner.padded_horizontally_packed_row(r)
+    }
+}
 
 /// Precomputed `1/(zⱼ − xᵢ)` for N evaluation points.
 ///
@@ -187,11 +258,13 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
             .iter()
             .flat_map(|group| {
                 group.iter().map(|m| {
-                    let weights = &barycentric_weights[&(m.height() >> log_blowup as usize)];
+                    let degree = m.height() >> log_blowup as usize;
+                    let weights = &barycentric_weights[&degree];
                     let _guard =
                         debug_span!("evaluate matrix", height = weights.len(), width = m.width())
                             .entered();
-                    let mut results = m.columnwise_dot_product_batched(weights);
+                    let coset_rows = RowPrefix { inner: *m, height: degree };
+                    let mut results = coset_rows.columnwise_dot_product_batched(weights);
                     for batch_evals in results.iter_mut() {
                         *batch_evals *= barycentric_scalings;
                     }
