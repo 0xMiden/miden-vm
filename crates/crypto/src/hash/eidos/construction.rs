@@ -48,7 +48,7 @@ impl Eidos {
     /// Each lane is independent. Like [`Self::compress`], this adds no message framing.
     #[inline]
     pub fn compress_packed(cv: PackedChainingValue, block: PackedBlock) -> PackedChainingValue {
-        compression::compress_packed_felt_cv(cv, block)
+        compression::compress_packed_felt_cv(&cv, &block)
     }
 
     /// Return all sixteen raw XOF output lanes for one complete block.
@@ -295,7 +295,7 @@ where
         len,
         framing::init_packed_u32_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [Felt::ZERO; PACKED_LANES],
-        compression::compress_packed_felt_block,
+        |cv, block| compression::compress_packed_felt_block(&cv, &block),
     );
     encoding::pack_cv_to_felts(cv)
 }
@@ -310,9 +310,9 @@ where
         len,
         framing::init_packed_u32_cv(GENERIC_FELT_TAG, [len_u32, 0, 0]),
         [0; PACKED_LANES],
-        compression::compress_packed_u64_block,
+        |cv, block| compression::compress_packed_u64_block(&cv, &block),
     );
-    compression::pack_packed_u64_cv(cv)
+    compression::pack_packed_u64_cv(&cv)
 }
 
 impl CryptographicHasher<Felt, [Felt; DIGEST_WIDTH]> for Eidos {

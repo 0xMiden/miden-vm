@@ -84,7 +84,7 @@ impl PseudoCompressionFunction<PackedDigest, COMPRESSION_INPUTS> for EidosLmcsCo
             input[1][2],
             input[1][3],
         ];
-        compression::compress_packed_u64_cv(framing::init_packed_u64_cv(0, [0; 3]), block)
+        compression::compress_packed_u64_cv(&framing::init_packed_u64_cv(0, [0; 3]), &block)
     }
 }
 
@@ -132,7 +132,7 @@ impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
             input,
             [Felt::ZERO; PACKED_LANES],
             |cv, block| {
-                compression::compress_cv_packed(cv, encoding::encode_packed_felt_block(block))
+                compression::compress_cv_packed(&cv, &encoding::encode_packed_felt_block(block))
             },
         );
         *state = encoding::pack_cv_to_packed_u64s(cv);
@@ -259,7 +259,7 @@ mod tests {
             &packed_state,
         );
         for lane in 0..PACKED_LANES {
-            assert_eq!(unpack_digest_lane(packed, lane), expected);
+            assert_eq!(unpack_digest_lane(&packed, lane), expected);
         }
     }
 
@@ -468,13 +468,13 @@ mod tests {
         let expected = eidos_hash_two_digests(left, right);
         assert_eq!(actual, expected);
 
-        let left_packed = pack_digest_lanes(array::from_fn(|lane| digest_from_seed(100 + lane)));
-        let right_packed = pack_digest_lanes(array::from_fn(|lane| digest_from_seed(200 + lane)));
+        let left_packed = pack_digest_lanes(&array::from_fn(|lane| digest_from_seed(100 + lane)));
+        let right_packed = pack_digest_lanes(&array::from_fn(|lane| digest_from_seed(200 + lane)));
         let actual_packed = compressor.compress([left_packed, right_packed]);
 
         for (lane, _) in left_packed[0].iter().enumerate() {
-            let left_lane = unpack_digest_lane(left_packed, lane);
-            let right_lane = unpack_digest_lane(right_packed, lane);
+            let left_lane = unpack_digest_lane(&left_packed, lane);
+            let right_lane = unpack_digest_lane(&right_packed, lane);
             let expected_lane = eidos_hash_two_digests(left_lane, right_lane);
 
             for word in 0..DIGEST_WIDTH {
@@ -518,11 +518,11 @@ mod tests {
             .map(|value| value.as_canonical_u64())
     }
 
-    fn pack_digest_lanes(lanes: [Digest; PACKED_LANES]) -> PackedDigest {
+    fn pack_digest_lanes(lanes: &[Digest; PACKED_LANES]) -> PackedDigest {
         array::from_fn(|word| array::from_fn(|lane| lanes[lane][word]))
     }
 
-    fn unpack_digest_lane(digest: PackedDigest, lane: usize) -> Digest {
+    fn unpack_digest_lane(digest: &PackedDigest, lane: usize) -> Digest {
         array::from_fn(|word| digest[word][lane])
     }
 }
