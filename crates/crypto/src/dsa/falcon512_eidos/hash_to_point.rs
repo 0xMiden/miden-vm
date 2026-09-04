@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
-use super::{FALCON_HASH_TO_POINT_SELECTOR, MODULUS, N, Nonce, Polynomial, ZERO, math::FalconFelt};
-use crate::{Felt, Word, hash::eidos::Eidos};
+use super::{MODULUS, N, Nonce, Polynomial, ZERO, math::FalconFelt};
+use crate::{
+    Felt, Word,
+    hash::eidos::{Eidos, domains::FALCON_HASH_TO_POINT},
+};
 
 // HASH-TO-POINT FUNCTIONS
 // ================================================================================================
@@ -18,7 +21,7 @@ use crate::{Felt, Word, hash::eidos::Eidos};
 pub fn hash_to_point_eidos(message: Word, nonce: &Nonce) -> Polynomial<FalconFelt> {
     let nonce_elements = nonce.to_elements();
 
-    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT_SELECTOR, 0);
+    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT, 0);
     cv = Eidos::compress(cv, nonce_elements);
 
     let mut block = [ZERO; 8];

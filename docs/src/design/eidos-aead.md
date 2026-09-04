@@ -11,12 +11,12 @@ covers the resulting ciphertext before decryption releases any plaintext.
 
 ## Key derivation
 
-The secret key and nonce are each four field elements. Two registered selectors derive
+The secret key and nonce are each four field elements. Two registered domains derive
 domain-separated session values:
 
 ```text
-K_ctr = compress(init(AEAD_CTR_SELECTOR, [0, 0, 0]), key || nonce)
-K_mac = compress(init(AEAD_MAC_SELECTOR, [0, 0, 0]), key || nonce)
+K_ctr = compress(init(AEAD_CTR_KEY, [0, 0, 0]), key || nonce)
+K_mac = compress(init(AEAD_MAC_KEY, [0, 0, 0]), key || nonce)
 ```
 
 `K_ctr` is the secret chaining value for the counter-mode stream. `K_mac` is interpreted as

@@ -6,7 +6,7 @@
 //! [`decrypt_felts_expanded_authenticated`](crate::aead::aead_eidos::expanded::decrypt_felts_expanded_authenticated).
 //!
 //! The CTR and MAC keys are separate Eidos compressions of `key || nonce` under their registered
-//! selectors. Encryption XORs each pair of plaintext `u32` limbs with one pair from the raw Eidos
+//! domains. Encryption XORs each pair of plaintext `u32` limbs with one pair from the raw Eidos
 //! XOF. For authentication, adjacent elements of
 //! `nonce || associated_data || ciphertext || [ad_len, ct_len] || padding` become coefficients in
 //! the quadratic extension field. Horner evaluation starts with one, which binds the number of
@@ -16,11 +16,15 @@ use alloc::vec::Vec;
 
 use subtle::{Choice, ConstantTimeEq};
 
-use super::{AEAD_CTR_SELECTOR, AEAD_MAC_SELECTOR, MAX_AUTHENTICATED_INPUT_FELTS};
+use super::MAX_AUTHENTICATED_INPUT_FELTS;
 use crate::{
     Felt, Word,
     field::{BasedVectorSpace, BinomialExtensionField},
-    hash::eidos::{BLOCK_LEN, Eidos, encoding},
+    hash::eidos::{
+        BLOCK_LEN, Eidos,
+        domains::{AEAD_CTR_KEY, AEAD_MAC_KEY},
+        encoding,
+    },
 };
 
 const FELTS_PER_CTR_BLOCK: usize = BLOCK_LEN;
@@ -36,9 +40,7 @@ type QuadFelt = BinomialExtensionField<Felt, 2>;
 /// The returned word lies in Eidos's 252-bit output subspace and is used as the input CV for
 /// keystream generation.
 pub fn derive_ctr_key(key: Word, nonce: Word) -> Word {
-    // Fixed-arity derivations use a registered selector for domain separation. Variable-length
-    // Eidos hashes bind their length in the initial chaining value.
-    let init = Eidos::init_chaining_word(AEAD_CTR_SELECTOR, 0);
+    let init = Eidos::init_chaining_word(AEAD_CTR_KEY, 0);
     Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
 }
 
@@ -47,9 +49,7 @@ pub fn derive_ctr_key(key: Word, nonce: Word) -> Word {
 /// The returned word is `[r0, r1, s0, s1]`, where `r = (r0, r1)` is the
 /// quadratic-extension evaluation point and `s = (s0, s1)` is the final mask.
 pub fn derive_mac_key(key: Word, nonce: Word) -> Word {
-    // Fixed-arity derivations use a registered selector for domain separation. Variable-length
-    // Eidos hashes bind their length in the initial chaining value.
-    let init = Eidos::init_chaining_word(AEAD_MAC_SELECTOR, 0);
+    let init = Eidos::init_chaining_word(AEAD_MAC_KEY, 0);
     Eidos::compress(init, [key[0], key[1], key[2], key[3], nonce[0], nonce[1], nonce[2], nonce[3]])
 }
 

@@ -1,18 +1,20 @@
 //! Eidos LMCS configuration.
 //!
-//! LMCS leaf hashing uses zero padding to the eight-Felt block width and deliberately does not bind
-//! a variable input length. Matrix metadata fixes every committed row width, so this construction
-//! is only suitable for those fixed-width rows and is not interchangeable with
-//! [`Eidos::hash_elements`](super::Eidos::hash_elements). Internal nodes use the distinct
-//! eight-felt Eidos chaining value and therefore remain separated from leaves.
+//! LMCS leaf hashing has a registered custom domain. Each matrix row is padded independently to
+//! the eight-Felt block width, and the total padded length is bound in the initial chaining value.
+//! Matrix metadata fixes the row boundaries and widths. Internal nodes use the reserved Merkle
+//! inner-node construction and remain separated from leaves.
 
-use core::array;
+use alloc::vec::Vec;
 
 use p3_symmetric::PseudoCompressionFunction;
 
 use super::{
-    PACKED_LANES, compression, encoding,
-    framing::{self, FELT_BLOCK_INIT_CV, FELT_INIT_CV_U64},
+    PACKED_LANES, compression,
+    domain::EidosDomain,
+    domains::LmcsLeafDomain,
+    encoding,
+    framing::{self, MERKLE_NODE_INIT_CV},
 };
 use crate::{
     Felt,
@@ -27,17 +29,12 @@ const BLOCK_LEN: usize = super::BLOCK_LEN;
 
 const COMPRESSION_INPUTS: usize = 2;
 
-// LMCS creates hasher states with `Default`. Eidos starts from a non-zero
-// chaining value, so the state carries one extra flag to mark initialization.
-const INIT_FLAG_IDX: usize = DIGEST_WIDTH;
-const STATE_WIDTH: usize = DIGEST_WIDTH + 1;
-
 type PackedFelt = [Felt; PACKED_LANES];
 type PackedU64 = [u64; PACKED_LANES];
 type Digest = [u64; DIGEST_WIDTH];
 type PackedDigest = [PackedU64; DIGEST_WIDTH];
-type State = [u64; STATE_WIDTH];
-type PackedState = [PackedU64; STATE_WIDTH];
+type State = Digest;
+type PackedState = PackedDigest;
 
 /// Eidos LMCS configuration.
 pub type EidosLmcs = LmcsConfig<
@@ -45,7 +42,7 @@ pub type EidosLmcs = LmcsConfig<
     PackedU64,
     EidosLmcsHasher,
     EidosLmcsCompressor,
-    STATE_WIDTH,
+    DIGEST_WIDTH,
     DIGEST_WIDTH,
 >;
 
@@ -70,7 +67,7 @@ impl PseudoCompressionFunction<Digest, COMPRESSION_INPUTS> for EidosLmcsCompress
             input[1][2],
             input[1][3],
         ];
-        encoding::pack_cv_to_u64s(compression::compress_u64_cv(FELT_BLOCK_INIT_CV, block))
+        encoding::pack_cv_to_u64s(compression::compress_u64_cv(MERKLE_NODE_INIT_CV, block))
     }
 }
 
@@ -87,61 +84,74 @@ impl PseudoCompressionFunction<PackedDigest, COMPRESSION_INPUTS> for EidosLmcsCo
             input[1][2],
             input[1][3],
         ];
-        compression::compress_packed_u64_cv(
-            framing::init_packed_u64_cv(0, [BLOCK_LEN as u32, 0, 0]),
-            block,
-        )
+        compression::compress_packed_u64_cv(framing::init_packed_u64_cv(0, [0; 3]), block)
     }
 }
 
 impl StatefulHasher<Felt, Digest> for EidosLmcsHasher {
     type State = State;
 
-    fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Felt>) {
-        ensure_initialized(state);
+    fn initialize_state(&self, state: &mut Self::State, encoded_len: usize) {
+        *state = new_state(encoded_len);
+    }
 
-        let cv = absorb_blocks(
-            encoding::unpack_u64_cv(read_digest(state)),
-            input,
-            Felt::ZERO,
-            |cv, block| compression::compress_cv(cv, encoding::encode_felt_block(&block)),
-        );
-        pack_lmcs_cv_into(cv, state);
+    fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = Felt>) {
+        let cv = absorb_blocks(encoding::unpack_u64_cv(*state), input, Felt::ZERO, |cv, block| {
+            compression::compress_cv(cv, encoding::encode_felt_block(&block))
+        });
+        *state = encoding::pack_cv_to_u64s(cv);
     }
 
     fn squeeze(&self, state: &Self::State) -> Digest {
-        if state[INIT_FLAG_IDX] == 0 {
-            FELT_INIT_CV_U64
-        } else {
-            read_digest(state)
+        *state
+    }
+
+    fn hash_rows<'a>(&self, rows: impl IntoIterator<Item = &'a [Felt]>) -> Digest
+    where
+        Felt: 'a,
+    {
+        let rows = rows.into_iter().collect::<Vec<_>>();
+        let mut state = new_state(encoded_len(rows.iter().map(|row| row.len())));
+        for row in rows {
+            self.absorb_into(&mut state, row.iter().copied());
         }
+        self.squeeze(&state)
     }
 }
 
 impl StatefulHasher<PackedFelt, PackedDigest> for EidosLmcsHasher {
     type State = PackedState;
 
-    fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = PackedFelt>) {
-        ensure_packed_initialized(state);
+    fn initialize_state(&self, state: &mut Self::State, encoded_len: usize) {
+        *state = new_packed_state(encoded_len);
+    }
 
+    fn absorb_into(&self, state: &mut Self::State, input: impl IntoIterator<Item = PackedFelt>) {
         let cv = absorb_blocks(
-            encoding::unpack_packed_u64_cv(read_digest(state)),
+            encoding::unpack_packed_u64_cv(*state),
             input,
             [Felt::ZERO; PACKED_LANES],
             |cv, block| {
                 compression::compress_cv_packed(cv, encoding::encode_packed_felt_block(block))
             },
         );
-        pack_lmcs_cv_packed_into(cv, state);
+        *state = encoding::pack_cv_to_packed_u64s(cv);
     }
 
     fn squeeze(&self, state: &Self::State) -> PackedDigest {
-        let initialized = packed_initialization_state(state);
-        if initialized {
-            read_digest(state)
-        } else {
-            array::from_fn(|word| [FELT_INIT_CV_U64[word]; PACKED_LANES])
+        *state
+    }
+
+    fn hash_rows<'a>(&self, rows: impl IntoIterator<Item = &'a [PackedFelt]>) -> PackedDigest
+    where
+        PackedFelt: 'a,
+    {
+        let rows = rows.into_iter().collect::<Vec<_>>();
+        let mut state = new_packed_state(encoded_len(rows.iter().map(|row| row.len())));
+        for row in rows {
+            self.absorb_into(&mut state, row.iter().copied());
         }
+        self.squeeze(&state)
     }
 }
 
@@ -186,63 +196,42 @@ where
     digest
 }
 
-fn ensure_initialized(state: &mut State) {
-    if state[INIT_FLAG_IDX] != 0 {
-        return;
-    }
-
-    write_digest(state, FELT_INIT_CV_U64);
-    state[INIT_FLAG_IDX] = 1;
+fn new_state(encoded_len: usize) -> State {
+    let encoded_len = u32::try_from(encoded_len).expect("LMCS encoded length exceeds u32");
+    let cv = framing::init_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0]);
+    encoding::pack_cv_to_u64s(cv)
 }
 
-fn ensure_packed_initialized(state: &mut PackedState) {
-    let initialized = packed_initialization_state(state);
-
-    if initialized {
-        return;
-    }
-
-    for (word, value) in state[..DIGEST_WIDTH].iter_mut().zip(FELT_INIT_CV_U64) {
-        *word = [value; PACKED_LANES];
-    }
-    state[INIT_FLAG_IDX] = [1; PACKED_LANES];
+fn new_packed_state(encoded_len: usize) -> PackedState {
+    let encoded_len = u32::try_from(encoded_len).expect("LMCS encoded length exceeds u32");
+    framing::init_packed_u64_cv(LmcsLeafDomain::TAG.as_u32(), [encoded_len, 0, 0])
 }
 
-fn packed_initialization_state(state: &PackedState) -> bool {
-    let initialized = state[INIT_FLAG_IDX][0] != 0;
-    assert!(
-        state[INIT_FLAG_IDX].iter().all(|&flag| (flag != 0) == initialized),
-        "packed LMCS state contains mixed initialization flags"
-    );
-    initialized
-}
-
-fn read_digest<T: Copy, const WIDTH: usize>(state: &[T; WIDTH]) -> [T; DIGEST_WIDTH] {
-    array::from_fn(|idx| state[idx])
-}
-
-fn write_digest<T: Copy, const WIDTH: usize>(state: &mut [T; WIDTH], digest: [T; DIGEST_WIDTH]) {
-    state[..DIGEST_WIDTH].copy_from_slice(&digest);
-}
-
-fn pack_lmcs_cv_into(cv: [u32; 8], state: &mut State) {
-    write_digest(state, encoding::pack_cv_to_u64s(cv));
-}
-
-fn pack_lmcs_cv_packed_into(cv: [[u32; PACKED_LANES]; 8], state: &mut PackedState) {
-    write_digest(state, encoding::pack_cv_to_packed_u64s(cv));
+fn encoded_len(row_lengths: impl IntoIterator<Item = usize>) -> usize {
+    row_lengths.into_iter().fold(0usize, |total, len| {
+        let padded = len
+            .checked_add(BLOCK_LEN - 1)
+            .map(|len| len / BLOCK_LEN * BLOCK_LEN)
+            .expect("LMCS row length exceeds usize");
+        total.checked_add(padded).expect("LMCS encoded length exceeds usize")
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
+    use core::array;
 
     use p3_symmetric::PseudoCompressionFunction;
 
     use super::*;
     use crate::{
+        Word,
         hash::eidos::{Eidos, compression::compress_felt_block_for_test},
-        stark::hasher::{Alignable, StatefulHasher},
+        stark::{
+            hasher::{Alignable, StatefulHasher},
+            lmcs::{Lmcs, LmcsTree},
+            matrix::RowMajorMatrix,
+        },
     };
 
     const INPUT_LENGTHS: [usize; 7] = [0, 1, 7, 8, 9, 16, 17];
@@ -253,31 +242,32 @@ mod tests {
     }
 
     #[test]
-    fn empty_row_sequence_squeezes_initialized_digest() {
+    fn empty_row_sequence_squeezes_length_bound_digest() {
         let hasher = EidosLmcsHasher;
+        let scalar_state = new_state(0);
 
         let scalar =
-            <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::squeeze(&hasher, &[0; STATE_WIDTH]);
-        assert_eq!(scalar, FELT_INIT_CV_U64);
+            <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::squeeze(&hasher, &scalar_state);
+        let expected: Digest = Eidos::init_chaining_word_with_params(LmcsLeafDomain, [0; 3])
+            .into_elements()
+            .map(|value| value.as_canonical_u64());
+        assert_eq!(scalar, expected);
 
+        let packed_state = new_packed_state(0);
         let packed = <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::squeeze(
             &hasher,
-            &[[0; PACKED_LANES]; STATE_WIDTH],
+            &packed_state,
         );
         for lane in 0..PACKED_LANES {
-            assert_eq!(unpack_digest_lane(packed, lane), FELT_INIT_CV_U64);
+            assert_eq!(unpack_digest_lane(packed, lane), expected);
         }
     }
 
+    #[cfg(target_pointer_width = "64")]
     #[test]
-    #[should_panic(expected = "packed LMCS state contains mixed initialization flags")]
-    fn mixed_packed_initialization_flags_are_rejected() {
-        let hasher = EidosLmcsHasher;
-        let mut state = [[0; PACKED_LANES]; STATE_WIDTH];
-        state[INIT_FLAG_IDX][0] = 1;
-
-        let _ =
-            <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::squeeze(&hasher, &state);
+    #[should_panic(expected = "LMCS encoded length exceeds u32")]
+    fn encoded_length_must_fit_the_framing_lane() {
+        let _ = new_state(u32::MAX as usize + 1);
     }
 
     #[test]
@@ -287,14 +277,14 @@ mod tests {
         let mut explicitly_padded = input.clone();
         explicitly_padded.resize(16, Felt::ZERO);
 
-        let mut partial_state = [0; STATE_WIDTH];
+        let mut partial_state = new_state(16);
         <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
             &hasher,
             &mut partial_state,
             input,
         );
 
-        let mut padded_state = [0; STATE_WIDTH];
+        let mut padded_state = new_state(16);
         <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
             &hasher,
             &mut padded_state,
@@ -307,8 +297,8 @@ mod tests {
     #[test]
     fn frozen_lmcs_tree_vector() {
         let hasher = EidosLmcsHasher;
-        let mut left_state = [0; STATE_WIDTH];
-        let mut right_state = [0; STATE_WIDTH];
+        let mut left_state = new_state(16);
+        let mut right_state = new_state(16);
         <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
             &hasher,
             &mut left_state,
@@ -319,30 +309,30 @@ mod tests {
             &mut right_state,
             (101..=109).map(Felt::new_unchecked),
         );
-        let left = read_digest(&left_state);
-        let right = read_digest(&right_state);
+        let left = left_state;
+        let right = right_state;
         let root = EidosLmcsCompressor.compress([left, right]);
 
         assert_eq!(
             left,
-            [6361241547698535781, 8537111288558577663, 851413926585467786, 31821888461167226,],
+            [7975491762537237790, 210725808216452534, 809262867721008121, 4612689512912990922,],
         );
         assert_eq!(
             right,
             [
-                5928680795072819257,
-                9046658530231547486,
-                1678833814049704111,
-                7048430306948613652,
+                3235890721826482854,
+                5501488662693794106,
+                7516676704806885018,
+                6369515668133163107,
             ],
         );
         assert_eq!(
             root,
             [
-                4698205327658179430,
-                1657025491673246698,
-                418554804512439445,
-                8258405545248521438
+                2202331962719226590,
+                2302273434923287409,
+                7081266703261990827,
+                2694702893234644687,
             ],
         );
     }
@@ -355,7 +345,8 @@ mod tests {
             let lanes = scalar_lane_inputs(len);
             let packed_input = pack_lanes(&lanes);
 
-            let mut packed_state = [[0; PACKED_LANES]; STATE_WIDTH];
+            let encoded_len = encoded_len([len]);
+            let mut packed_state = new_packed_state(encoded_len);
             <EidosLmcsHasher as StatefulHasher<PackedFelt, PackedDigest>>::absorb_into(
                 &hasher,
                 &mut packed_state,
@@ -363,14 +354,14 @@ mod tests {
             );
 
             for lane in 0..PACKED_LANES {
-                let mut scalar_state = [0; STATE_WIDTH];
+                let mut scalar_state = new_state(encoded_len);
                 <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
                     &hasher,
                     &mut scalar_state,
                     lanes[lane].iter().copied(),
                 );
 
-                for word in 0..STATE_WIDTH {
+                for word in 0..DIGEST_WIDTH {
                     assert_eq!(
                         packed_state[word][lane], scalar_state[word],
                         "packed lane {lane} diverged from scalar at input length {len}, word {word}",
@@ -386,23 +377,85 @@ mod tests {
 
         for len in INPUT_LENGTHS {
             let input = scalar_lane_inputs(len)[0].clone();
+            let encoded_len = encoded_len([len]);
 
-            let mut state = [0; STATE_WIDTH];
+            let mut state = new_state(encoded_len);
             <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
                 &hasher,
                 &mut state,
                 input.iter().copied(),
             );
 
-            let mut expected = Eidos::init_chaining_word(0, 0).into();
+            let mut expected =
+                Eidos::init_chaining_word_with_params(LmcsLeafDomain, [encoded_len as u32, 0, 0])
+                    .into();
             expected = absorb_blocks(expected, input, Felt::ZERO, compress_felt_block_for_test);
 
-            let actual = read_digest(&state).map(Felt::new_unchecked);
+            let actual = state.map(Felt::new_unchecked);
             assert_eq!(
                 actual, expected,
                 "LMCS digest changed field semantics at input length {len}",
             );
         }
+    }
+
+    #[test]
+    fn lmcs_paths_bind_the_sum_of_independently_padded_rows() {
+        let first = (1..=3).map(Felt::new_unchecked).collect::<Vec<_>>();
+        let second = (4..=12).map(Felt::new_unchecked).collect::<Vec<_>>();
+        let matrices = vec![
+            RowMajorMatrix::new(first.clone(), first.len()),
+            RowMajorMatrix::new(second.clone(), second.len()),
+        ];
+        let lmcs = config();
+
+        let hasher = EidosLmcsHasher;
+        let mut expected_state = new_state(24);
+        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
+            &hasher,
+            &mut expected_state,
+            first.iter().copied(),
+        );
+        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
+            &hasher,
+            &mut expected_state,
+            second.iter().copied(),
+        );
+
+        let leaf = lmcs.hash([first.as_slice(), second.as_slice()]);
+        assert_eq!(*leaf.as_ref(), expected_state);
+        let tree = lmcs.build_tree(matrices.clone());
+        let aligned_tree = lmcs.build_aligned_tree(matrices);
+        assert_eq!(tree.root(), leaf);
+        assert_eq!(aligned_tree.root(), leaf);
+    }
+
+    #[test]
+    fn length_binding_prevents_extending_a_leaf_digest() {
+        let hasher = EidosLmcsHasher;
+        let first = (1..=8).map(Felt::new_unchecked).collect::<Vec<_>>();
+        let second = (9..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+
+        let mut prefix_state = new_state(8);
+        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
+            &hasher,
+            &mut prefix_state,
+            first.iter().copied(),
+        );
+        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
+            &hasher,
+            &mut prefix_state,
+            second.iter().copied(),
+        );
+
+        let mut full_state = new_state(16);
+        <EidosLmcsHasher as StatefulHasher<Felt, Digest>>::absorb_into(
+            &hasher,
+            &mut full_state,
+            first.into_iter().chain(second),
+        );
+
+        assert_ne!(prefix_state, full_state);
     }
 
     #[test]
@@ -458,8 +511,11 @@ mod tests {
             };
             Felt::new_unchecked(value)
         });
-        let expected: [Felt; DIGEST_WIDTH] = Eidos::hash_elements(&elements).into();
-        expected.map(|value| value.as_canonical_u64())
+        let left = Word::new(elements[..DIGEST_WIDTH].try_into().unwrap());
+        let right = Word::new(elements[DIGEST_WIDTH..].try_into().unwrap());
+        Eidos::merge(&[left, right])
+            .into_elements()
+            .map(|value| value.as_canonical_u64())
     }
 
     fn pack_digest_lanes(lanes: [Digest; PACKED_LANES]) -> PackedDigest {

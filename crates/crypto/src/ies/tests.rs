@@ -851,80 +851,69 @@ mod protocol_tests {
     // SEALED MESSAGE SERIALIZATION ROUND-TRIP TESTS (BYTES)
     // --------------------------------------------------------------------------------------------
 
-    #[test]
-    fn test_sealed_message_serialization_roundtrip_k256_xchacha() {
+    fn assert_serialization_roundtrip(
+        sealing_key: SealingKey,
+        unsealing_key: UnsealingKey,
+        expected_scheme: IesScheme,
+    ) {
         let mut rng = rand::rng();
+        let plaintext = b"serialization roundtrip";
+        let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
+        assert_eq!(sealed.scheme(), expected_scheme);
+        let bytes = sealed.to_bytes();
+        assert_eq!(bytes[0], expected_scheme as u8);
+
+        let decoded = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.scheme(), expected_scheme);
+        let opened = unsealing_key.unseal_bytes(decoded).unwrap();
+        assert_eq!(opened.as_slice(), plaintext);
+    }
+
+    #[test]
+    fn sealed_message_serialization_roundtrips_for_every_scheme() {
+        let mut rng = rand::rng();
+
         let sk = KeyExchangeKey::with_rng(&mut rng);
-        let pk = sk.public_key();
-        let sealing_key = SealingKey::K256XChaCha20Poly1305(pk);
-        let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(sk);
+        assert_serialization_roundtrip(
+            SealingKey::K256XChaCha20Poly1305(sk.public_key()),
+            UnsealingKey::K256XChaCha20Poly1305(sk),
+            IesScheme::K256XChaCha20Poly1305,
+        );
 
-        let plaintext = b"serialization roundtrip";
-        let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
-        let before = sealed.scheme_name();
-        let bytes = sealed.to_bytes();
-        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
-        let after = sealed2.scheme_name();
-        assert_eq!(before, after);
-        let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
-        assert_eq!(opened.as_slice(), plaintext);
-    }
+        let sk = KeyExchangeKey25519::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::X25519XChaCha20Poly1305(sk.public_key()),
+            UnsealingKey::X25519XChaCha20Poly1305(sk),
+            IesScheme::X25519XChaCha20Poly1305,
+        );
 
-    #[test]
-    fn test_sealed_message_serialization_roundtrip_x25519_xchacha() {
-        let mut rng = rand::rng();
-        let sk = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::with_rng(&mut rng);
-        let pk = sk.public_key();
-        let sealing_key = SealingKey::X25519XChaCha20Poly1305(pk);
-        let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(sk);
-
-        let plaintext = b"serialization roundtrip";
-        let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
-        let before = sealed.scheme_name();
-        let bytes = sealed.to_bytes();
-        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
-        let after = sealed2.scheme_name();
-        assert_eq!(before, after);
-        let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
-        assert_eq!(opened.as_slice(), plaintext);
-    }
-
-    #[test]
-    fn test_sealed_message_serialization_roundtrip_k256_aead_eidos() {
-        let mut rng = rand::rng();
         let sk = KeyExchangeKey::with_rng(&mut rng);
-        let pk = sk.public_key();
-        let sealing_key = SealingKey::K256AeadEidos(pk);
-        let unsealing_key = UnsealingKey::K256AeadEidos(sk);
+        assert_serialization_roundtrip(
+            SealingKey::K256AeadPoseidon2(sk.public_key()),
+            UnsealingKey::K256AeadPoseidon2(sk),
+            IesScheme::K256AeadPoseidon2,
+        );
 
-        let plaintext = b"serialization roundtrip";
-        let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
-        let before = sealed.scheme_name();
-        let bytes = sealed.to_bytes();
-        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
-        let after = sealed2.scheme_name();
-        assert_eq!(before, after);
-        let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
-        assert_eq!(opened.as_slice(), plaintext);
-    }
+        let sk = KeyExchangeKey25519::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::X25519AeadPoseidon2(sk.public_key()),
+            UnsealingKey::X25519AeadPoseidon2(sk),
+            IesScheme::X25519AeadPoseidon2,
+        );
 
-    #[test]
-    fn test_sealed_message_serialization_roundtrip_x25519_aead_eidos() {
-        let mut rng = rand::rng();
-        let sk = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::with_rng(&mut rng);
-        let pk = sk.public_key();
-        let sealing_key = SealingKey::X25519AeadEidos(pk);
-        let unsealing_key = UnsealingKey::X25519AeadEidos(sk);
+        let sk = KeyExchangeKey::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::K256AeadEidos(sk.public_key()),
+            UnsealingKey::K256AeadEidos(sk),
+            IesScheme::K256AeadEidos,
+        );
 
-        let plaintext = b"serialization roundtrip";
-        let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
-        let before = sealed.scheme_name();
-        let bytes = sealed.to_bytes();
-        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
-        let after = sealed2.scheme_name();
-        assert_eq!(before, after);
-        let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
-        assert_eq!(opened.as_slice(), plaintext);
+        let sk = KeyExchangeKey25519::with_rng(&mut rng);
+        assert_serialization_roundtrip(
+            SealingKey::X25519AeadEidos(sk.public_key()),
+            UnsealingKey::X25519AeadEidos(sk),
+            IesScheme::X25519AeadEidos,
+        );
     }
 }
 
@@ -1043,6 +1032,8 @@ mod keys_serialization_tests {
             SealingKey::X25519XChaCha20Poly1305(
                 KeyExchangeKey25519::with_rng(&mut rng).public_key(),
             ),
+            SealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng).public_key()),
+            SealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
             SealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng).public_key()),
             SealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
         ]
@@ -1053,9 +1044,24 @@ mod keys_serialization_tests {
         vec![
             UnsealingKey::K256XChaCha20Poly1305(KeyExchangeKey::with_rng(&mut rng)),
             UnsealingKey::X25519XChaCha20Poly1305(KeyExchangeKey25519::with_rng(&mut rng)),
+            UnsealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng)),
+            UnsealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng)),
             UnsealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng)),
             UnsealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng)),
         ]
+    }
+
+    #[test]
+    fn scheme_tags_are_stable_and_distinct() {
+        let tags = [
+            IesScheme::K256XChaCha20Poly1305 as u8,
+            IesScheme::X25519XChaCha20Poly1305 as u8,
+            IesScheme::K256AeadPoseidon2 as u8,
+            IesScheme::X25519AeadPoseidon2 as u8,
+            IesScheme::K256AeadEidos as u8,
+            IesScheme::X25519AeadEidos as u8,
+        ];
+        assert_eq!(tags, [0, 1, 2, 3, 4, 5]);
     }
 
     #[test]

@@ -11,7 +11,9 @@ use super::{
     Serializable, Signature,
 };
 use crate::{
-    SequentialCommit, Word, dsa::falcon512_eidos::FALCON_ENCODING_BITS, hash::eidos::Eidos,
+    SequentialCommit, Word,
+    dsa::falcon512_eidos::FALCON_ENCODING_BITS,
+    hash::eidos::{Eidos, domains::FALCON_PUBLIC_KEY},
 };
 
 // PUBLIC KEY
@@ -32,7 +34,7 @@ impl PublicKey {
         signature.public_key().clone()
     }
 
-    /// Returns a commitment to the public key using Eidos.
+    /// Returns the Eidos commitment to the public key in its registered domain.
     pub fn to_commitment(&self) -> Word {
         <Self as SequentialCommit>::to_commitment(self)
     }
@@ -42,7 +44,7 @@ impl SequentialCommit for PublicKey {
     type Commitment = Word;
 
     fn to_commitment(&self) -> Self::Commitment {
-        Eidos::hash_elements(&self.to_elements())
+        Eidos::hash_elements_in_domain(&self.to_elements(), FALCON_PUBLIC_KEY)
     }
 
     fn to_elements(&self) -> Vec<Felt> {
