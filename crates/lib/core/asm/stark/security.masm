@@ -147,10 +147,13 @@ end
 #!
 #! - out-of-domain: the configured PCS has `log_blowup = 3`. For an AIR whose largest symbolic
 #!   constraint degree is `M`, Lifted STARK splits the quotient into the smallest power-of-two
-#!   number of chunks that is at least `max(M - 1, 1)`. The prover and verifier reject the AIR
+#!   number of chunks `c` that is at least `max(M - 1, 1)`. The prover and verifier reject the AIR
 #!   configuration if it requires more than `2^3` chunks. Therefore every proof accepted under
-#!   this configuration has `M <= 9`. Its out-of-domain term is at least
-#!   `127 - floor(log2(10)) - height = 124 - height`, which is greater than the lookup bound
+#!   this configuration has `M <= 9` and `c <= 8`. The AIRs read the `local` and `next` rows only,
+#!   so the DEEP-ALI identity is tested at a point where it has degree at most
+#!   `max(M * (2^height + 1) + 2^height - 1, (c + 1) * 2^height + 1) <= 10 * 2^height + 8`, which
+#!   `11 * 2^height` bounds for `height >= 3`. Its out-of-domain term is therefore at least
+#!   `127 - ceil(log2(11)) - height = 123 - height`, which is greater than the lookup bound
 #!   `119 - height`;
 #! - FRI folding: `FRI_FOLDING_BASE_BITS - height + folding_pow >= 122 - height`, above
 #!   `119 - height`;
