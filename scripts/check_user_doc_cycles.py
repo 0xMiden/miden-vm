@@ -51,6 +51,8 @@ def extract_cycles_from_description(description: str) -> str:
     block = re.sub(r"where:\s*", "where ", block, flags=re.IGNORECASE)
     block = re.sub(r"[,.\:;]", " ", block)
     block = re.sub(r"\s+", " ", block.lower()).strip()
+    if not block:
+        raise MissingCycleTextError("description has empty cycle text")
     if is_estimate:
         return f"estimate {block}"
     return block
@@ -176,10 +178,6 @@ def table_header_cells(content: str, row_start: int) -> list[str] | None:
 
 def _normalize_cycle_cell_text(text: str) -> str:
     text = text.lower()
-    if re.fullmatch(r"\d+(?: cycles?)?", text, re.IGNORECASE):
-        return text
-    if re.fullmatch(r"\d+(?: \d+)+", text):
-        return text
     match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", text, re.IGNORECASE)
     if match:
         return re.sub(r"\s+", " ", match.group(1).lower())
@@ -193,8 +191,9 @@ def extract_cycle_cell_from_row(
 ) -> str | None:
     """Return the cycle cell text from a marked markdown table row.
 
-    When the table has a Cycles column header, use that column. Otherwise fall back to
-    an embedded `*(N cycles)*` fragment in the instruction cell (u32_operations).
+    When the table has a Cycles column header, that column is authoritative: a blank
+    cell returns None (no fallback). Otherwise fall back to an embedded
+    `*(N cycles)*` fragment in the instruction cell (u32_operations).
     """
     cells = [c.strip() for c in row.strip().strip("|").split("|")]
 
@@ -204,13 +203,15 @@ def extract_cycle_cell_from_row(
 
     if header_cells:
         for idx, name in enumerate(header_cells):
-            if "cycle" in name and idx < len(cells):
+            if "cycle" in name:
+                if idx >= len(cells):
+                    return None
                 text = _normalize_table_cell(cells[idx])
-                if text:
-                    return _normalize_cycle_cell_text(text)
+                if not text:
+                    return None
+                return _normalize_cycle_cell_text(text)
 
     for cell in cells:
-        text = _normalize_table_cell(cell)
         match = re.search(r"\*\(\s*(\d+\s+cycles?)\s*\)\*", cell, re.IGNORECASE)
         if match:
             return re.sub(r"\s+", " ", match.group(1).lower())
@@ -270,6 +271,12 @@ class CheckUserDocCyclesTests(unittest.TestCase):
         with self.assertRaises(MissingCycleTextError):
             extract_cycles_from_description("Inputs: [a, b] Outputs: [c]")
 
+    def test_empty_cycle_text_raises(self) -> None:
+        for description in ("Cycles:", "Cycles:   ", "Cycles (estimate):", "Cycles:\n"):
+            with self.subTest(description=description):
+                with self.assertRaises(MissingCycleTextError):
+                    extract_cycles_from_description(description)
+
     def test_cycle_cell_uses_cycles_column_not_operand(self) -> None:
         content = (
             "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
@@ -279,6 +286,17 @@ class CheckUserDocCyclesTests(unittest.TestCase):
         row_start = content.index("| foo")
         row = content[row_start:content.find("\n", row_start)]
         self.assertEqual(extract_cycle_cell_from_row(row, content, row_start), "38")
+
+    def test_blank_cycles_column_returns_none(self) -> None:
+        # Present Cycles column is authoritative: do not fall back to *(38 cycles)*.
+        content = (
+            "| Instruction | Stack Input | Stack Output | Cycles | Notes |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| foo *(38 cycles)* | `[2, 1, ...]` | `[3, ...]` |  | note |\n"
+        )
+        row_start = content.index("| foo")
+        row = content[row_start:content.find("\n", row_start)]
+        self.assertIsNone(extract_cycle_cell_from_row(row, content, row_start))
 
     def test_cycle_cell_falls_back_to_embedded_cycles(self) -> None:
         row = "| u32popcnt *(38 cycles)* | [a, ...] | [b, ...] | note |"

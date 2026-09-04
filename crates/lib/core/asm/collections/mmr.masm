@@ -128,8 +128,9 @@ end
 #!    The address is expected to be word-aligned.
 #!
 #! Cycles: 215 + 9 * extra_peak_pair cycles
-#!    where `extra_peak_pair` is the number of peak pairs in addition to the
-#!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
+#!    where `extra_peak_pair` is the number of peak pairs beyond the first 16
+#!    peaks (zero when `num_of_peaks <= 16`), i.e.
+#!    `round_up(max(num_of_peaks - 16, 0) / 2)`
 pub proc unpack
   # load the preimage and its size to the advice_stack (0 cycles)
   adv.push_mapvaln adv_push
@@ -170,8 +171,9 @@ end
 #! Input: [mmr_ptr, ...]
 #! Output: [HASH, ...]
 #! Cycles: 198 + 6 * extra_peak_pair cycles
-#!    where `extra_peak_pair` is the number of peak pairs in addition to the
-#!    first 16 peaks, i.e. `round_up((num_of_peaks - 16) / 2)`
+#!    where `extra_peak_pair` is the number of peak pairs beyond the first 16
+#!    peaks (zero when `num_of_peaks <= 16`), i.e.
+#!    `round_up(max(num_of_peaks - 16, 0) / 2)`
 pub proc pack
   # load num_leaves (2 cycles)
   dup mem_load
