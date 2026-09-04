@@ -10,7 +10,9 @@ use p3_challenger::{
 };
 use p3_symmetric::{Hash, MerkleCap};
 
-use super::{BLOCK_LEN, DIGEST_WIDTH, Eidos};
+use super::{
+    BLOCK_LEN, DIGEST_WIDTH, Eidos, PACKED_LANES, PackedBlock, PackedChainingValue, PackedFelt,
+};
 use crate::{
     Felt, Word, ZERO,
     field::{BasedVectorSpace, PrimeField64},
@@ -330,15 +332,79 @@ impl GrindingChallenger for EidosChallenger {
             return ZERO;
         }
 
-        let witness = (0..Felt::ORDER_U64)
+        let mask = (1u64 << bits) - 1;
+        let cv = self.cv;
+        let buffer = self.buffer;
+        let buffer_len = self.buffer_len;
+        let num_batches = Felt::ORDER_U64.div_ceil(PACKED_LANES as u64);
+
+        // Every candidate shares the same pre-witness challenger snapshot (`observe_felt` always
+        // forces absorbing mode first, so this only ever replays that branch); only the witness
+        // lane varies. One packed compression pass therefore checks `PACKED_LANES` candidates.
+        let witness = (0..num_batches)
             .into_par_iter()
-            .map(Felt::new_unchecked)
-            .find_any(|&witness| self.clone().check_witness(bits, witness))
+            .map(|batch| {
+                let base = batch * PACKED_LANES as u64;
+                let candidates: PackedFelt = core::array::from_fn(|lane| {
+                    let candidate = base + lane as u64;
+                    // Lanes beyond the field order can never satisfy the PoW check; repeat the
+                    // last in-range candidate so every lane stays a canonical field element.
+                    Felt::new_unchecked(candidate.min(Felt::ORDER_U64 - 1))
+                });
+                let accepted = check_witness_packed(cv, buffer, buffer_len, candidates, mask);
+                (0..PACKED_LANES).find(|&lane| accepted[lane]).map(|lane| candidates[lane])
+            })
+            .find_any(Option::is_some)
+            .flatten()
             .expect("failed to find proof-of-work witness");
 
         assert!(self.check_witness(bits, witness));
         witness
     }
+}
+
+/// Runs the equivalent of `EidosChallenger::check_witness` for `PACKED_LANES` independent
+/// candidate witnesses in one packed compression pass, given a fixed pre-witness challenger
+/// snapshot `(cv, buffer, buffer_len)`.
+///
+/// `observe_felt` always calls `enter_absorbing_mode` first, so absorbing the witness and
+/// sampling the check bits only ever exercises the `Absorbing` branch of `refill_output_word`;
+/// this mirrors that exact sequence with `Felt` replaced by `PackedFelt` throughout.
+fn check_witness_packed(
+    cv: Word,
+    buffer: [Felt; BLOCK_LEN],
+    buffer_len: usize,
+    witnesses: PackedFelt,
+    mask: u64,
+) -> [bool; PACKED_LANES] {
+    debug_assert!(buffer_len < BLOCK_LEN);
+
+    // observe_felt: append the witness at the next free buffer slot.
+    let mut packed_buffer: PackedBlock = core::array::from_fn(|slot| {
+        use core::cmp::Ordering;
+        match slot.cmp(&buffer_len) {
+            Ordering::Less => [buffer[slot]; PACKED_LANES],
+            Ordering::Equal => witnesses,
+            Ordering::Greater => [ZERO; PACKED_LANES],
+        }
+    });
+    let mut packed_cv: PackedChainingValue = core::array::from_fn(|i| [cv[i]; PACKED_LANES]);
+    let mut packed_len = buffer_len + 1;
+
+    // compress_pending_buffer: an untagged compression only if the witness filled the buffer.
+    if packed_len == BLOCK_LEN {
+        packed_cv = Eidos::compress_packed(packed_cv, packed_buffer);
+        packed_buffer = [[ZERO; PACKED_LANES]; BLOCK_LEN];
+        packed_len = 0;
+    }
+
+    // refill_output_word (Absorbing branch): tagged compression producing the fresh output word.
+    let tag = transition_tag(packed_len);
+    packed_cv[3] = packed_cv[3].map(|word| word + tag);
+    let output = Eidos::compress_packed(packed_cv, packed_buffer);
+
+    // sample_felt then sample_bits: the first sample off a freshly refilled word is output[0].
+    core::array::from_fn(|lane| (output[0][lane].as_canonical_u64() & mask) == 0)
 }
 
 impl CanFinalizeDigest for EidosChallenger {
@@ -619,5 +685,68 @@ mod tests {
         assert_eq!(row[6..14], [9, 10, 0, 0, 0, 0, 0, 0]);
         assert_eq!(row[14], 2);
         assert_eq!(row[15..20], [0, 0, 0, 0, 0]);
+    }
+
+    /// `check_witness_packed` must agree, lane by lane, with the scalar `check_witness` default
+    /// implementation run on an independently cloned challenger, for every pre-witness buffer
+    /// state it can be called with (`buffer_len` in `0..BLOCK_LEN`, covering both the case where
+    /// the witness fills the buffer and the case where it doesn't).
+    #[test]
+    fn check_witness_packed_matches_scalar_check_witness_across_buffer_lengths() {
+        let bits_values = [1usize, 8, 20];
+
+        for buffer_len in 0..BLOCK_LEN {
+            let mut challenger = EidosChallenger::new(word([5, 6, 7, 8]));
+            for i in 0..buffer_len {
+                challenger.observe_felt(felt(100 + i as u64));
+            }
+            assert_eq!(challenger.buffer_len, buffer_len);
+
+            let witnesses: PackedFelt = core::array::from_fn(|lane| felt(1_000_000 + lane as u64));
+
+            for &bits in &bits_values {
+                let mask = (1u64 << bits) - 1;
+                let accepted = check_witness_packed(
+                    challenger.cv,
+                    challenger.buffer,
+                    challenger.buffer_len,
+                    witnesses,
+                    mask,
+                );
+
+                for lane in 0..PACKED_LANES {
+                    let mut scalar = challenger.clone();
+                    let expected = scalar.check_witness(bits, witnesses[lane]);
+                    assert_eq!(
+                        accepted[lane], expected,
+                        "lane {lane} mismatch at buffer_len={buffer_len}, bits={bits}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `grind` must find a witness from every possible pre-grind buffer state, and that witness
+    /// must independently satisfy `check_witness` on a challenger cloned from the pre-grind
+    /// state (not just the internal assertion `grind` already performs on `self`).
+    #[test]
+    fn grind_finds_a_valid_witness_from_every_buffer_state() {
+        let bits = 4;
+
+        for buffer_len in 0..BLOCK_LEN {
+            let mut challenger = EidosChallenger::new(word([1, 2, 3, 4]));
+            for i in 0..buffer_len {
+                challenger.observe_felt(felt(200 + i as u64));
+            }
+            let pre_grind = challenger.clone();
+
+            let witness = challenger.grind(bits);
+
+            let mut verifier = pre_grind;
+            assert!(
+                verifier.check_witness(bits, witness),
+                "witness from buffer_len={buffer_len} failed independent verification"
+            );
+        }
     }
 }
