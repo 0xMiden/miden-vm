@@ -1,4 +1,8 @@
-use std::{path::PathBuf, time::Instant};
+use std::{
+    env,
+    path::{Component, Path, PathBuf},
+    time::Instant,
+};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
@@ -108,7 +112,7 @@ impl ProveCmd {
         // common case-insensitive filesystems.
         let proof_path = self.resolved_proof_path();
         let output_path = self.output_file.clone().unwrap_or_else(|| self.default_output_path());
-        if output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()) {
+        if paths_are_equal(&output_path, &proof_path) {
             return Err(Report::msg(format!(
                 "The outputs file `{}` would overwrite the proof file `{}`. Choose a different \
                  --proof or --output path.",
@@ -214,15 +218,67 @@ impl ProveCmd {
 
     /// Resolves the proof path the same way as ProofFile::write.
     fn resolved_proof_path(&self) -> PathBuf {
-        self.proof_file
-            .clone()
-            .unwrap_or_else(|| self.program_file.with_extension("proof"))
+        ProofFile::resolve_path(&self.proof_file, &self.program_file)
     }
 
     /// Derives verify's default outputs path from the resolved proof path.
     fn default_output_path(&self) -> PathBuf {
         self.resolved_proof_path().with_extension("outputs")
     }
+}
+
+fn paths_are_equal(left: &Path, right: &Path) -> bool {
+    let left = resolve_for_comparison(left);
+    let right = resolve_for_comparison(right);
+    left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
+}
+
+/// Resolves `path` against the current directory so both sides compare in one form.
+///
+/// The file itself usually does not exist yet, so only its parent can be canonicalized; that still
+/// resolves symlinked directories. Hard links compare as distinct.
+fn resolve_for_comparison(path: &Path) -> PathBuf {
+    let lexical = normalize_path(&env::current_dir().unwrap_or_default().join(path));
+
+    // A path that already exists resolves fully, which also follows a symlinked file.
+    if let Ok(canonical) = lexical.canonicalize() {
+        return canonical;
+    }
+
+    match (lexical.parent(), lexical.file_name()) {
+        (Some(parent), Some(file_name)) => match parent.canonicalize() {
+            Ok(parent) => parent.join(file_name),
+            Err(_) => lexical,
+        },
+        _ => lexical,
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let is_absolute = path.is_absolute();
+    let mut components = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {},
+            Component::ParentDir => match components.last() {
+                Some(Component::Normal(_)) => {
+                    components.pop();
+                },
+                Some(Component::ParentDir) | None if !is_absolute => {
+                    components.push(Component::ParentDir);
+                },
+                _ => {},
+            },
+            component => components.push(component),
+        }
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in components {
+        normalized.push(component.as_os_str());
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -289,5 +345,16 @@ mod tests {
             output_path.as_os_str().eq_ignore_ascii_case(proof_path.as_os_str()),
             "but they name the same file on a case-insensitive filesystem"
         );
+    }
+
+    #[test]
+    fn paths_are_equal_after_normalizing_dot_and_dot_dot_components() {
+        assert!(paths_are_equal(Path::new("sub/../same.proof"), Path::new("same.proof")));
+    }
+
+    #[test]
+    fn paths_are_equal_when_one_side_is_absolute() {
+        let absolute = env::current_dir().unwrap().join("same.proof");
+        assert!(paths_are_equal(Path::new("same.proof"), &absolute));
     }
 }
