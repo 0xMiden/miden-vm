@@ -357,7 +357,7 @@ pub fn u32rotr(
 
 /// Translates u32popcnt assembly instructions to VM operations.
 ///
-/// This operation takes 32 cycles.
+/// This operation takes 38 VM cycles.
 pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
     #[rustfmt::skip]
     let ops = [

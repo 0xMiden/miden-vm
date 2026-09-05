@@ -7,6 +7,7 @@
 #### Changes
 
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).
+- Added `scripts/check-user-doc-cycles.sh` to verify user-facing core library and assembly instruction cycle counts against generated MASM docs and measured `clk` fixtures ([#3111](https://github.com/0xMiden/miden-vm/issues/3111)).
 - [BREAKING] Removed the trace bus debugger APIs from `miden-air` and the `bus-debugger` feature from `miden-processor` ([#3775](https://github.com/0xMiden/miden-vm/pull/3775)).
 - [BREAKING] Bumped Plonky3 related dependencies to v0.7.0 ([#3778](https://github.com/0xMiden/miden-vm/pull/3778)).
 
