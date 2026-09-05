@@ -67,6 +67,7 @@ pub const COMMITMENT_ALIGNMENT: usize = config::SPONGE_RATE;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 427,
     max_constraint_degree: 9,
+    max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(138),
     lookup: LookupShape {
         fractions_per_row: 28,
@@ -99,6 +100,7 @@ pub fn derive_air_shape() -> AirShape {
         // single-AIR statement needs no cross-AIR batching challenge.
         num_composed_constraints: (num_constraints + AIRS.len() - 1) as u32,
         max_constraint_degree: max_constraint_degree as u32,
+        max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
         lookup: LookupShape {
             fractions_per_row: fractions_per_row as u32,
@@ -186,7 +188,15 @@ pub const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
 /// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
-pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
+///
+/// The round's error size is `max(d * (H + combo - 1) + (H - 1), (c + 1) * H + combo - 1)` for a
+/// trace height `H`, maximum constraint degree `d`, out-of-domain point count `combo`, and
+/// quotient chunk count `c <= d`. At `combo = 2` that is at most `(d + 1) * H + (d - 1)`, which
+/// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
+/// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
+/// round.
+pub const OOD_COEFFICIENT: u64 =
+    fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
 
 /// Q16 upper bound on the log2 of the DEEP round's error coefficient.
 pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
@@ -567,7 +577,7 @@ mod tests {
         const SECURITY_CAP_FP: u64 = 8_388_606;
         const LOOKUP_BASE_FP: u64 = 7_800_270;
         const COMPOSITION_TERM_FP: u64 = 7_815_946;
-        const OOD_BASE_FP: u64 = 8_170_900;
+        const OOD_BASE_FP: u64 = 8_161_888;
         const DEEP_BASE_FP: u64 = 7_922_741;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
@@ -600,7 +610,7 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_406_895, 7_815_946, 7_777_684, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_406_895, 7_815_946, 7_776_509, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (

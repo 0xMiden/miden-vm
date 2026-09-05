@@ -90,7 +90,7 @@
 
 mod aux;
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -360,16 +360,18 @@ impl BaseAir<Felt> for UintMulAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         // One one-hot per row role, then the S-keep gate.
-        (0..PERIOD)
-            .map(|row| {
-                let mut col = vec![Felt::ZERO; PERIOD];
-                col[row] = Felt::ONE;
-                col
-            })
-            .chain(core::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
-            .collect()
+        Cow::Owned(
+            (0..PERIOD)
+                .map(|row| {
+                    let mut col = vec![Felt::ZERO; PERIOD];
+                    col[row] = Felt::ONE;
+                    col
+                })
+                .chain(core::iter::once(S_KEEP.iter().map(|&g| Felt::from(g as u32)).collect()))
+                .collect(),
+        )
     }
 }
 

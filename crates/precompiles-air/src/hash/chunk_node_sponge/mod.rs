@@ -4,7 +4,7 @@
 //! constraints and LogUp interactions delegate to the same offset-aware
 //! evaluators used by the standalone component AIRs.
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder};
@@ -55,8 +55,8 @@ impl BaseAir<Felt> for ChunkNodeSpongeAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        sponge_program().to_vec()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(sponge_program().into())
     }
 }
 

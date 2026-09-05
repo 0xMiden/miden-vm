@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -96,9 +96,9 @@ impl BaseAir<Felt> for PeriodicPowerAir {
         1
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         // Period 2: entries [1, 0] repeat across the trace.
-        vec![vec![Felt::ONE, Felt::ZERO]]
+        Cow::Owned(vec![vec![Felt::ONE, Felt::ZERO]])
     }
 }
 

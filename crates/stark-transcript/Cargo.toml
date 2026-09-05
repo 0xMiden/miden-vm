@@ -7,7 +7,7 @@ name                   = "miden-stark-transcript"
 readme.workspace       = true
 repository.workspace   = true
 rust-version.workspace = true
-version = "0.32.0"
+version = "0.33.0"
 
 [lib]
 doctest = false
