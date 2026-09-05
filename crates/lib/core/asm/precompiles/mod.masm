@@ -18,8 +18,7 @@ pub type Tag = struct { id: felt, args: [felt; 3] }
 #! One deferred payload chunk in stack order; interpretation depends on its tag.
 pub type Payload = struct { lo: word, hi: word }
 
-# Registered Eidos domain selectors. These must match `miden_core::deferred`.
-const DEFERRED_AND_DOMAIN = 0x01000301
+# Registered Eidos domain tag. This must match `miden_core::deferred`.
 const DEFERRED_CHUNKS_DOMAIN = 0x01000401
 
 # Eidos initial-CV bases. Kept local so this package remains independent of `miden-core`; they
@@ -35,9 +34,9 @@ const DEFERRED_CHUNKS_INIT_CV_1 = [4280581857109607425, 2688637132020383752, 194
 const DEFERRED_CHUNKS_INIT_CV_2 = [4280581857109607425, 2688637132020383760, 1947077364412317696, 6620516959492505600]
 const DEFERRED_CHUNKS_INIT_CV_3 = [4280581857109607425, 2688637132020383768, 1947077364412317696, 6620516959492505600]
 
-#! Constructs an Eidos chaining word from a registered selector and three selector-defined
+#! Constructs an Eidos chaining word from a domain tag and three domain-defined
 #! parameters.
-#! Input: [selector, param0, param1, param2, ...]
+#! Input: [domain_tag, param0, param1, param2, ...]
 #! Output: [CV, ...]
 proc init_deferred_cv
     u32assert2.err="Eidos init values must fit in u32"
@@ -50,8 +49,8 @@ proc init_deferred_cv
     movup.3 movdn.2
 end
 
-#! Constructs `init(selector, [length, 0, 0])`.
-#! Input: [length, selector, ...]
+#! Constructs `init(domain_tag, [length, 0, 0])`.
+#! Input: [length, domain_tag, ...]
 #! Output: [CV, ...]
 proc init_deferred_cv_in_domain
     u32assert2.err="Eidos init values must fit in u32"
@@ -64,7 +63,7 @@ end
 
 #! Constructs the initial Eidos chaining word for a precompile-owned deferred node.
 #! The tag's reserved lane must be zero; every value injected into the CV must fit in a u32.
-#! Input: [payload_len, TAG=[selector, arg0, arg1, reserved], ...]
+#! Input: [payload_len, TAG=[domain_tag, arg0, arg1, reserved], ...]
 #! Output: [CV, ...]
 proc init_precompile_deferred_cv
     movup.4 assertz.err="deferred tag reserved lane must be zero"
@@ -112,7 +111,7 @@ end
 #! Registers a one-chunk expression node and returns its Eidos content-addressed digest.
 #!
 #! `adv.register_deferred` interns the node host-side (no stack or advice output). The VM binds the
-#! tag selector, payload length, and two tag arguments into the initial Eidos chaining word, then
+#! domain tag, payload length, and two tag arguments into the initial Eidos chaining word, then
 #! compresses the payload block once.
 #!
 #! Input:  [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -154,8 +153,8 @@ end
 #! `ptr`, where `n` is the stack-supplied `n_chunks`; it produces no stack or advice output. The
 #! event leaves those stack arguments unchanged, but its direct host read adds no AIR memory access.
 #! This wrapper binds the registration input with the same Eidos construction as `Node::digest`:
-#! the tag selector, `8n` payload length, and two tag arguments initialize the chaining word, then
-#! the `n` payload chunks are compressed. Empty data bodies are forbidden, so `n ≥ 1`.
+#! the domain tag, `8n` payload length, and two tag arguments initialize the chaining word, then
+#! the `n` payload chunks are compressed. Empty data bodies are forbidden, so `n >= 1`.
 #!
 #! Input:  [TAG, ptr, n_chunks, ...]
 #! Output: [NODE_DIGEST, ...]

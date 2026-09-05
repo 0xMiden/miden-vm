@@ -21,7 +21,7 @@ use crate::{
 #[test]
 fn dyn_hash_is_correct() {
     let expected_constant =
-        hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
+        hasher::merge_in_mast_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
 
     let mut forest = MastForest::new();
     let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();

@@ -256,7 +256,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     /// Basic-block hash init: one 8-Felt block + Eidos chaining word initialized from the
     /// logical number of operation groups in the block.
     pub fn basic_block_init(addr: E, block: &[E; 8], num_groups: E) -> Self {
-        let cv = eidos_compression::init_chaining_word(0, 0);
+        let cv = eidos_compression::felt_sequence_chaining_word(0);
         let mut cv: [E; 4] = core::array::from_fn(|i| E::from_u64(cv[i].as_canonical_u64()));
         cv[1] = cv[1].clone() + num_groups;
         let state = [
@@ -1226,7 +1226,7 @@ mod tests {
         let HasherPayload::State(state) = msg.payload else {
             panic!("basic-block initialization must carry a compression state");
         };
-        let expected = eidos_compression::init_chaining_word(0, num_groups);
+        let expected = eidos_compression::felt_sequence_chaining_word(num_groups);
 
         assert_eq!(&state[8..], expected.as_slice());
     }

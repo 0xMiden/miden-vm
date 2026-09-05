@@ -19,7 +19,7 @@ use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]`; `TAG` is one word with layout
-// `[selector, arg0, arg1, 0]`. The selector, payload length, and arguments initialize the Eidos
+// `[domain_tag, arg0, arg1, 0]`. The domain tag, payload length, and arguments initialize the Eidos
 // chaining word, and the eight payload felts form its single compression block. The payload is one
 // 8-felt data chunk, `lhs || rhs` child digests for a join, or one `lhs || rhs` pair for a
 // pair-list node. Exact `Tag::CHUNKS` (`[2, 0, 0, 0]`) is framework-owned opaque data; malformed

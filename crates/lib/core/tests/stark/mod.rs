@@ -1028,10 +1028,7 @@ fn tampered_claim_preimage_is_rejected() {
         data.store.clone(),
         data.advice_map.clone()
     );
-    expect_assert_error_code_from_msg!(
-        test,
-        "pipe_double_words_preimage_to_memory_with_domain: COMMITMENT does not match"
-    );
+    expect_assert_error_code_from_msg!(test, "claim preimage commitment does not match");
 }
 
 /// The advice-map value under the claim commitment must use the canonical 40-felt encoding.
@@ -1327,7 +1324,7 @@ fn eidos_init_seed_matches_rust_challenger() {
 fn eidos_relation_digest_seed_matches_rust_challenger() {
     const SQUEEZED_WORD_PTR: u32 = 1000;
 
-    // The pushed word is `Eidos::transcript_init_cv(0x00000201)`, matching the
+    // The pushed word is `Eidos::transcript_init_cv(STARK_TRANSCRIPT)`, matching the
     // `EIDOS_TRANSCRIPT_INIT_CV_*` constants in `stark/random_coin.masm`.
     let source = "
         use miden::core::sys::vm
@@ -1336,7 +1333,7 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
 
         begin
             exec.vm::load_air_context
-            push.6225836997093344009.6615246172502583955.3539038439026260303.4361500420518448919
+            push.6620516959492505600.1947077364412317696.2688637132020383744.4280581857109607681
             padw exec.constants::relation_digest_ptr mem_loadw_le
             exec.random_coin::eidos_init_challenger
             exec.random_coin::eidos_squeeze_word
@@ -1427,7 +1424,10 @@ fn eidos_absorb_block_rejects_nonempty_buffer() {
 fn eidos_hash_elements_single_block_matches_masm_compress_loop() {
     const HASH_WORD_PTR: u32 = 1000;
 
-    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, 8);
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        8,
+    );
     let source = format!(
         "
         begin
@@ -1461,7 +1461,10 @@ fn eidos_hash_elements_adv_pipe_loop_matches_masm_compress_loop() {
     const STREAM_PTR: u32 = 1 << 16;
 
     let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
-    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, elements.len() as u32);
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
     let advice_stack: Vec<u64> = elements.iter().map(Felt::as_canonical_u64).collect();
 
     let source = format!(
@@ -1506,7 +1509,10 @@ fn eidos_hash_elements_advice_map_loop_matches_masm_compress_loop() {
         .map(|value| value.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, elements.len() as u32);
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(
+        miden_crypto::hash::eidos::domains::GENERIC_FELT_SEQUENCE,
+        elements.len() as u32,
+    );
 
     let source = format!(
         "

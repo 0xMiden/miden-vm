@@ -36,8 +36,9 @@ use miden_air::{
 };
 use miden_core::{
     Felt,
-    deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN},
+    deferred::DEFERRED_AND_INIT_CV,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
+    program::domain::DEFERRED_CHUNKS,
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -441,10 +442,8 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
         let chain_context: [AB::Expr; 4] =
             array::from_fn(|i| local[COL_CHAIN_CONTEXT_BEGIN + i].into());
         let and_init = DEFERRED_AND_INIT_CV.into_elements();
-        let chunks_init =
-            Eidos::init_chaining_word(DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32, 0)
-                .into_elements();
-        let init_bases = Eidos::init_chaining_word_with_params(0, [0; 3]).into_elements();
+        let chunks_init = Eidos::init_chaining_word(DEFERRED_CHUNKS, 0).into_elements();
+        let init_bases = Eidos::merkle_node_init_chaining_word().into_elements();
         for i in 0..4 {
             let mut expected = is_and.clone() * AB::Expr::from(and_init[i])
                 + is_chunks.clone() * AB::Expr::from(chunks_init[i]);

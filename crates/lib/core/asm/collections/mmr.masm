@@ -5,6 +5,37 @@ use miden::core::math::u64
 #! Element address of an MMR header, followed by its variable-length peak array.
 pub type MmrPtr = ptr<felt>
 
+# `MMR_PEAKS` (tag 0x00000201) initial chaining-word constants. Only the u32 leaf count is dynamic
+# in the VM.
+const MMR_PEAKS_INIT_CV_0 = 4280581857092829697
+const MMR_PEAKS_INIT_CV_1_BASE = 2688637132020383744
+const MMR_PEAKS_INIT_CV_2 = 1947077364412317696
+const MMR_PEAKS_INIT_CV_3 = 6620516959492505600
+
+#! Constructs the `MMR_PEAKS` initial chaining word for `num_leaves`.
+#!
+#! Input:  [num_leaves, ...]
+#! Output: [CV, ...]
+proc init_peaks_chaining_word
+  u32assert.err="MMR leaf count must fit in a u32"
+  push.MMR_PEAKS_INIT_CV_1_BASE add
+  push.MMR_PEAKS_INIT_CV_3.MMR_PEAKS_INIT_CV_2
+  movup.2
+  push.MMR_PEAKS_INIT_CV_0
+end
+
+#! Hashes the canonical padded peak vector while binding `num_leaves` into the initial chaining
+#! word. This VM implementation supports only u32 leaf counts, so the high limb is zero.
+#!
+#! Input:  [peaks_start, peaks_end, num_leaves, ...]
+#! Output: [HASH, ...]
+proc hash_peaks
+  movup.2 exec.init_peaks_chaining_word
+  # => [CV, peaks_start, peaks_end, ...]
+
+  push.0 movdn.6 padw padw
+  exec.eidos::hash_elements_with_state
+end
 
 #! Loads the leaf at the absolute `pos` in the MMR.
 #!
@@ -124,7 +155,7 @@ end
 #! Output: [...]
 #!
 #! Where:
-#!  - HASH: is the hash of `[num_leaves, 0, 0, 0] || padded_peaks`.
+#!  - HASH binds `num_leaves` in the `MMR_PEAKS` initial chaining word and hashes `padded_peaks`.
 #!  - The advice map must contain a key with HASH, and its value is
 #!    `[num_leaves, 0, 0 , 0] || padded_peaks`.
 #!  - mmr_ptr: the memory location where the MMR data will be written to,
@@ -143,30 +174,50 @@ pub proc unpack(hash: eidos::Digest, mmr_ptr: MmrPtr)
   # make sure the preimage is word-aligned
   dup u32mod.4 assertz.err="invalid MMR preimage: size must be word-aligned"
 
-  # compute the number of words in the preimage
+  # compute the number of words in the stored MMR representation
   div.4
-  # operand_stack => [num_words, HASH, mmr_ptr, ...]
+  # => [num_words, HASH, mmr_ptr, ...]
   # advice_stack => [NUM_LEAVES, peaks*, ...]
 
-  # copy the MMR preimage to memory and verify the leaf-count-bound commitment
-  dup.5 swap
-  # => [num_words, mmr_ptr, HASH, mmr_ptr, ...]
+  # Load and store the header word. Only its first element carries the leaf count.
+  adv_pushw
+  # => [num_leaves, 0, 0, 0, num_words, HASH, mmr_ptr, ...]
 
-  exec.mem::pipe_preimage_to_memory
-  # => [mmr_ptr_end, mmr_ptr, ...]
+  dup.1 assertz dup.2 assertz dup.3 assertz
+  u32assert
 
-  # verify that the preimage size matches the encoded MMR leaf count
-  dup.1 mem_load
-  # => [num_leaves, mmr_ptr_end, mmr_ptr, ...]
+  dup.9 mem_storew_le
+  movdn.3 drop drop drop
+  # => [num_leaves, num_words, HASH, mmr_ptr, ...]
 
+  # The stored representation contains one header word followed by the padded peaks.
+  dup
   exec.num_leaves_to_num_peaks
   exec.num_peaks_to_message_size
-  # => [peak_elements, mmr_ptr_end, mmr_ptr, ...]
+  div.4
+  # => [expected_peak_words, num_leaves, num_words, HASH, mmr_ptr, ...]
 
-  add.4 dup.2 add
-  # => [expected_mmr_ptr_end, mmr_ptr_end, mmr_ptr, ...]
+  dup.2 sub.1 assert_eq.err="invalid MMR preimage: size does not match leaf count"
+  # => [num_leaves, num_words, HASH, mmr_ptr, ...]
 
-  assert_eq drop
+  # Derive the peak range from the leaf count, retaining the MMR pointer for cleanup.
+  swap drop
+  dup exec.num_leaves_to_num_peaks exec.num_peaks_to_message_size
+  dup.6 add.4
+  dup dup.2 add movup.2 drop swap
+  # => [peaks_start, peaks_end, num_leaves, HASH, mmr_ptr, ...]
+
+  movup.2 exec.init_peaks_chaining_word
+  # => [CV, peaks_start, peaks_end, HASH, mmr_ptr, ...]
+
+  padw padw
+  exec.mem::pipe_double_words_to_memory
+  exec.eidos::digest
+  # => [HASH_ACTUAL, peaks_end, HASH_EXPECTED, mmr_ptr, ...]
+
+  movup.4 movdn.8
+  assert_eqw.err="invalid MMR preimage: commitment does not match"
+  drop drop
 end
 
 #! Computes the hash of the given MMR and copies it to the Advice Map using its hash as a key.
@@ -182,27 +233,29 @@ pub proc pack(mmr_ptr: MmrPtr) -> eidos::Digest
   # => [num_leaves, mmr_ptr, ...]
 
   # compute num_peaks (67 cycles)
-  exec.num_leaves_to_num_peaks
-  # => [num_peaks, mmr_ptr, ...]
+  dup exec.num_leaves_to_num_peaks
+  # => [num_peaks, num_leaves, mmr_ptr, ...]
 
   # compute the message size (19 cycles)
   exec.num_peaks_to_message_size
-  # => [message_size, mmr_ptr, ...]
+  # => [message_size, num_leaves, mmr_ptr, ...]
 
-  # compute the full MMR preimage range
-  dup.1 add.4 add
-  # => [mmr_ptr_end, mmr_ptr, ...]
+  # Compute the peak range, then retain a copy for the advice-map insertion.
+  dup.2 add.4
+  dup dup.2 add movup.2 drop
+  swap
+  # => [peaks_start, peaks_end, num_leaves, mmr_ptr, ...]
 
-  swap dup.1 dup.1
-  # => [mmr_ptr, mmr_ptr_end, mmr_ptr, mmr_ptr_end, ...]
+  dup.1 movdn.4
+  # => [peaks_start, peaks_end, num_leaves, mmr_ptr, peaks_end, ...]
 
-  exec.eidos::hash_words
-  # => [HASH, mmr_ptr, mmr_ptr_end, ...]
+  exec.hash_peaks
+  # => [HASH, mmr_ptr, peaks_end, ...]
 
   # copy the data to advice map
   adv.insert_mem
 
-  # drop the extra addresses (4 cycles)
+  # drop the extra addresses
   movup.4 drop movup.4 drop
   # => [HASH, ...]
 end

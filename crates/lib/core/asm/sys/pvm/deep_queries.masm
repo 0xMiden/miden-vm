@@ -25,11 +25,11 @@ const MAIN_LEAF_VALUE_MISMATCH = "main query leaf hash mismatch"
 const AUX_LEAF_VALUE_MISMATCH = "aux query leaf hash mismatch"
 const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 
-# Eidos::init_chaining_word(0, 0).
-const EIDOS_LMCS_INIT_CV_0 = 4280581857092829184
-const EIDOS_LMCS_INIT_CV_1 = 2688637132020383744
-const EIDOS_LMCS_INIT_CV_2 = 1947077364412317696
-const EIDOS_LMCS_INIT_CV_3 = 6620516959492505600
+# Registered LMCS leaf initial chaining words for the fixed PVM row widths.
+const EIDOS_LMCS_INIT_CV_8 = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_16 = [4280581857092832001, 2688637132020383760, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_352 = [4280581857092832001, 2688637132020384096, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_544 = [4280581857092832001, 2688637132020384288, 1947077364412317696, 6620516959492505600]
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -119,7 +119,7 @@ proc process_preprocessed_trace(
     swapw
     #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, full_depth, index, query_ptr]
 
-    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    push.EIDOS_LMCS_INIT_CV_16
     swapw padw
     exec.load_preprocessed_trace
 
@@ -159,7 +159,7 @@ proc process_main_trace(
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    push.EIDOS_LMCS_INIT_CV_544
     swapw padw
     exec.load_main_trace
 
@@ -199,7 +199,7 @@ proc process_aux_trace(
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    push.EIDOS_LMCS_INIT_CV_352
     swapw padw
     exec.load_aux_trace
 
@@ -239,7 +239,7 @@ proc process_quotient_trace(
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_3.EIDOS_LMCS_INIT_CV_2.EIDOS_LMCS_INIT_CV_1.EIDOS_LMCS_INIT_CV_0
+    push.EIDOS_LMCS_INIT_CV_8
     swapw padw
     exec.load_quotient_trace
 

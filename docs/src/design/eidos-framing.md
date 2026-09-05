@@ -115,6 +115,11 @@ registrable. A nonzero namespace may allocate owner-local ID zero.
 Unlisted namespace values remain unallocated. Adding one requires an update to the central
 namespace registry in `miden-crypto`; it is not a local convention.
 
+Values in the reserved `(namespace, local_id) = (0, 0)` region are not domain tags. The all-zero
+tuple initializes Merkle inner-node compression. MAST control nodes place an opcode in the tag
+lane, bind `param0 = 8`, and leave the other parameters zero. Registered tags are at least `0x100`,
+so neither VM-internal framing family can overlap a registry allocation.
+
 ### Versioning
 
 Version bytes `1..=255` identify numbered construction versions. Version byte `0` is the named
@@ -250,9 +255,10 @@ enter the tree, and callers bind the role of a root where it is consumed. In par
 Eidos::merge([left, right]) != Eidos::hash_elements(left || right)
 ```
 
-The right-hand side uses the registered generic Felt tag and binds length eight. Code scheduling a
-Merkle compression through a separate engine obtains the reserved initial word from
-`Eidos::merkle_node_init_chaining_word`; ordinary callers use `Eidos::merge`.
+The right-hand side uses the registered generic Felt tag and binds length eight. The VM's `hmerge`
+instruction and `eidos::hash_two_words` procedure implement that generic hash. Merkle code uses
+`Eidos::merge`, or obtains its reserved initial word from
+`Eidos::merkle_node_init_chaining_word` when compression is scheduled by a separate engine.
 
 ## Custom schedules
 
@@ -260,6 +266,27 @@ A numbered tag identifies the complete grammar of a construction: parameter mean
 encoding, compression schedule, and output extraction. A delegated tag identifies the same fixed
 hash schedule plus the stable rule used to find the object version in its payload. The three
 parameter lanes do not have global names; their interpretation belongs to the registered domain.
+
+### Deferred-node framing
+
+A precompile-owned node stores this tag word:
+
+```text
+TAG = [domain_tag, arg0, arg1, 0]
+```
+
+For `b` complete payload blocks, its digest is:
+
+```text
+CV_0 = init(domain_tag, [8 * b, arg0, arg1])
+CV_{i + 1} = compress(CV_i, payload_block_i)
+digest = CV_b
+```
+
+The reserved fourth tag Felt and all values injected into the initial CV must fit their declared
+ranges. Every compression consumes payload; there is no terminal tag block. Framework AND and
+CHUNKS nodes store their compact framework tags but hash under the registered `DEFERRED_AND` and
+`DEFERRED_CHUNKS` domains. The TRUE node is a sentinel and is not hashed.
 
 LMCS is an example. Leaf hashing has its own `Custom` domain because it absorbs matrix rows in
 commitment order, padding each row independently to eight Felts. Its first parameter binds the sum
@@ -309,6 +336,24 @@ generated MASM constants.
 | `0x0009` | 1 | `RANDOM_COIN_OUTPUT` | `FeltSequence` |
 | `0x000a` | 1 | `GENERIC_FELT_SEQUENCE` | `FeltSequence` |
 | `0x000b` | 1 | `LMCS_LEAF` | `Custom` |
+
+## `miden-vm` local registry
+
+The declarations in `core::program::domain` are normative and are the source for this table.
+
+| Local ID | Version | Rust domain | Encoding |
+| ---: | ---: | --- | --- |
+| `0x0000` | 1 | `KERNEL_COMMITMENT` | `FeltSequence` |
+| `0x0001` | 1 | `EXECUTION_CLAIM` | `FeltSequence` |
+| `0x0002` | 1 | `PROOF_REQUEST` | `FeltSequence` |
+| `0x0003` | 1 | `DEFERRED_AND` | `FeltSequence` |
+| `0x0004` | 1 | `DEFERRED_CHUNKS` | `FeltSequence` |
+| `0x0005` | 1 | `STARK_TRANSCRIPT` | `Transcript` |
+| `0x0006` | 1 | `KECCAK256_PRECOMPILE` | `Custom` |
+| `0x0007` | 1 | `UINT256_PRECOMPILE` | `Custom` |
+| `0x0008` | 1 | `CURVE_PRECOMPILE` | `Custom` |
+| `0x0009` | 1 | `PVM_UINT_PIN_CLAIM` | `Custom` |
+| `0x000a` | 1 | `FALCON_PRODUCT_CHECK` | `FeltSequence` |
 
 Numeric assignments are consensus-visible. Changing a numbered construction's encoding, parameter
 schema, or schedule requires a new version. A delegated construction may evolve the payload grammar

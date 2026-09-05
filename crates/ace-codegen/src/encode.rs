@@ -92,7 +92,7 @@ impl EncodedCircuit {
     /// Eidos digest of the whole instruction stream.
     ///
     /// Note this is not the recursive verifier's registry leaf: a factored circuit is committed
-    /// as `merge(H(constants | shuffle), H(common))` over the two stream segments.
+    /// by hashing their two commitments as one generic eight-Felt sequence.
     pub fn circuit_hash(&self) -> Word {
         Eidos::hash_elements(self.instructions())
     }

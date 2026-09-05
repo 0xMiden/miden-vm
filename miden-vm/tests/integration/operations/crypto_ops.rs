@@ -2,9 +2,11 @@
 use miden_core::field::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
 #[cfg(feature = "arbitrary")]
+use miden_utils_testing::build_expected_hash;
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_compress, build_expected_hash, build_op_test, build_test,
+    Felt, build_expected_compress, build_expected_hmerge, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
 };
 
@@ -100,7 +102,7 @@ fn hmerge() {
 
     // --- test hashing [ONE, ONE, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO] ----------------------------
     let values = [1, 1, 0, 0, 0, 0, 0, 0];
-    let expected = build_expected_hash(&values);
+    let expected = build_expected_hmerge(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -139,7 +141,7 @@ proptest! {
 
         // --- test hashing 8 random values -----------------------------------------------------------
         let values = [v0, v1, v2, v3, v4, v5, v6, v7];
-        let expected = build_expected_hash(&values);
+        let expected = build_expected_hmerge(&values);
 
         let test = build_op_test!(asm_op, &values);
         let last_state = test.get_last_stack_state();

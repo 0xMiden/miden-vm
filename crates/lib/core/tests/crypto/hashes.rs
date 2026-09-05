@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, deferred::DeferredState, utils::bytes_to_packed_u32_elements};
+use miden_core::{
+    Felt, chiplets::eidos_compression, deferred::DeferredState, utils::bytes_to_packed_u32_elements,
+};
 use miden_core_lib::CoreLibrary;
-use miden_crypto::hash::{eidos::Eidos, keccak::Keccak256};
+use miden_crypto::hash::keccak::Keccak256;
 use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
@@ -124,7 +126,7 @@ fn cycle_eidos_init_source(num_elements: u32) -> String {
 }
 
 fn cycle_eidos_precomputed_init_source(num_elements: u32) -> String {
-    let cv = masm_push_word(&Eidos::init_chaining_word(0, num_elements));
+    let cv = masm_push_word(&eidos_compression::felt_sequence_chaining_word(num_elements));
     format!(
         r#"
         {TRUNCATE_STACK_TO_1_PROC}
@@ -157,7 +159,7 @@ fn cycle_eidos_domain_init_source(domain: u32, num_elements: u32) -> String {
 }
 
 fn cycle_eidos_precomputed_domain_init_source(domain: u32, num_elements: u32) -> String {
-    let cv = masm_push_word(&Eidos::init_chaining_word(domain, num_elements));
+    let cv = masm_push_word(&eidos_compression::init_chaining_word(domain, num_elements));
     format!(
         r#"
         {TRUNCATE_STACK_TO_1_PROC}

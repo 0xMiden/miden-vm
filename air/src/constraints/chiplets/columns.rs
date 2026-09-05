@@ -57,8 +57,8 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// - Merkle rows: `state = block[8] || digest_out[4]`, `row_data = [node_index, node_index_next,
 ///   is_start, 0]`.
 ///
-/// Merkle input CV is the fixed domain-0 two-to-one chaining word, so it does not need trace
-/// columns. Hash rows need both `cv_in` and `cv_out`, so they place the output CV in `row_data`.
+/// Merkle rows use the reserved fixed inner-node CV, so it does not need trace columns. Hash rows
+/// need both `cv_in` and `cv_out`, so they place the output CV in `row_data`.
 ///
 /// ## Layout
 ///

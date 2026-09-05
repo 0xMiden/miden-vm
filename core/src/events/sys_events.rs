@@ -234,8 +234,8 @@ pub enum SystemEvent {
     /// Where `values` are the elements located in memory[start_addr..end_addr].
     MemToMap,
 
-    /// Reads two word from the operand stack and inserts them into the advice map under the key
-    /// defined by the hash of these words.
+    /// Reads two words from the operand stack and inserts them into the advice map under
+    /// `hmerge(A, B)`.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, ...]
@@ -245,22 +245,8 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed as hash(A || B, domain=0).
+    /// KEY is the generic Eidos hash of the eight Felts in `A || B`.
     HdwordToMap,
-
-    /// Reads two words from the operand stack and inserts them into the advice map under the key
-    /// defined by the hash of these words (using `d` as the domain).
-    ///
-    /// Inputs:
-    ///   Operand stack: [A, B, d, ...]
-    ///   Advice map: {...}
-    ///
-    /// Outputs:
-    ///   Operand stack: [A, B, d, ...]
-    ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
-    ///
-    /// Where KEY is computed as hash(A || B, d).
-    HdwordToMapWithDomain,
 
     /// Reads four words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words.
@@ -289,7 +275,7 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// In particular, setting `C = Eidos::init_chaining_word(d, 8)` produces
+    /// In particular, using the framed initial CV for `(domain_tag = d, param0 = 8)` produces
     /// `Eidos::hash_elements_in_domain(A || B, d)`.
     CompressToMap,
 
@@ -394,7 +380,7 @@ pub enum SystemEvent {
     /// This event does not push advice or return the node digest. A program that relies on the
     /// registered node must compute its digest with VM instructions from the same `TAG` and ordered
     /// chunk sequence. The `register_mem` MASM wrapper does this with the canonical Eidos deferred
-    /// framing: the tag selector, payload length, and tag arguments initialize the chaining word,
+    /// framing: the domain tag, payload length, and tag arguments initialize the chaining word,
     /// then payload chunks are compressed in order. If the event and the VM hash different chunk
     /// sequences, the VM-computed digest does not identify the host-registered node and cannot bind
     /// that registration into a proof-relevant deferred claim.
@@ -498,7 +484,6 @@ impl SystemEvent {
             Self::ILog2,
             Self::MemToMap,
             Self::HdwordToMap,
-            Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
             Self::CompressToMap,
             Self::DeferredRegister,
@@ -548,7 +533,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 24;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -634,11 +619,6 @@ impl SystemEvent {
             id: EventId::from_u64(5988159172915333521),
             event: SystemEvent::HdwordToMap,
             name: "sys::hdword_to_map",
-        },
-        SystemEventEntry {
-            id: EventId::from_u64(6143777601072385586),
-            event: SystemEvent::HdwordToMapWithDomain,
-            name: "sys::hdword_to_map_with_domain",
         },
         SystemEventEntry {
             id: EventId::from_u64(11723176702659679401),
@@ -788,7 +768,6 @@ mod test {
                 | SystemEvent::ILog2
                 | SystemEvent::MemToMap
                 | SystemEvent::HdwordToMap
-                | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
                 | SystemEvent::CompressToMap
                 | SystemEvent::DeferredRegister
@@ -803,7 +782,6 @@ mod test {
 
     #[test]
     fn compress_to_map_preserves_its_wire_identity() {
-        assert_eq!(SystemEvent::CompressToMap as usize, 18);
         assert_eq!(SystemEvent::CompressToMap.event_id(), EventId::from_u64(454105713963103935));
         assert_eq!(SystemEvent::CompressToMap.event_name().as_str(), "sys::bcompress_to_map");
     }
