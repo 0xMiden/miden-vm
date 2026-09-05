@@ -99,7 +99,7 @@
 //! flags, `act` — 21 main columns, 12 LogUp aux columns, 4 periodic
 //! one-hots.
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -294,15 +294,17 @@ impl BaseAir<Felt> for EcGroupAddAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        ROLE_ROWS
-            .iter()
-            .map(|&row| {
-                let mut col = vec![Felt::ZERO; PERIOD];
-                col[row] = Felt::ONE;
-                col
-            })
-            .collect()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(
+            ROLE_ROWS
+                .iter()
+                .map(|&row| {
+                    let mut col = vec![Felt::ZERO; PERIOD];
+                    col[row] = Felt::ONE;
+                    col
+                })
+                .collect(),
+        )
     }
 }
 

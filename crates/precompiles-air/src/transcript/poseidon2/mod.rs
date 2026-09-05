@@ -11,7 +11,7 @@ pub mod math;
 pub mod messages;
 pub mod program;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::array;
 
 pub use digest::{P2Cap, P2Digest};
@@ -142,8 +142,8 @@ impl BaseAir<Felt> for Poseidon2Air {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        poseidon2_program().to_vec()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(poseidon2_program().into())
     }
 }
 

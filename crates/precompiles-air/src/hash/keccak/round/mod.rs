@@ -18,7 +18,7 @@
 
 pub mod program;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::{array, ops::Range};
 
 use miden_core::{
@@ -160,8 +160,8 @@ impl BaseAir<Felt> for KeccakRoundAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        round_program().to_vec()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(round_program().into())
     }
 }
 

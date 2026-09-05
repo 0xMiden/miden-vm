@@ -1,7 +1,7 @@
 //! Integration tests for the lifted STARK prove/verify cycle using a minimal
 //! single-column AIR with periodic columns and auxiliary traces.
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -60,8 +60,8 @@ impl BaseAir<Felt> for TinyAir {
         1
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        self.periodic_cols.clone()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(self.periodic_cols.clone())
     }
 }
 

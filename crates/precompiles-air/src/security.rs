@@ -1,14 +1,17 @@
 //! Conjectured security level computation for the precompile chiplet stack.
 //!
 //! The chiplet stack proves a different statement from the VM and therefore has its own AIR shape.
-//! Both statements use the round-budget formulas in [`p3_security::budget`] and the same challenge
-//! field. Their recursive verifiers both use Poseidon2. Native verification derives alignment and
-//! collision resistance from the commitment scheme used for each proof.
+//! Both statements use the same round-budget formulas and challenge field. Their recursive
+//! verifiers both use Poseidon2. Native verification derives alignment and collision resistance
+//! from the commitment scheme used for each proof.
 //!
 //! [`AIR_SHAPE`] stores the relation shape used by the security calculation, while
 //! `air_shape_matches_symbolic` checks it against the shape obtained from the chiplet AIRs.
 
-pub use miden_air::security::ProofSecurityParameters;
+pub use miden_air::security::{
+    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
+    SecurityTerm,
+};
 use miden_air::security::{CHALLENGE_FIELD_BITS, COLLISION_RESISTANCE, COMMITMENT_ALIGNMENT};
 use miden_core::{
     Felt,
@@ -16,13 +19,7 @@ use miden_core::{
 };
 use miden_crypto::stark::pcs::PcsParams;
 use miden_lifted_air::{BaseAir, ConstraintCounts, ConstraintDegrees, LiftedAir};
-use p3_security::{
-    budget::{
-        AirShape, InstanceShape, LookupShape, ProtocolParams, SecurityReport, SecurityTerm,
-        report::LOOKUP_LABEL,
-    },
-    fixed,
-};
+use p3_security::{budget::report::LOOKUP_LABEL, fixed};
 
 use crate::{
     ChipletAir,
@@ -50,6 +47,7 @@ const EXTENSION_DEGREE: usize = <QuadFelt as BasedVectorSpace<Felt>>::DIMENSION;
 pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 591,
     max_constraint_degree: 5,
+    max_combo: NUM_OOD_POINTS,
     num_deep_terms: Some(770),
     lookup: LookupShape {
         fractions_per_row: 247,
@@ -85,6 +83,7 @@ pub fn derive_air_shape() -> AirShape {
         // single-AIR statement needs no cross-AIR batching challenge.
         num_composed_constraints: (num_constraints + num_airs - 1) as u32,
         max_constraint_degree: max_constraint_degree as u32,
+        max_combo: NUM_OOD_POINTS,
         num_deep_terms: Some(num_columns as u32 + NUM_OOD_POINTS),
         lookup: LookupShape {
             fractions_per_row: fractions_per_row as u32,
@@ -166,7 +165,15 @@ pub const COMPOSITION_COEFFICIENT: u64 =
     fixed::ceil_log2(AIR_SHAPE.num_composed_constraints as u64);
 
 /// Q16 upper bound on the log2 of the out-of-domain round's error coefficient.
-pub const OOD_COEFFICIENT: u64 = fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + 1);
+///
+/// The round's error size is `max(d * (H + combo - 1) + (H - 1), (c + 1) * H + combo - 1)` for a
+/// trace height `H`, maximum constraint degree `d`, out-of-domain point count `combo`, and
+/// quotient chunk count `c <= d`. At `combo = 2` that is at most `(d + 1) * H + (d - 1)`, which
+/// `(d + 2) * H` bounds for every trace height at or above `d - 1`. Dividing out `H` leaves this
+/// height-independent coefficient, so `OOD_BASE - log_max_height` stays a lower bound on the
+/// round.
+pub const OOD_COEFFICIENT: u64 =
+    fixed::ceil_log2(AIR_SHAPE.max_constraint_degree as u64 + AIR_SHAPE.max_combo as u64);
 
 /// Q16 upper bound on the log2 of the DEEP round's error coefficient.
 pub const DEEP_COEFFICIENT: u64 = fixed::ceil_log2(match AIR_SHAPE.num_deep_terms {
@@ -407,7 +414,7 @@ mod tests {
         const SECURITY_CAP_FP: u64 = 8_388_606;
         const LOOKUP_BASE_FP: u64 = 7_584_459;
         const COMPOSITION_TERM_FP: u64 = 7_785_215;
-        const OOD_BASE_FP: u64 = 8_219_197;
+        const OOD_BASE_FP: u64 = 8_204_623;
         const DEEP_BASE_FP: u64 = 7_760_199;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
@@ -489,12 +496,12 @@ mod tests {
         const VECTORS: &[((u32, u32, u32, u32, u32), [u64; 7], u32)] = &[
             (
                 (27, 17, 12, 4, 6),
-                [7_191_195, 7_785_215, 7_825_981, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
+                [7_191_195, 7_785_215, 7_825_002, 8_388_606, 7_891_517, 6_335_399, 8_388_606],
                 96,
             ),
             (
                 (27, 17, 12, 4, 16),
-                [6_535_882, 7_785_215, 7_170_621, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
+                [6_535_882, 7_785_215, 7_170_620, 8_388_606, 7_236_157, 6_335_399, 8_388_606],
                 96,
             ),
             (
@@ -514,7 +521,7 @@ mod tests {
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_535_882, 7_785_215, 7_170_621, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
+                [6_535_882, 7_785_215, 7_170_620, 7_760_199, 6_974_013, 1_353_667, 8_388_606],
                 20,
             ),
         ];

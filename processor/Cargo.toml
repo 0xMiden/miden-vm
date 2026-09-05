@@ -1,6 +1,6 @@
 [package]
 name = "miden-processor"
-version = "0.32.0"
+version = "0.33.0"
 description = "Miden VM processor"
 documentation = "https://docs.rs/miden-processor"
 readme = "README.md"

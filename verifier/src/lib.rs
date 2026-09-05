@@ -37,7 +37,10 @@ mod exports {
     }
 }
 pub use exports::*;
-pub use miden_air::security::ProofSecurityParameters;
+pub use miden_air::security::{
+    AirShape, InstanceShape, LookupShape, ProofSecurityParameters, ProtocolParams, SecurityReport,
+    SecurityTerm,
+};
 
 pub mod recursive;
 

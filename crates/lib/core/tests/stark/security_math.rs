@@ -147,6 +147,7 @@ fn omitted_rounds_are_dominated_at_envelope_extremes() {
     let air_shape = AirShape {
         num_composed_constraints: 8192,
         max_constraint_degree: 9,
+        max_combo: security::AIR_SHAPE.max_combo,
         num_deep_terms: Some(8192),
         lookup: LookupShape {
             fractions_per_row: 1,

@@ -525,7 +525,7 @@ fn render_pvm_constraints_eval(
 fn max_periodic_cycle_len_log() -> Result<u32, String> {
     let max_len = ChipletAir::all()
         .iter()
-        .flat_map(<ChipletAir as BaseAir<Felt>>::periodic_columns)
+        .flat_map(|air| <ChipletAir as BaseAir<Felt>>::periodic_columns(air).into_owned())
         .map(|column| column.len())
         .max()
         .unwrap_or(1);

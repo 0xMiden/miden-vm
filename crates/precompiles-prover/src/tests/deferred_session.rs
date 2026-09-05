@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::deferred::{DeferredState, Node};
+use miden_core::deferred::{DeferredState, Node, TRUE_DIGEST};
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::{
@@ -310,4 +310,75 @@ fn deferred_session_lowers_large_msm_without_panicking() {
     register_curve_equality(&mut state, msm.clone(), msm);
 
     session_from_deferred_state(&state).expect("large MSM should lower");
+}
+
+fn run_on_small_stack(f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(f)
+        .expect("thread spawn must succeed")
+        .join()
+        .expect("thread must not panic");
+}
+
+#[test]
+fn translate_truthy_deep_and_spine_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = DeferredState::default();
+        for _ in 0..512 {
+            state.log_statement(TRUE_DIGEST).unwrap();
+        }
+        session_from_deferred_state(&state)
+            .expect("deep AND spine must lower without stack overflow");
+    });
+}
+
+#[test]
+fn translate_uint_deep_add_chain_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let one = UintPrecompile::value_node(curve.scalar_domain(), limbs(1));
+        state.register(one.clone()).expect("scalar leaf must register");
+        let mut current = one.clone();
+        for _ in 0..512 {
+            let next = Node::join(
+                UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
+                current.digest(),
+                one.digest(),
+            )
+            .expect("add node must construct");
+            state.register(next.clone()).expect("add node must register");
+            current = next;
+        }
+        let generator = CurvePrecompile::generator_node(curve);
+        state.register(generator.clone()).expect("generator must register");
+        let msm = curve_msm_node(vec![(generator, current)]);
+        state.register(msm.clone()).expect("MSM must register");
+        register_curve_equality(&mut state, msm.clone(), msm);
+        session_from_deferred_state(&state)
+            .expect("deep uint add chain must lower without stack overflow");
+    });
+}
+
+#[test]
+fn translate_ec_deep_nested_msm_does_not_stackoverflow() {
+    run_on_small_stack(|| {
+        let mut state = state();
+        let curve = CurveId::Secp256k1;
+        let scalar2 = UintPrecompile::value_node(curve.scalar_domain(), limbs(2));
+        state.register(scalar2.clone()).expect("scalar must register");
+        let generator = CurvePrecompile::generator_node(curve);
+        state.register(generator.clone()).expect("generator must register");
+        let mut current = curve_msm_node(vec![(generator, scalar2.clone())]);
+        state.register(current.clone()).expect("first MSM must register");
+        for _ in 1..512 {
+            let next = curve_msm_node(vec![(current.clone(), scalar2.clone())]);
+            state.register(next.clone()).expect("nested MSM must register");
+            current = next;
+        }
+        register_curve_equality(&mut state, current.clone(), current);
+        session_from_deferred_state(&state)
+            .expect("deep nested MSM must lower without stack overflow");
+    });
 }
