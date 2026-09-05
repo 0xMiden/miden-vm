@@ -135,8 +135,8 @@ fn mtree_merge() {
 #[test]
 fn mtree_merge_then_get() {
     // Build two trees and merge them via mtree_merge, then immediately mtree_get from the merged
-    // root. This exercises the advice-store merge and would fail if the merge order mismatched
-    // the hmerge output.
+    // root. This exercises the advice-store and VM Merkle constructions together and would fail
+    // if their input order diverged.
     let leaves_a = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]).0;
     let leaves_b = init_merkle_store(&[9, 10, 11, 12, 13, 14, 15, 16]).0;
     let tree_a = MerkleTree::new(leaves_a).unwrap();

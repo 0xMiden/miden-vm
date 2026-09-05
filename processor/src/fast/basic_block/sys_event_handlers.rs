@@ -14,16 +14,6 @@ use super::deferred_handlers::{
 };
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
 
-// CONSTANTS
-// ================================================================================================
-
-/// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
-/// Offset accounts for the event ID at position 0 on the stack.
-pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
-
-/// The largest selector accepted by Eidos framing.
-const MAX_EIDOS_DOMAIN: u64 = u32::MAX as u64;
-
 // SYSTEM EVENT ERROR
 // ================================================================================================
 
@@ -66,11 +56,7 @@ pub fn handle_system_event(
         SystemEvent::U32Cto => push_trailing_ones(processor),
         SystemEvent::ILog2 => push_ilog2(processor),
         SystemEvent::MemToMap => insert_mem_values_into_adv_map(processor),
-        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(processor, ZERO),
-        SystemEvent::HdwordToMapWithDomain => {
-            let domain = processor.stack_get(HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET);
-            insert_hdword_into_adv_map(processor, domain)
-        },
+        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(processor),
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::CompressToMap => insert_compress_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
@@ -134,8 +120,7 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     Ok(())
 }
 
-/// Reads two words from the operand stack and inserts them into the advice map under the key
-/// defined by the hash of these words.
+/// Inserts the top two stack words into the advice map under the same key as `hmerge`.
 ///
 /// ```text
 /// Inputs:
@@ -146,22 +131,14 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
 ///   Advice map: {KEY: [A, B]}
 /// ```
 ///
-/// Where A is the first word after event_id (positions 1-4) and B is the second (positions 5-8).
-/// KEY is computed as `hash(A || B, domain)`, which matches `hmerge` on stack `[A, B, ...]`.
-fn insert_hdword_into_adv_map(
-    processor: &mut FastProcessor,
-    domain: Felt,
-) -> Result<(), SystemEventError> {
-    if domain.as_canonical_u64() > MAX_EIDOS_DOMAIN {
-        return Err(OperationError::EidosDomainOutOfRange { domain }.into());
-    }
-
+/// A is the first word after event_id (positions 1-4), and B is the second (positions 5-8).
+/// KEY is the generic Eidos hash of the eight Felts in `A || B`.
+fn insert_hdword_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
 
-    // Hash as [A, B] to match `hmerge` behavior directly.
-    let key = hasher::merge_in_domain(&[a, b], domain);
+    let key = hasher::hash_two_words(&[a, b]);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -195,7 +172,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = hasher::hash_elements(&[*a, *b, *c, *d].concat());
+    let key = hasher::merge_many(&[Word::new(*a), Word::new(*b), Word::new(*c), Word::new(*d)]);
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
@@ -554,7 +531,6 @@ mod tests {
     use alloc::vec;
 
     use miden_core::{Felt, ZERO, chiplets::hasher, crypto::merkle::MerkleStore};
-    use miden_utils_testing::build_test;
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
@@ -604,46 +580,11 @@ mod tests {
             .with_options(options)
             .expect("test advice inputs should fit advice map limits");
 
-        let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
+        let err = insert_hdword_into_adv_map(&mut processor).unwrap_err();
         assert!(matches!(
             err,
             SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added: actual, max })
                 if current == base && actual == added && max == base + added - 1
-        ));
-    }
-
-    #[test]
-    fn insert_hdword_with_domain_event_accepts_max_eidos_domain() {
-        let mut stack_values: Vec<u64> = (1..=8).collect();
-        stack_values.push(MAX_EIDOS_DOMAIN);
-        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN);
-
-        let (output, _) = build_test!("begin adv.insert_hdword_d end", &stack_values)
-            .execute_for_output()
-            .unwrap();
-
-        let a = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(1 + idx as u64)));
-        let b = Word::new(core::array::from_fn(|idx| Felt::new_unchecked(5 + idx as u64)));
-        let key = hasher::merge_in_domain(&[a, b], domain);
-        let stored_values = output
-            .advice
-            .get_mapped_values(&key)
-            .expect("valid Eidos domain should insert the double word");
-        assert_eq!(stored_values, &(1..=8).map(Felt::new_unchecked).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn insert_hdword_with_domain_event_rejects_oversized_eidos_domain() {
-        let mut stack_values = vec![ZERO];
-        stack_values.extend((1..=8).map(Felt::new_unchecked));
-        let domain = Felt::new_unchecked(MAX_EIDOS_DOMAIN + 1);
-        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
-
-        let err = insert_hdword_into_adv_map(&mut processor, domain).unwrap_err();
-        assert!(matches!(
-            err,
-            SystemEventError::Operation(OperationError::EidosDomainOutOfRange { domain: actual })
-                if actual == domain
         ));
     }
 
@@ -678,11 +619,11 @@ mod tests {
 
         for i in 0..2 {
             write_stack_values(&mut processor, 8, i * 8 + 1);
-            insert_hdword_into_adv_map(&mut processor, ZERO).unwrap();
+            insert_hdword_into_adv_map(&mut processor).unwrap();
         }
 
         write_stack_values(&mut processor, 8, 17);
-        let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
+        let err = insert_hdword_into_adv_map(&mut processor).unwrap_err();
         let SystemEventError::Advice(AdviceError::SizeBudgetExceeded { current, added, max }) = err
         else {
             panic!("expected advice map element budget error, got {err:?}");

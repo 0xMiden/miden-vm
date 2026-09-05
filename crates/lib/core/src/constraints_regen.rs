@@ -504,7 +504,9 @@ fn render_vm_layout(geometry: &VmGeometry) -> io::Result<String> {
 
 fn render_vm_ood_frames(geometry: &VmGeometry) -> String {
     format!(
-        r#"#! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
+        r#"#! VM out-of-domain evaluation helpers.
+
+#! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
 #! Horner accumulator used by the DEEP fixed terms.

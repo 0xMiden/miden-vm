@@ -6,7 +6,7 @@
 
 use miden_crypto::{
     Felt, Word,
-    hash::eidos::{self, Eidos},
+    hash::eidos::{self, Eidos, domains::GENERIC_FELT_SEQUENCE},
 };
 
 /// Number of Felts in one Eidos compression stack window.
@@ -52,18 +52,42 @@ pub fn pack_word(cv: [u32; STATE_WORDS]) -> Word {
     eidos::encoding::output_cv_to_word(cv)
 }
 
-/// Constructs the Eidos felt-sequence initial chaining word.
+/// Constructs an Eidos initial chaining word from raw framing values.
+///
+/// This is the low-level bridge used by VM trace and AIR code. It does not check that `tag` is
+/// registered or interpret the parameters; protocol-facing Rust code should use the typed `Eidos`
+/// API.
 #[inline]
-pub fn init_chaining_word(domain: u32, n: u32) -> Word {
-    Eidos::init_chaining_word(domain, n)
+pub fn init_chaining_word_with_params(tag: u32, params: [u32; 3]) -> Word {
+    let base = Eidos::merkle_node_init_chaining_word();
+    let injected = [tag, params[0], params[1], params[2]];
+    Word::new(core::array::from_fn(|i| base[i] + Felt::from_u32(injected[i])))
+}
+
+/// Constructs a raw Eidos initial chaining word with only `param0` set.
+#[inline]
+pub fn init_chaining_word(tag: u32, param0: u32) -> Word {
+    init_chaining_word_with_params(tag, [param0, 0, 0])
+}
+
+/// Returns the initial chaining word for the generic Felt-sequence construction.
+#[inline]
+pub fn felt_sequence_chaining_word(num_felts: u32) -> Word {
+    Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, num_felts)
 }
 
 /// Constructs the chaining word for a two-word Eidos hash.
 ///
 /// This is the switch point for the VM's 2-to-1/control-block framing.
 #[inline]
-pub fn two_to_one_chaining_word(domain: u32) -> Word {
-    init_chaining_word(domain, BLOCK_LEN as u32)
+pub fn two_to_one_chaining_word(tag: u32) -> Word {
+    init_chaining_word(tag, BLOCK_LEN as u32)
+}
+
+/// Returns the initial chaining word reserved for Merkle inner-node compression.
+#[inline]
+pub fn merkle_node_chaining_word() -> Word {
+    Eidos::merkle_node_init_chaining_word()
 }
 
 /// Applies packed Eidos compression to a VM stack window.
@@ -115,7 +139,29 @@ pub fn compress_raw_xof_lanes(state: &[Felt; STATE_WIDTH]) -> [u32; 16] {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::hash::eidos::{domain::EidosDomain, domains::GenericFeltSequenceDomain};
+
     use super::*;
+    use crate::program::domain::KernelCommitmentDomain;
+
+    #[test]
+    fn raw_initializers_match_canonical_framing() {
+        for params in [[0; 3], [1, 2, 3], [u32::MAX; 3]] {
+            assert_eq!(
+                init_chaining_word_with_params(KernelCommitmentDomain::TAG.as_u32(), params),
+                Eidos::init_chaining_word_with_tag(KernelCommitmentDomain::TAG, params),
+            );
+        }
+
+        assert_eq!(
+            two_to_one_chaining_word(GenericFeltSequenceDomain::TAG.as_u32()),
+            Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32),
+        );
+        assert_eq!(
+            init_chaining_word_with_params(0, [0; 3]),
+            Eidos::merkle_node_init_chaining_word(),
+        );
+    }
 
     #[test]
     fn compress_state_preserves_block_and_writes_new_cv() {

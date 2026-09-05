@@ -28,7 +28,7 @@ const MUL_TAG = [16779009, 3, 0, 0]
 const EQ_TAG = [16779009, 4, 0, 0]
 
 # Initial chaining words for the fixed one-block node shapes in this module. Codegen derives each
-# word from its matching tag as `init(selector, [8, arg0, arg1])`.
+# word from its matching tag as `init(domain_tag, [8, arg0, arg1])`.
 const VALUE_INIT_CV = [4280581857109608193, 2688637132020383752, 1947077364412317696, 6620516959492505601]
 const ADD_INIT_CV = [4280581857109608193, 2688637132020383752, 1947077364412317697, 6620516959492505600]
 const SUB_INIT_CV = [4280581857109608193, 2688637132020383752, 1947077364412317698, 6620516959492505600]

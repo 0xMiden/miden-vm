@@ -424,8 +424,8 @@ mod tests {
     // --------------------------------------------------------------------------------------------
 
     fn compute_internal_nodes() -> (Word, Word, Word) {
-        let node2 = Eidos::hash_elements(&[*LEAVES4[0], *LEAVES4[1]].concat());
-        let node3 = Eidos::hash_elements(&[*LEAVES4[2], *LEAVES4[3]].concat());
+        let node2 = Eidos::merge(&[LEAVES4[0], LEAVES4[1]]);
+        let node3 = Eidos::merge(&[LEAVES4[2], LEAVES4[3]]);
         let root = Eidos::merge(&[node2, node3]);
 
         (root, node2, node3)

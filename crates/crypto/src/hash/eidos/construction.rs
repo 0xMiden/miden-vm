@@ -204,8 +204,8 @@ impl Eidos {
 
     /// Compress two digest words as one reserved Merkle inner node.
     ///
-    /// This fixed, one-block construction uses the all-zero domain tuple and is intentionally not
-    /// equivalent to [`Self::hash_elements`] over the same eight Felts.
+    /// This fixed, one-block construction uses the reserved all-zero framing tuple and is
+    /// intentionally not equivalent to [`Self::hash_elements`] over the same eight Felts.
     #[inline]
     pub fn merge(values: &[Word; 2]) -> Word {
         compress_digest_pair(values, MERKLE_NODE_INIT_CV)
@@ -226,19 +226,25 @@ impl Eidos {
     /// This is the packed equivalent of [`Self::merge`].
     #[inline]
     pub fn merge_packed(values: &[PackedDigest; 2]) -> PackedDigest {
-        let block = array::from_fn(|i| {
-            if i < DIGEST_WIDTH {
-                values[0][i]
-            } else {
-                values[1][i - DIGEST_WIDTH]
-            }
-        });
-        Self::compress_packed(framing::init_packed_cv(0, [0; 3]), block)
+        compress_packed_digest_pair(values, framing::init_packed_cv(0, [0; 3]))
+    }
+
+    /// Hash two digest words as one generic eight-Felt sequence.
+    #[inline]
+    pub fn hash_two_words(values: &[Word; 2]) -> Word {
+        Self::hash_two_words_in_domain(values, GENERIC_FELT_SEQUENCE)
+    }
+
+    /// Hash packed pairs of digest words as generic eight-Felt sequences.
+    #[inline]
+    pub fn hash_two_words_packed(values: &[PackedDigest; 2]) -> PackedDigest {
+        let cv = Self::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, BLOCK_LEN as u32);
+        compress_packed_digest_pair(values, cv)
     }
 
     /// Hash two digest words under a typed Felt-sequence domain.
     #[inline]
-    pub fn merge_in_domain<D>(values: &[Word; 2], _: D) -> Word
+    pub fn hash_two_words_in_domain<D>(values: &[Word; 2], _: D) -> Word
     where
         D: EidosDomain<Encoding = FeltSequence>,
     {
@@ -267,6 +273,21 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
         }
     });
     encoding::output_cv_to_word(compression::compress_cv(cv, encoding::encode_felt_block(&block)))
+}
+
+#[inline]
+fn compress_packed_digest_pair(
+    values: &[PackedDigest; 2],
+    cv: PackedChainingValue,
+) -> PackedDigest {
+    let block = array::from_fn(|i| {
+        if i < DIGEST_WIDTH {
+            values[0][i]
+        } else {
+            values[1][i - DIGEST_WIDTH]
+        }
+    });
+    Eidos::compress_packed(cv, block)
 }
 
 #[inline]
@@ -514,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn packed_compression_and_merge_match_scalar_lanes() {
+    fn packed_compression_and_two_word_hashes_match_scalar_lanes() {
         let input_len = (2 * BLOCK_LEN) as u32;
         let packed_cv = Eidos::init_packed_chaining_word(GENERIC_FELT_SEQUENCE, input_len);
         let packed_block: PackedBlock = array::from_fn(|element| {
@@ -526,6 +547,7 @@ mod tests {
             array::from_fn(|word| packed_block[DIGEST_WIDTH + word]),
         ];
         let packed_merged = Eidos::merge_packed(&packed_values);
+        let packed_hashed = Eidos::hash_two_words_packed(&packed_values);
 
         for lane in 0..PACKED_LANES {
             let scalar_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, input_len);
@@ -540,6 +562,13 @@ mod tests {
             ];
             let actual = Word::new(array::from_fn(|word| packed_merged[word][lane]));
             assert_eq!(actual, Eidos::merge(&scalar_values), "packed merge lane {lane} diverged");
+
+            let actual = Word::new(array::from_fn(|word| packed_hashed[word][lane]));
+            assert_eq!(
+                actual,
+                Eidos::hash_two_words(&scalar_values),
+                "packed generic hash lane {lane} diverged"
+            );
         }
     }
 

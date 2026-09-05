@@ -17,7 +17,7 @@
 //! Because the constants section is also padded to a block boundary, the encoded stream
 //! splits into two block-aligned segments: `[constants | shuffle ops]` (per-order) and
 //! `[common ops | root padding]` (order-invariant), which the MASM loader hashes
-//! separately and the registry binds as `merge(H(prefix_i), H(common))`.
+//! separately and hashes their two commitments as one generic eight-Felt sequence.
 
 use std::collections::HashMap;
 

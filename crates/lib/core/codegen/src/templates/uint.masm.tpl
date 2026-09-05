@@ -28,7 +28,7 @@ const MUL_TAG = {{MUL_TAG}}
 const EQ_TAG = {{EQ_TAG}}
 
 # Initial chaining words for the fixed one-block node shapes in this module. Codegen derives each
-# word from its matching tag as `init(selector, [8, arg0, arg1])`.
+# word from its matching tag as `init(domain_tag, [8, arg0, arg1])`.
 const VALUE_INIT_CV = {{VALUE_INIT_CV}}
 const ADD_INIT_CV = {{ADD_INIT_CV}}
 const SUB_INIT_CV = {{SUB_INIT_CV}}

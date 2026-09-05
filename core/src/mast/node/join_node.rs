@@ -103,10 +103,10 @@ impl MastNodeExt for JoinNode {
     /// defined by [Self::DOMAIN] - i.e.,:
     /// ```
     /// # use miden_core::mast::JoinNode;
-    /// # use miden_crypto::{Word, hash::eidos::Eidos as Hasher};
+    /// # use miden_core::{Word, chiplets::hasher};
     /// # let first_child_digest = Word::default();
     /// # let second_child_digest = Word::default();
-    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
+    /// hasher::merge_in_mast_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
     /// ```
     fn digest(&self) -> Word {
         self.digest
@@ -178,7 +178,7 @@ impl JoinNodeBuilder {
             let left_child_hash = left_child.digest();
             let right_child_hash = right_child.digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
         Ok(JoinNode { children: self.children, digest })
@@ -223,7 +223,7 @@ impl MastForestContributor for JoinNodeBuilder {
                 })?
                 .digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
+            hasher::merge_in_mast_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
         fingerprint_with_child_fingerprints(node_digest, &self.children, context, hash_by_node_id)

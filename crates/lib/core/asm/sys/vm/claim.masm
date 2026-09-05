@@ -19,17 +19,12 @@ use miden::core::mem
 # resumable by callsites that pin those fields. Mirrors
 # miden_core::program::ExecutionClaim::commitment (enforced by cross-tests).
 
-# Domain tag for the claim commitment: the registered selector
-# (EXECUTION_CLAIM_DOMAIN_ID << 8) | version = (0x010001 << 8) | 1, per the Miden
-# domain-separation RFC (https://github.com/0xMiden/crypto/pull/1026).
-# Must match miden_core::program::CLAIM_DOMAIN_TAG (enforced by cross-tests).
-const CLAIM_DOMAIN_TAG = 0x01000101
-
 # Number of field elements in the canonical claim encoding.
 const NUM_CLAIM_ELEMENTS = 40
 
-# Number of words in the canonical claim encoding.
-const NUM_CLAIM_WORDS = NUM_CLAIM_ELEMENTS // 4
+# Initial CV for the claim commitment:
+# init(EXECUTION_CLAIM = 0x01000101, [40, 0, 0]).
+const CLAIM_INIT_CV = [4280581857109606657, 2688637132020383784, 1947077364412317696, 6620516959492505600]
 
 #! Fetches a claim preimage from the advice map, copies it into memory, and checks its commitment.
 #!
@@ -45,9 +40,19 @@ pub proc materialize_claim
     eq.NUM_CLAIM_ELEMENTS assert.err="claim preimage has a non-canonical length"
     movup.4
 
-    push.NUM_CLAIM_WORDS
-    push.CLAIM_DOMAIN_TAG
-    exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    dup add.NUM_CLAIM_ELEMENTS swap
+    # => [claim_ptr, end_ptr, CLAIM_COMMITMENT, ...]
+
+    push.CLAIM_INIT_CV
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV, claim_ptr, end_ptr, CLAIM_COMMITMENT, ...]
+
+    exec.mem::pipe_double_words_to_memory
+    exec.eidos::digest
+    # => [DIGEST, end_ptr, CLAIM_COMMITMENT, ...]
+
+    movup.4 movdn.8
+    assert_eqw.err="claim preimage commitment does not match"
     drop
 end
 
@@ -64,8 +69,14 @@ end
 #! - claim_ptr is the word-aligned address of the claim region.
 #! - CLAIM_HASH is the domain-tagged Eidos hash of the 40-element encoding.
 pub proc claim_commitment
-    push.CLAIM_DOMAIN_TAG push.NUM_CLAIM_ELEMENTS movup.2
-    # => [claim_ptr, NUM_CLAIM_ELEMENTS, CLAIM_DOMAIN_TAG, ...]
-    exec.eidos::hash_elements_in_domain
+    dup add.NUM_CLAIM_ELEMENTS
+    push.0 movdn.2 swap
+    # => [claim_ptr, end_ptr, remainder=0, ...]
+
+    push.CLAIM_INIT_CV
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CLAIM_INIT_CV, claim_ptr, end_ptr, remainder=0, ...]
+
+    exec.eidos::hash_elements_with_state
     # => [CLAIM_HASH, ...]
 end

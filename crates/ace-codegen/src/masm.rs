@@ -3,7 +3,10 @@
 use std::{format, string::String};
 
 use miden_core::{Felt, Word};
-use miden_crypto::stark::QuotientRecompositionInputs;
+use miden_crypto::{
+    hash::eidos::{Eidos, domains::GENERIC_FELT_SEQUENCE},
+    stark::QuotientRecompositionInputs,
+};
 
 use crate::AceError;
 
@@ -61,6 +64,18 @@ pub fn render_masm_constraints_eval(
 
     let prefix_rows = config.shuffle_prefix_len / 8;
     let common_rows = (config.stream_len - config.shuffle_prefix_len) / 8;
+    let prefix_felts =
+        u32::try_from(config.shuffle_prefix_len).map_err(|_| AceError::InvalidInputLayout {
+            message: "ACE shuffle prefix length must fit in Eidos's u32 length binding".into(),
+        })?;
+    let common_felts =
+        u32::try_from(config.stream_len - config.shuffle_prefix_len).map_err(|_| {
+            AceError::InvalidInputLayout {
+                message: "ACE common section length must fit in Eidos's u32 length binding".into(),
+            }
+        })?;
+    let prefix_init_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, prefix_felts);
+    let common_init_cv = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, common_felts);
     let common_commitment = config.common_commitment;
     let quotient = config.quotient_inputs;
 
@@ -89,6 +104,15 @@ pub fn render_masm_constraints_eval(
             "# Number of 8-felt blocks in each authenticated ACE circuit segment.\n",
             "const ACE_PREFIX_BLOCKS = {prefix_rows}\n",
             "const ACE_COMMON_BLOCKS = {common_rows}\n\n",
+            "# Precomputed generic Felt-sequence chaining words for the two fixed-length segments.\n",
+            "const ACE_PREFIX_INIT_CV_0 = {prefix_init_cv_0}\n",
+            "const ACE_PREFIX_INIT_CV_1 = {prefix_init_cv_1}\n",
+            "const ACE_PREFIX_INIT_CV_2 = {prefix_init_cv_2}\n",
+            "const ACE_PREFIX_INIT_CV_3 = {prefix_init_cv_3}\n",
+            "const ACE_COMMON_INIT_CV_0 = {common_init_cv_0}\n",
+            "const ACE_COMMON_INIT_CV_1 = {common_init_cv_1}\n",
+            "const ACE_COMMON_INIT_CV_2 = {common_init_cv_2}\n",
+            "const ACE_COMMON_INIT_CV_3 = {common_init_cv_3}\n\n",
             "# Quotient recomposition inputs derived from the circuit's quotient arity and the\n",
             "# relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;\n",
             "# QUOTIENT_FIRST_SHIFT depends on the canonical LDE shift and blowup; and\n",
@@ -98,7 +122,7 @@ pub fn render_masm_constraints_eval(
             "const QUOTIENT_FIRST_WEIGHT = {quotient_first_weight}\n\n",
             "# Eidos digest of the order-invariant common section of the ACE circuit stream\n",
             "# (common ops + root padding). The registry leaf for each ORDER_TAG is\n",
-            "# merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).\n",
+            "# hash_elements(H(constants | shuffle ops) || ACE_COMMON_COMMITMENT).\n",
             "const ACE_COMMON_COMMITMENT_0 = {common_commitment_0}\n",
             "const ACE_COMMON_COMMITMENT_1 = {common_commitment_1}\n",
             "const ACE_COMMON_COMMITMENT_2 = {common_commitment_2}\n",
@@ -137,13 +161,13 @@ pub fn render_masm_constraints_eval(
             "#! [common ops | root padding]. Both are hashed separately; the common digest is\n",
             "#! pinned to the compiled-in ACE_COMMON_COMMITMENT, and the registry leaf\n",
             "#! selected by ORDER_TAG must equal\n",
-            "#! merge(PREFIX_COMMITMENT, ACE_COMMON_COMMITMENT).\n",
+            "#! hash_elements(PREFIX_COMMITMENT || ACE_COMMON_COMMITMENT).\n",
             "proc load_and_authenticate_ace_circuit\n",
             "    exec.load_ace_registry_commitment\n",
             "    # => [LEAF]\n",
             "    adv.push_mapval\n",
             "    exec.layout::ace_circuit_stream_ptr\n",
-            "    push.{prefix_felts} exec.eidos::init_chaining_word\n",
+            "    push.ACE_PREFIX_INIT_CV_3.ACE_PREFIX_INIT_CV_2.ACE_PREFIX_INIT_CV_1.ACE_PREFIX_INIT_CV_0\n",
             "    padw padw\n",
             "    # => [ZERO, ZERO, CV, ptr, LEAF]\n",
             "    repeat.ACE_PREFIX_BLOCKS\n",
@@ -154,7 +178,7 @@ pub fn render_masm_constraints_eval(
             "    # => [PREFIX_COMMITMENT, ptr, LEAF]\n",
             "    movup.4\n",
             "    # => [ptr, PREFIX_COMMITMENT, LEAF]\n",
-            "    push.{common_felts} exec.eidos::init_chaining_word\n",
+            "    push.ACE_COMMON_INIT_CV_3.ACE_COMMON_INIT_CV_2.ACE_COMMON_INIT_CV_1.ACE_COMMON_INIT_CV_0\n",
             "    padw padw\n",
             "    repeat.ACE_COMMON_BLOCKS\n",
             "        adv_pipe\n",
@@ -169,7 +193,7 @@ pub fn render_masm_constraints_eval(
             "    # => [COMMON_COMMITMENT, PREFIX_COMMITMENT, LEAF]\n",
             "    swapw\n",
             "    # => [PREFIX_COMMITMENT, COMMON_COMMITMENT, LEAF]\n",
-            "    exec.eidos::merge\n",
+            "    exec.eidos::hash_two_words\n",
             "    # => [CIRCUIT_COMMITMENT, LEAF]\n",
             "    assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH\n",
             "end\n\n",
@@ -195,8 +219,14 @@ pub fn render_masm_constraints_eval(
         quotient_first_weight = quotient.first_weight.as_canonical_u64(),
         prefix_rows = prefix_rows,
         common_rows = common_rows,
-        prefix_felts = config.shuffle_prefix_len,
-        common_felts = config.stream_len - config.shuffle_prefix_len,
+        prefix_init_cv_0 = prefix_init_cv[0].as_canonical_u64(),
+        prefix_init_cv_1 = prefix_init_cv[1].as_canonical_u64(),
+        prefix_init_cv_2 = prefix_init_cv[2].as_canonical_u64(),
+        prefix_init_cv_3 = prefix_init_cv[3].as_canonical_u64(),
+        common_init_cv_0 = common_init_cv[0].as_canonical_u64(),
+        common_init_cv_1 = common_init_cv[1].as_canonical_u64(),
+        common_init_cv_2 = common_init_cv[2].as_canonical_u64(),
+        common_init_cv_3 = common_init_cv[3].as_canonical_u64(),
         common_commitment_0 = common_commitment[0].as_canonical_u64(),
         common_commitment_1 = common_commitment[1].as_canonical_u64(),
         common_commitment_2 = common_commitment[2].as_canonical_u64(),

@@ -252,8 +252,8 @@ fn merge_hasher_bus() {
         }
         let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
-        // SPLIT's own hasher response carries the SPLIT selector in its Eidos chaining word;
-        // sibling SPAN hash-init rows use the default selector.
+        // SPLIT's own hasher response carries the SPLIT opcode in its Eidos chaining word;
+        // sibling SPAN hash-init rows use the generic Felt-sequence domain tag.
         let split_cv = eidos_compression::two_to_one_chaining_word(opcodes::SPLIT as u32);
         if state[8..12] == *split_cv {
             exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));

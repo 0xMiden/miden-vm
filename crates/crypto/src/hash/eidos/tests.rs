@@ -200,15 +200,25 @@ fn merkle_initializer_has_zero_in_every_injected_lane() {
 }
 
 #[test]
-fn merge_in_domain_matches_hash_elements_in_domain() {
+fn hash_two_words_in_domain_matches_hash_elements_in_domain() {
     let left = word([10, 20, 30, 40]);
     let right = word([50, 60, 70, 80]);
     let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
 
     assert_eq!(
-        Eidos::merge_in_domain(&[left, right], RANDOM_COIN_STATE),
+        Eidos::hash_two_words_in_domain(&[left, right], RANDOM_COIN_STATE),
         Eidos::hash_elements_in_domain(&concat, RANDOM_COIN_STATE)
     );
+}
+
+#[test]
+fn hash_two_words_matches_generic_felt_hash() {
+    let left = word([10, 20, 30, 40]);
+    let right = word([50, 60, 70, 80]);
+    let concat = vec![left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3]];
+
+    assert_eq!(Eidos::hash_two_words(&[left, right]), Eidos::hash_elements(&concat));
+    assert_ne!(Eidos::hash_two_words(&[left, right]), Eidos::merge(&[left, right]));
 }
 
 #[test]

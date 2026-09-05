@@ -237,14 +237,14 @@ end
 #! Outputs: [DIGEST, write_ptr']
 #!
 #! Where:
-#! - domain identifies the Eidos hash domain.
+#! - domain is the runtime Eidos domain tag.
 #! - num_words is the number of words copied from the advice stack.
 #! - write_ptr is the word-aligned destination address.
 #! - write_ptr' points immediately after the copied words.
 #! - DIGEST matches `Eidos::hash_elements_in_domain` over the copied felts.
 pub proc pipe_words_to_memory_in_domain
-  # Empty input has a distinct encoding under a nonzero domain. Reuse the canonical memory-based
-  # implementation; it does not read memory when num_elements is zero.
+  # Empty input has a domain-specific digest. Reuse the canonical memory-based implementation;
+  # it does not read memory when num_elements is zero.
   dup.1 eq.0
   if.true
     swap drop dup.1 push.0 swap
@@ -362,13 +362,13 @@ end
 #! Moves an even number of words from the advice stack to memory and asserts that their
 #! domain-tagged Eidos compression-chain hash matches a given commitment.
 #!
-#! Like `pipe_double_words_preimage_to_memory`, but binds a domain identifier into the Eidos CV.
+#! Like `pipe_double_words_preimage_to_memory`, but binds a runtime domain tag into the Eidos CV.
 #!
 #! Inputs:  [domain, num_words, write_ptr, COMMITMENT]
 #! Outputs: [write_ptr']
 #!
 #! Where:
-#! - domain is the domain identifier included in the Eidos chaining word.
+#! - domain is the runtime domain tag included in the Eidos chaining word.
 #! - num_words is the number of words which will be copied to the memory (must be even).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.

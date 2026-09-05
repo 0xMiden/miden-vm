@@ -354,38 +354,6 @@ fn advice_insert_hdword() {
     // Values are stored as [W0, W1] in advice map.
     // Retrieval: adv_loadw swapw adv_loadw swapw produces [W0, W1].
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
-
-    // --- test hashing with domain -------------------------------------------
-    let source: &str = "
-    begin
-        # stack: [1, 2, 3, 4, 5, 6, 7, 8, 9, ...]
-        # W0 = [1,2,3,4], W1 = [5,6,7,8], domain = 9
-
-        # hash and insert top two words into the advice map
-        adv.insert_hdword_d
-
-        # manually compute the hash of the two words with domain
-        # Eidos init chaining word for domain 9 and 8 input felts.
-        movup.8 drop
-        push.6620516959492505600.1947077364412317696.2688637132020383752.4280581857092829193
-        movdnw.2
-        compress
-        dropw dropw
-        # => [KEY, ...]
-
-        # load the advice stack with values from the advice map and drop the key
-        adv.push_mapval
-        dropw
-
-        # move the values from the advice stack to the operand stack
-        # Values stored as [W0, W1], advice stack top is W0
-        # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
-        adv_loadw swapw adv_loadw swapw
-    end";
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-    let test = build_test!(source, &stack_inputs);
-    // Values stored as [W0, W1], retrieval produces [W0, W1] on operand stack
-    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 }
 
 #[test]
@@ -424,7 +392,7 @@ fn advice_insert_hqword() {
         adv.insert_hqword
 
         # Hash the four words with Eidos length binding for 16 input felts.
-        push.6620516959492505600.1947077364412317696.2688637132020383760.4280581857092829184
+        push.6620516959492505600.1947077364412317696.2688637132020383760.4280581857092831745
         movdnw.2
         compress
         dropw dropw

@@ -154,11 +154,12 @@ fn hash_elements_in_domain_matches_native() {
             domain_int = domain.as_canonical_u64(),
         );
 
-        let mut expected: Vec<u64> = hasher::hash_elements_in_domain(&felts, domain)
-            .as_elements()
-            .iter()
-            .map(Felt::as_canonical_u64)
-            .collect();
+        let mut expected: Vec<u64> =
+            hasher::hash_elements_in_domain(&felts, miden_core::program::domain::KERNEL_COMMITMENT)
+                .as_elements()
+                .iter()
+                .map(Felt::as_canonical_u64)
+                .collect();
         expected.resize(16, 0);
         build_test!(source.as_str(), &[]).expect_stack(&expected);
     }
@@ -196,8 +197,7 @@ fn element_hash_procedures_reject_non_u32_length() {
 
 #[test]
 fn generic_eidos_initializer_matches_native_across_full_u32_inputs() {
-    use miden_core::Felt;
-    use miden_crypto::hash::eidos::Eidos;
+    use miden_core::{Felt, chiplets::eidos_compression};
 
     for (selector, params) in [
         (0, [0; 3]),
@@ -211,11 +211,12 @@ fn generic_eidos_initializer_matches_native_across_full_u32_inputs() {
              begin push.{param2}.{param1}.{param0}.{selector} \
              exec.eidos::init_chaining_word_with_params exec.sys::truncate_stack end"
         );
-        let mut expected: Vec<u64> = Eidos::init_chaining_word_with_params(selector, params)
-            .as_elements()
-            .iter()
-            .map(Felt::as_canonical_u64)
-            .collect();
+        let mut expected: Vec<u64> =
+            eidos_compression::init_chaining_word_with_params(selector, params)
+                .as_elements()
+                .iter()
+                .map(Felt::as_canonical_u64)
+                .collect();
         expected.resize(16, 0);
         build_test!(source.as_str(), &[]).expect_stack(&expected);
     }

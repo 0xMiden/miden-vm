@@ -13,18 +13,89 @@ const LEAF_DEPTH = 64
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
 const MAX_LEAF_SIZE = 8192
 
-# Domain identifier used when hashing SMT leaves. Matches `SmtLeaf::LEAF_DOMAIN` in miden-crypto
-# and is mixed into the Eidos chaining word to domain-separate leaf hashes from ordinary inner
-# Merkle nodes.
-const LEAF_DOMAIN = 0x13af
+# `SMT_BUCKET_LEAF` (tag 0x00000101) initial chaining-word constants. Only the entry count is
+# dynamic.
+const LEAF_INIT_CV_0 = 4280581857092829441
+const LEAF_INIT_CV_1_BASE = 2688637132020383744
+const LEAF_INIT_CV_2 = 1947077364412317696
+const LEAF_INIT_CV_3 = 6620516959492505600
 
-# Eidos chaining word for one 8-Felt block under LEAF_DOMAIN.
+# Eidos chaining word for one key-value pair under `SMT_BUCKET_LEAF`.
 const LEAF_MERGE_INIT_CV = [
-    4280581857092834223,
-    2688637132020383752,
+    4280581857092829441,
+    2688637132020383745,
     1947077364412317696,
     6620516959492505600
 ]
+
+# LEAF HASHING HELPERS
+# =================================================================================================
+
+#! Constructs the `SMT_BUCKET_LEAF` initial chaining word for `num_entries` key-value pairs.
+#!
+#! Input:  [num_entries, ...]
+#! Output: [CV, ...]
+proc init_leaf_chaining_word
+    u32assert.err="SMT leaf entry count must fit in a u32"
+    push.LEAF_INIT_CV_1_BASE add
+    push.LEAF_INIT_CV_3.LEAF_INIT_CV_2
+    movup.2
+    push.LEAF_INIT_CV_0
+end
+
+#! Copies a non-empty, even number of advice words to memory and verifies their SMT leaf hash.
+#!
+#! Input:  [num_words, write_ptr, COMMITMENT, ...]
+#! Output: [write_ptr', ...]
+proc pipe_leaf_preimage_to_memory
+    dup is_odd assertz.err="SMT leaf preimage must contain complete key-value pairs"
+
+    # Each entry contains two words.
+    dup div.2 exec.init_leaf_chaining_word
+    # => [CV, num_words, write_ptr, COMMITMENT, ...]
+
+    # Replace num_words with the end pointer.
+    movup.4 mul.4 dup.5 add movdn.5
+    # => [CV, write_ptr, end_ptr, COMMITMENT, ...]
+
+    padw padw
+    exec.mem::pipe_double_words_to_memory
+    exec.eidos::digest
+    # => [DIGEST, write_ptr', COMMITMENT, ...]
+
+    movup.4 movdn.8
+    assert_eqw.err="SMT leaf preimage does not match its commitment"
+end
+
+#! Hashes a non-empty, block-aligned SMT leaf preimage in memory.
+#!
+#! Input:  [start_ptr, end_ptr, ...]
+#! Output: [DIGEST, ...]
+proc hash_leaf_from_memory
+    dup.1 dup.1 u32assert2 u32gte
+    assert.err="SMT leaf start pointer must not exceed its end pointer"
+
+    dup.1 dup.1 sub
+    dup u32mod.8 assertz.err="SMT leaf preimage must contain complete key-value pairs"
+    u32div.8 exec.init_leaf_chaining_word
+    # => [CV, start_ptr, end_ptr, ...]
+
+    push.0 movdn.6 padw padw
+    exec.eidos::hash_elements_with_state
+end
+
+#! Inserts one key-value pair into the advice map and returns its SMT leaf hash.
+#!
+#! Input:  [K, V, ...]
+#! Output: [DIGEST, K, ...]
+proc hash_and_insert_single_leaf
+    dupw.1 dupw.1
+    push.LEAF_MERGE_INIT_CV movdnw.2
+    adv.insert_compress
+    exec.eidos::compress
+    exec.eidos::digest
+    movupw.2 dropw
+end
 
 # EXPORTS
 # =================================================================================================
@@ -214,12 +285,12 @@ pub proc set
             drop
             # => [NV, V, K, R]
 
-            # Load the advice-provided single-leaf preimage (K_l, V_l) and assert
-            # hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
+            # Load the advice-provided single-leaf preimage (K_l, V_l) and assert that its
+            # SMT_BUCKET_LEAF hash equals NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
             dupw dupw.2 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
-            # => [hash_in_domain(K_l, V_l, LEAF_DOMAIN), V_l, K_l, NV, V, K, R]
+            # => [leaf_hash, V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
 
@@ -313,7 +384,7 @@ proc get_multi_leaf_value
 
     # Push the leaf domain separator.
     # Cycles: 58 + 3 * num_words
-    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    exec.pipe_leaf_preimage_to_memory
     # => [ptr_end, K, R]
 
     locaddr.0
@@ -563,14 +634,8 @@ proc set_empty_leaf
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
-        #=> [V, K, R, ...]
-
-        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
-        # (21 cycles)
-        dupw.1 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
+        # Insert [K, V] into the advice map and compute the new leaf commitment.
+        swapw exec.hash_and_insert_single_leaf
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
@@ -647,14 +712,8 @@ proc insert_single_leaf
         dropw
         # => [K, V_l, V, R]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
-        # => [V, K, V_l, R]
-
-        # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
-        # (X cycles)
-        dupw.1 push.LEAF_MERGE_INIT_CV exec.eidos::merge_with_chaining_word
+        # Insert [K, V] into the advice map and compute the new leaf commitment.
+        movupw.2 swapw exec.hash_and_insert_single_leaf
         # => [NV, K, V_l, R]
 
         # Prepare stack to update Merkle store
@@ -796,9 +855,8 @@ proc remove_single_leaf
         dropw
         # => [K, V_l, V, R]
 
-        # Update advice map (swap to put K on top for the leaf-domain
-        # hash key hash_in_domain(K || V, LEAF_DOMAIN)).
-        movupw.2 swapw push.LEAF_DOMAIN movdn.8 adv.insert_hdword_d movup.8 drop swapw
+        # Move the empty replacement value to the top. Empty leaves have no advice preimage.
+        movupw.2
         # => [V, K, V_l, R]
 
         # Prepare the stack for `mtree_set`
@@ -819,7 +877,7 @@ proc remove_single_leaf
     else
         # Keys don't match; this is a no-op. The advice provider's claims were
         # already verified at the top of `set`: mtree_get bound NV to R at K[3],
-        # and the caller asserted hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
+        # and the caller asserted that the SMT_BUCKET_LEAF hash of (K_l, V_l) equals NV.
         # V is known to be ZERO.
         # => [K_l, K, V_l, V (=ZERO), R]
 
@@ -866,7 +924,7 @@ proc set_multi_leaf
     locaddr.0 swap
     # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
 
-    push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    exec.pipe_leaf_preimage_to_memory
     # => [end_ptr; NV, K, V, leaf_size, R]
 
     movdn.12
@@ -1323,7 +1381,7 @@ proc hash_and_insert_mem
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    push.LEAF_DOMAIN exec.eidos::hash_words_with_domain
+    exec.hash_leaf_from_memory
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem

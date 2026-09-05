@@ -253,7 +253,7 @@ fn is_merkle_selector(selectors: Selectors) -> bool {
 fn input_state_from_row(selectors: Selectors, state: &HasherState) -> HasherState {
     let mut input = *state;
     if is_merkle_selector(selectors) {
-        let cv = eidos_compression::two_to_one_chaining_word(0);
+        let cv = eidos_compression::merkle_node_chaining_word();
         input[8..12].copy_from_slice(cv.as_elements());
     }
     input
@@ -266,7 +266,7 @@ fn output_state_from_row(
 ) -> HasherState {
     let mut output = [ZERO; STATE_WIDTH];
     if is_merkle_selector(selectors) {
-        let cv = eidos_compression::two_to_one_chaining_word(0);
+        let cv = eidos_compression::merkle_node_chaining_word();
         output[..4].copy_from_slice(cv.as_elements());
         output[8..12].copy_from_slice(&state[8..12]);
     } else {

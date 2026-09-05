@@ -1,6 +1,6 @@
-//! Selector-local operation discriminants used by transcript nodes.
+//! Domain-local operation discriminants used by transcript nodes.
 //!
-//! Eidos construction selectors come from the shared protocol registry or a concrete precompile;
+//! Eidos domain tags come from the shared registry or a concrete precompile;
 //! this module defines only the operation ids interpreted within those constructions.
 
 /// Operation discriminant for VM uint op rows.
