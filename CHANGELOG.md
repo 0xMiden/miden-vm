@@ -196,6 +196,19 @@
 - [BREAKING] Split the synthetic core MASM package into separate `miden-core` and `miden-precompiles` packages, leaving the bare `miden` namespace available for sibling packages such as `miden-protocol` ([#3459](https://github.com/0xMiden/miden-vm/pull/3459)).
 - Moved the `miden-precompiles` and `miden-precompiles-prover` crate sources from the repository root into `crates/`, aligning them with the rest of the workspace layout ([#3462](https://github.com/0xMiden/miden-vm/pull/3462)).
 
+#### Changes
+
+- [BREAKING] Removed `Eq` and `PartialEq` from Falcon, ECDSA-k256, and EdDSA secret-key types in
+  non-test builds so production comparisons cannot materialize encoded private-key copies
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
+
+#### Fixes
+
+- Wiped Falcon secret-polynomial and encoded-key temporaries during key generation,
+  deserialization, serialization, public-key derivation, and signing. ECDSA-k256 and EdDSA
+  serialization temporaries are also wiped
+  ([0xMiden/crypto#1061](https://github.com/0xMiden/crypto/pull/1061)).
+
 ## v0.28.0 (2026-08-01)
 
 #### Features
