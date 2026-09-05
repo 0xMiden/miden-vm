@@ -16,7 +16,7 @@
 //! hashes `lhs || rhs` with the registered deferred-AND framing, folding two child
 //! `True` bindings; the **uint leaf / pin-claim row**, which hashes a stored uint's
 //! value under either `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`
-//! or `[PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr, 0]`; and the **uint ops**
+//! or `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`; and the **uint ops**
 //! (`is_add` / `is_sub` / `is_mul` / `is_is`), which hash two child hashes under
 //! `[UintPrecompile::id(), op_id, 0, 0]` and tie the children's `Uint` bindings
 //! to a [`UintAdd`](crate::uint::add) / [`UintMul`](crate::uint::mul) relation
@@ -68,9 +68,10 @@ use miden_core::{
     Felt,
     deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
-    program::domain::PVM_UINT_PIN_CLAIM_SELECTOR,
+    program::domain::PvmUintPinClaimDomain,
     utils::RowMajorMatrix,
 };
+use miden_crypto::hash::eidos::EidosDomain;
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder};
 use miden_precompiles::{CurvePrecompile, UintPrecompile};
 
@@ -748,16 +749,16 @@ where
         // Node-compression chain context, every slot degree-1. Runtime uint values use
         // `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`; uint ops use
         // `[UintPrecompile::id(), op_id, 0, 0]`; explicit pins use
-        // `[PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr, 0]`; EcCreate / PAI rows use
+        // `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`; EcCreate / PAI rows use
         // `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`.
         let and_context = Tag::AND.as_word();
         let uint_precompile_id = LB::Expr::from(UintPrecompile::id());
         let curve_precompile_id = LB::Expr::from(CurvePrecompile::id());
-        let pin_claim_selector = LB::Expr::from(PVM_UINT_PIN_CLAIM_SELECTOR);
+        let pin_claim_domain_tag = LB::Expr::from(PvmUintPinClaimDomain::TAG.as_felt());
         let chain_context = [
             and_gate.clone() * LB::Expr::from(and_context[0])
                 + (is_uint_leaf + op_lhs_gate.clone()) * uint_precompile_id.clone()
-                + is_pinned * (pin_claim_selector - uint_precompile_id)
+                + is_pinned * (pin_claim_domain_tag - uint_precompile_id)
                 + (is_create.clone() + is_ec_op.clone()) * curve_precompile_id,
             and_gate.clone() * LB::Expr::from(and_context[1]) + tag_arg0,
             and_gate.clone() * LB::Expr::from(and_context[2]) + tag_arg1,

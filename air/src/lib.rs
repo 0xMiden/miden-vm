@@ -1196,7 +1196,7 @@ pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
 fn hash_kernel_input_felts(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
     miden_core::chiplets::hasher::hash_elements_in_domain(
         kernel_felts,
-        miden_core::program::KERNEL_DOMAIN_TAG,
+        miden_core::program::domain::KERNEL_COMMITMENT,
     )
     .into()
 }

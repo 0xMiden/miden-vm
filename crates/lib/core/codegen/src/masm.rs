@@ -275,13 +275,15 @@ fn tag_word(tag: Tag) -> [u64; 4] {
 }
 
 fn initial_cv_literal(tag: Tag, payload_len: u32) -> String {
-    let [selector, arg0, arg1, reserved] = tag_word(tag);
+    let [domain_tag, arg0, arg1, reserved] = tag_word(tag);
     assert_eq!(reserved, 0, "generated deferred tags must have a zero reserved lane");
-    let selector = u32::try_from(selector).expect("generated selector must fit in u32");
+    let domain_tag = u32::try_from(domain_tag).expect("generated domain tag must fit in u32");
     let arg0 = u32::try_from(arg0).expect("generated tag argument must fit in u32");
     let arg1 = u32::try_from(arg1).expect("generated tag argument must fit in u32");
-    word_literal(digest_word(Eidos::init_chaining_word_with_params(
-        selector,
+    let domain_tag = miden_core::program::domain::DomainTag::from_u32(domain_tag)
+        .expect("generated deferred domain tag must be structurally valid");
+    word_literal(digest_word(Eidos::init_chaining_word_with_tag(
+        domain_tag,
         [payload_len, arg0, arg1],
     )))
 }

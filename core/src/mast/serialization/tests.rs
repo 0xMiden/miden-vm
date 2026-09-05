@@ -1594,7 +1594,7 @@ fn test_header_counts_match_node_kinds() {
 /// Version 4 encoded opcode 0x50 as HPERM, while version 5 interprets it as COMPRESS. Every load
 /// path must reject version-4 bytes before it can attach the new semantics to an old stored digest.
 #[test]
-fn test_hperm_wire_version_is_rejected_by_every_load_path() {
+fn test_pre_eidos_wire_version_is_rejected_by_every_load_path() {
     assert_eq!(VERSION, [0, 0, 5]);
 
     let mut forest = MastForest::new();

@@ -5,12 +5,12 @@ use assert_matches::assert_matches;
 use super::{EMPTY_WORD, LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
 use crate::{
     Felt, ONE, Word,
-    hash::eidos::Eidos,
+    hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF},
     merkle::{
         EmptySubtreeRoots,
         smt::{
-            LEAF_DOMAIN, Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError,
-            SparseMerkleTree, SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
+            Map, MutationSet, NodeMutation, SmtLeafError, SmtProofError, SparseMerkleTree,
+            SparseMerkleTreeReader, full::MAX_LEAF_ENTRIES,
         },
         store::MerkleStore,
     },
@@ -1257,17 +1257,17 @@ fn build_empty_or_single_leaf_node(key: Word, value: Word) -> Word {
 }
 
 fn build_multiple_leaf_node(kv_pairs: &[(Word, Word)]) -> Word {
-    let elements: Vec<Felt> = kv_pairs
-        .iter()
-        .flat_map(|(key, value)| {
-            let key_elements = key.into_iter();
-            let value_elements = (*value).into_iter();
-
-            key_elements.chain(value_elements)
-        })
-        .collect();
-
-    Eidos::hash_elements_in_domain(&elements, LEAF_DOMAIN)
+    let mut cv = Eidos::init_chaining_word(
+        SMT_BUCKET_LEAF,
+        u32::try_from(kv_pairs.len()).expect("test leaf entry count must fit in a u32"),
+    );
+    for &(key, value) in kv_pairs {
+        cv = Eidos::compress(
+            cv,
+            core::array::from_fn(|i| if i < 4 { key[i] } else { value[i - 4] }),
+        );
+    }
+    cv
 }
 
 /// Applies mutations with and without reversion to the given SMT, comparing resulting SMTs,

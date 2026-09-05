@@ -350,7 +350,7 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
         ProofOrder,
         ace::{RecursiveAceCircuitFactory, build_recursive_verifier_ace_circuit},
     };
-    use miden_core::crypto::hash::Eidos;
+    use miden_core::{Word, crypto::hash::Eidos};
 
     // The loader's two `repeat` counts are generated from this split, so pin it to the real
     // constants+shuffle boundary instead of trusting the value the struct reports.
@@ -389,10 +389,8 @@ fn recursive_ace_factory_and_factoring_match_the_one_shot_builder() {
         let (prefix, common) = circuit.instructions.split_at(circuit.shuffle_prefix_len);
         assert_eq!(circuit.shuffle_commitment, Eidos::hash_elements(prefix));
         assert_eq!(circuit.common_commitment, Eidos::hash_elements(common));
-        assert_eq!(
-            circuit.commitment,
-            Eidos::merge(&[circuit.shuffle_commitment, circuit.common_commitment])
-        );
+        let commitments = [circuit.shuffle_commitment, circuit.common_commitment];
+        assert_eq!(circuit.commitment, Eidos::hash_elements(Word::words_as_elements(&commitments)));
 
         // The common section must be byte-identical across proof orders; only the
         // shuffle section may differ.

@@ -121,7 +121,7 @@ mod tests {
         Felt, ZERO,
         deferred::{
             DeferredContext, Node, NodeType, Payload, Precompile, PrecompileRegistry, Tag,
-            precompile::test_precompile_selector,
+            precompile::test_precompile_domain_tag,
         },
     };
 
@@ -144,10 +144,10 @@ mod tests {
 
     impl FixturePrecompile {
         const NAME: &'static str = "precompile-witness-fixture";
-        const SELECTOR: Felt = test_precompile_selector(3);
+        const DOMAIN_TAG: Felt = test_precompile_domain_tag(3);
 
         fn tag() -> Tag {
-            Tag::precompile(Self::SELECTOR, [ZERO; 2]).expect("fixture id is precompile-owned")
+            Tag::precompile(Self::DOMAIN_TAG, [ZERO; 2]).expect("fixture id is precompile-owned")
         }
     }
 
@@ -157,7 +157,7 @@ mod tests {
         }
 
         fn id(&self) -> Felt {
-            Self::SELECTOR
+            Self::DOMAIN_TAG
         }
 
         fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {

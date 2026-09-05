@@ -8,8 +8,9 @@ use miden_core::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
         PrecompileError, Tag,
     },
-    program::domain::UINT256_PRECOMPILE_SELECTOR,
+    program::domain::Uint256PrecompileDomain,
 };
+use miden_crypto::hash::eidos::EidosDomain;
 
 use super::{Limbs, ONE_LIMBS, TWO_LIMBS, UintDomain, ZERO_LIMBS};
 
@@ -127,9 +128,9 @@ impl UintPrecompile {
     pub const MUL_OP_ID: u64 = 3;
     pub const EQ_OP_ID: u64 = 4;
 
-    /// Registered precompile selector.
+    /// Registered precompile domain tag.
     pub fn id() -> Felt {
-        UINT256_PRECOMPILE_SELECTOR
+        Uint256PrecompileDomain::TAG.as_felt()
     }
 
     /// Builds a canonical uint `VALUE` tag for `domain`.

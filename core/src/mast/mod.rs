@@ -756,7 +756,7 @@ impl MastForest {
 
                     let left_digest = computed_hashes[left_id.0 as usize];
                     let right_digest = computed_hashes[right_id.0 as usize];
-                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
                 },
                 MastNode::Split(split) => {
                     let true_id = split.on_true();
@@ -766,14 +766,14 @@ impl MastForest {
 
                     let true_digest = computed_hashes[true_id.0 as usize];
                     let false_digest = computed_hashes[false_id.0 as usize];
-                    hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
                 },
                 MastNode::Loop(loop_node) => {
                     let body_id = loop_node.body();
                     check_no_forward_ref(node_id, body_id)?;
 
                     let body_digest = computed_hashes[body_id.0 as usize];
-                    hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
+                    hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
                 },
                 MastNode::Call(call) => {
                     let callee_id = call.callee();
@@ -785,7 +785,7 @@ impl MastForest {
                     } else {
                         CallNode::CALL_DOMAIN
                     };
-                    hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+                    hasher::merge_in_mast_domain(&[callee_digest, Word::default()], domain)
                 },
                 MastNode::Dyn(dyn_node) => {
                     if dyn_node.is_dyncall() {

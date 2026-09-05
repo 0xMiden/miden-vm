@@ -16,22 +16,23 @@ const EIDOS_INIT_CV_0_BASE = 4280581857092829184
 const EIDOS_INIT_CV_1_BASE = 2688637132020383744
 const EIDOS_INIT_CV_2_BASE = 1947077364412317696
 const EIDOS_INIT_CV_3_BASE = 6620516959492505600
+const GENERIC_FELT_SEQUENCE_DOMAIN_TAG = 0x00000a01
 
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0 = 6347876015119529679
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1 = 7689086723714803787
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2 = 447594322480659107
-const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3 = 5651722801955730124
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0 = 1271780409803817075
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1 = 5764598326126322987
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2 = 4360610806978597365
+const EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3 = 6175761669194382739
 
-#! Constructs an Eidos chaining word from a registered selector and three selector-defined
+#! Constructs an Eidos chaining word from a domain tag and three domain-defined
 #! parameters. Every input must fit in a u32. Each occupies the low lane of one packed Felt; the
 #! corresponding high lane is a fixed masked IV word.
 #!
-#! Input:  [selector, param0, param1, param2, ...]
+#! Input:  [domain_tag, param0, param1, param2, ...]
 #! Output: [CV, ...]
 #!
 #! Invocation: exec
 pub proc init_chaining_word_with_params(
-    selector: u32,
+    domain_tag: u32,
     param0: u32,
     param1: u32,
     param2: u32,
@@ -46,7 +47,7 @@ pub proc init_chaining_word_with_params(
     movup.3 movdn.2
 end
 
-#! Returns the Eidos digest of an empty Felt sequence under selector zero.
+#! Returns the Eidos digest of an empty generic Felt sequence.
 #!
 #! Input:  [...]
 #! Output: [DIGEST, ...]
@@ -56,7 +57,7 @@ pub proc empty_felt_sequence_digest() -> Digest
     push.EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_3.EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_2.EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_1.EIDOS_EMPTY_FELT_SEQUENCE_DIGEST_0
 end
 
-#! Constructs `Eidos::init_chaining_word(0, n)`.
+#! Constructs `Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, n)`.
 #! `n` must fit in a u32.
 #!
 #! Input:  [n, ...]
@@ -69,13 +70,13 @@ pub proc init_chaining_word(num_elements: u32) -> ChainingValue
     push.EIDOS_INIT_CV_1_BASE add
     push.EIDOS_INIT_CV_3_BASE.EIDOS_INIT_CV_2_BASE
     movup.2
-    push.EIDOS_INIT_CV_0_BASE
+    push.EIDOS_INIT_CV_0_BASE add.GENERIC_FELT_SEQUENCE_DOMAIN_TAG
 end
 
-#! Constructs `Eidos::init_chaining_word(selector, n)`.
-#! `n` and `selector` must fit in a u32.
+#! Constructs an initial chaining word from a runtime domain tag and `n`.
+#! Both values must fit in a u32. The caller is responsible for registry and schema validation.
 #!
-#! Input:  [n, selector, ...]
+#! Input:  [n, domain_tag, ...]
 #! Output: [CV, ...]
 #!
 #! Invocation: exec
@@ -99,7 +100,7 @@ pub proc init_with_chaining_word(chaining_value: ChainingValue) -> State
     padw padw
 end
 
-#! Initializes a three-word state for a message of `num_elements` Felts in domain zero.
+#! Initializes a three-word state for a message under the generic Felt-sequence domain.
 #! `num_elements` must fit in a u32.
 #! An empty message still requires one zero-block compression after initialization.
 #!
@@ -112,8 +113,8 @@ pub proc init(num_elements: u32) -> State
     exec.init_with_chaining_word
 end
 
-#! Initializes a three-word state for a message of `num_elements` Felts in the given domain.
-#! `num_elements` and `domain` must fit in a u32.
+#! Initializes a three-word state for a message under a runtime domain tag.
+#! `num_elements` and the tag must fit in a u32.
 #! An empty message still requires one zero-block compression after initialization.
 #!
 #! Input:  [num_elements, domain, ...]
@@ -216,12 +217,12 @@ pub proc hash_double_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
     exec.hash_words
 end
 
-#! Hashes the word-aligned memory range `[start_addr, end_addr)` with a domain identifier.
+#! Hashes the word-aligned memory range `[start_addr, end_addr)` with a runtime domain tag.
 #!
 #! Requires `start_addr <= end_addr`, `end_addr` is not inclusive.
 #! Requires `start_addr` and `end_addr` to be word-aligned.
 #!
-#! Input: [domain, start_addr, end_addr, ...]
+#! Input: [domain_tag, start_addr, end_addr, ...]
 #! Output: [H, ...]
 #!
 #! Invocation: exec
@@ -243,7 +244,7 @@ end
 
 #! Hashes the word-aligned memory range `[start_addr, end_addr)`.
 #!
-#! Equivalent to `hash_words_with_domain` with `domain = 0`.
+#! Uses the generic Felt-sequence domain.
 #!
 #! Requires `start_addr <= end_addr`, `end_addr` is not inclusive.
 #! Requires `start_addr` and `end_addr` to be word-aligned.
@@ -253,8 +254,8 @@ end
 #!
 #! Invocation: exec
 pub proc hash_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
-    push.0
-    # => [domain=0, start_addr, end_addr, ...]
+    push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG
+    # => [domain_tag, start_addr, end_addr, ...]
 
     exec.hash_words_with_domain
 end
@@ -376,9 +377,9 @@ pub proc prepare_hasher_state(
 
         exec.prepare_padded_hasher_state
     else
-        # Bind the logical input length in domain zero.
-        push.0 movdn.2
-        # => [ptr, num_elements, domain=0]
+        # Bind the logical input length in the generic Felt-sequence domain.
+        push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG movdn.2
+        # => [ptr, num_elements, domain_tag]
 
         exec.prepare_hasher_state_in_domain
     end
@@ -559,7 +560,7 @@ end
 #! - ptr is the memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
 #! - num_elements is the number of elements to be hashed and must fit in a u32.
-#! - domain is the domain identifier mixed into the initial chaining word.
+#! - domain is the runtime domain tag mixed into the initial chaining word.
 #! - HASH is the resulting hash of the provided memory values.
 #!
 #! Invocation: exec
@@ -571,7 +572,8 @@ pub proc hash_elements_in_domain(ptr: ptr<felt>, num_elements: u32, domain: u32)
     # => [HASH]
 end
 
-#! Hashes Felt values starting at the specified memory address in domain zero.
+#! Hashes Felt values starting at the specified memory address under the generic Felt-sequence
+#! domain.
 #!
 #! Input:  [ptr, num_elements, ...]
 #! Output: [HASH, ...]
@@ -580,8 +582,8 @@ end
 #!
 #! Invocation: exec
 pub proc hash_elements(ptr: ptr<felt>, num_elements: u32) -> Digest
-    push.0 movdn.2
-    # => [ptr, num_elements, domain=0]
+    push.GENERIC_FELT_SEQUENCE_DOMAIN_TAG movdn.2
+    # => [ptr, num_elements, domain_tag]
 
     exec.hash_elements_in_domain
 end
@@ -628,7 +630,7 @@ pub proc hash(input: word) -> Digest
     hash
 end
 
-#! Merges two words (256-bit digests) via the VM-native hash.
+#! Hashes two words as an eight-Felt sequence under the generic Felt-sequence domain.
 #!
 #! Inputs:  [A, B]
 #! Outputs: [C]
@@ -638,7 +640,7 @@ end
 #! - C is the resulting hash.
 #!
 #! Invocation: exec
-pub proc merge(a: Digest, b: Digest) -> Digest
+pub proc hash_two_words(a: Digest, b: Digest) -> Digest
     hmerge
 end
 
@@ -654,7 +656,7 @@ pub proc merge_with_chaining_word(chaining_value: ChainingValue, a: Digest, b: D
     exec.digest
 end
 
-#! Merges two words (256-bit digests) via the VM-native hash with a domain identifier.
+#! Hashes two words as an eight-Felt sequence under a runtime domain tag.
 #!
 #! Inputs:  [domain, A, B, ...]
 #! Outputs: [C, ...]
@@ -664,7 +666,7 @@ end
 #! - C is `hash_elements_in_domain(A || B, domain)`.
 #!
 #! Invocation: exec
-pub proc merge_in_domain(domain: u32, a: Digest, b: Digest) -> Digest
+pub proc hash_two_words_in_domain(domain: u32, a: Digest, b: Digest) -> Digest
     movdn.8
     # => [A, B, domain, ...]
 

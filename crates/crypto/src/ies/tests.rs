@@ -416,283 +416,6 @@ mod x25519_xchacha_tests {
     }
 }
 
-/// K256 + AeadPoseidon2 test suite
-mod k256_aead_poseidon2_tests {
-    use super::*;
-    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
-
-    // BYTES TESTS
-    #[test]
-    fn test_k256_aead_poseidon2_bytes_roundtrip() {
-        let mut rng = rand::rng();
-        let plaintext = b"test bytes encryption";
-        let secret_key = KeyExchangeKey::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(sealing_key, unsealing_key, plaintext, seal_bytes, unseal_bytes);
-    }
-
-    #[test]
-    fn test_k256_aead_poseidon2_bytes_with_associated_data() {
-        let mut rng = rand::rng();
-        let plaintext = b"test bytes with associated data";
-        let associated_data = b"authentication context";
-        let secret_key = KeyExchangeKey::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            plaintext,
-            associated_data,
-            seal_bytes_with_associated_data,
-            unseal_bytes_with_associated_data
-        );
-    }
-
-    #[test]
-    fn test_k256_aead_poseidon2_invalid_associated_data() {
-        let mut rng = rand::rng();
-        let plaintext = b"test invalid associated data";
-        let correct_ad = b"correct context";
-        let mut incorrect_ad = correct_ad.to_vec();
-        incorrect_ad[0] ^= 1;
-        let secret_key = KeyExchangeKey::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-        let sealed = sealing_key
-            .seal_bytes_with_associated_data(&mut rng, plaintext, correct_ad)
-            .unwrap();
-        let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-        let result = unsealing_key.unseal_bytes_with_associated_data(sealed, &incorrect_ad);
-        assert!(matches!(result, Err(IesError::DecryptionFailed)));
-    }
-
-    // FIELD ELEMENTS TESTS
-    #[test]
-    fn test_k256_aead_poseidon2_field_elements_roundtrip() {
-        use crate::Felt;
-        let mut rng = rand::rng();
-        let plaintext =
-            vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        let secret_key = KeyExchangeKey::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            &plaintext,
-            seal_elements,
-            unseal_elements
-        );
-    }
-
-    #[test]
-    fn test_k256_aead_poseidon2_field_elements_with_associated_data() {
-        use crate::Felt;
-        let mut rng = rand::rng();
-        let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
-        let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
-        let secret_key = KeyExchangeKey::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            &plaintext,
-            &associated_data,
-            seal_elements_with_associated_data,
-            unseal_elements_with_associated_data
-        );
-    }
-
-    proptest! {
-        #[test]
-        fn prop_k256_aead_poseidon2_bytes_comprehensive(
-            plaintext in arbitrary_bytes(),
-            associated_data in arbitrary_bytes()
-        ) {
-            let mut rng = rand::rng();
-            let secret_key = KeyExchangeKey::with_rng(&mut rng);
-            let public_key = secret_key.public_key();
-            let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-            let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-            test_roundtrip!(sealing_key, unsealing_key, &plaintext, &associated_data, seal_bytes_with_associated_data, unseal_bytes_with_associated_data);
-        }
-
-        #[test]
-        fn prop_k256_aead_poseidon2_field_elements_comprehensive(
-            plaintext in arbitrary_field_elements(),
-            associated_data in arbitrary_field_elements()
-        ) {
-            let mut rng = rand::rng();
-            let secret_key = KeyExchangeKey::with_rng(&mut rng);
-            let public_key = secret_key.public_key();
-            let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
-            let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
-            test_roundtrip!(sealing_key, unsealing_key, &plaintext, &associated_data, seal_elements_with_associated_data, unseal_elements_with_associated_data);
-        }
-
-        #[test]
-        fn prop_k256_aead_poseidon2_wrong_key_fails(
-            plaintext in arbitrary_bytes()
-        ) {
-            prop_assume!(!plaintext.is_empty());
-            let mut rng = rand::rng();
-            let secret1 = KeyExchangeKey::with_rng(&mut rng);
-            let public1 = secret1.public_key();
-            let secret2 = KeyExchangeKey::with_rng(&mut rng);
-            let sealing_key = SealingKey::K256AeadPoseidon2(public1);
-            let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
-            let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret2);
-            let result = unsealing_key.unseal_bytes(sealed);
-            prop_assert!(result.is_err());
-        }
-    }
-}
-
-/// X25519 + AeadPoseidon2 test suite
-mod x25519_aead_poseidon2_tests {
-    use super::*;
-
-    // BYTES TESTS
-    #[test]
-    fn test_x25519_aead_poseidon2_bytes_roundtrip() {
-        let mut rng = rand::rng();
-        let plaintext = b"test bytes encryption";
-        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(sealing_key, unsealing_key, plaintext, seal_bytes, unseal_bytes);
-    }
-
-    #[test]
-    fn test_x25519_aead_poseidon2_bytes_with_associated_data() {
-        let mut rng = rand::rng();
-        let plaintext = b"test bytes with associated data";
-        let associated_data = b"authentication context";
-        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            plaintext,
-            associated_data,
-            seal_bytes_with_associated_data,
-            unseal_bytes_with_associated_data
-        );
-    }
-
-    #[test]
-    fn test_x25519_aead_poseidon2_invalid_associated_data() {
-        let mut rng = rand::rng();
-        let plaintext = b"test invalid associated data";
-        let correct_ad = b"correct context";
-        let mut incorrect_ad = correct_ad.to_vec();
-        incorrect_ad[0] ^= 1;
-        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-        let sealed = sealing_key
-            .seal_bytes_with_associated_data(&mut rng, plaintext, correct_ad)
-            .unwrap();
-        let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-        let result = unsealing_key.unseal_bytes_with_associated_data(sealed, &incorrect_ad);
-        assert!(matches!(result, Err(IesError::DecryptionFailed)));
-    }
-
-    // FIELD ELEMENTS TESTS
-    #[test]
-    fn test_x25519_aead_poseidon2_field_elements_roundtrip() {
-        use crate::Felt;
-        let mut rng = rand::rng();
-        let plaintext =
-            vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            &plaintext,
-            seal_elements,
-            unseal_elements
-        );
-    }
-
-    #[test]
-    fn test_x25519_aead_poseidon2_field_elements_with_associated_data() {
-        use crate::Felt;
-        let mut rng = rand::rng();
-        let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
-        let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
-        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-        let public_key = secret_key.public_key();
-        let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-        let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-        test_basic_roundtrip!(
-            sealing_key,
-            unsealing_key,
-            &plaintext,
-            &associated_data,
-            seal_elements_with_associated_data,
-            unseal_elements_with_associated_data
-        );
-    }
-
-    proptest! {
-        #[test]
-        fn prop_x25519_aead_poseidon2_bytes_comprehensive(
-            plaintext in arbitrary_bytes(),
-            associated_data in arbitrary_bytes()
-        ) {
-            let mut rng = rand::rng();
-            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-            let public_key = secret_key.public_key();
-            let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-            let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-            test_roundtrip!(sealing_key, unsealing_key, &plaintext, &associated_data, seal_bytes_with_associated_data, unseal_bytes_with_associated_data);
-        }
-
-        #[test]
-        fn prop_x25519_aead_poseidon2_field_elements_comprehensive(
-            plaintext in arbitrary_field_elements(),
-            associated_data in arbitrary_field_elements()
-        ) {
-            let mut rng = rand::rng();
-            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
-            let public_key = secret_key.public_key();
-            let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
-            let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
-            test_roundtrip!(sealing_key, unsealing_key, &plaintext, &associated_data, seal_elements_with_associated_data, unseal_elements_with_associated_data);
-        }
-
-        #[test]
-        fn prop_x25519_aead_poseidon2_wrong_key_fails(
-            plaintext in arbitrary_bytes()
-        ) {
-            prop_assume!(!plaintext.is_empty());
-            let mut rng = rand::rng();
-            let secret1 = KeyExchangeKey25519::with_rng(&mut rng);
-            let public1 = secret1.public_key();
-            let secret2 = KeyExchangeKey25519::with_rng(&mut rng);
-            let sealing_key = SealingKey::X25519AeadPoseidon2(public1);
-            let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
-            let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret2);
-            let result = unsealing_key.unseal_bytes(sealed);
-            prop_assert!(result.is_err());
-        }
-    }
-}
-
 /// K256 + AeadEidos test suite
 mod k256_aead_eidos_tests {
     use super::*;
@@ -1168,20 +891,6 @@ mod protocol_tests {
 
         let sk = KeyExchangeKey::with_rng(&mut rng);
         assert_serialization_roundtrip(
-            SealingKey::K256AeadPoseidon2(sk.public_key()),
-            UnsealingKey::K256AeadPoseidon2(sk),
-            IesScheme::K256AeadPoseidon2,
-        );
-
-        let sk = KeyExchangeKey25519::with_rng(&mut rng);
-        assert_serialization_roundtrip(
-            SealingKey::X25519AeadPoseidon2(sk.public_key()),
-            UnsealingKey::X25519AeadPoseidon2(sk),
-            IesScheme::X25519AeadPoseidon2,
-        );
-
-        let sk = KeyExchangeKey::with_rng(&mut rng);
-        assert_serialization_roundtrip(
             SealingKey::K256AeadEidos(sk.public_key()),
             UnsealingKey::K256AeadEidos(sk),
             IesScheme::K256AeadEidos,
@@ -1311,8 +1020,6 @@ mod keys_serialization_tests {
             SealingKey::X25519XChaCha20Poly1305(
                 KeyExchangeKey25519::with_rng(&mut rng).public_key(),
             ),
-            SealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng).public_key()),
-            SealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
             SealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng).public_key()),
             SealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
         ]
@@ -1323,8 +1030,6 @@ mod keys_serialization_tests {
         vec![
             UnsealingKey::K256XChaCha20Poly1305(KeyExchangeKey::with_rng(&mut rng)),
             UnsealingKey::X25519XChaCha20Poly1305(KeyExchangeKey25519::with_rng(&mut rng)),
-            UnsealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng)),
-            UnsealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng)),
             UnsealingKey::K256AeadEidos(KeyExchangeKey::with_rng(&mut rng)),
             UnsealingKey::X25519AeadEidos(KeyExchangeKey25519::with_rng(&mut rng)),
         ]
@@ -1335,12 +1040,10 @@ mod keys_serialization_tests {
         let tags = [
             IesScheme::K256XChaCha20Poly1305 as u8,
             IesScheme::X25519XChaCha20Poly1305 as u8,
-            IesScheme::K256AeadPoseidon2 as u8,
-            IesScheme::X25519AeadPoseidon2 as u8,
             IesScheme::K256AeadEidos as u8,
             IesScheme::X25519AeadEidos as u8,
         ];
-        assert_eq!(tags, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(tags, [0, 1, 2, 3]);
     }
 
     #[test]
