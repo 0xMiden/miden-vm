@@ -2,6 +2,10 @@
 
 ## v0.33.0 (Unreleased)
 
+#### Fixes
+
+- [BREAKING] Fixed stack overflows when parsing deeply nested constant and type expressions by rejecting nesting beyond 256 levels ([#3700](https://github.com/0xMiden/miden-vm/pull/3700)).
+
 ## v0.32.0 (2026-09-05)
 
 #### Changes
