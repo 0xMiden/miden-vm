@@ -477,14 +477,8 @@ pub struct PeriodicCols<T> {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct AeadStreamPeriodicCols<T> {
-    pub r0: T,
-    pub r1: T,
-    pub r2: T,
-    pub r3: T,
-    pub r4: T,
-    pub r5: T,
-    pub r6: T,
-    pub r7: T,
+    /// One-hot selectors for phases 0 through 7.
+    pub phases: [T; 8],
 }
 
 // PERIODIC COLUMN GENERATION
@@ -500,26 +494,14 @@ impl AeadStreamPeriodicCols<Vec<Felt>> {
             col
         });
 
-        Self {
-            r0: phases[0].clone(),
-            r1: phases[1].clone(),
-            r2: phases[2].clone(),
-            r3: phases[3].clone(),
-            r4: phases[4].clone(),
-            r5: phases[5].clone(),
-            r6: phases[6].clone(),
-            r7: phases[7].clone(),
-        }
+        Self { phases }
     }
 }
 
 impl PeriodicCols<Vec<Felt>> {
     /// Returns chiplet periodic columns in `PeriodicCols` layout order.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
-            AeadStreamPeriodicCols::new();
-
-        vec![r0, r1, r2, r3, r4, r5, r6, r7]
+        AeadStreamPeriodicCols::new().phases.into_iter().collect()
     }
 }
 
@@ -584,10 +566,9 @@ mod tests {
 
     #[test]
     fn aead_stream_phase_columns_are_one_hot() {
-        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
-            AeadStreamPeriodicCols::new();
+        let phases = AeadStreamPeriodicCols::new().phases;
 
-        for (phase, col) in [r0, r1, r2, r3, r4, r5, r6, r7].into_iter().enumerate() {
+        for (phase, col) in phases.into_iter().enumerate() {
             assert_eq!(col[phase], Felt::ONE);
             assert_eq!(col.iter().filter(|&&v| v == Felt::ONE).count(), 1);
         }

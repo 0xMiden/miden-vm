@@ -86,7 +86,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                 |g| {
                     // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN; CALL / SYSCALL
                     // share the payload but live in batches below). SPAN encodes opcode 0
-                    // at the beta^12 slot.
+                    // at the β¹² slot.
                     let mut control_remove = |name, flag, opcode: u8| {
                         g.remove(
                             name,

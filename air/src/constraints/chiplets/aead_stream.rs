@@ -34,18 +34,7 @@ pub fn enforce_aead_stream_constraints<AB>(
     AB: MidenAirBuilder,
 {
     let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
-    let phase = periodic.aead_stream;
-
-    let phases: [AB::Expr; 8] = [
-        phase.r0.into(),
-        phase.r1.into(),
-        phase.r2.into(),
-        phase.r3.into(),
-        phase.r4.into(),
-        phase.r5.into(),
-        phase.r6.into(),
-        phase.r7.into(),
-    ];
+    let phases: [AB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     let cols = local.aead_stream();
     let cols_next = next.aead_stream();
@@ -86,11 +75,16 @@ fn carry_read_to_high_first<AB>(
     let curr = cols.read();
     let next = cols_next.high_first();
 
-    assert_eq_on(builder, gate.clone(), next.ctx, curr.ctx);
-    assert_eq_on(builder, gate.clone(), next.clk, curr.clk);
-    assert_eq_on(builder, gate.clone(), next.src_ptr, curr.src_ptr);
-    assert_eq_on(builder, gate.clone(), next.lane_base, curr.lane_base);
-    assert_eq_on(builder, gate.clone(), next.next_plaintext, curr.plaintext[plaintext_offset + 1]);
+    builder.when(gate.clone()).assert_eq_arrays(
+        [next.ctx, next.clk, next.src_ptr, next.lane_base, next.next_plaintext],
+        [
+            curr.ctx,
+            curr.clk,
+            curr.src_ptr,
+            curr.lane_base,
+            curr.plaintext[plaintext_offset + 1],
+        ],
+    );
     assert_eq_expr_on(builder, gate.clone(), next.c_prev0, xor_limb_expr::<AB>(curr.bytes));
     enforce_canonical_split(
         builder,
@@ -113,12 +107,24 @@ fn carry_high_first_to_low_second<AB>(
     let curr = cols.high_first();
     let next = cols_next.low_second();
 
-    assert_eq_on(builder, gate.clone(), next.ctx, curr.ctx);
-    assert_eq_on(builder, gate.clone(), next.clk, curr.clk);
-    assert_eq_on(builder, gate.clone(), next.src_ptr, curr.src_ptr);
-    assert_eq_on(builder, gate.clone(), next.lane_base, curr.lane_base);
-    assert_eq_on(builder, gate.clone(), next.active_plaintext, curr.next_plaintext);
-    assert_eq_on(builder, gate.clone(), next.c_prev0, curr.c_prev0);
+    builder.when(gate.clone()).assert_eq_arrays(
+        [
+            next.ctx,
+            next.clk,
+            next.src_ptr,
+            next.lane_base,
+            next.active_plaintext,
+            next.c_prev0,
+        ],
+        [
+            curr.ctx,
+            curr.clk,
+            curr.src_ptr,
+            curr.lane_base,
+            curr.next_plaintext,
+            curr.c_prev0,
+        ],
+    );
     assert_eq_expr_on(builder, gate, next.c_prev1, xor_limb_expr::<AB>(curr.bytes));
 }
 
@@ -133,12 +139,10 @@ fn carry_low_second_to_high_second<AB>(
     let curr = cols.low_second();
     let next = cols_next.high_second();
 
-    assert_eq_on(builder, gate.clone(), next.ctx, curr.ctx);
-    assert_eq_on(builder, gate.clone(), next.clk, curr.clk);
-    assert_eq_on(builder, gate.clone(), next.dst_ptr, curr.dst_ptr);
-    assert_eq_on(builder, gate.clone(), next.lane_base, curr.lane_base);
-    assert_eq_on(builder, gate.clone(), next.c_prev0, curr.c_prev0);
-    assert_eq_on(builder, gate.clone(), next.c_prev1, curr.c_prev1);
+    builder.when(gate.clone()).assert_eq_arrays(
+        [next.ctx, next.clk, next.dst_ptr, next.lane_base, next.c_prev0, next.c_prev1],
+        [curr.ctx, curr.clk, curr.dst_ptr, curr.lane_base, curr.c_prev0, curr.c_prev1],
+    );
     assert_eq_expr_on(builder, gate.clone(), next.c_prev2, xor_limb_expr::<AB>(curr.bytes));
     enforce_canonical_split(
         builder,
@@ -161,13 +165,6 @@ where
     let s1_next: AB::Expr = next.chiplets[1].into();
     let stream_mode_next: AB::Expr = next.bitwise_stream_mode().into();
     s_ctrl_next.not() * s1_next.not() * stream_mode_next
-}
-
-fn assert_eq_on<AB>(builder: &mut AB, gate: AB::Expr, next: AB::Var, current: AB::Var)
-where
-    AB: MidenAirBuilder,
-{
-    builder.when(gate).assert_eq(next, current);
 }
 
 fn assert_eq_expr_on<AB>(builder: &mut AB, gate: AB::Expr, next: AB::Var, current: AB::Expr)
@@ -193,7 +190,7 @@ fn enforce_canonical_split<AB>(
 
     let hi_gap = AB::Expr::from(TWO_POW_32_MINUS_1) - hi;
     // If the high limb is all ones, canonical packing requires the low limb to be zero.
-    builder.when(gate).assert_eq(Into::<AB::Expr>::into(hi_quotient) * hi_gap, lo);
+    builder.when(gate).assert_eq(hi_quotient * hi_gap, lo);
 }
 
 pub(crate) fn a_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
@@ -207,16 +204,11 @@ pub(crate) fn xor_limb_expr<AB>(bytes: [AB::Var; 12]) -> AB::Expr
 where
     AB: MidenAirBuilder,
 {
-    let two = AB::Expr::from_u8(2);
-    let xor_bytes = [
-        Into::<AB::Expr>::into(bytes[0]) + Into::<AB::Expr>::into(bytes[4])
-            - two.clone() * Into::<AB::Expr>::into(bytes[8]),
-        Into::<AB::Expr>::into(bytes[1]) + Into::<AB::Expr>::into(bytes[5])
-            - two.clone() * Into::<AB::Expr>::into(bytes[9]),
-        Into::<AB::Expr>::into(bytes[2]) + Into::<AB::Expr>::into(bytes[6])
-            - two.clone() * Into::<AB::Expr>::into(bytes[10]),
-        Into::<AB::Expr>::into(bytes[3]) + Into::<AB::Expr>::into(bytes[7])
-            - two * Into::<AB::Expr>::into(bytes[11]),
-    ];
+    let xor_bytes: [AB::Expr; 4] = core::array::from_fn(|i| {
+        let lhs: AB::Expr = bytes[i].into();
+        let rhs: AB::Expr = bytes[i + 4].into();
+        let and: AB::Expr = bytes[i + 8].into();
+        lhs + rhs - and.double()
+    });
     pack_u32_bytes_le::<_, AB::Expr>(xor_bytes)
 }

@@ -91,6 +91,7 @@ fn naive_composites(
     let prefix_011 = not_6 * bit_5 * bit_4;
     let add3_madd_prefix = bit_6 * not_5 * not_4 * bit_3 * bit_2;
 
+    // SPLIT consumes its condition; LOOP enters its body without consuming a stack item.
     let split_flag = deg5[4];
     let shift_left_on_end = deg4[4] * is_loop_end;
 

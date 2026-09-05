@@ -52,9 +52,7 @@ pub fn enforce_controller_constraints<AB>(
     builder.when_first_row().assert_one(chiplet.is_active.clone());
     builder.when_first_row().assert_one(cols.s0);
 
-    let first_merkle_row: AB::Expr = Into::<AB::Expr>::into(cols.s1)
-        + Into::<AB::Expr>::into(cols.s2)
-        - Into::<AB::Expr>::into(cols.s1) * Into::<AB::Expr>::into(cols.s2);
+    let first_merkle_row: AB::Expr = cols.s1 + cols.s2 - cols.s1 * cols.s2;
     builder.when_first_row().assert_zero(first_merkle_row * merkle_start.not());
 
     let first_mv_row = Into::<AB::Expr>::into(cols.s1) * Into::<AB::Expr>::into(cols.s2).not();
