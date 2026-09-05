@@ -8,13 +8,15 @@
 //! hash when the full instruction stream is needed
 //! ([`FactoredCircuitFactory::circuit_for_order`]).
 //!
-//! The registry leaf of an ordering is `merge(H(constants | shuffle), H(common))` over
-//! the two `adv_pipe`-aligned stream segments.
+//! The registry leaf of an ordering hashes the two segment commitments as one generic eight-Felt
+//! sequence.
 
 use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::{
     field::ExtensionField,
-    hash::eidos::{BLOCK_LEN, PACKED_LANES, PackedBlock, PackedDigest},
+    hash::eidos::{
+        BLOCK_LEN, PACKED_LANES, PackedBlock, PackedDigest, domains::GENERIC_FELT_SEQUENCE,
+    },
 };
 
 use crate::{
@@ -51,7 +53,7 @@ pub struct FactoredEncodedCircuit {
     pub shuffle_commitment: Word,
     /// Eidos digest of the order-invariant common section.
     pub common_commitment: Word,
-    /// Registry leaf and advice-map key: `merge(shuffle_commitment, common_commitment)`.
+    /// Registry leaf and advice-map key for the two segment commitments.
     pub commitment: Word,
 }
 
@@ -103,7 +105,7 @@ where
             u32::try_from(prefix_len).map_err(|_| AceError::InvalidInputLayout {
                 message: "ACE stream prefix length must fit in Eidos's u32 length binding".into(),
             })?;
-        let mut constants_state = Eidos::init_chaining_word(0, prefix_len_u32);
+        let mut constants_state = Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, prefix_len_u32);
         compress_blocks(&mut constants_state, &instructions[..const_felts]);
         let common_commitment = Eidos::hash_elements(&instructions[prefix_len..]);
 
@@ -158,7 +160,7 @@ where
         let mut state = self.constants_state;
         compress_blocks(&mut state, shuffle);
         let shuffle_commitment = state;
-        Ok(Eidos::merge(&[shuffle_commitment, self.common_commitment]))
+        Ok(Eidos::hash_two_words(&[shuffle_commitment, self.common_commitment]))
     }
 
     /// Compute registry leaves for a batch of proof orders, hashing `LEAF_LANES`
@@ -212,7 +214,7 @@ where
 
             let common: PackedDigest =
                 core::array::from_fn(|element| [self.common_commitment[element]; LEAF_LANES]);
-            let leaves = Eidos::merge_packed(&[state, common]);
+            let leaves = Eidos::hash_two_words_packed(&[state, common]);
 
             out.extend((0..chunk.len()).map(|lane| {
                 let leaf: [Felt; 4] = core::array::from_fn(|i| leaves[i][lane]);
@@ -259,7 +261,7 @@ where
         compress_blocks(&mut state, &instructions[self.const_felts..shuffle_prefix_len]);
         let shuffle_commitment = state;
         let common_commitment = self.common_commitment;
-        let commitment = Eidos::merge(&[shuffle_commitment, common_commitment]);
+        let commitment = Eidos::hash_two_words(&[shuffle_commitment, common_commitment]);
 
         Ok(FactoredEncodedCircuit {
             encoded,

@@ -99,7 +99,7 @@ where
 /// Row `r`'s contribution to column `c` is the slice
 /// `fractions[prefix .. prefix + counts[r * num_cols + c]]`, where `prefix` is the running
 /// sum of earlier `counts` entries. The accumulator walks rows in order with a single
-/// cursor - no separate offset array, no gather.
+/// cursor — no separate offset array, no gather.
 ///
 /// No padding, no fixed stride: a row that contributes zero fractions to a column writes
 /// zero entries and records `counts.push(0)`.
@@ -126,7 +126,7 @@ where
     EF: ExtensionField<F>,
 {
     /// Allocate a fresh buffer sized to hold every fraction an AIR can emit across
-    /// `num_rows` rows. The flat fraction capacity is `num_rows * sum shape`, so the row loop
+    /// `num_rows` rows. The flat fraction capacity is `num_rows * Σ shape`, so the row loop
     /// does not re-allocate as long as each row stays within its declared bound. The flat
     /// count capacity is `num_rows * shape.len()`.
     pub fn from_shape(shape: Vec<usize>, num_rows: usize) -> Self {
@@ -179,7 +179,7 @@ where
     }
 
     /// Full flat fraction buffer, packed in builder write order. Length equals
-    /// `sum counts()` - i.e. the total number of fractions actually pushed.
+    /// `Σ counts()` — i.e. the total number of fractions actually pushed.
     pub fn fractions(&self) -> &[(F, EF)] {
         &self.fractions
     }
@@ -287,8 +287,8 @@ where
 ///
 /// **Phase 1 (parallel).** Split rows into fixed-size chunks.
 /// Each chunk independently: batch-inverts its denominators (Montgomery trick), computes
-/// `f_i(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
-/// records the row total `t(r) = sum_i f_i(r)` into a side buffer.
+/// `fᵢ(r)` for every `(row, col)`, writes fraction columns into the output matrix, and
+/// records the row total `t(r) = Σᵢ fᵢ(r)` into a side buffer.
 ///
 /// **Phase 2 (sequential).** Compute `sigma_prime`, then scan `t(r) - sigma_prime` to fill the
 /// accumulator column. This step is inherently sequential but touches only one scalar per row.
@@ -343,8 +343,8 @@ where
             return;
         }
 
-        // Batch-invert and scale: scratch[j] = m_j * d_j^-1 (ready to sum).
-        // Allocated once per chunk (~1.5 K elements ~= 24 KiB, L1-resident).
+        // Batch-invert and scale: scratch[j] = mⱼ · dⱼ⁻¹ (ready to sum).
+        // Allocated once per chunk (~1.5 K elements ≈ 24 KiB, L1-resident).
         let mut scratch: Vec<EF> = vec![EF::ZERO; chunk_fracs.len()];
         invert_and_scale(chunk_fracs, &mut scratch);
 
@@ -362,11 +362,11 @@ where
                 cursor = end;
             }
 
-            // output[r][i] = f_i(r) for fraction columns i > 0.
+            // output[r][i] = fᵢ(r) for fraction columns i > 0.
             let out_row = &mut chunk_out[out_row_base..out_row_base + num_cols];
             out_row[1..].copy_from_slice(&per_row_value[1..]);
 
-            // t(r) = sum_i f_i(r), consumed by phase 2.
+            // t(r) = Σᵢ fᵢ(r), consumed by phase 2.
             totals_slice[row_in_chunk] = per_row_value.iter().copied().sum();
         }
         debug_assert_eq!(cursor, chunk_fracs.len());
@@ -416,7 +416,7 @@ where
 ///
 /// Returns a `Vec<usize>` of length `num_rows + 1` where `offsets[r]` is the starting index
 /// of row `r`'s fractions in the flat `fractions.fractions()` buffer and `offsets[num_rows]`
-/// equals the total fraction count. Sequential (O(num_rows * num_cols) `usize` adds).
+/// equals the total fraction count. Sequential (O(num_rows · num_cols) `usize` adds).
 fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: usize) -> Vec<usize> {
     debug_assert_eq!(flat_counts.len(), num_rows * num_cols);
     let mut offsets = Vec::with_capacity(num_rows + 1);
@@ -431,16 +431,16 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
     offsets
 }
 
-/// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = m_j * d_j^-1`
+/// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = mⱼ · dⱼ⁻¹`
 /// using one field inversion + O(N) multiplications.
 ///
-/// The backward sweep multiplies each inverse by `m_j`, so the caller gets ready-to-sum
-/// fraction values without a second pass.
+/// The backward sweep multiplies each inverse by `mⱼ` (an `EF × F` multiplication, cheaper than
+/// `EF × EF`), so the caller gets ready-to-sum fraction values without a second pass.
 ///
 /// # Panics
 ///
-/// Panics if the denominator product is zero (would indicate an upstream bug - individual
-/// `d_j` are never zero because of the nonzero `bus_prefix[bus]` term).
+/// Panics if the denominator product is zero (would indicate an upstream bug — individual
+/// `dⱼ` are never zero because of the nonzero `bus_prefix[bus]` term).
 fn invert_and_scale<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
 where
     F: Field,
@@ -449,7 +449,7 @@ where
     debug_assert_eq!(scratch.len(), chunk_fracs.len());
     debug_assert!(!chunk_fracs.is_empty());
 
-    // Forward pass: scratch[i] = d_0 * d_1 * ... * d_i.
+    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ.
     let mut acc = chunk_fracs[0].1;
     scratch[0] = acc;
     for i in 1..chunk_fracs.len() {
@@ -462,22 +462,22 @@ where
         .try_inverse()
         .expect("LogUp denominator product must be non-zero (bus_prefix is never zero)");
 
-    // Backward sweep: scratch[i] = m_i * d_i^-1.
+    // Backward sweep: scratch[i] = mᵢ · dᵢ⁻¹.
     //
     // Loop invariant (entering iteration i, for i = n-1 down to 1):
-    //     running_inv = (d_i * d_(i+1) * ... * d_(n-1))^-1
-    //     scratch[i-1] = d_0 * d_1 * ... * d_(i-1)  (from the forward pass)
+    //     running_inv = (dᵢ · dᵢ₊₁ · … · dₙ₋₁)⁻¹
+    //     scratch[i-1] = d₀ · d₁ · … · dᵢ₋₁  (from the forward pass)
     //
     // Then:
-    //     d_i^-1 = scratch[i-1] * running_inv
-    // We scale by m_i and fold d_i into running_inv for the next iteration.
-    // After the loop: running_inv = d_0^-1.
+    //     dᵢ⁻¹ = scratch[i-1] · running_inv
+    // We scale by mᵢ and fold dᵢ into running_inv for the next iteration.
+    // After the loop: running_inv = d₀⁻¹.
     for i in (1..chunk_fracs.len()).rev() {
         let (m_i, d_i) = chunk_fracs[i];
         scratch[i] = scratch[i - 1] * running_inv * m_i;
         running_inv *= d_i;
     }
-    // i = 0: running_inv = d_0^-1.
+    // i = 0: running_inv = d₀⁻¹.
     scratch[0] = running_inv * chunk_fracs[0].0;
 }
 

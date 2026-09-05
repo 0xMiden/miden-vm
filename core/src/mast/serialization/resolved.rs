@@ -394,27 +394,33 @@ fn recompute_hash_table(
             MastNodeEntry::Join { left_child_id, right_child_id } => {
                 let left = checked_child_index(index, left_child_id, layout.node_count)?;
                 let right = checked_child_index(index, right_child_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[left], digests[right]], JoinNode::DOMAIN)
+                hasher::merge_in_mast_domain(&[digests[left], digests[right]], JoinNode::DOMAIN)
             },
             MastNodeEntry::Split { if_branch_id, else_branch_id } => {
                 let on_true = checked_child_index(index, if_branch_id, layout.node_count)?;
                 let on_false = checked_child_index(index, else_branch_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[on_true], digests[on_false]], SplitNode::DOMAIN)
+                hasher::merge_in_mast_domain(
+                    &[digests[on_true], digests[on_false]],
+                    SplitNode::DOMAIN,
+                )
             },
             MastNodeEntry::Loop { body_id } => {
                 let body = checked_child_index(index, body_id, layout.node_count)?;
-                hasher::merge_in_domain(&[digests[body], crate::Word::default()], LoopNode::DOMAIN)
+                hasher::merge_in_mast_domain(
+                    &[digests[body], crate::Word::default()],
+                    LoopNode::DOMAIN,
+                )
             },
             MastNodeEntry::Call { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                hasher::merge_in_domain(
+                hasher::merge_in_mast_domain(
                     &[digests[callee], crate::Word::default()],
                     CallNode::CALL_DOMAIN,
                 )
             },
             MastNodeEntry::SysCall { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                hasher::merge_in_domain(
+                hasher::merge_in_mast_domain(
                     &[digests[callee], crate::Word::default()],
                     CallNode::SYSCALL_DOMAIN,
                 )

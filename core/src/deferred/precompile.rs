@@ -1,22 +1,22 @@
-//! Trait and selector contract for precompiles in the deferred framework.
+//! Trait and domain-tag contract for precompiles in the deferred framework.
 //!
-//! A [`Precompile`] owns a registered selector and supplies the semantics the framework cannot
+//! A [`Precompile`] owns a registered domain tag and supplies the semantics the framework cannot
 //! know: which tags are valid, what their bodies mean, and how nodes evaluate to canonical form.
-//! The framework owns routing but does not derive consensus selectors from names.
+//! The framework owns routing but does not derive consensus domain tags from names.
 
 use alloc::vec::Vec;
 
 use super::{DeferredContext, Node, NodeType, Payload, PrecompileError};
 use crate::Felt;
 
-/// Constructs a selector in a test-only portion of the delegated miden-vm range.
+/// Constructs a tag in a test-only portion of the ecosystem namespace.
 ///
-/// These selectors never appear in production code or the protocol registry. Centralized
+/// These test tags never appear in production code or the protocol registry. Centralized
 /// construction keeps test fixtures explicit and avoids scattered numeric literals.
 #[cfg(test)]
-pub(crate) const fn test_precompile_selector(discriminant: u8) -> Felt {
-    assert!(discriminant >= 1, "test selector discriminants start at one");
-    Felt::new_unchecked((0x0001_ffff_u64 << 8) | discriminant as u64)
+pub(crate) const fn test_precompile_domain_tag(discriminant: u8) -> Felt {
+    assert!(discriminant >= 1, "test tag discriminants start at one");
+    Felt::new_unchecked((0x10ff_ffff_u64 & !0xff) | discriminant as u64)
 }
 
 // PRECOMPILE TRAIT
@@ -24,17 +24,17 @@ pub(crate) const fn test_precompile_selector(discriminant: u8) -> Felt {
 
 /// Semantic module installed in a [`PrecompileRegistry`](crate::deferred::PrecompileRegistry).
 ///
-/// Each precompile owns one stable selector and interprets that selector's two local tag
+/// Each precompile owns one stable domain tag and interprets that tag's two local
 /// parameters.
 pub trait Precompile: Send + Sync {
     /// Human-readable name used for diagnostics only.
     fn name(&self) -> &'static str;
 
-    /// Registered numeric selector for this precompile.
+    /// Registered Eidos domain tag for this precompile.
     ///
-    /// The registry rejects framework ids, invalid selector encodings, and selectors assigned to
+    /// The registry rejects framework ids, invalid domain-tag encodings, and tags assigned to
     /// other VM constructions. Implementations must obtain an explicit allocation from the shared
-    /// selector registry.
+    /// domain registry.
     fn id(&self) -> Felt;
 
     /// Canonical constants this precompile wants registered before execution.

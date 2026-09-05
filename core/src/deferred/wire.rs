@@ -641,7 +641,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        deferred::{DeferredContext, Payload, Precompile, precompile::test_precompile_selector},
+        deferred::{DeferredContext, Payload, Precompile, precompile::test_precompile_domain_tag},
         serde::{ByteWriter, Serializable},
     };
 
@@ -650,10 +650,10 @@ mod tests {
 
     impl PairListFixture {
         const NAME: &'static str = "wire-pair-list-fixture";
-        const SELECTOR: Felt = test_precompile_selector(1);
+        const DOMAIN_TAG: Felt = test_precompile_domain_tag(1);
 
         fn tag() -> Tag {
-            Tag::precompile(Self::SELECTOR, [ZERO; 2]).expect("fixture id is precompile-owned")
+            Tag::precompile(Self::DOMAIN_TAG, [ZERO; 2]).expect("fixture id is precompile-owned")
         }
     }
 
@@ -663,7 +663,7 @@ mod tests {
         }
 
         fn id(&self) -> Felt {
-            Self::SELECTOR
+            Self::DOMAIN_TAG
         }
 
         fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {

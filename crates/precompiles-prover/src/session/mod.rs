@@ -165,7 +165,7 @@ impl Session {
     /// pinned at `bound_ptr`.
     ///
     /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
-    /// pin-claim context `(PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, ptr, 0)`, consumes both
+    /// pin-claim context `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, ptr, 0)`, consumes both
     /// `UintVal` halves at `ptr`, and returns the foldable [`Truthy`] for
     /// `Binding(h_pin, True)`. Default fixed domains and curve coefficients are already installed
     /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use

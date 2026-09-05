@@ -119,10 +119,8 @@ pub mod falcon512_eidos {
     pub use miden_core::crypto::dsa::falcon512_eidos::{PublicKey, SecretKey, Signature};
     use miden_core::{
         Felt, Word,
-        crypto::{
-            dsa::falcon512_eidos::{FALCON_PRODUCT_CHECK_SELECTOR, Polynomial},
-            hash::Eidos,
-        },
+        crypto::{dsa::falcon512_eidos::Polynomial, hash::Eidos},
+        program::domain::{FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN},
     };
 
     /// Signs the provided message with the provided secret key and returns the resulting signature
@@ -198,13 +196,13 @@ pub mod falcon512_eidos {
     /// The transcript binds the public-key commitment, the signature polynomial, and the claimed
     /// product. The verifier recomputes the public-key commitment separately from the expanded key.
     pub fn product_check_digest(public_key: Word, s2: &[Felt], product: &[Felt]) -> Word {
-        assert_eq!(s2.len() % 8, 0, "s2 must be split into full Eidos blocks");
-        assert_eq!(product.len() % 8, 0, "product must be split into full Eidos blocks");
+        assert_eq!(s2.len(), 512, "s2 must contain 512 coefficients");
+        assert_eq!(product.len(), 1024, "product must contain 1024 coefficients");
 
-        let mut cv = Eidos::merge_in_domain(
-            &[public_key, Word::default()],
-            Felt::from_u32(FALCON_PRODUCT_CHECK_SELECTOR),
-        );
+        let mut cv =
+            Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
+        let first_block = core::array::from_fn(|i| if i < 4 { public_key[i] } else { Felt::ZERO });
+        cv = Eidos::compress(cv, first_block);
 
         for chunk in s2.chunks(8).chain(product.chunks(8)) {
             cv = Eidos::compress(cv, chunk.try_into().expect("chunk length checked above"));

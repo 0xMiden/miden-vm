@@ -26,8 +26,8 @@ pub mod keccak256;
 pub trait HashFunction: Default + Send + Sync + 'static {
     /// Human-readable name used for diagnostics.
     const NAME: &'static str;
-    /// Registered numeric selector for this hash precompile.
-    const SELECTOR: Felt;
+    /// Registered Eidos domain tag for this hash precompile.
+    const DOMAIN_TAG: Felt;
     /// u32-packed-LE felts in the digest (8 for a 256-bit hash, 16 for 512-bit).
     const DIGEST_FELTS: usize;
     /// Hashes `input`, returning the digest as `DIGEST_FELTS * 4` bytes.
@@ -66,9 +66,9 @@ impl<H: HashFunction> HashPrecompile<H> {
     /// Local discriminant of the assertion tag.
     pub const ASSERT_TAG_ID: u32 = ASSERT_DISC;
 
-    /// Returns this precompile's registered selector.
+    /// Returns this precompile's registered domain tag.
     pub fn id() -> Felt {
-        H::SELECTOR
+        H::DOMAIN_TAG
     }
 
     /// Tag for a hash assertion node carrying the preimage byte length.

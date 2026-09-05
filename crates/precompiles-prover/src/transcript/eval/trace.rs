@@ -199,7 +199,7 @@ enum NodeKind {
     /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the VM uint value context
     /// `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and bind
     /// `Binding(hash, Uint, ptr, bound_ptr)`. Explicit pin claims use
-    /// `(PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
+    /// `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
     /// `Binding(hash, True)`.
     UintLeaf {
         ptr: u32,
@@ -839,13 +839,15 @@ impl TranscriptEvalRequires {
             .checked_mul(8)
             .and_then(|len| u32::try_from(len).ok())
             .expect("MSM claim felt length must fit in u32");
-        let [selector, arg0, arg1, reserved] = chain_context.as_array();
+        let [domain_tag_felt, arg0, arg1, reserved] = chain_context.as_array();
         debug_assert_eq!(reserved, Felt::ZERO);
         let to_u32 = |value: Felt| {
             u32::try_from(value.as_canonical_u64()).expect("MSM context values must fit in u32")
         };
-        let mut cv = Eidos::init_chaining_word_with_params(
-            to_u32(selector),
+        let domain_tag = miden_crypto::hash::eidos::DomainTag::from_u32(to_u32(domain_tag_felt))
+            .expect("MSM domain tag must be structurally valid");
+        let mut cv = Eidos::init_chaining_word_with_tag(
+            domain_tag,
             [payload_len, to_u32(arg0), to_u32(arg1)],
         );
         let span_head = absorption.head().as_u32();
@@ -916,7 +918,7 @@ impl TranscriptEvalRequires {
 
     /// Record an explicit uint pin claim binding `value` to `Binding(hash, True)`.
     ///
-    /// The chain context is `(PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr = ptr, 0)`, and the
+    /// The chain context is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the
     /// row consumes both
     /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
     /// exactly like any [`Truthy`].
@@ -1145,7 +1147,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PTR] = Felt::from(*ptr);
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
             if *is_pinned {
-                // Explicit pin claim: `[PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr, 0]`.
+                // Explicit pin claim: `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`.
                 row[COL_PIN_CLAIM_BOUND_PTR] = Felt::from(*bound_ptr);
                 row[COL_PIN_CLAIM_PIN_PTR] = Felt::from(*ptr);
             } else {

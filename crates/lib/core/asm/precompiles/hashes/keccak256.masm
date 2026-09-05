@@ -12,7 +12,7 @@ use miden::core::precompiles
 # CONSTANTS — Keccak256Precompile assertion tag fields and digest advice event
 # ================================================================================================
 # Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the registered
-# Keccak-256 selector; ASSERT_TAG_ID is the generic hash assertion discriminant.
+# Keccak-256 domain tag; ASSERT_TAG_ID is the generic hash assertion discriminant.
 
 const PRECOMPILE_ID = 16778753
 const ASSERT_TAG_ID = 0
@@ -29,7 +29,7 @@ const ASSERT_INIT_CV_3_BASE = 6620516959492505600
 
 #! Registers a Keccak assertion expression and returns its content-addressed digest.
 #!
-#! The caller constructs `TAG=[PRECOMPILE_ID, ASSERT_TAG_ID, len_bytes, 0]`. The selector,
+#! The caller constructs `TAG=[PRECOMPILE_ID, ASSERT_TAG_ID, len_bytes, 0]`. The domain tag,
 #! expression payload length, assertion operation, and reserved lane are therefore fixed; only
 #! `len_bytes` needs runtime validation and injection into the initial chaining word.
 #!
