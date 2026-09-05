@@ -381,7 +381,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt, ZERO,
-        deferred::{Payload, Precompile, precompile::test_precompile_selector},
+        deferred::{Payload, Precompile, precompile::test_precompile_domain_tag},
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -393,7 +393,7 @@ mod tests {
         }
 
         fn id(&self) -> Felt {
-            test_precompile_selector(2)
+            test_precompile_domain_tag(2)
         }
 
         fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {

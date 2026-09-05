@@ -9,7 +9,7 @@ use super::{
     nodes_from_mask,
 };
 use crate::{
-    Felt,
+    hash::eidos::{BLOCK_LEN, domains::MMR_PEAKS},
     merkle::{
         MerklePath, MerkleTree, NodeIndex, int_to_node,
         mmr::{
@@ -1523,17 +1523,16 @@ mod property_tests {
 // ================================================================================================
 
 fn mmr_commitment(num_leaves: u64, padded_peaks: &[Word]) -> Word {
-    let padded_peak_elements = Word::words_as_elements(padded_peaks);
-    let mut elements = Vec::with_capacity(Word::NUM_ELEMENTS + padded_peak_elements.len());
-    elements.extend_from_slice(&[
-        Felt::new_unchecked(num_leaves),
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-    ]);
-    elements.extend_from_slice(padded_peak_elements);
+    let mut cv = Eidos::init_chaining_word_with_params(
+        MMR_PEAKS,
+        [num_leaves as u32, (num_leaves >> 32) as u32, 0],
+    );
 
-    Eidos::hash_elements(&elements)
+    for block in Word::words_as_elements(padded_peaks).chunks_exact(BLOCK_LEN) {
+        cv = Eidos::compress(cv, block.try_into().expect("MMR peaks are block-aligned"));
+    }
+
+    cv
 }
 
 // Short hand for the Eidos hash, used to make test code more concise and easy to read.

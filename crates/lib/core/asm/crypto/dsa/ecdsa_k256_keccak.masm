@@ -7,9 +7,9 @@ use miden::core::word
 
 const ECDSA_RECOVER_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::recover")
 
-# Selector-zero Eidos chaining word for the 16-Felt public-key preimage.
+# Generic Felt-sequence Eidos chaining word for the 16-Felt public-key preimage.
 const PUBLIC_KEY_INIT_CV = [
-    4280581857092829184,
+    4280581857092831745,
     2688637132020383760,
     1947077364412317696,
     6620516959492505600

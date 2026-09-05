@@ -1,6 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_crypto::Word;
+use miden_crypto::{Word, hash::eidos::EidosDomain};
 
 use crate::{
     chiplets::hasher,
@@ -10,10 +10,8 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-/// Domain tag for the kernel commitment: the registered selector
-/// `(KERNEL_COMMITMENT_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const KERNEL_DOMAIN_TAG: crate::Felt =
-    super::domain::domain_selector(super::domain::KERNEL_COMMITMENT_DOMAIN_ID, 1);
+/// Registered domain tag for the kernel commitment.
+pub const KERNEL_DOMAIN_TAG: crate::Felt = super::domain::KernelCommitmentDomain::TAG.as_felt();
 
 // KERNEL
 // ================================================================================================
@@ -106,7 +104,10 @@ impl KernelDescriptor {
     /// - Eidos initializes its chaining word from the registered domain and exact logical length,
     ///   preventing ambiguity between a partial block and its zero-padded form.
     pub fn commitment(&self) -> Word {
-        hasher::hash_elements_in_domain(Word::words_as_elements(&self.0), KERNEL_DOMAIN_TAG)
+        hasher::hash_elements_in_domain(
+            Word::words_as_elements(&self.0),
+            super::domain::KERNEL_COMMITMENT,
+        )
     }
 }
 
@@ -145,6 +146,7 @@ mod tests {
     use super::KernelDescriptor;
     use crate::{
         Felt, Word,
+        program::domain,
         serde::{ByteWriter, Deserializable, Serializable, SliceReader},
     };
 
@@ -164,7 +166,7 @@ mod tests {
         assert_eq!(empty.commitment(), expected);
         assert_eq!(
             empty.commitment(),
-            crate::chiplets::hasher::hash_elements_in_domain(&[], super::KERNEL_DOMAIN_TAG)
+            crate::chiplets::hasher::hash_elements_in_domain(&[], domain::KERNEL_COMMITMENT)
         );
     }
 

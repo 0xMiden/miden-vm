@@ -14,7 +14,7 @@ modules are internal implementation details used by core-library facades and tes
 
 - **`Tag`** — A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`,
   semantic `AND`, and opaque framework `CHUNKS`. Every precompile has an explicitly registered
-  numeric selector and interprets two local argument felts. The final felt is reserved and zero.
+  numeric domain tag and interprets two local argument felts. The final felt is reserved and zero.
 - **`Node`** — A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data
   chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework
   `TRUE` sentinel.
@@ -66,8 +66,8 @@ Proving, verification, transport, and resource policy are specified in the
 
 ## Conventions
 
-- Tag layout: `TAG = [registered_selector, arg0, arg1, 0]`.
-  - `registered_selector` selects the framework or owning precompile.
+- Tag layout: `TAG = [domain_tag, arg0, arg1, 0]`.
+  - `domain_tag` selects the framework or owning precompile.
   - `arg0` and `arg1` are interpreted by the selected precompile.
   - The final lane is reserved and must be zero.
   - Framework id `0` is `Tag::TRUE`; framework id `1` is `Tag::AND`; framework id `2` is

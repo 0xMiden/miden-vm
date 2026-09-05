@@ -146,7 +146,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
     let ctrl_row_data: [LB::Var; 4] = ctrl.hash_cv();
-    let merkle_cv = eidos_compression::two_to_one_chaining_word(0);
+    let merkle_cv = eidos_compression::merkle_node_chaining_word();
     let stream = local.aead_stream();
     let stream_next = next.aead_stream();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();

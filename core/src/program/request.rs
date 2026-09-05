@@ -1,11 +1,11 @@
 //! Content-addressing for recursive proof packages.
 
-use super::domain::{PROOF_REQUEST_DOMAIN_ID, domain_selector};
+use miden_crypto::hash::eidos::EidosDomain;
+
 use crate::{Felt, Word, ZERO, chiplets::hasher};
 
-/// Domain tag for proof-request keys: the registered selector
-/// `(PROOF_REQUEST_DOMAIN_ID << 8) | 1` (see the [`domain`](super::domain) module).
-pub const PROOF_REQUEST_DOMAIN_TAG: Felt = domain_selector(PROOF_REQUEST_DOMAIN_ID, 1);
+/// Registered domain tag for proof-request keys.
+pub const PROOF_REQUEST_DOMAIN_TAG: Felt = super::domain::ProofRequestDomain::TAG.as_felt();
 
 /// Returns the advice-map key addressing a proof package for `claim_commitment` under the
 /// verifier identified by `verifier_root`.
@@ -20,5 +20,5 @@ pub fn proof_request_key(verifier_root: Word, claim_commitment: Word) -> Word {
     let mut preimage = [ZERO; 2 * 4];
     preimage[0..4].copy_from_slice(claim_commitment.as_elements());
     preimage[4..8].copy_from_slice(verifier_root.as_elements());
-    hasher::hash_elements_in_domain(&preimage, PROOF_REQUEST_DOMAIN_TAG)
+    hasher::hash_elements_in_domain(&preimage, super::domain::PROOF_REQUEST)
 }

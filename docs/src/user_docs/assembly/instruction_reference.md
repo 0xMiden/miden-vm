@@ -258,8 +258,7 @@ _Insert into Advice Map:_
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                  |
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
-| `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
-| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`; `d` must fit in a u32. |
+| `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hmerge(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
 | `adv.insert_compress` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `K ← Eidos::compress(CV, BLOCK_LO \|\| BLOCK_HI)`. `advice_map[K] ← [BLOCK_LO, BLOCK_HI]`. |
 
@@ -303,7 +302,7 @@ manipulations.
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hash`         | `[A, ...]`           | `[B, ...]`       | 18     | `B ← Eidos::hash_elements(A)`. The exact 4-element length is bound into the initial chaining value. |
 | `compress`    | `[BLOCK_LO, BLOCK_HI, CV, ...]` | `[BLOCK_LO, BLOCK_HI, CV', ...]` | 1 | Eidos compression. Preserves the 8-element block and replaces only the 4-element chaining value. |
-| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 15     | Canonical Eidos two-to-one merge. |
+| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 15     | Generic Eidos hash of the eight Felts in `A \|\| B`. |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 15     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |

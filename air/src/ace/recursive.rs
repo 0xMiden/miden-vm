@@ -41,8 +41,8 @@ fn recursive_verifier_ace_config() -> AceConfig {
 /// - the order-invariant common section `[common ops | root padding]`, hashed into
 ///   `common_commitment` (the same digest for every proof order).
 ///
-/// The registry leaf and advice-map key is
-/// `commitment = Eidos::merge(shuffle_commitment, common_commitment)`.
+/// The registry leaf and advice-map key hashes the two segment commitments as one generic
+/// eight-Felt sequence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecursiveAceCircuit {
     /// Number of ACE READ variables.
@@ -57,7 +57,7 @@ pub struct RecursiveAceCircuit {
     pub shuffle_commitment: Word,
     /// Eidos digest of the order-invariant common section.
     pub common_commitment: Word,
-    /// Registry leaf and advice-map key: `merge(shuffle_commitment, common_commitment)`.
+    /// Registry leaf and advice-map key for the two segment commitments.
     pub commitment: Word,
     /// Encoded ACE instruction stream consumed by `eval_circuit`.
     pub instructions: Vec<Felt>,
@@ -244,7 +244,7 @@ fn encode_recursive_circuit(
 
     let shuffle_commitment = Eidos::hash_elements(&instructions[..shuffle_prefix_len]);
     let common_commitment = Eidos::hash_elements(&instructions[shuffle_prefix_len..]);
-    let commitment = Eidos::merge(&[shuffle_commitment, common_commitment]);
+    let commitment = Eidos::hash_two_words(&[shuffle_commitment, common_commitment]);
 
     Ok(RecursiveAceCircuit {
         num_inputs: encoded.num_vars(),

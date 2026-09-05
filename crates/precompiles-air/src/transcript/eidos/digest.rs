@@ -12,8 +12,9 @@ use core::cmp::Ordering;
 use miden_core::{
     Felt,
     deferred::{Digest, Tag},
-    program::domain::PVM_UINT_PIN_CLAIM_SELECTOR,
+    program::domain::PvmUintPinClaimDomain,
 };
+use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile};
 
 use crate::transcript::nodes::{EcOpId, UintOpId};
@@ -84,10 +85,10 @@ impl EidosChainContext {
     }
 
     /// Explicit uint pin-claim context:
-    /// `[PVM_UINT_PIN_CLAIM_SELECTOR, bound_ptr, pin_ptr, 0]`.
+    /// `[PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0]`.
     pub fn uint_pin_claim(bound_ptr: u32, pin_ptr: u32) -> Self {
         Self([
-            PVM_UINT_PIN_CLAIM_SELECTOR,
+            PvmUintPinClaimDomain::TAG.as_felt(),
             Felt::from(bound_ptr),
             Felt::from(pin_ptr),
             Felt::ZERO,

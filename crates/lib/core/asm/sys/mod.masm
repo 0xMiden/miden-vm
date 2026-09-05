@@ -7,7 +7,7 @@ pub mod vm
 # CONSTANTS
 # =================================================================================================
 
-# Eidos chaining word for one proof-request key block under the registered selector 0x01000201.
+# Eidos chaining word for one proof-request key block under the registered domain tag 0x01000201.
 const PROOF_REQUEST_INIT_CV = [
     4280581857109606913,
     2688637132020383752,

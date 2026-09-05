@@ -157,10 +157,6 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::InsertHdword),
     },
     PrimitiveSpec {
-        spelling: "adv.insert_hdword_d",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
-    },
-    PrimitiveSpec {
         spelling: "adv.insert_compress",
         build: || Instruction::SysEvent(SystemEventNode::InsertCompress),
     },

@@ -2,28 +2,14 @@
 
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
+use miden_crypto::hash::eidos::namespace;
+
 use super::precompile::Precompile;
 use crate::{
     Felt,
-    deferred::{
-        DEFERRED_AND_DOMAIN, DEFERRED_CHUNKS_DOMAIN, DeferredContext, Node, NodeType,
-        PrecompileError, Tag,
-    },
-    program::{
-        CLAIM_DOMAIN_TAG, KERNEL_DOMAIN_TAG, PROOF_REQUEST_DOMAIN_TAG,
-        domain::{MAX_EIDOS_INIT_VALUE, PVM_UINT_PIN_CLAIM_SELECTOR, has_domain_selector_encoding},
-    },
+    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag},
+    program::domain::{is_vm_precompile_domain, parse_domain_tag},
 };
-
-/// Eidos selectors allocated to VM constructions other than deferred precompiles.
-const NON_PRECOMPILE_EIDOS_SELECTORS: [Felt; 6] = [
-    KERNEL_DOMAIN_TAG,
-    CLAIM_DOMAIN_TAG,
-    PROOF_REQUEST_DOMAIN_TAG,
-    DEFERRED_AND_DOMAIN,
-    DEFERRED_CHUNKS_DOMAIN,
-    PVM_UINT_PIN_CLAIM_SELECTOR,
-];
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
 ///
@@ -58,8 +44,8 @@ impl PrecompileRegistry {
 
     /// Adds a precompile to the registry and returns `self` for chaining.
     ///
-    /// Panics if the selector is invalid, allocated to another VM construction, or already
-    /// registered.
+    /// Panics if the domain tag is invalid, belongs to `miden-crypto`, is allocated to another VM
+    /// construction, or is already registered.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         self.insert_precompile(Arc::new(precompile));
         self
@@ -77,7 +63,7 @@ impl PrecompileRegistry {
 
     fn insert_precompile(&mut self, precompile: Arc<dyn Precompile>) {
         let id = precompile.id();
-        validate_precompile_selector(precompile.name(), id);
+        validate_precompile_domain_tag(precompile.name(), id);
         let name = precompile.name();
         if let Some(prev) = self.precompiles.get(&id) {
             panic!("duplicate precompile id in registry (`{}` and `{name}`)", prev.name());
@@ -107,7 +93,7 @@ impl PrecompileRegistry {
     /// TRUE sentinel, so a precompile that returns it is rejected as an invalid node.
     pub fn decode_precompile_tag(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         if tag.is_framework_reserved()
-            || !has_domain_selector_encoding(tag.id())
+            || parse_domain_tag(tag.id()).is_none()
             || !tag.has_canonical_reserved_lane()
             || !tag.has_canonical_init_values()
         {
@@ -165,22 +151,20 @@ impl PrecompileRegistry {
     }
 }
 
-fn validate_precompile_selector(name: &'static str, id: Felt) {
-    assert!(
-        id.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE),
-        "precompile `{name}` selector must fit in a u32"
-    );
+fn validate_precompile_domain_tag(name: &'static str, id: Felt) {
     assert!(
         !Tag::is_framework_reserved_id(id),
         "precompile `{name}` uses a framework-reserved id"
     );
+    let tag = parse_domain_tag(id)
+        .unwrap_or_else(|| panic!("precompile `{name}` id is not a valid Eidos domain tag"));
     assert!(
-        has_domain_selector_encoding(id),
-        "precompile `{name}` selector is not a registered Eidos selector"
+        tag.namespace() != namespace::MIDEN_CRYPTO,
+        "precompile `{name}` uses a miden-crypto domain tag"
     );
     assert!(
-        !NON_PRECOMPILE_EIDOS_SELECTORS.contains(&id),
-        "precompile `{name}` uses an Eidos selector allocated to another VM construction"
+        tag.namespace() != namespace::MIDEN_VM || is_vm_precompile_domain(tag),
+        "precompile `{name}` uses an unallocated miden-vm domain tag"
     );
 }
 
@@ -190,12 +174,13 @@ mod tests {
     use super::*;
     use crate::{
         ONE, ZERO,
-        deferred::{DeferredState, Payload, precompile::test_precompile_selector},
+        deferred::{DeferredState, Payload, precompile::test_precompile_domain_tag},
+        program::domain::MidenVmDomainRegistry,
     };
 
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
-    /// Selectors control routing, so duplicate selectors exercise duplicate-id handling. Non-zero
+    /// Domain tags control routing, so duplicate tags exercise duplicate-id handling. Non-zero
     /// arguments are rejected by the fixture, not by the framework.
     #[derive(Debug, Clone, Copy)]
     struct Fixture {
@@ -207,7 +192,7 @@ mod tests {
         fn new(name: &'static str, discriminant: u8) -> Self {
             Self {
                 name,
-                id: test_precompile_selector(discriminant),
+                id: test_precompile_domain_tag(discriminant),
             }
         }
         fn tag(&self) -> Tag {
@@ -250,7 +235,7 @@ mod tests {
             "malicious-true"
         }
         fn id(&self) -> Felt {
-            test_precompile_selector(6)
+            test_precompile_domain_tag(6)
         }
         fn decode(&self, _args: [Felt; 2]) -> Option<NodeType> {
             Some(NodeType::True)
@@ -347,37 +332,49 @@ mod tests {
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn true_id_is_reserved_for_framework() {
-        validate_precompile_selector("reserved-true", Tag::TRUE.id());
+        validate_precompile_domain_tag("reserved-true", Tag::TRUE.id());
     }
 
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn and_id_is_reserved_for_framework() {
-        validate_precompile_selector("reserved-and", Tag::AND.id());
+        validate_precompile_domain_tag("reserved-and", Tag::AND.id());
     }
 
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn chunks_id_is_reserved_for_framework() {
-        validate_precompile_selector("reserved-chunks", Tag::CHUNKS.id());
+        validate_precompile_domain_tag("reserved-chunks", Tag::CHUNKS.id());
     }
 
     #[test]
-    #[should_panic(expected = "not a registered Eidos selector")]
-    fn opcode_sized_selector_is_rejected() {
-        validate_precompile_selector(
+    #[should_panic(expected = "not a valid Eidos domain tag")]
+    fn opcode_sized_domain_tag_is_rejected() {
+        validate_precompile_domain_tag(
             "opcode-sized",
             Felt::from_u32(u32::from(crate::operations::opcodes::JOIN)),
         );
     }
 
     #[test]
-    fn selectors_allocated_to_other_vm_constructions_are_rejected() {
-        for selector in NON_PRECOMPILE_EIDOS_SELECTORS {
+    #[should_panic(expected = "miden-crypto domain tag")]
+    fn crypto_domain_tag_is_rejected() {
+        validate_precompile_domain_tag(
+            "crypto-domain",
+            crate::program::domain::domain_tag(miden_crypto::hash::eidos::domains::SMT_BUCKET_LEAF),
+        );
+    }
+
+    #[test]
+    fn domain_tags_allocated_to_other_vm_constructions_are_rejected() {
+        for domain in MidenVmDomainRegistry::domains()
+            .iter()
+            .filter(|domain| !is_vm_precompile_domain(domain.tag))
+        {
             let result = std::panic::catch_unwind(|| {
-                validate_precompile_selector("conflicting-selector", selector);
+                validate_precompile_domain_tag("conflicting-domain", domain.tag.as_felt());
             });
-            assert!(result.is_err(), "selector {selector} was accepted");
+            assert!(result.is_err(), "domain tag {} was accepted", domain.tag.as_felt());
         }
     }
 

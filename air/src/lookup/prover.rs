@@ -450,7 +450,7 @@ where
         M: LookupMessage<F, EF>,
     {
         // The prover path short-circuits on `flag == F::ZERO`, while the constraint path
-        // evaluates the encode unconditionally. The two agree only when `flag in {0, 1}`.
+        // evaluates the encode unconditionally. The two agree only when `flag ∈ {0, 1}`.
         // Every Miden bus emitter today drives `flag` as a product of decoder/op selectors
         // pinned boolean by the AIR. This debug assertion catches regressions at test time.
         debug_assert!(
@@ -478,7 +478,7 @@ where
             "ProverGroup::batch flag must be in {{0, 1}}; non-boolean flag would diverge \
              from the constraint path",
         );
-        // When `active == false` every push inside the batch is a no-op - the
+        // When `active == false` every push inside the batch is a no-op — the
         // `msg.encode()` call is skipped too. The `build` closure still runs so
         // it can produce its `R` return value without requiring `R: Default`.
         let active = flag != F::ZERO;
@@ -527,7 +527,7 @@ where
 /// outer `batch(flag, ...)` call. Inactive batches skip message encoding and do not push.
 ///
 /// Each push appends one fraction entry when active and its multiplicity is nonzero. There's no
-/// `(N, D)` state inside the batch - LogUp's aux-trace builder handles the combination downstream.
+/// `(N, D)` state inside the batch — LogUp's aux-trace builder handles the combination downstream.
 pub struct ProverBatch<'b, F, EF>
 where
     F: Field,
@@ -603,7 +603,7 @@ mod tests {
     }
 
     /// Two-column stand-in for the real Miden lookup AIR, with a handcrafted `eval` body
-    /// that respects its own shape on **every** row - no mutual-exclusion assumptions, so
+    /// that respects its own shape on **every** row — no mutual-exclusion assumptions, so
     /// random (non-trace) input data drives it without tripping the shape debug_assert.
     ///
     /// - Column 0 always pushes 2 fractions (one `add`, one `remove`) with shape 2.
@@ -693,12 +693,12 @@ mod tests {
         let alpha = QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]);
         let beta = QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]);
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
-        // `LookupAir` impl - the trait-method path can't be called directly because
+        // `LookupAir` impl — the trait-method path can't be called directly because
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
         let challenges = Challenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
         // `SmokeAir::eval` never touches the main trace, periodic columns, or public
-        // values - pass dummy zero-length slices.
+        // values — pass dummy zero-length slices.
         let empty_row: Vec<Felt> = vec![];
         let periodic_values: Vec<Felt> = vec![];
 

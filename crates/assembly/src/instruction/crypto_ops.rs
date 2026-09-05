@@ -1,5 +1,5 @@
 use miden_core::{
-    ZERO, chiplets::eidos_compression, events::SystemEvent, operations::Operation::*,
+    Word, ZERO, chiplets::eidos_compression, events::SystemEvent, operations::Operation::*,
 };
 
 use super::BasicBlockBuilder;
@@ -12,9 +12,10 @@ use super::BasicBlockBuilder;
 /// - Input:   the top 4 elements are the word `A` to be hashed.
 /// - Output:  the top 4 elements are the digest word.
 ///
-/// Internally, this compresses `[A, ZERO]` under the selector-zero Eidos CV for four elements.
+/// Internally, this compresses `[A, ZERO]` under the generic Felt-sequence domain for four
+/// elements.
 pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
-    let cv = eidos_compression::init_chaining_word(0, 4);
+    let cv = eidos_compression::felt_sequence_chaining_word(4);
     #[rustfmt::skip]
     let ops = [
         // Add the zero high block word.
@@ -44,9 +45,14 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
 /// Appends Eidos compression and stack manipulation operations to compute a 2-to-1 hash.
 ///
 /// - Input:   the top 8 elements form the 2-word preimage `[A, B]` in stack order (A on top).
-/// - Output:  the top 4 elements are the digest word, which is `hash(A, B)`.
+/// - Output:  the top 4 elements are `Eidos::hash_elements(A || B)`.
 pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
-    let cv = eidos_compression::two_to_one_chaining_word(0);
+    let cv = eidos_compression::felt_sequence_chaining_word(8);
+    hash_two_words_with_chaining_word(block_builder, cv);
+}
+
+/// Hashes the top two stack words with the supplied initial chaining word.
+fn hash_two_words_with_chaining_word(block_builder: &mut BasicBlockBuilder, cv: Word) {
     #[rustfmt::skip]
     let ops = [
         // Add the initial chaining value.
@@ -144,8 +150,10 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
     // of the operand stack
     block_builder.push_system_event(SystemEvent::MerkleNodeMerge);
 
-    // perform the `hmerge`, updating the operand stack
-    hmerge(block_builder)
+    // Compute the parent with the reserved Merkle inner-node construction. This is intentionally
+    // distinct from `hmerge`, which hashes eight Felts under the generic Felt-sequence domain.
+    let cv = eidos_compression::merkle_node_chaining_word();
+    hash_two_words_with_chaining_word(block_builder, cv)
 }
 
 // MERKLE TREES - HELPERS

@@ -139,8 +139,7 @@ once before timing proof-heavy axes.
 ### Single-core prover performance
 
 The following two performance tables predate the native Eidos cutover and are retained as
-historical reference points. They must not be read as measurements of the current four-AIR Eidos
-topology; refreshed producer and prover measurements are still pending.
+historical reference points. They do not measure the current four-AIR Eidos topology.
 
 When these measurements were collected, Miden VM operated at around 20 - 25 KHz on a single CPU
 core. In the benchmarks below, the VM executes a
@@ -176,11 +175,8 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ### Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3. While BLAKE3 is fast on conventional
-processors, it is not efficient to execute inside the VM. The VM-native Eidos construction—its
-framed transcript and underlying compression—is designed for recursive proof verification.
-Optional proof-hash configurations, including Poseidon2, remain available for prover experiments
-and comparison.
+Eidos is Miden VM's native hash. It is derived from BLAKE3 and tailored for efficient execution
+inside the VM while retaining fast native execution on conventional processors.
 
 The historical comparison below uses the optional Poseidon2 STARK proof-hash configuration. It
 predates the native Eidos cutover and does not describe the current VM hash topology:

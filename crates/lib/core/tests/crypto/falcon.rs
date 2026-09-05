@@ -4,21 +4,18 @@ use miden_air::Felt;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
-    crypto::{
-        dsa::falcon512_eidos::{
-            FALCON_HASH_TO_POINT_SELECTOR, FALCON_PRODUCT_CHECK_SELECTOR, Nonce,
-        },
-        hash::Eidos,
-    },
+    crypto::{dsa::falcon512_eidos::Nonce, hash::Eidos},
     events::EventName,
     field::PrimeField64,
     mast::error_code_from_msg,
+    program::domain::{FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN},
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{
     CoreLibrary,
     dsa::falcon512_eidos::{self, product_check_digest},
 };
+use miden_crypto::hash::eidos::domains::{FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation, AdviceStack},
@@ -209,7 +206,8 @@ fn falcon_public_key_hash_loop_matches_eidos() {
 
     let h = Polynomial::new((0..N).map(|i| Felt::new_unchecked((i % M as usize) as u64)).collect());
     let elements = to_elements(h);
-    let expected = Eidos::hash_elements(&elements);
+    let expected = Eidos::hash_elements_in_domain(&elements, FALCON_PUBLIC_KEY);
+    let init_cv = Eidos::init_chaining_word(FALCON_PUBLIC_KEY, elements.len() as u32);
 
     let mut advice_stack = vec![7, 11];
     advice_stack.extend(elements.iter().map(Felt::as_canonical_u64));
@@ -224,7 +222,7 @@ fn falcon_public_key_hash_loop_matches_eidos() {
         locaddr.4
         movup.3
 
-        push.512 exec.eidos::init_chaining_word
+        push.{cv3}.{cv2}.{cv1}.{cv0}
         padw
 
         push.0.0
@@ -247,7 +245,11 @@ fn falcon_public_key_hash_loop_matches_eidos() {
         push.0
         exec.hash_h
     end
-    "
+    ",
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
     );
 
     let (output, _host) = build_test!(&source, &[], &advice_stack)
@@ -276,10 +278,19 @@ fn falcon_product_transcript_loop_matches_host() {
         (0..N).map(|i| Felt::new_unchecked(((i + 3) % M as usize) as u64)).collect(),
     );
     let pi = mul_modulo_p(h.clone(), s2.clone());
-    let h_hash = Eidos::hash_elements(&to_elements(h));
+    let h_hash = Eidos::hash_elements_in_domain(&to_elements(h), FALCON_PUBLIC_KEY);
     let s2_elements = to_elements(s2);
     let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
     let expected = product_check_digest(h_hash, &s2_elements, &pi_elements);
+
+    let mut payload = Vec::with_capacity(FALCON_PRODUCT_CHECK_PAYLOAD_LEN as usize);
+    payload.extend_from_slice(h_hash.as_elements());
+    payload.extend([Felt::ZERO; 4]);
+    payload.extend_from_slice(&s2_elements);
+    payload.extend_from_slice(&pi_elements);
+    assert_eq!(expected, Eidos::hash_elements_in_domain(&payload, FALCON_PRODUCT_CHECK));
+
+    let init_cv = Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
 
     let advice_stack = s2_elements
         .iter()
@@ -294,8 +305,8 @@ fn falcon_product_transcript_loop_matches_host() {
     begin
         padw
         swapw
-        push.{FALCON_PRODUCT_CHECK_SELECTOR}
-        exec.eidos::merge_in_domain
+        push.{cv3}.{cv2}.{cv1}.{cv0}
+        exec.eidos::merge_with_chaining_word
         padw padw
 
         repeat.64
@@ -312,7 +323,11 @@ fn falcon_product_transcript_loop_matches_host() {
         push.{HASH_WORD_PTR} mem_storew_le
         dropw drop
     end
-    "
+    ",
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
     );
 
     let mut stack = stack_from_words(&[h_hash]);
@@ -335,10 +350,10 @@ fn falcon_product_transcript_loop_matches_host() {
 }
 
 #[test]
-fn eidos_merge_in_domain_matches_masm() {
+fn falcon_product_initial_block_matches_masm() {
     const HASH_WORD_PTR: u32 = 1000;
 
-    let left = [
+    let left: Word = [
         Felt::new_unchecked(1),
         Felt::new_unchecked(2),
         Felt::new_unchecked(3),
@@ -346,20 +361,27 @@ fn eidos_merge_in_domain_matches_masm() {
     ]
     .into();
     let right = Word::default();
-    let expected =
-        Eidos::merge_in_domain(&[left, right], Felt::from_u32(FALCON_PRODUCT_CHECK_SELECTOR));
+    let init_cv = Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN);
+    let expected = Eidos::compress(
+        init_cv,
+        core::array::from_fn(|i| if i < 4 { left[i] } else { right[i - 4] }),
+    );
 
     let source = format!(
         "
     use miden::core::crypto::hashes::eidos
 
     begin
-        push.{FALCON_PRODUCT_CHECK_SELECTOR}
-        exec.eidos::merge_in_domain
+        push.{cv3}.{cv2}.{cv1}.{cv0}
+        exec.eidos::merge_with_chaining_word
         push.{HASH_WORD_PTR} mem_storew_le
         dropw
     end
-    "
+    ",
+        cv0 = init_cv[0].as_canonical_u64(),
+        cv1 = init_cv[1].as_canonical_u64(),
+        cv2 = init_cv[2].as_canonical_u64(),
+        cv3 = init_cv[3].as_canonical_u64(),
     );
 
     let stack = stack_from_words(&[left, right]);
@@ -392,7 +414,7 @@ fn falcon_hash_to_point_loop_matches_eidos() {
     let nonce = Nonce::deterministic();
     let nonce_elements = nonce.to_elements();
 
-    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT_SELECTOR, 0);
+    let mut cv = Eidos::init_chaining_word(FALCON_HASH_TO_POINT, 0);
     cv = Eidos::compress(cv, nonce_elements);
 
     let mut message_block = [ZERO; 8];
@@ -521,7 +543,7 @@ fn test_move_sig_to_adv_stack() {
     let public_key = secret_key.public_key().to_commitment();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
-        let sig_key = Eidos::merge(&[public_key, message]);
+        let sig_key = Eidos::hash_elements(Word::words_as_elements(&[public_key, message]));
         let signature =
             falcon512_eidos::sign(&secret_key, message).expect("failed to sign message");
 
@@ -868,7 +890,7 @@ fn generate_data_probabilistic_product_test(
 
     // get the challenge point and push it to the advice stack
     // Two sequential `adv_push` ops will place tau0 on top, tau1 at position 1.
-    let h_hash = Eidos::hash_elements(&h_elements);
+    let h_hash = Eidos::hash_elements_in_domain(&h_elements, FALCON_PUBLIC_KEY);
     let digest_polynomials = product_check_digest(h_hash, &s2_elements, &pi_elements);
     let tau0 = digest_polynomials[0];
     let tau1 = digest_polynomials[1];
