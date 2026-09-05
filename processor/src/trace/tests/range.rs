@@ -267,10 +267,10 @@ fn u32div_emits_all_range_check_removes() {
 
 /// Two memory ops (`MStoreW` + `MLoadW`) on the same word address emit 5 `RangeMsg` removes
 /// per memory chiplet row: `d0`, `d1` (the 16-bit delta limbs used for sorted-access
-/// constraints) and `w0`, `w1`, `4 * w1` (the word-address decomposition).
+/// constraints) and `w0`, `w1`, `4·w1` (the word-address decomposition).
 ///
-/// The address `262148 = 4 * 65537` is word-aligned with `word_index = 65537 = 0x10001`, so
-/// `w0 = 1`, `w1 = 1`, `4 * w1 = 4` - a non-trivial decomposition that exercises the full
+/// The address `262148 = 4 · 65537` is word-aligned with `word_index = 65537 = 0x10001`, so
+/// `w0 = 1`, `w1 = 1`, `4·w1 = 4` — a non-trivial decomposition that exercises the full
 /// five-way range-check batch.
 #[test]
 fn memory_chiplet_row_emits_range_check_removes() {
@@ -292,7 +292,7 @@ fn memory_chiplet_row_emits_range_check_removes() {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // Collect every memory chiplet row; we expect exactly two for the two memory ops.
+    // Collect every memory chiplet row — we expect exactly two for the two memory ops.
     let mut mem_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);

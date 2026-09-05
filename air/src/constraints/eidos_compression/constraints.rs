@@ -4,7 +4,7 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
-    algebra::{pack_u32_le, sum_input_b, universal_cv_word, xor_from_and},
+    algebra::{pack_pair, pack_u32_le, sum_input_b, universal_cv_word, xor_from_and},
     layout::*,
     lookup::{FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN},
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_COL, G_IDX_DIAG, LaneMap},
@@ -330,8 +330,7 @@ fn enforce_footer_transition<AB>(
         let lo = AB::Expr::from(local[footer_msg_word_col(2 * pair)]);
         let hi = AB::Expr::from(local[footer_msg_word_col(2 * pair + 1)]);
         builder.when(gate.clone()).assert_zero(
-            pack_pair::<AB>(lo, hi)
-                - AB::Expr::from(next[footer_r_col(footer + 1, 2 * footer + pair)]),
+            pack_pair(lo, hi) - AB::Expr::from(next[footer_r_col(footer + 1, 2 * footer + pair)]),
         );
     }
     for idx in 0..=2 * footer + 1 {
@@ -468,7 +467,7 @@ fn enforce_footer_row_locals<AB>(
         .assert_zero(cv_word::<AB>(local, 2 * footer + 1) - words.h_odd.clone());
 
     let masked_odd = words.out_odd.clone() - AB::Expr::from_u64(1 << 24) * top_bit_masked;
-    let packed_output = pack_pair::<AB>(words.out_even.clone(), masked_odd);
+    let packed_output = pack_pair(words.out_even.clone(), masked_odd);
     builder
         .when(gate * (AB::Expr::ONE - AB::Expr::from(local[F_MODE_COL])))
         .assert_eq(AB::Expr::from(local[footer_interface_tail_col(footer)]), packed_output);
@@ -631,13 +630,6 @@ fn lane_position(lane_map: &LaneMap, word_idx: usize) -> (usize, usize) {
         }
     }
     unreachable!("word index must appear exactly once in the lane map");
-}
-
-fn pack_pair<AB>(lo: AB::Expr, hi: AB::Expr) -> AB::Expr
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    lo + AB::Expr::from_u64(1u64 << 32) * hi
 }
 
 fn cv_word<AB>(row: &[AB::Var], idx: usize) -> AB::Expr

@@ -139,7 +139,7 @@ impl MainTrace {
     /// Returns the stored core trace row at index `i`.
     ///
     /// # Panics
-    /// Panics if `i` is past the core trace height; see [`Self::core_height`]. Callers
+    /// Panics if `i` is past the core trace height — see [`Self::core_height`]. Callers
     /// iterating the unified trace must bound by [`Self::core_height`] for Core accessors.
     #[inline]
     pub fn core_row(&self, i: RowIndex) -> &CoreCols<Felt> {
@@ -155,7 +155,7 @@ impl MainTrace {
     /// active on that row.
     ///
     /// # Panics
-    /// Panics if `i` is past the chiplets trace height; see [`Self::chiplets_height`]. The
+    /// Panics if `i` is past the chiplets trace height — see [`Self::chiplets_height`]. The
     /// four `is_*_row` classifiers short-circuit past the chiplets height, so they can be
     /// used as bound-aware filters when iterating the unified trace.
     #[inline]
@@ -238,7 +238,7 @@ impl MainTrace {
     /// Returns one column as a new vector.
     ///
     /// Returns a column of length [`Self::core_height`] for Core columns and
-    /// [`Self::chiplets_height`] for Chiplets columns; there is no unified projection.
+    /// [`Self::chiplets_height`] for Chiplets columns — there is no unified projection.
     // Test/debug-only, the proving path never materializes columns.
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column(&self, col_idx: usize) -> Vec<Felt> {

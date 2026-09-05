@@ -501,7 +501,7 @@ where
 ///
 /// Holds the same mutable borrow of the column's fraction `Vec` as the
 /// enclosing [`ProverGroup`], plus an `active` flag copied from the
-/// outer `batch(flag, ...)` call. Inactive batches skip message encoding and do not push.
+/// outer `batch(flag, …)` call. Inactive batches skip message encoding and do not push.
 ///
 /// Each push appends one fraction entry when active and its multiplicity is nonzero. There's no
 /// `(N, D)` state inside the batch — LogUp's aux-trace builder handles the combination downstream.
@@ -568,7 +568,7 @@ mod tests {
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
-    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + beta^0*value`, which is
+    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
     /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
     /// without blowing up).
     #[derive(Clone, Copy, Debug)]

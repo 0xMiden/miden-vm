@@ -37,13 +37,13 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     //
     // The boundary correction emits a `Child` payload while the in-trace removal at the
-    // root END row (in `block_hash_and_op_group.rs`) emits an `End` payload. The two
+    // root END row (in `block_hash_and_op_group.rs`) emits an `End` payload — the two
     // collapse to the same denominator by the algebra below, so a single `Child` here
     // cancels the root END's `-1/d`:
     //
     //   - At the root END row, the next op is HALT, so the decoder forces `addr_next = 0`, hence
     //     `parent = addr_next = 0`.
-    //   - `halt_next() = 1`, so `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
+    //   - `halt_next() = 1` ⇒ `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
     //   - The root block is not a loop body, so `is_loop_body = 0`.
     //   - `child_hash = h_0 = program_hash` by the decoder's program-hash boundary.
     //
