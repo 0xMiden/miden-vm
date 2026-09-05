@@ -1,171 +1,205 @@
 # Maps user-facing core library docs to generated MASM docs (source of truth for cycles).
 # See scripts/check_user_doc_cycles.py and issue #3111.
+#
+# Every entry must declare exactly one of:
+# - fixture_id: id of a measured [[case]] in processor/src/tests/assembly-cycle-fixtures.toml
+# - exemption: why this mapping is not backed by a clk fixture (formula / multi-case / etc.)
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "add"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
+exemption = "cycle cost is a formula over peak_merges"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "pack"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
+exemption = "cycle cost is a formula over extra_peak_pair"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "unpack"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
+exemption = "cycle cost is a formula over extra_peak_pair"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "num_leaves_to_num_peaks"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
+fixture_id = "num_leaves_to_num_peaks"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Merkle Mountain Range"
 procedure = "num_peaks_to_message_size"
 generated_doc = "crates/lib/core/docs/collections/mmr.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/collections.md"
 section = "Sorted Array"
 procedure = "find_word"
 generated_doc = "crates/lib/core/docs/collections/sorted_array.md"
+exemption = "multi-case absolute cycle list depending on search outcome"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "reverse"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "store_word_u32s_le"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "eqz"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "testz"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "gt"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "gte"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "lt"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "lte"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "eq"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/word.md"
 procedure = "test_eq"
 generated_doc = "crates/lib/core/docs/word.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/sys.md"
 procedure = "truncate_stack"
 generated_doc = "crates/lib/core/docs/sys.md"
+exemption = "cycle cost is a formula over overflow_words"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "init_no_padding"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "squeeze_digest"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "copy_digest"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "absorb_double_words_from_memory"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "cycle cost is a formula over words"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_double_words"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "cycle cost is a formula over words"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_words"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "multi-case cycle formula depending on empty/even/odd word counts"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash_elements"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "multi-case cycle formula depending on element count"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "pad_and_hash_elements"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "multi-case cycle formula depending on element count"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "hash"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "merge"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/hashes.md"
 section = "Poseidon2"
 procedure = "permute"
 generated_doc = "crates/lib/core/docs/crypto/hashes/poseidon2.md"
+exemption = "absolute body annotation without a dedicated clk fixture yet"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/aead.md"
 section = "encrypt"
 procedure = "encrypt"
 generated_doc = "crates/lib/core/docs/crypto/aead.md"
+exemption = "estimated cycle cost is a formula over plaintext length"
 
 [[entry]]
 user_doc = "docs/src/user_docs/core_lib/crypto/aead.md"
 section = "decrypt"
 procedure = "decrypt"
 generated_doc = "crates/lib/core/docs/crypto/aead.md"
+exemption = "estimated cycle cost is a formula over plaintext length"
