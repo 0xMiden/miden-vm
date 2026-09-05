@@ -2,21 +2,21 @@
 
 use alloc::vec::Vec;
 
+#[cfg(test)]
+use miden_core::field::QuadFelt;
 use miden_core::{
     Felt,
-    field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 
-use crate::{
-    ec::{
-        NUM_MAIN_COLS as POINTS_NUM_MAIN_COLS,
-        groups::NUM_MAIN_COLS as G_NUM_MAIN_COLS,
-        point_store_groups::{EcPointStoreGroupsAir, NUM_MAIN_COLS},
-        trace::{EcStoreRequires, groups_trace_padded_to, points_trace},
-    },
-    logup::build_logup_aux_trace,
+use crate::ec::{
+    NUM_MAIN_COLS as POINTS_NUM_MAIN_COLS,
+    groups::NUM_MAIN_COLS as G_NUM_MAIN_COLS,
+    point_store_groups::NUM_MAIN_COLS,
+    trace::{EcStoreRequires, groups_trace_padded_to, points_trace},
 };
+#[cfg(test)]
+use crate::{ec::point_store_groups::EcPointStoreGroupsAir, logup::build_logup_aux_trace};
 
 /// Build the merged main trace at the largest component height. Point rows
 /// can be zero-extended because they are activity-gated; group rows use
@@ -41,6 +41,7 @@ pub fn generate_trace(requires: EcStoreRequires) -> RowMajorMatrix<Felt> {
 }
 
 /// Build the merged chiplet's LogUp trace.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

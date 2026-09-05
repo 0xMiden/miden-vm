@@ -38,7 +38,7 @@ use miden_core::{
     proof::StarkProof,
     utils::RowMajorMatrix,
 };
-use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
+use miden_lifted_air::{LiftedAir, MultiAir, ProverStatement, ReductionError, Statement};
 use miden_lifted_stark::check_constraints;
 use miden_precompiles_verifier::{VerifyError, verify_deferred as verify_precompile};
 

@@ -49,6 +49,7 @@ impl<'a> EcRequire<'a> {
     /// carries the `F_p` handle) until
     /// [`constrain_scalar_bound`](Self::constrain_scalar_bound) names
     /// the scalar-field modulus.
+    #[cfg(test)]
     pub fn create_group(&mut self, a: U256, b: U256, bound: UintPtr) -> (EcGroupPtr, EcPointPtr) {
         assert_ne!(b, U256::ZERO, "b = 0 puts (0,0) on the curve");
         let a_ptr = self.uint.intern(a, bound);
@@ -64,6 +65,7 @@ impl<'a> EcRequire<'a> {
     /// first call the group tuple vacuously carries its `F_p` handle;
     /// mathematically `(a, b, p)` determines `F_s`, so this names a
     /// value, it never chooses one. Idempotent on the same handle.
+    #[cfg(test)]
     pub fn constrain_scalar_bound(&mut self, group: EcGroupPtr, sbound: UintPtr) {
         self.store.set_scalar_bound(group, sbound);
     }
@@ -139,6 +141,7 @@ impl<'a> EcRequire<'a> {
     /// entry retained for direct callers/tests. Creates/dedups the group
     /// `(a, b, bound)`, then delegates the point work to
     /// [`point_on_group`](Self::point_on_group).
+    #[cfg(test)]
     pub fn point_on_curve(
         &mut self,
         a_ptr: UintPtr,
@@ -157,6 +160,7 @@ impl<'a> EcRequire<'a> {
     /// legacy coefficient entry retained for direct callers/tests.
     /// Creates/dedups the group `(a, b, bound)`, then delegates to
     /// [`pai_on_group`](Self::pai_on_group).
+    #[cfg(test)]
     pub fn pai_on_curve(
         &mut self,
         a_ptr: UintPtr,
@@ -387,6 +391,7 @@ impl<'a> EcRequire<'a> {
     /// `R = −P`, since the `EcGroupAdd` bus alone carries no case flag and
     /// so doesn't pin the ∞ result slot. Route one more ∞ consume here for
     /// that pin.
+    #[cfg(test)]
     pub fn neg(
         &mut self,
         p: EcPointPtr,

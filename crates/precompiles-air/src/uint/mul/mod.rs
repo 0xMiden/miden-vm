@@ -86,6 +86,7 @@ mod aux;
 use alloc::{vec, vec::Vec};
 use core::array;
 
+pub(crate) use aux::MulRegisters;
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},

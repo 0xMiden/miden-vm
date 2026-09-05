@@ -4,12 +4,11 @@
 //! the public DAG surface, shared between the test suite and the
 //! `src/bin/` benches so a construction is written (and audited) once.
 
+#[cfg(test)]
 use alloc::vec::Vec;
 
-use crate::{
-    math::U256,
-    session::{Session, UintNode},
-};
+#[cfg(test)]
+use crate::{math::U256, session::Session, session::UintNode};
 
 /// Build `P(−x)` by two different DAG shapes over the modulus pinned at
 /// `bound_ptr` and return the two accumulators — equal in value (so
@@ -35,6 +34,7 @@ use crate::{
 /// so roughly half of path B's intermediates dedup onto path A's store
 /// blocks — canonical interning exercised mid-chain, not just at the
 /// ends.
+#[cfg(test)]
 pub fn horner_sign_paths(
     session: &mut Session,
     x: U256,

@@ -10,19 +10,20 @@
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::{
-    Felt,
-    field::{Field, QuadFelt},
-    utils::RowMajorMatrix,
-};
+#[cfg(test)]
+use miden_core::field::QuadFelt;
+use miden_core::{Felt, field::Field, utils::RowMajorMatrix};
 
+#[cfg(test)]
+use super::UintAddAir;
 use super::{
     CELL_B_ON, CELL_C_ON, CELL_D_W, CELL_D_WS, CELL_HI, CELL_IS_B_ZERO, CELL_IS_C_ZERO, CELL_K,
     COL_A_PTR, COL_NZ, GAMMA_SLOTS, NUM_GAMMA, NUM_LIMBS, NUM_MAIN_COLS, PERIOD, ROW_AB, ROW_CP,
-    TERM_CELL_MULT, UintAddAir,
+    TERM_CELL_MULT,
 };
+#[cfg(test)]
+use crate::logup::build_logup_aux_trace;
 use crate::{
-    logup::build_logup_aux_trace,
     math::{U256, add_reduce, from_limbs32, to_limbs32},
     relations::ProvideMult,
     uint::trace::{UintPtr, UintStoreRequires},
@@ -82,6 +83,7 @@ pub struct UintAddRequires {
 }
 
 impl UintAddRequires {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -149,6 +151,7 @@ impl UintAddRequires {
     /// `b` lookup, no zero pin). With both values canonical under the
     /// shared modulus the identity is exactly value equality — the EC
     /// group law's `x₁ = x₂` / `y₁ = y₂` case ties.
+    #[cfg(test)]
     pub fn record_eq(&mut self, a: UintPtr, c: UintPtr, bound: UintPtr, mult: ProvideMult) {
         self.push(AddOp { a, b: None, c: Some(c), bound, nz: false }, mult);
     }
@@ -312,6 +315,7 @@ pub fn generate_trace(
 /// columns over the `UintVal` consumes + the `UintAdd` provide. The
 /// Schwartz–Zippel identity is a block-local main-trace constraint, so
 /// the aux trace carries no register alongside them.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

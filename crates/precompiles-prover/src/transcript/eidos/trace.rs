@@ -6,7 +6,7 @@ use core::ops::Range;
 use miden_core::{
     Felt, Word,
     deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN},
-    field::{Field, PrimeCharacteristicRing},
+    field::Field,
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -70,6 +70,7 @@ impl AbsorptionSpan {
         AbsorptionId(self.start + self.len - 1)
     }
 
+    #[cfg(test)]
     pub fn n_cycles(self) -> u32 {
         self.len
     }
@@ -86,6 +87,7 @@ impl AbsorptionOutput {
         self.span.head()
     }
 
+    #[cfg(test)]
     pub fn tail(&self) -> AbsorptionId {
         self.span.tail()
     }
@@ -245,6 +247,7 @@ impl EidosRequires {
         Some(AbsorptionSpan::new(rec.range.clone()))
     }
 
+    #[cfg(test)]
     pub fn lookup(&self, digest: EidosDigest) -> Option<AbsorptionSpan> {
         self.by_digest
             .get(&digest)
@@ -252,6 +255,7 @@ impl EidosRequires {
     }
 
     /// Number of compressions allocated to surrounding transcript buses.
+    #[cfg(test)]
     pub fn total_cycles(&self) -> u32 {
         self.next_seq
     }
@@ -442,6 +446,7 @@ pub(crate) fn generate_trace_with_byte_lookups(
     RowMajorMatrix::new(values, NUM_MAIN_COLS)
 }
 
+#[cfg(test)]
 pub fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
     generate_trace_with_byte_lookups(requires, &mut BytePairLutRequires::new())
 }

@@ -19,8 +19,12 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+#[cfg(test)]
+use miden_core::field::QuadFelt;
+use miden_core::{Felt, utils::RowMajorMatrix};
 
+#[cfg(test)]
+use crate::{hash::keccak::sponge::KeccakSpongeAir, logup::build_logup_aux_trace};
 use crate::{
     hash::{
         chunk::trace::{ChunkRequires, ChunkSeqId, Invocation as ChunkInvocation},
@@ -31,13 +35,12 @@ use crate::{
             sponge::{
                 CHUNK_BYTES_RANGE, CLEARED_BYTES_RANGE, COL_ACT, COL_B_BEGIN, COL_BYTES_LEFT,
                 COL_CHUNK_PTR, COL_IS_CHUNK_AVAIL, COL_IS_FIRST_BLOCK_OF_INVOCATION, COL_IS_ZERO,
-                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, KeccakSpongeAir, NUM_MAIN_COLS,
-                PADDED_BYTES_RANGE, SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
+                COL_SPONGE_SEQ_ID, COL_STATE_OUT_LO, NUM_MAIN_COLS, PADDED_BYTES_RANGE,
+                SPONGE_PERIOD, STATE_NEW_BYTES_RANGE, STATE_PREV_BYTES_RANGE,
                 program::{EXTRA_BLOCK_BEGIN, NOP_SLACK_BEGIN},
             },
         },
     },
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp, require_logic64},
     transcript::eidos::{
         digest::EidosDigest,
@@ -379,6 +382,7 @@ fn compute_block_snapshots(inv: &Invocation, layout: &InvocationLayout) -> Vec<B
 /// `SPONGE_PERIOD` rows per block; trailing rows up to the next power
 /// of two are inactive (`act = 0`). Returns a [`NUM_MAIN_COLS`]-column
 /// trace.
+#[cfg(test)]
 pub fn generate_trace(requires: SpongeRequires) -> RowMajorMatrix<Felt> {
     generate_trace_padded_to(requires, 0)
 }
@@ -639,6 +643,7 @@ fn padding_mask(byte_offset: usize) -> u64 {
 /// Build the aux trace for [`KeccakSpongeAir`]. The aux trace is
 /// produced by the generic [`build_logup_aux_trace`] driver — no
 /// chiplet-specific aux-trace code lives here.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

@@ -165,6 +165,7 @@ fn push_row(
 /// populated directly from the computed values, sufficient for row-local
 /// `check_constraints` (the `BytePairLut` interaction is a cross-AIR bus
 /// concern, checked separately by the session-level bus-balance tests).
+#[cfg(test)]
 pub fn generate_trace_from_states(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
@@ -173,6 +174,7 @@ pub fn generate_trace_from_states(
     generate_trace_from_states_inner(states, rcs, &mut scratch)
 }
 
+#[cfg(test)]
 fn generate_trace_from_states_inner(
     states: &[[u64; 25]],
     rcs: &[u64; NUM_ROUNDS],
@@ -269,6 +271,7 @@ fn generate_trace_from_states_inner(
 /// the χ-XOR / ι output slots of round 23 of cycle n — lane (0, 0) at
 /// slot 103 (ι output), the other 24 lanes at slots 104..128 in
 /// row-major lane index order.
+#[cfg(test)]
 pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u64; 25]> {
     assert!(!states.is_empty(), "at least one perm required");
     let num_perms = states.len();
@@ -335,6 +338,7 @@ pub fn extract_outputs(states: &[[u64; 25]], rcs: &[u64; NUM_ROUNDS]) -> Vec<[u6
 }
 
 /// Single-perm convenience wrapper around [`extract_outputs`].
+#[cfg(test)]
 pub fn extract_output(state: &[u64; 25], rcs: &[u64; NUM_ROUNDS]) -> [u64; 25] {
     extract_outputs(core::slice::from_ref(state), rcs)
         .into_iter()

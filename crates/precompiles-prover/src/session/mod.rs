@@ -35,7 +35,6 @@
 
 use alloc::{vec, vec::Vec};
 
-pub use miden_core::proof::StarkProof;
 use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub use crate::transcript::eval::trace::{EcNode, Truthy, UintNode};
@@ -78,10 +77,14 @@ use crate::{
 
 mod fixed;
 mod prove;
+#[cfg(test)]
 pub(crate) use fixed::{fixed_ecgroup_msgs, fixed_uintval_msgs};
 pub mod statements;
 pub mod strategies;
-pub use miden_precompiles_air::{ChipletAir, ChipletMultiAir, NUM_CHIPLETS};
+#[cfg(test)]
+pub use miden_precompiles_air::ChipletAir;
+#[cfg(test)]
+pub use miden_precompiles_air::NUM_CHIPLETS;
 
 /// Stateful builder over the full chiplet stack.
 ///
@@ -169,6 +172,7 @@ impl Session {
     /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use
     /// [`uint_leaf`](Self::uint_leaf) instead. The modulus itself is a self-referential pin
     /// (`bound_ptr == ptr`).
+    #[cfg(test)]
     pub fn pin_uint(&mut self, ptr: u32, value: U256, bound_ptr: u32) -> Truthy {
         let handle = if ptr == bound_ptr {
             self.uint.store.pin_modulus(ptr, value)
@@ -394,6 +398,7 @@ impl Session {
     /// Number of MSM expressions laid so far (intros + endomorphism intros +
     /// combines + negs) — a chain-cost diagnostic, e.g. to compare
     /// addition-chain [`strategies`]. Not a DAG quantity.
+    #[cfg(test)]
     pub fn msm_expr_count(&self) -> usize {
         self.msm.expr_count()
     }
@@ -402,6 +407,7 @@ impl Session {
     /// off-circuit cross-checks (e.g. against a reference MSM) until the
     /// eval resolve seam binds the value in-circuit. Panics if the value is
     /// the point at infinity.
+    #[cfg(test)]
     pub fn msm_value_coords(&self, expr: EcExprPtr) -> (U256, U256) {
         let val = self.msm.value(expr);
         let (_, coords) = self.ec.store.point_params(val);
@@ -431,6 +437,7 @@ impl Session {
     /// Left-fold claims into the transcript from a `ZERO_HASH` base:
     /// `Hash(… Hash(Hash(0, h₀), h₁) …, hₙ)`. `assert_and_fold(keccaks)`
     /// reproduces the left-leaning spine.
+    #[cfg(test)]
     pub fn assert_and_fold(&mut self, handles: impl IntoIterator<Item = Truthy>) -> Truthy {
         let mut acc = self.zero();
         for h in handles {
@@ -537,6 +544,7 @@ impl SessionTraces {
     /// Keccak round, canonical byte-pair lookup, transcript eval, uint-store-mul,
     /// uint-add, ec-point-store-groups, ec-add, and ec-msm. The AIRs, provers, and public values a
     /// caller assembles must line up with this order.
+    #[cfg(test)]
     pub fn mains(&self) -> [&RowMajorMatrix<Felt>; NUM_CHIPLETS] {
         [
             &self.chunk_node_sponge,
@@ -577,6 +585,7 @@ impl SessionTraces {
     }
 
     /// The transcript root committed by the eval chip.
+    #[cfg(test)]
     pub fn public_root(&self) -> EidosDigest {
         self.public_root
     }

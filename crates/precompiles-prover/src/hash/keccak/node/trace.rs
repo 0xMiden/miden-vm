@@ -19,27 +19,29 @@
 
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 
+#[cfg(test)]
+use miden_core::field::QuadFelt;
 use miden_core::{
     Felt,
     deferred::{Digest, Node},
-    field::QuadFelt,
     utils::RowMajorMatrix,
 };
 use miden_precompiles::Keccak256Precompile;
 
+#[cfg(test)]
+use crate::{hash::keccak::node::KeccakNodeAir, logup::build_logup_aux_trace};
 use crate::{
     hash::{
         chunk::trace::{ChunkRequires, ChunkSeqId},
         keccak::{
             digest::KeccakDigest,
-            node::{KeccakNodeAir, NUM_HASH, NUM_MAIN_COLS},
+            node::{NUM_HASH, NUM_MAIN_COLS},
             round::RoundRequires,
             sponge::trace::{
                 Invocation as SpongeInvocation, SpongeRequires, SpongeSeqId, keccak_oracle,
             },
         },
     },
-    logup::build_logup_aux_trace,
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     transcript::eidos::{
@@ -125,6 +127,7 @@ pub fn generate_trace(requires: KeccakNodeRequires) -> RowMajorMatrix<Felt> {
 
 /// Generates a trace from explicit invocations for standalone keccak-node tests. The local AIR
 /// constraints do not depend on which higher-level component supplied the digest bytes.
+#[cfg(test)]
 pub fn generate_trace_from_invocations(
     invocations: &[KeccakNodeInvocation],
 ) -> RowMajorMatrix<Felt> {
@@ -187,6 +190,7 @@ fn push_row(trace: &mut Vec<Felt>, inv: &KeccakNodeInvocation) {
 pub struct KeccakNodeOutput {
     pub keccak_digest: KeccakDigest,
     pub h_keccak: EidosDigest,
+    #[allow(dead_code)]
     pub node_row: u32,
 }
 
@@ -315,6 +319,7 @@ impl KeccakNodeRequires {
 
 /// Witness-bearing companion to [`KeccakNodeAir`]. The aux trace is
 /// produced by the generic [`build_logup_aux_trace`] driver.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

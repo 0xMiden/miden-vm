@@ -50,10 +50,11 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(test)]
+use miden_core::field::QuadFelt;
 use miden_core::{
     Felt,
     deferred::{Digest, fold_deferred_root},
-    field::QuadFelt,
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -65,7 +66,6 @@ use crate::{
         msm::trace::{EcExprPtr, EcMsmRequires},
         trace::{EcGroupPtr, EcPointPtr},
     },
-    logup::build_logup_aux_trace,
     relations::ProvideMult,
     transcript::{
         eidos::{
@@ -81,7 +81,7 @@ use crate::{
             COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_LHS_END,
             COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PIN_CLAIM_BOUND_PTR,
             COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_TAG_ARG0,
-            COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
+            COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS,
         },
         nodes::{EcOpId, UintOpId},
     },
@@ -90,6 +90,8 @@ use crate::{
         trace::{UintPtr, UintStoreRequires},
     },
 };
+#[cfg(test)]
+use crate::{logup::build_logup_aux_trace, transcript::eval::TranscriptEvalAir};
 
 /// A handle to a `Binding(hash, True)` claim, issued by the eval requires.
 ///
@@ -920,6 +922,7 @@ impl TranscriptEvalRequires {
     /// row consumes both
     /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
     /// exactly like any [`Truthy`].
+    #[cfg(test)]
     pub fn pin_uint(
         &mut self,
         ptr: UintPtr,
@@ -1226,6 +1229,7 @@ fn root_hash(trace: &[Felt]) -> EidosDigest {
 /// Aux-trace builder for [`TranscriptEvalAir`] — the generic
 /// [`build_logup_aux_trace`] driver. Called by the AIR's
 /// `LiftedAir::build_aux_trace`.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

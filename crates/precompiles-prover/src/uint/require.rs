@@ -134,6 +134,7 @@ impl<'a> UintRequire<'a> {
     /// exactly value equality; the certificate is value-level, so two
     /// distinct ptrs binding equal values still close. Panics unless the
     /// stored values are equal.
+    #[cfg(test)]
     pub fn value_eq(&mut self, a_ptr: UintPtr, c_ptr: UintPtr) {
         let (a, _) = self.resolve(a_ptr);
         let (c, _) = self.resolve(c_ptr);

@@ -3,32 +3,32 @@
 
 use alloc::vec::Vec;
 
+#[cfg(test)]
+use miden_core::field::QuadFelt;
 use miden_core::{
     Felt,
-    field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 
-use crate::{
-    hash::{
-        chunk::{
-            self,
-            trace::{ChunkRequires, generate_trace_padded_to as chunk_trace},
+use crate::hash::{
+    chunk::{
+        self,
+        trace::{ChunkRequires, generate_trace_padded_to as chunk_trace},
+    },
+    chunk_node_sponge::NUM_MAIN_COLS,
+    keccak::{
+        node::{
+            self as node,
+            trace::{KeccakNodeRequires, generate_trace as node_trace},
         },
-        chunk_node_sponge::{ChunkNodeSpongeAir, NUM_MAIN_COLS},
-        keccak::{
-            node::{
-                self as node,
-                trace::{KeccakNodeRequires, generate_trace as node_trace},
-            },
-            sponge::{
-                self as sponge,
-                trace::{SpongeRequires, generate_trace_padded_to as sponge_trace},
-            },
+        sponge::{
+            self as sponge,
+            trace::{SpongeRequires, generate_trace_padded_to as sponge_trace},
         },
     },
-    logup::build_logup_aux_trace,
 };
+#[cfg(test)]
+use crate::{hash::chunk_node_sponge::ChunkNodeSpongeAir, logup::build_logup_aux_trace};
 
 /// Build the merged main trace at the largest component height. Node rows
 /// can be zero-extended because they are activity-gated; chunk and sponge
@@ -70,6 +70,7 @@ pub fn generate_trace(
 }
 
 /// Build the merged chiplet's LogUp trace.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

@@ -33,10 +33,9 @@ use crate::{
         compression::{
             layout::{
                 BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, BYTE_SLOT_WIDTH, BYTES_PER_WORD,
-                F_COMPRESSION_CYCLE_ID_COL, F_CV_STORAGE_COLS, F_TOP_BIT_MASK,
-                F_TOP_BIT_SLOT_BASE_COL, FOOTER_START, G_COMPRESSION_CYCLE_ID_COL,
-                NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, footer_digest_col, footer_r_col,
-                g_bd_rot_slot_col,
+                F_CV_STORAGE_COLS, F_TOP_BIT_MASK, F_TOP_BIT_SLOT_BASE_COL, FOOTER_START,
+                G_COMPRESSION_CYCLE_ID_COL, NUM_COLS as NUM_EIDOS_COMPRESSION_COLS,
+                footer_digest_col, footer_r_col, g_bd_rot_slot_col,
             },
             trace::{
                 EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,

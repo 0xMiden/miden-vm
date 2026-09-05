@@ -24,11 +24,14 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::RowMajorMatrix};
+#[cfg(test)]
+use miden_core::field::QuadFelt;
+use miden_core::{Felt, deferred::Node, utils::RowMajorMatrix};
 
+#[cfg(test)]
+use crate::{hash::chunk::ChunkAir, logup::build_logup_aux_trace};
 use crate::{
-    hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
-    logup::build_logup_aux_trace,
+    hash::chunk::{NUM_F, NUM_MAIN_COLS},
     transcript::eidos::{
         digest::{EidosChainContext, EidosDigest},
         trace::{AbsorptionSpan, EidosRequires},
@@ -169,6 +172,7 @@ impl ChunkRequires {
 /// of two are inactive (`act = 0`), with `chunk_seq_id` and
 /// `absorption_id` continuing `+1` to satisfy the relaxed chain on
 /// dead rows. Returns a 12-column trace.
+#[cfg(test)]
 pub fn generate_trace(requires: ChunkRequires) -> RowMajorMatrix<Felt> {
     generate_trace_padded_to(requires, 0)
 }
@@ -232,6 +236,7 @@ pub(crate) fn generate_trace_padded_to(
 
 /// Build the chunk chiplet's aux trace via the generic
 /// [`build_logup_aux_trace`] driver.
+#[cfg(test)]
 pub(crate) fn build_aux(
     main: &RowMajorMatrix<Felt>,
     challenges: &[QuadFelt],

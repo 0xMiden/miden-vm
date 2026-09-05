@@ -23,7 +23,9 @@
 //! Each returns the combined [`EcExprPtr`]; tie it to a claimed point with
 //! [`Session::ec_msm`].
 
-use alloc::{vec, vec::Vec};
+#[cfg(test)]
+use alloc::vec;
+use alloc::vec::Vec;
 
 use miden_precompiles::glv_decompose;
 
@@ -50,6 +52,7 @@ use crate::{
 /// the table is `2ᵏ`. Panics if `terms` is empty, `k > 16`, or every scalar
 /// is zero. (A zero scalar wastes its base's intro + table entries; drop
 /// such terms before calling.)
+#[cfg(test)]
 pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     let k = terms.len();
     assert!(k >= 1, "an MSM needs at least one base");
@@ -110,6 +113,7 @@ pub fn straus(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
 /// A 2-base strategy (the signed table is `3ᵏ`-ish): `terms` must hold
 /// exactly two `(base, scalar value)` pairs. Returns the combined MSM
 /// expression. Panics if `terms.len() != 2` or both scalars are zero.
+#[cfg(test)]
 pub fn joint_naf(session: &mut Session, terms: &[(EcNode, U256)]) -> EcExprPtr {
     assert_eq!(terms.len(), 2, "joint_naf is a 2-base strategy");
 
@@ -252,6 +256,7 @@ pub fn wnaf_scalarmul(session: &mut Session, table: &WnafTable, k: U256) -> EcEx
 /// generator's, built once with [`wnaf_table`]) is reused across the batch
 /// rather than rebuilt per term. Returns the combined MSM expression. Panics
 /// if `terms` is empty.
+#[cfg(test)]
 pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPtr {
     let mut acc: Option<EcExprPtr> = None;
     for &(table, k) in terms {
@@ -288,6 +293,7 @@ pub fn wnaf_msm(session: &mut Session, terms: &[(&WnafTable, U256)]) -> EcExprPt
 /// signatures — build its table once with [`wnaf_table`] and drive the same
 /// interleaved ladder with [`joint_wnaf_with_tables`] instead, so the
 /// recurring base's table is laid once rather than rebuilt per call.
+#[cfg(test)]
 pub fn joint_wnaf(session: &mut Session, terms: &[(EcNode, U256)], w: usize) -> EcExprPtr {
     let tables: Vec<WnafTable> = terms.iter().map(|(p, _)| wnaf_table(session, p, w)).collect();
     let table_terms: Vec<(&WnafTable, U256)> =
@@ -399,6 +405,7 @@ pub fn glv_joint_wnaf_with_tables(
 /// Non-adjacent form of `k` (digits LSB-first, each in `{−1, 0, 1}`, no two
 /// adjacent nonzero) — ~⅓ density vs binary's ½. `d = 2 − (k mod 4)` on the
 /// odd steps (`k mod 4 ∈ {1, 3} → d ∈ {1, −1}`), then `k ← (k − d)/2`.
+#[cfg(test)]
 fn naf(mut k: U256) -> Vec<i8> {
     let one = U256::from(1u64);
     let mut out = Vec::new();

@@ -1,9 +1,4 @@
 #![no_std]
-#![allow(
-    dead_code,
-    unused_imports,
-    reason = "the imported prover stack is intentionally retained behind a narrow crate API"
-)]
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]

@@ -150,6 +150,7 @@ impl UintStoreRequires {
     /// on a value already interned under the same modulus — pins are
     /// protocol addresses, so they must land before any equal value can
     /// be interned canonically onto them.
+    #[cfg(test)]
     pub fn intern_pinned(&mut self, addr: u32, value: U256, bound: UintPtr) -> UintPtr {
         let ptr = UintPtr(addr);
         assert!(value <= self.uint(bound).value, "value exceeds its modulus bound");
@@ -294,6 +295,7 @@ fn bound_value(requires: &UintStoreRequires, u: &Uint, is_pad: bool) -> U256 {
 /// `bpl` — every `v` / `comp` 16-bit limb plus the per-block ptr gap,
 /// padding blocks included — mirroring the consumes [`UintStoreAir`]
 /// emits on the `v` / `comp` / term rows.
+#[cfg(test)]
 pub fn generate_trace(
     requires: UintStoreRequires,
     bpl: &mut BytePairLutRequires,
