@@ -59,7 +59,7 @@ const CONTROLLER_IS_START_COL: usize = CONTROLLER_ROW_DATA_BASE_COL + 2;
 const CONTROLLER_MERKLE_OR_PADDING_COL: usize = CHIPLETS_MODE_COL;
 static PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Pad/Add/Mul/Drop inside a span - same kind of ops the decoder/stack tests use, with
+/// Pad/Add/Mul/Drop inside a span — same kind of ops the decoder/stack tests use, with
 /// enough variety to exercise decoder, stack, and range-check bus emitters.
 fn tiny_span() -> Vec<Operation> {
     vec![
@@ -630,7 +630,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
         build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &challenges);
     assert!(
         !core_fractions.fractions().is_empty(),
-        "{label}: no Core fractions collected - trace is degenerate or emitters are broken",
+        "{label}: no Core fractions collected — trace is degenerate or emitters are broken",
     );
     let _ = accumulate(&core_fractions);
 
@@ -644,7 +644,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     );
     assert!(
         !chip_fractions.fractions().is_empty(),
-        "{label}: no Chiplets fractions collected - trace is degenerate or emitters are broken",
+        "{label}: no Chiplets fractions collected — trace is degenerate or emitters are broken",
     );
     let _ = accumulate(&chip_fractions);
 
@@ -658,7 +658,7 @@ fn assert_lookup_fractions_run(label: &str, trace: &VmTrace) {
     );
     assert!(
         !eidos_compression_fractions.fractions().is_empty(),
-        "{label}: no Eidos compression fractions collected - trace is degenerate or emitters are broken",
+        "{label}: no Eidos compression fractions collected — trace is degenerate or emitters are broken",
     );
     assert_eidos_compression_oracle_coverage(
         label,
