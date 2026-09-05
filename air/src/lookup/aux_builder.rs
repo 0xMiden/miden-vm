@@ -507,8 +507,8 @@ fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: us
 /// Montgomery batch inversion fused with multiplicity scaling: writes `scratch[j] = mⱼ · dⱼ⁻¹`
 /// using one field inversion + O(N) multiplications.
 ///
-/// The backward sweep multiplies each inverse by `mⱼ` (an `EF × F` multiplication, cheaper than
-/// `EF × EF`), so the caller gets ready-to-sum fraction values without a second pass.
+/// The backward sweep multiplies each inverse by `mⱼ` (an `EF × F` mul, cheaper than
+/// `EF × EF`) so the caller gets ready-to-sum fraction values without a second pass.
 ///
 /// # Panics
 ///
@@ -521,7 +521,7 @@ where
     debug_assert_eq!(scratch.len(), chunk_fracs.len());
     debug_assert!(!chunk_fracs.is_empty());
 
-    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ.
+    // Forward pass: scratch[i] = d₀ · d₁ · … · dᵢ (prefix products of denominators).
     let mut acc = chunk_fracs[0].1;
     scratch[0] = acc;
     for i in 1..chunk_fracs.len() {
@@ -529,7 +529,7 @@ where
         scratch[i] = acc;
     }
 
-    // One field inversion, amortized over the whole chunk.
+    // One field inversion — amortised over the whole chunk.
     let mut running_inv = scratch[scratch.len() - 1]
         .try_inverse()
         .expect("LogUp denominator product must be non-zero");
@@ -542,8 +542,10 @@ where
     //
     // Then:
     //     dᵢ⁻¹ = scratch[i-1] · running_inv
-    // We scale by mᵢ and fold dᵢ into running_inv for the next iteration.
-    // After the loop: running_inv = d₀⁻¹.
+    //     (prefix-product cancels every factor except dᵢ⁻¹ inside running_inv).
+    // We scale by mᵢ (EF × F, cheaper than EF × EF) to yield the fraction directly, then
+    // fold dᵢ into running_inv so the invariant holds for iteration i-1.
+    // After the loop: running_inv = d₀⁻¹, ready for the i = 0 case below.
     for i in (1..chunk_fracs.len()).rev() {
         let (m_i, d_i) = chunk_fracs[i];
         scratch[i] = scratch[i - 1] * running_inv * m_i;
@@ -569,7 +571,7 @@ mod tests {
         lookup::{LookupAir, LookupBuilder},
     };
 
-    // Small deterministic LCG for random-fixture cross-check tests.
+    // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
     // We don't need cryptographic quality, just determinism.
     struct Lcg(u64);
     impl Lcg {
@@ -607,7 +609,8 @@ mod tests {
                 let count = (rng.next() as usize) % (max_count + 1);
                 for _ in 0..count {
                     let m = rng.felt();
-                    // Rejection sample until we get a non-zero denominator.
+                    // Rejection sample until we get a non-zero denominator. With a 64-bit
+                    // Goldilocks field and random draws, this basically never loops.
                     let d = loop {
                         let candidate = rng.quad();
                         if candidate != QuadFelt::ZERO {
@@ -817,7 +820,9 @@ mod tests {
         assert_ne!(wrong_residual, QuadFelt::ZERO);
     }
 
-    /// `LookupFractions::from_shape` reserves from the declared shape and starts empty.
+    /// `LookupFractions::from_shape` sizes the flat `fractions` Vec with `num_rows * Σ shape`
+    /// capacity and the flat `counts` Vec with `num_rows * num_cols` capacity (so neither
+    /// reallocates in the hot loop). Both start empty.
     #[test]
     fn new_reserves_capacity() {
         let air = FakeAir { shape: [3, 5] };

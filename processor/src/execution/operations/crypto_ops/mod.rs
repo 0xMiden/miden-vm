@@ -296,9 +296,9 @@ fn read_horner_eval_point<P: Processor, T: Tracer>(
 /// The computation processes 8 base field coefficients from the stack using Horner's method.
 /// If we denote the values at stack positions 0..7 as `s[0]..s[7]`, the computation is:
 ///
-/// - Level 1: tmp0 = (acc * alpha + s[0]) * alpha + s[1]
-/// - Level 2: tmp1 = ((tmp0 * alpha + s[2]) * alpha + s[3]) * alpha + s[4]
-/// - Level 3: acc' = ((tmp1 * alpha + s[5]) * alpha + s[6]) * alpha + s[7]
+/// - Level 1: tmp0 = (acc * α + s[0]) * α + s[1]
+/// - Level 2: tmp1 = ((tmp0 * α + s[2]) * α + s[3]) * α + s[4]
+/// - Level 3: acc' = ((tmp1 * α + s[5]) * α + s[6]) * α + s[7]
 ///
 /// This evaluates the polynomial:
 ///
@@ -336,9 +336,9 @@ fn read_horner_eval_point<P: Processor, T: Tracer>(
 ///    evaluation point alpha = (alpha0, alpha1).
 ///
 /// The instruction uses helper registers to store intermediate values:
-/// - h0, h1: evaluation point alpha = (alpha0, alpha1)
-/// - h2, h3: Level 2 intermediate result tmp1
-/// - h4, h5: Level 1 intermediate result tmp0
+/// - h₀, h₁: evaluation point α = (α₀, α₁)
+/// - h₂, h₃: Level 2 intermediate result tmp1
+/// - h₄, h₅: Level 1 intermediate result tmp0
 #[inline(always)]
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -369,13 +369,13 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     let acc_high = processor.stack().get(ACC_HIGH_INDEX);
     let acc = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
-    // Level 1: tmp0 = (acc * alpha + c0) * alpha + c1
+    // Level 1: tmp0 = (acc * α + c₀) * α + c₁
     let tmp0 = (acc * alpha + c0) * alpha + c1;
 
-    // Level 2: tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4
+    // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
     let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
 
-    // Level 3: acc' = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7
+    // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
     let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
     // Update the accumulator values on the stack (LE: low at lower index)
@@ -394,8 +394,8 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 /// If we denote the QuadFelt values at stack positions (0,1), (2,3), (4,5), (6,7) as
 /// `s[0]..s[3]`, the computation is:
 ///
-/// - Level 1: acc_tmp = (acc * alpha + s[0]) * alpha + s[1]
-/// - Level 2: acc' = ((acc_tmp * alpha + s[2]) * alpha + s[3]
+/// - Level 1: acc_tmp = (acc * α + s[0]) * α + s[1]
+/// - Level 2: acc' = ((acc_tmp * α + s[2]) * α + s[3]
 ///
 /// This evaluates the polynomial:
 ///
@@ -431,7 +431,7 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 /// 3. alpha_addr is the word-aligned address of `[alpha0, alpha1, 0, 0]`, which contains the
 ///    evaluation point alpha = (alpha0, alpha1).
 ///
-/// The instruction uses helper registers to hold alpha and the intermediate value acc_tmp.
+/// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,

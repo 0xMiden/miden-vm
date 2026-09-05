@@ -524,7 +524,7 @@ where
 ///
 /// Holds the same mutable borrow of the column's fraction `Vec` as the
 /// enclosing [`ProverGroup`], plus an `active` flag copied from the
-/// outer `batch(flag, ...)` call. Inactive batches skip message encoding and do not push.
+/// outer `batch(flag, …)` call. Inactive batches skip message encoding and do not push.
 ///
 /// Each push appends one fraction entry when active and its multiplicity is nonzero. There's no
 /// `(N, D)` state inside the batch — LogUp's aux-trace builder handles the combination downstream.

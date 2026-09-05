@@ -22,12 +22,12 @@
 //! + is_eval * (m_0/wire_0 - 1/wire_1 - 1/wire_2)
 //!   = ace_flag * [ m_0/wire_0
 //!                + ((1 - sblock) * m_1 - sblock)/wire_1
-//!                + (-sblock)/wire_2 ]
+//!                + (−sblock)/wire_2 ]
 //! ```
 //!
 //! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
 //! slot: under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
-//! `wire_2` interaction is fully suppressed via the `-sblock` multiplicity, so the
+//! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
 //! ## Hasher compression link (`BusId::HasherCompressionLink`)
@@ -94,19 +94,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 {
     let local = ctx.local;
     let next = ctx.next;
-    let aead_phase: [LB::Expr; 8] = {
-        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        [
-            periodic.aead_stream.r0.into(),
-            periodic.aead_stream.r1.into(),
-            periodic.aead_stream.r2.into(),
-            periodic.aead_stream.r3.into(),
-            periodic.aead_stream.r4.into(),
-            periodic.aead_stream.r5.into(),
-            periodic.aead_stream.r6.into(),
-            periodic.aead_stream.r7.into(),
-        ]
-    };
+    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     // ---- ACE wiring captures (Group 1) ----
     let ace_flag = ctx.chiplet_active.ace.clone();

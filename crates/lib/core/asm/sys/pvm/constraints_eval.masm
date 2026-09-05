@@ -52,10 +52,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 # Eidos digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # hash_elements(H(constants | shuffle ops) || ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 4462520971032307965
-const ACE_COMMON_COMMITMENT_1 = 2902526181058098055
-const ACE_COMMON_COMMITMENT_2 = 4781163886011412831
-const ACE_COMMON_COMMITMENT_3 = 5979090230184048231
+const ACE_COMMON_COMMITMENT_0 = 3876567516148243099
+const ACE_COMMON_COMMITMENT_1 = 6141715024950437142
+const ACE_COMMON_COMMITMENT_2 = 3412890067101630634
+const ACE_COMMON_COMMITMENT_3 = 420310376818991084
 
 # ERRORS
 # =================================================================================================

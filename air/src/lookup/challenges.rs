@@ -30,8 +30,8 @@ use miden_core::field::PrimeCharacteristicRing;
 ///
 /// Widths (`beta_powers.len()` and `bus_prefix.len()`) come from the [`LookupAir`]'s
 /// `max_message_width()` / `num_bus_ids()` at construction time. The struct is built
-/// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops unused allocation capacity and
-/// signals fixed length.
+/// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops the unused
+/// capacity word and signals fixed length.
 ///
 /// [`LookupAir`]: crate::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
