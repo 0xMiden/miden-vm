@@ -510,10 +510,10 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("TMP4", 0, 4),
         ("COMPOSITION_COEF_PTR", 0, 4),
         ("DEEP_RAND_CC_PTR", 0, 4),
-        ("NUM_FIXED_LEN_PUBLIC_INPUTS_PTR", 0, 1),
-        ("NUM_ACE_INPUTS_PTR", 0, 1),
-        ("NUM_ACE_GATES_PTR", 0, 1),
-        ("MAX_CYCLE_LEN_LOG_PTR", 0, 1),
+        ("AIR_TRACE_LENGTH_LOGS_PTR", 16, 1),
+        ("AIR_TRACE_LENGTH_LOGS_PTR", 17, 1),
+        ("AIR_TRACE_LENGTH_LOGS_PTR", 18, 1),
+        ("AIR_TRACE_LENGTH_LOGS_PTR", 19, 1),
         ("QUERY_POW_BITS_PTR", 0, 1),
         ("DEEP_POW_BITS_PTR", 0, 1),
         ("FOLDING_POW_BITS_PTR", 0, 1),
@@ -530,7 +530,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("AIR_TRACE_LENGTH_LOGS_PTR", 0, 16),
         ("RELATION_DIGEST_PTR", 0, 4),
         ("ACE_REGISTRY_ROOT_PTR", 0, 4),
-        ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 1),
+        ("CURRENT_TRACE_ROW_ADDRESS_PTR", 1, 1),
         // One word per accepted query grows backward; FRI layers and the remainder grow forward.
         (
             "FRI_COM_PTR",
@@ -555,13 +555,13 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "PUBLIC_INPUTS_PTR", 0, 8),
         ("pvm/layout.masm", "AUX_RAND_ELEM_PTR", 0, 8),
         ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_CURRENT_PTR", 0, 880),
-        ("pvm/layout.masm", "AUX_CURRENT_PTR", 0, 624),
-        ("pvm/layout.masm", "QUOTIENT_CURRENT_PTR", 0, 16),
-        ("pvm/layout.masm", "PREPROCESSED_NEXT_PTR", 0, 16),
-        ("pvm/layout.masm", "MAIN_NEXT_PTR", 0, 880),
-        ("pvm/layout.masm", "AUX_NEXT_PTR", 0, 624),
-        ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 16, 880),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 896, 624),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 1520, 16),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 1536, 16),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 1552, 880),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 2432, 624),
+        ("pvm/layout.masm", "PREPROCESSED_CURRENT_PTR", 3056, 16),
         ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
         ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13824),
@@ -570,12 +570,12 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),
         ("pvm/layout.masm", "PREPROCESSED_COM_PTR", 0, 4),
         ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 0, 1),
-        ("vm/layout.masm", "CONTROL_ALIGNMENT_PADDING_PTR", 0, 3),
+        ("vm/layout.masm", "NUM_KERNEL_PROCEDURES_PTR", 1, 3),
         ("vm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("vm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_COMMITMENT_PTR", 0, 4),
         ("vm/layout.masm", "CLAIM_PTR", 0, 40),
-        ("vm/layout.masm", "BOUNDARY_ANCHOR_PADDING_PTR", 0, 16),
+        ("vm/layout.masm", "CLAIM_PTR", 40, 16),
         ("vm/layout.masm", "BOUNDARY_INPUTS_PTR", 0, 8),
         ("vm/layout.masm", "KERNEL_WITNESS_PTR", 0, 1020),
         // Includes the alignment word before OOD_EVALUATIONS_PTR.
@@ -755,19 +755,24 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     let generic_declarations = declarations(&generic_path);
     assert!(!generic_declarations.is_empty(), "the generic layer must declare addresses");
 
-    let mut generic_manifest: BTreeMap<&str, (i64, u64)> = BTreeMap::new();
+    let mut generic_manifest: BTreeMap<&str, Vec<(i64, u64)>> = BTreeMap::new();
     for &(name, offset, felts) in GENERIC_REGIONS {
-        assert!(
-            generic_manifest.insert(name, (offset, felts)).is_none(),
-            "duplicate generic region manifest entry: {name}"
-        );
+        generic_manifest.entry(name).or_default().push((offset, felts));
     }
     let mut generic_regions = Vec::new();
     for (name, address) in generic_declarations {
-        let (offset, felts) = generic_manifest
+        let entries = generic_manifest
             .remove(name.as_str())
             .unwrap_or_else(|| panic!("unmanifested generic address: {name}"));
-        generic_regions.push(region("stark/constants.masm", name, address, offset, felts));
+        for (offset, felts) in entries {
+            generic_regions.push(region(
+                "stark/constants.masm",
+                name.clone(),
+                address,
+                offset,
+                felts,
+            ));
+        }
     }
     assert!(
         generic_manifest.is_empty(),
@@ -780,14 +785,12 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     collect_masm_files(&sys, &mut relation_files);
     relation_files.sort();
 
-    let mut relation_manifest: BTreeMap<(String, String), (i64, u64)> = BTreeMap::new();
+    let mut relation_manifest: BTreeMap<(String, String), Vec<(i64, u64)>> = BTreeMap::new();
     for &(source, name, offset, felts) in RELATION_REGIONS {
-        assert!(
-            relation_manifest
-                .insert((source.to_string(), name.to_string()), (offset, felts))
-                .is_none(),
-            "duplicate relation region manifest entry: {source}:{name}"
-        );
+        relation_manifest
+            .entry((source.to_string(), name.to_string()))
+            .or_default()
+            .push((offset, felts));
     }
     let mut relation_regions = Vec::new();
     for path in relation_files {
@@ -797,10 +800,12 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
             .to_string_lossy()
             .replace('\\', "/");
         for (name, address) in declarations(&path) {
-            let (offset, felts) = relation_manifest
+            let entries = relation_manifest
                 .remove(&(source.clone(), name.clone()))
                 .unwrap_or_else(|| panic!("unmanifested relation address: {source}:{name}"));
-            relation_regions.push(region(&source, name, address, offset, felts));
+            for (offset, felts) in entries {
+                relation_regions.push(region(&source, name.clone(), address, offset, felts));
+            }
         }
     }
     assert!(

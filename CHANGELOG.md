@@ -4,6 +4,8 @@
 
 ## v0.32.0 (2026-09-05)
 
+- [BREAKING] Warn when a private assembly constant is unused ([#3759](https://github.com/0xMiden/miden-vm/pull/3759)).
+
 #### Changes
 
 - Cached loaded MAST forests in `FastProcessor` so repeated external calls reuse the forest and merge its advice map once ([#3764](https://github.com/0xMiden/miden-vm/pull/3764)).

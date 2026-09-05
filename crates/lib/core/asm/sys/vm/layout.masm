@@ -17,9 +17,6 @@ use miden::core::stark::constants
 ### Number of kernel procedures in the authenticated witness.
 const NUM_KERNEL_PROCEDURES_PTR = 3223322764
 
-### Reserved alignment cells before the word-aligned scratch region.
-const CONTROL_ALIGNMENT_PADDING_PTR = 3223322765
-
 ### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
 ### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
 ### Computed in `observe_aux_trace` (step II) from the FS-sampled aux randomness.
@@ -36,9 +33,6 @@ const CLAIM_COMMITMENT_PTR = 3223322776
 
 ### Verifier-owned claim preimage (40 felts: P | K | I | O).
 const CLAIM_PTR = 3223322780
-
-### Reserved cells preserving the established boundary and witness anchors.
-const BOUNDARY_ANCHOR_PADDING_PTR = 3223322820
 
 ### Boundary block [program_digest | deferred_root].
 const BOUNDARY_INPUTS_PTR = 3223322836
