@@ -598,8 +598,8 @@ fn check(artifacts: &GeneratedArtifacts) -> Result<(), String> {
     Ok(())
 }
 
-fn format_word(word: &Word) -> String {
-    word.iter().fold(String::new(), |mut output, felt| {
+fn format_felts(felts: &[Felt]) -> String {
+    felts.iter().fold(String::new(), |mut output, felt| {
         output.push_str(&format!("    {},\n", felt.as_canonical_u64()));
         output
     })
@@ -612,8 +612,8 @@ fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
             node.iter().map(|felt| felt.as_canonical_u64().to_string()).collect();
         rows.push_str(&format!("    [{}],\n", limbs.join(", ")));
     }
-    let root = format_word(&artifacts.root);
-    let preprocessed = format_word(&artifacts.preprocessed_commitment);
+    let root = format_felts(artifacts.root.as_elements());
+    let preprocessed = format_felts(artifacts.preprocessed_commitment.as_elements());
     let num_inputs = artifacts.shape.num_inputs;
     let num_eval_gates = artifacts.shape.num_eval_gates;
     let stream_len = artifacts.shape.stream_len;
@@ -638,16 +638,10 @@ fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
 }
 
 fn render_protocol(artifacts: &GeneratedArtifacts) -> String {
-    let digest = artifacts
-        .digest
-        .iter()
-        .map(Felt::as_canonical_u64)
-        .map(|felt| felt.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let digest = format_felts(&artifacts.digest);
     format!(
         "/// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.\n\
-         pub const PVM_RELATION_DIGEST: [u64; 4] =\n    [{digest}];\n"
+         pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{digest}];\n"
     )
 }
 
@@ -710,13 +704,13 @@ mod tests {
 
     use miden_core::{Felt, Word};
 
-    use super::{format_word, replace_masm_const};
+    use super::{format_felts, replace_masm_const};
 
     #[test]
     fn generated_words_put_one_limb_on_each_line() {
         let word =
             Word::new([Felt::from(1u32), Felt::from(2u32), Felt::from(3u32), Felt::from(4u32)]);
-        assert_eq!(format_word(&word), "    1,\n    2,\n    3,\n    4,\n");
+        assert_eq!(format_felts(word.as_elements()), "    1,\n    2,\n    3,\n    4,\n");
     }
 
     #[test]

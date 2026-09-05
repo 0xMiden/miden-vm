@@ -50,8 +50,9 @@ use miden_core::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
         PrecompileError, TRUE_DIGEST, Tag,
     },
-    program::domain::CURVE_PRECOMPILE_SELECTOR,
+    program::domain::CurvePrecompileDomain,
 };
+use miden_crypto::hash::eidos::EidosDomain;
 
 use self::secp256k1::Secp256k1;
 pub use self::{
@@ -532,9 +533,9 @@ impl CurvePrecompile {
     pub const EQ_OP_ID: u64 = 3;
     pub const MSM_OP_ID: u64 = 4;
 
-    /// Registered precompile selector.
+    /// Registered precompile domain tag.
     pub fn id() -> Felt {
-        CURVE_PRECOMPILE_SELECTOR
+        CurvePrecompileDomain::TAG.as_felt()
     }
 
     /// Builds a canonical curve `VALUE` tag for `curve`.

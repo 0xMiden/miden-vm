@@ -30,6 +30,16 @@ const NUM_AIRS = 4
 const ACE_PREFIX_BLOCKS = 154
 const ACE_COMMON_BLOCKS = 880
 
+# Precomputed generic Felt-sequence chaining words for the two fixed-length segments.
+const ACE_PREFIX_INIT_CV_0 = 4280581857092831745
+const ACE_PREFIX_INIT_CV_1 = 2688637132020384976
+const ACE_PREFIX_INIT_CV_2 = 1947077364412317696
+const ACE_PREFIX_INIT_CV_3 = 6620516959492505600
+const ACE_COMMON_INIT_CV_0 = 4280581857092831745
+const ACE_COMMON_INIT_CV_1 = 2688637132020390784
+const ACE_COMMON_INIT_CV_2 = 1947077364412317696
+const ACE_COMMON_INIT_CV_3 = 6620516959492505600
+
 # Quotient recomposition inputs derived from the circuit's quotient arity and the
 # relation's PCS configuration. QUOTIENT_SHIFT_RATIO depends on arity;
 # QUOTIENT_FIRST_SHIFT depends on the canonical LDE shift and blowup; and
@@ -40,11 +50,11 @@ const QUOTIENT_FIRST_WEIGHT = 8868329529835627796
 
 # Eidos digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
-# merge(H(constants | shuffle ops), ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 9020966637363257724
-const ACE_COMMON_COMMITMENT_1 = 142185119522892247
-const ACE_COMMON_COMMITMENT_2 = 9130371894130887258
-const ACE_COMMON_COMMITMENT_3 = 4829897061563121832
+# hash_elements(H(constants | shuffle ops) || ACE_COMMON_COMMITMENT).
+const ACE_COMMON_COMMITMENT_0 = 5820962765137376944
+const ACE_COMMON_COMMITMENT_1 = 7837394052838582793
+const ACE_COMMON_COMMITMENT_2 = 8718504172627809431
+const ACE_COMMON_COMMITMENT_3 = 4742121911389531690
 
 # ERRORS
 # =================================================================================================
@@ -88,13 +98,13 @@ end
 #! [common ops | root padding]. Both are hashed separately; the common digest is
 #! pinned to the compiled-in ACE_COMMON_COMMITMENT, and the registry leaf
 #! selected by ORDER_TAG must equal
-#! merge(PREFIX_COMMITMENT, ACE_COMMON_COMMITMENT).
+#! hash_elements(PREFIX_COMMITMENT || ACE_COMMON_COMMITMENT).
 proc load_and_authenticate_ace_circuit
     exec.load_ace_registry_commitment
     # => [LEAF]
     adv.push_mapval
     exec.layout::ace_circuit_stream_ptr
-    push.1232 exec.eidos::init_chaining_word
+    push.ACE_PREFIX_INIT_CV_3.ACE_PREFIX_INIT_CV_2.ACE_PREFIX_INIT_CV_1.ACE_PREFIX_INIT_CV_0
     padw padw
     # => [ZERO, ZERO, CV, ptr, LEAF]
     repeat.ACE_PREFIX_BLOCKS
@@ -105,7 +115,7 @@ proc load_and_authenticate_ace_circuit
     # => [PREFIX_COMMITMENT, ptr, LEAF]
     movup.4
     # => [ptr, PREFIX_COMMITMENT, LEAF]
-    push.7040 exec.eidos::init_chaining_word
+    push.ACE_COMMON_INIT_CV_3.ACE_COMMON_INIT_CV_2.ACE_COMMON_INIT_CV_1.ACE_COMMON_INIT_CV_0
     padw padw
     repeat.ACE_COMMON_BLOCKS
         adv_pipe
@@ -120,7 +130,7 @@ proc load_and_authenticate_ace_circuit
     # => [COMMON_COMMITMENT, PREFIX_COMMITMENT, LEAF]
     swapw
     # => [PREFIX_COMMITMENT, COMMON_COMMITMENT, LEAF]
-    exec.eidos::merge
+    exec.eidos::hash_two_words
     # => [CIRCUIT_COMMITMENT, LEAF]
     assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH
 end

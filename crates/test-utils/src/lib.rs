@@ -1037,6 +1037,14 @@ pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     digest.into()
 }
 
+/// Computes the generic eight-Felt hash used by `hmerge`.
+pub fn build_expected_hmerge(values: &[u64]) -> [Felt; 4] {
+    assert!(values.len() >= 2 * WORD_SIZE, "expected at least two words for hmerge test");
+
+    let values = values.iter().map(|&v| Felt::new_unchecked(v)).collect::<Vec<_>>();
+    hash_elements(&values[..2 * WORD_SIZE]).into()
+}
+
 // Generates the MASM code which pushes the input values during the execution of the program.
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 pub fn push_inputs(inputs: &[u64]) -> String {

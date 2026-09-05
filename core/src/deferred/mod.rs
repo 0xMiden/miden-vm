@@ -19,6 +19,7 @@ mod witness;
 use alloc::boxed::Box;
 
 pub use claim::DeferredClaim;
+use miden_crypto::hash::eidos::EidosDomain;
 pub use node::{DataChunk, Digest, Node, NodeType, Payload, TRUE_DIGEST, Tag};
 pub use precompile::Precompile;
 pub use precompile_registry::PrecompileRegistry;
@@ -28,22 +29,22 @@ pub use witness::{PrecompileWitness, PrecompileWitnessError};
 
 use crate::{
     Felt, Word,
-    program::domain::{DEFERRED_AND_DOMAIN_ID, DEFERRED_CHUNKS_DOMAIN_ID, domain_selector},
+    program::domain::{DeferredAndDomain, DeferredChunksDomain},
 };
 
 /// The deferred root committed in public inputs.
 pub type DeferredRoot = Digest;
 
-/// Eidos domain selector for semantic AND nodes and rolling deferred-root folds.
-pub const DEFERRED_AND_DOMAIN: Felt = domain_selector(DEFERRED_AND_DOMAIN_ID, 1);
+/// Eidos domain tag for semantic AND nodes and rolling deferred-root folds.
+pub const DEFERRED_AND_DOMAIN: Felt = DeferredAndDomain::TAG.as_felt();
 
-/// Eidos domain selector for framework-owned CHUNKS nodes.
-pub const DEFERRED_CHUNKS_DOMAIN: Felt = domain_selector(DEFERRED_CHUNKS_DOMAIN_ID, 1);
+/// Eidos domain tag for framework-owned CHUNKS nodes.
+pub const DEFERRED_CHUNKS_DOMAIN: Felt = DeferredChunksDomain::TAG.as_felt();
 
 /// Fixed initial Eidos chaining value for deferred AND nodes and rolling-root folds.
 ///
 /// This is
-/// `Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8)`. It is spelled out
+/// `Eidos::init_chaining_word(DEFERRED_AND, 8)`. It is spelled out
 /// so the consensus-critical value remains a `const` usable by AIR definitions.
 pub const DEFERRED_AND_INIT_CV: Word = Word::new([
     Felt::new_unchecked(4280581857109607169),
@@ -142,7 +143,7 @@ mod tests {
     fn deferred_and_init_cv_matches_its_eidos_derivation() {
         assert_eq!(
             DEFERRED_AND_INIT_CV,
-            Eidos::init_chaining_word(DEFERRED_AND_DOMAIN.as_canonical_u64() as u32, 8),
+            Eidos::init_chaining_word(crate::program::domain::DEFERRED_AND, 8),
         );
     }
 }

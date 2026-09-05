@@ -1268,7 +1268,7 @@ impl MastForestBuilder {
                 let left_digest = self.pending_node_mast_root(left.node_ref());
                 let right_digest = self.pending_node_mast_root(right.node_ref());
                 let join_digest =
-                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN);
+                    hasher::merge_in_mast_domain(&[left_digest, right_digest], JoinNode::DOMAIN);
                 let child_refs = vec![left.node_ref(), right.node_ref()];
                 let source_child_refs = vec![left.source_ref(), right.source_ref()];
                 let draft =
@@ -1320,7 +1320,7 @@ impl MastForestBuilder {
         let source_child_refs = branches.map(MastNodeUse::source_ref).into();
         let branches = branches.map(MastNodeUse::node_ref);
         let branch_digests = branches.map(|node_ref| self.pending_node_mast_root(node_ref));
-        let split_digest = hasher::merge_in_domain(&branch_digests, SplitNode::DOMAIN);
+        let split_digest = hasher::merge_in_mast_domain(&branch_digests, SplitNode::DOMAIN);
         let child_refs = Vec::from(branches);
         let mut draft =
             PendingMastNodeDraft::new(PendingMastNodeKind::Split, split_digest, child_refs);
@@ -1354,7 +1354,7 @@ impl MastForestBuilder {
         let body = body.node_ref();
         let body_digest = self.pending_node_mast_root(body);
         let loop_digest =
-            hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
+            hasher::merge_in_mast_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
         let child_refs = vec![body];
         let mut draft =
             PendingMastNodeDraft::new(PendingMastNodeKind::Loop, loop_digest, child_refs);
@@ -1394,7 +1394,8 @@ impl MastForestBuilder {
         } else {
             CallNode::CALL_DOMAIN
         };
-        let call_digest = hasher::merge_in_domain(&[callee_digest, Word::default()], call_domain);
+        let call_digest =
+            hasher::merge_in_mast_domain(&[callee_digest, Word::default()], call_domain);
         let child_refs = vec![callee];
         let mut draft = PendingMastNodeDraft::new(
             PendingMastNodeKind::Call { is_syscall },
@@ -2594,7 +2595,7 @@ mod tests {
             .unwrap();
         let left_source_ref = builder.latest_source_ref_for_node_ref(left_ref).unwrap();
         let right_source_ref = builder.latest_source_ref_for_node_ref(right_ref).unwrap();
-        let join_digest = hasher::merge_in_domain(
+        let join_digest = hasher::merge_in_mast_domain(
             &[builder.nodes[left_ref].digest, builder.nodes[right_ref].digest],
             JoinNode::DOMAIN,
         );
@@ -2605,7 +2606,7 @@ mod tests {
         let external_source_ref = builder.latest_source_ref_for_node_ref(external_ref).unwrap();
 
         let parent_digest =
-            hasher::merge_in_domain(&[join_digest, Word::default()], LoopNode::DOMAIN);
+            hasher::merge_in_mast_domain(&[join_digest, Word::default()], LoopNode::DOMAIN);
         let parent_ref = builder
             .intern_pending_node(PendingMastNodeDraft::new(
                 PendingMastNodeKind::Loop,

@@ -24,8 +24,8 @@ meaning of the nodes.
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
-> The digest construction and selector allocations are specified in
-> [Eidos framing and selectors](../eidos-framing.md).
+> The digest construction and domain allocations are specified in
+> [Eidos framing and domain registry](../eidos-framing.md).
 
 ## Motivation
 
@@ -58,8 +58,8 @@ content yields an identical digest, so equal subterms are shared automatically (
 - A **tag** is a node's identity and constructor: externally, precompile tags are built with
   `Tag::precompile(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
   selects the owning precompile; the next two felts (`args`) are entirely the precompile's to
-  interpret (a discriminant, a data length, a small constant, …). The final felt is reserved and
-  must be zero, so the canonical layout is `[selector, arg0, arg1, 0]`. The framework reserves ids
+  interpret (a discriminant, a data length, a small constant, ...). The final felt is reserved and
+  must be zero, so the canonical layout is `[domain_tag, arg0, arg1, 0]`. The framework reserves ids
   `0`, `1`, and `2` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node,
   `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes, and
   `Tag::CHUNKS = [2, 0, 0, 0]` tags framework-owned opaque byte chunks. No precompile may claim
@@ -80,8 +80,8 @@ content yields an identical digest, so equal subterms are shared automatically (
     pair as one ordinary 8-felt payload block, in addition to the tag word.
 
 The digest commits to both the node identity and body. Framework AND and CHUNKS nodes use their
-registered Eidos selectors. A precompile-owned node initializes Eidos directly from its registered
-selector, payload length, and two tag arguments, then compresses each 8-felt payload chunk exactly
+registered Eidos domain tags. A precompile-owned node initializes Eidos directly from its registered
+domain tag, payload length, and two tag arguments, then compresses each 8-felt payload chunk exactly
 once. The last payload compression produces the node digest.
 
 ## Precompiles
@@ -112,10 +112,10 @@ A precompile supplies three things:
   generator) at registry-initialization time.
 
 Precompiles are collected in a **`PrecompileRegistry`**, the framework's dispatcher: it routes each
-tag selector to its owning precompile and is otherwise indifferent to how the precompile behaves.
-Each precompile uses an explicitly registered numeric selector; names are diagnostic only and are
-never hashed into protocol identifiers. The registry rejects out-of-range, framework-reserved, or
-duplicate selectors at construction. `PrecompileRegistry::new()` creates an empty low-level
+domain tag to its owning precompile and is otherwise indifferent to how the precompile behaves.
+Each precompile uses an explicitly registered domain tag; names are diagnostic only and are never
+hashed into protocol identifiers. The registry rejects malformed, framework-reserved, or duplicate
+tags at construction. `PrecompileRegistry::new()` creates an empty low-level
 registry that rejects every precompile-owned tag. A `DeferredState` carries the registry it
 evaluates under, and `PrecompileRegistry` remains defined in `miden-core` so the framework does not
 depend on concrete precompile implementations.
@@ -139,11 +139,11 @@ memory chunk sequence in a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. If the tag arguments define a different required data or pair-list arity, precompile evaluation rejects the node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` initializes Eidos from the tag selector, payload length, and two arguments, then compresses this payload block once. |
-| `register_deferred_data`   | `[TAG, ptr, n_chunks, …]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. For data and pair-list tags, `n_chunks` determines the non-empty payload length; when tag arguments define an exact arity, precompile evaluation checks it. Pair-list chunks are interpreted as `lhs_digest || rhs_digest` pairs. Join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it inside the VM from the same `TAG` and ordered chunk sequence. |
-| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
-| `evaluate_deferred_tag`    | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
-| `evaluate_deferred_payload` | `[NODE_DIGEST, …]`              | Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. If the tag arguments define a different required data or pair-list arity, precompile evaluation rejects the node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` initializes Eidos from the domain tag, payload length, and two arguments, then compresses this payload block once. |
+| `register_deferred_data`   | `[TAG, ptr, n_chunks, ...]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. For data and pair-list tags, `n_chunks` determines the non-empty payload length; when tag arguments define an exact arity, precompile evaluation checks it. Pair-list chunks are interpreted as `lhs_digest || rhs_digest` pairs. Join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it inside the VM from the same `TAG` and ordered chunk sequence. |
+| `evaluate_deferred`        | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
+| `evaluate_deferred_tag`    | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
+| `evaluate_deferred_payload` | `[NODE_DIGEST, ...]`              | Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
 `register_*` validate the decoded shape, require non-empty data and pair lists, and check child
 closure for structural payloads. Exact data or pair-list arity is enforced only when the tag's
@@ -157,7 +157,7 @@ host-side state changes are not constrained by the AIR. In particular, a memory-
 event reads `n_chunks` chunks at `ptr` without adding AIR memory accesses that bind the registered
 contents to those cells. A proof-relevant digest must therefore be derived with VM instructions:
 `compress` for a stack payload, or `mem_stream` plus `compress` for the same tag and ordered
-memory chunk sequence, using the registered Eidos selector and parameter framing.
+memory chunk sequence, using the registered Eidos domain tag and parameter framing.
 
 This composes with the verifier:
 

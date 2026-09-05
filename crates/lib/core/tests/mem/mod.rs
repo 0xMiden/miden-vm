@@ -355,7 +355,8 @@ fn pipe_words_to_memory_hashes_empty_input_canonically() {
 /// kernel tag.
 #[test]
 fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
-    use miden_core::{chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+    use miden_core::{chiplets::eidos_compression, program::KERNEL_DOMAIN_TAG};
+    use miden_crypto::hash::eidos::Eidos;
 
     const MEM_ADDR: u64 = 1000;
     const OTHER_DOMAIN: u64 = 42;
@@ -401,7 +402,16 @@ fn pipe_words_to_memory_in_domain_matches_native_and_memory_hashes() {
             "
         );
 
-        let digest = hasher::hash_elements_in_domain(&felts, Felt::new_unchecked(domain));
+        let mut digest = eidos_compression::init_chaining_word(domain as u32, num_felts as u32);
+        if felts.is_empty() {
+            digest = Eidos::compress(digest, [Felt::ZERO; 8]);
+        } else {
+            for chunk in felts.chunks(8) {
+                let mut block = [Felt::ZERO; 8];
+                block[..chunk.len()].copy_from_slice(chunk);
+                digest = Eidos::compress(digest, block);
+            }
+        }
         let mut expected_stack = felt_slice_to_ints(digest.as_elements());
         expected_stack.resize(16, 0);
         let expected_memory: Vec<u64> = data.iter().copied().chain(CANARY).collect();
@@ -522,7 +532,7 @@ fn pipe_double_words_preimage_to_memory_accepts_canonical_empty_hash() {
 
 #[test]
 fn test_pipe_empty_preimage_to_memory_with_domain() {
-    use miden_core::{chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+    use miden_core::{chiplets::hasher, program};
 
     const MEM_ADDR: u64 = 1000;
     let source = format!(
@@ -540,10 +550,10 @@ fn test_pipe_empty_preimage_to_memory_with_domain() {
             swap drop
         end
         ",
-        domain = KERNEL_DOMAIN_TAG.as_canonical_u64(),
+        domain = program::KERNEL_DOMAIN_TAG.as_canonical_u64(),
     );
 
-    let commitment = hasher::hash_elements_in_domain(&[], KERNEL_DOMAIN_TAG);
+    let commitment = hasher::hash_elements_in_domain(&[], program::domain::KERNEL_COMMITMENT);
     let mut advice_stack = AdviceStack::new();
     advice_stack.append_word(commitment);
 

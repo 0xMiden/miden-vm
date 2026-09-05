@@ -1,5 +1,5 @@
-use miden_core::{Felt, Word};
-use miden_crypto::hash::eidos::Eidos;
+use miden_core::{Felt, Word, chiplets::eidos_compression};
+use miden_crypto::hash::eidos::{Eidos, domain::EidosDomain, domains::GenericFeltSequenceDomain};
 use miden_processor::{ExecutionError, ZERO, operation::OperationError};
 use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
 
@@ -31,12 +31,26 @@ fn word_elements(word: Word) -> Vec<u64> {
 
 fn initialized_state(domain: u32, num_elements: u32) -> Vec<u64> {
     let mut state = vec![0; 8];
-    state.extend(word_elements(Eidos::init_chaining_word(domain, num_elements)));
+    state.extend(word_elements(eidos_compression::init_chaining_word(domain, num_elements)));
     state
 }
 
+fn hash_elements_with_raw_tag(elements: &[Felt], tag: u32) -> Word {
+    let mut cv = eidos_compression::init_chaining_word(tag, elements.len() as u32);
+    if elements.is_empty() {
+        return Eidos::compress(cv, [Felt::ZERO; 8]);
+    }
+
+    for chunk in elements.chunks(8) {
+        let mut block = [Felt::ZERO; 8];
+        block[..chunk.len()].copy_from_slice(chunk);
+        cv = Eidos::compress(cv, block);
+    }
+    cv
+}
+
 #[test]
-fn test_init_prepares_zero_domain_compression_state() {
+fn test_init_prepares_generic_felt_compression_state() {
     for num_elements in [0, 13] {
         let source = format!(
             "
@@ -52,7 +66,7 @@ fn test_init_prepares_zero_domain_compression_state() {
             ",
         );
 
-        let mut expected = initialized_state(0, num_elements);
+        let mut expected = initialized_state(GenericFeltSequenceDomain::TAG.as_u32(), num_elements);
         expected.push(99);
         build_test!(source.as_str(), &[]).expect_stack(&expected);
     }
@@ -263,7 +277,7 @@ fn test_empty_felt_sequence_digest_matches_native_eidos() {
 
 #[test]
 fn test_hash_empty_words_with_domain() {
-    use miden_core::{Felt, chiplets::hasher, program::KERNEL_DOMAIN_TAG};
+    use miden_core::{Felt, chiplets::hasher, program};
 
     const PTR: u64 = 1000;
     let source = format!(
@@ -278,14 +292,15 @@ fn test_hash_empty_words_with_domain() {
             swapw dropw
         end
         ",
-        domain = KERNEL_DOMAIN_TAG.as_canonical_u64(),
+        domain = program::KERNEL_DOMAIN_TAG.as_canonical_u64(),
     );
 
-    let expected: Vec<u64> = hasher::hash_elements_in_domain(&[], KERNEL_DOMAIN_TAG)
-        .as_elements()
-        .iter()
-        .map(Felt::as_canonical_u64)
-        .collect();
+    let expected: Vec<u64> =
+        hasher::hash_elements_in_domain(&[], program::domain::KERNEL_COMMITMENT)
+            .as_elements()
+            .iter()
+            .map(Felt::as_canonical_u64)
+            .collect();
     build_test!(source.as_str(), &[]).expect_stack(&expected);
 }
 
@@ -314,14 +329,13 @@ fn test_hash_elements_in_domain_matches_native_eidos() {
             ",
         );
 
-        let expected =
-            word_elements(Eidos::hash_elements_in_domain(&elements, Felt::from_u32(domain)));
+        let expected = word_elements(hash_elements_with_raw_tag(&elements, domain));
         build_test!(source.as_str(), &[]).expect_stack(&expected);
     }
 }
 
 #[test]
-fn test_zero_domain_hash_elements_matches_default() {
+fn test_generic_felt_domain_hash_elements_matches_default() {
     const PTR: u64 = 1000;
 
     for num_elements in [0, 5, 8] {
@@ -333,19 +347,58 @@ fn test_zero_domain_hash_elements_matches_default() {
                 push.4.3.2.1.1000 mem_storew_le dropw
                 push.8.7.6.5.1004 mem_storew_le dropw
 
-                push.0 push.{num_elements} push.{PTR}
+                push.{domain} push.{num_elements} push.{PTR}
                 exec.eidos::hash_elements_in_domain
 
                 push.{num_elements} push.{PTR}
                 exec.eidos::hash_elements
 
-                assert_eqw.err="zero-domain hash must match the default hash"
+                assert_eqw.err="generic Felt domain must match the default hash"
             end
             "#,
+            domain = GenericFeltSequenceDomain::TAG.as_u32(),
         );
 
         build_test!(source.as_str(), &[]).expect_stack(&[]);
     }
+}
+
+#[test]
+fn test_two_word_helpers_match_eight_felt_hashing() {
+    let values = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ];
+    let stack_inputs = values.map(|value| value.as_canonical_u64());
+    let expected = word_elements(Eidos::hash_elements(&values));
+
+    let source = "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        exec.eidos::hash_two_words
+    end
+    ";
+    build_test!(source, &stack_inputs).expect_stack(&expected);
+
+    const TAG: u32 = 42;
+    let expected = word_elements(hash_elements_with_raw_tag(&values, TAG));
+    let mut tagged_inputs = vec![TAG as u64];
+    tagged_inputs.extend(stack_inputs);
+    let source = "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        exec.eidos::hash_two_words_in_domain
+    end
+    ";
+    build_test!(source, &tagged_inputs).expect_stack(&expected);
 }
 
 #[test]

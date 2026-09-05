@@ -5,7 +5,7 @@
 
 use alloc::vec;
 
-use miden_core::{Felt, Word, field::QuadFelt};
+use miden_core::{Felt, Word, field::QuadFelt, program::domain::STARK_TRANSCRIPT};
 use miden_crypto::{
     field::Field,
     hash::{
@@ -110,20 +110,20 @@ pub fn relation_digest(protocol_id: u64, registry_root: &Word) -> RelationDigest
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: RelationDigest = [
-    Felt::new_unchecked(5386642688186435407),
-    Felt::new_unchecked(6538706076452792969),
-    Felt::new_unchecked(9112338682580750753),
-    Felt::new_unchecked(4367732112936953739),
+    Felt::new_unchecked(4637326042443240130),
+    Felt::new_unchecked(3486273296776313587),
+    Felt::new_unchecked(3070534904973075176),
+    Felt::new_unchecked(5935105178162257159),
 ];
 
 /// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 pub const ACE_CIRCUIT_REGISTRY_ROOT: [Felt; 4] = [
-    Felt::new_unchecked(6867412142867451962),
-    Felt::new_unchecked(2481413844695882715),
-    Felt::new_unchecked(5303340724979295925),
-    Felt::new_unchecked(8468512126931593944),
+    Felt::new_unchecked(1422475845934563596),
+    Felt::new_unchecked(6352656881002619781),
+    Felt::new_unchecked(1337719276432975597),
+    Felt::new_unchecked(5425517114880118302),
 ];
 
 /// Smallest ACE circuit registry depth covering every proof-order tag.
@@ -356,16 +356,13 @@ pub fn blake3_256_config(params: PcsParams, relation_digest: RelationDigest) -> 
 // EIDOS
 // ================================================================================================
 
-/// Registered selector for the Miden VM STARK transcript's Eidos challenger.
-const EIDOS_VM_STARK_TRANSCRIPT_SELECTOR: u32 = 0x00000201;
-
 /// Concrete STARK configuration type for Eidos.
 pub type EidosConfig = MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
 
 /// Creates an Eidos-based STARK configuration bound to `relation_digest`.
 pub fn eidos_config(params: PcsParams, relation_digest: RelationDigest) -> EidosConfig {
     let lmcs = lmcs_config();
-    let transcript_init_cv = Eidos::transcript_init_cv(EIDOS_VM_STARK_TRANSCRIPT_SELECTOR);
+    let transcript_init_cv = Eidos::transcript_init_cv(STARK_TRANSCRIPT);
     let challenger = MidenEidosChallenger::new(transcript_init_cv, relation_digest.into());
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }

@@ -11,7 +11,7 @@ use miden_air::trace::and8_lookup::{
 };
 use miden_core::{
     Felt, Word,
-    deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN},
+    deferred::DEFERRED_AND_INIT_CV,
     field::{Field, PrimeCharacteristicRing, PrimeField64},
     utils::RowMajorMatrix,
 };
@@ -133,19 +133,21 @@ fn initial_cv(kind: AbsorptionKind, context: EidosChainContext, num_payload_bloc
             assert_eq!(num_payload_blocks, 1, "AND must contain one digest pair");
             DEFERRED_AND_INIT_CV
         },
-        AbsorptionKind::Chunks => Eidos::init_chaining_word(
-            DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32,
-            payload_felts,
-        ),
+        AbsorptionKind::Chunks => {
+            Eidos::init_chaining_word(miden_core::program::domain::DEFERRED_CHUNKS, payload_felts)
+        },
         AbsorptionKind::Generic => {
-            let [selector, arg0, arg1, reserved] = context.as_array();
+            let [domain_tag_felt, arg0, arg1, reserved] = context.as_array();
             assert_eq!(reserved, Felt::ZERO, "deferred tag reserved lane must be zero");
             let to_u32 = |value: Felt| {
                 u32::try_from(value.as_canonical_u64())
                     .expect("deferred tag values must fit in u32")
             };
-            Eidos::init_chaining_word_with_params(
-                to_u32(selector),
+            let domain_tag =
+                miden_crypto::hash::eidos::DomainTag::from_u32(to_u32(domain_tag_felt))
+                    .expect("deferred domain tag must be structurally valid");
+            Eidos::init_chaining_word_with_tag(
+                domain_tag,
                 [payload_felts, to_u32(arg0), to_u32(arg1)],
             )
         },

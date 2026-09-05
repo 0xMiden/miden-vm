@@ -913,17 +913,20 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 /// `n` is the total number of felts in the hash call.
 #[inline(always)]
 pub fn init_state(init_values: &[Felt; BLOCK_LEN], n: u32) -> [Felt; STATE_WIDTH] {
-    let cv = eidos_compression::init_chaining_word(0, n);
+    let cv = eidos_compression::felt_sequence_chaining_word(n);
     let mut state = [ZERO; STATE_WIDTH];
     state[..BLOCK_LEN].copy_from_slice(init_values);
     state[BLOCK_LEN..STATE_WIDTH].copy_from_slice(cv.as_slice());
     state
 }
 
-/// Initializes a domain-0 two-word compression state.
+/// Initializes a reserved Merkle inner-node compression state.
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
-    init_state_from_words_with_domain(w1, w2, ZERO)
+    let cv = eidos_compression::merkle_node_chaining_word();
+    [
+        w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], cv[0], cv[1], cv[2], cv[3],
+    ]
 }
 
 /// Initializes a two-word compression state for the provided domain.

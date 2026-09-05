@@ -20,15 +20,15 @@ use miden::core::crypto::hashes::eidos
 # Constants
 # ================================================================================================
 
-# Eidos::init_chaining_word(AEAD_CTR_SELECTOR, 0), where AEAD_CTR_SELECTOR = 0x00000601.
-# Fixed-arity derivations use registered selectors for separation; variable-length Eidos hashes
+# Eidos::init_chaining_word(AEAD_CTR_KEY, 0), where AEAD_CTR_KEY = 0x00000601.
+# Fixed-arity derivations use registered domain tags for separation; variable-length Eidos hashes
 # also bind their length in the initial chaining value.
 const AEAD_CTR_INIT_CV_0 = 4280581857092830721
 const AEAD_CTR_INIT_CV_1 = 2688637132020383744
 const AEAD_CTR_INIT_CV_2 = 1947077364412317696
 const AEAD_CTR_INIT_CV_3 = 6620516959492505600
 
-# Eidos::init_chaining_word(AEAD_MAC_SELECTOR, 0), where AEAD_MAC_SELECTOR = 0x00000701.
+# Eidos::init_chaining_word(AEAD_MAC_KEY, 0), where AEAD_MAC_KEY = 0x00000701.
 const AEAD_MAC_INIT_CV_0 = 4280581857092830977
 const AEAD_MAC_INIT_CV_1 = 2688637132020383744
 const AEAD_MAC_INIT_CV_2 = 1947077364412317696
@@ -49,8 +49,8 @@ const AEAD_DECRYPT_EMPTY_AD_EVENT = event("miden::core::crypto::aead_eidos::decr
 
 #! Derives the CTR chaining value (`K_CTR`) from a key and nonce.
 #!
-#! `K_MAC` uses a separate registered selector. This procedure is fixed to
-#! `AEAD_CTR_SELECTOR`.
+#! `K_MAC` uses a separate registered domain tag. This procedure is fixed to
+#! `AEAD_CTR_KEY`.
 #!
 #! The caller must not reuse `(key, nonce)`.
 #!

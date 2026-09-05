@@ -5,10 +5,10 @@ use core::mem::size_of;
 
 use miden_crypto::{ONE, ZERO, hash::eidos::Eidos};
 
-use super::{DEFERRED_AND_DOMAIN, DEFERRED_CHUNKS_DOMAIN, DeferredError};
+use super::DeferredError;
 use crate::{
     Felt, Word,
-    program::domain::{MAX_EIDOS_INIT_VALUE, has_domain_selector_encoding},
+    program::domain::{DEFERRED_AND, DEFERRED_CHUNKS, parse_domain_tag},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
@@ -28,13 +28,13 @@ pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 // TAG
 // ================================================================================================
 
-/// Identifies the precompile that owns a node and carries its two local parameters.
+/// Identifies the framework or precompile domain that owns a node and carries its local parameters.
 ///
 /// Framework ids are reserved for built-in nodes: `0` is TRUE, `1` is semantic AND, and
 /// `2` is opaque framework chunks. The next two felts are interpreted only by the owning
 /// [`super::Precompile`]. The fourth tag felt is reserved and must be zero, preserving the
 /// word-aligned stack and wire representation. The canonical layout is
-/// `[selector, arg0, arg1, 0]`.
+/// `[domain_tag, arg0, arg1, 0]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     id: Felt,
@@ -73,15 +73,15 @@ impl Tag {
         Self::is_framework_reserved_id(self.id)
     }
 
-    /// Creates a tag from a registered precompile selector and its two local parameters.
+    /// Creates a tag from a precompile domain tag and its two local parameters.
     ///
     /// Framework ids are reserved for [`Tag::TRUE`], [`Tag::AND`], and [`Tag::CHUNKS`]. Use
     /// [`Tag::from_word`] only for raw stack/wire decoding that must preserve untrusted tags before
     /// validation.
     pub fn precompile(id: Felt, args: [Felt; 2]) -> Result<Self, DeferredError> {
         if Self::is_framework_reserved_id(id)
-            || !has_domain_selector_encoding(id)
-            || args.iter().any(|arg| arg.as_canonical_u64() > u64::from(MAX_EIDOS_INIT_VALUE))
+            || parse_domain_tag(id).is_none()
+            || args.iter().any(|arg| u32::try_from(arg.as_canonical_u64()).is_err())
         {
             return Err(DeferredError::InvalidTag);
         }
@@ -105,11 +105,8 @@ impl Tag {
 
     /// Returns whether every tag value can be injected into an Eidos initial CV without carry.
     pub fn has_canonical_init_values(&self) -> bool {
-        self.id.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE)
-            && self
-                .args
-                .iter()
-                .all(|arg| arg.as_canonical_u64() <= u64::from(MAX_EIDOS_INIT_VALUE))
+        u32::try_from(self.id.as_canonical_u64()).is_ok()
+            && self.args.iter().all(|arg| u32::try_from(arg.as_canonical_u64()).is_ok())
     }
 
     /// Returns the canonical layout used by hashing and wire encoding.
@@ -455,7 +452,7 @@ impl Node {
 
     fn require_precompile_tag(tag: Tag) -> Result<Tag, DeferredError> {
         if tag.is_framework_reserved()
-            || !has_domain_selector_encoding(tag.id())
+            || parse_domain_tag(tag.id()).is_none()
             || !tag.has_canonical_reserved_lane()
             || !tag.has_canonical_init_values()
         {
@@ -541,24 +538,21 @@ impl Node {
             let [chunk] = chunks else {
                 unreachable!("AND nodes always contain exactly one digest pair")
             };
-            return Eidos::hash_elements_in_domain(chunk, DEFERRED_AND_DOMAIN);
+            return Eidos::hash_elements_in_domain(chunk, DEFERRED_AND);
         }
         if self.tag == Tag::CHUNKS {
             let logical_len = Self::DATA_CHUNK_FELT_LEN
                 .checked_mul(chunks.len())
                 .and_then(|len| u32::try_from(len).ok())
                 .expect("deferred CHUNKS felt length must fit in u32");
-            let mut cv = Eidos::init_chaining_word(
-                DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32,
-                logical_len,
-            );
+            let mut cv = Eidos::init_chaining_word(DEFERRED_CHUNKS, logical_len);
             for chunk in chunks {
                 cv = Eidos::compress(cv, *chunk);
             }
             return cv;
         }
 
-        // Precompile-owned nodes bind their registered selector, complete payload length, and two
+        // Precompile-owned nodes bind their domain tag, complete payload length, and two
         // local arguments into the initial chaining value. The payload is an aligned sequence of
         // complete Eidos blocks.
         assert!(
@@ -571,8 +565,9 @@ impl Node {
             .and_then(|len| u32::try_from(len).ok())
             .expect("deferred node payload length must fit in u32");
         let [arg0, arg1] = self.tag.args();
-        let mut cv = Eidos::init_chaining_word_with_params(
-            self.tag.id().as_canonical_u64() as u32,
+        let tag = parse_domain_tag(self.tag.id()).expect("validated deferred tag must be a u32");
+        let mut cv = Eidos::init_chaining_word_with_tag(
+            tag,
             [payload_len, arg0.as_canonical_u64() as u32, arg1.as_canonical_u64() as u32],
         );
         for chunk in chunks {
@@ -624,18 +619,18 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::deferred::precompile::test_precompile_selector;
+    use crate::deferred::precompile::test_precompile_domain_tag;
 
-    const TAG_A: Tag = Tag::from_word([test_precompile_selector(1), ZERO, ZERO, ZERO]);
+    const TAG_A: Tag = Tag::from_word([test_precompile_domain_tag(1), ZERO, ZERO, ZERO]);
     const TAG_B: Tag =
-        Tag::from_word([test_precompile_selector(1), ZERO, Felt::new_unchecked(1), ZERO]);
+        Tag::from_word([test_precompile_domain_tag(1), ZERO, Felt::new_unchecked(1), ZERO]);
 
     fn block(seed: u64) -> DataChunk {
         core::array::from_fn(|i| Felt::new_unchecked(seed.wrapping_add(i as u64)))
     }
 
     #[test]
-    fn tag_precompile_rejects_reserved_and_unregistered_selectors_but_from_word_is_raw() {
+    fn tag_precompile_rejects_framework_and_structurally_invalid_tags_but_from_word_is_raw() {
         assert_eq!(Tag::precompile(Tag::TRUE.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
         assert_eq!(Tag::precompile(Tag::AND.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
         assert_eq!(Tag::precompile(Tag::CHUNKS.id(), [ZERO; 2]), Err(DeferredError::InvalidTag));
@@ -647,10 +642,10 @@ mod tests {
             Tag::precompile(Felt::from_u32(u32::from(crate::operations::opcodes::JOIN)), [ZERO; 2],),
             Err(DeferredError::InvalidTag)
         );
-        assert_eq!(
-            Tag::precompile(Felt::from_u32(0x100), [ZERO; 2]),
-            Err(DeferredError::InvalidTag)
-        );
+
+        let unregistered = Tag::precompile(Felt::from_u32(0x100), [ZERO; 2])
+            .expect("structural domain tags are checked against the registry later");
+        assert_eq!(unregistered.as_word(), [Felt::from_u32(0x100), ZERO, ZERO, ZERO]);
 
         let raw_true = Tag::from_word([ZERO, Felt::new_unchecked(9), ZERO, ZERO]);
         assert_eq!(raw_true.id(), Tag::TRUE.id());
@@ -664,10 +659,11 @@ mod tests {
     }
 
     #[test]
-    fn tag_precompile_accepts_full_u32_selector_and_arguments() {
+    fn tag_precompile_accepts_structural_domain_tag_and_full_u32_arguments() {
+        let id = test_precompile_domain_tag(1);
         let max = Felt::from_u32(u32::MAX);
-        let tag = Tag::precompile(max, [max; 2]).expect("u32::MAX is a valid framing value");
-        assert_eq!(tag.as_word(), [max, max, max, ZERO]);
+        let tag = Tag::precompile(id, [max; 2]).expect("u32 arguments are valid framing values");
+        assert_eq!(tag.as_word(), [id, max, max, ZERO]);
     }
 
     #[test]
@@ -700,8 +696,8 @@ mod tests {
                 ZERO,
             ]),
             Tag::from_word([too_large, ZERO, ZERO, ZERO]),
-            Tag::from_word([test_precompile_selector(1), too_large, ZERO, ZERO]),
-            Tag::from_word([test_precompile_selector(1), ZERO, too_large, ZERO]),
+            Tag::from_word([test_precompile_domain_tag(1), too_large, ZERO, ZERO]),
+            Tag::from_word([test_precompile_domain_tag(1), ZERO, too_large, ZERO]),
         ];
 
         for tag in malformed {

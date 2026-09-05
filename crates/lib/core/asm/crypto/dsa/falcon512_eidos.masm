@@ -13,24 +13,24 @@ const SQUARE_NORM_BOUND = 34034726
 const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
 const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_eidos::falcon_div")
 
-# Eidos chaining word for the registered Falcon hash-to-point selector and an empty framed prefix.
+# Eidos chaining word for the registered Falcon hash-to-point domain and an empty framed prefix.
 const FALCON_H2P_INIT_CV = [
     4280581857092830209,
     2688637132020383744,
     1947077364412317696,
     6620516959492505600
 ]
-# Selector-zero Eidos chaining word for the 512-Felt public-key preimage.
+# Eidos chaining word for the registered 512-Felt Falcon public-key commitment.
 const FALCON_PUBLIC_KEY_INIT_CV = [
-    4280581857092829184,
+    4280581857092830465,
     2688637132020384256,
     1947077364412317696,
     6620516959492505600
 ]
-# Eidos chaining word for the registered Falcon product-check selector and one 8-Felt input block.
+# Eidos chaining word for the VM-registered 1,544-Felt Falcon product-check transcript.
 const FALCON_PRODUCT_INIT_CV = [
-    4280581857092830465,
-    2688637132020383752,
+    4280581857109608961,
+    2688637132020385288,
     1947077364412317696,
     6620516959492505600
 ]
@@ -731,20 +731,20 @@ end
 # =============================================================================================
 
 #! Moves the signature from the advice map to the advice stack, where the signature is stored in
-#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the VM-native hash. The signature is
+#! the hashmap at key `hash(PK || MSG)`, where `hash()` is the VM-native hash. The signature is
 #! expected to be stored in reverse order, so that it gets pushed on the advice stack in the
 #! correct order.
 #!
 #! Inputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  []
-#!   Advice map: hash(MSG || PK) -> SIGNATURE
+#!   Advice map: hash(PK || MSG) -> SIGNATURE
 #! Outputs:
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
 pub proc move_sig_from_map_to_adv_stack
     dupw.1 dupw.1 hmerge
-    #=> [hash(MSG || PK), PK, MSG, ...]
+    #=> [hash(PK || MSG), PK, MSG, ...]
 
     adv.push_mapval dropw
     #=> [PK, MSG, ...]

@@ -1,5 +1,5 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_crypto::{hash::eidos::Eidos, merkle::smt::LEAF_DOMAIN};
+use miden_crypto::hash::eidos::{Eidos, domains::SMT_BUCKET_LEAF};
 
 use super::*;
 
@@ -921,8 +921,7 @@ fn test_smt_leaf_hash_matches_merkle_store() {
     }
 }
 
-/// Regression check: a single-entry leaf hash is domain-separated, so it must not equal the
-/// plain `merge([K, V])` that would be produced with domain 0.
+/// Regression check: a single-entry leaf hash is distinct from a Merkle inner-node hash.
 #[test]
 fn test_smt_single_leaf_hash_differs_from_plain_merge() {
     let (key, value) = LEAVES[0];
@@ -932,23 +931,21 @@ fn test_smt_single_leaf_hash_differs_from_plain_merge() {
     let leaf_hash = leaf.hash();
 
     let plain_merge = Eidos::merge(&[key, value]);
-    let domain_merge = Eidos::merge_in_domain(&[key, value], LEAF_DOMAIN);
+    let expected = smt_leaf_commitment(&[(key, value)]);
 
     assert_ne!(
         leaf_hash, plain_merge,
         "single-entry leaf hash must not equal plain merge([K, V])"
     );
     assert_eq!(
-        leaf_hash, domain_merge,
-        "single-entry leaf hash must equal merge_in_domain([K, V], LEAF_DOMAIN)"
+        leaf_hash, expected,
+        "single-entry leaf hash must use the registered SMT leaf construction"
     );
 }
 
-/// Regression check: a multi-entry leaf hash is domain-separated, so it must not equal the
-/// plain `hash_elements` of its preimage. This would fail if the preimage check still used
-/// domain 0 on either the Rust or MASM side.
+/// Regression check: a multi-entry leaf hash is distinct from generic Felt hashing.
 #[test]
-fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
+fn test_smt_multi_leaf_hash_differs_from_generic_felt_hash() {
     let smt = build_smt_from_pairs(&LEAVES_MULTI);
 
     // Find the leaf that contains multiple entries (same K[0] bucket).
@@ -963,15 +960,15 @@ fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
     let elements: Vec<Felt> = multi_leaf.to_elements().collect();
 
     let plain_hash = Eidos::hash_elements(&elements);
-    let domain_hash = Eidos::hash_elements_in_domain(&elements, LEAF_DOMAIN);
+    let expected = smt_leaf_commitment(multi_leaf.entries());
 
     assert_ne!(
         leaf_hash, plain_hash,
-        "multi-entry leaf hash must not equal plain hash_elements(preimage) (domain 0)"
+        "multi-entry leaf hash must not equal generic hash_elements(preimage)"
     );
     assert_eq!(
-        leaf_hash, domain_hash,
-        "multi-entry leaf hash must equal hash_elements_in_domain(preimage, LEAF_DOMAIN)"
+        leaf_hash, expected,
+        "multi-entry leaf hash must use the registered SMT leaf construction"
     );
 }
 
@@ -1023,7 +1020,7 @@ fn build_custom_smt_root(entries: &[(Word, Word)]) -> (Word, MerkleStore, Vec<(W
     assert!(!entries.is_empty(), "custom SMT root requires at least one entry");
 
     let leaf_elements = build_leaf_advice_value(entries);
-    let leaf_hash = Eidos::hash_elements_in_domain(&leaf_elements, LEAF_DOMAIN);
+    let leaf_hash = smt_leaf_commitment(entries);
 
     let leaf_index = entries[0].0[3].as_canonical_u64();
     let empty_root = Smt::new().root();
@@ -1041,6 +1038,20 @@ fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     append_word_to_vec(&mut result, word0);
     append_word_to_vec(&mut result, word1);
     result
+}
+
+fn smt_leaf_commitment(entries: &[(Word, Word)]) -> Word {
+    let mut cv = Eidos::init_chaining_word(
+        SMT_BUCKET_LEAF,
+        u32::try_from(entries.len()).expect("test leaf entry count must fit in a u32"),
+    );
+    for &(key, value) in entries {
+        cv = Eidos::compress(
+            cv,
+            core::array::from_fn(|i| if i < 4 { key[i] } else { value[i - 4] }),
+        );
+    }
+    cv
 }
 
 fn entries_for_leaf(pair_count: usize, leaf_index: u64) -> Vec<(Word, Word)> {

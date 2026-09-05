@@ -16,8 +16,9 @@ use miden_air::{
 };
 use miden_core::{
     Felt,
-    deferred::{DEFERRED_AND_INIT_CV, DEFERRED_CHUNKS_DOMAIN, Tag},
+    deferred::{DEFERRED_AND_INIT_CV, Tag},
     field::{PrimeCharacteristicRing, QuadFelt},
+    program::domain::DEFERRED_CHUNKS,
     utils::RowMajorMatrix,
 };
 use miden_crypto::{hash::eidos::Eidos, stark::air::ConstraintDegrees};
@@ -392,17 +393,19 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
     let expected_and = Eidos::compress(DEFERRED_AND_INIT_CV, as_block(and_block));
     assert_eq!(and.digest, EidosDigest(expected_and.into_elements()));
 
-    let mut expected_chunks =
-        Eidos::init_chaining_word(DEFERRED_CHUNKS_DOMAIN.as_canonical_u64() as u32, 24);
+    let mut expected_chunks = Eidos::init_chaining_word(DEFERRED_CHUNKS, 24);
     for input in chunk_blocks {
         expected_chunks = Eidos::compress(expected_chunks, as_block(input));
     }
     assert_eq!(chunks.digest, EidosDigest(expected_chunks.into_elements()));
 
-    let [selector, arg0, arg1, reserved] = generic_context.as_array();
+    let [domain_tag_felt, arg0, arg1, reserved] = generic_context.as_array();
     assert_eq!(reserved, Felt::ZERO);
-    let mut expected_generic = Eidos::init_chaining_word_with_params(
-        selector.as_canonical_u64() as u32,
+    let domain_tag =
+        miden_crypto::hash::eidos::DomainTag::from_u32(domain_tag_felt.as_canonical_u64() as u32)
+            .expect("generic context must use a structurally valid domain tag");
+    let mut expected_generic = Eidos::init_chaining_word_with_tag(
+        domain_tag,
         [16, arg0.as_canonical_u64() as u32, arg1.as_canonical_u64() as u32],
     );
     for input in generic_blocks {
