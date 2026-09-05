@@ -17,9 +17,9 @@
 //!    bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
 //! 5. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
 //!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
-//!    `w0`, `w1`, and `4 * w1`. Together these enforce `d0, d1, w0, w1 in [0, 2^16)` plus `w1 in
-//!    [0, 2^14)` (via the `4 * w1` check), which bounds `word_addr = 4 * (w0 + 2^16 * w1)` to the
-//!    32-bit memory address space.
+//!    `w0`, `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0,
+//!    2^14)` (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit
+//!    memory address space.
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
@@ -77,19 +77,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
-    let aead_phase: [LB::Expr; 8] = {
-        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        [
-            periodic.aead_stream.r0.into(),
-            periodic.aead_stream.r1.into(),
-            periodic.aead_stream.r2.into(),
-            periodic.aead_stream.r3.into(),
-            periodic.aead_stream.r4.into(),
-            periodic.aead_stream.r5.into(),
-            periodic.aead_stream.r6.into(),
-            periodic.aead_stream.r7.into(),
-        ]
-    };
+    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     // --- Sibling-table setup ---
 
@@ -311,11 +300,11 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
 
                     // --- MEMORY-SIDE RANGE CHECKS (BusId::RangeCheck) ---
                     // Five removes per memory-active row:
-                    // - `d0`, `d1` - the two 16-bit delta limbs used by the memory chiplet's
+                    // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's
                     //   sorted-access constraints.
-                    // - `w0`, `w1`, `4 * w1` - the word-address decomposition limbs. The `4 * w1`
-                    //   check additionally enforces `w1 in [0, 2^14)`, which bounds `word_addr = 4
-                    //   * (w0 + 2^16 * w1) < 2^32`.
+                    // - `w0`, `w1`, `4·w1` — the word-address decomposition limbs. The `4·w1` check
+                    //   additionally enforces `w1 ∈ [0, 2^14)`, which bounds `word_addr = 4·(w0 +
+                    //   2^16·w1) < 2^32`.
                     g.batch(
                         "memory_range_checks",
                         mem_active,
@@ -355,16 +344,11 @@ fn stream_xor_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
 where
     LB: ChipletLookupBuilder,
 {
-    let two = LB::Expr::from_u8(2);
-    let xor_bytes = [
-        Into::<LB::Expr>::into(bytes[0]) + Into::<LB::Expr>::into(bytes[4])
-            - two.clone() * Into::<LB::Expr>::into(bytes[8]),
-        Into::<LB::Expr>::into(bytes[1]) + Into::<LB::Expr>::into(bytes[5])
-            - two.clone() * Into::<LB::Expr>::into(bytes[9]),
-        Into::<LB::Expr>::into(bytes[2]) + Into::<LB::Expr>::into(bytes[6])
-            - two.clone() * Into::<LB::Expr>::into(bytes[10]),
-        Into::<LB::Expr>::into(bytes[3]) + Into::<LB::Expr>::into(bytes[7])
-            - two * Into::<LB::Expr>::into(bytes[11]),
-    ];
+    let xor_bytes: [LB::Expr; 4] = core::array::from_fn(|i| {
+        let lhs: LB::Expr = bytes[i].into();
+        let rhs: LB::Expr = bytes[i + 4].into();
+        let and: LB::Expr = bytes[i + 8].into();
+        lhs + rhs - and.double()
+    });
     pack_u32_bytes_le::<_, LB::Expr>(xor_bytes)
 }

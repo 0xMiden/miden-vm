@@ -54,19 +54,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 {
     let local = ctx.local;
     // Read the typed periodic column view used by AEAD stream rows.
-    let aead_phase: [LB::Expr; 8] = {
-        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        [
-            periodic.aead_stream.r0.into(),
-            periodic.aead_stream.r1.into(),
-            periodic.aead_stream.r2.into(),
-            periodic.aead_stream.r3.into(),
-            periodic.aead_stream.r4.into(),
-            periodic.aead_stream.r5.into(),
-            periodic.aead_stream.r6.into(),
-            periodic.aead_stream.r7.into(),
-        ]
-    };
+    let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+    let aead_phase: [LB::Expr; 8] = periodic.aead_stream.phases.map(Into::into);
 
     // Typed chiplet-data overlays.
     let ctrl = local.controller();

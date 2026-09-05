@@ -6,12 +6,17 @@ use super::{layout::*, schedule::EIDOS_COMPRESSION_IV};
 
 #[inline]
 pub(super) fn xor_from_and<E: PrimeCharacteristicRing>(lhs: E, rhs: E, and: E) -> E {
-    lhs + rhs - and.clone() - and
+    lhs + rhs - and.double()
 }
 
 #[inline]
 pub(super) fn pack_u32_le<E: PrimeCharacteristicRing>(b0: E, b1: E, b2: E, b3: E) -> E {
     b0 + E::from_u64(1 << 8) * b1 + E::from_u64(1 << 16) * b2 + E::from_u64(1 << 24) * b3
+}
+
+#[inline]
+pub(super) fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
+    lo + E::from_u64(1u64 << 32) * hi
 }
 
 /// Sum of the four B input words represented by one row's rotation-input byte fields.
