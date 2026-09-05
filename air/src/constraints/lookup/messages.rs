@@ -1,6 +1,6 @@
 //! Message structs for LogUp bus interactions.
 //!
-//! Each struct represents a reduced denominator encoding: `alpha + sum(beta^i * field_i)`.
+//! Each struct represents a reduced denominator encoding: `α + Σ βⁱ · field_i`.
 //! Fields are named for readability; the [`super::lookup::LookupMessage`] trait
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
@@ -135,7 +135,7 @@ impl BusId {
     pub const COUNT: usize = Self::AeadEidosCompressionOutputPair as usize + 1;
 }
 
-// Per-variant discriminant locks. `BusId::COUNT` only catches gaps. A *reorder* that
+// Per-variant discriminant locks. `BusId::COUNT` only catches gaps — a *reorder* that
 // kept the high watermark would silently swap which `bus_prefix[i]` each variant resolves
 // to, breaking domain separation across every emitter and consumer. These per-variant
 // asserts pin the entire layout so any reorder fails at compile time.
@@ -379,7 +379,7 @@ pub enum MemoryMsg<E> {
     /// 8-element message: `[ctx, addr, clk, word[0..4]]`.
     ///
     /// `#[non_exhaustive]` forces external construction through the typed
-    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers. See
+    /// [`MemoryMsg::read_word`] / [`MemoryMsg::write_word`] helpers — see
     /// [`MemoryMsg::Element`] for rationale.
     #[non_exhaustive]
     Word {
@@ -479,10 +479,10 @@ impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
 
 /// Block stack message: `[block_id, parent_id, is_loop, ctx, fmp, depth, fn_hash[4]]`.
 ///
-/// `Simple`: for blocks that don't save context (JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN/END-simple).
+/// `Simple` — for blocks that don't save context (JOIN/SPLIT/SPAN/DYN/LOOP/RESPAN/END-simple).
 /// Context fields are encoded as zeros.
 ///
-/// `Full`: for blocks that save/restore the caller's execution context
+/// `Full` — for blocks that save/restore the caller's execution context
 /// (CALL/SYSCALL/DYNCALL/END-call).
 #[derive(Clone, Debug)]
 pub enum BlockStackMsg<E> {
@@ -505,10 +505,10 @@ pub enum BlockStackMsg<E> {
 /// Block hash queue message (7 elements):
 /// `[child_hash[4], parent, is_first_child, is_loop_body]`.
 ///
-/// `FirstChild`: first child of a JOIN (is_first_child = 1, is_loop_body = 0).
-/// `Child`: non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
-/// `LoopBody`: loop body entry (is_first_child = 0, is_loop_body = 1).
-/// `End`: removal at END; both flags are computed expressions.
+/// `FirstChild` — first child of a JOIN (is_first_child = 1, is_loop_body = 0).
+/// `Child` — non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
+/// `LoopBody` — loop body entry (is_first_child = 0, is_loop_body = 1).
+/// `End` — removal at END; both flags are computed expressions.
 #[derive(Clone, Debug)]
 pub enum BlockHashMsg<E> {
     FirstChild {
@@ -715,7 +715,7 @@ pub struct AceInitMsg<E> {
 
 /// Range check message (1 element): `[value]`.
 ///
-/// The denominator is `alpha + beta^0 * value`.
+/// The denominator is `α + β⁰ · value`.
 #[derive(Clone, Debug)]
 pub struct RangeMsg<E> {
     pub value: E,
@@ -923,7 +923,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
         match self {
-            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `beta^k * 0 = 0` so
+            // `Simple` zero-pads to 10 slots; slots `3..10` contribute `β^k · 0 = 0` so
             // they are elided from the loop.
             Self::Simple { block_id, parent_id, is_loop } => {
                 acc += challenges
@@ -1142,7 +1142,7 @@ where
         let is_element: E = E::ONE - is_word.clone();
 
         // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared. Factored
-        // as a read/write select per access width so the four (read/write x element/word)
+        // as a read/write select per access width so the four (read/write × element/word)
         // cases stay audit-visible without blowing the polynomial degree.
         let prefix_element = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
             * is_read.clone()
@@ -1167,16 +1167,16 @@ where
 // ================================================================================================
 //
 // [`SiblingMsg<E>`] carries an already selected block half and a [`SiblingBit`] tag. It uses the
-// sparse beta layout expected by the hasher chiplet. Lookup-message encoders may touch sparse beta
+// sparse β layout expected by the hasher chiplet. Lookup-message encoders may touch sparse β
 // positions; contiguity is a convention, not a requirement.
 
 /// Sibling-table message for the Merkle sibling bus.
 ///
 /// The Merkle direction bit picks which half of the Eidos block holds the sibling:
-/// `bit = 0` puts the sibling at `h[4..8]`, with payload in beta positions
-/// `[1, 2, 7, 8, 9, 10]` (mrupdate_id at beta^1, node_index at beta^2,
-/// high block word at beta^7..beta^10). `bit = 1` puts the sibling at `h[0..4]`,
-/// with payload in beta positions `[1, 2, 3, 4, 5, 6]`.
+/// `bit = 0` puts the sibling at `h[4..8]`, with payload in β positions
+/// `[1, 2, 7, 8, 9, 10]` (mrupdate_id at β¹, node_index at β²,
+/// high block word at β⁷..β¹⁰). `bit = 1` puts the sibling at `h[0..4]`,
+/// with payload in β positions `[1, 2, 3, 4, 5, 6]`.
 #[derive(Clone, Debug)]
 pub struct SiblingMsg<E> {
     pub bit: SiblingBit,
@@ -1188,9 +1188,9 @@ pub struct SiblingMsg<E> {
 /// Which half of the Eidos block holds the sibling word for this row.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SiblingBit {
-    /// `bit = 0`: sibling lives in the high block word (`h[4..8]`).
+    /// `bit = 0` — sibling lives in the high block word (`h[4..8]`).
     Zero,
-    /// `bit = 1`: sibling lives in the low block word (`h[0..4]`).
+    /// `bit = 1` — sibling lives in the low block word (`h[0..4]`).
     One,
 }
 

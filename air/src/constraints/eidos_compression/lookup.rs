@@ -12,7 +12,7 @@ use miden_core::{
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
-    algebra::{missing_rotation_result, pack_u32_le, universal_cv_word, xor_from_and},
+    algebra::{missing_rotation_result, pack_pair, pack_u32_le, universal_cv_word, xor_from_and},
     layout::*,
     narrow::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields},
     selectors::EidosCompressionSelectors,
@@ -302,7 +302,7 @@ pub(crate) fn emit_lookup_columns<LB>(
                                             mode,
                                             block: footer_block::<LB>(local),
                                             cv_in: core::array::from_fn(|idx| {
-                                                pack_pair::<LB>(
+                                                pack_pair(
                                                     cv_word::<LB>(local, 2 * idx),
                                                     cv_word::<LB>(local, 2 * idx + 1),
                                                 )
@@ -459,7 +459,7 @@ where
             LB::Expr::from(local.columns[footer_r_col(FOOTER_ROWS - 1, idx)])
         } else {
             let pair = idx - 6;
-            pack_pair::<LB>(
+            pack_pair(
                 LB::Expr::from(local.columns[footer_msg_word_col(2 * pair)]),
                 LB::Expr::from(local.columns[footer_msg_word_col(2 * pair + 1)]),
             )
@@ -472,13 +472,6 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     universal_cv_word(|col| LB::Expr::from(local.columns[col]), idx)
-}
-
-fn pack_pair<LB>(lo: LB::Expr, hi: LB::Expr) -> LB::Expr
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    lo + LB::Expr::from_u64(1u64 << 32) * hi
 }
 
 fn aead_output_pair_msg_for_current_footer<LB>(

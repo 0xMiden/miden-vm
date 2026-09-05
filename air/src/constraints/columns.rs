@@ -27,7 +27,7 @@ use crate::trace::{CHIPLETS_DATA_WIDTH, CHIPLETS_MODE_COL, TRACE_WIDTH};
 
 /// Column layout of the core execution trace.
 ///
-/// `CoreCols` covers the system, decoder, and stack segments - the columns owned by `CoreAir`.
+/// `CoreCols` covers the system, decoder, and stack segments — the columns owned by `CoreAir`.
 /// It is also the layout of the leading `NUM_CORE_COLS` columns of the unified `TRACE_WIDTH`-wide
 /// main trace, so it can be borrowed from either a per-AIR
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
@@ -63,7 +63,7 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 
 impl<T> CoreCols<T> {
     /// Returns the column layout as a flat slice of length NUM_CORE_COLS, in column-index
-    /// order. Useful for column-index -> field lookups (e.g. a `CoreCols<&str>` name table).
+    /// order. Useful for column-index → field lookups (e.g. a `CoreCols<&str>` name table).
     pub fn as_slice(&self) -> &[T] {
         let ptr = self as *const Self as *const T;
         unsafe { core::slice::from_raw_parts(ptr, NUM_CORE_COLS) }

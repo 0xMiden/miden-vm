@@ -32,7 +32,7 @@
 //! - LOGDEFERRED: {LOGDEFERRED} — a single opcode.
 //!
 //! No row can fire two of these simultaneously. The END-simple / END-call/syscall split
-//! inside block-stack is mutually exclusive via the `is_call + is_syscall <= 1` end-flag
+//! inside block-stack is mutually exclusive via the `is_call + is_syscall ≤ 1` end-flag
 //! invariant.
 //!
 //! # Degree budget
@@ -139,7 +139,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
     builder.next_column(
         |col| {
-            // Main group: all opcode-gated interactions.
+            // ──────────── Main group: all opcode-gated interactions ────────────
             col.group(
                 "main_interactions",
                 |g| {
@@ -267,7 +267,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // RESPAN: simultaneous push + pop - one batch under the RESPAN flag.
+                    // RESPAN: simultaneous push + pop — one batch under the RESPAN flag.
                     g.batch(
                         "respan",
                         op_flags.respan(),

@@ -396,7 +396,7 @@ where
         let no_shift_depth8
             // +MOVUP7|MOVDN7  — permute s0..s7
             = movup_or_movdn[5].clone()
-            // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0–7
+            // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0-7
             + op7(opcodes::SWAPW)
             // +PIPE|MSTREAM   — overwrite s0..s7 and cursor at s12
             + stream_word.clone()

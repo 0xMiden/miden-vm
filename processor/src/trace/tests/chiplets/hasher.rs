@@ -7,7 +7,7 @@
 //!
 //! Because request and response messages share a `bus_prefix` and the same payload shape,
 //! an add at a controller row and a remove at the matching decoder row produce the same
-//! encoded denominator with opposite multiplicities, which is what makes the bus balance.
+//! encoded denominator with opposite multiplicities — which is what makes the bus balance.
 //! The subset matcher verifies each claimed interaction lands; their pairing is an algebraic
 //! consequence.
 //!
@@ -357,7 +357,7 @@ fn logdeferred_hasher_bus() {
 
         let cv = DEFERRED_AND_INIT_CV;
 
-        // Input: [STATE_PREV, STMNT, CV] - 4 helpers + 4 stack lanes + AND init CV.
+        // Input: [STATE_PREV, STMNT, CV] — 4 helpers + 4 stack lanes + AND init CV.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
                 main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
@@ -471,7 +471,7 @@ fn mpverify_hasher_bus() {
         match kind {
             HasherResponseKind::MpInput => {
                 let node_index = main.chiplet_node_index(idx);
-                // Match the emitter's own `bit = node_index - 2 * node_index_next` formula.
+                // Match the emitter's own `bit = node_index - 2·node_index_next` formula.
                 let bit = merkle_direction_bit(main, idx);
                 let word: [Felt; 4] = if bit == ZERO { block_lo } else { block_hi };
                 exp.add(
@@ -638,7 +638,7 @@ fn as_bit(val: Felt) -> Option<bool> {
     }
 }
 
-/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2 * node_index_next`.
+/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`.
 fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
     main.chiplet_node_index(row) - main.chiplet_node_index_next(row).double()
 }
@@ -657,7 +657,7 @@ fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
 // where the M4/C2 packing puts it.
 
 /// Drive a depth-3 Merkle MRUPDATE and assert the sibling-table bus fires one add per MV
-/// controller row and one remove per MU controller row (3 levels -> 3 adds + 3 removes).
+/// controller row and one remove per MU controller row (3 levels: 3 adds + 3 removes).
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
