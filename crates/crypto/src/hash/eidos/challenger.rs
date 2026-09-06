@@ -11,7 +11,7 @@ use p3_challenger::{
 use p3_symmetric::{Hash, MerkleCap};
 
 use super::{
-    BLOCK_LEN, DIGEST_WIDTH, Eidos, PACKED_LANES, PackedBlock, PackedChainingValue, PackedFelt,
+    BLOCK_LEN, DIGEST_WIDTH, Eidos, PACKED_LANES, compression::compress_cv_packed_counted, encoding,
 };
 use crate::{
     Felt, Word, ZERO,
@@ -333,9 +333,8 @@ impl GrindingChallenger for EidosChallenger {
         }
 
         let mask = (1u64 << bits) - 1;
-        let cv = self.cv;
-        let buffer = self.buffer;
         let buffer_len = self.buffer_len;
+        let (cv, buffer) = prepare_witness_batch(self.cv, self.buffer, buffer_len);
         let num_batches = Felt::ORDER_U64.div_ceil(PACKED_LANES as u64);
 
         // Every candidate shares the same pre-witness challenger snapshot (`observe_felt` always
@@ -345,14 +344,10 @@ impl GrindingChallenger for EidosChallenger {
             .into_par_iter()
             .map(|batch| {
                 let base = batch * PACKED_LANES as u64;
-                let candidates: PackedFelt = core::array::from_fn(|lane| {
-                    let candidate = base + lane as u64;
-                    // Lanes beyond the field order can never satisfy the PoW check; repeat the
-                    // last in-range candidate so every lane stays a canonical field element.
-                    Felt::new_unchecked(candidate.min(Felt::ORDER_U64 - 1))
-                });
-                let accepted = check_witness_packed(cv, buffer, buffer_len, candidates, mask);
-                (0..PACKED_LANES).find(|&lane| accepted[lane]).map(|lane| candidates[lane])
+                let count = (Felt::ORDER_U64 - base).min(PACKED_LANES as u64) as usize;
+                let accepted = check_witness_batch(&cv, &buffer, buffer_len, base, count, mask);
+                (accepted != 0)
+                    .then(|| Felt::new_unchecked(base + accepted.trailing_zeros() as u64))
             })
             .find_any(Option::is_some)
             .flatten()
@@ -363,48 +358,66 @@ impl GrindingChallenger for EidosChallenger {
     }
 }
 
-/// Runs the equivalent of `EidosChallenger::check_witness` for `PACKED_LANES` independent
-/// candidate witnesses in one packed compression pass, given a fixed pre-witness challenger
-/// snapshot `(cv, buffer, buffer_len)`.
-///
-/// `observe_felt` always calls `enter_absorbing_mode` first, so absorbing the witness and
-/// sampling the check bits only ever exercises the `Absorbing` branch of `refill_output_word`;
-/// this mirrors that exact sequence with `Felt` replaced by `PackedFelt` throughout.
-fn check_witness_packed(
+/// Prepare invariant raw lanes once, including the transition tweak when the witness will not
+/// fill the buffer. The tweak is Goldilocks addition, even for arbitrary initial CVs.
+fn prepare_witness_batch(
     cv: Word,
     buffer: [Felt; BLOCK_LEN],
     buffer_len: usize,
-    witnesses: PackedFelt,
-    mask: u64,
-) -> [bool; PACKED_LANES] {
+) -> ([[u32; PACKED_LANES]; 8], [[u32; PACKED_LANES]; 16]) {
     debug_assert!(buffer_len < BLOCK_LEN);
+    let cv = if buffer_len + 1 == BLOCK_LEN {
+        cv
+    } else {
+        tweak_cv(cv, transition_tag(buffer_len + 1))
+    };
+    (
+        encoding::word_to_cv(cv).map(|word| [word; PACKED_LANES]),
+        encoding::encode_felt_block(&buffer[..buffer_len]).map(|word| [word; PACKED_LANES]),
+    )
+}
 
-    // observe_felt: append the witness at the next free buffer slot.
-    let mut packed_buffer: PackedBlock = core::array::from_fn(|slot| {
-        use core::cmp::Ordering;
-        match slot.cmp(&buffer_len) {
-            Ordering::Less => [buffer[slot]; PACKED_LANES],
-            Ordering::Equal => witnesses,
-            Ordering::Greater => [ZERO; PACKED_LANES],
-        }
-    });
-    let mut packed_cv: PackedChainingValue = core::array::from_fn(|i| [cv[i]; PACKED_LANES]);
-    let mut packed_len = buffer_len + 1;
-
-    // compress_pending_buffer: an untagged compression only if the witness filled the buffer.
-    if packed_len == BLOCK_LEN {
-        packed_cv = Eidos::compress_packed(packed_cv, packed_buffer);
-        packed_buffer = [[ZERO; PACKED_LANES]; BLOCK_LEN];
-        packed_len = 0;
+/// Check an active prefix of consecutive canonical witnesses against a prepared snapshot.
+/// Observing a witness always enters absorbing mode, discarding any pending squeezed output.
+fn check_witness_batch(
+    cv: &[[u32; PACKED_LANES]; 8],
+    buffer: &[[u32; PACKED_LANES]; 16],
+    buffer_len: usize,
+    base: u64,
+    count: usize,
+    mask: u64,
+) -> u16 {
+    assert!((1..=PACKED_LANES).contains(&count));
+    assert!(base < Felt::ORDER_U64 && count as u64 <= Felt::ORDER_U64 - base);
+    debug_assert!(buffer_len < BLOCK_LEN);
+    let mut block = *buffer;
+    for lane in 0..count {
+        let candidate = base + lane as u64;
+        block[2 * buffer_len][lane] = candidate as u32;
+        block[2 * buffer_len + 1][lane] = (candidate >> 32) as u32;
     }
-
-    // refill_output_word (Absorbing branch): tagged compression producing the fresh output word.
-    let tag = transition_tag(packed_len);
-    packed_cv[3] = packed_cv[3].map(|word| word + tag);
-    let output = Eidos::compress_packed(packed_cv, packed_buffer);
-
-    // sample_felt then sample_bits: the first sample off a freshly refilled word is output[0].
-    core::array::from_fn(|lane| (output[0][lane].as_canonical_u64() & mask) == 0)
+    let mut output = [[0; PACKED_LANES]; 8];
+    compress_cv_packed_counted(cv, &block, &mut output, count);
+    if buffer_len + 1 == BLOCK_LEN {
+        // Counted compression masks odd output words, matching scalar CV packing. Its fourth
+        // pair is at most 63 bits, so adding the zero-length transition tag cannot wrap the field.
+        for lane in 0..count {
+            let value = encoding::pack_output_pair_u64(output[6][lane], output[7][lane])
+                + TRANSITION_TAG_BASE as u64;
+            output[6][lane] = value as u32;
+            output[7][lane] = (value >> 32) as u32;
+        }
+        let mut squeezed = [[0; PACKED_LANES]; 8];
+        compress_cv_packed_counted(&output, &[[0; PACKED_LANES]; 16], &mut squeezed, count);
+        output = squeezed;
+    }
+    let mut accepted = 0;
+    for lane in 0..count {
+        if encoding::pack_output_pair_u64(output[0][lane], output[1][lane]) & mask == 0 {
+            accepted |= 1 << lane;
+        }
+    }
+    accepted
 }
 
 impl CanFinalizeDigest for EidosChallenger {
@@ -687,40 +700,42 @@ mod tests {
         assert_eq!(row[15..20], [0, 0, 0, 0, 0]);
     }
 
-    /// `check_witness_packed` must agree, lane by lane, with the scalar `check_witness` default
-    /// implementation run on an independently cloned challenger, for every pre-witness buffer
-    /// state it can be called with (`buffer_len` in `0..BLOCK_LEN`, covering both the case where
-    /// the witness fills the buffer and the case where it doesn't).
+    /// Catch wrong transition tags, missing intermediate output masking, and tail-lane acceptance.
     #[test]
-    fn check_witness_packed_matches_scalar_check_witness_across_buffer_lengths() {
-        let bits_values = [1usize, 8, 20];
-
+    fn check_witness_batch_matches_scalar_across_lengths_counts_and_field_tail() {
         for buffer_len in 0..BLOCK_LEN {
-            let mut challenger = EidosChallenger::new(word([5, 6, 7, 8]));
+            let mut challenger = EidosChallenger::new(word([1, 2, 3, Felt::ORDER_U64 - 1]));
             for i in 0..buffer_len {
-                challenger.observe_felt(felt(100 + i as u64));
+                challenger.observe_felt(felt(Felt::ORDER_U64 - 10 - i as u64));
             }
-            assert_eq!(challenger.buffer_len, buffer_len);
-
-            let witnesses: PackedFelt = core::array::from_fn(|lane| felt(1_000_000 + lane as u64));
-
-            for &bits in &bits_values {
-                let mask = (1u64 << bits) - 1;
-                let accepted = check_witness_packed(
-                    challenger.cv,
-                    challenger.buffer,
-                    challenger.buffer_len,
-                    witnesses,
-                    mask,
-                );
-
-                for lane in 0..PACKED_LANES {
-                    let mut scalar = challenger.clone();
-                    let expected = scalar.check_witness(bits, witnesses[lane]);
-                    assert_eq!(
-                        accepted[lane], expected,
-                        "lane {lane} mismatch at buffer_len={buffer_len}, bits={bits}"
-                    );
+            let (cv, buffer) = prepare_witness_batch(challenger.cv, challenger.buffer, buffer_len);
+            for count in 1..=PACKED_LANES {
+                let mut cv = cv;
+                let mut buffer = buffer;
+                for row in cv.iter_mut().chain(buffer.iter_mut()) {
+                    row[count..].fill(u32::MAX);
+                }
+                for base in [0, u32::MAX as u64 - 7, Felt::ORDER_U64 - count as u64] {
+                    for bits in [0, 1, 8, 24] {
+                        let accepted = check_witness_batch(
+                            &cv,
+                            &buffer,
+                            buffer_len,
+                            base,
+                            count,
+                            (1u64 << bits) - 1,
+                        );
+                        let mut expected = 0u16;
+                        for lane in 0..count {
+                            if challenger.clone().check_witness(bits, felt(base + lane as u64)) {
+                                expected |= 1 << lane;
+                            }
+                        }
+                        assert_eq!(
+                            accepted, expected,
+                            "buffer_len={buffer_len}, count={count}, base={base}, bits={bits}"
+                        );
+                    }
                 }
             }
         }

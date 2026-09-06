@@ -30,6 +30,16 @@ pub(super) fn compress_cv_packed(
 }
 
 #[inline]
+pub(super) fn compress_cv_packed_counted(
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
+    out: &mut [[u32; PACKED_LANES]; 8],
+    active_lanes: usize,
+) {
+    CompressionCore::compress_packed_native_counted(cv, block, out, active_lanes);
+}
+
+#[inline]
 pub(super) fn compress_xof_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     CompressionCore::compress_raw_xof(cv, block)
 }
