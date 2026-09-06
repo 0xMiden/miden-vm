@@ -438,6 +438,14 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         row_x86::compress_raw(&cv, &block)
     }
 
+    #[cfg(target_arch = "aarch64")]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon {
+        let mut out = [0; 8];
+        // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
+        unsafe { eidos_compress_raw_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
+        return out;
+    }
+
     #[cfg(not(target_arch = "x86_64"))]
     {
         let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
@@ -461,6 +469,14 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
     {
         row_x86::compress_raw_xof(&cv, &block)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon {
+        let mut out = [0; 16];
+        // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
+        unsafe { eidos_compress_xof_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
+        return out;
     }
 
     #[cfg(not(target_arch = "x86_64"))]
@@ -577,6 +593,12 @@ pub(super) fn compress_packed_native_counted(
     for (out_word, full_word) in out.iter_mut().zip(full) {
         out_word[..active_lanes].copy_from_slice(&full_word[..active_lanes]);
     }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
+    fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);
 }
 
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]

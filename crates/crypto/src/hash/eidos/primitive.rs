@@ -247,6 +247,38 @@ mod tests {
         }
     }
 
+    /// Direct calls catch NEON lane permutations, rotations, and fold errors independently of
+    /// runtime dispatch, including the upper XOF half that raw CV compression does not expose.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn compress_neon_raw_and_xof_match_scalar_reference_over_random_inputs() {
+        unsafe extern "C" {
+            fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
+            fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);
+        }
+
+        let mut state = 0x243f_6a88_85a3_08d3u64;
+        let mut next_u32 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u32
+        };
+        for _ in 0..10_000 {
+            let cv: [u32; 8] = core::array::from_fn(|_| next_u32());
+            let block: [u32; 16] = core::array::from_fn(|_| next_u32());
+            let mut raw = [0; 8];
+            let mut xof = [0; 16];
+            // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
+            unsafe {
+                eidos_compress_raw_neon(cv.as_ptr(), block.as_ptr(), raw.as_mut_ptr());
+                eidos_compress_xof_neon(cv.as_ptr(), block.as_ptr(), xof.as_mut_ptr());
+            }
+            assert_eq!(raw, reference_core_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]));
+            assert_eq!(xof, reference_core_xof_with_p(cv, block, [IV[4], IV[5], IV[6], IV[7]]));
+        }
+    }
+
     #[test]
     fn xof_reference_matches_official_blake3_compress_xof() {
         let cv = TEST_CV;
