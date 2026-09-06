@@ -12,6 +12,25 @@ use super::{
 };
 use crate::{Felt, Word, field::BasedVectorSpace};
 
+const FELT_BLOCK_INIT_PACKED_CV: PackedChainingValue = [
+    [Felt::new_unchecked(encoding::pack_output_pair_u64(
+        FELT_BLOCK_INIT_CV[0],
+        FELT_BLOCK_INIT_CV[1],
+    )); PACKED_LANES],
+    [Felt::new_unchecked(encoding::pack_output_pair_u64(
+        FELT_BLOCK_INIT_CV[2],
+        FELT_BLOCK_INIT_CV[3],
+    )); PACKED_LANES],
+    [Felt::new_unchecked(encoding::pack_output_pair_u64(
+        FELT_BLOCK_INIT_CV[4],
+        FELT_BLOCK_INIT_CV[5],
+    )); PACKED_LANES],
+    [Felt::new_unchecked(encoding::pack_output_pair_u64(
+        FELT_BLOCK_INIT_CV[6],
+        FELT_BLOCK_INIT_CV[7],
+    )); PACKED_LANES],
+];
+
 /// Eidos hash construction.
 ///
 /// Byte strings and field-element strings use distinct registered selectors. Field hashing
@@ -151,7 +170,7 @@ impl Eidos {
                 values[1][i - DIGEST_WIDTH]
             }
         });
-        Self::compress_packed(framing::init_packed_cv(0, [BLOCK_LEN as u32, 0, 0]), block)
+        Self::compress_packed(FELT_BLOCK_INIT_PACKED_CV, block)
     }
 
     /// Hash two digest words under a caller-supplied selector.
@@ -175,14 +194,19 @@ impl Eidos {
 
 #[inline]
 fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
-    let block: [Felt; BLOCK_LEN] = array::from_fn(|i| {
-        if i < DIGEST_WIDTH {
-            values[0][i]
+    encoding::output_cv_to_word(compression::compress_cv(cv, digest_pair_block(values)))
+}
+
+#[inline]
+fn digest_pair_block(values: &[Word; 2]) -> [u32; 16] {
+    array::from_fn(|lane| {
+        let felt = values[lane / (2 * DIGEST_WIDTH)][(lane / 2) % DIGEST_WIDTH].as_canonical_u64();
+        if lane % 2 == 0 {
+            felt as u32
         } else {
-            values[1][i - DIGEST_WIDTH]
+            (felt >> 32) as u32
         }
-    });
-    encoding::output_cv_to_word(compression::compress_cv(cv, encoding::encode_felt_block(&block)))
+    })
 }
 
 #[inline]
@@ -384,6 +408,90 @@ mod tests {
 
     use super::*;
     use crate::hash::eidos::PackedBlock;
+
+    #[test]
+    fn digest_pair_block_preserves_word_order_and_input_high_bits() {
+        let values = [
+            Word::new([
+                Felt::new_unchecked(0x8000_0001_0000_0001),
+                Felt::new_unchecked(0x4000_0002_0000_0003),
+                Felt::new_unchecked(0x2000_0003_0000_0005),
+                Felt::new_unchecked(0x1000_0004_0000_0007),
+            ]),
+            Word::new([
+                Felt::new_unchecked(0x0800_0005_0000_000b),
+                Felt::new_unchecked(0x0400_0006_0000_000d),
+                Felt::new_unchecked(0x0200_0007_0000_0011),
+                Felt::new_unchecked(0x0100_0008_0000_0013),
+            ]),
+        ];
+
+        assert_eq!(
+            digest_pair_block(&values),
+            [
+                1,
+                0x8000_0001,
+                3,
+                0x4000_0002,
+                5,
+                0x2000_0003,
+                7,
+                0x1000_0004,
+                11,
+                0x0800_0005,
+                13,
+                0x0400_0006,
+                17,
+                0x0200_0007,
+                19,
+                0x0100_0008,
+            ]
+        );
+    }
+
+    #[test]
+    fn digest_merges_preserve_framing_and_packed_lane_equivalence() {
+        let values = [
+            Word::new([
+                Felt::new_unchecked(0x8000_0001_0000_0001),
+                Felt::new_unchecked(0x4000_0002_0000_0003),
+                Felt::new_unchecked(0x2000_0003_0000_0005),
+                Felt::new_unchecked(0x1000_0004_0000_0007),
+            ]),
+            Word::new([
+                Felt::new_unchecked(0x0800_0005_0000_000b),
+                Felt::new_unchecked(0x0400_0006_0000_000d),
+                Felt::new_unchecked(0x0200_0007_0000_0011),
+                Felt::new_unchecked(0x0100_0008_0000_0013),
+            ]),
+        ];
+        let elements = values.into_iter().flat_map(Word::into_iter).collect::<Vec<_>>();
+        let domain = Felt::from_u32(17);
+        let expected_merge = Word::new([
+            Felt::new_unchecked(7066677778366688579),
+            Felt::new_unchecked(2670184074332039235),
+            Felt::new_unchecked(8367120510803267708),
+            Felt::new_unchecked(4671844698153676469),
+        ]);
+        let expected_domain_merge = Word::new([
+            Felt::new_unchecked(6280005452210828352),
+            Felt::new_unchecked(7305477876879022688),
+            Felt::new_unchecked(6501408626928269720),
+            Felt::new_unchecked(8345300191011544472),
+        ]);
+
+        assert_eq!(Eidos::merge(&values), expected_merge);
+        assert_eq!(Eidos::merge(&values), Eidos::hash_elements(&elements));
+        assert_eq!(Eidos::merge_in_domain(&values, domain), expected_domain_merge);
+        assert_eq!(
+            Eidos::merge_in_domain(&values, domain),
+            Eidos::hash_elements_in_domain(&elements, domain)
+        );
+
+        let packed = values.map(|word| array::from_fn(|i| [word[i]; PACKED_LANES]));
+        let merged = Eidos::merge_packed(&packed);
+        assert_eq!(merged, array::from_fn(|i| [expected_merge[i]; PACKED_LANES]));
+    }
 
     #[test]
     fn sequential_field_batches_preserve_framing_and_exact_iterators() {
