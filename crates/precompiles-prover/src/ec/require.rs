@@ -135,9 +135,8 @@ impl<'a> EcRequire<'a> {
         pai
     }
 
-    /// A curve point from already-interned handles — the legacy coefficient
-    /// entry retained for direct callers/tests. Creates/dedups the group
-    /// `(a, b, bound)`, then delegates the point work to
+    /// A curve point from already-interned handles. Creates or reuses the group `(a, b, bound)`,
+    /// then delegates the point work to
     /// [`point_on_group`](Self::point_on_group).
     pub fn point_on_curve(
         &mut self,
@@ -153,9 +152,8 @@ impl<'a> EcRequire<'a> {
         (group, point)
     }
 
-    /// The group's point-at-infinity from already-interned curve handles — the
-    /// legacy coefficient entry retained for direct callers/tests.
-    /// Creates/dedups the group `(a, b, bound)`, then delegates to
+    /// The group's point at infinity from already-interned curve handles. Creates or reuses the
+    /// group `(a, b, bound)`, then delegates to
     /// [`pai_on_group`](Self::pai_on_group).
     pub fn pai_on_curve(
         &mut self,

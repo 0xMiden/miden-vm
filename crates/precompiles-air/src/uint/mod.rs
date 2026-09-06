@@ -104,9 +104,8 @@ use crate::{
 /// the ptr of the uint storing this value's modulus `p − 1`.
 ///
 /// Carrying `bound_ptr` lets any consumer (eval hash, add/mul) recover
-/// the modulus in the same lookup. The limb layout mirrors
-/// [`EidosChainInputMsg`](crate::transcript::eidos::EidosChainInputMsg) so the eval chip can pin
-/// the whole value directly into one chaining-input message.
+/// the modulus in the same lookup. The eight-limb layout lets the eval
+/// chip use the value directly as one Eidos block.
 ///
 /// Encoded as `bus_prefix[UintVal] + β⁰·ptr + β¹·bound_ptr + β²·c0 + … +
 /// β⁹·c7`.

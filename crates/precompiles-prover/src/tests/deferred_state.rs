@@ -7,7 +7,7 @@ use miden_core::{
     deferred::{
         DeferredState, Digest, Node as VmNode, PrecompileRegistry, TRUE_DIGEST as VM_TRUE_DIGEST,
     },
-    field::QuadFelt,
+    field::{PrimeCharacteristicRing, QuadFelt},
     proof::{HashFunction, StarkProof},
 };
 use miden_precompiles::{
@@ -19,9 +19,18 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use crate::{
     deferred::{DeferredSession, session_from_deferred_state},
     hash::{
-        chunk_node_sponge::SPONGE_COL_OFFSET,
-        keccak::sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        chunk::{COL_F_BEGIN as CHUNK_COL_F_BEGIN, COL_F_END as CHUNK_COL_F_END},
+        chunk_node::NODE_COL_OFFSET,
+        chunk_node_sponge::{ChunkNodeSpongeAir, SPONGE_COL_OFFSET},
+        keccak::{
+            node::{
+                COL_ABSORPTION_ID_CHUNKS as NODE_COL_ABSORPTION_ID_CHUNKS, COL_ACT as NODE_COL_ACT,
+                COL_H_INPUT_CHUNKS_BEGIN, COL_N_CHUNKS as NODE_COL_N_CHUNKS,
+            },
+            sponge::{COL_ACT as SPONGE_COL_ACT, SPONGE_PERIOD, trace::keccak_oracle},
+        },
     },
+    logup::LookupMessage,
     math::{U256, from_hex, to_limbs32},
     prove_deferred_state,
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
@@ -31,7 +40,10 @@ use crate::{
         SessionTracesTestExt, bus_balance::session_stack_residual,
         verify_deferred as verify_session,
     },
-    transcript::eidos::EidosDigest,
+    transcript::eidos::{
+        COL_CHAIN_HEAD_ID, EidosDigest, EidosOutMsg, NUM_MAIN_COLS as EIDOS_NUM_MAIN_COLS,
+        compression::layout::{BLOCK_PERIOD as EIDOS_COMPRESSION_CYCLE_LEN, footer_digest_col},
+    },
 };
 
 /// A VM synthetic Keccak-only deferred state and the prover-typed view of its root.
@@ -95,7 +107,7 @@ fn keccak_digest_chunks(input: &[u8]) -> Vec<[Felt; 8]> {
 }
 
 fn len_bytes(input: &[u8]) -> u32 {
-    u32::try_from(input.len()).expect("Keccak MVP inputs fit in a VM u32 length tag")
+    u32::try_from(input.len()).expect("Keccak MVP inputs fit in a u32 byte-length parameter")
 }
 
 fn register_keccak_assertion(state: &mut DeferredState, input: &[u8]) -> Digest {
@@ -122,7 +134,7 @@ fn register_uint_value(state: &mut DeferredState, domain: UintDomain, value: U25
 
 fn register_uint_op(state: &mut DeferredState, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
     state
-        .register(VmNode::join(UintPrecompile::op_tag(op_id), lhs, rhs).expect("uint op tag"))
+        .register(VmNode::join(UintPrecompile::op_frame(op_id), lhs, rhs).expect("uint op frame"))
         .expect("register uint op node")
 }
 
@@ -148,14 +160,15 @@ fn register_curve_generator(state: &mut DeferredState, curve: CurveId) -> Digest
 
 fn register_curve_op(state: &mut DeferredState, op_id: u64, lhs: Digest, rhs: Digest) -> Digest {
     state
-        .register(VmNode::join(CurvePrecompile::op_tag(op_id), lhs, rhs).expect("curve op tag"))
+        .register(VmNode::join(CurvePrecompile::op_frame(op_id), lhs, rhs).expect("curve op frame"))
         .expect("register curve op node")
 }
 
 fn register_curve_msm(state: &mut DeferredState, pairs: Vec<(Digest, Digest)>) -> Digest {
+    let n_pairs = u32::try_from(pairs.len()).expect("test MSM pair count fits in u32");
     state
         .register(
-            VmNode::try_pair_list(CurvePrecompile::msm_tag(), pairs)
+            VmNode::try_pair_list(CurvePrecompile::msm_frame(n_pairs), pairs)
                 .expect("curve msm pair list is non-empty"),
         )
         .expect("register curve msm node")
@@ -369,8 +382,9 @@ fn trailing_zero_input_changes_root() {
     let abc = synthetic_keccak_state(b"abc");
     let abc_zero = synthetic_keccak_state(b"abc\0");
 
-    // Generic chunk nodes are lengthless: these inputs pack to the same single zero-padded chunk.
-    // The Keccak assertion tag's `len_bytes` and digest child are what distinguish them.
+    // CHUNKS binds the padded Felt length, not the original byte length, so these inputs share the
+    // same one-block encoding. The Keccak assertion frame's `len_bytes` and digest child
+    // distinguish them.
     assert_eq!(abc.input_digest, abc_zero.input_digest);
     assert_ne!(abc.expected_digest, abc_zero.expected_digest);
     assert_ne!(abc.assertion_digest, abc_zero.assertion_digest);
@@ -501,6 +515,164 @@ fn merged_chunk_node_sponge_multi_block_checks_and_balances() {
         traces.check();
         assert_session_balanced(&traces, &mut rng);
     }
+}
+
+/// The generic chunk and Eidos AIRs do not interpret the CHUNKS frame. The Keccak-node owner binds
+/// its claimed chunk count into both the Eidos initial CV and the consumed `(head, tail, digest)`
+/// relation. This mutant changes only that owner-supplied count. It remains locally admissible for
+/// a single invocation, but cannot balance against the unchanged chunk and Eidos traces.
+#[test]
+fn keccak_node_chunk_count_is_bound_by_cross_air_relations() {
+    let traces = keccak_session_traces(&[0xa5; 33]);
+    let mains = traces.mains();
+    let n_chunks_col = NODE_COL_OFFSET + NODE_COL_N_CHUNKS;
+
+    let challenges = Challenges::new(
+        QuadFelt::from_u64(101),
+        QuadFelt::from_u64(103),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    assert_eq!(mains[0].values[n_chunks_col], Felt::from_u8(2));
+
+    for forged_count in [Felt::ZERO, Felt::from_u8(3), -Felt::ONE] {
+        let mut forged = mains[0].clone();
+        forged.values[n_chunks_col] = forged_count;
+
+        // There is one active Keccak-node row, so changing its count does not violate the owner's
+        // row-to-row layout constraints. Soundness comes from its cross-AIR frame and span
+        // messages.
+        crate::tests::check_local(ChunkNodeSpongeAir, &forged);
+
+        let residual = session_stack_residual(&mains, &[(0, &forged)], &challenges);
+        assert!(
+            !residual.is_empty(),
+            "forged CHUNKS count {forged_count} must unbalance the bus"
+        );
+    }
+}
+
+/// The output relation must bind both ends of an Eidos chain. A tail-only relation cannot
+/// distinguish the last Keccak owner claiming the digest of the chain immediately before its own:
+/// setting its chunk count to zero makes its derived tail `head - 1`. This test isolates that
+/// decisive relation seam; it does not reproduce every coordinated mutation needed by a
+/// tail-only interface.
+#[test]
+fn chain_head_distinguishes_a_crossed_terminal_digest_request() {
+    let mut session = Session::new();
+    let (_, first_claim) = session.keccak(&[0x11; 33]);
+    let (_, second_claim) = session.keccak(&[0xa5; 33]);
+    let root = session.assert_and_fold([first_claim, second_claim]);
+    let traces = session.finish(root);
+    let mains = traces.mains();
+
+    let owner = mains[0];
+    let owner_width = owner.width;
+    let active_rows: Vec<_> = owner
+        .values
+        .chunks_exact(owner_width)
+        .enumerate()
+        .filter_map(|(row_idx, row)| {
+            (row[NODE_COL_OFFSET + NODE_COL_ACT] == Felt::ONE).then_some(row_idx)
+        })
+        .collect();
+    assert_eq!(active_rows.len(), 2);
+
+    let second_row_idx = active_rows[1];
+    let second_row =
+        &owner.values[second_row_idx * owner_width..(second_row_idx + 1) * owner_width];
+    let new_head = second_row[NODE_COL_OFFSET + NODE_COL_ABSORPTION_ID_CHUNKS];
+    let new_head_idx = new_head.as_canonical_u64() as usize;
+    assert!(new_head_idx > 0);
+    let old_tail = new_head - Felt::ONE;
+
+    let compression = mains[1];
+    let old_tail_idx = new_head_idx - 1;
+    let old_head = compression.values
+        [old_tail_idx * EIDOS_COMPRESSION_CYCLE_LEN * EIDOS_NUM_MAIN_COLS + COL_CHAIN_HEAD_ID];
+    let old_footer = (old_tail_idx + 1) * EIDOS_COMPRESSION_CYCLE_LEN - 1;
+    let old_digest = core::array::from_fn(|idx| {
+        compression.values[old_footer * EIDOS_NUM_MAIN_COLS + footer_digest_col(idx)]
+    });
+    assert_eq!(old_head, old_tail, "the preceding chain must be a one-block chain");
+    assert_ne!(new_head, old_head);
+
+    let challenges = Challenges::new(
+        QuadFelt::from_u64(101),
+        QuadFelt::from_u64(103),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let previous_provider = EidosOutMsg {
+        chain_head_id: old_head,
+        compression_id: old_tail,
+        digest: old_digest,
+    }
+    .encode(&challenges);
+    let crossed_request = EidosOutMsg {
+        chain_head_id: new_head,
+        compression_id: old_tail,
+        digest: old_digest,
+    }
+    .encode(&challenges);
+    let tail_only_previous = [old_tail, old_digest[0], old_digest[1], old_digest[2], old_digest[3]];
+    let tail_only_crossed =
+        [new_head - Felt::ONE, old_digest[0], old_digest[1], old_digest[2], old_digest[3]];
+    assert_eq!(
+        tail_only_crossed, tail_only_previous,
+        "a tail-only relation would alias the crossed request with the previous provider",
+    );
+    assert_ne!(
+        crossed_request, previous_provider,
+        "the chain head must distinguish the crossed request from the previous provider",
+    );
+
+    let mut forged_owner = owner.clone();
+    let forged_row =
+        &mut forged_owner.values[second_row_idx * owner_width..(second_row_idx + 1) * owner_width];
+    forged_row[NODE_COL_OFFSET + NODE_COL_N_CHUNKS] = Felt::ZERO;
+    forged_row[NODE_COL_OFFSET + COL_H_INPUT_CHUNKS_BEGIN
+        ..NODE_COL_OFFSET + COL_H_INPUT_CHUNKS_BEGIN + old_digest.len()]
+        .copy_from_slice(&old_digest);
+
+    // This is the final active owner row, so neither mutation violates its local layout. The
+    // full relation set rejects it. The direct comparison above isolates the head field; this
+    // integration check also confirms that the composed trace does not accept the malformed owner.
+    crate::tests::check_local(ChunkNodeSpongeAir, &forged_owner);
+    let residual = session_stack_residual(&mains, &[(0, &forged_owner)], &challenges);
+    assert!(!residual.is_empty(), "the crossed terminal digest must not balance");
+}
+
+/// Chunk contents are locally unconstrained because their two consumers authenticate them: the
+/// downstream sponge fixes Memory64 order, while EidosBlock fixes physical compression order.
+/// Swapping two blocks therefore preserves the owner AIR's local equations but must break the
+/// cross-AIR relations.
+#[test]
+fn reordering_chunks_within_an_eidos_chain_unbalances_the_bus() {
+    let traces = keccak_session_traces(&[0xa5; 33]);
+    let mains = traces.mains();
+    let mut forged = mains[0].clone();
+    let width = forged.width;
+
+    assert_ne!(
+        &forged.values[CHUNK_COL_F_BEGIN..CHUNK_COL_F_END],
+        &forged.values[width + CHUNK_COL_F_BEGIN..width + CHUNK_COL_F_END],
+        "the two input chunks must differ for the reorder mutant"
+    );
+    for col in CHUNK_COL_F_BEGIN..CHUNK_COL_F_END {
+        forged.values.swap(col, width + col);
+    }
+
+    crate::tests::check_local(ChunkNodeSpongeAir, &forged);
+
+    let challenges = Challenges::new(
+        QuadFelt::from_u64(101),
+        QuadFelt::from_u64(103),
+        MAX_MESSAGE_WIDTH,
+        NUM_BUS_IDS,
+    );
+    let residual = session_stack_residual(&mains, &[(0, &forged)], &challenges);
+    assert!(!residual.is_empty(), "reordered chunks must unbalance the bus");
 }
 
 /// Explicit full prove+verify of a multi-block Keccak session — the

@@ -24,13 +24,18 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_core::{Felt, deferred::Node, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    deferred::{Node, deferred_chunks_frame},
+    field::QuadFelt,
+    utils::RowMajorMatrix,
+};
 
 use crate::{
     hash::chunk::{ChunkAir, NUM_F, NUM_MAIN_COLS},
     logup::build_logup_aux_trace,
     transcript::eidos::{
-        digest::{EidosChainContext, EidosDigest},
+        digest::EidosDigest,
         trace::{AbsorptionSpan, EidosRequires},
     },
 };
@@ -136,9 +141,9 @@ impl ChunkRequires {
                 (block_lo, block_hi)
             })
             .collect();
-        let eidos_out =
-            eidos.require_absorption(EidosChainContext::chunk(), block_words.iter().copied());
         let n = f_per_chunk.len() as u32;
+        let eidos_out =
+            eidos.require_absorption(deferred_chunks_frame(n), block_words.iter().copied());
         let chunk_head = ChunkSeqId(self.next_chunk_seq);
         let chunk_seq_id_range = self.next_chunk_seq..self.next_chunk_seq + n;
         self.next_chunk_seq += n;

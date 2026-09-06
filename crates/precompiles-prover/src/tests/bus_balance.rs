@@ -60,8 +60,7 @@ fn fold_balance_with_native_preprocessed<A>(
 {
     let periodic = air.periodic_columns();
     let preprocessed = air.preprocessed_trace();
-    let fractions =
-        build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
+    let fractions = build_lookup_fractions(air, main, preprocessed.as_ref(), &periodic, challenges);
     for &(multiplicity, denom) in fractions.fractions() {
         net.entry(denom)
             .or_insert_with(|| (Felt::ZERO, core::any::type_name::<A>().into()))
@@ -95,11 +94,11 @@ fn fold_fixed_messages<M>(
 }
 
 /// Net the canonical full session stack, including verifier-side fixed-boundary consumes.
-pub(crate) fn session_stack_residual(
+pub(crate) fn session_stack_net(
     mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
     replacements: &[(usize, &RowMajorMatrix<Felt>)],
     challenges: &Challenges<QuadFelt>,
-) -> Vec<(Felt, String)> {
+) -> HashMap<QuadFelt, (Felt, String)> {
     let mut net = HashMap::new();
     let miden_challenges = Challenges::new(
         challenges.alpha,
@@ -151,5 +150,17 @@ pub(crate) fn session_stack_residual(
         }
     }
     fold_fixed_boundary_external_balance(challenges, &mut net);
-    net.into_values().filter(|(m, _)| *m != Felt::ZERO).collect()
+    net
+}
+
+/// Return the nonzero entries from the canonical full session stack balance.
+pub(crate) fn session_stack_residual(
+    mains: &[&RowMajorMatrix<Felt>; NUM_CHIPLETS],
+    replacements: &[(usize, &RowMajorMatrix<Felt>)],
+    challenges: &Challenges<QuadFelt>,
+) -> Vec<(Felt, String)> {
+    session_stack_net(mains, replacements, challenges)
+        .into_values()
+        .filter(|(m, _)| *m != Felt::ZERO)
+        .collect()
 }

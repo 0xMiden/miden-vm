@@ -335,9 +335,9 @@ fn core_ecdsa_k256_keccak_verify_cycle_baseline() {
     let output = run_core_program_with_advice(&verify_cycle_source(&fixture), &fixture.advice)
         .expect("valid core ECDSA K256/Keccak signature must verify");
     let cycles = output.stack.get_element(0).expect("cycle count").as_canonical_u64();
-    // This includes the Eidos compression-and-framing work for every deferred node registered by
-    // the Keccak and secp256k1 precompile wrappers.
-    assert_eq!(cycles, 1546);
+    // This includes the deferred-node registration and hashing performed by the Keccak and
+    // secp256k1 precompile wrappers.
+    assert_eq!(cycles, 1191);
 }
 
 #[test]

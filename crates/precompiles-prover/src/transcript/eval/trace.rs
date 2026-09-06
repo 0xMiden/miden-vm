@@ -15,7 +15,7 @@
 //! [`uint_op`](TranscriptEvalRequires::uint_op) /
 //! [`record_is`](TranscriptEvalRequires::record_is) record the uint-op
 //! nodes, while EC create rows commit the selected `group_ptr` in the curve
-//! VALUE chain context. Each recording entry drives its own Eidos absorption —
+//! VALUE frame. Each recording entry drives its own Eidos absorption —
 //! and the uint entries their store / relation demand — through the
 //! `&mut` requires it takes, the keccak-node pattern.
 //!
@@ -52,12 +52,13 @@ use alloc::{
 
 use miden_core::{
     Felt,
-    deferred::{Digest, fold_deferred_root},
+    deferred::{DEFERRED_AND_FRAME, Digest, EidosFrame, fold_deferred_root},
     field::QuadFelt,
+    program::domain::PvmUintPinClaimDomain,
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
-use miden_precompiles::CurvePrecompile;
+use miden_crypto::hash::eidos::{Eidos, EidosDomain};
+use miden_precompiles::{CurveId, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::{
     ec::{
@@ -69,18 +70,18 @@ use crate::{
     relations::ProvideMult,
     transcript::{
         eidos::{
-            EidosChainContext, EidosDigest,
+            EidosDigest,
             trace::{AbsorptionId, EidosRequires},
         },
         eval::{
             COL_A_PTR, COL_ABSORPTION_ID, COL_ACT, COL_B_PTR, COL_BOUND_PTR,
             COL_EC_CONTEXT_GROUP_PTR, COL_EC_CREATE_COORD_BOUND_PTR, COL_EC_CREATE_GROUP_PTR,
-            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_H_BEGIN,
-            COL_H_END, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE, COL_IS_EC_MSM, COL_IS_EC_OP,
-            COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL, COL_IS_PINNED, COL_IS_SUB,
-            COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO, COL_LHS_BEGIN, COL_LHS_END,
-            COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT, COL_PIN_CLAIM_BOUND_PTR,
-            COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END, COL_TAG_ARG0,
+            COL_EC_CREATE_POINT_PTR, COL_EC_CREATE_X_PTR, COL_EC_CREATE_Y_PTR, COL_FRAME_PARAM0,
+            COL_FRAME_PARAM1, COL_H_BEGIN, COL_H_END, COL_IS_ADD, COL_IS_AND, COL_IS_EC_CREATE,
+            COL_IS_EC_MSM, COL_IS_EC_OP, COL_IS_EC_PAI, COL_IS_IS, COL_IS_MSM_LAST, COL_IS_MUL,
+            COL_IS_PINNED, COL_IS_SUB, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_IS_ZERO,
+            COL_LHS_BEGIN, COL_LHS_END, COL_MSM_EXPR, COL_MSM_IDX, COL_MSM_IS_HEAD, COL_OUT_MULT,
+            COL_PIN_CLAIM_BOUND_PTR, COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_RHS_BEGIN, COL_RHS_END,
             COL_UINT_VALUE_BOUND_PTR, DIGEST_WIDTH, NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::{EcOpId, UintOpId},
@@ -157,7 +158,7 @@ impl EcNode {
 struct EvalNode {
     id: u32,
     /// The Eidos absorption this node commits — its digest (the row's
-    /// `h[4]` columns) and the head absorption ID whose chain context the row pins. `None`
+    /// `h[4]` columns) and the head absorption ID whose frame the row pins. `None`
     /// only for the constant [`NodeKind::Zero`] leaf, which runs no
     /// absorption (`hash = ZERO_HASH`).
     absorbed: Option<Absorbed>,
@@ -165,7 +166,7 @@ struct EvalNode {
 }
 
 /// The hash data hoisted out of the [`NodeKind`] arms: a node's committed
-/// digest plus the Eidos absorption ID whose chain context the eval row
+/// digest plus the Eidos absorption ID whose frame the eval row
 /// pins. Carried once on [`EvalNode`] rather than repeated per variant.
 #[derive(Debug, Clone, Copy)]
 struct Absorbed {
@@ -196,8 +197,8 @@ enum NodeKind {
     /// AND node folding two children's bindings into the node hash.
     And { lhs: EidosDigest, rhs: EidosDigest },
     /// Uint leaf / explicit pin claim — hashes a stored uint's 8×u32 value (`lo` ‖ `hi`,
-    /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the VM uint value context
-    /// `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]` and bind
+    /// its two 4×32 halves pulled over `UintVal`). Runtime leaves use the uint VALUE frame
+    /// `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]` and bind
     /// `Binding(hash, Uint, ptr, bound_ptr)`. Explicit pin claims use
     /// `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr, 0)` with `pin_ptr = ptr` and bind
     /// `Binding(hash, True)`.
@@ -208,8 +209,8 @@ enum NodeKind {
         lo: [Felt; DIGEST_WIDTH],
         hi: [Felt; DIGEST_WIDTH],
     },
-    /// Uint op — hashes its two child hashes under the VM uint operation context
-    /// `[UintPrecompile::id(), op_id, 0, 0]`, consumes the children's `Uint`
+    /// Uint op — hashes its two child hashes under the uint operation frame
+    /// `[UintPrecompile::domain(), op_id, 0, 0]`, consumes the children's `Uint`
     /// bindings (`a_ptr` / `b_ptr` / `bound_ptr`) plus one `UintAdd` / `UintMul`
     /// relation tuple, and binds `(hash, Uint, r_ptr, bound_ptr)` — or
     /// `(hash, True)` for [`UintOpId::Is`]. `Is` carries `b_ptr = a_ptr` and
@@ -223,8 +224,8 @@ enum NodeKind {
         r_ptr: u32,
         bound_ptr: u32,
     },
-    /// EcCreate — hashes two uint-coord child hashes `(x, y)` under the VM curve
-    /// VALUE context `[CurvePrecompile::id(), VALUE_OP_ID, group_ptr, 0]`, consumes
+    /// EcCreate — hashes two uint-coordinate child hashes `(x, y)` under the curve VALUE frame
+    /// `[CurvePrecompile::domain(), VALUE_OP_ID, group_ptr, 0]`, consumes
     /// the finite coords' `Uint` bindings plus one `EcPoint` membership tuple,
     /// and binds `(hash, Group, point_ptr)`. PAI mode has no coord children.
     EcCreate {
@@ -240,8 +241,8 @@ enum NodeKind {
         /// flag instead of `is_ec_create`.
         is_pai: bool,
     },
-    /// EcBinOp — hashes two point child hashes under the VM curve operation context
-    /// `[CurvePrecompile::id(), op, 0, 0]`. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
+    /// EcBinOp — hashes two point child hashes under the curve operation frame
+    /// `[CurvePrecompile::domain(), op, 0, 0]`. `Add` consumes `EcGroupAdd(group, p, q, r)`, `Sub`
     /// consumes the rearranged `EcGroupAdd(group, r, q, p)`, and both bind
     /// `(hash, Group, r_ptr)`; `Is` consumes no relation (shared
     /// `p_ptr = q_ptr`) and binds `(hash, True)` (`r_ptr = group_ptr = 0`).
@@ -279,7 +280,7 @@ enum UintKey {
 }
 
 /// Interning key for an EC value node ([`EcNode`]): a `Create` by its
-/// `group_ptr` + coord hashes (the group rides the chain context, not the children, so
+/// `group_ptr` + coord hashes (the group rides the frame, not the children, so
 /// identical coords on distinct groups stay distinct; ∞ uses the zero coord
 /// hashes), an `Op` by `(op, P hash, Q hash)`, an `Msm` claim by its
 /// `(expr_ptr, claim hash)` (one node per structural claim; its hash chains the whole term run).
@@ -339,14 +340,13 @@ impl TranscriptEvalRequires {
 
     /// Record an AND node folding `a` and `b` (both consumed) into
     /// `Binding(hash, True)`, driving the Eidos absorption of
-    /// `a.hash || b.hash || VM Tag::AND` itself. Returns the result
+    /// `a.hash || b.hash` under the VM's deferred-AND frame. Returns the result
     /// handle.
     pub fn record_and(&mut self, a: Truthy, b: Truthy, eidos: &mut EidosRequires) -> Truthy {
         let (lhs, rhs) = (a.hash, b.hash);
         self.consume(a);
         self.consume(b);
-        let absorption =
-            eidos.require_one_shot(EidosChainContext::and(), lhs.as_array(), rhs.as_array());
+        let absorption = eidos.require_one_shot(DEFERRED_AND_FRAME, lhs.as_array(), rhs.as_array());
         let _ = eidos.require_digest(absorption.digest);
         debug_assert_eq!(
             absorption.digest,
@@ -367,7 +367,7 @@ impl TranscriptEvalRequires {
 
     /// Record a uint value row (shared by [`uint_leaf`](Self::uint_leaf) and
     /// [`pin_uint`](Self::pin_uint)): drive the Eidos absorption of `lo ‖ hi` under either
-    /// the runtime uint-leaf context or the explicit pin-claim context, then push the row. Returns
+    /// the runtime uint VALUE frame or the explicit pin-claim frame, then push the row. Returns
     /// the
     /// node id + hash.
     fn push_uint_leaf(
@@ -381,12 +381,14 @@ impl TranscriptEvalRequires {
         let lo: [Felt; DIGEST_WIDTH] = core::array::from_fn(|i| Felt::from(value[i]));
         let hi: [Felt; DIGEST_WIDTH] =
             core::array::from_fn(|i| Felt::from(value[DIGEST_WIDTH + i]));
-        let chain_context = if is_pinned {
-            EidosChainContext::uint_pin_claim(bound_ptr.addr(), ptr.addr())
+        let frame = if is_pinned {
+            EidosFrame::for_domain(PvmUintPinClaimDomain, [bound_ptr.addr(), ptr.addr(), 0])
         } else {
-            EidosChainContext::uint_value(bound_ptr.addr())
+            let domain =
+                UintDomain::from_bound_ptr(bound_ptr.addr()).expect("known uint bound pointer");
+            UintPrecompile::value_frame(domain)
         };
-        let absorption = eidos.require_one_shot(chain_context, lo, hi);
+        let absorption = eidos.require_one_shot(frame, lo, hi);
         let _ = eidos.require_digest(absorption.digest);
         let hash = absorption.digest;
         let id = self.next_id;
@@ -436,7 +438,7 @@ impl TranscriptEvalRequires {
     /// `b`: dedup by `(op, child hashes)` — a re-requested op returns the
     /// existing shared-use handle — else record the relation-chiplet op through
     /// `uints` (interning the result), drive the Eidos absorption of
-    /// `a.hash ‖ b.hash` under the VM uint operation context, consume each child once, and
+    /// `a.hash ‖ b.hash` under the uint operation frame, consume each child once, and
     /// bind the result to `Binding(hash, Uint, r_ptr, bound_ptr)`. Returns
     /// the result's handle.
     pub fn uint_op(
@@ -465,7 +467,7 @@ impl TranscriptEvalRequires {
         self.consume_uint(a);
         self.consume_uint(b);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::uint_op(op),
+            UintPrecompile::op_frame(op as u64),
             a.hash.as_array(),
             b.hash.as_array(),
         );
@@ -494,7 +496,7 @@ impl TranscriptEvalRequires {
 
     /// Record an `Is` node asserting `a ≡ b`, consuming each child's
     /// value-binding once, driving the Eidos absorption of
-    /// `a.hash ‖ b.hash` under the VM uint `EQ`/`Is` context, and binding
+    /// `a.hash ‖ b.hash` under the uint `EQ`/`Is` frame, and binding
     /// `(hash, True)` — the predicate that folds uint values into the
     /// transcript spine. Equality is asserted on the bus (the row
     /// carries one shared ptr for both child consumes), so the honest
@@ -510,7 +512,7 @@ impl TranscriptEvalRequires {
         self.consume_uint(a);
         self.consume_uint(b);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::uint_op(UintOpId::Is),
+            UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID),
             a.hash.as_array(),
             b.hash.as_array(),
         );
@@ -536,8 +538,8 @@ impl TranscriptEvalRequires {
     /// Record an EcCreate node — a curve point from two uint coords `(x, y)` on
     /// an already-selected group. Dedups by `(group, x hash, y hash)`; else
     /// drives the EC value work (eager-membership point) through `ec`, the
-    /// Eidos absorption of
-    /// `x.hash ‖ y.hash ‖ [CurvePrecompile::id(), VALUE_OP_ID, group, 0]`, consumes
+    /// Eidos absorption of `x.hash ‖ y.hash` under
+    /// `[CurvePrecompile::domain(), VALUE_OP_ID, group, 0]`, consumes
     /// both coords, and binds `(hash, Group, point_ptr)`. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_create(
@@ -557,7 +559,9 @@ impl TranscriptEvalRequires {
         self.consume_uint(x);
         self.consume_uint(y);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::ec_create(group_ptr),
+            CurvePrecompile::value_frame(
+                CurveId::from_group_ptr(group_ptr).expect("known curve group pointer"),
+            ),
             x.hash.as_array(),
             y.hash.as_array(),
         );
@@ -587,8 +591,8 @@ impl TranscriptEvalRequires {
 
     /// Record an EcCreate/PAI node — the group's point-at-infinity. Dedups by
     /// `(group, 0, 0)` (one ∞ per group); else drives `ec.pai_on_group` (routing
-    /// the row's `EcPoint(∞)` demand), the Eidos absorption of
-    /// `0 ‖ 0 ‖ [CurvePrecompile::id(), VALUE_OP_ID, group, 0]`, and binds
+    /// the row's `EcPoint(∞)` demand), a one-block Eidos absorption of `0 ‖ 0` under the curve
+    /// domain with parameters `[VALUE_OP_ID, group, 0]`, and binds
     /// `(hash, Group, pai_ptr)`. No coord children. Returns the shared-use
     /// [`EcNode`].
     pub fn ec_pai(
@@ -603,7 +607,9 @@ impl TranscriptEvalRequires {
         }
         let pai = ec.pai_on_group(EcGroupPtr::from_addr(group_ptr));
         let absorption = eidos.require_one_shot(
-            EidosChainContext::ec_create(group_ptr),
+            CurvePrecompile::value_frame(
+                CurveId::from_group_ptr(group_ptr).expect("known curve group pointer"),
+            ),
             EidosDigest::default().as_array(),
             EidosDigest::default().as_array(),
         );
@@ -633,8 +639,8 @@ impl TranscriptEvalRequires {
 
     /// Record an EcBinOp/Add node `R = P + Q`. Dedups by `(Add, P hash,
     /// Q hash)`; else drives `ec.add` (the group law at provide mult 1)
-    /// for `(group, R)`, the Eidos absorption of `P.hash ‖ Q.hash ‖
-    /// [CurvePrecompile::id(), ADD_OP_ID, 0, 0]`, consumes both operands, and binds `(hash,
+    /// for `(group, R)`, a one-block Eidos absorption of `P.hash ‖ Q.hash` under the curve domain
+    /// with parameters `[ADD_OP_ID, 0, 0]`, consumes both operands, and binds `(hash,
     /// Group, r_ptr)`. Returns the shared-use [`EcNode`].
     pub fn ec_add(
         &mut self,
@@ -652,7 +658,7 @@ impl TranscriptEvalRequires {
         self.consume_ec(p);
         self.consume_ec(q);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::ec_op(EcOpId::Add),
+            CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
             p.hash.as_array(),
             q.hash.as_array(),
         );
@@ -683,8 +689,8 @@ impl TranscriptEvalRequires {
     /// `R + Q = P` (one `EcGroupAdd` block via [`EcRequire::sub`]), the EC
     /// parallel of uint sub. Dedups by `(Sub, P hash, Q hash)`; else drives
     /// `ec.sub` (intern the witness `R`, certify `R + Q = P` at provide
-    /// mult 1), consumes both operands, absorbs `P.hash ‖ Q.hash ‖
-    /// [CurvePrecompile::id(), SUB_OP_ID, 0, 0]`, and binds `(hash, Group, r_ptr)` — `R`. The
+    /// mult 1), consumes both operands, absorbs `P.hash ‖ Q.hash` under the curve domain with
+    /// parameters `[SUB_OP_ID, 0, 0]`, and binds `(hash, Group, r_ptr)` — `R`. The
     /// row carries `(p_ptr, q_ptr, r_ptr) = (P, Q, R)`; the AIR's Sub arm
     /// permutes the consume to `EcGroupAdd(g, R, Q, P)`. Returns the
     /// shared-use [`EcNode`].
@@ -704,7 +710,7 @@ impl TranscriptEvalRequires {
         self.consume_ec(p);
         self.consume_ec(q);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::ec_op(EcOpId::Sub),
+            CurvePrecompile::op_frame(CurvePrecompile::SUB_OP_ID),
             p.hash.as_array(),
             q.hash.as_array(),
         );
@@ -733,8 +739,8 @@ impl TranscriptEvalRequires {
 
     /// Record a EcBinOp/Is node asserting `P ≡ Q` — point-ptr equality
     /// (canonical interning means equal points share a ptr), consuming
-    /// both operands' Group bindings at one shared ptr, driving the
-    /// Eidos absorption of `P.hash ‖ Q.hash ‖ [CurvePrecompile::id(), EQ_OP_ID, 0, 0]`,
+    /// both operands' Group bindings at one shared ptr, driving a one-block Eidos absorption of
+    /// `P.hash ‖ Q.hash` under the curve domain with parameters `[EQ_OP_ID, 0, 0]`,
     /// and binding `(hash, True)`. Returns the foldable [`Truthy`].
     pub fn ec_is(&mut self, p: &EcNode, q: &EcNode, eidos: &mut EidosRequires) -> Truthy {
         assert_eq!(
@@ -744,7 +750,7 @@ impl TranscriptEvalRequires {
         self.consume_ec(p);
         self.consume_ec(q);
         let absorption = eidos.require_one_shot(
-            EidosChainContext::ec_op(EcOpId::Is),
+            CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID),
             p.hash.as_array(),
             q.hash.as_array(),
         );
@@ -768,8 +774,8 @@ impl TranscriptEvalRequires {
     }
 
     /// Record an EcMsm claim node `R = Σ sᵢ·Pᵢ` — an Eidos chain over caller-declared
-    /// `terms = [(Pᵢ, sᵢ)]`. The whole term list is framed by the VM curve MSM context
-    /// `[CurvePrecompile::id(), MSM_OP_ID, 0, 0]`; the returned chain
+    /// `terms = [(Pᵢ, sᵢ)]`. The whole term list is framed by the curve domain with parameters
+    /// `[MSM_OP_ID, pair_count, 0]`; the returned chain
     /// digest is `h_claim` and it binds `(h_claim, Group, val)`. Consumes each
     /// term's child `Group`/`Uint` binding (their `out_mult`);
     /// the absorb rows additionally consume `MsmClaimTerm` and the boundary
@@ -822,34 +828,20 @@ impl TranscriptEvalRequires {
             })
             .collect();
 
-        let chain_context = EidosChainContext::ec_msm_context();
-        let h_claim = EidosRequires::digest_of(chain_context, &blocks);
+        let n_pairs = u32::try_from(blocks.len()).expect("MSM pair count must fit in u32");
+        let frame = CurvePrecompile::msm_frame(n_pairs);
+        let h_claim = EidosRequires::digest_of(frame, &blocks);
         let key = EcKey::Msm(expr.addr(), h_claim);
         if let Some(&node) = self.ec_dedup.get(&key) {
             return node;
         }
 
-        let absorption = eidos.require_absorption(chain_context, blocks.iter().copied());
+        let absorption = eidos.require_absorption(frame, blocks.iter().copied());
         debug_assert_eq!(absorption.digest, h_claim);
         let _ = eidos.require_digest(absorption.digest);
 
         let mut absorbs = Vec::with_capacity(terms.len());
-        let payload_len = blocks
-            .len()
-            .checked_mul(8)
-            .and_then(|len| u32::try_from(len).ok())
-            .expect("MSM claim felt length must fit in u32");
-        let [domain_tag_felt, arg0, arg1, reserved] = chain_context.as_array();
-        debug_assert_eq!(reserved, Felt::ZERO);
-        let to_u32 = |value: Felt| {
-            u32::try_from(value.as_canonical_u64()).expect("MSM context values must fit in u32")
-        };
-        let domain_tag = miden_crypto::hash::eidos::DomainTag::from_u32(to_u32(domain_tag_felt))
-            .expect("MSM domain tag must be structurally valid");
-        let mut cv = Eidos::init_chaining_word_with_tag(
-            domain_tag,
-            [payload_len, to_u32(arg0), to_u32(arg1)],
-        );
+        let mut cv = frame.initial_chaining_word();
         let span_head = absorption.head().as_u32();
         for (idx, ((base, scalar), &(block_lo, block_hi))) in
             terms.iter().zip(blocks.iter()).enumerate()
@@ -918,7 +910,7 @@ impl TranscriptEvalRequires {
 
     /// Record an explicit uint pin claim binding `value` to `Binding(hash, True)`.
     ///
-    /// The chain context is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the
+    /// The frame is `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, pin_ptr = ptr, 0)`, and the
     /// row consumes both
     /// `UintVal` halves at `ptr`. The returned handle is foldable into the initial/root transcript
     /// exactly like any [`Truthy`].
@@ -1082,10 +1074,11 @@ fn write_children(row: &mut [Felt; NUM_MAIN_COLS], lhs: &EidosDigest, rhs: &Eido
 /// flags + reused ptr columns; everything else stays 0.
 fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) {
     // EcMsm is the one multi-row node: lay its absorb run (one row per term;
-    // the head consumes the IV context, and the last row consumes the final digest /
+    // the head consumes the initial-CV relation, and the last row consumes the final digest /
     // carries the value ptr + Group-binding `out_mult`).
     if let NodeKind::EcMsm { absorbs, expr, group, val, bound } = &node.kind {
         let k = absorbs.len();
+        let n_pairs = u32::try_from(k).expect("MSM pair count must fit in u32");
         for (idx, a) in absorbs.iter().enumerate() {
             let is_last = idx == k - 1;
             let mut row = [Felt::ZERO; NUM_MAIN_COLS];
@@ -1106,6 +1099,8 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_MSM_EXPR] = Felt::from(*expr);
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group);
             row[COL_BOUND_PTR] = Felt::from(*bound);
+            row[COL_FRAME_PARAM0] = Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32);
+            row[COL_FRAME_PARAM1] = Felt::from(n_pairs);
             if is_last {
                 row[COL_PTR] = Felt::from(*val);
                 row[COL_OUT_MULT] = Felt::from(out_mult);
@@ -1151,7 +1146,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
                 row[COL_PIN_CLAIM_BOUND_PTR] = Felt::from(*bound_ptr);
                 row[COL_PIN_CLAIM_PIN_PTR] = Felt::from(*ptr);
             } else {
-                // Runtime VM uint VALUE: `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`.
+                // Runtime VM uint VALUE: `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`.
                 row[COL_UINT_VALUE_BOUND_PTR] = Felt::from(*bound_ptr);
             }
         },
@@ -1171,8 +1166,8 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_BOUND_PTR] = Felt::from(*bound_ptr);
             row[COL_A_PTR] = Felt::from(*a_ptr);
             row[COL_B_PTR] = Felt::from(*b_ptr);
-            row[COL_TAG_ARG0] = Felt::from(*op as u8); // context slot 1 = op id
-            // Context slot 2 stays 0: the bound rides the Binding / uint-relation buses.
+            row[COL_FRAME_PARAM0] = Felt::from(*op as u8);
+            // Frame parameter 1 stays 0: the bound rides the Binding / uint-relation buses.
         },
         NodeKind::EcCreate {
             x_hash,
@@ -1191,7 +1186,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_EC_CREATE_X_PTR] = Felt::from(*x_ptr); // x coord (0 on PAI)
             row[COL_EC_CREATE_Y_PTR] = Felt::from(*y_ptr); // y coord (0 on PAI)
             row[COL_EC_CREATE_GROUP_PTR] = Felt::from(*group_ptr); // curve VALUE group_ptr
-            // COL_TAG_ARG0 stays 0: curve VALUE_OP_ID. COL_EC_CONTEXT_GROUP_PTR is not live on
+            // COL_FRAME_PARAM0 stays 0: curve VALUE_OP_ID. COL_EC_CONTEXT_GROUP_PTR is not live on
             // create rows.
         },
         NodeKind::EcBinOp {
@@ -1209,7 +1204,7 @@ fn push_node_row(trace: &mut Vec<Felt>, node: &EvalNode, out_mult: ProvideMult) 
             row[COL_PTR] = Felt::from(*r_ptr); // result (0 for Is)
             row[COL_A_PTR] = Felt::from(*p_ptr); // P
             row[COL_B_PTR] = Felt::from(*q_ptr); // Q
-            row[COL_TAG_ARG0] = Felt::from_u32(ec_op_id(*op) as u32); // curve-op context slot 1
+            row[COL_FRAME_PARAM0] = Felt::from_u32(ec_op_id(*op) as u32);
             row[COL_EC_CONTEXT_GROUP_PTR] = Felt::from(*group_ptr); // 0 for Is
         },
         NodeKind::EcMsm { .. } => unreachable!("EcMsm is laid as a multi-row run above"),

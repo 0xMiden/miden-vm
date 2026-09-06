@@ -29,11 +29,11 @@ meaning of the nodes.
 
 ## Motivation
 
-The deferred subsystem models proof-bound work as a **graph of tagged payloads and structural
-edges**. This lets the Precompile VM prove computation at a finer grain. For example, it can prove a
-single curve or field operation without re-hashing every intermediate as an opaque standalone assertion.
-A calculation like `(a + b) · c` can reference and share sub-results by content address, so
-operation-heavy precompiles avoid duplicating the same hashing work.
+The deferred subsystem models proof-bound work as a **graph of content-addressed nodes and
+structural edges**. This lets the Precompile VM prove computation at a finer grain. For example, it
+can prove a single curve or field operation without re-hashing every intermediate as an opaque
+standalone assertion. A calculation like `(a + b) · c` can reference and share sub-results by
+content address, so operation-heavy precompiles avoid duplicating the same hashing work.
 
 Each deferred node evaluates to a canonical node; an operation references its operands by their
 content address; shared sub-computations are shared in the graph. When the framework needs ordered
@@ -52,24 +52,20 @@ proofs, completion, and verification.
 
 ## The model
 
-A **node** is a `(tag, payload)` pair, addressed by its 4-felt Eidos **digest**. Identical
-content yields an identical digest, so equal subterms are shared automatically (hash-consing).
+A non-`TRUE` **node** is a `(frame, payload)` pair, addressed by its 4-felt Eidos **digest**.
+Identical content yields an identical digest, so equal subterms are shared automatically
+(hash-consing).
 
-- A **tag** is a node's identity and constructor: externally, precompile tags are built with
-  `Tag::precompile(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
-  selects the owning precompile; the next two felts (`args`) are entirely the precompile's to
-  interpret (a discriminant, a data length, a small constant, ...). The final felt is reserved and
-  must be zero, so the canonical layout is `[domain_tag, arg0, arg1, 0]`. The framework reserves ids
-  `0`, `1`, and `2` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node,
-  `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes, and
-  `Tag::CHUNKS = [2, 0, 0, 0]` tags framework-owned opaque byte chunks. No precompile may claim
-  these ids. Deferred statement accumulation uses the same semantic `AND` constructor as a
-  restricted right-spined chain.
+- A **frame** is `(domain_tag, param0, param1, param2)`, with every component represented by one
+  `u32`. The registered domain selects the owner and defines the meaning of all three parameters,
+  the payload grammar, and the compression schedule. The framework defines frames for semantic
+  AND and opaque CHUNKS nodes. The canonical `TRUE` node is a zero-digest sentinel with no frame or
+  payload. Deferred statement accumulation uses AND nodes as a restricted right-spined chain.
 - A **payload** is the node's body, in one of four shapes:
   - the framework `TRUE` sentinel, carrying no data; it is the only zero-payload node;
-  - a data payload: one or more 8-felt compression blocks, linearly hashed under the tag. An empty
-    data payload is forbidden; precompiles decide whether a data payload represents a scalar,
-    digest, message, hash preimage, coordinate, or some other local value;
+  - a data payload: one or more 8-felt compression blocks, linearly hashed from the frame's initial
+    chaining word. An empty data payload is forbidden; precompiles decide whether a data payload
+    represents a scalar, digest, message, hash preimage, coordinate, or some other local value;
   - a join payload: two child digests (`lhs`, `rhs`) for anything referential, such as a binary
     operation, predicate, or AND step;
   - a pair-list payload: one or more structural digest pairs for precompile-specific multi-pair
@@ -77,32 +73,32 @@ content yields an identical digest, so equal subterms are shared automatically (
     order is `lhs0`, `rhs0`, `lhs1`, `rhs1`, and so on. Canonical wire encodes the same ordered
     pairs as topological child indices. Empty pair lists are rejected; exact pair-count/arity
     constraints are semantic and enforced by the owning precompile. Budget accounting treats each
-    pair as one ordinary 8-felt payload block, in addition to the tag word.
+    pair as one ordinary 8-felt payload block, in addition to the frame word.
 
-The digest commits to both the node identity and body. Framework AND and CHUNKS nodes use their
-registered Eidos domain tags. A precompile-owned node initializes Eidos directly from its registered
-domain tag, payload length, and two tag arguments, then compresses each 8-felt payload chunk exactly
-once. The last payload compression produces the node digest.
+The digest commits to both the frame and body. A non-TRUE node derives one Eidos initial chaining
+word from its complete frame, then compresses each 8-felt payload chunk exactly once. The domain,
+not the framework, assigns meaning to the frame parameters. The last payload compression produces
+the node digest.
 
 ## Precompiles
 
 A **precompile** is the framework's extension point: an implementation of the `Precompile` trait
-that claims one tag id and, within that slice of tag space, defines a *family of node types*
+that claims one registered domain and defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
 DAG. Concrete proof-bound precompiles live in the `miden-precompiles` crate; their MASM support
 code is an internal implementation detail.
 
 A precompile supplies three things:
 
-- `decode(args) -> Option<NodeType>` checks which constructor a tag names and what
-  structural shape it carries. This inspects only `Tag::args()`; payload data is not available yet.
+- `decode(params) -> Option<NodeType>` checks which constructor a frame names and what
+  structural shape it carries. Payload data is not available yet.
   The returned shape drives registration and wire handling, but exact data/pair-list arity is
   semantic and is checked during precompile evaluation:
   - `NodeType::Data` declares a non-empty opaque data payload.
   - `NodeType::Join` declares one payload block containing two child digests.
   - `NodeType::PairList` declares a non-empty list of structural `lhs || rhs` digest pairs.
   - `NodeType::True` is reserved for the framework TRUE sentinel; a precompile must not return it.
-- `evaluate(args, payload, …) -> Result<Node>` computes a node's **canonical form**. The
+- `evaluate(params, payload, …) -> Result<Node>` computes a node's **canonical form**. The
   common roles are: validate a canonical value represented as data (its canonical is itself),
   evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
   (evaluate operands, return the `TRUE` node on success or fail otherwise). These roles are
@@ -116,7 +112,7 @@ domain tag to its owning precompile and is otherwise indifferent to how the prec
 Each precompile uses an explicitly registered domain tag; names are diagnostic only and are never
 hashed into protocol identifiers. The registry rejects malformed, framework-reserved, or duplicate
 tags at construction. `PrecompileRegistry::new()` creates an empty low-level
-registry that rejects every precompile-owned tag. A `DeferredState` carries the registry it
+registry that rejects every precompile-owned frame. A `DeferredState` carries the registry it
 evaluates under, and `PrecompileRegistry` remains defined in `miden-core` so the framework does not
 depend on concrete precompile implementations.
 
@@ -139,16 +135,21 @@ memory chunk sequence in a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: one data chunk, two 4-felt child digests for a join, or one `lhs_digest || rhs_digest` pair for a pair-list node. If the tag arguments define a different required data or pair-list arity, precompile evaluation rejects the node. Structural child digests may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` initializes Eidos from the domain tag, payload length, and two arguments, then compresses this payload block once. |
-| `register_deferred_data`   | `[TAG, ptr, n_chunks, ...]`        | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. For data and pair-list tags, `n_chunks` determines the non-empty payload length; when tag arguments define an exact arity, precompile evaluation checks it. Pair-list chunks are interpreted as `lhs_digest || rhs_digest` pairs. Join tags require `n_chunks == 1` and interpret the single chunk as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it inside the VM from the same `TAG` and ordered chunk sequence. |
-| `evaluate_deferred`        | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
-| `evaluate_deferred_tag`    | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
+| `register_deferred`        | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Recovers the frame from the initial chaining word `CV`, registers one stack-resident 8-felt payload block, and evaluates the node immediately. The frame determines whether the block is data, two child digests for a precompile-owned join, or one digest pair. Precompile evaluation rejects a frame whose semantics require another payload shape or arity. Structural children may reference only registered nodes or `TRUE_DIGEST`. The event returns nothing; code that uses the digest must compress the same block from the same `CV`. |
+| `register_deferred_data`   | `[n_chunks, CV, ptr, ...]`        | Recovers the frame from `CV`, reads `n_chunks` non-empty 8-felt blocks from word-aligned memory, registers the corresponding data, pair-list, or one-block precompile-owned join node, and evaluates it immediately. The event returns nothing; code that uses the digest must hash the same memory range from the same `CV`. |
+| `evaluate_deferred`        | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame and payload felts onto the **advice stack**. For a non-TRUE node, the frame is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand stack. `TRUE` emits one zero word in the frame slot. |
+| `evaluate_deferred_frame`  | `[NODE_DIGEST, ...]`               | Looks the node up, evaluates it to canonical form, and pushes its frame onto the **advice stack**. `TRUE` emits one zero word in the frame slot. |
 | `evaluate_deferred_payload` | `[NODE_DIGEST, ...]`              | Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
 `register_*` validate the decoded shape, require non-empty data and pair lists, and check child
-closure for structural payloads. Exact data or pair-list arity is enforced only when the tag's
+closure for structural payloads. Exact data or pair-list arity is enforced only when the frame's
 precompile-specific semantics define one. Registration stores the original node under its digest,
 evaluates it immediately, and fails immediately if semantic evaluation fails.
+
+The generic registration events accept precompile-owned nodes and framework CHUNKS nodes, but not
+the framework-owned `DEFERRED_AND_FRAME` (or malformed parameterized frames in that domain).
+Execution constructs rolling AND nodes through `log_deferred`; state merge and wire rehydration use
+the same framework-owned node construction directly.
 
 ### Why the digest is computed inside the VM
 
@@ -156,8 +157,8 @@ A system event is a host hook. Its stack arguments are visible in the VM executi
 host-side state changes are not constrained by the AIR. In particular, a memory-backed register
 event reads `n_chunks` chunks at `ptr` without adding AIR memory accesses that bind the registered
 contents to those cells. A proof-relevant digest must therefore be derived with VM instructions:
-`compress` for a stack payload, or `mem_stream` plus `compress` for the same tag and ordered
-memory chunk sequence, using the registered Eidos domain tag and parameter framing.
+`compress` for a stack payload, or `mem_stream` plus `compress` for the same initial chaining word
+and ordered memory chunk sequence.
 
 This composes with the verifier:
 
@@ -174,7 +175,7 @@ execution trace.
 
 A deferred-evaluation event delegates work the VM does not perform and returns the result through
 advice, making it an **unbound host hint**. Using it soundly requires re-hashing the returned payload
-with VM instructions (and, for the full event, checking the returned tag) and logging a predicate
+with VM instructions (and, for the full event, checking the returned frame) and logging a predicate
 that `from_wire` re-checks; a VM `eq`/`assert` over two raw advice results proves nothing about their
 correctness. Because that obligation is precompile-specific (which predicate to log is the
 precompile's business), deferred evaluation is intentionally *not* exposed as a generic safe `sys`
@@ -186,7 +187,7 @@ claim about the registered node.
 
 Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node like any
 other successful predicate. `evaluate_deferred_payload` emits no advice for `TRUE` because `TRUE`
-has no payload, while `evaluate_deferred_tag` and full `evaluate_deferred` emit `Tag::TRUE`. A
+has no payload, while `evaluate_deferred_frame` and full `evaluate_deferred` emit one zero word. A
 failed predicate has already surfaced as an error before any felts are pushed.
 
 ## The deferred root commitment
@@ -195,7 +196,8 @@ The deferred root commitment is a rolling AND-chain. `DeferredState.root` starts
 (`TRUE_DIGEST`), which is also the digest of the always-present canonical `Node::TRUE`. A verified
 **statement** is any registered digest that evaluates to `TRUE` and need not be a primitive
 predicate node. To fold one, the framework registers an AND node
-`{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
+`{ frame: DEFERRED_AND_FRAME, payload: prev_root || stmt_digest }` and advances the root to that
+node's digest.
 The append path first evaluates the statement under the installed registry and rejects missing or
 non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
 implicit root and evaluates that root directly. The digest is structural: even `AND(TRUE, TRUE)` is
@@ -230,8 +232,8 @@ wire's implicit root.
 
 Hydration performs structural decoding, a canonicality check, and root evaluation:
 
-1. **structural.** Seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
-   entry (translating structural child indices back to digests), decode its tag, check that the entry
+1. **structural.** Seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit entry
+   (translating structural child indices back to digests), decode its frame, check that the entry
    variant and payload shape match the declared `NodeType`, reject explicit `TRUE`, reject duplicate
    digests, and require structural children to reference only earlier entries;
 2. **canonicality.** Register decoded entries into a fresh state, set the implicit wire root as
@@ -247,7 +249,8 @@ the wire's implicit root and whose canonical wire output is byte-for-byte identi
 ## Status and scope
 
 This framework is the proof-bound precompile substrate. Execution accumulates host-side
-`DeferredState`; `log_deferred` advances its root by folding registered statements with `Tag::AND`.
+`DeferredState`; `log_deferred` advances its root by folding registered statements with
+`DEFERRED_AND_FRAME`.
 The `miden-precompiles` crate supplies the bundled implementations used by core-library facades and
 standard proving. See the [API contract](./semantics.md#proof-obligations-and-composition) for the
 transport, hydration, merge, completion, and verification lifecycle.
