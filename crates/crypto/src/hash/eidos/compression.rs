@@ -50,8 +50,10 @@ pub(super) fn compress_packed_felt_cv(
     cv: &PackedChainingValue,
     block: &PackedBlock,
 ) -> PackedChainingValue {
-    let cv = encoding::unpack_packed_cv(*cv);
-    let block = encoding::encode_packed_felt_block(*block);
+    #[cfg(target_arch = "aarch64")]
+    let (cv, block) = (encoding::arm_unpack_felts(*cv), encoding::arm_unpack_felts(*block));
+    #[cfg(not(target_arch = "aarch64"))]
+    let (cv, block) = (encoding::unpack_packed_cv(*cv), encoding::encode_packed_felt_block(*block));
     encoding::pack_cv_to_felts(CompressionCore::compress_packed_native(&cv, &block))
 }
 
@@ -65,6 +67,8 @@ pub(super) fn compress_packed_u64_cv(
     cv: &[[u64; PACKED_LANES]; DIGEST_WIDTH],
     block: &[[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
+    // Raw u64 inputs are split losslessly; callers supplying field elements must canonicalize
+    // them first. Arbitrary Felts use the canonicalizing adapter above.
     let cv = encoding::unpack_packed_u64_cv(*cv);
 
     #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
@@ -271,6 +275,53 @@ mod tests {
                 encoding::pack_cv_to_packed_u64s(cv),
                 "AVX-512 output adapter diverged in batch {batch}",
             );
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn arm_adapter_preserves_canonical_boundaries_and_mixed_halves() {
+        // Noncanonical internal representatives must be reduced before splitting.
+        let boundaries = [
+            0,
+            1,
+            u32::MAX as u64,
+            1 << 32,
+            Felt::ORDER - 1,
+            Felt::ORDER,
+            Felt::ORDER + 1,
+            u64::MAX,
+        ];
+        for batch in 0..32 {
+            let block: PackedBlock = array::from_fn(|word| {
+                array::from_fn(|lane| {
+                    Felt::new_unchecked(if batch == 0 {
+                        boundaries[(word + lane) % 8]
+                    } else {
+                        mixed_u64(batch, word, lane)
+                    })
+                })
+            });
+            let decoded: [[u32; PACKED_LANES]; 16] = encoding::arm_unpack_felts(block);
+            for word in 0..BLOCK_LEN {
+                for lane in 0..PACKED_LANES {
+                    let value = block[word][lane].as_canonical_u64();
+                    assert_eq!(decoded[2 * word][lane], value as u32);
+                    assert_eq!(decoded[2 * word + 1][lane], (value >> 32) as u32);
+                }
+            }
+            let cv = array::from_fn(|word| block[word]);
+            let actual = compress_packed_felt_cv(&cv, &block);
+            for lane in 0..PACKED_LANES {
+                let expected = compress_felt_block(
+                    Word::new(array::from_fn(|word| cv[word][lane])),
+                    array::from_fn(|word| block[word][lane]),
+                );
+                for word in 0..DIGEST_WIDTH {
+                    assert_eq!(actual[word][lane], expected[word]);
+                    assert!(actual[word][lane].as_canonical_u64() < (1 << 63));
+                }
+            }
         }
     }
 

@@ -141,6 +141,7 @@ pub(super) fn encode_u64_block(chunk: &[u64]) -> [u32; 16] {
     block
 }
 
+#[cfg(not(target_arch = "aarch64"))]
 #[inline]
 pub(super) fn unpack_packed_cv<const LANES: usize>(
     cv: [[Felt; LANES]; DIGEST_WIDTH],
@@ -198,6 +199,25 @@ pub(super) fn encode_packed_u64_block<const LANES: usize>(
             }
         })
     })
+}
+
+/// Split one row at a time so NEON can canonicalize and deinterleave without a full
+/// intermediate array of pairs. This also feeds the fixed-layout SVE kernels.
+#[cfg(target_arch = "aarch64")]
+#[inline]
+pub(super) fn arm_unpack_felts<const ROWS: usize, const WORDS: usize>(
+    input: [[Felt; super::PACKED_LANES]; ROWS],
+) -> [[u32; super::PACKED_LANES]; WORDS] {
+    assert_eq!(WORDS, 2 * ROWS);
+    let mut output = [[0; super::PACKED_LANES]; WORDS];
+    for (word, values) in input.iter().enumerate() {
+        for (lane, value) in values.iter().enumerate() {
+            let value = value.as_canonical_u64();
+            output[2 * word][lane] = value as u32;
+            output[2 * word + 1][lane] = (value >> 32) as u32;
+        }
+    }
+    output
 }
 
 #[cfg(test)]
