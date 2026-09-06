@@ -4,6 +4,59 @@
 use super::*;
 
 #[test]
+fn pointer_address_spaces_survive_package_round_trip() -> TestResult {
+    use miden_assembly_syntax::ast::types::{AddressSpace, PointerType, Type};
+    use miden_mast_package::{Package, PackageExport};
+
+    let context = TestContext::new();
+    let module = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::pointers
+
+        pub proc write(
+            explicit: ptr<u32, addrspace(felt)>,
+            implicit: ptr<u32>,
+            bytes: ptr<u32, addrspace(byte)>,
+            nested: ptr<ptr<u32, addrspace(felt)>, addrspace(byte)>
+        ) -> ptr<u32, addrspace(felt)>
+            nop
+        end
+        "#
+    ))?;
+
+    let package = context.assemble_library("lib", None, module, [])?;
+    let decoded = Package::read_from_bytes(&package.to_bytes()).expect("package should decode");
+    let element_ptr =
+        Type::Ptr(PointerType::new_with_address_space(Type::U32, AddressSpace::Element).into());
+    let byte_ptr =
+        Type::Ptr(PointerType::new_with_address_space(Type::U32, AddressSpace::Byte).into());
+    let nested_ptr = Type::Ptr(
+        PointerType::new_with_address_space(element_ptr.clone(), AddressSpace::Byte).into(),
+    );
+
+    for package in [&package, &decoded] {
+        let signature = package
+            .manifest
+            .exports()
+            .find_map(|export| match export {
+                PackageExport::Procedure(proc) if proc.path.to_string().ends_with("write") => {
+                    proc.signature.as_ref()
+                },
+                _ => None,
+            })
+            .expect("write should be exported with a signature");
+
+        assert_eq!(
+            signature.params(),
+            &[element_ptr.clone(), element_ptr.clone(), byte_ptr.clone(), nested_ptr.clone()]
+        );
+        assert_eq!(signature.results(), core::slice::from_ref(&element_ptr));
+    }
+    Ok(())
+}
+
+#[test]
 fn variadic_procedure_signatures_resolve() -> TestResult {
     use miden_assembly_syntax::ast::types::Type;
     use miden_mast_package::PackageExport;
