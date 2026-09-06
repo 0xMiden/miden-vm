@@ -27,7 +27,7 @@ impl UintDomain {
     /// All fixed domains in deterministic precompile initialization order.
     pub const ALL: [Self; 3] = [Self::U256, Self::K1Base, Self::K1Scalar];
 
-    /// Returns the supported domain for a tag-local id.
+    /// Returns the supported domain for a local metadata identifier.
     pub fn from_id(id: Felt) -> Option<Self> {
         match id {
             id if id == <U256 as UintSpec>::ID => Some(Self::U256),
@@ -46,7 +46,7 @@ impl UintDomain {
         }
     }
 
-    /// Returns the VM-owned bound pointer carried in uint `VALUE` tags.
+    /// Returns the VM-owned bound pointer carried in uint `VALUE` frames.
     pub const fn bound_ptr(self) -> u32 {
         match self {
             Self::U256 => U256_BOUND_PTR,

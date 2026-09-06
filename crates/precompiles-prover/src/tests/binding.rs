@@ -14,7 +14,7 @@ use crate::{
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        eidos::EidosChainInputMsg,
+        eidos::EidosBlockMsg,
     },
 };
 
@@ -96,12 +96,9 @@ fn binding_bus_has_disjoint_prefix() {
         bound_ptr: Felt::ZERO,
     }
     .encode(&challenges);
-    let enc_in = EidosChainInputMsg {
-        chain_step_id: p[0],
-        is_head: Felt::ONE,
-        domain: p[1],
-        message: [p[2], p[3], p[4], p[5], Felt::ZERO, Felt::ZERO, Felt::ZERO, Felt::ZERO],
-        chain_context: [Felt::ZERO; 4],
+    let enc_in = EidosBlockMsg {
+        compression_id: p[0],
+        block: [p[1], p[2], p[3], p[4], p[5], Felt::ZERO, Felt::ZERO, Felt::ZERO],
     }
     .encode(&challenges);
 

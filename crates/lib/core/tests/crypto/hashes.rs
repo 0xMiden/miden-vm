@@ -94,9 +94,9 @@ fn core_hash_wrapper_cycle_baselines() {
             cycle_eidos_precomputed_domain_init_source(42, 8),
             25,
         ),
-        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 227),
-        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 244),
-        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 266),
+        ("core_keccak_hash", cycle_fixed_hash_source("keccak256", &input), 195),
+        ("core_keccak_merge", cycle_merge_source("keccak256", &left, &right), 219),
+        ("core_keccak_hash_bytes_short", cycle_hash_bytes_source("keccak256", short), 243),
     ] {
         let output =
             run_core_program(&source).unwrap_or_else(|err| panic!("{name} failed: {err:?}"));

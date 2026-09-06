@@ -11,7 +11,7 @@ use miden_air::trace::and8_lookup::{
 };
 use miden_core::{
     Felt, Word,
-    deferred::DEFERRED_AND_INIT_CV,
+    deferred::EidosFrame,
     field::{Field, PrimeCharacteristicRing, PrimeField64},
     utils::RowMajorMatrix,
 };
@@ -27,17 +27,15 @@ use super::compression::{
 use crate::{
     relations::ProvideMult,
     transcript::eidos::{
-        COL_ABSORPTION_ID, COL_CHAIN_CONTEXT_BEGIN, COL_CV_IN_BEGIN, COL_IN_MULTIPLICITY,
-        COL_IS_ABSORB, COL_IS_AND, COL_IS_CHUNKS, COL_IS_GENERIC, COL_IS_HEAD, COL_IS_OUTPUT,
-        COL_IS_PAYLOAD, COL_OUT_MULTIPLICITY, COL_REMAINING, COL_REMAINING_INV, NUM_MAIN_COLS,
-        digest::{EidosChainContext, EidosDigest},
+        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, NUM_MAIN_COLS,
+        digest::EidosDigest,
     },
 };
 
 // ABSORPTION OUTPUT
 // ================================================================================================
 
-/// Logical input-block identifier used by the surrounding transcript relations.
+/// Physical Eidos compression-cycle identifier used by the surrounding transcript relations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AbsorptionId(u32);
 
@@ -52,7 +50,7 @@ impl AbsorptionId {
     }
 }
 
-/// Contiguous input-block span occupied by one absorption.
+/// Contiguous physical compression-cycle span occupied by one absorption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AbsorptionSpan {
     start: u32,
@@ -99,23 +97,6 @@ impl AbsorptionOutput {
 // EIDOS ORACLE
 // ================================================================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AbsorptionKind {
-    And,
-    Chunks,
-    Generic,
-}
-
-fn absorption_kind(context: EidosChainContext) -> AbsorptionKind {
-    if context == EidosChainContext::and() {
-        AbsorptionKind::And
-    } else if context == EidosChainContext::chunk() {
-        AbsorptionKind::Chunks
-    } else {
-        AbsorptionKind::Generic
-    }
-}
-
 fn block_from_words(block_lo: [Felt; 4], block_hi: [Felt; 4]) -> [Felt; 8] {
     let mut block = [Felt::ZERO; 8];
     block[..4].copy_from_slice(&block_lo);
@@ -123,40 +104,8 @@ fn block_from_words(block_lo: [Felt; 4], block_hi: [Felt; 4]) -> [Felt; 8] {
     block
 }
 
-fn initial_cv(kind: AbsorptionKind, context: EidosChainContext, num_payload_blocks: usize) -> Word {
-    let payload_felts = num_payload_blocks
-        .checked_mul(8)
-        .and_then(|len| u32::try_from(len).ok())
-        .expect("deferred absorption felt length must fit in u32");
-    match kind {
-        AbsorptionKind::And => {
-            assert_eq!(num_payload_blocks, 1, "AND must contain one digest pair");
-            DEFERRED_AND_INIT_CV
-        },
-        AbsorptionKind::Chunks => {
-            Eidos::init_chaining_word(miden_core::program::domain::DEFERRED_CHUNKS, payload_felts)
-        },
-        AbsorptionKind::Generic => {
-            let [domain_tag_felt, arg0, arg1, reserved] = context.as_array();
-            assert_eq!(reserved, Felt::ZERO, "deferred tag reserved lane must be zero");
-            let to_u32 = |value: Felt| {
-                u32::try_from(value.as_canonical_u64())
-                    .expect("deferred tag values must fit in u32")
-            };
-            let domain_tag =
-                miden_crypto::hash::eidos::DomainTag::from_u32(to_u32(domain_tag_felt))
-                    .expect("deferred domain tag must be structurally valid");
-            Eidos::init_chaining_word_with_tag(
-                domain_tag,
-                [payload_felts, to_u32(arg0), to_u32(arg1)],
-            )
-        },
-    }
-}
-
-fn absorb_oracle(context: EidosChainContext, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
-    let kind = absorption_kind(context);
-    let mut cv = initial_cv(kind, context, blocks.len());
+fn absorb_oracle(frame: EidosFrame, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
+    let mut cv = frame.initial_chaining_word();
     for &(block_lo, block_hi) in blocks {
         cv = Eidos::compress(cv, block_from_words(block_lo, block_hi));
     }
@@ -168,7 +117,7 @@ fn absorb_oracle(context: EidosChainContext, blocks: &[([Felt; 4], [Felt; 4])]) 
 
 #[derive(Debug, Clone)]
 struct RecordedAbsorption {
-    chain_context: EidosChainContext,
+    frame: EidosFrame,
     blocks: Vec<([Felt; 4], [Felt; 4])>,
     digest: EidosDigest,
     range: Range<u32>,
@@ -188,31 +137,26 @@ impl EidosRequires {
         Self::default()
     }
 
-    pub fn digest_of(
-        chain_context: EidosChainContext,
-        blocks: &[([Felt; 4], [Felt; 4])],
-    ) -> EidosDigest {
+    pub fn digest_of(frame: EidosFrame, blocks: &[([Felt; 4], [Felt; 4])]) -> EidosDigest {
         assert!(!blocks.is_empty(), "absorption needs at least one block");
-        absorb_oracle(chain_context, blocks)
+        absorb_oracle(frame, blocks)
     }
 
     pub fn require_absorption(
         &mut self,
-        chain_context: EidosChainContext,
+        frame: EidosFrame,
         blocks: impl IntoIterator<Item = ([Felt; 4], [Felt; 4])>,
     ) -> AbsorptionOutput {
         let blocks: Vec<_> = blocks.into_iter().collect();
         assert!(!blocks.is_empty(), "absorption needs at least one block");
-        let digest = absorb_oracle(chain_context, &blocks);
+        let digest = absorb_oracle(frame, &blocks);
 
         if let Some(&idx) = self.by_digest.get(&digest) {
             let rec = &mut self.absorptions[idx];
-            debug_assert_eq!(
-                rec.chain_context, chain_context,
-                "equal digest must identify the same chain context"
-            );
+            debug_assert_eq!(rec.frame, frame, "equal digest must identify the same frame");
             debug_assert_eq!(rec.blocks, blocks, "equal digest must identify the same payload");
-            rec.in_mult += 1;
+            rec.in_mult =
+                rec.in_mult.checked_add(1).expect("Eidos input multiplicity must fit in u32");
             return AbsorptionOutput {
                 digest,
                 span: AbsorptionSpan::new(rec.range.clone()),
@@ -225,7 +169,7 @@ impl EidosRequires {
         self.next_seq = next_seq;
         let idx = self.absorptions.len();
         self.absorptions.push(RecordedAbsorption {
-            chain_context,
+            frame,
             blocks,
             digest,
             range: range.clone(),
@@ -238,17 +182,18 @@ impl EidosRequires {
 
     pub fn require_one_shot(
         &mut self,
-        chain_context: EidosChainContext,
+        frame: EidosFrame,
         block_lo: [Felt; 4],
         block_hi: [Felt; 4],
     ) -> AbsorptionOutput {
-        self.require_absorption(chain_context, core::iter::once((block_lo, block_hi)))
+        self.require_absorption(frame, core::iter::once((block_lo, block_hi)))
     }
 
     pub fn require_digest(&mut self, digest: EidosDigest) -> Option<AbsorptionSpan> {
         let &idx = self.by_digest.get(&digest)?;
         let rec = &mut self.absorptions[idx];
-        rec.out_mult += 1;
+        rec.out_mult =
+            rec.out_mult.checked_add(1).expect("Eidos output multiplicity must fit in u32");
         Some(AbsorptionSpan::new(rec.range.clone()))
     }
 
@@ -276,16 +221,11 @@ pub struct EidosTraceBundle {
 
 #[derive(Debug)]
 struct CompressionCycle {
-    absorption_id: u32,
     in_mult: ProvideMult,
     out_mult: ProvideMult,
-    is_head: bool,
-    is_payload: bool,
-    is_output: bool,
-    kind: AbsorptionKind,
-    remaining: usize,
+    is_absorb: bool,
+    chain_head_id: u32,
     block: [Felt; 8],
-    chain_context: EidosChainContext,
     cv_in: Word,
 }
 
@@ -295,28 +235,10 @@ impl CompressionCycle {
         row.resize(start + (NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS), Felt::ZERO);
         let meta = &mut row[start..];
         let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
-        meta[col(COL_ABSORPTION_ID)] = Felt::from(self.absorption_id);
         meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
         meta[col(COL_OUT_MULTIPLICITY)] = Felt::from(self.out_mult);
-        meta[col(COL_IS_HEAD)] = Felt::from_u8(self.is_head as u8);
-        meta[col(COL_IS_ABSORB)] = Felt::from_u8((!self.is_head) as u8);
-        meta[col(COL_IS_PAYLOAD)] = Felt::from_u8(self.is_payload as u8);
-        meta[col(COL_IS_OUTPUT)] = Felt::from_u8(self.is_output as u8);
-        meta[col(COL_IS_AND)] = Felt::from_u8((self.kind == AbsorptionKind::And) as u8);
-        meta[col(COL_IS_CHUNKS)] = Felt::from_u8((self.kind == AbsorptionKind::Chunks) as u8);
-        meta[col(COL_IS_GENERIC)] = Felt::from_u8((self.kind == AbsorptionKind::Generic) as u8);
-        let remaining = Felt::from(
-            u32::try_from(self.remaining).expect("remaining compression count must fit in u32"),
-        );
-        meta[col(COL_REMAINING)] = remaining;
-        meta[col(COL_REMAINING_INV)] = if self.remaining == 1 {
-            Felt::ZERO
-        } else {
-            (remaining - Felt::ONE).inverse()
-        };
-        meta[col(COL_CHAIN_CONTEXT_BEGIN)..col(COL_CHAIN_CONTEXT_BEGIN) + 4]
-            .copy_from_slice(&self.chain_context.as_array());
-        meta[col(COL_CV_IN_BEGIN)..col(COL_CV_IN_BEGIN) + 4].copy_from_slice(self.cv_in.as_slice());
+        meta[col(COL_IS_ABSORB)] = Felt::from_u8(self.is_absorb as u8);
+        meta[col(COL_CHAIN_HEAD_ID)] = Felt::from(self.chain_head_id);
     }
 }
 
@@ -428,25 +350,17 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
     let mut cycles = Vec::with_capacity(cycle_count);
 
     for rec in &requires.absorptions {
-        let kind = absorption_kind(rec.chain_context);
-        let total = rec.blocks.len();
-        let mut cv = initial_cv(kind, rec.chain_context, total);
+        let mut cv = rec.frame.initial_chaining_word();
 
         for (idx, &(block_lo, block_hi)) in rec.blocks.iter().enumerate() {
             let block = block_from_words(block_lo, block_hi);
             let cv_out = Eidos::compress(cv, block);
-            let is_output = idx + 1 == total;
             cycles.push(CompressionCycle {
-                absorption_id: rec.range.start + idx as u32,
                 in_mult: rec.in_mult,
-                out_mult: if is_output { rec.out_mult } else { 0 },
-                is_head: idx == 0,
-                is_payload: true,
-                is_output,
-                kind,
-                remaining: total - idx,
+                out_mult: rec.out_mult,
+                is_absorb: idx > 0,
+                chain_head_id: rec.range.start,
                 block,
-                chain_context: rec.chain_context,
                 cv_in: cv,
             });
             cv = cv_out;
@@ -469,7 +383,12 @@ pub fn generate_traces(requires: EidosRequires) -> EidosTraceBundle {
         if let Some(cycle) = cycles.get(cycle_idx) {
             cycle.append_metadata(&mut values);
         } else {
-            values.extend([Felt::ZERO; NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS]);
+            let start = values.len();
+            values.resize(start + (NUM_MAIN_COLS - NUM_EIDOS_COMPRESSION_COLS), Felt::ZERO);
+            let physical_cycle_id =
+                u32::try_from(cycle_idx).expect("Eidos compression cycle ID must fit in u32");
+            values[start + COL_CHAIN_HEAD_ID - NUM_EIDOS_COMPRESSION_COLS] =
+                Felt::from(physical_cycle_id);
         }
     }
 

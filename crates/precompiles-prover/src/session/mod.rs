@@ -27,7 +27,7 @@
 //! intern with canonical `(value, modulus)` dedup, so equal values share
 //! a ptr — the `uint_is` completeness contract — and nodes intern by
 //! `(op, child hashes)` in the eval layer, mirroring keccak interning.
-//! Ptrs themselves never surface in the API or any chain context.
+//! Result pointers stay in binding and relation messages rather than operation frames.
 //!
 //! This produces traces only. Assembling the AIRs and provers and calling
 //! `prove_multi` (or a bus-balance check) is the caller's job — that's
@@ -165,7 +165,7 @@ impl Session {
     /// pinned at `bound_ptr`.
     ///
     /// This installs the value in the uint store, hashes `lo[4] || hi[4]` under the manual
-    /// pin-claim context `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, ptr, 0)`, consumes both
+    /// pin-claim frame `(PVM_UINT_PIN_CLAIM_DOMAIN_TAG, bound_ptr, ptr, 0)`, consumes both
     /// `UintVal` halves at `ptr`, and returns the foldable [`Truthy`] for
     /// `Binding(h_pin, True)`. Default fixed domains and curve coefficients are already installed
     /// by [`Session::new`] and should not be pinned manually; ordinary runtime constants should use
@@ -188,9 +188,8 @@ impl Session {
     /// [`uint_mul`](Self::uint_mul) / [`uint_is`](Self::uint_is). The
     /// value is interned with canonical `(value, modulus)` dedup (a value
     /// value equal to a pinned constant lands on the pin's ptr), hashed
-    /// under the VM uint value context `[UintPrecompile::id(), VALUE_OP_ID, bound_ptr, 0]`, and
-    /// bound
-    /// as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
+    /// under the uint VALUE frame `[UintPrecompile::domain(), VALUE_OP_ID, bound_ptr, 0]`, and
+    /// bound as `Binding(h, Uint, ptr, bound_ptr)`. One leaf node per stored
     /// uint: re-leafing a value returns the same shared-use handle.
     ///
     /// Unlike [`pin_uint`](Self::pin_uint), nothing about a *store
@@ -204,8 +203,7 @@ impl Session {
             .uint_leaf(ptr, bound, to_limbs32(value), &mut self.uint.store, &mut self.eidos)
     }
 
-    /// The DAG node `a + b mod p`: hashes the uint `Add` operation context over the children's
-    /// hashes,
+    /// The DAG node `a + b mod p`: hashes the children's hashes under the uint `Add` frame,
     /// consumes their `Uint` bindings plus one [`UintAdd`](crate::relations::BusId::UintAdd)
     /// relation tuple carrying the shared bound, and binds the reduced sum. Returns the result's
     /// shared-use handle.

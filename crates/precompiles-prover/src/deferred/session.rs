@@ -3,7 +3,11 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::deferred::{DataChunk, DeferredState, Digest, Node, TRUE_DIGEST, Tag};
+use miden_core::{
+    deferred::{DEFERRED_AND_FRAME, DataChunk, DeferredState, Digest, Node, TRUE_DIGEST},
+    program::domain::DeferredChunksDomain,
+};
+use miden_crypto::hash::eidos::EidosDomain;
 use miden_precompiles::{
     CurveId, CurveNodeRef, CurvePrecompile, HashAssertNode, Keccak256Precompile, UintDomain,
     UintNodeRef, UintPrecompile, chunks_to_bytes_exact, n_chunks,
@@ -149,8 +153,7 @@ impl<'a> DeferredSessionBuilder<'a> {
                         continue;
                     }
 
-                    let tag = self.node_tag(digest)?;
-                    if tag == Tag::AND {
+                    if self.node(digest)?.frame() == Some(DEFERRED_AND_FRAME) {
                         let (lhs, rhs) = self.join_payload(digest)?;
                         work.push(Step::CombineAnd(digest));
                         // Push rhs first so lhs is visited first (LIFO).
@@ -698,10 +701,6 @@ impl<'a> DeferredSessionBuilder<'a> {
         self.state.get_node(&digest).ok_or(DeferredSessionError::MissingNode(digest))
     }
 
-    fn node_tag(&self, digest: Digest) -> Result<Tag, DeferredSessionError> {
-        Ok(self.node(digest)?.tag())
-    }
-
     fn join_payload(&self, digest: Digest) -> Result<(Digest, Digest), DeferredSessionError> {
         self.node(digest)?
             .payload()
@@ -715,7 +714,7 @@ impl<'a> DeferredSessionBuilder<'a> {
         child: Digest,
     ) -> Result<&'a [DataChunk], DeferredSessionError> {
         let node = self.node(child)?;
-        if node.tag() != Tag::CHUNKS {
+        if node.frame().is_none_or(|frame| frame.domain() != DeferredChunksDomain::TAG) {
             return Err(DeferredSessionError::MalformedNode(parent));
         }
         node.payload()

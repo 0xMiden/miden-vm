@@ -34,7 +34,6 @@ mod and8_trace;
 pub(crate) use and8_trace::build_and8_lookup_trace;
 
 #[cfg(test)]
-#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR

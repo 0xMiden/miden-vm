@@ -9,7 +9,7 @@ use miden_core::{
 };
 
 use super::deferred_handlers::{
-    handle_deferred_evaluate, handle_deferred_evaluate_payload, handle_deferred_evaluate_tag,
+    handle_deferred_evaluate, handle_deferred_evaluate_frame, handle_deferred_evaluate_payload,
     handle_deferred_register, handle_deferred_register_data,
 };
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
@@ -61,7 +61,7 @@ pub fn handle_system_event(
         SystemEvent::CompressToMap => insert_compress_into_adv_map(processor),
         SystemEvent::DeferredRegister => handle_deferred_register(processor),
         SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
-        SystemEvent::DeferredEvaluateTag => handle_deferred_evaluate_tag(processor),
+        SystemEvent::DeferredEvaluateFrame => handle_deferred_evaluate_frame(processor),
         SystemEvent::DeferredEvaluatePayload => handle_deferred_evaluate_payload(processor),
         SystemEvent::DeferredRegisterData => handle_deferred_register_data(processor),
         // `TraceEvent` does not have a handler. Its purpose is signaling the processor to trigger

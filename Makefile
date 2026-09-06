@@ -40,7 +40,7 @@ DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
 ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,registry-tools
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable,fixture-tools,registry-tools
 MIDEN_CRYPTO_FUZZ_TARGETS := smt word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
 MIDEN_SERDE_UTILS_FUZZ_TARGETS := primitives collections string vint64 goldilocks budgeted
 EXECUTION_PROOF_FUZZ_LIMITS := -rss_limit_mb=512 -timeout=10
@@ -337,6 +337,27 @@ regenerate-pvm-registry: ## Regenerate PVM registry and MASM artifacts (~2 min; 
 .PHONY: check-pvm-registry
 check-pvm-registry: ## Check PVM registry and MASM artifacts for drift (full recompute)
 	cargo run --release --package miden-precompiles-verifier --features registry-tools --bin pvm-registry-regen -- --check
+
+.PHONY: check-precompile-masm
+check-precompile-masm: ## Check generated precompile MASM artifacts for drift
+	@set -eu; \
+	generated_masm_tmp=$$(mktemp -d); \
+	trap 'rm -rf "$$generated_masm_tmp"' EXIT INT TERM; \
+	cargo run --quiet --locked --package miden-core-lib-codegen -- --out "$$generated_masm_tmp/generated"; \
+	mkdir -p "$$generated_masm_tmp/tracked/asm/fields" "$$generated_masm_tmp/tracked/asm/curves"; \
+	cp crates/lib/core/asm/precompiles/u256.masm "$$generated_masm_tmp/tracked/asm/u256.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/k1_base.masm "$$generated_masm_tmp/tracked/asm/fields/k1_base.masm"; \
+	cp crates/lib/core/asm/precompiles/fields/k1_scalar.masm "$$generated_masm_tmp/tracked/asm/fields/k1_scalar.masm"; \
+	cp crates/lib/core/asm/precompiles/curves/secp256k1.masm "$$generated_masm_tmp/tracked/asm/curves/secp256k1.masm"; \
+	diff -ru "$$generated_masm_tmp/tracked" "$$generated_masm_tmp/generated"
+
+.PHONY: regenerate-pvm-proof-fixture
+regenerate-pvm-proof-fixture: ## Regenerate the pinned Eidos PVM proof and deferred root
+	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --write
+
+.PHONY: check-pvm-proof-fixture
+check-pvm-proof-fixture: ## Check the pinned Eidos PVM proof and deferred root for drift
+	cargo run --release --no-default-features --package miden-precompiles-prover --features fixture-tools --bin pvm-proof-fixture -- --check
 
 .PHONY: check-constraints
 check-constraints: ## Check the checked-in constraint artifacts for drift

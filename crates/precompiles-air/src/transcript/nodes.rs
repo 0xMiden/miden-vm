@@ -5,7 +5,7 @@
 
 /// Operation discriminant for VM uint op rows.
 ///
-/// The chain context is `[UintPrecompile::id(), op_id, 0, 0]`; operand/result pointers and
+/// The frame is `[UintPrecompile::domain(), op_id, 0, 0]`; operand/result pointers and
 /// `bound_ptr` are carried by `Binding` and relation witnesses.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
@@ -28,10 +28,10 @@ pub enum UintOpId {
 
 /// Operation discriminant of a curve binary-op node.
 ///
-/// The VM chain context is `[CurvePrecompile::id(), op_id, 0, 0]`. The compression block is
+/// The VM frame is `[CurvePrecompile::domain(), op_id, 0, 0]`. The compression block is
 /// `lhs_hash ‖ rhs_hash` over two `Group` children; the result point rides
 /// the node's `Binding` as a nondeterministic ptr. The curve threads from
-/// the operands' curve VALUE contexts.
+/// the operands' curve VALUE frames.
 ///
 /// | op | children (lhs, rhs) | relation consumed |
 /// |---|---|---|
