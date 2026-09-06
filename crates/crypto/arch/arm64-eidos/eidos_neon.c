@@ -168,58 +168,67 @@ static inline uint32x4_t rotate7(uint32x4_t x) {
  \
 } while (0)
 
-// Tail staging is bounded to one four-candidate row; full groups load directly.
-static inline uint32x4x2_t unpack_u64(const uint64_t *input, size_t count) {
-    uint64_t tail[4] = {0};
-    if (count < 4) {
-        for (size_t i = 0; i < count; ++i) tail[i] = input[i];
-        input = tail;
-    }
+static inline uint32x4x2_t unpack_u64(const uint64_t *input) {
     uint32x4_t a = vreinterpretq_u32_u64(vld1q_u64(input));
     uint32x4_t b = vreinterpretq_u32_u64(vld1q_u64(input + 2));
     return (uint32x4x2_t){{vuzp1q_u32(a, b), vuzp2q_u32(a, b)}};
 }
 
-static inline void pack_u64(uint64_t *out, uint32x4_t lo, uint32x4_t hi, size_t count) {
+static inline void pack_u64(uint64_t *out, uint32x4_t lo, uint32x4_t hi) {
     hi = vandq_u32(hi, vdupq_n_u32(0x7fffffff));
     uint64x2_t a = vreinterpretq_u64_u32(vzip1q_u32(lo, hi));
     uint64x2_t b = vreinterpretq_u64_u32(vzip2q_u32(lo, hi));
-    if (count == 4) {
-        vst1q_u64(out, a);
-        vst1q_u64(out + 2, b);
-    } else {
-        uint64_t tail[4];
-        vst1q_u64(tail, a);
-        vst1q_u64(tail + 2, b);
-        for (size_t i = 0; i < count; ++i) out[i] = tail[i];
-    }
+    vst1q_u64(out, a);
+    vst1q_u64(out + 2, b);
 }
 
-#define LOAD(word) unpack_u64(block + ((word) / 2) * 16 + base, count).val[(word) % 2]
-void eidos_compress16_u64_neon(const uint64_t *cv, const uint64_t *block,
-    uint64_t *out, size_t active_lanes) {
-    for (size_t base = 0; base < active_lanes; base += 4) {
-        size_t count = active_lanes - base < 4 ? active_lanes - base : 4;
-        uint32x4x2_t c0 = unpack_u64(cv + base, count);
-        uint32x4x2_t c1 = unpack_u64(cv + 16 + base, count);
-        uint32x4x2_t c2 = unpack_u64(cv + 32 + base, count);
-        uint32x4x2_t c3 = unpack_u64(cv + 48 + base, count);
-        uint32x4_t v0 = c0.val[0], v1 = c0.val[1];
-        uint32x4_t v2 = c1.val[0], v3 = c1.val[1];
-        uint32x4_t v4 = c2.val[0], v5 = c2.val[1];
-        uint32x4_t v6 = c3.val[0], v7 = c3.val[1];
-        uint32x4_t v8 = vdupq_n_u32(0x6a09e667), v9 = vdupq_n_u32(0xbb67ae85);
-        uint32x4_t v10 = vdupq_n_u32(0x3c6ef372), v11 = vdupq_n_u32(0xa54ff53a);
-        uint32x4_t v12 = vdupq_n_u32(0x510e527f), v13 = vdupq_n_u32(0x9b05688c);
-        uint32x4_t v14 = vdupq_n_u32(0x1f83d9ab), v15 = vdupq_n_u32(0x5be0cd19);
-        ROUNDS();
-        pack_u64(out + base, XOR(v0, v8), XOR(v1, v9), count);
-        pack_u64(out + 16 + base, XOR(v2, v10), XOR(v3, v11), count);
-        pack_u64(out + 32 + base, XOR(v4, v12), XOR(v5, v13), count);
-        pack_u64(out + 48 + base, XOR(v6, v14), XOR(v7, v15), count);
-    }
+#define LOAD(word) message[(word) / 2].val[(word) % 2]
+// Keep one round body for full groups and the compact staged tail.
+static __attribute__((noinline)) void compress4_u64(const uint64_t *cv, const uint64_t *block,
+    uint64_t *out, size_t stride) {
+    uint32x4x2_t message[8];
+    for (size_t row = 0; row < 8; ++row) message[row] = unpack_u64(block + row * stride);
+    uint32x4x2_t c0 = unpack_u64(cv);
+    uint32x4x2_t c1 = unpack_u64(cv + stride);
+    uint32x4x2_t c2 = unpack_u64(cv + 2 * stride);
+    uint32x4x2_t c3 = unpack_u64(cv + 3 * stride);
+    uint32x4_t v0 = c0.val[0], v1 = c0.val[1];
+    uint32x4_t v2 = c1.val[0], v3 = c1.val[1];
+    uint32x4_t v4 = c2.val[0], v5 = c2.val[1];
+    uint32x4_t v6 = c3.val[0], v7 = c3.val[1];
+    uint32x4_t v8 = vdupq_n_u32(0x6a09e667), v9 = vdupq_n_u32(0xbb67ae85);
+    uint32x4_t v10 = vdupq_n_u32(0x3c6ef372), v11 = vdupq_n_u32(0xa54ff53a);
+    uint32x4_t v12 = vdupq_n_u32(0x510e527f), v13 = vdupq_n_u32(0x9b05688c);
+    uint32x4_t v14 = vdupq_n_u32(0x1f83d9ab), v15 = vdupq_n_u32(0x5be0cd19);
+    ROUNDS();
+    pack_u64(out, XOR(v0, v8), XOR(v1, v9));
+    pack_u64(out + stride, XOR(v2, v10), XOR(v3, v11));
+    pack_u64(out + 2 * stride, XOR(v4, v12), XOR(v5, v13));
+    pack_u64(out + 3 * stride, XOR(v6, v14), XOR(v7, v15));
 }
 #undef LOAD
+
+void eidos_compress16_u64_neon(const uint64_t *cv, const uint64_t *block,
+    uint64_t *out, size_t active_lanes) {
+    size_t base = 0;
+    for (; base + 4 <= active_lanes; base += 4) {
+        compress4_u64(cv + base, block + base, out + base, 16);
+    }
+    size_t count = active_lanes - base;
+    if (count != 0) {
+        uint64_t tail_cv[4][4] = {0}, tail_block[8][4] = {0}, tail_out[4][4];
+        for (size_t row = 0; row < 4; ++row)
+            for (size_t lane = 0; lane < count; ++lane)
+                tail_cv[row][lane] = cv[row * 16 + base + lane];
+        for (size_t row = 0; row < 8; ++row)
+            for (size_t lane = 0; lane < count; ++lane)
+                tail_block[row][lane] = block[row * 16 + base + lane];
+        compress4_u64(&tail_cv[0][0], &tail_block[0][0], &tail_out[0][0], 4);
+        for (size_t row = 0; row < 4; ++row)
+            for (size_t lane = 0; lane < count; ++lane)
+                out[row * 16 + base + lane] = tail_out[row][lane];
+    }
+}
 
 // Prepared canonical CV already includes the partial-buffer transition tag.
 #define LOAD(word) (squeeze ? vdupq_n_u32(0) : \
