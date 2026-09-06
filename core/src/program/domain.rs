@@ -45,16 +45,16 @@ miden_crypto::eidos_domain_registry! {
             pub DEFERRED_AND: DeferredAndDomain {
                 local_id: 0x0003,
                 version: DomainVersion::numbered(1),
-                encoding: FeltSequence,
+                encoding: Custom,
                 description: "Deferred AND node and rolling-root fold.",
-                schema: "param0 = 8; param1 = 0; param2 = 0; payload = left digest || right digest",
+                schema: "params = [0, 0, 0]; payload = exactly one block containing left digest || right digest",
             }
             pub DEFERRED_CHUNKS: DeferredChunksDomain {
                 local_id: 0x0004,
                 version: DomainVersion::numbered(1),
-                encoding: FeltSequence,
+                encoding: Custom,
                 description: "Deferred framework chunk-list node.",
-                schema: "param0 = number of payload Felts; param1 = 0; param2 = 0; payload = one or more complete 8-Felt chunks",
+                schema: "param0 = encoded Felt length; param1 = 0; param2 = 0; payload = exactly param0 / 8 complete 8-Felt chunks; param0 > 0 and divisible by 8",
             }
             pub STARK_TRANSCRIPT: StarkTranscriptDomain {
                 local_id: 0x0005,
@@ -68,28 +68,28 @@ miden_crypto::eidos_domain_registry! {
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Keccak-256 deferred precompile nodes.",
-                schema: "param0 = payload length in Felts; param1/param2 = node tag arguments; payload = complete 8-Felt chunks",
+                schema: "param0 = operation; param1 = preimage length in bytes; param2 = 0; ASSERT payload = exactly one block containing preimage digest || expected digest",
             }
             pub UINT256_PRECOMPILE: Uint256PrecompileDomain {
                 local_id: 0x0007,
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Uint256 deferred precompile nodes.",
-                schema: "param0 = payload length in Felts; param1/param2 = node tag arguments; payload = complete 8-Felt chunks",
+                schema: "param0 = operation; VALUE uses param1 = bound pointer and one value block; binary operations use param1 = 0 and one digest-pair block; param2 = 0",
             }
             pub CURVE_PRECOMPILE: CurvePrecompileDomain {
                 local_id: 0x0008,
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Elliptic-curve deferred precompile nodes.",
-                schema: "param0 = payload length in Felts; param1/param2 = node tag arguments; payload = complete 8-Felt chunks",
+                schema: "param0 = operation; VALUE uses param1 = group pointer and one digest-pair block; fixed binary operations use param1 = 0 and one digest-pair block; MSM uses param1 = pair count and exactly that many digest-pair blocks; param2 = 0",
             }
             pub PVM_UINT_PIN_CLAIM: PvmUintPinClaimDomain {
                 local_id: 0x0009,
                 version: DomainVersion::numbered(1),
                 encoding: Custom,
                 description: "Precompile VM uint pin claim.",
-                schema: "param0 = payload length in Felts; param1 = uint bound pointer; param2 = pin pointer; payload = complete 8-Felt chunks",
+                schema: "param0 = uint bound pointer; param1 = pin pointer; param2 = 0; payload = exactly one uint value block",
             }
             pub FALCON_PRODUCT_CHECK: FalconProductCheckDomain {
                 local_id: 0x000a,
@@ -105,12 +105,6 @@ miden_crypto::eidos_domain_registry! {
 /// Returns the field-element representation of a typed Eidos domain.
 pub const fn domain_tag<D: EidosDomain>(_: D) -> Felt {
     D::TAG.as_felt()
-}
-
-/// Parses a structurally valid Eidos domain tag.
-pub(crate) fn parse_domain_tag(value: Felt) -> Option<DomainTag> {
-    let value = u32::try_from(value.as_canonical_u64()).ok()?;
-    DomainTag::from_u32(value)
 }
 
 /// Returns whether `tag` is assigned to a deferred precompile in the VM registry.

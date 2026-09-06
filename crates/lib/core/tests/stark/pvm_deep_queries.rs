@@ -26,8 +26,8 @@ const AUX_COM_PTR: u32 = 3_223_322_644;
 const QUOTIENT_COM_PTR: u32 = 3_223_322_648;
 
 const PREPROCESSED_WIDTH: usize = 16;
-const MAIN_WIDTH: usize = 544;
-const AUX_WIDTH: usize = 352;
+const MAIN_WIDTH: usize = 528;
+const AUX_WIDTH: usize = 368;
 const QUOTIENT_WIDTH: usize = 8;
 const QUERY_ROW_WIDTH: usize = PREPROCESSED_WIDTH + MAIN_WIDTH + AUX_WIDTH + QUOTIENT_WIDTH;
 

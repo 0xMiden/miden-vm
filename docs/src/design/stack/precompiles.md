@@ -12,15 +12,15 @@ modules are internal implementation details used by core-library facades and tes
 
 ## Data model
 
-- **`Tag`** — A 4-felt node constructor. Framework ids `0`, `1`, and `2` are reserved for `TRUE`,
-  semantic `AND`, and opaque framework `CHUNKS`. Every precompile has an explicitly registered
-  numeric domain tag and interprets two local argument felts. The final felt is reserved and zero.
-- **`Node`** — A content-addressed `(tag, payload)` term in the deferred DAG. Payloads are data
+- **`EidosFrame`** — A 4-felt node constructor `(domain_tag, param0, param1, param2)`. The
+  registered domain defines the meaning of all three parameters. The framework defines frames for
+  semantic `AND` and opaque `CHUNKS`; `TRUE` is a zero-digest sentinel with no frame.
+- **`Node`** — A content-addressed `(frame, payload)` term in the deferred DAG. Payloads are data
   chunks, join child digests, pair lists of `lhs_digest || rhs_digest` chunks, or the framework
   `TRUE` sentinel.
-- **`Precompile`** — A host implementation that owns one precompile id and decodes the structural
-  shape for its tags. It evaluates nodes to canonical form and optionally contributes constants
-  through `init()`.
+- **`Precompile`** — A host implementation that owns one registered domain and decodes the
+  structural shape for its frames. It evaluates nodes to canonical form and optionally contributes
+  constants through `init()`.
 - **`PrecompileRegistry`** — The host/framework dispatcher for trusted precompile implementations.
   The type remains in `miden-core` so the framework does not depend on concrete implementations.
 - **`DeferredState`** — The host-side DAG witness accumulated during execution. It tracks
@@ -40,8 +40,8 @@ modules are internal implementation details used by core-library facades and tes
 2. **Wrapper binds digests inside the VM** – Registration arguments are visible in the VM
    execution trace, but the event does not constrain the host-side `DeferredState` update.
    Memory-backed registration also performs direct host reads without adding AIR accesses. The
-   wrapper computes each proof-relevant digest with VM instructions from the exact same tag and
-   stack payload or ordered memory chunk sequence.
+   wrapper computes each proof-relevant digest with VM instructions from the exact same initial
+   chaining word and stack payload or ordered memory chunk sequence.
 3. **Wrapper evaluates only through explicit predicates** – When a wrapper uses
    `adv.evaluate_deferred*` to obtain host-computed canonical data, it must use VM instructions to
    relate that advice to values established independently of it, then log a statement digest that
@@ -66,19 +66,15 @@ Proving, verification, transport, and resource policy are specified in the
 
 ## Conventions
 
-- Tag layout: `TAG = [domain_tag, arg0, arg1, 0]`.
-  - `domain_tag` selects the framework or owning precompile.
-  - `arg0` and `arg1` are interpreted by the selected precompile.
-  - The final lane is reserved and must be zero.
-  - Framework id `0` is `Tag::TRUE`; framework id `1` is `Tag::AND`; framework id `2` is
-    `Tag::CHUNKS`.
-- Payload shapes are declared by the selected precompile's `decode(args)`, but semantic lengths are
-  tag-specific and validated by the owning precompile:
+- Frame layout: `FRAME = [domain_tag, param0, param1, param2]`. Every value is a canonical `u32`.
+  The registered domain defines the parameters; none has a framework-wide meaning.
+- Payload shapes are declared by the selected precompile's `decode(params)`. Parameter and payload
+  semantics are validated by the owning precompile:
   - `NodeType::Data` accepts one or more opaque 8-felt chunks. For memory-backed registration,
     the stack-supplied `n_chunks` determines how many chunks are read.
   - `NodeType::Join` reads `lhs_digest || rhs_digest`.
-  - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. Precompiles that
-    encode a pair count in tag arguments must check the actual payload length during evaluation.
+  - `NodeType::PairList` accepts one or more `lhs_digest || rhs_digest` chunks. A domain that
+    encodes a pair count in its parameters must check the actual payload length during evaluation.
 - `log_deferred` stack effect: `[STMNT, ...] -> [ROOT_NEW, ...]`. The precompile wrapper drops
   `ROOT_NEW` after the root transition has been constrained.
 - Input and memory layouts are precompile-specific. Core-library wrappers define the native formats

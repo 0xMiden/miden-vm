@@ -1,4 +1,4 @@
-//! Focused tests for VM uint chain contexts.
+//! Focused tests for VM uint Eidos frames.
 
 use miden_core::{Felt, utils::Matrix};
 use miden_precompiles::{UintDomain, UintPrecompile};
@@ -7,10 +7,11 @@ use crate::{
     math::U256,
     session::Session,
     transcript::{
-        eidos::{EidosChainContext, EidosDigest, trace::EidosRequires},
+        eidos::{EidosDigest, trace::EidosRequires},
         eval::{
-            COL_BOUND_PTR, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP, COL_PIN_CLAIM_PIN_PTR,
-            COL_PTR, COL_TAG_ARG1, COL_UINT_VALUE_BOUND_PTR, NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
+            COL_BOUND_PTR, COL_FRAME_PARAM1, COL_IS_PINNED, COL_IS_UINT_LEAF, COL_IS_UINT_OP,
+            COL_PIN_CLAIM_PIN_PTR, COL_PTR, COL_UINT_VALUE_BOUND_PTR,
+            NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS,
         },
         nodes::UintOpId,
     },
@@ -36,14 +37,13 @@ fn uint_value_hash_matches_vm_node_and_eq_op_context() {
     let (lo, hi) = value_words(value_limbs);
     let value_node = UintPrecompile::value_node(domain, value_limbs);
 
-    let actual_value =
-        EidosRequires::digest_of(EidosChainContext::uint_value(domain.bound_ptr()), &[(lo, hi)]);
+    let actual_value = EidosRequires::digest_of(UintPrecompile::value_frame(domain), &[(lo, hi)]);
     assert_eq!(actual_value, EidosDigest::from(value_node.digest()));
 
     assert_eq!(
-        EidosChainContext::uint_op(UintOpId::Is).as_array(),
+        UintPrecompile::op_frame(UintOpId::Is as u64).as_word().into_elements(),
         [
-            UintPrecompile::id(),
+            UintPrecompile::domain().as_felt(),
             Felt::new(UintPrecompile::EQ_OP_ID).expect("uint EQ op id must fit in a felt"),
             Felt::ZERO,
             Felt::ZERO,
@@ -97,7 +97,7 @@ fn pin_claim_rows_commit_pin_ptr_but_vm_uint_rows_commit_bound_ptr() {
     let op_row = (0..eval.height())
         .find(|&row| row_value(row, COL_IS_UINT_OP) == Felt::ONE)
         .expect("expected VM uint Is op row");
-    assert_eq!(row_value(op_row, COL_TAG_ARG1), Felt::ZERO);
+    assert_eq!(row_value(op_row, COL_FRAME_PARAM1), Felt::ZERO);
     assert_eq!(row_value(op_row, COL_BOUND_PTR), Felt::from(bound_ptr));
 
     traces.check();

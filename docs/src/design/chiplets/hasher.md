@@ -108,17 +108,13 @@ internal computation provider connected by lookup arguments.
 
 ## Eidos compression AIR
 
-`EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row block per
-physical compression:
+The MVM's `EidosCompressionAir` uses 108 main columns and 20 auxiliary columns, with one 32-row
+block per physical compression:
 
 | Rows | Role |
 | ---- | ---- |
 | 0–27 | Seven Eidos compression rounds, represented as 28 fused G-function rows |
 | 28–31 | Footer rows assembling the message, input chaining value, output chaining value, XOF lanes, and external relations |
-
-This is the MVM layout. The PVM has an independent Eidos transcript AIR: it uses the same
-108-column Eidos compression layout plus 20 transcript/interface columns, for 128 main columns
-and 20 auxiliary columns in total.
 
 Periodic selectors identify the G-function phase, diagonal steps, message-schedule indices, and
 each footer row. The fused rows prove u32 additions, XOR witnesses, and rotations. Their input

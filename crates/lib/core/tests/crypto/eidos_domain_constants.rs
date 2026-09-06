@@ -2,7 +2,7 @@ use miden_core::{
     Felt, Word,
     program::domain::{
         DEFERRED_CHUNKS, EXECUTION_CLAIM, FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN,
-        KERNEL_COMMITMENT, STARK_TRANSCRIPT, domain_tag,
+        KERNEL_COMMITMENT, PROOF_REQUEST, STARK_TRANSCRIPT, domain_tag,
     },
 };
 use miden_crypto::hash::eidos::{
@@ -12,14 +12,18 @@ use miden_crypto::hash::eidos::{
         LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
     },
 };
+use miden_precompiles::Keccak256Precompile;
 
 const EIDOS: &str = include_str!("../../asm/crypto/hashes/eidos.masm");
 const SMT: &str = include_str!("../../asm/collections/smt.masm");
 const MMR: &str = include_str!("../../asm/collections/mmr.masm");
 const FALCON: &str = include_str!("../../asm/crypto/dsa/falcon512_eidos.masm");
+const ECDSA_K256_KECCAK: &str = include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm");
 const AEAD: &str = include_str!("../../asm/crypto/aead_eidos.masm");
 const PRECOMPILES: &str = include_str!("../../asm/precompiles/mod.masm");
+const KECCAK: &str = include_str!("../../asm/precompiles/hashes/keccak256.masm");
 const RANDOM_COIN: &str = include_str!("../../asm/stark/random_coin.masm");
+const SYS: &str = include_str!("../../asm/sys/mod.masm");
 const VM: &str = include_str!("../../asm/sys/vm/mod.masm");
 const CLAIM: &str = include_str!("../../asm/sys/vm/claim.masm");
 const FRI: &str = include_str!("../../asm/pcs/fri/frie2f4.masm");
@@ -102,6 +106,14 @@ fn masm_domain_tags_match_rust_registries() {
         masm_scalar(VM, "KERNEL_DOMAIN_TAG"),
         domain_tag(KERNEL_COMMITMENT).as_canonical_u64(),
     );
+    assert_eq!(
+        masm_scalar(KECCAK, "DOMAIN_TAG"),
+        u64::from(Keccak256Precompile::domain().as_u32()),
+    );
+    assert_eq!(
+        masm_scalar(KECCAK, "ASSERT_OP_ID"),
+        u64::from(Keccak256Precompile::ASSERT_OP_ID),
+    );
 }
 
 #[test]
@@ -109,6 +121,10 @@ fn masm_initial_chaining_words_match_rust() {
     let merkle_cv = Eidos::merkle_node_init_chaining_word();
     assert_eq!(masm_base_word(EIDOS, "EIDOS_INIT_CV"), merkle_cv);
     assert_eq!(masm_base_word(PRECOMPILES, "EIDOS_INIT_CV"), merkle_cv);
+    assert_eq!(
+        masm_scalar(PRECOMPILES, "DEFERRED_CHUNKS_INIT_CV_0"),
+        Eidos::init_chaining_word(DEFERRED_CHUNKS, 8).as_elements()[0].as_canonical_u64(),
+    );
     assert_indexed_word(
         EIDOS,
         "EIDOS_EMPTY_FELT_SEQUENCE_DIGEST",
@@ -146,6 +162,11 @@ fn masm_initial_chaining_words_match_rust() {
         "FALCON_PRODUCT_INIT_CV",
         Eidos::init_chaining_word(FALCON_PRODUCT_CHECK, FALCON_PRODUCT_CHECK_PAYLOAD_LEN),
     );
+    assert_word(
+        ECDSA_K256_KECCAK,
+        "PUBLIC_KEY_INIT_CV",
+        Eidos::init_chaining_word(GENERIC_FELT_SEQUENCE, (4 * Word::NUM_ELEMENTS) as u32),
+    );
     assert_indexed_word(AEAD, "AEAD_CTR_INIT_CV", Eidos::init_chaining_word(AEAD_CTR_KEY, 0));
     assert_indexed_word(AEAD, "AEAD_MAC_INIT_CV", Eidos::init_chaining_word(AEAD_MAC_KEY, 0));
 
@@ -156,10 +177,24 @@ fn masm_initial_chaining_words_match_rust() {
     ] {
         assert_word(PRECOMPILES, name, Eidos::init_chaining_word(DEFERRED_CHUNKS, len));
     }
+    assert_eq!(
+        Word::new([
+            Felt::new_unchecked(masm_scalar(KECCAK, "ASSERT_INIT_CV_0")),
+            Felt::new_unchecked(masm_scalar(KECCAK, "ASSERT_INIT_CV_1")),
+            Felt::new_unchecked(masm_scalar(KECCAK, "ASSERT_INIT_CV_2_BASE")),
+            Felt::new_unchecked(masm_scalar(KECCAK, "ASSERT_INIT_CV_3")),
+        ]),
+        Keccak256Precompile::assert_frame(0).initial_chaining_word(),
+    );
     assert_indexed_word(
         RANDOM_COIN,
         "EIDOS_TRANSCRIPT_INIT_CV",
         Eidos::transcript_init_cv(STARK_TRANSCRIPT),
+    );
+    assert_word(
+        SYS,
+        "PROOF_REQUEST_INIT_CV",
+        Eidos::init_chaining_word(PROOF_REQUEST, (2 * Word::NUM_ELEMENTS) as u32),
     );
     assert_word(CLAIM, "CLAIM_INIT_CV", Eidos::init_chaining_word(EXECUTION_CLAIM, 40));
 
@@ -174,8 +209,8 @@ fn masm_initial_chaining_words_match_rust() {
     for (name, len) in [
         ("EIDOS_LMCS_INIT_CV_8", 8),
         ("EIDOS_LMCS_INIT_CV_16", 16),
-        ("EIDOS_LMCS_INIT_CV_352", 352),
-        ("EIDOS_LMCS_INIT_CV_544", 544),
+        ("EIDOS_LMCS_INIT_CV_368", 368),
+        ("EIDOS_LMCS_INIT_CV_528", 528),
     ] {
         assert_word(PVM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
     }

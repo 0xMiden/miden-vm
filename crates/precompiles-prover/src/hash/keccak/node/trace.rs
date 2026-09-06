@@ -43,7 +43,7 @@ use crate::{
     primitives::byte_pair_lut::BytePairLutRequires,
     relations::ProvideMult,
     transcript::eidos::{
-        digest::{EidosChainContext, EidosDigest},
+        digest::EidosDigest,
         trace::{AbsorptionId, EidosRequires},
     },
 };
@@ -74,16 +74,15 @@ pub struct KeccakNodeInvocation {
     pub absorption_id_digest_chunks: AbsorptionId,
     /// Eidos cycle for the keccak-node hashing
     /// (= the framed Eidos Keccak-node digest of `H_input_chunks || H_digest_chunks`, under the
-    /// assertion context bound to `len_bytes`).
+    /// assertion frame bound to `len_bytes`).
     pub absorption_id_keccak: AbsorptionId,
     /// Sponge invocation start (the sponge's row at the first row of
     /// this invocation).
     pub sponge_seq_id_head: SpongeSeqId,
     /// Downstream consumer count for the `Binding(H_keccak, True)`
-    /// provide on this row. Range-checked to `[0, 2^16)`; the AIR's
-    /// `(1 − act) · out_mult = 0` constraint pins it to 0 on
-    /// inactive rows. A plain `u32` count — pinned to the `Binding`
-    /// consumer count by bus balance, not range-checked.
+    /// provide on this row. This is a plain `u32` count pinned to the
+    /// `Binding` consumer count by bus balance. The AIR also pins it to
+    /// zero on inactive rows.
     pub out_mult: ProvideMult,
 }
 
@@ -236,12 +235,15 @@ impl KeccakNodeRequires {
     ) -> KeccakNodeOutput {
         let keccak_digest = keccak_oracle(input);
 
-        // True dedup: an identical input bumps the existing row's
-        // consumer count (`out_mult` is a plain `usize`, pinned to the
-        // count by bus balance — no `2^16` cap, no row split).
+        // True dedup: an identical input bumps the existing row's consumer count. Bus balance
+        // pins this plain u32 value to the number of consumers.
         if let Some(&idx) = self.by_keccak.get(&keccak_digest) {
             let rec = &mut self.records[idx];
-            rec.invocation.out_mult += 1;
+            rec.invocation.out_mult = rec
+                .invocation
+                .out_mult
+                .checked_add(1)
+                .expect("Keccak output multiplicity must fit in u32");
             return KeccakNodeOutput {
                 keccak_digest,
                 h_keccak: rec.h_keccak,
@@ -262,22 +264,25 @@ impl KeccakNodeRequires {
         let h_input_chunks: [Felt; NUM_HASH] = h_input_chunks_digest.as_array();
         let _ = eidos.require_digest(h_input_chunks_digest);
 
-        // H_digest_chunks is the framed Eidos hash of D under the CHUNKS chain context. This is a
+        // H_digest_chunks is the framed Eidos hash of D under the CHUNKS frame. This is a
         // semantic one-chunk digest commitment, not a physical extra ChunkAir row.
         let d_felts = sponge_out.keccak_digest.to_felts();
         let digest_block_lo: [Felt; 4] = d_felts[0..4].try_into().expect("block-low slice");
         let digest_block_hi: [Felt; 4] = d_felts[4..8].try_into().expect("block-high slice");
-        let digest_chunks_out =
-            eidos.require_one_shot(EidosChainContext::chunk(), digest_block_lo, digest_block_hi);
+        let digest_chunks_out = eidos.require_one_shot(
+            miden_core::deferred::deferred_chunks_frame(1),
+            digest_block_lo,
+            digest_block_hi,
+        );
         let h_digest_chunks = digest_chunks_out.digest;
         // Consume the terminal EidosOut value at absorption_id_digest_chunks.
         let _ = eidos.require_digest(h_digest_chunks);
 
         // H_keccak is the framed Eidos hash of H_input_chunks || H_digest_chunks under the
-        // Keccak-assertion chain context.
+        // Keccak-assertion frame.
         let len_bytes = u32::try_from(input.len()).expect("len_bytes fits in u32");
         let keccak_out = eidos.require_one_shot(
-            EidosChainContext::keccak256_assertion(len_bytes),
+            Keccak256Precompile::assert_frame(len_bytes),
             h_input_chunks,
             h_digest_chunks.as_array(),
         );
