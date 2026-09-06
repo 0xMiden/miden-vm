@@ -390,7 +390,10 @@ fn check_witness_batch(
     assert!((1..=PACKED_LANES).contains(&count));
     assert!(base < Felt::ORDER_U64 && count as u64 <= Felt::ORDER_U64 - base);
     debug_assert!(buffer_len < BLOCK_LEN);
-    let mut block = *buffer;
+    let mut block = [[0; PACKED_LANES]; 16];
+    for (row, source) in block.iter_mut().zip(buffer) {
+        row[..count].copy_from_slice(&source[..count]);
+    }
     for lane in 0..count {
         let candidate = base + lane as u64;
         block[2 * buffer_len][lane] = candidate as u32;
@@ -409,7 +412,9 @@ fn check_witness_batch(
         }
         let mut squeezed = [[0; PACKED_LANES]; 8];
         compress_cv_packed_counted(&output, &[[0; PACKED_LANES]; 16], &mut squeezed, count);
-        output = squeezed;
+        for (row, source) in output.iter_mut().zip(&squeezed) {
+            row[..count].copy_from_slice(&source[..count]);
+        }
     }
     let mut accepted = 0;
     for lane in 0..count {
