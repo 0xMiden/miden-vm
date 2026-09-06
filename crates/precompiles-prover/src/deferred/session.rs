@@ -7,9 +7,11 @@ use alloc::{
 };
 
 use miden_core::deferred::{
-    DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileWitness,
-    PrecompileWitnessEntry, TRUE_DIGEST, Tag, fold_deferred_root,
+    DEFERRED_AND_FRAME, DataChunk, Digest, MAX_DEFERRED_ELEMENTS, MAX_PRECOMPILE_ROOTS, Node, PrecompileWitness,
+    PrecompileWitnessEntry, TRUE_DIGEST, fold_deferred_root,
 };
+use miden_core::program::domain::DeferredChunksDomain;
+use miden_crypto::hash::eidos::{EidosDomain, EidosFrame};
 use miden_precompiles::{
     CurveBinaryOp, CurveId, CurveOp, Keccak256Precompile, UintBinaryOp, UintDomain, UintOp,
     chunks_to_bytes_exact, n_chunks,
@@ -199,7 +201,7 @@ pub(crate) fn import_witnesses(
         if witness_index != 0 {
             reserve(
                 &mut elements_left,
-                Tag::AND.as_word().len() + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>(),
+                EidosFrame::FELT_LEN + Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>(),
                 location,
                 "aggregate folds",
             )?;
@@ -217,11 +219,11 @@ pub(crate) fn import_witnesses(
             };
             let elements = payloads
                 .checked_mul(Node::PACKED_BYTES_PER_CHUNK / size_of::<u32>())
-                .and_then(|n| n.checked_add(Tag::AND.as_word().len()))
+                .and_then(|n| n.checked_add(EidosFrame::FELT_LEN))
                 .ok_or(SessionInputError::Limit { location, resource: "input elements" })?;
             reserve(&mut elements_left, elements, location, "input elements")?;
-            if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(entry.tag())
-                .map_err(|_| SessionInputError::Invalid { location, reason: "invalid hash tag" })?
+            if let Some(n_bytes) = Keccak256Precompile::decode_assert_frame(entry.frame())
+                .map_err(|_| SessionInputError::Invalid { location, reason: "invalid hash frame" })?
             {
                 reserve(&mut hash_bytes_left, n_bytes as usize, location, "hash input bytes")?;
             }
@@ -327,7 +329,7 @@ fn same_definition(
     b: &PrecompileWitnessEntry,
     b_digests: &[Digest],
 ) -> bool {
-    if a.tag() != b.tag() {
+    if a.frame() != b.frame() {
         return false;
     }
     match (a, b) {
@@ -434,21 +436,21 @@ impl WitnessImporter {
         entry: &'a PrecompileWitnessEntry,
         entries: &[Imported<'a>],
     ) -> Result<Imported<'a>, SessionInputError> {
-        let tag = entry.tag();
-        if tag == Tag::CHUNKS {
+        let frame = entry.frame();
+        if frame.domain() == DeferredChunksDomain::TAG {
             return match entry {
                 PrecompileWitnessEntry::Data { chunks, .. } => Ok(Imported::Chunks(chunks)),
                 _ => Err(self.invalid("chunks require data payload")),
             };
         }
-        if tag == Tag::AND {
+        if frame == DEFERRED_AND_FRAME {
             let (lhs, rhs) = self.join(entry)?;
             let lhs = self.truth(entries, lhs)?;
             let rhs = self.truth(entries, rhs)?;
             return Ok(Imported::Truth(self.session.assert_and(lhs, rhs)));
         }
-        if let Some(n_bytes) = Keccak256Precompile::decode_assert_tag(tag)
-            .map_err(|_| self.invalid("invalid hash tag"))?
+        if let Some(n_bytes) = Keccak256Precompile::decode_assert_frame(frame)
+            .map_err(|_| self.invalid("invalid hash frame"))?
         {
             let (input, expected) = self.join(entry)?;
             let n_bytes = n_bytes as usize;
@@ -472,7 +474,7 @@ impl WitnessImporter {
             return Ok(Imported::Truth(claim));
         }
         if let Some(op) =
-            UintOp::decode_tag(tag).map_err(|_| self.invalid("invalid uint tag or domain"))?
+            UintOp::decode_frame(frame).map_err(|_| self.invalid("invalid uint frame or domain"))?
         {
             return match op {
                 UintOp::Value(domain) => {
@@ -523,7 +525,7 @@ impl WitnessImporter {
                 },
             };
         }
-        if let Some(op) = CurveOp::decode_tag(tag).map_err(|_| self.invalid("invalid curve tag"))? {
+        if let Some(op) = CurveOp::decode_frame(frame).map_err(|_| self.invalid("invalid curve frame"))? {
             return match op {
                 CurveOp::Value(curve) => {
                     let (x, y) = self.join(entry)?;

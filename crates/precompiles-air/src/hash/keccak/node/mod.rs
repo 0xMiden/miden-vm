@@ -10,16 +10,16 @@
 //! 1. Issues `KeccakSponge(sponge_seq_id_head, 4·chunk_seq_id_head, len_bytes)` — pins the
 //!    invocation's sponge anchor and chunk-tape base.
 //! 2. Consumes a `ChunkChain(chunk_seq_id_head, absorption_id_chunks)` provide from the chunk
-//!    chiplet — bundles the chunk chain's two foreign keys.
+//!    chiplet and supplies the chain's length-bound initial CV.
 //! 3. Reads the 4-lane Keccak digest `D` from `Memory64` at the round chiplet's perm-N
 //!    digest-output addresses, mult 2 (matching the round chiplet's `dst_mult`).
 //! 4. Drives one framed Eidos compression chain to hash `D[8 felts]` (block low = lanes 0-1, block
-//!    high = lanes 2-3) under VM `Tag::CHUNKS = [2, 0, 0, 0]` → `H_digest_chunks`.
+//!    high = lanes 2-3) as one deferred CHUNKS block → `H_digest_chunks`.
 //! 5. Reads `H_input_chunks` from `EidosOut` at `absorption_id_chunks + n_chunks − 1` — the chunks
 //!    chain tail.
 //! 6. Drives a second framed Eidos compression chain over `[H_input_chunks | H_digest_chunks]`
 //!    (block low = H_input_chunks, block high = H_digest_chunks) under the VM Keccak-256 assertion
-//!    tag `[Keccak256Precompile::id(), 0, len_bytes, 0]` → `H_keccak`.
+//!    frame `(KECCAK256_PRECOMPILE, ASSERT, len_bytes, 0)` → `H_keccak`.
 //! 7. Provides `Binding(H_keccak, True, 0, 0)`.
 //!
 //! Continuity (`+n_chunks` on `chunk_seq_id_head`, `+32·n_sponge_perms`
@@ -37,7 +37,7 @@ use core::array;
 
 use miden_core::{
     Felt,
-    deferred::Tag,
+    deferred::DEFERRED_CHUNKS_DOMAIN,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
@@ -53,7 +53,7 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        eidos::{EidosChainInputMsg, EidosOutMsg},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
     },
     utils::{current_main, next_main},
 };
@@ -79,17 +79,19 @@ pub const COL_ACT: usize = 0;
 /// `sponge_seq_id_head_next = sponge_seq_id_head + 32·n_sponge_perms`
 /// keeps the sponge namespace gap-free across invocations.
 pub const COL_SPONGE_SEQ_ID_HEAD: usize = 1;
-/// Number of Keccak permutations this invocation occupies on the sponge
-/// (= sponge blocks). Free witness; the sponge's `bytes_left` /
-/// pad-must-fire pin it to `floor(len_bytes / 136) + 1`.
+/// Number of Keccak permutations this invocation occupies on the sponge (= sponge blocks). On a
+/// non-final active row, successor-head continuity fixes this free witness. On the final active
+/// row, its digest-address selections must match the sponge's fixed-multiplicity `Memory64`
+/// outputs.
 pub const COL_N_SPONGE_PERMS: usize = 2;
 /// Head chunk index of this invocation's chunk chain. Pinned by the
 /// `ChunkChain` consume; `chunk_seq_id_head_next = chunk_seq_id_head +
 /// n_chunks` keeps the chunk-side namespace contiguous.
 pub const COL_CHUNK_SEQ_ID_HEAD: usize = 3;
-/// Number of chunks in this invocation's chain. Free witness; chunk-side
-/// `ChunkChain` bus balance + sponge's `chunk_ptr` chain pin it to
-/// `ceil(17·n_sponge_perms / 4)`.
+/// Number of chunks in this invocation's chain. On a non-final active row, successor-head
+/// continuity fixes this free witness. On the final active row, the length-bound `EidosInit` and
+/// `(head, tail, digest)` `EidosOut` relations bind it to the physical chain. An inconsistent final
+/// count is rejected through global relation balance rather than a local constraint.
 pub const COL_N_CHUNKS: usize = 4;
 /// Eidos cycle at the head of this invocation's chunks-absorption chain.
 /// Pinned by the `ChunkChain` consume per row (the FK closes there);
@@ -99,7 +101,7 @@ pub const COL_N_CHUNKS: usize = 4;
 /// so successive rows' `absorption_id_chunks` values can have gaps.
 pub const COL_ABSORPTION_ID_CHUNKS: usize = 5;
 /// Invocation byte length. Pinned by the `KeccakSponge` provide.
-/// Folded into the Keccak-node hash's `param_a` chain-context slot.
+/// Bound by the Keccak assertion frame's second parameter.
 pub const COL_LEN_BYTES: usize = 6;
 
 /// Eidos cycle used internally to hash `D` as a semantic one-chunk payload.
@@ -157,18 +159,18 @@ pub const NUM_MAIN_COLS: usize = COL_OUT_MULT + 1;
 // AUX / PUBLIC LAYOUT
 // ================================================================================================
 
-/// Seven aux columns, flattened via `frac_col!` so every closing
+/// Nine aux columns, flattened via `frac_col!` so every closing
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 ///
 /// - col 0: `KeccakSponge` provide alone — the gated running-sum anchor.
 /// - col 1: `Binding(_, True, 0, 0)` provide + `ChunkChain` consume.
-/// - col 2: `EidosOut(H_input_chunks)` consume alone (no partner left to pair).
+/// - col 2: `EidosOut(H_input_chunks)` + the chunks-chain initial CV.
 /// - col 3/4: the four `Memory64` D-limb consumes, paired.
-/// - col 5: atomic digest-chunks `EidosIn` + `EidosOut(H_digest_chunks)`.
-/// - col 6: atomic keccak-node `EidosIn` + `EidosOut(H_keccak)`.
-pub const NUM_AUX_COLS: usize = 7;
+/// - col 5/6: digest-chunks block + initial CV, then `EidosOut(H_digest_chunks)`.
+/// - col 7/8: Keccak-node block + initial CV, then `EidosOut(H_keccak)`.
+pub const NUM_AUX_COLS: usize = 9;
 
-pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 1, 2, 2, 2, 2];
+pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 2, 2, 2, 1, 2, 1];
 
 // AIR
 // ================================================================================================
@@ -341,7 +343,7 @@ where
         let chunk_ptr_head: LB::Expr = LB::Expr::from(Felt::from(4u8)) * chunk_seq_id_head.clone();
         // absorption_id_chunks_tail = absorption_id_chunks + n_chunks − 1.
         let absorption_id_chunks_tail: LB::Expr =
-            absorption_id_chunks.clone() + n_chunks - LB::Expr::ONE;
+            absorption_id_chunks.clone() + n_chunks.clone() - LB::Expr::ONE;
         // Digest-lane Memory64 addresses. Sponge's `addr_squeeze =
         // 100·sponge_seq_id − 99·p_idx + 3072` at the last block's
         // digest rows (`p_idx ∈ [0, 4)` of the last period) reduces to
@@ -352,14 +354,28 @@ where
             + LB::Expr::from(Felt::from(3200u32)) * n_sponge_perms
             - LB::Expr::from(Felt::from(128u8));
 
-        // Eidos chain contexts.
-        let chain_context_digest_chunks = Tag::CHUNKS.as_word().map(LB::Expr::from);
-        let chain_context_keccak = [
-            LB::Expr::from(Keccak256Precompile::id()),
-            LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_TAG_ID)),
+        // Eidos frames and their initial chaining values.
+        let frame_chunks = [
+            LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
+            LB::Expr::from(Felt::from(8u8)) * n_chunks.clone(),
+            LB::Expr::ZERO,
+            LB::Expr::ZERO,
+        ];
+        let frame_digest_chunks = [
+            LB::Expr::from(DEFERRED_CHUNKS_DOMAIN),
+            LB::Expr::from(Felt::from(8u8)),
+            LB::Expr::ZERO,
+            LB::Expr::ZERO,
+        ];
+        let frame_keccak = [
+            LB::Expr::from(Keccak256Precompile::domain().as_felt()),
+            LB::Expr::from(Felt::from_u32(Keccak256Precompile::ASSERT_OP_ID)),
             len_bytes.clone(),
             LB::Expr::ZERO,
         ];
+        let initial_cv_chunks = initial_cv_from_frame(frame_chunks);
+        let initial_cv_digest_chunks = initial_cv_from_frame(frame_digest_chunks);
+        let initial_cv_keccak = initial_cv_from_frame(frame_keccak);
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };
@@ -397,23 +413,32 @@ where
                 pos_act.clone(),
                 ChunkChainMsg {
                     chunk_seq_id_head: chunk_seq_id_head.clone(),
-                    absorption_id_head: absorption_id_chunks,
+                    absorption_id_head: absorption_id_chunks.clone(),
                 },
                 interaction_deg
             ),
         );
-        // col 2: EidosOut(H_input_chunks) consume alone (no partner
-        // left to pair).
+        // col 2: the chunks-chain digest and its initial CV.
         frac_col!(
             builder,
             "handshake-and-chunks-digest",
-            provides_deg,
+            pair_deg,
             (
-                "p2out-h-input-chunks",
+                "eidos-out-h-input-chunks",
                 pos_act.clone(),
                 EidosOutMsg {
-                    chain_step_id: absorption_id_chunks_tail,
+                    chain_head_id: absorption_id_chunks.clone(),
+                    compression_id: absorption_id_chunks_tail,
                     digest: h_input_chunks.clone(),
+                },
+                interaction_deg
+            ),
+            (
+                "eidos-init-input-chunks",
+                pos_act.clone(),
+                EidosInitMsg {
+                    compression_id: absorption_id_chunks,
+                    initial_cv: initial_cv_chunks,
                 },
                 interaction_deg
             ),
@@ -473,60 +498,86 @@ where
             ),
         );
 
-        // ---- col 5: one atomic digest-chunks input + its output -------------------------------
+        // ---- col 5/6: digest-chunks block, initial CV, and output -----------------------------
         frac_col!(
             builder,
             "digest-chunks-eidos",
             pair_deg,
             (
-                "eidos-chain-input",
+                "eidos-block",
                 pos_act.clone(),
-                EidosChainInputMsg::chunks(
-                    absorption_id_digest_chunks.clone(),
-                    LB::Expr::ONE,
-                    d,
-                    chain_context_digest_chunks,
-                ),
+                EidosBlockMsg {
+                    compression_id: absorption_id_digest_chunks.clone(),
+                    block: d
+                },
                 interaction_deg
             ),
             (
-                "eidos-chain-output",
+                "eidos-init",
+                pos_act.clone(),
+                EidosInitMsg {
+                    compression_id: absorption_id_digest_chunks.clone(),
+                    initial_cv: initial_cv_digest_chunks,
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "digest-chunks-eidos",
+            provides_deg,
+            (
+                "eidos-out",
                 pos_act.clone(),
                 EidosOutMsg {
-                    chain_step_id: absorption_id_digest_chunks,
+                    chain_head_id: absorption_id_digest_chunks.clone(),
+                    compression_id: absorption_id_digest_chunks,
                     digest: h_digest_chunks.clone(),
                 },
                 interaction_deg
             ),
         );
 
-        // ---- col 6: one atomic keccak-node input + its output ---------------------------------
+        // ---- col 7/8: Keccak-node block, initial CV, and output -------------------------------
         frac_col!(
             builder,
             "keccak-eidos",
             pair_deg,
             (
-                "eidos-chain-input",
+                "eidos-block",
                 pos_act.clone(),
-                EidosChainInputMsg::node(
-                    absorption_id_keccak.clone(),
-                    LB::Expr::ONE,
-                    array::from_fn(|idx| {
+                EidosBlockMsg {
+                    compression_id: absorption_id_keccak.clone(),
+                    block: array::from_fn(|idx| {
                         if idx < 4 {
                             h_input_chunks[idx].clone()
                         } else {
                             h_digest_chunks[idx - 4].clone()
                         }
                     }),
-                    chain_context_keccak,
-                ),
+                },
                 interaction_deg
             ),
             (
-                "eidos-chain-output",
+                "eidos-init",
+                pos_act.clone(),
+                EidosInitMsg {
+                    compression_id: absorption_id_keccak.clone(),
+                    initial_cv: initial_cv_keccak,
+                },
+                interaction_deg
+            ),
+        );
+        frac_col!(
+            builder,
+            "keccak-eidos",
+            provides_deg,
+            (
+                "eidos-out",
                 pos_act,
                 EidosOutMsg {
-                    chain_step_id: absorption_id_keccak,
+                    chain_head_id: absorption_id_keccak.clone(),
+                    compression_id: absorption_id_keccak,
                     digest: h_keccak
                 },
                 interaction_deg

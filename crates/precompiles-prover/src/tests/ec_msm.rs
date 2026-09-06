@@ -27,7 +27,9 @@ use crate::{
         },
     },
     tests::{SessionTracesTestExt, check_local_inputs, verify_deferred},
-    transcript::eval::{COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir},
+    transcript::eval::{
+        COL_FRAME_PARAM1, COL_IS_EC_MSM, COL_IS_MSM_LAST, COL_MSM_EXPR, TranscriptEvalAir,
+    },
 };
 
 /// secp256k1 VM-owned uint/group pointers.
@@ -81,10 +83,9 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 11 aux columns (col 0 the gated
-    // running-sum anchor alone, the rest each a pair of at-most-two
-    // fractions — folding both the flatten and the follow-on singleton
-    // pack into one step), so every closing constraint stays at degree
+    // Flattened via `frac_col!` into 15 aux columns (col 0 the gated
+    // running-sum anchor alone, with the remaining fractions grouped according to
+    // `COLUMN_SHAPE`), so every closing constraint stays at degree
     // ≤ 3 → log_quotient_degree = 1.
     assert_eq!(crate::tests::log_quotient_degree(&EcMsmAir), 1);
 }
@@ -298,7 +299,7 @@ fn glv_joint_wnaf_with_tables_reused_across_scalars() {
 
 /// In-circuit resolve of the 1-term claim `R = 1·G` (`R = G`): `msm_intro`
 /// then `msm_resolve` lays the eval `EcMsm` node (a single absorb row, the
-/// IV as its chain context) binding the value, and the `Is` ties it to `G`. The claim
+/// initial CV derived from its MSM frame) binding the value, and the `Is` ties it to `G`. The claim
 /// folds into the transcript root — the real DAG consumer of the MSM.
 fn msm_resolve_one_term_traces() -> crate::session::SessionTraces {
     let g = ProjectivePoint::GENERATOR;
@@ -362,6 +363,24 @@ fn msm_resolve_two_term_traces() -> crate::session::SessionTraces {
 fn msm_resolve_two_term_checks() {
     let traces = msm_resolve_two_term_traces();
     traces.check();
+}
+
+#[test]
+#[should_panic(expected = "constraint not satisfied")]
+fn msm_resolve_pair_count_must_match_the_absorb_run() {
+    let traces = msm_resolve_two_term_traces();
+    let mut eval = crate::tests::transcript_eval_main(&traces);
+    let ncols = eval.width();
+
+    // Keep the frame parameter constant across the run, but claim three pairs for its two rows.
+    // The terminal position counter binds the semantic MSM arity to the actual run length.
+    for row in 0..eval.height() {
+        if eval.values[row * ncols + COL_IS_EC_MSM] == Felt::ONE {
+            eval.values[row * ncols + COL_FRAME_PARAM1] = Felt::from_u8(3);
+        }
+    }
+
+    check_local_inputs(TranscriptEvalAir, &eval, traces.public_root().as_array().to_vec());
 }
 
 #[test]

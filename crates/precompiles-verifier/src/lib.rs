@@ -27,7 +27,7 @@ pub use verify::{VerifyError, verify_deferred};
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{vec, vec::Vec};
 
     use miden_core::{Felt, Word, deferred::TRUE_DIGEST, proof::MAX_STARK_PROOF_BYTES};
 
@@ -36,15 +36,14 @@ mod tests {
     #[test]
     fn verifies_pinned_eidos_proof() {
         const PROOF_BYTES: &[u8] = include_bytes!("../tests/fixtures/pvm_eidos_v0_31.bin");
-        let root = Word::new(
-            [
-                7489668467827568877,
-                7373524072806342465,
-                6727291966695309661,
-                1978710426549110171,
-            ]
-            .map(Felt::new_unchecked),
-        );
+        const ROOT: &str = include_str!("../tests/fixtures/pvm_eidos_v0_31.root");
+        let root: [Felt; 4] = ROOT
+            .split_ascii_whitespace()
+            .map(|value| Felt::new_unchecked(value.parse().expect("root element must be a u64")))
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("fixture root must contain four elements");
+        let root = Word::new(root);
         let proof = StarkProof::new(PROOF_BYTES.to_vec(), HashFunction::Eidos);
 
         verify_deferred(&proof, root).expect("pinned Eidos proof must verify");

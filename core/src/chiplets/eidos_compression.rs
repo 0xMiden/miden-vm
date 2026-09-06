@@ -4,9 +4,13 @@
 //! packed chaining value. This module owns the VM stack contract and delegates
 //! raw compression and encoding to the canonical interfaces in `miden-crypto`.
 
+pub use miden_crypto::hash::eidos::encoding::{
+    felts_to_block as unpack_block, pack_output_felt as pack, unpack_felt as unpack,
+    word_to_cv as unpack_word,
+};
 use miden_crypto::{
     Felt, Word,
-    hash::eidos::{self, Eidos, domains::GENERIC_FELT_SEQUENCE},
+    hash::eidos::{Eidos, domains::GENERIC_FELT_SEQUENCE},
 };
 
 /// Number of Felts in one Eidos compression stack window.
@@ -19,38 +23,6 @@ pub const BLOCK_LEN: usize = 8;
 pub const DIGEST_WIDTH: usize = 4;
 
 const STATE_WORDS: usize = 8;
-const BLOCK_WORDS: usize = 16;
-
-#[inline]
-pub fn unpack(felt: Felt) -> (u32, u32) {
-    eidos::encoding::unpack_felt(felt)
-}
-
-#[inline]
-pub fn unpack_word(word: Word) -> [u32; STATE_WORDS] {
-    eidos::encoding::word_to_cv(word)
-}
-
-#[inline]
-pub fn unpack_block(block: [Felt; BLOCK_LEN]) -> [u32; BLOCK_WORDS] {
-    eidos::encoding::felts_to_block(block)
-}
-
-/// Packs two lanes of an Eidos output CV into one Felt.
-///
-/// This clears bit 31 of `hi` and is therefore not a lossless inverse for arbitrary input CVs.
-#[inline]
-pub fn pack(lo: u32, hi: u32) -> Felt {
-    eidos::encoding::pack_output_felt(lo, hi)
-}
-
-/// Packs an Eidos output CV into its four-Felt representation.
-///
-/// This clears bit 31 of every odd lane and must not be used to round-trip an arbitrary input CV.
-#[inline]
-pub fn pack_word(cv: [u32; STATE_WORDS]) -> Word {
-    eidos::encoding::output_cv_to_word(cv)
-}
 
 /// Constructs an Eidos initial chaining word from raw framing values.
 ///
@@ -139,10 +111,12 @@ pub fn compress_raw_xof_lanes(state: &[Felt; STATE_WIDTH]) -> [u32; 16] {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::eidos::{domain::EidosDomain, domains::GenericFeltSequenceDomain};
+    use miden_crypto::hash::eidos::{
+        EidosFrame, domain::EidosDomain, domains::GenericFeltSequenceDomain,
+    };
 
     use super::*;
-    use crate::program::domain::KernelCommitmentDomain;
+    use crate::{operations::opcodes, program::domain::KernelCommitmentDomain};
 
     #[test]
     fn raw_initializers_match_canonical_framing() {
@@ -160,6 +134,14 @@ mod tests {
         assert_eq!(
             init_chaining_word_with_params(0, [0; 3]),
             Eidos::merkle_node_init_chaining_word(),
+        );
+
+        assert_eq!(EidosFrame::from_initial_chaining_word(merkle_node_chaining_word()), None);
+        assert_eq!(
+            EidosFrame::from_initial_chaining_word(two_to_one_chaining_word(u32::from(
+                opcodes::JOIN,
+            ))),
+            None,
         );
     }
 
@@ -193,25 +175,6 @@ mod tests {
         assert_eq!(actual_cv, expected_cv);
         assert_eq!(&state[..BLOCK_LEN], &block);
         assert_eq!(&state[BLOCK_LEN..STATE_WIDTH], expected_cv_word.as_slice());
-    }
-
-    #[test]
-    fn pack_word_masks_odd_lanes() {
-        let word = pack_word([
-            0xffff_ffff,
-            0xffff_ffff,
-            0x0123_4567,
-            0x89ab_cdef,
-            0xdead_beef,
-            0xffff_ffff,
-            0xa5a5_a5a5,
-            0xffff_ffff,
-        ]);
-
-        for felt in word.as_slice() {
-            let (_, hi) = unpack(*felt);
-            assert_eq!(hi >> 31, 0);
-        }
     }
 
     #[test]

@@ -17,8 +17,8 @@ use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{
     BaseAir, MidenAir, MidenMultiAir, ProverStatement, StarkConfig, Statement, config, debug,
-    logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
-    lookup::{Challenges, LookupFractions, accumulate, build_lookup_fractions},
+    logup::{BusId, HasherCompressionLinkMsg, MIDEN_MAX_MESSAGE_WIDTH},
+    lookup::{Challenges, LookupFractions, LookupMessage, accumulate, build_lookup_fractions},
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
@@ -30,12 +30,18 @@ use miden_air::{
 };
 use miden_core::{
     Word,
-    crypto::merkle::{MerkleStore, MerkleTree},
+    crypto::{
+        hash::Eidos,
+        merkle::{MerkleStore, MerkleTree},
+    },
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
 
-use super::{Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs, rand_array};
+use super::{
+    Felt, VmTrace, build_trace_from_ops, build_trace_from_ops_with_inputs,
+    lookup_harness::InteractionLog, rand_array,
+};
 use crate::{AdviceInputs, StackInputs, operation::Operation};
 
 const EIDOS_COMPRESSION_NARROW_COLUMN_CAPACITY: usize = 2;
@@ -155,6 +161,65 @@ fn lookup_constraints_close_for_tiny_span() {
 #[test]
 fn lookup_constraints_close_for_compress() {
     let trace = build_trace_from_ops(vec![Operation::Compress], &[1, 2, 3, 4, 5, 6, 7, 8]);
+    trace.check_constraints();
+}
+
+#[test]
+fn deduplicated_compress_keeps_unit_controller_multiplicity() {
+    // The fourth word backs up the input CV. After the first compression, swap that backup into
+    // the CV position so the second COMPRESS issues the identical physical request.
+    let trace = build_trace_from_ops(
+        vec![
+            Operation::Compress,
+            Operation::SwapW2,
+            Operation::SwapW3,
+            Operation::SwapW2,
+            Operation::Compress,
+        ],
+        &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 10, 11, 12],
+    );
+    let (_, chip_matrix, eidos_compression_matrix, _) = trace.main_trace().clone_air_matrices();
+    let log = InteractionLog::new(&trace);
+
+    let block = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new_unchecked);
+    let cv_in = [9, 10, 11, 12].map(Felt::new_unchecked);
+    let output = Eidos::compress(Word::new(cv_in), block);
+    let message = HasherCompressionLinkMsg {
+        block,
+        cv_in,
+        cv_out: core::array::from_fn(|idx| output[idx]),
+    };
+    let denominator = message.encode(&log.challenges);
+
+    let chip_fractions = build_lookup_fractions(
+        &MidenAir::CHIPLETS,
+        &chip_matrix,
+        None,
+        &BaseAir::<Felt>::periodic_columns(&MidenAir::CHIPLETS),
+        &log.challenges,
+    );
+    let eidos_compression_fractions = build_lookup_fractions(
+        &MidenAir::EIDOS_COMPRESSION,
+        &eidos_compression_matrix,
+        None,
+        &BaseAir::<Felt>::periodic_columns(&MidenAir::EIDOS_COMPRESSION),
+        &log.challenges,
+    );
+    let matching_multiplicities = |fractions: &LookupFractions<Felt, QuadFelt>| {
+        fractions
+            .fractions()
+            .iter()
+            .filter_map(|&(multiplicity, encoded)| (encoded == denominator).then_some(multiplicity))
+            .collect::<Vec<_>>()
+    };
+
+    let two = Felt::new_unchecked(2);
+    assert_eq!(matching_multiplicities(&chip_fractions), vec![Felt::ONE, Felt::ONE]);
+    assert_eq!(matching_multiplicities(&eidos_compression_fractions), vec![-two]);
+    assert_eq!(log.net_multiplicity(&message), Felt::ZERO);
+
+    // The aggregate provider cancels both unit controller emissions in the complete four-AIR
+    // ledger, and the composed constraints close as well.
     trace.check_constraints();
 }
 

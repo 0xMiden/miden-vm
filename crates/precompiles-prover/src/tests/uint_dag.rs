@@ -7,7 +7,7 @@
 //! lands equal values on one ptr. Around it: node dedup / `out_mult`
 //! accounting, the stray-claim policy, and the forgeries the pointered
 //! relations must catch (a forged result ptr; a re-encoded op id that
-//! passes every local constraint and dies on the Eidos chain-context bus).
+//! passes every local constraint and dies on the Eidos frame relation).
 
 use miden_air::lookup::Challenges;
 use miden_core::{
@@ -26,7 +26,7 @@ use crate::{
     tests::{SessionTracesTestExt, bus_balance::session_stack_residual, verify_deferred},
     transcript::{
         eval::{
-            COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR, COL_TAG_ARG0,
+            COL_FRAME_PARAM0, COL_IS_ADD, COL_IS_MUL, COL_IS_SUB, COL_OUT_MULT, COL_PTR,
             NUM_MAIN_COLS as EVAL_NUM_MAIN_COLS, TranscriptEvalAir,
         },
         nodes::UintOpId,
@@ -275,10 +275,10 @@ fn forged_result_ptr_unbalances() {
     assert!(!residual.is_empty(), "a forged r_ptr must unbalance the bus");
 }
 
-/// Re-encoding an op's discriminant — flag *and* `tag_arg0` swapped
+/// Re-encoding an op's discriminant — flag *and* frame parameter 0 swapped
 /// consistently from `Add` to `Sub` — passes every local constraint
-/// (the one-hot, the context materialization, the ptr pins). What rejects it
-/// is the bus: the row's chain-context message no longer matches the Eidos
+/// (the one-hot, the frame materialization, the ptr pins). What rejects it
+/// is the bus: the row's initial-CV message no longer matches the Eidos
 /// compression that produced its hash, and the `UintAdd` consume re-wires to a
 /// tuple no chiplet proved. The op id lives in the *hash*, not in local
 /// algebra.
@@ -302,13 +302,13 @@ fn reencoded_op_id_passes_constraints_but_unbalances() {
     let row = find_op_row(&tampered, COL_IS_ADD);
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_ADD] = Felt::ZERO;
     tampered.values[row * EVAL_NUM_MAIN_COLS + COL_IS_SUB] = Felt::ONE;
-    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_TAG_ARG0] = Felt::from(UintOpId::Sub as u8);
+    tampered.values[row * EVAL_NUM_MAIN_COLS + COL_FRAME_PARAM0] = Felt::from(UintOpId::Sub as u8);
 
     // Locally indistinguishable from an honest Sub row… (the eval chip's
     // local check needs the honest transcript root it pins in row 0).
     crate::tests::check_local_inputs(TranscriptEvalAir, &tampered, traces.air_inputs());
 
-    // …but the bus refuses the re-encoded context + re-wired relation.
+    // …but the bus refuses the re-encoded frame and re-wired relation.
     let composite = crate::tests::with_transcript_eval_main(&traces, tampered);
     let mut mains = traces.mains();
     mains[4] = &composite;

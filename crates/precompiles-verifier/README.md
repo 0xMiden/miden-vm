@@ -9,6 +9,14 @@ the `masm_verifier` module builds host inputs for the in-VM PVM verifier.
 The crate also owns the PVM ACE registry. The `registry-tools` feature enables
 the registry and MASM artifact generator.
 
+The pinned Eidos proof in `tests/fixtures` proves a Keccak-256 assertion for the
+input `abc`. Check or regenerate the proof and its deferred root with:
+
+```sh
+make check-pvm-proof-fixture
+make regenerate-pvm-proof-fixture
+```
+
 ## Build
 
 ```sh

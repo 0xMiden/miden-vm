@@ -22,6 +22,7 @@ concurrent = [
     "miden-lifted-stark/concurrent",
     "miden-precompiles-air/concurrent",
 ]
+fixture-tools = ["std", "dep:miden-precompiles-verifier"]
 std = [
     "miden-air/std",
     "miden-core/std",
@@ -39,11 +40,17 @@ miden-lifted-air.workspace = true
 miden-lifted-stark.workspace = true
 miden-precompiles-air.workspace = true
 miden-precompiles.workspace = true
+miden-precompiles-verifier = { workspace = true, optional = true }
 serde.workspace = true
 serde-wincode.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 wincode.workspace = true
+
+[[bin]]
+name = "pvm-proof-fixture"
+path = "src/bin/pvm_proof_fixture.rs"
+required-features = ["fixture-tools"]
 
 [dev-dependencies]
 # Known-good secp256k1 ("k1") reference — the oracle for EC circuit

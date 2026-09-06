@@ -162,6 +162,7 @@ fn hasher_build_merkle_root_depth_3() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn hasher_update_merkle_root() {
     let leaves = init_leaves(&[1, 2, 3, 4]);
     let tree = MerkleTree::new(&leaves).unwrap();
@@ -777,6 +778,7 @@ fn init_leaf(value: u64) -> Digest {
 ///
 /// Checks controller columns copied by memoization.
 /// Does NOT check mrupdate_id (which is overwritten by the hasher on copy).
+#[allow(clippy::needless_range_loop)]
 fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Range<usize>) {
     assert_eq!(
         original.len(),
