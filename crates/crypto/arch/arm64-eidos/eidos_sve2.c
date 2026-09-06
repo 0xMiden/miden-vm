@@ -111,3 +111,66 @@ void eidos_compress16_sve2(
         svst1_u32(pg, out + 7 * 16 + base, XOR(v7, v15));
     }
 }
+
+// Single-block rows use only lanes 0..3, independently of the hardware vector length.
+#define WORDS(a, b, c, d) svld1_gather_u32index_u32(pg, block, svdupq_n_u32(a, b, c, d))
+#define G(x, y) do { \
+    a = ADD(ADD(a, b), (x)); \
+    d = XOR_ROTATE(d, a, 16); \
+    c = ADD(c, d); \
+    b = XOR_ROTATE(b, c, 12); \
+    a = ADD(ADD(a, b), (y)); \
+    d = XOR_ROTATE(d, a, 8); \
+    c = ADD(c, d); \
+    b = XOR_ROTATE(b, c, 7); \
+} while (0)
+
+// Table indices always select the first four lanes, including when VL exceeds 128 bits.
+#define ROUND(m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15) do { \
+    G(WORDS(m0, m2, m4, m6), WORDS(m1, m3, m5, m7)); \
+    b = svtbl_u32(b, left1); \
+    c = svtbl_u32(c, left2); \
+    d = svtbl_u32(d, left3); \
+    G(WORDS(m8, m10, m12, m14), WORDS(m9, m11, m13, m15)); \
+    b = svtbl_u32(b, left3); \
+    c = svtbl_u32(c, left2); \
+    d = svtbl_u32(d, left1); \
+} while (0)
+
+static inline svuint32x4_t compress_pre(const uint32_t *cv, const uint32_t *block) {
+    const svbool_t pg = svptrue_pat_b32(SV_VL4);
+    const svuint32_t left1 = svdupq_n_u32(1, 2, 3, 0);
+    const svuint32_t left2 = svdupq_n_u32(2, 3, 0, 1);
+    const svuint32_t left3 = svdupq_n_u32(3, 0, 1, 2);
+    svuint32_t a = svld1_u32(pg, cv);
+    svuint32_t b = svld1_u32(pg, cv + 4);
+    svuint32_t c = svdupq_n_u32(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a);
+    svuint32_t d = svdupq_n_u32(0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19);
+
+    ROUND(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    ROUND(2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8);
+    ROUND(3, 4, 10, 12, 13, 2, 7, 14, 6, 5, 9, 0, 11, 15, 8, 1);
+    ROUND(10, 7, 12, 9, 14, 3, 13, 15, 4, 0, 11, 2, 5, 8, 1, 6);
+    ROUND(12, 13, 9, 11, 15, 10, 14, 8, 7, 2, 5, 3, 0, 1, 6, 4);
+    ROUND(9, 14, 11, 5, 8, 12, 15, 1, 13, 3, 0, 10, 2, 6, 4, 7);
+    ROUND(11, 15, 5, 0, 1, 9, 8, 6, 14, 10, 2, 12, 3, 4, 7, 13);
+    return svcreate4_u32(a, b, c, d);
+}
+
+void eidos_compress_raw_sve2(const uint32_t *cv, const uint32_t *block, uint32_t *out) {
+    const svbool_t pg = svptrue_pat_b32(SV_VL4);
+    const svuint32x4_t v = compress_pre(cv, block);
+    svst1_u32(pg, out, XOR(svget4_u32(v, 0), svget4_u32(v, 2)));
+    svst1_u32(pg, out + 4, XOR(svget4_u32(v, 1), svget4_u32(v, 3)));
+}
+
+void eidos_compress_xof_sve2(const uint32_t *cv, const uint32_t *block, uint32_t *out) {
+    const svbool_t pg = svptrue_pat_b32(SV_VL4);
+    const svuint32x4_t v = compress_pre(cv, block);
+    const svuint32_t cv0 = svld1_u32(pg, cv);
+    const svuint32_t cv1 = svld1_u32(pg, cv + 4);
+    svst1_u32(pg, out, XOR(svget4_u32(v, 0), svget4_u32(v, 2)));
+    svst1_u32(pg, out + 4, XOR(svget4_u32(v, 1), svget4_u32(v, 3)));
+    svst1_u32(pg, out + 8, XOR(svget4_u32(v, 2), cv0));
+    svst1_u32(pg, out + 12, XOR(svget4_u32(v, 3), cv1));
+}

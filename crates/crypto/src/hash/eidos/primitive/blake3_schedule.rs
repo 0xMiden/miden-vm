@@ -28,11 +28,11 @@ pub(super) const IV: [u32; 8] = [
     0x5be0_cd19,
 ];
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 const ROUNDS: usize = 7;
 
 /// BLAKE3 message-word schedule for the compression rounds.
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
@@ -325,7 +325,7 @@ pub(super) fn selected_arm_tier_for_test() -> arm_dispatch::ArmTier {
 }
 
 #[inline(always)]
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
     v[d] = (v[d] ^ v[a]).rotate_right(16);
@@ -393,7 +393,7 @@ fn g_packed<const LANES: usize>(
 }
 
 #[inline(always)]
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn permuted_state_with_parameter_words(
     cv: [u32; 8],
     block: [u32; 16],
@@ -438,15 +438,23 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         row_x86::compress_raw(&cv, &block)
     }
 
+    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
+        let mut out = [0; 8];
+        // SAFETY: runtime detection or target features guarantee SVE2; buffers match the ABI.
+        unsafe { eidos_compress_raw_sve2(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
+        return out;
+    }
+
     #[cfg(target_arch = "aarch64")]
-    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon {
+    {
         let mut out = [0; 8];
         // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
         unsafe { eidos_compress_raw_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
         return out;
     }
 
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         array::from_fn(|i| v[i] ^ v[i + 8])
@@ -471,15 +479,23 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
         row_x86::compress_raw_xof(&cv, &block)
     }
 
+    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
+        let mut out = [0; 16];
+        // SAFETY: runtime detection or target features guarantee SVE2; buffers match the ABI.
+        unsafe { eidos_compress_xof_sve2(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
+        return out;
+    }
+
     #[cfg(target_arch = "aarch64")]
-    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon {
+    {
         let mut out = [0; 16];
         // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
         unsafe { eidos_compress_xof_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
         return out;
     }
 
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
@@ -608,6 +624,8 @@ unsafe extern "C" {
 
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
 unsafe extern "C" {
+    fn eidos_compress_raw_sve2(cv: *const u32, block: *const u32, out: *mut u32);
+    fn eidos_compress_xof_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress16_sve2(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
 }
 
