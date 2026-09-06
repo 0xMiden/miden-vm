@@ -1,5 +1,10 @@
 # ===== POSEIDON2 PROCEDURES ====================================================================
 
+#! A Poseidon2 digest in stack element order.
+pub type Digest = word
+#! Poseidon2 sponge state, with the first rate word at the top of the stack.
+pub type State = struct { rate0: word, rate1: word, capacity: word }
+
 #! Prepares the top of the stack with the hasher initial state.
 #!
 #! This procedures does not handle padding, therefore, the user is expected to
@@ -12,7 +17,7 @@
 #! (R0 on top of stack).
 #!
 #! Cycles: 12
-pub proc init_no_padding
+pub proc init_no_padding() -> State
     padw padw padw
 end
 
@@ -27,7 +32,7 @@ end
 #! Output: [R0=0w, R1=0w, C, ...]
 #!
 #! Cycles: 8
-pub proc init_with_capacity
+pub proc init_with_capacity(capacity: word) -> State
     padw padw
 end
 
@@ -43,7 +48,7 @@ end
 #! - `DIGEST = R0`.
 #!
 #! Cycles: 9
-pub proc squeeze_digest
+pub proc squeeze_digest(state: State) -> Digest
     # swap R0 (digest) with C (1 cycle)
     swapw.2
 
@@ -69,7 +74,7 @@ end
 #! - `DIGEST = R0`.
 #!
 #! Cycles: 4
-pub proc copy_digest
+pub proc copy_digest(state: State) -> (Digest, State)
     dupw
 end
 
@@ -87,7 +92,11 @@ end
 #! - `C` is the capacity word (positions 8-11).
 #!
 #! Cycles: 4 + 3 * words, where `words` is the `start_addr - end_addr`
-pub proc absorb_double_words_from_memory
+pub proc absorb_double_words_from_memory(
+    state: State,
+    start_addr: ptr<felt>,
+    end_addr: ptr<felt>,
+) -> (State, ptr<felt>, ptr<felt>)
     dup.13 dup.13 neq  # (4 cycles )
     while.true
         mem_stream exec.permute # (2 cycles)
@@ -107,7 +116,7 @@ end
 #! - `HASH` is the cumulative hash of the provided memory values.
 #!
 #! Cycles: 37 + 3 * words, where `words` is the `start_addr - end_addr`
-pub proc hash_double_words
+pub proc hash_double_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
     # enforce `start_addr ≤ end_addr`
     dup.1 dup.1 u32assert2
     u32gte assert.err="start address should be less or equal to the end address"
@@ -143,7 +152,7 @@ end
 #! - non-empty even words: 56 cycles + 3 * words
 #! - non-empty odd words: 68 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
-pub proc hash_words_with_domain
+pub proc hash_words_with_domain(domain: felt, start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
     # Move the domain past the address pair so we can reuse the standard hash_words control flow.
     # (1 cycle)
     movdn.2
@@ -221,7 +230,7 @@ end
 #! - non-empty even words: 57 cycles + 3 * words
 #! - non-empty odd words: 69 cycles + 3 * words
 #! where `words` is `(end_addr - start_addr) / 4`.
-pub proc hash_words
+pub proc hash_words(start_addr: ptr<felt>, end_addr: ptr<felt>) -> Digest
     push.0
     # => [domain=0, start_addr, end_addr, ...]
 
@@ -250,7 +259,11 @@ end
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
-pub proc prepare_hasher_state
+pub proc prepare_hasher_state(
+    ptr: ptr<felt>,
+    num_elements: u32,
+    pad_inputs_flag: i1,
+) -> (State, ptr<felt>, ptr<felt>, u8)
     # move number of inputs to the top of the stack
     swap
     # => [num_elements, ptr, pad_inputs_flag]
@@ -299,7 +312,12 @@ end
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
 #! - HASH is the resulting hash of the provided memory values.
-pub proc hash_elements_with_state
+pub proc hash_elements_with_state(
+    state: State,
+    ptr: ptr<felt>,
+    end_pairs_addr: ptr<felt>,
+    remainder: u8,
+) -> Digest
     # hash every pair of words
     exec.absorb_double_words_from_memory
     # => [A, B, C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
@@ -453,7 +471,7 @@ end
 #! - If number of elements divides by 8: 55 cycles + 3 * words
 #! - Else: 188 cycles + 3 * words
 #! where `words` is the number of quads of input values.
-pub proc hash_elements
+pub proc hash_elements(ptr: ptr<felt>, num_elements: u32) -> Digest
     # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
     push.0 movdn.2
     # => [ptr, num_elements, pad_inputs_flag = 0]
@@ -488,7 +506,7 @@ end
 #! - non-empty and divisible by 8: 67 cycles + 3 * words
 #! - non-empty and not divisible by 8: 200 cycles + 3 * words
 #! where `words` is the number of four-element words in the input.
-pub proc hash_elements_in_domain
+pub proc hash_elements_in_domain(ptr: ptr<felt>, num_elements: u32, domain: felt) -> Digest
     # => [ptr, num_elements, domain]
     push.0 movdn.2
     # => [ptr, num_elements, pad_inputs_flag=0, domain]
@@ -546,7 +564,7 @@ end
 #! - If number of elements divides by 8: 55 cycles + 3 * words
 #! - Else: 188 cycles + 3 * words
 #! where `words` is the number of quads of input values.
-pub proc pad_and_hash_elements
+pub proc pad_and_hash_elements(ptr: ptr<felt>, num_elements: u32) -> Digest
     # push the 1 as the pad_inputs flag: this procedure should pad its inputs
     push.1 movdn.2
     # => [ptr, num_elements, pad_inputs_flag = 1]
@@ -568,7 +586,7 @@ end
 #! - B is the resulting hash, computed as `Poseidon2(A)`.
 #!
 #! Cycles: 19
-pub proc hash
+pub proc hash(input: word) -> Digest
     hash
 end
 
@@ -582,7 +600,7 @@ end
 #! - C is the resulting hash, computed as `Poseidon2(A || B)`.
 #!
 #! Cycles: 16
-pub proc merge
+pub proc merge(a: Digest, b: Digest) -> Digest
     hmerge
 end
 
@@ -596,7 +614,7 @@ end
 #! - C is the resulting hash, computed with capacity `[0, domain, 0, 0]`.
 #!
 #! Cycles: 16
-pub proc merge_in_domain
+pub proc merge_in_domain(domain: felt, a: Digest, b: Digest) -> Digest
     # move `domain` past the two words so we can reuse the `adv.insert_hdword_d` capacity-word
     # construction pattern (1 cycle)
     movdn.8
@@ -621,6 +639,6 @@ end
 #! - R0', R1', C' are the permuted state words.
 #!
 #! Cycles: 1
-pub proc permute
+pub proc permute(state: State) -> State
     hperm
 end

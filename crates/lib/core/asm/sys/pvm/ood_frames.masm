@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 
 # Number of eight-felt advice blocks in one aligned PVM OOD row. Pinned against the generated
@@ -19,7 +20,10 @@ const OOD_ROW_DOUBLE_WORDS = 192
 #!
 #! Inputs:  [R0, R1, C, ptr, alpha_ptr, acc0, acc1]
 #! Outputs: [R0, R1, C, ptr, alpha_ptr, acc0`, acc1`]
-pub proc process_row_ood_evaluations
+pub proc process_row_ood_evaluations(
+    state: types::PoseidonState,
+    evaluation: types::HornerState,
+) -> (types::PoseidonState, types::HornerState)
     repeat.OOD_ROW_DOUBLE_WORDS
         adv_pipe
         horner_eval_ext

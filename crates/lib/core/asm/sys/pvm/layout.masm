@@ -8,6 +8,8 @@
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
+use miden::core::stark::types
+
 ### 8 felts: 3225426416..3225426424.
 const PUBLIC_INPUTS_PTR = 3225426416
 
@@ -59,42 +61,42 @@ const CURRENT_TRACE_ROW_PTR = 3225443440
 ### 4 felts: 3225444208..3225444212. Stores the trusted preprocessed-tree commitment for DEEP openings.
 const PREPROCESSED_COM_PTR = 3225444208
 
-pub proc public_inputs_ptr
+pub proc public_inputs_ptr() -> types::Address
     push.PUBLIC_INPUTS_PTR
 end
 
-pub proc aux_rand_elem_ptr
+pub proc aux_rand_elem_ptr() -> types::Address
     push.AUX_RAND_ELEM_PTR
 end
 
-pub proc preprocessed_current_ptr
+pub proc preprocessed_current_ptr() -> types::Address
     push.PREPROCESSED_CURRENT_PTR
 end
 
-pub proc aux_bus_boundary_ptr
+pub proc aux_bus_boundary_ptr() -> types::Address
     push.AUX_BUS_BOUNDARY_PTR
 end
 
-pub proc auxiliary_ace_inputs_ptr
+pub proc auxiliary_ace_inputs_ptr() -> types::Address
     push.AUXILIARY_ACE_INPUTS_PTR
 end
 
-pub proc ace_circuit_stream_ptr
+pub proc ace_circuit_stream_ptr() -> types::Address
     push.ACE_CIRCUIT_STREAM_PTR
 end
 
-pub proc bus_gamma_ptr
+pub proc bus_gamma_ptr() -> types::Address
     push.BUS_GAMMA_PTR
 end
 
-pub proc c_total_ptr
+pub proc c_total_ptr() -> types::Address
     push.C_TOTAL_PTR
 end
 
-pub proc current_trace_row_ptr
+pub proc current_trace_row_ptr() -> types::Address
     push.CURRENT_TRACE_ROW_PTR
 end
 
-pub proc preprocessed_com_ptr
+pub proc preprocessed_com_ptr() -> types::Address
     push.PREPROCESSED_COM_PTR
 end

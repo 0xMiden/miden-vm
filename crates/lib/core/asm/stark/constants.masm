@@ -1,3 +1,4 @@
+use miden::core::stark::types
 # CONSTANTS
 # =================================================================================================
 
@@ -185,134 +186,134 @@ const FRI_COM_PTR = 4294912800
 # ACCESSORS
 # =================================================================================================
 
-pub proc get_root_unity
+pub proc get_root_unity() -> felt
     push.ROOT_UNITY
 end
 
-pub proc get_domain_offset
+pub proc get_domain_offset() -> felt
     push.DOMAIN_OFFSET_PTR mem_load
 end
 
-pub proc set_domain_offset
+pub proc set_domain_offset(value: felt)
     push.DOMAIN_OFFSET_PTR mem_store
 end
 
-pub proc get_domain_offset_inv
+pub proc get_domain_offset_inv() -> felt
     push.DOMAIN_OFFSET_INV_PTR mem_load
 end
 
-pub proc set_domain_offset_inv
+pub proc set_domain_offset_inv(value: felt)
     push.DOMAIN_OFFSET_INV_PTR mem_store
 end
 
-pub proc get_num_aux_trace_coefs
+pub proc get_num_aux_trace_coefs() -> u8
     push.NUM_AUX_TRACE_COEFS
 end
 
-pub proc get_blowup_factor
+pub proc get_blowup_factor() -> u8
     push.BLOWUP_FACTOR
 end
 
-pub proc get_blowup_factor_log
+pub proc get_blowup_factor_log() -> u8
     push.BLOWUP_FACTOR_LOG
 end
 
-pub proc get_log_final_degree
+pub proc get_log_final_degree() -> u8
     push.LOG_FINAL_DEGREE
 end
 
-pub proc get_fri_fold_arity
+pub proc get_fri_fold_arity() -> u8
     push.FRI_FOLD_ARITY
 end
 
 #! Store details about the LDE domain.
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
-pub proc set_lde_domain_info_word
+pub proc set_lde_domain_info_word(domain: types::LdeDomain) -> types::LdeDomain
     push.LDE_DOMAIN_INFO_PTR mem_storew_le
 end
 
 #! Load details about the LDE domain.
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
-pub proc get_lde_domain_info_word
+pub proc get_lde_domain_info_word(scratch: word) -> types::LdeDomain
     push.LDE_DOMAIN_INFO_PTR mem_loadw_le
 end
 
 #! Returns log(lde_size), i.e., the depth of the LDE domain Merkle tree.
-pub proc get_lde_domain_depth
+pub proc get_lde_domain_depth() -> u8
     push.LDE_DOMAIN_LOG_SIZE_PTR mem_load
 end
 
-pub proc set_lde_domain_generator
+pub proc set_lde_domain_generator(value: felt)
     push.LDE_DOMAIN_GEN_PTR mem_store
 end
 
-pub proc get_lde_domain_generator
+pub proc get_lde_domain_generator() -> felt
     push.LDE_DOMAIN_GEN_PTR mem_load
 end
 
-pub proc set_lde_domain_size
+pub proc set_lde_domain_size(value: felt)
     push.LDE_DOMAIN_SIZE_PTR mem_store
 end
 
-pub proc get_lde_domain_size
+pub proc get_lde_domain_size() -> felt
     push.LDE_DOMAIN_SIZE_PTR mem_load
 end
 
-pub proc set_number_queries
+pub proc set_number_queries(value: u8)
     push.NUM_QUERIES_PTR mem_store
 end
 
-pub proc get_number_queries
+pub proc get_number_queries() -> u8
     push.NUM_QUERIES_PTR mem_load
 end
 
-pub proc set_remainder_poly_size
+pub proc set_remainder_poly_size(value: u32)
     push.REMAINDER_POLY_SIZE_PTR mem_store
 end
 
-pub proc get_remainder_poly_size
+pub proc get_remainder_poly_size() -> u32
     push.REMAINDER_POLY_SIZE_PTR mem_load
 end
 
-pub proc set_num_fri_layers
+pub proc set_num_fri_layers(value: u8)
     push.NUM_FRI_LAYERS_PTR mem_store
 end
 
-pub proc get_num_fri_layers
+pub proc get_num_fri_layers() -> u8
     push.NUM_FRI_LAYERS_PTR mem_load
 end
 
-pub proc set_remainder_poly_address
+pub proc set_remainder_poly_address(value: types::Address)
     push.REMAINDER_POLY_ADDRESS_PTR mem_store
 end
 
-pub proc get_remainder_poly_address
+pub proc get_remainder_poly_address() -> types::Address
     push.REMAINDER_POLY_ADDRESS_PTR mem_load
 end
 
-pub proc set_trace_length
+pub proc set_trace_length(value: u32)
     push.TRACE_LENGTH_PTR mem_store
 end
 
-pub proc get_trace_length
+pub proc get_trace_length() -> u32
     push.TRACE_LENGTH_PTR mem_load
 end
 
-pub proc set_fri_queries_address
+pub proc set_fri_queries_address(value: types::Address)
     push.FRI_QUERIES_ADDRESS_PTR mem_store
 end
 
-pub proc get_fri_queries_address
+pub proc get_fri_queries_address() -> types::Address
     push.FRI_QUERIES_ADDRESS_PTR mem_load
 end
 
-pub proc set_trace_length_log
+pub proc set_trace_length_log(value: u8)
     push.TRACE_LENGTH_LOG_PTR mem_store
 end
 
-pub proc get_trace_length_log
+pub proc get_trace_length_log() -> u8
     push.TRACE_LENGTH_LOG_PTR mem_load
 end
 
@@ -328,118 +329,118 @@ end
 #! - `ptr` is the base address of the per-AIR log-height cells.
 #!
 #! Invocation: exec
-pub proc air_trace_length_logs_ptr
+pub proc air_trace_length_logs_ptr() -> types::Address
     push.AIR_TRACE_LENGTH_LOGS_PTR
 end
 
 #! Number of per-AIR log-height cells reserved in the shared memory map.
-pub proc air_trace_length_logs_capacity
+pub proc air_trace_length_logs_capacity() -> u8
     push.AIR_TRACE_LENGTH_LOGS_CAPACITY
 end
 
-pub proc set_query_pow_bits
+pub proc set_query_pow_bits(value: u8)
     push.QUERY_POW_BITS_PTR mem_store
 end
 
-pub proc get_query_pow_bits
+pub proc get_query_pow_bits() -> u8
     push.QUERY_POW_BITS_PTR mem_load
 end
 
-pub proc set_deep_pow_bits
+pub proc set_deep_pow_bits(value: u8)
     push.DEEP_POW_BITS_PTR mem_store
 end
 
-pub proc get_deep_pow_bits
+pub proc get_deep_pow_bits() -> u8
     push.DEEP_POW_BITS_PTR mem_load
 end
 
-pub proc set_folding_pow_bits
+pub proc set_folding_pow_bits(value: u8)
     push.FOLDING_POW_BITS_PTR mem_store
 end
 
-pub proc get_folding_pow_bits
+pub proc get_folding_pow_bits() -> u8
     push.FOLDING_POW_BITS_PTR mem_load
 end
 
-pub proc main_trace_com_ptr
+pub proc main_trace_com_ptr() -> types::Address
     push.MAIN_TRACE_COM_PTR
 end
 
-pub proc aux_trace_com_ptr
+pub proc aux_trace_com_ptr() -> types::Address
     push.AUX_TRACE_COM_PTR
 end
 
-pub proc composition_poly_com_ptr
+pub proc composition_poly_com_ptr() -> types::Address
     push.COMPOSITION_POLY_COM_PTR
 end
 
 #! Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.
 #!
 #! The word stored is `[z^n_0, z^n_1, z_0, z_1]`.
-pub proc z_ptr
+pub proc z_ptr() -> types::Address
     push.Z_PTR
 end
 
-pub proc zero_word_ptr
+pub proc zero_word_ptr() -> types::Address
     push.ZERO_WORD_PTR
 end
 
-pub proc deep_rand_alpha_nd_ptr
+pub proc deep_rand_alpha_nd_ptr() -> types::Address
     push.ALPHA_DEEP_ND_PTR
 end
 
-pub proc ood_fixed_term_horner_evaluations_ptr
+pub proc ood_fixed_term_horner_evaluations_ptr() -> types::Address
     push.OOD_FIXED_TERM_HORNER_EVALS_PTR
 end
 
-pub proc set_trace_domain_generator
+pub proc set_trace_domain_generator(value: felt)
     push.TRACE_DOMAIN_GENERATOR_PTR mem_store
 end
 
-pub proc get_trace_domain_generator
+pub proc get_trace_domain_generator() -> felt
     push.TRACE_DOMAIN_GENERATOR_PTR mem_load
 end
 
-pub proc public_inputs_address_ptr
+pub proc public_inputs_address_ptr() -> types::Address
     push.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
 #! Returns the pointer to the capacity word of the Poseidon2-based random coin.
-pub proc c_ptr
+pub proc c_ptr() -> types::Address
     push.C_PTR
 end
 
 #! Returns the pointer to the first rate word of the Poseidon2-based random coin.
-pub proc r1_ptr
+pub proc r1_ptr() -> types::Address
     push.R1_PTR
 end
 
 #! Returns the pointer to the second rate word of the Poseidon2-based random coin.
-pub proc r2_ptr
+pub proc r2_ptr() -> types::Address
     push.R2_PTR
 end
 
-pub proc tmp1
+pub proc tmp1() -> types::Address
     push.TMP1
 end
 
-pub proc tmp2
+pub proc tmp2() -> types::Address
     push.TMP2
 end
 
-pub proc tmp3
+pub proc tmp3() -> types::Address
     push.TMP3
 end
 
-pub proc tmp4
+pub proc tmp4() -> types::Address
     push.TMP4
 end
 
-pub proc set_order_tag
+pub proc set_order_tag(value: u32)
     push.ORDER_TAG_PTR mem_store
 end
 
-pub proc get_order_tag
+pub proc get_order_tag() -> u32
     push.ORDER_TAG_PTR mem_load
 end
 
@@ -450,76 +451,76 @@ end
 #!
 #! Inputs:  [order_tag_count, ...]
 #! Outputs: [...]
-pub proc assert_valid_order_tag
+pub proc assert_valid_order_tag(order_tag_count: u32)
     push.ORDER_TAG_PTR mem_load
     swap u32lt assert.err="invalid order tag"
 end
 
-pub proc relation_digest_ptr
+pub proc relation_digest_ptr() -> types::Address
     push.RELATION_DIGEST_PTR
 end
 
-pub proc ace_registry_root_ptr
+pub proc ace_registry_root_ptr() -> types::Address
     push.ACE_REGISTRY_ROOT_PTR
 end
 
-pub proc random_coin_input_len_ptr
+pub proc random_coin_input_len_ptr() -> types::Address
     push.RANDOM_COIN_INPUT_LEN_PTR
 end
 
-pub proc random_coin_output_len_ptr
+pub proc random_coin_output_len_ptr() -> types::Address
     push.RANDOM_COIN_OUTPUT_LEN_PTR
 end
 
-pub proc set_ood_evaluations_address
+pub proc set_ood_evaluations_address(value: types::Address)
     push.OOD_EVALUATIONS_ADDRESS_PTR mem_store
 end
 
-pub proc get_ood_evaluations_address
+pub proc get_ood_evaluations_address() -> types::Address
     push.OOD_EVALUATIONS_ADDRESS_PTR mem_load
 end
 
-pub proc set_current_trace_row_address
+pub proc set_current_trace_row_address(value: types::Address)
     push.CURRENT_TRACE_ROW_ADDRESS_PTR mem_store
 end
 
-pub proc get_current_trace_row_address
+pub proc get_current_trace_row_address() -> types::Address
     push.CURRENT_TRACE_ROW_ADDRESS_PTR mem_load
 end
 
-pub proc fri_verify_state_ptr
+pub proc fri_verify_state_ptr() -> types::Address
     push.FRI_VERIFY_STATE_PTR
 end
 
-pub proc composition_coef_ptr
+pub proc composition_coef_ptr() -> types::Address
     push.COMPOSITION_COEF_PTR
 end
 
-pub proc deep_rand_coef_ptr
+pub proc deep_rand_coef_ptr() -> types::Address
     push.DEEP_RAND_CC_PTR
 end
 
-pub proc fri_com_ptr
+pub proc fri_com_ptr() -> types::Address
     push.FRI_COM_PTR
 end
 
-pub proc get_procedure_digest_compute_deep_composition_polynomial_queries_ptr
+pub proc get_procedure_digest_compute_deep_composition_polynomial_queries_ptr() -> types::Address
     push.DYNAMIC_PROCEDURE_0_PTR
 end
 
-pub proc get_procedure_digest_execute_constraint_evaluation_check_ptr
+pub proc get_procedure_digest_execute_constraint_evaluation_check_ptr() -> types::Address
     push.DYNAMIC_PROCEDURE_1_PTR
 end
 
-pub proc get_procedure_digest_process_row_ood_evaluations_ptr
+pub proc get_procedure_digest_process_row_ood_evaluations_ptr() -> types::Address
     push.DYNAMIC_PROCEDURE_2_PTR
 end
 
-pub proc get_procedure_digest_process_public_inputs_ptr
+pub proc get_procedure_digest_process_public_inputs_ptr() -> types::Address
     push.DYNAMIC_PROCEDURE_3_PTR
 end
 
-pub proc get_procedure_digest_observe_aux_trace_ptr
+pub proc get_procedure_digest_observe_aux_trace_ptr() -> types::Address
     push.DYNAMIC_PROCEDURE_4_PTR
 end
 
@@ -527,6 +528,6 @@ end
 # =================================================================================================
 
 #! Overwrites the top stack word with zeros.
-pub proc zeroize_stack_word
+pub proc zeroize_stack_word(value: word) -> word
     exec.zero_word_ptr mem_loadw_le
 end

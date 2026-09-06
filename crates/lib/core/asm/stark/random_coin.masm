@@ -17,6 +17,7 @@
 #!     rate and permute immediately. Valid only when the input buffer is empty (the stream is known
 #!     to start and end on a rate boundary).
 
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::utils
@@ -29,7 +30,7 @@ use miden::core::stark::utils
 #! Input: [...]
 #! Output: [R1, ...]
 #! Cycles: 6
-pub proc get_rate_1
+pub proc get_rate_1() -> word
     padw exec.constants::r1_ptr mem_loadw_le
 end
 
@@ -38,7 +39,7 @@ end
 #! Input: [R1, ...]
 #! Output: [...]
 #! Cycles: 6
-pub proc set_rate_1
+pub proc set_rate_1(value: word)
     exec.constants::r1_ptr mem_storew_le dropw
 end
 
@@ -47,7 +48,7 @@ end
 #! Input: [...]
 #! Output: [R2, ...]
 #! Cycles: 6
-pub proc get_rate_2
+pub proc get_rate_2() -> word
     padw exec.constants::r2_ptr mem_loadw_le
 end
 
@@ -56,7 +57,7 @@ end
 #! Input: [R2, ...]
 #! Output: [...]
 #! Cycles: 6
-pub proc set_rate_2
+pub proc set_rate_2(value: word)
     exec.constants::r2_ptr mem_storew_le dropw
 end
 
@@ -65,7 +66,7 @@ end
 #! Input: [...]
 #! Output: [C, ...]
 #! Cycles: 6
-pub proc get_capacity
+pub proc get_capacity() -> word
     padw exec.constants::c_ptr mem_loadw_le
 end
 
@@ -74,7 +75,7 @@ end
 #! Input: [C, ...]
 #! Output: [...]
 #! Cycles: 6
-pub proc set_capacity
+pub proc set_capacity(value: word)
     exec.constants::c_ptr mem_storew_le dropw
 end
 
@@ -83,7 +84,7 @@ end
 #! Input: [...]
 #! Output: [R1, R2, C, ...]
 #! Cycles: 18
-pub proc load_random_coin_state
+pub proc load_random_coin_state() -> types::PoseidonState
     exec.get_capacity
     exec.get_rate_2
     exec.get_rate_1
@@ -94,7 +95,7 @@ end
 #! Input: [R1, R2, C, ...]
 #! Output: [...]
 #! Cycles: 18
-pub proc store_random_coin_state
+pub proc store_random_coin_state(state: types::PoseidonState)
     exec.set_rate_1
     exec.set_rate_2
     exec.set_capacity
@@ -108,7 +109,7 @@ end
 #!
 #! Input:  [n, ...]
 #! Output: [...]
-pub proc add_absorb_length_tag
+pub proc add_absorb_length_tag(length: u8)
     exec.constants::c_ptr mem_load add
     exec.constants::c_ptr mem_store
 end
@@ -125,7 +126,7 @@ end
 #!
 #! Input: [...]
 #! Output: [x, ...]
-pub proc sample_felt
+pub proc sample_felt() -> felt
     exec.constants::random_coin_output_len_ptr mem_load
     dup push.0 neq assert.err="sample_felt: output buffer is empty"
     sub.1
@@ -138,7 +139,7 @@ end
 #!
 #! Input: [...]
 #! Output: [x0, x1, ...]
-pub proc sample_ext
+pub proc sample_ext() -> types::QuadFelt
     exec.sample_felt
     exec.sample_felt
     swap
@@ -148,7 +149,7 @@ end
 #!
 #! Input: [bits, ...]
 #! Output: [value, ...]
-pub proc sample_bits
+pub proc sample_bits(bits: u8) -> u32
     dup
     pow2
     u32assert u32overflowing_sub.1 assertz
@@ -178,7 +179,7 @@ end
 #!
 #! Input:  [felt, ...]
 #! Output: [...]
-pub proc observe_felt
+pub proc observe_felt(value: felt)
     # Invalidate any buffered rate output (p3's `output_buffer.clear()`): a partial buffer left here
     # leaves output_len = 0, so an unflushed `sample_felt` trips its assertion instead of reading a
     # stale rate. The full-buffer branch below restores output_len = 8 after permuting.
@@ -220,7 +221,7 @@ end
 #!
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
-pub proc observe_word
+pub proc observe_word(value: word)
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="observe_word: input buffer must be empty"
     # => [w0, w1, w2, w3, ...]
@@ -241,7 +242,7 @@ end
 #!
 #! Input:  [x0, x1, ...]
 #! Output: [...]
-pub proc observe_pair
+pub proc observe_pair(first: felt, second: felt)
     exec.constants::random_coin_input_len_ptr mem_load
     push.4 assert_eq.err="observe_pair: input buffer must contain one word"
     # => [x0, x1, ...]
@@ -263,7 +264,7 @@ end
 #!
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
-proc observe_second_word_and_flush
+proc observe_second_word_and_flush(value: word)
     exec.constants::random_coin_input_len_ptr mem_load
     push.4 assert_eq.err="observe_second_word_and_flush: input buffer must contain one word"
     # => [w0, w1, w2, w3, ...]
@@ -291,7 +292,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc flush_buffer
+pub proc flush_buffer()
     exec.constants::random_coin_input_len_ptr mem_load
     dup push.0 neq
     if.true
@@ -324,7 +325,7 @@ end
 #!
 #! Input:  [w0, w1, w2, w3, ...]
 #! Output: [...]
-pub proc observe_word_and_flush_buffer
+pub proc observe_word_and_flush_buffer(value: word)
     exec.constants::random_coin_input_len_ptr mem_load
     dup eq.4
     if.true
@@ -369,7 +370,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc init_seed
+pub proc init_seed()
     # Initialize the zero word and buffers to zero.
     padw
     exec.constants::zero_word_ptr mem_storew_le
@@ -511,7 +512,7 @@ end
 #!
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [R1, R2, C, ...]
-proc absorb_word_and_felt
+proc absorb_word_and_felt(value: felt, data: word) -> types::PoseidonState
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="absorb_word_and_felt: input buffer must be empty"
     # => [felt, w0, w1, w2, w3, ...]
@@ -539,7 +540,7 @@ end
 #!
 #! Input: [felt, w0, w1, w2, w3, ...]
 #! Output: [...]
-pub proc reseed_with_felt
+pub proc reseed_with_felt(value: felt, commitment: types::Digest)
     exec.absorb_word_and_felt
     exec.store_random_coin_state
 
@@ -559,7 +560,7 @@ end
 #!
 #! Input: [w0, w1, w2, w3, ...]
 #! Output: [...]
-pub proc reseed_direct
+pub proc reseed_direct(value: word)
     exec.constants::random_coin_input_len_ptr mem_load
     assertz.err="reseed_direct: input buffer must be empty"
     # => [w0, w1, w2, w3, ...]
@@ -589,7 +590,10 @@ end
 #!
 #! Input: [pow_witness, w0, w1, w2, w3, ...]
 #! Output: [a0, a1, ...]
-pub proc reseed_check_folding_pow_and_sample_alpha
+pub proc reseed_check_folding_pow_and_sample_alpha(
+    pow_witness: felt,
+    commitment: types::Digest,
+) -> types::QuadFelt
     exec.absorb_word_and_felt
     # => [R1, R2, C, ...]
 
@@ -624,7 +628,7 @@ end
 #!
 #! Input: [pow_bits, ...]
 #! Output: [R2, pow_bits, ...]
-proc absorb_pow_nonce
+proc absorb_pow_nonce(pow_bits: u8) -> (word, u8)
     adv_push
     # => [nonce, pow_bits, ...]
     exec.constants::random_coin_input_len_ptr mem_load
@@ -667,7 +671,7 @@ end
 #!
 #! Input: [aux_rand_ptr, ...]
 #! Output: [...]
-pub proc generate_aux_randomness
+pub proc generate_aux_randomness(aux_rand_ptr: types::Address)
 
     exec.sample_ext
     exec.sample_ext
@@ -685,7 +689,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc generate_constraint_composition_coefficients
+pub proc generate_constraint_composition_coefficients()
     exec.sample_ext
     exec.sample_ext
     # => [beta0, beta1, alpha0, alpha1, ...]
@@ -702,7 +706,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc generate_deep_composition_random_coefficients
+pub proc generate_deep_composition_random_coefficients()
     # Sample challenge_columns (deep alpha) for batching columns.
     exec.sample_ext
     padw
@@ -736,7 +740,7 @@ end
 #!
 #! Input: [pow_bits, ...]
 #! Output: [...]
-proc check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients
+proc check_nonzero_deep_pow_and_generate_deep_composition_random_coefficients(pow_bits: u8)
     exec.absorb_pow_nonce
     # => [R2, pow_bits, ...]
 
@@ -777,7 +781,7 @@ end
 #!
 #! The nonzero-PoW path consumes the needed samples directly from the fresh permutation. The
 #! zero-PoW path leaves the transcript unchanged before using the generic sampler.
-pub proc check_deep_pow_and_generate_deep_composition_random_coefficients
+pub proc check_deep_pow_and_generate_deep_composition_random_coefficients()
     exec.constants::get_deep_pow_bits
     dup push.0 neq
     if.true
@@ -797,11 +801,10 @@ end
 #! the trace length. The resulting word `[(z_0, z_1)^N, z0, z1]` is stored in the
 #! global memory address `exec.z_ptr` reserved for it.
 #!
-#! Input: [X, ...]
+#! Input: [...]
 #! Output: [...]
-#! Note: The top word on the stack is consumed by this procedure.
 #! Cycles: 21 + 10 * log(N)
-pub proc generate_z_zN
+pub proc generate_z_zN()
     # Sample z and load log trace length N
     exec.sample_ext
     exec.constants::get_trace_length_log
@@ -846,7 +849,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc generate_list_indices
+pub proc generate_list_indices()
     exec.constants::get_number_queries
     exec.constants::get_fri_queries_address
     #=> [query_ptr, num_queries, ...]
@@ -947,7 +950,7 @@ end
 #!
 #! The generic query generator starts from the output buffer left by the PoW check. For a nonzero
 #! PoW this is `output_len = 7`; for a zero-PoW configuration, the transcript is unchanged.
-pub proc check_query_pow_and_generate_list_indices
+pub proc check_query_pow_and_generate_list_indices()
     exec.check_query_pow
     exec.generate_list_indices
 end
@@ -971,7 +974,7 @@ end
 #!
 #! Input: [pow_bits, ...]
 #! Output: [...]
-proc check_pow
+proc check_pow(pow_bits: u8)
     dup
     push.0 neq
     if.true
@@ -1004,7 +1007,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc check_deep_pow
+pub proc check_deep_pow()
     exec.constants::get_deep_pow_bits
     exec.check_pow
 end
@@ -1017,7 +1020,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc check_query_pow
+pub proc check_query_pow()
     exec.constants::get_query_pow_bits
     exec.check_pow
 end

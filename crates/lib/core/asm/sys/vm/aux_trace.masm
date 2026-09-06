@@ -1,8 +1,12 @@
+use miden::core::stark::types
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::sys::vm::layout
 use miden::core::sys::vm::public_inputs
+
+#! AIR log heights in proof order.
+type ProofOrderLogHeights = struct { first: u8, second: u8, third: u8 }
 
 # Number of valid Lehmer proof-order tags for the Miden VM's three AIRs: 3! = 6.
 # Valid tags are 0..5; the remaining two leaves in the depth-3 registry are padding.
@@ -16,7 +20,7 @@ const ORDER_TAG_COUNT = 6
 #!
 #! Input:  [boundary_offset, log_height, ...]
 #! Output: [n_sigma_prime_0, n_sigma_prime_1, ...]
-proc load_weighted_aux_sum
+proc load_weighted_aux_sum(boundary_offset: u8, log_height: u8) -> types::QuadFelt
     swap pow2
     # => [n, boundary_offset, ...]
 
@@ -42,7 +46,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [log_0, log_1, log_2, ...]
-proc push_proof_order_log_heights
+proc push_proof_order_log_heights() -> ProofOrderLogHeights
     push.ORDER_TAG_COUNT exec.constants::assert_valid_order_tag
     exec.constants::get_order_tag
     dup eq.0
@@ -116,7 +120,7 @@ end
 #!
 #! Input:  [...]
 #! Output: [...]
-pub proc observe_aux_trace
+pub proc observe_aux_trace()
     # Draw random extension field elements for the auxiliary trace.
     exec.layout::aux_rand_elem_ptr
     exec.random_coin::generate_aux_randomness

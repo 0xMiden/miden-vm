@@ -375,3 +375,52 @@ fn recursive_type_alias_cycle_is_diagnosed() -> TestResult {
     assert_diagnostic!(&err, "recursive");
     Ok(())
 }
+
+#[test]
+fn imported_type_bodies_resolve_in_their_defining_module() -> TestResult {
+    use miden_assembly_syntax::ast::types::Type;
+
+    let context = TestContext::new();
+    let definitions = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::definitions
+
+        pub type Element = u32
+        pub type Alias = Element
+        pub type Record = struct { value: Alias }
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::consumer
+        use lib::definitions
+
+        pub type Element = felt
+        pub type Alias = felt
+
+        pub proc entry(record: definitions::Record, alias: definitions::Alias, local: Element)
+            nop
+        end
+        "#
+    ))?;
+    let package = context.assemble_library("lib", None, consumer, [definitions])?;
+    let signature = package
+        .manifest
+        .exports()
+        .find_map(|export| match export {
+            PackageExport::Procedure(proc) if proc.path.to_string().ends_with("entry") => {
+                proc.signature.clone()
+            },
+            _ => None,
+        })
+        .expect("entry should be exported with its signature");
+
+    let Type::Struct(record) = &signature.params()[0] else {
+        panic!("expected the imported record");
+    };
+    assert_eq!(record.get().fields()[0].ty, Type::U32);
+    assert_eq!(signature.params()[1..], [Type::U32, Type::Felt]);
+    Ok(())
+}

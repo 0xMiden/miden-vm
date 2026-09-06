@@ -1,3 +1,4 @@
+use miden::core::stark::types
 # Shared constants for the conjectured security calculation and its Q16 arithmetic.
 #
 # The MVM and PVM recursive verifiers use the same PCS and security model. None of these constants
@@ -41,7 +42,11 @@ const MAX_BOUNDARY_TERMS = 4096
 #!
 #! Inputs:  [num_boundary_terms, fractions_per_row, log_max_height, ...]
 #! Outputs: [correction_fp, log_max_height, ...]
-proc lookup_boundary_correction
+proc lookup_boundary_correction(
+    num_boundary_terms: u32,
+    fractions_per_row: u32,
+    log_max_height: u8,
+) -> (u32, u8)
     dup eq.0
     if.true
         drop drop push.0
@@ -199,20 +204,7 @@ end
 #! Outputs: [level, ...]
 #!
 #! Invocation: exec
-pub proc compute_conjectured_security_level(
-    lookup_pow_bits: u32,
-    num_composed_constraints: u32,
-    max_constraint_degree: u32,
-    num_deep_terms: u32,
-    max_message_width: u32,
-    num_lookup_boundary_terms: u32,
-    lookup_fractions_per_row: u32,
-    log_max_height: u32,
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
-) -> u32
+pub proc compute_conjectured_security_level(descriptor: types::SecurityDescriptor) -> u32
     # Assert the validity envelope documented above. Each comparison also range-checks its
     # operand as a u32. Inputs not used by query or lookup are consumed after validation.
     # Lifted STARK currently has no grinding step before lookup-challenge sampling.

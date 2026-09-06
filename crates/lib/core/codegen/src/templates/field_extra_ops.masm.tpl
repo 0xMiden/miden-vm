@@ -4,7 +4,7 @@
 #!
 #! Every 128-bit chunk is canonical in the generated prime fields because 2^128 is smaller than
 #! the field modulus.
-pub proc load_128
+pub proc load_128(chunk: u128) -> Expr
     push.[0, 0, 0, 0] swapw
     # => [CHUNK_U32[4], ZERO_HI_U32[4], ...]
     exec.load
@@ -15,7 +15,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [FIELD_DIGEST, ...]
 #! Memory layout: ptr[0..4] = chunk limbs; high field limbs are zero.
-pub proc load_128_mem
+pub proc load_128_mem(ptr: ptr<u128>) -> Expr
     padw movup.4 mem_loadw_le
     # => [CHUNK_U32[4], ...]
     exec.load_128
@@ -28,7 +28,7 @@ end
 #!
 #! Registers the expression `lo128 + hi128 * 2^128`, where each half is loaded as a canonical
 #! field value.
-pub proc load_reduced_256
+pub proc load_reduced_256(value: u256) -> Expr
     exec.load_128
     # => [LO_DIGEST, HI_U32[4], ...]
 
@@ -49,7 +49,7 @@ end
 #! Input:  [ptr, ...]
 #! Output: [FIELD_DIGEST, ...]
 #! Memory layout: ptr[0..16] = little-endian u32 limbs of the 512-bit value.
-pub proc load_reduced_512_mem
+pub proc load_reduced_512_mem(ptr: ptr<u32>) -> Expr
     # h = c0. Keep ptr underneath the accumulator for the remaining chunks.
     dup
     # => [ptr, ptr, ...]
@@ -103,7 +103,7 @@ end
 #! The inverse limbs are untrusted host advice. This wrapper registers the advised limbs as a
 #! canonical VALUE node, then proves correctness by logging `eq(mul(X_DIGEST, INV_DIGEST), one)`
 #! into the deferred root using only existing MUL and EQ nodes.
-pub proc inv
+pub proc inv(value: Expr) -> Expr
     emit.event("miden::precompiles::fields::field_inv")
     # => [X_DIGEST, ...]
 
@@ -130,7 +130,7 @@ end
 #! Divides one field element digest by another nonzero field element digest.
 #! Input:  [NUMERATOR_DIGEST, DENOMINATOR_DIGEST, ...]
 #! Output: [QUOTIENT_DIGEST, ...]
-pub proc div
+pub proc div(numerator: Expr, denominator: Expr) -> Expr
     swapw
     # => [DENOMINATOR_DIGEST, NUMERATOR_DIGEST, ...]
     exec.inv

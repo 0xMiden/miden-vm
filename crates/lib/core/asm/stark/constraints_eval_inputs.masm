@@ -1,3 +1,4 @@
+use miden::core::stark::types
 use miden::core::stark::constants
 
 # Base-field offsets from the relation's `stark_vars_ptr` into the stark-vars block. The
@@ -43,7 +44,15 @@ const SELECTOR_STRIDE = 6
 #!          quot_first_shift, quot_shift_ratio, ...]
 #! Output: [...]
 @locals(1)
-pub proc set_up_auxiliary_inputs_ace
+pub proc set_up_auxiliary_inputs_ace(
+    max_cycle_len_log: u8,
+    num_airs: u8,
+    heights_ptr: types::Address,
+    stark_vars_ptr: types::Address,
+    quot_first_weight: felt,
+    quot_first_shift: felt,
+    quot_shift_ratio: felt,
+)
     # The block base is dereferenced many times below; a local keeps it out of the working
     # stack instead of threading it through every intermediate.
     movup.3 loc_store.0
@@ -185,7 +194,7 @@ end
 #!
 #! Input:  [addr, ...]
 #! Output: [q0, q1, ...]
-proc load_quad
+proc load_quad(address: types::Address) -> types::QuadFelt
     dup add.1 mem_load
     swap mem_load
 end
@@ -198,7 +207,7 @@ end
 #! Input:  [out_offset, log_air, stark_vars_ptr, ...]
 #! Output: [...]
 @locals(1)
-proc compute_per_air_selectors
+proc compute_per_air_selectors(out_offset: u32, log_air: u8, stark_vars_ptr: types::Address)
     movup.2 loc_store.0
     # => [out_offset, log_air, ...]
     swap
