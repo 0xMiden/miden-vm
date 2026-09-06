@@ -66,9 +66,9 @@ pub(super) fn compress_packed_felt_cv(
     block: &PackedBlock,
 ) -> PackedChainingValue {
     #[cfg(target_arch = "aarch64")]
-    if super::primitive::use_neon_adapter() {
+    if super::primitive::use_arm_u64_adapter() {
         let mut out = [[Felt::new_unchecked(0); PACKED_LANES]; DIGEST_WIDTH];
-        compress_packed_felt_neon(cv, block, &mut out, PACKED_LANES);
+        compress_packed_felt_arm(cv, block, &mut out, PACKED_LANES);
         return out;
     }
     #[cfg(target_arch = "aarch64")]
@@ -89,9 +89,9 @@ pub(super) fn compress_packed_u64_cv(
     block: &[[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
     #[cfg(target_arch = "aarch64")]
-    if super::primitive::use_neon_adapter() {
+    if super::primitive::use_arm_u64_adapter() {
         let mut out = [[0; PACKED_LANES]; DIGEST_WIDTH];
-        super::primitive::compress_packed_u64_neon(cv, block, &mut out, PACKED_LANES);
+        super::primitive::compress_packed_u64_arm(cv, block, &mut out, PACKED_LANES);
         return out;
     }
     // Raw u64 inputs are split losslessly; callers supplying field elements must canonicalize
@@ -128,8 +128,8 @@ pub(super) fn compress_packed_felt_cv_counted(
 ) {
     assert!(active_lanes <= PACKED_LANES);
     #[cfg(target_arch = "aarch64")]
-    if super::primitive::use_neon_adapter() {
-        compress_packed_felt_neon(cv, block, out, active_lanes);
+    if super::primitive::use_arm_u64_adapter() {
+        compress_packed_felt_arm(cv, block, out, active_lanes);
         return;
     }
     if active_lanes == PACKED_LANES {
@@ -177,8 +177,8 @@ pub(super) fn compress_packed_u64_cv_counted(
 ) {
     assert!(active_lanes <= PACKED_LANES);
     #[cfg(target_arch = "aarch64")]
-    if super::primitive::use_neon_adapter() {
-        super::primitive::compress_packed_u64_neon(cv, block, out, active_lanes);
+    if super::primitive::use_arm_u64_adapter() {
+        super::primitive::compress_packed_u64_arm(cv, block, out, active_lanes);
         return;
     }
     if active_lanes == PACKED_LANES {
@@ -216,7 +216,7 @@ pub(super) fn compress_packed_u64_cv_counted(
 }
 
 #[cfg(target_arch = "aarch64")]
-fn compress_packed_felt_neon(
+fn compress_packed_felt_arm(
     cv: &PackedChainingValue,
     block: &PackedBlock,
     out: &mut PackedChainingValue,
@@ -233,7 +233,7 @@ fn compress_packed_felt_neon(
         }
     }
     let mut packed = [[0; PACKED_LANES]; DIGEST_WIDTH];
-    super::primitive::compress_packed_u64_neon(
+    super::primitive::compress_packed_u64_arm(
         &canonical_cv,
         &canonical_block,
         &mut packed,
@@ -406,7 +406,7 @@ mod tests {
             not(target_feature = "sve"),
             not(target_feature = "sve2")
         ))]
-        assert!(super::super::primitive::use_neon_adapter());
+        assert!(super::super::primitive::use_arm_u64_adapter());
         for active in 0..=PACKED_LANES {
             let mut cv = array::from_fn(|word| array::from_fn(|lane| mixed_u64(1, word, lane)));
             let mut block = mixed_packed_u64_block(0);
@@ -432,6 +432,55 @@ mod tests {
                     expected,
                     "active={active}, lane={lane}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "aarch64", feature = "std"))]
+    fn sve_u64_adapter_preserves_active_prefix() {
+        if !std::arch::is_aarch64_feature_detected!("sve") {
+            return;
+        }
+        unsafe extern "C" {
+            fn eidos_compress16_u64_sve(
+                cv: *const u64,
+                block: *const u64,
+                out: *mut u64,
+                count: usize,
+            );
+        }
+        for batch in 0..32 {
+            let cv = array::from_fn::<_, DIGEST_WIDTH, _>(|word| {
+                array::from_fn::<_, PACKED_LANES, _>(|lane| mixed_u64(batch, word, lane))
+            });
+            let block = mixed_packed_u64_block(batch);
+            for active in 0..=PACKED_LANES {
+                let mut out = [[u64::MAX; PACKED_LANES]; DIGEST_WIDTH];
+                // SAFETY: SVE was detected and every pointer has the fixed ABI layout.
+                unsafe {
+                    eidos_compress16_u64_sve(
+                        cv.as_ptr().cast(),
+                        block.as_ptr().cast(),
+                        out.as_mut_ptr().cast(),
+                        active,
+                    );
+                }
+                for lane in 0..PACKED_LANES {
+                    let expected = if lane < active {
+                        encoding::pack_cv_to_u64s(compress_u64_cv(
+                            encoding::unpack_u64_cv(array::from_fn(|word| cv[word][lane])),
+                            array::from_fn(|word| block[word][lane]),
+                        ))
+                    } else {
+                        [u64::MAX; DIGEST_WIDTH]
+                    };
+                    assert_eq!(
+                        array::from_fn::<_, DIGEST_WIDTH, _>(|word| out[word][lane]),
+                        expected,
+                        "batch={batch}, active={active}, lane={lane}"
+                    );
+                }
             }
         }
     }

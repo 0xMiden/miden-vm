@@ -567,18 +567,34 @@ pub(super) fn compress_packed_native(
 }
 
 #[cfg(target_arch = "aarch64")]
-pub(in super::super) fn use_neon_adapter() -> bool {
-    arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon
+pub(in super::super) fn use_arm_u64_adapter() -> bool {
+    matches!(
+        arm_dispatch::detect_arm_tier(),
+        arm_dispatch::ArmTier::Neon | arm_dispatch::ArmTier::Sve
+    )
 }
 
 #[cfg(target_arch = "aarch64")]
-pub(in super::super) fn compress_packed_u64_neon(
+pub(in super::super) fn compress_packed_u64_arm(
     cv: &[[u64; PACKED_LANES]; 4],
     block: &[[u64; PACKED_LANES]; 8],
     out: &mut [[u64; PACKED_LANES]; 4],
     active_lanes: usize,
 ) {
     assert!(active_lanes <= PACKED_LANES);
+    #[cfg(any(feature = "std", target_feature = "sve"))]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve {
+        // SAFETY: Detection guarantees SVE; the kernel accesses only the validated prefix.
+        unsafe {
+            eidos_compress16_u64_sve(
+                cv.as_ptr().cast(),
+                block.as_ptr().cast(),
+                out.as_mut_ptr().cast(),
+                active_lanes,
+            );
+        }
+        return;
+    }
     // SAFETY: AArch64 provides NEON; all arrays have the ABI's fixed word-major layout.
     // The kernel only reads and writes the validated active prefix.
     unsafe {
@@ -725,6 +741,7 @@ unsafe extern "C" {
 
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
 unsafe extern "C" {
+    fn eidos_compress16_u64_sve(cv: *const u64, block: *const u64, out: *mut u64, count: usize);
     fn eidos_compress16_sve(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
     fn eidos_check_witness_batch_sve(
         cv: *const u64,

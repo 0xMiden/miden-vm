@@ -132,6 +132,68 @@ void eidos_compress16_sve(
     }
 }
 
+// Decode each row once; inactive halves use an in-range pointer and a false predicate.
+#undef LOAD
+#define LOAD(word) m##word
+#define UNPACK(ptr, row, lo, hi) \
+    svuint32_t lo, hi; \
+    do { \
+        svuint32_t first = svreinterpret_u32_u64(svld1_u64(pg_lo, (ptr) + (row) * 16 + base)); \
+        svuint32_t second = svreinterpret_u32_u64(svld1_u64(pg_hi, (ptr) + (row) * 16 + second_base)); \
+        lo = svuzp1_u32(first, second); \
+        hi = svuzp2_u32(first, second); \
+    } while (0)
+#define PACK(row, lo, hi) do { \
+    svuint32_t masked = svand_n_u32_x(pg, (hi), 0x7fffffff); \
+    svst1_u64(pg_lo, out + (row) * 16 + base, \
+              svreinterpret_u64_u32(svzip1_u32((lo), masked))); \
+    svst1_u64(pg_hi, out + (row) * 16 + second_base, \
+              svreinterpret_u64_u32(svzip2_u32((lo), masked))); \
+} while (0)
+
+void eidos_compress16_u64_sve(
+    const uint64_t *cv, const uint64_t *block, uint64_t *out, size_t active_lanes) {
+    const size_t words = svcntw();
+    const size_t half = svcntd();
+    for (size_t base = 0; base < active_lanes; base += words) {
+        svbool_t pg = svwhilelt_b32((uint64_t)base, (uint64_t)active_lanes);
+        svbool_t pg_lo = svwhilelt_b64((uint64_t)base, (uint64_t)active_lanes);
+        svbool_t pg_hi = svwhilelt_b64((uint64_t)(base + half), (uint64_t)active_lanes);
+        // VL can exceed the entire logical batch. Do not even form a pointer past its rows.
+        size_t second_base = base + half < active_lanes ? base + half : base;
+        UNPACK(cv, 0, v0, v1);
+        UNPACK(cv, 1, v2, v3);
+        UNPACK(cv, 2, v4, v5);
+        UNPACK(cv, 3, v6, v7);
+        UNPACK(block, 0, m0, m1);
+        UNPACK(block, 1, m2, m3);
+        UNPACK(block, 2, m4, m5);
+        UNPACK(block, 3, m6, m7);
+        UNPACK(block, 4, m8, m9);
+        UNPACK(block, 5, m10, m11);
+        UNPACK(block, 6, m12, m13);
+        UNPACK(block, 7, m14, m15);
+        svuint32_t v8 = svdup_n_u32(0x6a09e667);
+        svuint32_t v9 = svdup_n_u32(0xbb67ae85);
+        svuint32_t v10 = svdup_n_u32(0x3c6ef372);
+        svuint32_t v11 = svdup_n_u32(0xa54ff53a);
+        svuint32_t v12 = svdup_n_u32(0x510e527f);
+        svuint32_t v13 = svdup_n_u32(0x9b05688c);
+        svuint32_t v14 = svdup_n_u32(0x1f83d9ab);
+        svuint32_t v15 = svdup_n_u32(0x5be0cd19);
+
+        ROUNDS();
+
+        PACK(0, XOR(v0, v8), XOR(v1, v9));
+        PACK(1, XOR(v2, v10), XOR(v3, v11));
+        PACK(2, XOR(v4, v12), XOR(v5, v13));
+        PACK(3, XOR(v6, v14), XOR(v7, v15));
+    }
+}
+
+#undef UNPACK
+#undef PACK
+
 // Prepared canonical CV already includes the partial-buffer transition tag.
 #undef LOAD
 #define LOAD(word) (squeeze ? svdup_n_u32(0) : \

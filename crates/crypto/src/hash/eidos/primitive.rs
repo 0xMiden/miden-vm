@@ -11,7 +11,7 @@ mod blake3_schedule;
 pub(super) use blake3_schedule::check_witness_batch_arm;
 pub(super) use blake3_schedule::compress_blocks;
 #[cfg(target_arch = "aarch64")]
-pub(super) use blake3_schedule::{compress_packed_u64_neon, use_neon_adapter};
+pub(super) use blake3_schedule::{compress_packed_u64_arm, use_arm_u64_adapter};
 
 pub(super) const IV: [u32; 8] = blake3_schedule::IV;
 pub(super) const PACKED_LANES: usize = blake3_schedule::PACKED_LANES;
