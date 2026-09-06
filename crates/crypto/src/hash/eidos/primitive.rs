@@ -7,6 +7,8 @@
 
 mod blake3_schedule;
 
+#[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+pub(super) use blake3_schedule::check_witness_batch_sve;
 pub(super) use blake3_schedule::compress_blocks;
 
 pub(super) const IV: [u32; 8] = blake3_schedule::IV;

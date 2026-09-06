@@ -390,6 +390,12 @@ fn check_witness_batch(
     assert!((1..=PACKED_LANES).contains(&count));
     assert!(base < Felt::ORDER_U64 && count as u64 <= Felt::ORDER_U64 - base);
     debug_assert!(buffer_len < BLOCK_LEN);
+    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+    if let Some(accepted) =
+        super::primitive::check_witness_batch_sve(cv, buffer, buffer_len, base, count, mask)
+    {
+        return accepted;
+    }
     let mut block = [[0; PACKED_LANES]; 16];
     for (row, source) in block.iter_mut().zip(buffer) {
         row[..count].copy_from_slice(&source[..count]);
@@ -740,6 +746,72 @@ mod tests {
                             accepted, expected,
                             "buffer_len={buffer_len}, count={count}, base={base}, bits={bits}"
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    // Direct symbols catch tier-specific nonce carry, transition, and acceptance-mask errors.
+    #[cfg(all(target_arch = "aarch64", feature = "std"))]
+    #[test]
+    fn sve_witness_kernel_matches_scalar() {
+        type Kernel = unsafe extern "C" fn(*const u64, *const u64, usize, u64, usize, u64) -> u16;
+        unsafe extern "C" {
+            fn eidos_check_witness_batch_sve(
+                cv: *const u64,
+                buffer: *const u64,
+                len: usize,
+                base: u64,
+                count: usize,
+                mask: u64,
+            ) -> u16;
+        }
+        let kernels: [(Kernel, bool); 1] =
+            [(eidos_check_witness_batch_sve, std::arch::is_aarch64_feature_detected!("sve"))];
+        for (kernel, supported) in kernels {
+            if !supported {
+                continue;
+            }
+            for len in 0..BLOCK_LEN {
+                let mut challenger = EidosChallenger::new(word([1, 2, 3, Felt::ORDER_U64 - 1]));
+                for i in 0..len {
+                    challenger.observe_felt(felt(Felt::ORDER_U64 - 10 - i as u64));
+                }
+                let cv = if len + 1 == BLOCK_LEN {
+                    challenger.cv
+                } else {
+                    tweak_cv(challenger.cv, transition_tag(len + 1))
+                }
+                .into_elements()
+                .map(|value| value.as_canonical_u64());
+                let buffer = challenger.buffer.map(|value| value.as_canonical_u64());
+                for count in 1..=PACKED_LANES {
+                    for base in [0, u32::MAX as u64 - 7, Felt::ORDER_U64 - count as u64] {
+                        for bits in 0..=24 {
+                            // SAFETY: tier checked above; valid arrays, active count and canonical nonces.
+                            let actual = unsafe {
+                                kernel(
+                                    cv.as_ptr(),
+                                    buffer.as_ptr(),
+                                    len,
+                                    base,
+                                    count,
+                                    (1u64 << bits) - 1,
+                                )
+                            };
+                            let expected = (0..count).fold(0u16, |mask, lane| {
+                                mask | ((challenger
+                                    .clone()
+                                    .check_witness(bits, felt(base + lane as u64))
+                                    as u16)
+                                    << lane)
+                            });
+                            assert_eq!(
+                                actual, expected,
+                                "len={len}, count={count}, base={base}, bits={bits}"
+                            );
+                        }
                     }
                 }
             }
