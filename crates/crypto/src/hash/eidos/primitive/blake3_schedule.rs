@@ -605,9 +605,30 @@ pub(super) fn compress_packed_native_counted(
         }
         return;
     }
-    let full = native_backend::compress(cv, block);
-    for (out_word, full_word) in out.iter_mut().zip(full) {
-        out_word[..active_lanes].copy_from_slice(&full_word[..active_lanes]);
+    if active_lanes == PACKED_LANES {
+        *out = native_backend::compress(cv, block);
+        return;
+    }
+    let mut lane = 0;
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    while lane + 4 <= active_lanes {
+        let cv = array::from_fn(|word| array::from_fn(|i| cv[word][lane + i]));
+        let block = array::from_fn(|word| array::from_fn(|i| block[word][lane + i]));
+        let result = neon::compress_packed_4(cv, block);
+        for word in 0..8 {
+            out[word][lane..lane + 4].copy_from_slice(&result[word]);
+        }
+        lane += 4;
+    }
+    while lane < active_lanes {
+        let result = compress_raw(
+            array::from_fn(|word| cv[word][lane]),
+            array::from_fn(|word| block[word][lane]),
+        );
+        for word in 0..8 {
+            out[word][lane] = result[word];
+        }
+        lane += 1;
     }
 }
 

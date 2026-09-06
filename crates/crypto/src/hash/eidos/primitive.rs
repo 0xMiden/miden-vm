@@ -89,6 +89,21 @@ impl CompressionCore {
         cv_new
     }
 
+    /// Compress only the active prefix without reading or changing inactive lanes.
+    pub(super) fn compress_packed_native_counted(
+        cv: &[[u32; PACKED_LANES]; 8],
+        block: &[[u32; PACKED_LANES]; 16],
+        out: &mut [[u32; PACKED_LANES]; 8],
+        active_lanes: usize,
+    ) {
+        blake3_schedule::compress_packed_native_counted(cv, block, out, active_lanes);
+        for word in [1, 3, 5, 7] {
+            for value in &mut out[word][..active_lanes] {
+                *value &= ODD_LANE_MASK;
+            }
+        }
+    }
+
     /// Apply compression to the build's selected native packed lane width.
     #[inline]
     pub(super) fn compress_packed_native(
@@ -475,6 +490,14 @@ mod tests {
         });
         for active in 0..=16 {
             let mut out = [[0xdead_beef; 16]; 8];
+            let mut cv = cv;
+            let mut block = block;
+            for row in &mut cv {
+                row[active..].fill(0xffff_ffff);
+            }
+            for row in &mut block {
+                row[active..].fill(0xa5a5_a5a5);
+            }
             compress(&cv, &block, &mut out, active);
             for lane in 0..16 {
                 let expected = if lane < active {
@@ -493,6 +516,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn counted_raw_rejects_oversized_prefix() {
+        blake3_schedule::compress_packed_native_counted(
+            &[[0; 16]; 8],
+            &[[0; 16]; 16],
+            &mut [[0; 16]; 8],
+            17,
+        );
     }
 
     #[test]

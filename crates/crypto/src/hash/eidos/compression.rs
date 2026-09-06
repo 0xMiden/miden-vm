@@ -90,6 +90,94 @@ pub(super) fn compress_packed_u64_cv(
     }
 }
 
+/// Compress a validated active prefix, leaving inactive inputs and outputs untouched.
+/// Retained for callers such as PoW and benchmarks that know their actual batch size.
+#[allow(dead_code)]
+pub(super) fn compress_packed_felt_cv_counted(
+    cv: &[[Felt; PACKED_LANES]; DIGEST_WIDTH],
+    block: &[[Felt; PACKED_LANES]; BLOCK_LEN],
+    out: &mut [[Felt; PACKED_LANES]; DIGEST_WIDTH],
+    active_lanes: usize,
+) {
+    assert!(active_lanes <= PACKED_LANES);
+    if active_lanes == PACKED_LANES {
+        *out = compress_packed_felt_cv(cv, block);
+        return;
+    }
+    let mut raw_cv = [[0; PACKED_LANES]; 8];
+    let mut raw_block = [[0; PACKED_LANES]; 16];
+    for lane in 0..active_lanes {
+        for word in 0..DIGEST_WIDTH {
+            let value = cv[word][lane].as_canonical_u64();
+            raw_cv[2 * word][lane] = value as u32;
+            raw_cv[2 * word + 1][lane] = (value >> 32) as u32;
+        }
+        for word in 0..BLOCK_LEN {
+            let value = block[word][lane].as_canonical_u64();
+            raw_block[2 * word][lane] = value as u32;
+            raw_block[2 * word + 1][lane] = (value >> 32) as u32;
+        }
+    }
+    let mut raw_out = [[0; PACKED_LANES]; 8];
+    CompressionCore::compress_packed_native_counted(
+        &raw_cv,
+        &raw_block,
+        &mut raw_out,
+        active_lanes,
+    );
+    for lane in 0..active_lanes {
+        let result = core::array::from_fn(|word| raw_out[word][lane]);
+        let result: [Felt; DIGEST_WIDTH] = encoding::output_cv_to_word(result).into();
+        for word in 0..DIGEST_WIDTH {
+            out[word][lane] = result[word];
+        }
+    }
+}
+
+/// Compress a validated active prefix, leaving inactive inputs and outputs untouched.
+/// Retained for callers such as PoW and benchmarks that know their actual batch size.
+#[allow(dead_code)]
+pub(super) fn compress_packed_u64_cv_counted(
+    cv: &[[u64; PACKED_LANES]; DIGEST_WIDTH],
+    block: &[[u64; PACKED_LANES]; BLOCK_LEN],
+    out: &mut [[u64; PACKED_LANES]; DIGEST_WIDTH],
+    active_lanes: usize,
+) {
+    assert!(active_lanes <= PACKED_LANES);
+    if active_lanes == PACKED_LANES {
+        *out = compress_packed_u64_cv(cv, block);
+        return;
+    }
+    let mut raw_cv = [[0; PACKED_LANES]; 8];
+    let mut raw_block = [[0; PACKED_LANES]; 16];
+    for lane in 0..active_lanes {
+        for word in 0..DIGEST_WIDTH {
+            let value = cv[word][lane];
+            raw_cv[2 * word][lane] = value as u32;
+            raw_cv[2 * word + 1][lane] = (value >> 32) as u32;
+        }
+        for word in 0..BLOCK_LEN {
+            let value = block[word][lane];
+            raw_block[2 * word][lane] = value as u32;
+            raw_block[2 * word + 1][lane] = (value >> 32) as u32;
+        }
+    }
+    let mut raw_out = [[0; PACKED_LANES]; 8];
+    CompressionCore::compress_packed_native_counted(
+        &raw_cv,
+        &raw_block,
+        &mut raw_out,
+        active_lanes,
+    );
+    for lane in 0..active_lanes {
+        let result = core::array::from_fn(|word| raw_out[word][lane]);
+        let result: [u64; DIGEST_WIDTH] = encoding::pack_cv_to_u64s(result);
+        for word in 0..DIGEST_WIDTH {
+            out[word][lane] = result[word];
+        }
+    }
+}
+
 #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
 mod avx512_u64_adapter {
     use core::arch::x86_64::*;
@@ -184,6 +272,93 @@ mod tests {
     use core::array;
 
     use super::*;
+
+    #[test]
+    fn counted_felt_preserves_inactive_lanes() {
+        for active in 0..=PACKED_LANES {
+            let mut cv = array::from_fn(|word| {
+                array::from_fn(|lane| Felt::new_unchecked(mixed_u64(1, word, lane)))
+            });
+            let mut block = mixed_packed_u64_block(0).map(|row| row.map(Felt::new_unchecked));
+            for row in &mut cv {
+                row[active..].fill(Felt::new_unchecked(u64::MAX));
+            }
+            for row in &mut block {
+                row[active..].fill(Felt::new_unchecked(u64::MAX));
+            }
+            let mut out = [[Felt::new_unchecked(u64::MAX); PACKED_LANES]; DIGEST_WIDTH];
+            compress_packed_felt_cv_counted(&cv, &block, &mut out, active);
+            for lane in 0..PACKED_LANES {
+                let expected = if lane < active {
+                    compress_felt_block(
+                        Word::new(array::from_fn(|word| cv[word][lane])),
+                        array::from_fn(|word| block[word][lane]),
+                    )
+                    .into()
+                } else {
+                    [Felt::new_unchecked(u64::MAX); DIGEST_WIDTH]
+                };
+                assert_eq!(
+                    array::from_fn::<_, DIGEST_WIDTH, _>(|word| out[word][lane]),
+                    expected,
+                    "active={active}, lane={lane}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn counted_felt_rejects_oversized_prefix() {
+        compress_packed_felt_cv_counted(
+            &[[Felt::new_unchecked(u64::MAX); PACKED_LANES]; DIGEST_WIDTH],
+            &[[Felt::new_unchecked(u64::MAX); PACKED_LANES]; BLOCK_LEN],
+            &mut [[Felt::new_unchecked(u64::MAX); PACKED_LANES]; DIGEST_WIDTH],
+            PACKED_LANES + 1,
+        );
+    }
+
+    #[test]
+    fn counted_u64_preserves_inactive_lanes() {
+        for active in 0..=PACKED_LANES {
+            let mut cv = array::from_fn(|word| array::from_fn(|lane| mixed_u64(1, word, lane)));
+            let mut block = mixed_packed_u64_block(0);
+            for row in &mut cv {
+                row[active..].fill(u64::MAX);
+            }
+            for row in &mut block {
+                row[active..].fill(u64::MAX);
+            }
+            let mut out = [[u64::MAX; PACKED_LANES]; DIGEST_WIDTH];
+            compress_packed_u64_cv_counted(&cv, &block, &mut out, active);
+            for lane in 0..PACKED_LANES {
+                let expected = if lane < active {
+                    encoding::pack_cv_to_u64s(compress_u64_cv(
+                        encoding::unpack_u64_cv(array::from_fn(|word| cv[word][lane])),
+                        array::from_fn(|word| block[word][lane]),
+                    ))
+                } else {
+                    [u64::MAX; DIGEST_WIDTH]
+                };
+                assert_eq!(
+                    array::from_fn::<_, DIGEST_WIDTH, _>(|word| out[word][lane]),
+                    expected,
+                    "active={active}, lane={lane}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn counted_u64_rejects_oversized_prefix() {
+        compress_packed_u64_cv_counted(
+            &[[u64::MAX; PACKED_LANES]; DIGEST_WIDTH],
+            &[[u64::MAX; PACKED_LANES]; BLOCK_LEN],
+            &mut [[u64::MAX; PACKED_LANES]; DIGEST_WIDTH],
+            PACKED_LANES + 1,
+        );
+    }
     #[test]
     fn raw_compression_accepts_unmasked_input_cv() {
         let cv = Word::new([
