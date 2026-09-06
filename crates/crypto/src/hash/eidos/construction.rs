@@ -105,9 +105,7 @@ impl Eidos {
         if bytes.is_empty() {
             cv = compression::compress_cv(cv, [0; 16]);
         } else {
-            for chunk in bytes.chunks(64) {
-                cv = compression::compress_cv(cv, encoding::encode_byte_block(chunk));
-            }
+            cv = compress_encoded_blocks(cv, bytes.chunks(64).map(encoding::encode_byte_block));
         }
 
         encoding::output_cv_to_word(cv)
@@ -191,6 +189,24 @@ fn compress_digest_pair(values: &[Word; 2], cv: [u32; 8]) -> Word {
 fn exact_size_hint<I: Iterator>(iter: &I) -> Option<usize> {
     let (lower, upper) = iter.size_hint();
     upper.filter(|&upper| upper == lower)
+}
+
+/// Keep sequential batches bounded independently of the message length.
+fn compress_encoded_blocks(mut cv: [u32; 8], blocks: impl Iterator<Item = [u32; 16]>) -> [u32; 8] {
+    let mut batch = [[0; 16]; 8];
+    let mut count = 0;
+    for block in blocks {
+        batch[count] = block;
+        count += 1;
+        if count == batch.len() {
+            cv = compression::compress_blocks(cv, &batch);
+            count = 0;
+        }
+    }
+    if count != 0 {
+        cv = compression::compress_blocks(cv, &batch[..count]);
+    }
+    cv
 }
 
 fn hash_felt_iter_in_domain_with_len<I>(iter: I, len: usize, domain: u32) -> [Felt; DIGEST_WIDTH]
@@ -321,6 +337,76 @@ mod tests {
 
     use super::*;
     use crate::hash::eidos::PackedBlock;
+
+    #[test]
+    fn sequential_byte_vectors() {
+        for (n, expected) in [
+            (
+                0,
+                [
+                    2910656516858685338,
+                    4269926152153106528,
+                    576084148240214716,
+                    4236080967700832008,
+                ],
+            ),
+            (
+                64,
+                [
+                    3569322132172867237,
+                    4505987984688213795,
+                    501544810337014917,
+                    6644984086372658326,
+                ],
+            ),
+            (
+                128,
+                [
+                    5954243955803425906,
+                    4571021742501296852,
+                    1158949400215543998,
+                    5828945230432344913,
+                ],
+            ),
+            (
+                512,
+                [
+                    610729722130186455,
+                    2047615770893706848,
+                    8180501629483829075,
+                    8830705694241315303,
+                ],
+            ),
+            (
+                576,
+                [
+                    5629405759424591611,
+                    1670145300985505392,
+                    3946491887450433446,
+                    2226282959157556185,
+                ],
+            ),
+            (
+                577,
+                [
+                    7993109494051924800,
+                    1250336225736444400,
+                    7555335408522046248,
+                    6545331745750935460,
+                ],
+            ),
+        ] {
+            let bytes: Vec<u8> = (0..n).map(|i| i as u8).collect();
+            assert_eq!(
+                Eidos::hash(&bytes)
+                    .as_elements()
+                    .iter()
+                    .map(|v| v.as_canonical_u64())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
 
     struct LooseSizeHint<I>(I);
 

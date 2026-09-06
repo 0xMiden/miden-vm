@@ -36,7 +36,7 @@ static inline uint32x4_t rotate8(uint32x4_t x) {
     d = vextq_u32(d, d, 1); \
 } while (0)
 
-static inline uint32x4x4_t compress_pre(const uint32_t *cv, const uint32_t *block) {
+static inline __attribute__((always_inline)) uint32x4x4_t compress_pre(const uint32_t *cv, const uint32_t *block) {
     uint32x4_t a = vld1q_u32(cv);
     uint32x4_t b = vld1q_u32(cv + 4);
     uint32x4_t c = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a};
@@ -66,4 +66,16 @@ void eidos_compress_xof_neon(const uint32_t *cv, const uint32_t *block, uint32_t
     vst1q_u32(out + 4, veorq_u32(v.val[1], v.val[3]));
     vst1q_u32(out + 8, veorq_u32(v.val[2], cv0));
     vst1q_u32(out + 12, veorq_u32(v.val[3], cv1));
+}
+
+void eidos_compress_blocks_neon(const uint32_t *cv, const uint32_t *blocks, uint32_t *out, size_t count) {
+    uint32_t state[8];
+    for (size_t i = 0; i < 8; ++i) state[i] = cv[i];
+    for (size_t i = 0; i < count; ++i) {
+        const uint32x4x4_t v = compress_pre(state, blocks + 16 * i);
+        const uint32x4_t mask = {UINT32_MAX, 0x7fffffff, UINT32_MAX, 0x7fffffff};
+        vst1q_u32(state, vandq_u32(veorq_u32(v.val[0], v.val[2]), mask));
+        vst1q_u32(state + 4, vandq_u32(veorq_u32(v.val[1], v.val[3]), mask));
+    }
+    for (size_t i = 0; i < 8; ++i) out[i] = state[i];
 }

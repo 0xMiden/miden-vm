@@ -137,7 +137,7 @@ void eidos_compress16_sve2(
     d = svtbl_u32(d, left1); \
 } while (0)
 
-static inline svuint32x4_t compress_pre(const uint32_t *cv, const uint32_t *block) {
+static inline __attribute__((always_inline)) svuint32x4_t compress_pre(const uint32_t *cv, const uint32_t *block) {
     const svbool_t pg = svptrue_pat_b32(SV_VL4);
     const svuint32_t left1 = svdupq_n_u32(1, 2, 3, 0);
     const svuint32_t left2 = svdupq_n_u32(2, 3, 0, 1);
@@ -173,4 +173,17 @@ void eidos_compress_xof_sve2(const uint32_t *cv, const uint32_t *block, uint32_t
     svst1_u32(pg, out + 4, XOR(svget4_u32(v, 1), svget4_u32(v, 3)));
     svst1_u32(pg, out + 8, XOR(svget4_u32(v, 2), cv0));
     svst1_u32(pg, out + 12, XOR(svget4_u32(v, 3), cv1));
+}
+
+void eidos_compress_blocks_sve2(const uint32_t *cv, const uint32_t *blocks, uint32_t *out, size_t count) {
+    uint32_t state[8];
+    for (size_t i = 0; i < 8; ++i) state[i] = cv[i];
+    for (size_t i = 0; i < count; ++i) {
+        const svbool_t pg = svptrue_pat_b32(SV_VL4);
+        const svuint32x4_t v = compress_pre(state, blocks + 16 * i);
+        const svuint32_t mask = svdupq_n_u32(UINT32_MAX, 0x7fffffff, UINT32_MAX, 0x7fffffff);
+        svst1_u32(pg, state, svand_u32_x(pg, XOR(svget4_u32(v, 0), svget4_u32(v, 2)), mask));
+        svst1_u32(pg, state + 4, svand_u32_x(pg, XOR(svget4_u32(v, 1), svget4_u32(v, 3)), mask));
+    }
+    for (size_t i = 0; i < 8; ++i) out[i] = state[i];
 }

@@ -31,6 +31,10 @@ typedef uint16_t (*eidos_pow_kernel)(
     size_t count,
     uint64_t mask);
 
+// Sequential complete blocks; mask odd CV lanes after each block. Zero count copies CV.
+void eidos_compress_blocks_neon(const uint32_t *cv, const uint32_t *blocks, uint32_t *out, size_t count);
+void eidos_compress_blocks_sve2(const uint32_t *cv, const uint32_t *blocks, uint32_t *out, size_t count);
+
 void eidos_compress_raw_neon(const uint32_t *cv, const uint32_t *block, uint32_t *out);
 void eidos_compress_xof_neon(const uint32_t *cv, const uint32_t *block, uint32_t *out);
 void eidos_compress_raw_sve2(const uint32_t *cv, const uint32_t *block, uint32_t *out);

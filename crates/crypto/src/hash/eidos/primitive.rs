@@ -7,6 +7,8 @@
 
 mod blake3_schedule;
 
+pub(super) use blake3_schedule::compress_blocks;
+
 pub(super) const IV: [u32; 8] = blake3_schedule::IV;
 pub(super) const PACKED_LANES: usize = blake3_schedule::PACKED_LANES;
 

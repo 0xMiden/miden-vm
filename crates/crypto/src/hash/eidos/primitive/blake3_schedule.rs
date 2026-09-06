@@ -632,8 +632,31 @@ pub(super) fn compress_packed_native_counted(
     }
 }
 
+/// Compress an ordered sequence, masking each intermediate CV. Empty input preserves the CV.
+#[inline]
+pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [u32; 8] {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let mut out = [0; 8];
+        let kernel = eidos_compress_blocks_neon;
+        #[cfg(any(feature = "std", target_feature = "sve2"))]
+        let kernel = if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
+            eidos_compress_blocks_sve2
+        } else {
+            kernel
+        };
+        // SAFETY: the selected ISA is available. The slice contains count complete blocks;
+        // CV and output each contain eight words, including when the block count is zero.
+        unsafe { kernel(cv.as_ptr(), blocks.as_ptr().cast(), out.as_mut_ptr(), blocks.len()) };
+        out
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    blocks.iter().fold(cv, |cv, &block| super::CompressionCore::compress(cv, block))
+}
+
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
+    fn eidos_compress_blocks_neon(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);
 }
@@ -645,6 +668,7 @@ unsafe extern "C" {
 
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
 unsafe extern "C" {
+    fn eidos_compress_blocks_sve2(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress_raw_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress16_sve2(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);

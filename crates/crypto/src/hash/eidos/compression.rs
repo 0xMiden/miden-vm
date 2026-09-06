@@ -12,6 +12,11 @@ use super::{
 use crate::{Felt, Word};
 
 #[inline]
+pub(super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [u32; 8] {
+    super::primitive::compress_blocks(cv, blocks)
+}
+
+#[inline]
 pub(super) fn compress_cv(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
     CompressionCore::compress(cv, block)
 }
@@ -272,6 +277,16 @@ mod tests {
     use core::array;
 
     use super::*;
+
+    #[test]
+    fn sequential_blocks_mask_each_chaining_value() {
+        let blocks: [[u32; 16]; 9] = array::from_fn(|i| array::from_fn(|j| (i * 97 + j) as u32));
+        for n in [0, 1, 2, 8, 9] {
+            let expected =
+                blocks[..n].iter().fold([u32::MAX; 8], |cv, &block| compress_cv(cv, block));
+            assert_eq!(compress_blocks([u32::MAX; 8], &blocks[..n]), expected);
+        }
+    }
 
     #[test]
     fn counted_felt_preserves_inactive_lanes() {
