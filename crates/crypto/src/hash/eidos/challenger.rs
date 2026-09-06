@@ -390,9 +390,9 @@ fn check_witness_batch(
     assert!((1..=PACKED_LANES).contains(&count));
     assert!(base < Felt::ORDER_U64 && count as u64 <= Felt::ORDER_U64 - base);
     debug_assert!(buffer_len < BLOCK_LEN);
-    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+    #[cfg(target_arch = "aarch64")]
     if let Some(accepted) =
-        super::primitive::check_witness_batch_sve(cv, buffer, buffer_len, base, count, mask)
+        super::primitive::check_witness_batch_arm(cv, buffer, buffer_len, base, count, mask)
     {
         return accepted;
     }
@@ -755,9 +755,17 @@ mod tests {
     // Direct symbols catch tier-specific nonce carry, transition, and acceptance-mask errors.
     #[cfg(all(target_arch = "aarch64", feature = "std"))]
     #[test]
-    fn sve_witness_kernel_matches_scalar() {
+    fn arm_witness_kernel_matches_scalar() {
         type Kernel = unsafe extern "C" fn(*const u64, *const u64, usize, u64, usize, u64) -> u16;
         unsafe extern "C" {
+            fn eidos_check_witness_batch_neon(
+                cv: *const u64,
+                buffer: *const u64,
+                len: usize,
+                base: u64,
+                count: usize,
+                mask: u64,
+            ) -> u16;
             fn eidos_check_witness_batch_sve(
                 cv: *const u64,
                 buffer: *const u64,
@@ -777,7 +785,8 @@ mod tests {
                 mask: u64,
             ) -> u16;
         }
-        let kernels: [(Kernel, bool); 2] = [
+        let kernels: [(Kernel, bool); 3] = [
+            (eidos_check_witness_batch_neon, true),
             (eidos_check_witness_batch_sve, std::arch::is_aarch64_feature_detected!("sve")),
             (eidos_check_witness_batch_sve2, std::arch::is_aarch64_feature_detected!("sve2")),
         ];

@@ -566,9 +566,9 @@ pub(super) fn compress_packed_native(
     out
 }
 
-/// Uses the mask-only kernel for SVE/SVE2; other tiers retain their counted path.
-#[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
-pub(in super::super) fn check_witness_batch_sve(
+/// Uses the selected ARM mask-only kernel.
+#[cfg(target_arch = "aarch64")]
+pub(in super::super) fn check_witness_batch_arm(
     cv: &[[u32; PACKED_LANES]; 8],
     buffer: &[[u32; PACKED_LANES]; 16],
     buffer_len: usize,
@@ -579,7 +579,10 @@ pub(in super::super) fn check_witness_batch_sve(
     let kernel = match arm_dispatch::detect_arm_tier() {
         #[cfg(any(feature = "std", target_feature = "sve2"))]
         arm_dispatch::ArmTier::Sve2 => eidos_check_witness_batch_sve2,
+        #[cfg(any(feature = "std", target_feature = "sve"))]
         arm_dispatch::ArmTier::Sve => eidos_check_witness_batch_sve,
+        arm_dispatch::ArmTier::Neon => eidos_check_witness_batch_neon,
+        #[allow(unreachable_patterns)]
         _ => return None,
     };
     assert!(buffer_len < 8 && (1..=PACKED_LANES).contains(&count));
@@ -681,6 +684,14 @@ pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [
 
 #[cfg(target_arch = "aarch64")]
 unsafe extern "C" {
+    fn eidos_check_witness_batch_neon(
+        cv: *const u64,
+        buffer: *const u64,
+        buffer_len: usize,
+        base: u64,
+        count: usize,
+        mask: u64,
+    ) -> u16;
     fn eidos_compress_blocks_neon(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);

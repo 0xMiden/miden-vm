@@ -79,3 +79,150 @@ void eidos_compress_blocks_neon(const uint32_t *cv, const uint32_t *blocks, uint
     }
     for (size_t i = 0; i < 8; ++i) out[i] = state[i];
 }
+
+// Each vector holds one state word across four consecutive candidates.
+#define ADD(a, b) vaddq_u32((a), (b))
+#define XOR(a, b) veorq_u32((a), (b))
+#define XOR_ROTATE(a, b, n) rotate##n(XOR((a), (b)))
+
+static inline uint32x4_t rotate12(uint32x4_t x) {
+    return vsriq_n_u32(vshlq_n_u32(x, 20), x, 12);
+}
+
+static inline uint32x4_t rotate7(uint32x4_t x) {
+    return vsriq_n_u32(vshlq_n_u32(x, 25), x, 7);
+}
+
+// Advance the four independent G chains together; message vectors die at each add.
+#define G4(a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3, d0, d1, d2, d3, \
+           m0, m1, m2, m3, m4, m5, m6, m7) do { \
+    a0 = ADD(ADD(a0, b0), LOAD(m0)); \
+    a1 = ADD(ADD(a1, b1), LOAD(m2)); \
+    a2 = ADD(ADD(a2, b2), LOAD(m4)); \
+    a3 = ADD(ADD(a3, b3), LOAD(m6)); \
+    d0 = XOR_ROTATE(d0, a0, 16); \
+    d1 = XOR_ROTATE(d1, a1, 16); \
+    d2 = XOR_ROTATE(d2, a2, 16); \
+    d3 = XOR_ROTATE(d3, a3, 16); \
+    c0 = ADD(c0, d0); \
+    c1 = ADD(c1, d1); \
+    c2 = ADD(c2, d2); \
+    c3 = ADD(c3, d3); \
+    b0 = XOR_ROTATE(b0, c0, 12); \
+    b1 = XOR_ROTATE(b1, c1, 12); \
+    b2 = XOR_ROTATE(b2, c2, 12); \
+    b3 = XOR_ROTATE(b3, c3, 12); \
+    a0 = ADD(ADD(a0, b0), LOAD(m1)); \
+    a1 = ADD(ADD(a1, b1), LOAD(m3)); \
+    a2 = ADD(ADD(a2, b2), LOAD(m5)); \
+    a3 = ADD(ADD(a3, b3), LOAD(m7)); \
+    d0 = XOR_ROTATE(d0, a0, 8); \
+    d1 = XOR_ROTATE(d1, a1, 8); \
+    d2 = XOR_ROTATE(d2, a2, 8); \
+    d3 = XOR_ROTATE(d3, a3, 8); \
+    c0 = ADD(c0, d0); \
+    c1 = ADD(c1, d1); \
+    c2 = ADD(c2, d2); \
+    c3 = ADD(c3, d3); \
+    b0 = XOR_ROTATE(b0, c0, 7); \
+    b1 = XOR_ROTATE(b1, c1, 7); \
+    b2 = XOR_ROTATE(b2, c2, 7); \
+    b3 = XOR_ROTATE(b3, c3, 7); \
+} while (0)
+
+#define ROUNDS() do { \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           0, 1, 2, 3, 4, 5, 6, 7); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           8, 9, 10, 11, 12, 13, 14, 15); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           2, 6, 3, 10, 7, 0, 4, 13); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           1, 11, 12, 5, 9, 14, 15, 8); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           3, 4, 10, 12, 13, 2, 7, 14); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           6, 5, 9, 0, 11, 15, 8, 1); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           10, 7, 12, 9, 14, 3, 13, 15); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           4, 0, 11, 2, 5, 8, 1, 6); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           12, 13, 9, 11, 15, 10, 14, 8); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           7, 2, 5, 3, 0, 1, 6, 4); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           9, 14, 11, 5, 8, 12, 15, 1); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           13, 3, 0, 10, 2, 6, 4, 7); \
+ \
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, \
+           11, 15, 5, 0, 1, 9, 8, 6); \
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14, \
+           14, 10, 2, 12, 3, 4, 7, 13); \
+ \
+} while (0)
+
+// Prepared canonical CV already includes the partial-buffer transition tag.
+#define LOAD(word) (squeeze ? vdupq_n_u32(0) : \
+    ((word) == 2 * buffer_len ? nonce_lo : \
+    ((word) == 2 * buffer_len + 1 ? nonce_hi : \
+    vdupq_n_u32((uint32_t)(buffer[(word) / 2] >> (32 * ((word) % 2)))))))
+
+uint16_t eidos_check_witness_batch_neon(const uint64_t *cv, const uint64_t *buffer,
+    size_t buffer_len, uint64_t nonce_base, size_t count, uint64_t mask) {
+    uint16_t accepted = 0;
+    for (size_t base = 0; base < count; base += 4) {
+        uint32x4_t offsets = vaddq_u32(vdupq_n_u32((uint32_t)base), (uint32x4_t){0, 1, 2, 3});
+        uint32x4_t active = vcltq_u32(offsets, vdupq_n_u32((uint32_t)count));
+        uint32x4_t nonce_lo = vaddq_u32(offsets, vdupq_n_u32((uint32_t)nonce_base));
+        uint32x4_t carry = vshrq_n_u32(vcltq_u32(nonce_lo, vdupq_n_u32((uint32_t)nonce_base)), 31);
+        uint32x4_t nonce_hi = vaddq_u32(carry, vdupq_n_u32((uint32_t)(nonce_base >> 32)));
+        uint32x4_t v0 = vdupq_n_u32((uint32_t)(cv[0] >> 0));
+        uint32x4_t v1 = vdupq_n_u32((uint32_t)(cv[0] >> 32));
+        uint32x4_t v2 = vdupq_n_u32((uint32_t)(cv[1] >> 0));
+        uint32x4_t v3 = vdupq_n_u32((uint32_t)(cv[1] >> 32));
+        uint32x4_t v4 = vdupq_n_u32((uint32_t)(cv[2] >> 0));
+        uint32x4_t v5 = vdupq_n_u32((uint32_t)(cv[2] >> 32));
+        uint32x4_t v6 = vdupq_n_u32((uint32_t)(cv[3] >> 0));
+        uint32x4_t v7 = vdupq_n_u32((uint32_t)(cv[3] >> 32));
+        for (int squeeze = 0; ; ++squeeze) {
+            uint32x4_t v8 = vdupq_n_u32(0x6a09e667);
+            uint32x4_t v9 = vdupq_n_u32(0xbb67ae85);
+            uint32x4_t v10 = vdupq_n_u32(0x3c6ef372);
+            uint32x4_t v11 = vdupq_n_u32(0xa54ff53a);
+            uint32x4_t v12 = vdupq_n_u32(0x510e527f);
+            uint32x4_t v13 = vdupq_n_u32(0x9b05688c);
+            uint32x4_t v14 = vdupq_n_u32(0x1f83d9ab);
+            uint32x4_t v15 = vdupq_n_u32(0x5be0cd19);
+
+            ROUNDS();
+            if (buffer_len != 7 || squeeze) {
+                uint32x4_t lo = vandq_u32(XOR(v0, v8), vdupq_n_u32((uint32_t)mask));
+                uint32x4_t hi = vandq_u32(XOR(v1, v9), vdupq_n_u32((uint32_t)(mask >> 32) & 0x7fffffff));
+                uint32x4_t pass = vandq_u32(active, vceqq_u32(vorrq_u32(lo, hi), vdupq_n_u32(0)));
+                uint32x4_t bits = vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u32(offsets));
+                accepted |= (uint16_t)vaddvq_u32(vandq_u32(pass, bits));
+                break;
+            }
+            v0 = XOR(v0, v8);
+            v1 = vandq_u32(XOR(v1, v9), vdupq_n_u32(0x7fffffff));
+            v2 = XOR(v2, v10);
+            v3 = vandq_u32(XOR(v3, v11), vdupq_n_u32(0x7fffffff));
+            v4 = XOR(v4, v12);
+            v5 = vandq_u32(XOR(v5, v13), vdupq_n_u32(0x7fffffff));
+            v6 = XOR(v6, v14);
+            v7 = vandq_u32(XOR(v7, v15), vdupq_n_u32(0x7fffffff));
+            // Packed intermediate word is 63 bits, so the tag needs only a low-word carry.
+            uint32x4_t old6 = v6;
+            v6 = vaddq_u32(v6, vdupq_n_u32(1));
+            v7 = vaddq_u32(v7, vshrq_n_u32(vcltq_u32(v6, old6), 31));
+        }
+    }
+    return accepted;
+}
