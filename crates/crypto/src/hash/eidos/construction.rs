@@ -11,6 +11,7 @@ use super::{
     domain::{ByteString, EidosDomain, FeltSequence, Transcript},
     domains::{GENERIC_BYTE_STRING, GENERIC_FELT_SEQUENCE},
     encoding,
+    frame::EidosFrame,
     framing::{self, GENERIC_FELT_TAG, MERKLE_NODE_INIT_CV},
 };
 use crate::{Felt, Word, field::BasedVectorSpace};
@@ -94,7 +95,7 @@ impl Eidos {
     /// word.
     #[inline]
     pub fn init_chaining_word_with_params<D: EidosDomain>(_: D, params: [u32; 3]) -> Word {
-        Self::init_chaining_word_with_tag(D::TAG, params)
+        EidosFrame::new(D::TAG, params).initial_chaining_word()
     }
 
     /// Construct an initial chaining value from a structurally valid runtime tag and three
@@ -107,7 +108,7 @@ impl Eidos {
     /// that domain's parameter and payload schema.
     #[inline]
     pub fn init_chaining_word_with_tag(tag: super::DomainTag, params: [u32; 3]) -> Word {
-        encoding::output_cv_to_word(framing::init_cv(tag.as_u32(), params))
+        EidosFrame::new(tag, params).initial_chaining_word()
     }
 
     /// Construct the same one-parameter initial chaining word in every packed lane.

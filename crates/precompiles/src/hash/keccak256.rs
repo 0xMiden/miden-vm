@@ -2,8 +2,11 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, program::domain::Keccak256PrecompileDomain};
-use miden_crypto::hash::{eidos::EidosDomain, keccak::Keccak256};
+use miden_core::program::domain::Keccak256PrecompileDomain;
+use miden_crypto::hash::{
+    eidos::{DomainTag, EidosDomain},
+    keccak::Keccak256,
+};
 
 use super::{HashFunction, HashPrecompile};
 
@@ -13,7 +16,7 @@ pub struct Keccak256Hash;
 
 impl HashFunction for Keccak256Hash {
     const NAME: &'static str = "keccak256";
-    const DOMAIN_TAG: Felt = Keccak256PrecompileDomain::TAG.as_felt();
+    const DOMAIN: DomainTag = Keccak256PrecompileDomain::TAG;
     const DIGEST_FELTS: usize = 8;
 
     fn hash(input: &[u8]) -> Vec<u8> {

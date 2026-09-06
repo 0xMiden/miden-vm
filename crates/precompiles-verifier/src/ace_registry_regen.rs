@@ -29,7 +29,7 @@ use miden_crypto::merkle::MerkleTree;
 use miden_lifted_air::BaseAir;
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{
-    ChipletAir, NUM_CHIPLETS, preprocessed,
+    ChipletAir, NUM_CHIPLETS, preprocessed, security as pvm_security,
     stark_config::{eidos_config, precompile_pcs_params},
 };
 use rayon::prelude::*;
@@ -388,6 +388,33 @@ fn compute(mode: Mode) -> Result<GeneratedArtifacts, String> {
             felt.as_canonical_u64(),
         )?;
     }
+    for (name, value) in [
+        ("MAX_MESSAGE_WIDTH", u64::from(pvm_security::AIR_SHAPE.lookup.max_message_width)),
+        (
+            "NUM_COMPOSED_CONSTRAINTS",
+            u64::from(pvm_security::AIR_SHAPE.num_composed_constraints),
+        ),
+        (
+            "MAX_CONSTRAINT_DEGREE",
+            u64::from(pvm_security::AIR_SHAPE.max_constraint_degree),
+        ),
+        (
+            "NUM_DEEP_TERMS",
+            u64::from(
+                pvm_security::AIR_SHAPE.num_deep_terms.expect("the PVM uses DEEP composition"),
+            ),
+        ),
+        (
+            "LOOKUP_FRACTIONS_PER_ROW",
+            u64::from(pvm_security::AIR_SHAPE.lookup.fractions_per_row),
+        ),
+        (
+            "FIXED_BOUNDARY_LOOKUP_TERMS",
+            u64::from(pvm_security::FIXED_BOUNDARY_LOOKUP_TERMS),
+        ),
+    ] {
+        replace_masm_const(&mut relation_mod_masm, name, value)?;
+    }
 
     Ok(GeneratedArtifacts {
         row,
@@ -645,6 +672,7 @@ fn render_protocol(artifacts: &GeneratedArtifacts) -> String {
     let digest = format_felts(&artifacts.digest);
     format!(
         "/// Relation digest binding the PVM ACE registry root into the Fiat-Shamir transcript.\n\
+         #[rustfmt::skip]\n\
          pub const PVM_RELATION_DIGEST: [u64; 4] = [\n{digest}];\n"
     )
 }

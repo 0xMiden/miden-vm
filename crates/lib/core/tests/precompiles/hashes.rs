@@ -3,7 +3,7 @@ use miden_crypto::hash::keccak::Keccak256;
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
 };
-use miden_processor::ExecutionError;
+use miden_processor::{ExecutionError, operation::OperationError};
 
 use super::helpers::{
     TRUNCATE_STACK_TO_OUTPUT_PROC, assert_deferred_state_round_trips, masm_store_felts,
@@ -30,17 +30,50 @@ fn deferred_three_chunks_digest_matches_host() {
     assert_deferred_chunks_digest_matches_host(3);
 }
 
+#[test]
+fn deferred_dynamic_chunks_digest_matches_host() {
+    assert_deferred_chunks_digest_matches_host(4);
+}
+
+#[test]
+fn deferred_dynamic_chunks_rejects_encoded_length_overflow() {
+    let num_chunks = u32::MAX / 8 + 1;
+    let source = format!(
+        "begin push.{num_chunks} push.{IN_PTR} exec.::miden::core::precompiles::register_chunks_mem end"
+    );
+
+    let error = run_precompile_program(&source).expect_err("encoded length overflow must trap");
+    let expected_error_code =
+        miden_core::mast::error_code_from_msg("Deferred CHUNKS length must fit in u32");
+    assert!(
+        matches!(
+            error,
+            ExecutionError::OperationError {
+                err: OperationError::U32AssertionFailed { err_code, .. },
+                ..
+            } if err_code == expected_error_code
+        ),
+        "encoded length overflow reached the wrong guard: {error:?}",
+    );
+}
+
 fn assert_deferred_chunks_digest_matches_host(num_chunks: usize) {
     let chunks = (0..num_chunks)
         .map(|chunk| core::array::from_fn(|i| Felt::from_u32((chunk * 8 + i + 1) as u32)))
         .collect::<Vec<_>>();
     let stores = masm_store_felts(&chunks.concat(), IN_PTR);
+    let register = if num_chunks <= 3 {
+        format!("push.{IN_PTR}\nexec.::miden::core::precompiles::register_chunks_mem_{num_chunks}")
+    } else {
+        format!(
+            "push.{num_chunks} push.{IN_PTR}\nexec.::miden::core::precompiles::register_chunks_mem"
+        )
+    };
     let source = format!(
         r#"
         begin
             {stores}
-            push.{IN_PTR}
-            exec.::miden::core::precompiles::register_chunks_mem_{num_chunks}
+            {register}
             swapw dropw
         end
         "#,
@@ -63,8 +96,8 @@ fn deferred_expression_digest_matches_host() {
         masm_store_felts(&input_chunk, IN_PTR),
         masm_store_felts(&output_chunk, OUT_PTR),
     );
-    let tag = Keccak256Precompile::assert_tag(input.len() as u32).as_word();
-    let tag = tag
+    let frame = Keccak256Precompile::assert_frame(input.len() as u32).as_word();
+    let frame = frame
         .iter()
         .rev()
         .map(Felt::as_canonical_u64)
@@ -80,7 +113,7 @@ fn deferred_expression_digest_matches_host() {
             push.{OUT_PTR}
             exec.::miden::core::precompiles::register_chunks_mem_1
             swapw
-            push.{tag}
+            push.{frame}
             exec.::miden::core::precompiles::register_expr
             swapw dropw
         end
@@ -100,8 +133,8 @@ fn deferred_memory_value_digest_matches_host() {
     let limbs = core::array::from_fn(|i| (i + 1) as u32);
     let chunk = limbs.map(Felt::from_u32);
     let stores = masm_store_felts(&chunk, IN_PTR);
-    let tag = UintPrecompile::value_tag(UintDomain::U256).as_word();
-    let tag = tag
+    let cv = UintPrecompile::value_frame(UintDomain::U256).initial_chaining_word();
+    let cv = cv
         .iter()
         .rev()
         .map(Felt::as_canonical_u64)
@@ -112,7 +145,7 @@ fn deferred_memory_value_digest_matches_host() {
         r#"
         begin
             {stores}
-            push.1 push.{IN_PTR} push.{tag}
+            push.1 push.{IN_PTR} push.{cv}
             exec.::miden::core::precompiles::register_mem
             swapw dropw
         end
@@ -133,8 +166,8 @@ fn deferred_memory_pair_list_digest_matches_host_for_multiple_blocks() {
     let scalar_two =
         UintPrecompile::value_node(UintDomain::K1Scalar, [2, 0, 0, 0, 0, 0, 0, 0]).digest();
     let two_generator =
-        Node::try_pair_list(CurvePrecompile::msm_tag(), vec![(generator, scalar_two)])
-            .expect("curve MSM tag must accept a pair list")
+        Node::try_pair_list(CurvePrecompile::msm_frame(1), vec![(generator, scalar_two)])
+            .expect("curve MSM frame must accept a pair list")
             .digest();
     let pairs = vec![(generator, scalar_one), (two_generator, scalar_two)];
     let payload = pairs
@@ -142,8 +175,8 @@ fn deferred_memory_pair_list_digest_matches_host_for_multiple_blocks() {
         .flat_map(|(point, scalar)| point.as_elements().iter().chain(scalar.as_elements()).copied())
         .collect::<Vec<_>>();
     let stores = masm_store_felts(&payload, IN_PTR);
-    let tag = CurvePrecompile::msm_tag()
-        .as_word()
+    let cv = CurvePrecompile::msm_frame(2)
+        .initial_chaining_word()
         .iter()
         .rev()
         .map(Felt::as_canonical_u64)
@@ -159,7 +192,7 @@ fn deferred_memory_pair_list_digest_matches_host_for_multiple_blocks() {
             exec.::miden::core::precompiles::curves::secp256k1::mul_scalar_generator
             dropw
 
-            push.2 push.{IN_PTR} push.{tag}
+            push.2 push.{IN_PTR} push.{cv}
             exec.::miden::core::precompiles::register_mem
             swapw dropw
         end
@@ -167,8 +200,8 @@ fn deferred_memory_pair_list_digest_matches_host_for_multiple_blocks() {
     );
 
     let output = run_precompile_program(&source).expect("pair-list registration must execute");
-    let expected = Node::try_pair_list(CurvePrecompile::msm_tag(), pairs)
-        .expect("curve MSM tag must accept a pair list")
+    let expected = Node::try_pair_list(CurvePrecompile::msm_frame(2), pairs)
+        .expect("curve MSM frame must accept a pair list")
         .digest();
     assert_eq!(read_stack_felts(&output, 4), expected.as_elements());
 }
@@ -275,17 +308,17 @@ fn hash_precompile_cycle_baselines() {
         (
             "keccak_hash_1_chunk_mem",
             cycle_hash_mem_source("keccak256", "hash_1_chunk_mem", &input),
-            169,
+            136,
         ),
         (
             "keccak_hash_2_chunks_mem",
             cycle_hash_mem_source("keccak256", "hash_2_chunks_mem", &bytes64),
-            167,
+            136,
         ),
         (
             "keccak_hash_bytes_mem_short",
             cycle_hash_mem_source("keccak256", "hash_bytes_mem", short),
-            218,
+            195,
         ),
     ] {
         let output =

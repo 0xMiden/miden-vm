@@ -2,7 +2,9 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{
     Felt,
-    deferred::{DeferredState, DeferredStateWire, Node, PrecompileRegistry, TRUE_DIGEST, Tag},
+    deferred::{
+        DEFERRED_AND_FRAME, DeferredState, DeferredStateWire, Node, PrecompileRegistry, TRUE_DIGEST,
+    },
     serde::{ByteWriter, Deserializable, Serializable},
 };
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
@@ -37,10 +39,10 @@ fn deferred_session_lowers_shared_uint_dag_from_wire() {
     for depth in 0..24 {
         let op = [UintPrecompile::ADD_OP_ID, UintPrecompile::SUB_OP_ID, UintPrecompile::MUL_OP_ID]
             [depth % 3];
-        let node = Node::join(UintPrecompile::op_tag(op), current, current).unwrap();
+        let node = Node::join(UintPrecompile::op_frame(op), current, current).unwrap();
         current = state.register(node).expect("shared uint expression must register");
     }
-    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), current, zero).unwrap();
+    let eq = Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), current, zero).unwrap();
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).unwrap();
     state.log_statement(eq).unwrap();
@@ -56,11 +58,11 @@ fn deferred_session_lowers_shared_ec_dag_from_wire() {
     let mut current = identity;
     for depth in 0..24 {
         let op = [CurvePrecompile::ADD_OP_ID, CurvePrecompile::SUB_OP_ID][depth % 2];
-        let node = Node::join(CurvePrecompile::op_tag(op), current, current).unwrap();
+        let node = Node::join(CurvePrecompile::op_frame(op), current, current).unwrap();
         current = state.register(node).expect("shared EC expression must register");
     }
-    let eq =
-        Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), current, identity).unwrap();
+    let eq = Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), current, identity)
+        .unwrap();
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).unwrap();
     state.log_statement(eq).unwrap();
@@ -75,7 +77,7 @@ fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
         bytes.write_usize(depth as usize);
         for previous_index in 0..depth {
             bytes.write_u8(1); // Join entry
-            Tag::AND.write_into(&mut bytes);
+            DEFERRED_AND_FRAME.as_word().write_into(&mut bytes);
             bytes.write_u32(previous_index);
             bytes.write_u32(previous_index);
         }
@@ -119,11 +121,11 @@ fn deferred_session_lowers_uint_equality_assertion() {
     state.register(three.clone()).expect("three must register");
 
     let sum =
-        Node::join(UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID), one.digest(), two.digest())
-            .expect("tag is uint-owned");
+        Node::join(UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID), one.digest(), two.digest())
+            .expect("frame is uint-owned");
     let sum = state.register(sum).expect("sum must register");
-    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), three.digest(), sum)
-        .expect("tag is uint-owned");
+    let eq = Node::join(UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID), three.digest(), sum)
+        .expect("frame is uint-owned");
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
@@ -141,15 +143,15 @@ fn deferred_session_lowers_curve_equality_assertion() {
     state.register(generator.clone()).expect("generator must register");
 
     let sum = Node::join(
-        CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+        CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
         identity.digest(),
         generator.digest(),
     )
-    .expect("tag is curve-owned");
+    .expect("frame is curve-owned");
     let sum = state.register(sum).expect("sum must register");
     let eq =
-        Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), generator.digest(), sum)
-            .expect("tag is curve-owned");
+        Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), generator.digest(), sum)
+            .expect("frame is curve-owned");
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 
@@ -159,16 +161,17 @@ fn deferred_session_lowers_curve_equality_assertion() {
 fn register_curve_equality(state: &mut DeferredState, lhs: Node, rhs: Node) {
     let lhs = state.register(lhs).expect("lhs must register");
     let rhs = state.register(rhs).expect("rhs must register");
-    let eq = Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), lhs, rhs)
-        .expect("tag is curve-owned");
+    let eq = Node::join(CurvePrecompile::op_frame(CurvePrecompile::EQ_OP_ID), lhs, rhs)
+        .expect("frame is curve-owned");
     let eq = state.register(eq).expect("equality must register");
     state.log_statement(eq).expect("equality must log");
 }
 
 fn curve_msm_node(pairs: Vec<(Node, Node)>) -> Node {
+    let n_pairs = u32::try_from(pairs.len()).expect("test MSM pair count fits in u32");
     let pairs = pairs.into_iter().map(|(point, scalar)| (point.digest(), scalar.digest()));
     let pairs = pairs.collect::<Vec<_>>();
-    Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned")
+    Node::try_pair_list(CurvePrecompile::msm_frame(n_pairs), pairs).expect("frame is curve-owned")
 }
 
 #[test]
@@ -341,11 +344,11 @@ fn deferred_session_lowers_structurally_different_nodes_at_the_same_canonical_po
     state.register(generator.clone()).expect("generator must register");
     state.register(identity.clone()).expect("identity must register");
     let generator_via_add = Node::join(
-        CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+        CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
         identity.digest(),
         generator.digest(),
     )
-    .expect("tag is curve-owned");
+    .expect("frame is curve-owned");
     let generator_via_add =
         state.register(generator_via_add).expect("identity + generator must register");
 
@@ -355,7 +358,8 @@ fn deferred_session_lowers_structurally_different_nodes_at_the_same_canonical_po
     state.register(three.clone()).expect("scalar must register");
 
     let pairs = vec![(generator.digest(), two.digest()), (generator_via_add, three.digest())];
-    let msm = Node::try_pair_list(CurvePrecompile::msm_tag(), pairs).expect("tag is curve-owned");
+    let msm =
+        Node::try_pair_list(CurvePrecompile::msm_frame(2), pairs).expect("frame is curve-owned");
     register_curve_equality(&mut state, msm.clone(), msm);
 
     session_from_deferred_state(&state)
@@ -431,7 +435,7 @@ fn translate_uint_deep_add_chain_does_not_stackoverflow() {
         let mut current = one.clone();
         for _ in 0..512 {
             let next = Node::join(
-                UintPrecompile::op_tag(UintPrecompile::ADD_OP_ID),
+                UintPrecompile::op_frame(UintPrecompile::ADD_OP_ID),
                 current.digest(),
                 one.digest(),
             )

@@ -129,9 +129,9 @@ fn lifted_air_validates_and_layout_matches_spec() {
 
 #[test]
 fn log_quotient_degree_matches_design_target() {
-    // Flattened via `frac_col!` into 5 aux columns (col 0 the gated
-    // running-sum anchor alone, cols 1-4 each a pair of at-most-two
-    // fractions), so every closing constraint stays at degree ≤ 3 →
+    // Flattened via `frac_col!` into 4 aux columns (col 0 the gated
+    // running-sum anchor alone, cols 1-2 each a pair of at-most-two
+    // fractions, and col 3 a singleton), so every closing constraint stays at degree ≤ 3 →
     // log_quotient_degree = 1. See the design notes.
     let air = ChunkAir;
     assert_eq!(crate::tests::log_quotient_degree(&air), 1);

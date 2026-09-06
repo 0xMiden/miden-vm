@@ -339,13 +339,12 @@ fn test_eidos_recursive_verify_with_precompile_requests() {
 // ================================================================================================
 
 mod prover_api_lifecycle {
-    use miden_assembly::{Assembler, Linkage};
+    use miden_assembly::Assembler;
     use miden_core::{
         Felt, Word, ZERO,
-        deferred::{DeferredStateWire, Node, Tag},
+        deferred::{DeferredStateWire, Node},
     };
-    use miden_core_lib::CoreLibrary;
-    use miden_precompiles::UintPrecompile;
+    use miden_precompiles::{UintDomain, UintPrecompile};
     use miden_vm::{
         DefaultHost, ExecutionClaim, ExecutionOptions, ExecutionProof, ExecutionWitness,
         FastProcessor, HashFunction, PrecompileProof, PrecompileStatus, PrecompileWitness, Program,
@@ -356,10 +355,7 @@ mod prover_api_lifecycle {
     use super::minimum_conjectured_security_level;
 
     fn assemble(source: &str) -> Program {
-        let core_lib = CoreLibrary::default();
         Assembler::default()
-            .with_package(core_lib.package(), Linkage::Static)
-            .expect("core library should link")
             .assemble_program("program", source)
             .expect("program should compile")
             .unwrap_program()
@@ -382,49 +378,33 @@ mod prover_api_lifecycle {
     }
 
     fn u256_witness(value: u64) -> ExecutionWitness {
-        let precompile_id = UintPrecompile::id();
-        let value_tag = Tag::precompile(
-            precompile_id,
-            [
-                Felt::new(0).expect("VALUE operation ID is a felt"),
-                Felt::new(1).expect("U256 bound pointer is a felt"),
-            ],
-        )
-        .expect("uint precompile ID is not reserved");
+        let value_frame = UintPrecompile::value_frame(UintDomain::U256);
         let mut value_chunk = [ZERO; 8];
         value_chunk[0] = Felt::new(value).expect("test U256 value is a felt");
-        let value_digest = Node::value(value_tag, value_chunk)
+        let value_digest = Node::value(value_frame, value_chunk)
             .expect("U256 value node should be valid")
             .digest();
-        let equality_tag = Tag::precompile(
-            precompile_id,
-            [Felt::new(4).expect("EQ operation ID is a felt"), ZERO],
-        )
-        .expect("uint precompile ID is not reserved");
+        let equality_cv =
+            UintPrecompile::op_frame(UintPrecompile::EQ_OP_ID).initial_chaining_word();
 
         // This is the inlined equivalent of the core library's U256 `push_*_digest`, `assert_eq`,
-        // `precompiles::register_expr`, and `precompiles::log_deferred` procedures. The processor's
-        // built-in registry seeds the constant U256 value nodes used here.
+        // `precompiles::register_fixed_expr`, and `precompiles::log_deferred` procedures. The
+        // processor's built-in registry seeds the constant U256 value nodes used here.
         let source = format!(
-            "use miden::core::crypto::hashes::eidos\n\
-             begin\n\
+            "begin\n\
                  push.{}\n\
                  push.{}\n\
                  push.{}\n\
-                 movdnw.2\n\
                  adv.register_deferred\n\
-                 push.0.4.8.{} exec.eidos::init_chaining_word_with_params\n\
                  movdnw.2\n\
                  compress\n\
                  dropw dropw\n\
-                 swapw dropw\n\
                  log_deferred\n\
                  dropw\n\
              end",
             word_literal(value_digest),
             word_literal(value_digest),
-            word_literal(equality_tag.as_word().into()),
-            precompile_id.as_canonical_u64(),
+            word_literal(equality_cv),
         );
 
         execute(&assemble(&source))

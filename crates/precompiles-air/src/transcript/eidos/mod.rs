@@ -1,7 +1,8 @@
 //! Native Eidos chaining chiplet for the deferred transcript.
 //!
-//! Each logical Eidos compression occupies one physical 32-row cycle. That cycle emits the
-//! transcript's input/output relations directly, keyed by the logical chain-step ID.
+//! Each Eidos compression occupies one physical 32-row cycle. The controller accepts a block and,
+//! at a fresh chain head, an initial chaining value. It returns the terminal chaining value bound
+//! to the physical head and tail IDs of that chain.
 
 pub mod compression;
 pub mod digest;
@@ -23,10 +24,8 @@ use compression::{
     selectors::EidosCompressionSelectors,
     universal_cv_word,
 };
-pub use digest::{EidosChainContext, EidosDigest};
-pub use messages::{
-    EIDOS_DOMAIN_AND, EIDOS_DOMAIN_CHUNKS, EIDOS_DOMAIN_NODE, EidosChainInputMsg, EidosOutMsg,
-};
+pub use digest::EidosDigest;
+pub use messages::{EidosBlockMsg, EidosInitMsg, EidosOutMsg};
 use miden_air::{
     logup::{BusId as MidenBusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
@@ -36,9 +35,7 @@ use miden_air::{
 };
 use miden_core::{
     Felt,
-    deferred::DEFERRED_AND_INIT_CV,
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
-    program::domain::DEFERRED_CHUNKS,
     utils::RowMajorMatrix,
 };
 use miden_crypto::hash::eidos::Eidos;
@@ -54,6 +51,15 @@ use crate::{
     utils::{current_main, next_main},
 };
 
+/// Derives a symbolic packed initial CV from `(domain_tag, param0, param1, param2)`.
+pub(crate) fn initial_cv_from_frame<E>(frame: [E; 4]) -> [E; 4]
+where
+    E: PrimeCharacteristicRing + From<Felt>,
+{
+    let base = Eidos::merkle_node_init_chaining_word().into_elements();
+    array::from_fn(|idx| E::from(base[idx]) + frame[idx].clone())
+}
+
 // MAIN COLUMN LAYOUT
 // ================================================================================================
 
@@ -61,29 +67,24 @@ use crate::{
 pub const COL_EIDOS_COMPRESSION_BEGIN: usize = 0;
 pub const COL_EIDOS_COMPRESSION_END: usize = NUM_EIDOS_COMPRESSION_COLS;
 
-/// Cycle-constant logical input-block identifier.
-pub const COL_ABSORPTION_ID: usize = COL_EIDOS_COMPRESSION_END;
-pub const COL_IN_MULTIPLICITY: usize = COL_ABSORPTION_ID + 1;
+/// Number of caller-side block and initial-CV messages consumed by this compression.
+pub const COL_IN_MULTIPLICITY: usize = COL_EIDOS_COMPRESSION_END;
+/// Number of caller-side terminal-digest messages consumed by this chain.
 pub const COL_OUT_MULTIPLICITY: usize = COL_IN_MULTIPLICITY + 1;
-pub const COL_IS_HEAD: usize = COL_OUT_MULTIPLICITY + 1;
-pub const COL_IS_ABSORB: usize = COL_IS_HEAD + 1;
-pub const COL_IS_PAYLOAD: usize = COL_IS_ABSORB + 1;
-pub const COL_IS_OUTPUT: usize = COL_IS_PAYLOAD + 1;
-pub const COL_IS_AND: usize = COL_IS_OUTPUT + 1;
-pub const COL_IS_CHUNKS: usize = COL_IS_AND + 1;
-pub const COL_IS_GENERIC: usize = COL_IS_CHUNKS + 1;
-pub const COL_REMAINING: usize = COL_IS_GENERIC + 1;
-pub const COL_REMAINING_INV: usize = COL_REMAINING + 1;
-pub const COL_CHAIN_CONTEXT_BEGIN: usize = COL_REMAINING_INV + 1;
-pub const COL_CHAIN_CONTEXT_END: usize = COL_CHAIN_CONTEXT_BEGIN + 4;
-pub const COL_CV_IN_BEGIN: usize = COL_CHAIN_CONTEXT_END;
-pub const COL_CV_IN_END: usize = COL_CV_IN_BEGIN + 4;
-pub const NUM_MAIN_COLS: usize = COL_CV_IN_END;
+/// Whether this compression continues the chain immediately before it.
+pub const COL_IS_ABSORB: usize = COL_OUT_MULTIPLICITY + 1;
+/// Physical compression ID of this chain's first cycle. Carried through continuations so the
+/// terminal output binds both ends of the physical chain.
+pub const COL_CHAIN_HEAD_ID: usize = COL_IS_ABSORB + 1;
+/// Total PVM Eidos width: 108 compression columns and four interface columns.
+pub const NUM_MAIN_COLS: usize = COL_CHAIN_HEAD_ID + 1;
 
-const PVM_AUX_COLS: usize = 2;
+// Block input, the internal full-CV bridge, and the initial/terminal boundary relation.
+const PVM_AUX_COLS: usize = 3;
 const EIDOS_COMPRESSION_AUX_COLS: usize = EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len();
+/// Total PVM Eidos auxiliary width: 18 compression columns and three interface columns.
 pub const NUM_AUX_COLS: usize = PVM_AUX_COLS + EIDOS_COMPRESSION_AUX_COLS;
-const PVM_COLUMN_SHAPE: [usize; PVM_AUX_COLS] = [1, 2];
+const PVM_COLUMN_SHAPE: [usize; PVM_AUX_COLS] = [1, 1, 1];
 
 const PVM_VALUE_OFFSET: usize = 0;
 const EIDOS_COMPRESSION_VALUE_OFFSET: usize = 1;
@@ -329,160 +330,46 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionInterfaceAir {
         let is_last = selectors.is_footer_row(3);
         let not_last = AB::Expr::ONE - is_last.clone();
 
-        let head: AB::Expr = local[COL_IS_HEAD].into();
-        let absorb: AB::Expr = local[COL_IS_ABSORB].into();
-        let payload: AB::Expr = local[COL_IS_PAYLOAD].into();
-        let output: AB::Expr = local[COL_IS_OUTPUT].into();
-        let is_and: AB::Expr = local[COL_IS_AND].into();
-        let is_chunks: AB::Expr = local[COL_IS_CHUNKS].into();
-        let is_generic: AB::Expr = local[COL_IS_GENERIC].into();
-        let remaining: AB::Expr = local[COL_REMAINING].into();
-        let remaining_inv: AB::Expr = local[COL_REMAINING_INV].into();
-        let active = head.clone() + absorb.clone();
-        let next_head: AB::Expr = next[COL_IS_HEAD].into();
-        let next_absorb: AB::Expr = next[COL_IS_ABSORB].into();
-        let next_active = next_head + next_absorb.clone();
+        let is_absorb: AB::Expr = local[COL_IS_ABSORB].into();
+        let is_absorb_next: AB::Expr = next[COL_IS_ABSORB].into();
+        let compression_id: AB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
+        let chain_head_id: AB::Expr = local[COL_CHAIN_HEAD_ID].into();
+        let chain_head_id_next: AB::Expr = next[COL_CHAIN_HEAD_ID].into();
 
-        for col in [
-            COL_IS_HEAD,
-            COL_IS_ABSORB,
-            COL_IS_PAYLOAD,
-            COL_IS_OUTPUT,
-            COL_IS_AND,
-            COL_IS_CHUNKS,
-            COL_IS_GENERIC,
-        ] {
-            builder.assert_bool(local[col]);
-        }
-
-        builder.assert_zero(head.clone() * absorb.clone());
-        builder
-            .assert_zero(is_and.clone() + is_chunks.clone() + is_generic.clone() - active.clone());
-        builder.assert_zero(payload.clone() - active.clone());
-        builder.assert_zero(output.clone() * (AB::Expr::ONE - active.clone()));
-        builder.assert_zero(AB::Expr::from(local[COL_IN_MULTIPLICITY]) * (AB::Expr::ONE - payload));
-        builder.assert_zero(
-            AB::Expr::from(local[COL_OUT_MULTIPLICITY]) * (AB::Expr::ONE - output.clone()),
-        );
-        builder.assert_zero(is_and.clone() * (output.clone() - AB::Expr::ONE));
-        builder.assert_zero(is_and.clone() * (remaining.clone() - AB::Expr::ONE));
-
-        let remaining_minus_one = remaining.clone() - AB::Expr::ONE;
-        builder.assert_zero(active.clone() * output.clone() * remaining_minus_one.clone());
-        builder.assert_zero(
-            active.clone()
-                * (remaining_minus_one * remaining_inv - (AB::Expr::ONE - output.clone())),
-        );
-
-        builder.when_first_row().assert_zero(local[COL_ABSORPTION_ID]);
-        builder.when_first_row().assert_zero(absorb);
+        builder.assert_bool(local[COL_IS_ABSORB]);
+        builder.when_first_row().assert_zero(is_absorb);
 
         // Every metadata column is constant throughout its physical 32-row compression cycle.
-        for col in COL_ABSORPTION_ID..NUM_MAIN_COLS {
+        for col in COL_IN_MULTIPLICITY..NUM_MAIN_COLS {
             builder.assert_zero(
                 not_last.clone() * (AB::Expr::from(next[col]) - AB::Expr::from(local[col])),
             );
         }
 
-        // Each physical compression consumes one logical payload block, so active cycle ids are
-        // consecutive.
+        // A fresh chain starts at this physical compression. A continuation retains the head ID
+        // from the preceding cycle. This binds terminal outputs to one contiguous native chain
+        // without assigning any meaning to the caller's domain parameters.
+        builder.assert_zero(
+            selectors.is_first_fused()
+                * (AB::Expr::ONE - AB::Expr::from(local[COL_IS_ABSORB]))
+                * (chain_head_id.clone() - compression_id),
+        );
         builder.when_transition().assert_zero(
-            is_last.clone()
-                * next_active
-                * (AB::Expr::from(next[COL_ABSORPTION_ID])
-                    - AB::Expr::from(local[COL_ABSORPTION_ID])
-                    - AB::Expr::ONE),
+            is_last.clone() * is_absorb_next.clone() * (chain_head_id_next - chain_head_id),
         );
 
-        builder.when_transition().assert_zero(
-            is_last.clone()
-                * (active.clone() - output.clone())
-                * (AB::Expr::ONE - next_absorb.clone()),
-        );
-        builder
-            .when_transition()
-            .assert_zero(is_last.clone() * output.clone() * next_absorb.clone());
-        builder.when_last_row().assert_zero(active * (AB::Expr::ONE - output));
-
-        builder.when_transition().assert_zero(
-            is_last.clone()
-                * next_absorb.clone()
-                * (AB::Expr::from(next[COL_REMAINING]) - remaining.clone() + AB::Expr::ONE),
-        );
-        for col in [COL_IS_AND, COL_IS_CHUNKS, COL_IS_GENERIC] {
+        // A continuation starts from the preceding compression output. The primitive core already
+        // constrains its physical cycle ID to be canonical and consecutive.
+        for i in 0..4 {
+            let next_cv = universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i)
+                + AB::Expr::from(Felt::new_unchecked(1u64 << 32))
+                    * universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i + 1);
             builder.when_transition().assert_zero(
                 is_last.clone()
-                    * next_absorb.clone()
-                    * (AB::Expr::from(next[col]) - AB::Expr::from(local[col])),
+                    * is_absorb_next.clone()
+                    * (next_cv - AB::Expr::from(local[footer_digest_col(i)])),
             );
         }
-        for i in 0..4 {
-            builder.when_transition().assert_zero(
-                is_last.clone()
-                    * next_absorb.clone()
-                    * (AB::Expr::from(next[COL_CHAIN_CONTEXT_BEGIN + i])
-                        - AB::Expr::from(local[COL_CHAIN_CONTEXT_BEGIN + i])),
-            );
-            builder.when_transition().assert_zero(
-                is_last.clone()
-                    * next_absorb.clone()
-                    * (AB::Expr::from(next[COL_CV_IN_BEGIN + i])
-                        - AB::Expr::from(local[footer_digest_col(i)])),
-            );
-            let raw_cv_lo = universal_cv_word(|col| AB::Expr::from(local[col]), 2 * i);
-            let raw_cv_hi = universal_cv_word(|col| AB::Expr::from(local[col]), 2 * i + 1);
-            builder.assert_zero(
-                is_last.clone()
-                    * (AB::Expr::from(local[COL_CV_IN_BEGIN + i])
-                        - raw_cv_lo
-                        - AB::Expr::from(Felt::new_unchecked(1u64 << 32)) * raw_cv_hi),
-            );
-        }
-
-        let chain_context: [AB::Expr; 4] =
-            array::from_fn(|i| local[COL_CHAIN_CONTEXT_BEGIN + i].into());
-        let and_init = DEFERRED_AND_INIT_CV.into_elements();
-        let chunks_init = Eidos::init_chaining_word(DEFERRED_CHUNKS, 0).into_elements();
-        let init_bases = Eidos::merkle_node_init_chaining_word().into_elements();
-        for i in 0..4 {
-            let mut expected = is_and.clone() * AB::Expr::from(and_init[i])
-                + is_chunks.clone() * AB::Expr::from(chunks_init[i]);
-            if i == 1 {
-                expected +=
-                    is_chunks.clone() * remaining.clone() * AB::Expr::from(Felt::from_u8(8));
-            }
-            let generic_param = match i {
-                0 => chain_context[0].clone(),
-                1 => remaining.clone() * AB::Expr::from(Felt::from_u8(8)),
-                2 => chain_context[1].clone(),
-                3 => chain_context[2].clone(),
-                _ => unreachable!(),
-            };
-            expected += is_generic.clone() * (AB::Expr::from(init_bases[i]) + generic_param);
-            builder.assert_zero(
-                head.clone() * (AB::Expr::from(local[COL_CV_IN_BEGIN + i]) - expected),
-            );
-        }
-
-        let and_context = EidosChainContext::and().as_array();
-        let chunks_context = EidosChainContext::chunk().as_array();
-        for i in 0..4 {
-            builder.assert_zero(
-                is_and.clone() * (chain_context[i].clone() - AB::Expr::from(and_context[i])),
-            );
-            builder.assert_zero(
-                is_chunks.clone() * (chain_context[i].clone() - AB::Expr::from(chunks_context[i])),
-            );
-        }
-        builder.assert_zero(is_generic * chain_context[3].clone());
-
-        // The second interface fraction column is inactive outside the first fused row and
-        // footer 3. Pinning it closes the zero-denominator edge where its ungated fraction
-        // equation would otherwise leave the committed cell unconstrained.
-        let aux1: AB::ExprEF = builder.permutation().current_slice()[1].into();
-        let aux1_inactive =
-            AB::Expr::ONE - selectors.is_first_fused() - selectors.is_footer_row(FOOTER_ROWS - 1);
-        builder.assert_zero_ext(aux1 * aux1_inactive);
 
         let mut lb =
             CyclicConstraintLookupBuilder::new(builder, self, self.preprocessed_width() > 0);
@@ -542,105 +429,123 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let local: [LB::Var; NUM_MAIN_COLS] = current_main(builder.main(), 0);
+        let next: [LB::Var; NUM_MAIN_COLS] = next_main(builder.main(), 0);
         let periodic_values: Vec<LB::Expr> =
             builder.periodic_values().iter().map(|value| (*value).into()).collect();
         let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
         let first_fused = selectors.is_first_fused();
         let footer3 = selectors.is_footer_row(FOOTER_ROWS - 1);
 
-        let chain_step_id: LB::Expr = local[COL_ABSORPTION_ID].into();
-        let head: LB::Expr = local[COL_IS_HEAD].into();
+        let compression_id: LB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
         let in_mult: LB::Expr = local[COL_IN_MULTIPLICITY].into();
         let out_mult: LB::Expr = local[COL_OUT_MULTIPLICITY].into();
-        let is_and: LB::Expr = local[COL_IS_AND].into();
-        let is_chunks: LB::Expr = local[COL_IS_CHUNKS].into();
-        let is_generic: LB::Expr = local[COL_IS_GENERIC].into();
-
-        let message = footer_block(|col| LB::Expr::from(local[col]));
-        let chain_context = array::from_fn(|idx| local[COL_CHAIN_CONTEXT_BEGIN + idx].into());
+        let is_absorb: LB::Expr = local[COL_IS_ABSORB].into();
+        let is_absorb_next: LB::Expr = next[COL_IS_ABSORB].into();
+        let chain_head_id: LB::Expr = local[COL_CHAIN_HEAD_ID].into();
+        let block = footer_block(|col| LB::Expr::from(local[col]));
         let digest = array::from_fn(|idx| local[footer_digest_col(idx)].into());
-        let domain = is_generic * LB::Expr::from(Felt::from_u8(EIDOS_DOMAIN_NODE))
-            + is_and * LB::Expr::from(Felt::from_u8(EIDOS_DOMAIN_AND))
-            + is_chunks * LB::Expr::from(Felt::from_u8(EIDOS_DOMAIN_CHUNKS));
         let raw_cv = raw_cv_words(|col| LB::Expr::from(local[col]));
-
-        // The base constraints pin each multiplicity to zero off its event. Multiplying only by
-        // footer3 therefore keeps both multiplicities at degree two.
-        let input_multiplicity = -footer3.clone() * in_mult;
-        let output_multiplicity = -footer3.clone() * out_mult;
-        let cv_multiplicity = footer3 - first_fused;
+        let initial_cv =
+            array::from_fn(|idx| pack_pair(raw_cv[2 * idx].clone(), raw_cv[2 * idx + 1].clone()));
 
         let linear = Deg { v: 1, u: 1 };
-        let selected = Deg { v: 2, u: 1 };
-        let pair = Deg { v: 3, u: 2 };
+        let block_deg = Deg { v: 2, u: 1 };
+        let cv_deg = Deg { v: 1, u: 2 };
+        let boundary_deg = Deg { v: 3, u: 2 };
 
+        // Keep the running-sum column's denominator linear. Its numerator selects the last row
+        // and applies the cycle's input multiplicity.
         builder.next_column(
             |col| {
                 col.group(
-                    "eidos_compression-pvm-chain-input",
+                    "eidos-compression-block",
                     |group| {
                         group.batch(
-                            "atomic-chain-input",
+                            "block",
                             LB::Expr::ONE,
                             |batch| {
                                 batch.insert(
-                                    "chain-input",
-                                    input_multiplicity,
-                                    EidosChainInputMsg {
-                                        chain_step_id,
-                                        is_head: head,
-                                        domain,
-                                        message,
-                                        chain_context,
+                                    "block",
+                                    -footer3.clone() * in_mult.clone(),
+                                    EidosBlockMsg {
+                                        compression_id: compression_id.clone(),
+                                        block,
                                     },
-                                    selected,
+                                    block_deg,
                                 );
                             },
-                            selected,
+                            block_deg,
                         );
                     },
-                    selected,
+                    block_deg,
                 );
             },
-            selected,
+            block_deg,
         );
 
+        // The internal relation carries all eight raw CV words from the first fused row to the
+        // footer, where the primitive AIR has reconstructed and constrained them.
         builder.next_column(
             |col| {
                 col.group(
-                    "eidos_compression-pvm-cv-output",
+                    "eidos-compression-cv",
                     |group| {
-                        group.batch(
-                            "full-cv-and-chain-output",
-                            LB::Expr::ONE,
-                            |batch| {
-                                batch.insert(
-                                    "full-cv",
-                                    cv_multiplicity,
-                                    FullCvMsg {
-                                        compression_cycle_id: local[F_COMPRESSION_CYCLE_ID_COL]
-                                            .into(),
-                                        words: raw_cv,
-                                    },
-                                    linear,
-                                );
-                                batch.insert(
-                                    "chain-output",
-                                    output_multiplicity,
-                                    EidosOutMsg {
-                                        chain_step_id: local[COL_ABSORPTION_ID].into(),
-                                        digest,
-                                    },
-                                    selected,
-                                );
+                        group.insert(
+                            "consume-full-cv",
+                            first_fused,
+                            -LB::Expr::ONE,
+                            || FullCvMsg {
+                                compression_cycle_id: compression_id.clone(),
+                                words: raw_cv.clone(),
                             },
-                            pair,
+                            linear,
+                        );
+                        group.insert(
+                            "provide-full-cv",
+                            footer3.clone(),
+                            LB::Expr::ONE,
+                            || FullCvMsg {
+                                compression_cycle_id: compression_id.clone(),
+                                words: raw_cv,
+                            },
+                            linear,
                         );
                     },
-                    pair,
+                    cv_deg,
                 );
             },
-            pair,
+            cv_deg,
+        );
+
+        // Initial CVs and terminal outputs occupy different rows, so this selected group contains
+        // at most one denominator per row. The next-cycle continuation bit selects terminal rows.
+        builder.next_column(
+            |col| {
+                col.group(
+                    "eidos-compression-boundaries",
+                    |group| {
+                        group.insert(
+                            "initial-cv",
+                            selectors.is_first_fused(),
+                            -in_mult * (LB::Expr::ONE - is_absorb),
+                            || EidosInitMsg {
+                                compression_id: compression_id.clone(),
+                                initial_cv,
+                            },
+                            boundary_deg,
+                        );
+                        group.insert(
+                            "chain-output",
+                            footer3,
+                            -out_mult * (LB::Expr::ONE - is_absorb_next),
+                            || EidosOutMsg { chain_head_id, compression_id, digest },
+                            boundary_deg,
+                        );
+                    },
+                    boundary_deg,
+                );
+            },
+            boundary_deg,
         );
     }
 }
@@ -673,3 +578,182 @@ fn pack_pair<E: PrimeCharacteristicRing>(lo: E, hi: E) -> E {
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);
+
+#[cfg(test)]
+mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::{
+        Felt,
+        deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::RowMajorMatrix,
+    };
+    use miden_lifted_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+
+    use super::{
+        EidosCompressionInterfaceAir, EidosInitMsg, EidosOutMsg, FullCvMsg, NUM_MAIN_COLS,
+        PVM_AUX_COLS, get_periodic_column_values, initial_cv_from_frame,
+    };
+    use crate::{
+        logup::{Challenges, CyclicConstraintLookupBuilder, LookupAir, LookupMessage},
+        relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    };
+
+    struct InterfaceConstraintEvalBuilder {
+        main: RowMajorMatrix<Felt>,
+        aux: RowMajorMatrix<QuadFelt>,
+        randomness: Vec<QuadFelt>,
+        permutation_values: Vec<QuadFelt>,
+        periodic_values: Vec<Felt>,
+        extension_evaluations: Vec<QuadFelt>,
+        preprocessed_window: RowWindow<'static, Felt>,
+    }
+
+    impl AirBuilder for InterfaceConstraintEvalBuilder {
+        type F = Felt;
+        type Expr = Felt;
+        type Var = Felt;
+        type PreprocessedWindow = RowWindow<'static, Felt>;
+        type MainWindow = RowMajorMatrix<Felt>;
+        type PublicVar = Felt;
+        type PeriodicVar = Felt;
+
+        fn main(&self) -> Self::MainWindow {
+            self.main.clone()
+        }
+
+        fn preprocessed(&self) -> &Self::PreprocessedWindow {
+            &self.preprocessed_window
+        }
+
+        fn is_first_row(&self) -> Self::Expr {
+            Felt::ZERO
+        }
+
+        fn is_last_row(&self) -> Self::Expr {
+            Felt::ZERO
+        }
+
+        fn is_transition(&self) -> Self::Expr {
+            Felt::ONE
+        }
+
+        fn is_transition_window(&self, size: usize) -> Self::Expr {
+            assert_eq!(size, 2, "PVM Eidos interface tests use two-row transition windows");
+            Felt::ONE
+        }
+
+        fn assert_zero<I: Into<Self::Expr>>(&mut self, _value: I) {}
+
+        fn public_values(&self) -> &[Self::PublicVar] {
+            &[]
+        }
+
+        fn periodic_values(&self) -> &[Self::PeriodicVar] {
+            &self.periodic_values
+        }
+    }
+
+    impl ExtensionBuilder for InterfaceConstraintEvalBuilder {
+        type EF = QuadFelt;
+        type ExprEF = QuadFelt;
+        type VarEF = QuadFelt;
+
+        fn assert_zero_ext<I: Into<Self::ExprEF>>(&mut self, value: I) {
+            self.extension_evaluations.push(value.into());
+        }
+    }
+
+    impl PermutationAirBuilder for InterfaceConstraintEvalBuilder {
+        type MP = RowMajorMatrix<QuadFelt>;
+        type RandomVar = QuadFelt;
+        type PermutationVar = QuadFelt;
+
+        fn permutation(&self) -> Self::MP {
+            self.aux.clone()
+        }
+
+        fn permutation_randomness(&self) -> &[Self::RandomVar] {
+            &self.randomness
+        }
+
+        fn permutation_values(&self) -> &[Self::PermutationVar] {
+            &self.permutation_values
+        }
+    }
+
+    #[test]
+    fn symbolic_initial_cv_matches_typed_frames() {
+        for frame in [DEFERRED_AND_FRAME, deferred_chunks_frame(3)] {
+            assert_eq!(
+                initial_cv_from_frame(frame.as_word().into_elements()),
+                frame.initial_chaining_word().into_elements(),
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_interface_aux_columns_are_pinned_at_zero_denominators() {
+        const INACTIVE_FUSED_ROW: usize = 1;
+
+        let challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::ZERO,
+            QuadFelt::ZERO,
+            MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
+        assert_eq!(
+            [
+                FullCvMsg {
+                    compression_cycle_id: Felt::ZERO,
+                    words: [Felt::ZERO; 8],
+                }
+                .encode(&challenges),
+                EidosInitMsg {
+                    compression_id: Felt::ZERO,
+                    initial_cv: [Felt::ZERO; 4],
+                }
+                .encode(&challenges),
+                EidosOutMsg {
+                    chain_head_id: Felt::ZERO,
+                    compression_id: Felt::ZERO,
+                    digest: [Felt::ZERO; 4],
+                }
+                .encode(&challenges),
+            ],
+            [QuadFelt::ZERO; 3],
+        );
+
+        let periodic_values = get_periodic_column_values()
+            .iter()
+            .map(|column| column[INACTIVE_FUSED_ROW % column.len()])
+            .collect();
+        let mut aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * PVM_AUX_COLS], PVM_AUX_COLS);
+        aux.values[1] = QuadFelt::ONE;
+        aux.values[2] = QuadFelt::ONE;
+        let mut builder = InterfaceConstraintEvalBuilder {
+            main: RowMajorMatrix::new(vec![Felt::ZERO; 2 * NUM_MAIN_COLS], NUM_MAIN_COLS),
+            aux,
+            randomness: vec![QuadFelt::ZERO; 2],
+            permutation_values: vec![QuadFelt::ZERO],
+            periodic_values,
+            extension_evaluations: Vec::new(),
+            preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+        };
+
+        let air = EidosCompressionInterfaceAir;
+        let mut lookup_builder = CyclicConstraintLookupBuilder::new(&mut builder, &air, false);
+        LookupAir::eval(&air, &mut lookup_builder);
+
+        // This all-zero row with alpha = beta = 0 makes both encoded interface denominators zero.
+        // Because neither the first-fused nor footer-3 flag is active, each fraction constraint
+        // must nevertheless reduce to `aux = 0`. Keeping the selectors in the flag argument is
+        // what preserves the unit denominator on these inactive rows.
+        assert_eq!(builder.extension_evaluations.len(), PVM_AUX_COLS + 2);
+        assert_eq!(
+            &builder.extension_evaluations[builder.extension_evaluations.len() - 2..],
+            &[QuadFelt::ONE, QuadFelt::ONE],
+        );
+    }
+}

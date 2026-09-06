@@ -1,19 +1,17 @@
 //! Shared base for hash precompiles.
 //!
 //! [`HashPrecompile<H>`] implements the generic hash assertion protocol. A hash assertion is one
-//! precompile-owned join node tagged `[hash_id, ASSERT_DISC, n_bytes, 0]` over two framework-owned
-//! [`Tag::CHUNKS`](miden_core::deferred::Tag::CHUNKS) children: the preimage bytes and the expected
-//! digest bytes.
+//! precompile-owned join node framed as `(domain, [ASSERT_OP, n_bytes, 0])` over two
+//! `DEFERRED_CHUNKS` children: the preimage bytes and the expected digest bytes.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::{
-    Felt,
-    deferred::{
-        DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-    },
+    deferred::{DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError},
+    program::domain::DeferredChunksDomain,
 };
+use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
 
 use crate::codec::{chunks_to_bytes_exact, n_chunks};
 
@@ -27,7 +25,7 @@ pub trait HashFunction: Default + Send + Sync + 'static {
     /// Human-readable name used for diagnostics.
     const NAME: &'static str;
     /// Registered Eidos domain tag for this hash precompile.
-    const DOMAIN_TAG: Felt;
+    const DOMAIN: DomainTag;
     /// u32-packed-LE felts in the digest (8 for a 256-bit hash, 16 for 512-bit).
     const DIGEST_FELTS: usize;
     /// Hashes `input`, returning the digest as `DIGEST_FELTS * 4` bytes.
@@ -41,8 +39,8 @@ const ASSERT_DISC: u32 = 0;
 
 /// A structural view of a hash assertion node owned by [`HashPrecompile`].
 ///
-/// This exposes only the assertion tag immediate and join child digests; it does not evaluate the
-/// preimage or expected digest children.
+/// This exposes only the assertion frame parameters and join child digests; it does not evaluate
+/// the preimage or expected digest children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HashAssertNode {
     /// Declared preimage length in bytes.
@@ -63,40 +61,36 @@ impl<H> Default for HashPrecompile<H> {
 }
 
 impl<H: HashFunction> HashPrecompile<H> {
-    /// Local discriminant of the assertion tag.
-    pub const ASSERT_TAG_ID: u32 = ASSERT_DISC;
+    /// Local operation discriminant of the assertion frame.
+    pub const ASSERT_OP_ID: u32 = ASSERT_DISC;
 
-    /// Returns this precompile's registered domain tag.
-    pub fn id() -> Felt {
-        H::DOMAIN_TAG
+    /// Returns this precompile's registered domain.
+    pub const fn domain() -> DomainTag {
+        H::DOMAIN
     }
 
-    /// Tag for a hash assertion node carrying the preimage byte length.
-    pub fn assert_tag(n_bytes: u32) -> Tag {
-        Self::tag([Felt::from_u32(ASSERT_DISC), Felt::from_u32(n_bytes)])
+    /// Frame for a hash assertion node carrying the preimage byte length.
+    pub const fn assert_frame(n_bytes: u32) -> EidosFrame {
+        EidosFrame::new(Self::domain(), [ASSERT_DISC, n_bytes, 0])
     }
 
     /// Builds a hash assertion predicate over generic chunk-list children.
     pub fn assert_node(n_bytes: u32, preimage_digest: Digest, expected_digest: Digest) -> Node {
-        Node::join(Self::assert_tag(n_bytes), preimage_digest, expected_digest)
-            .expect("assert tag is precompile-owned")
+        Node::join(Self::assert_frame(n_bytes), preimage_digest, expected_digest)
+            .expect("assertion frame is precompile-owned")
     }
 
-    /// Decodes a hash assertion tag owned by this precompile.
+    /// Decodes a hash assertion frame owned by this precompile.
     ///
-    /// Returns `Ok(None)` when `tag` belongs to another precompile. Tags with this precompile's id
-    /// but invalid assertion arguments return [`PrecompileError::InvalidNode`].
-    pub fn decode_assert_tag(tag: Tag) -> Result<Option<u32>, PrecompileError> {
-        if tag.id() != Self::id() {
+    /// Returns `Ok(None)` when `frame` belongs to another precompile. Frames in this domain with
+    /// invalid parameters return [`PrecompileError::InvalidNode`].
+    pub fn decode_assert_frame(frame: EidosFrame) -> Result<Option<u32>, PrecompileError> {
+        if frame.domain() != Self::domain() {
             return Ok(None);
         }
 
-        let args = tag.args();
-        let disc =
-            u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        let n_bytes =
-            u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC {
+        let [operation, n_bytes, reserved] = frame.params();
+        if operation != ASSERT_DISC || reserved != 0 {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -108,7 +102,10 @@ impl<H: HashFunction> HashPrecompile<H> {
     /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
     /// structural join child digests directly from the payload.
     pub fn decode_assert_node(node: &Node) -> Result<Option<HashAssertNode>, PrecompileError> {
-        let Some(n_bytes) = Self::decode_assert_tag(node.tag())? else {
+        let Some(frame) = node.frame() else {
+            return Ok(None);
+        };
+        let Some(n_bytes) = Self::decode_assert_frame(frame)? else {
             return Ok(None);
         };
         let (preimage_digest, expected_digest) = node.payload().as_join()?;
@@ -117,10 +114,6 @@ impl<H: HashFunction> HashPrecompile<H> {
             preimage_digest,
             expected_digest,
         }))
-    }
-
-    fn tag(args: [Felt; 2]) -> Tag {
-        Tag::precompile(Self::id(), args).expect("hash precompile id is not framework-reserved")
     }
 
     fn digest_chunks() -> usize {
@@ -133,30 +126,22 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         H::NAME
     }
 
-    fn id(&self) -> Felt {
-        Self::id()
+    fn domain(&self) -> DomainTag {
+        Self::domain()
     }
 
-    fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
-        let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
-        if disc != ASSERT_DISC {
-            return None;
-        }
-        u32::try_from(args[1].as_canonical_u64()).ok()?;
-        Some(NodeType::Join)
+    fn decode(&self, params: [u32; 3]) -> Option<NodeType> {
+        matches!(params, [ASSERT_DISC, _, 0]).then_some(NodeType::Join)
     }
 
     fn evaluate(
         &self,
-        args: [Felt; 2],
+        params: [u32; 3],
         payload: &Payload,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
-        let disc =
-            u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        let n_bytes =
-            u32::try_from(args[1].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
-        if disc != ASSERT_DISC {
+        let [operation, n_bytes, reserved] = params;
+        if operation != ASSERT_DISC || reserved != 0 {
             return Err(PrecompileError::InvalidNode);
         }
 
@@ -189,7 +174,10 @@ fn chunks_child_to_bytes(
 ) -> Result<Vec<u8>, PrecompileError> {
     let canonical_digest = context.evaluate_digest(digest)?;
     let canonical_node = context.get_node(&canonical_digest).ok_or(PrecompileError::InvalidNode)?;
-    if canonical_node.tag() != Tag::CHUNKS {
+    if canonical_node
+        .frame()
+        .is_none_or(|frame| frame.domain() != DeferredChunksDomain::TAG)
+    {
         return Err(PrecompileError::InvalidNode);
     }
     let chunks = canonical_node.payload().as_data()?;
@@ -205,8 +193,8 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::{
-        ZERO,
-        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, Tag},
+        Felt, ZERO,
+        deferred::{DeferredState, PrecompileRegistry, TRUE_DIGEST, deferred_chunks_frame},
         utils::bytes_to_packed_u32_elements,
     };
 
@@ -256,24 +244,19 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     };
 
     let pc = HashPrecompile::<H>::default();
-    assert_eq!(
-        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), Felt::from_u32(65)]),
-        Some(NodeType::Join),
-    );
-    assert!(pc.decode([Felt::from_u32(1), ZERO]).is_none());
-    let non_u32 = Felt::new_unchecked(u64::from(u32::MAX) + 1);
-    assert!(pc.decode([non_u32, ZERO]).is_none());
-    assert!(
-        pc.decode([Felt::from_u32(HashPrecompile::<H>::ASSERT_TAG_ID), non_u32])
-            .is_none()
-    );
+    assert_eq!(pc.decode([HashPrecompile::<H>::ASSERT_OP_ID, 65, 0]), Some(NodeType::Join),);
+    assert!(pc.decode([1, 65, 0]).is_none());
+    assert!(pc.decode([HashPrecompile::<H>::ASSERT_OP_ID, 65, 1]).is_none());
 
-    let assert_tag = HashPrecompile::<H>::assert_tag(65);
-    assert_eq!(HashPrecompile::<H>::decode_assert_tag(assert_tag).unwrap(), Some(65));
-    assert_eq!(HashPrecompile::<H>::decode_assert_tag(Tag::CHUNKS).unwrap(), None);
-    let invalid_assert_tag = HashPrecompile::<H>::tag([Felt::from_u32(1), Felt::from_u32(65)]);
+    let assert_frame = HashPrecompile::<H>::assert_frame(65);
+    assert_eq!(HashPrecompile::<H>::decode_assert_frame(assert_frame).unwrap(), Some(65));
+    assert_eq!(
+        HashPrecompile::<H>::decode_assert_frame(deferred_chunks_frame(1)).unwrap(),
+        None
+    );
+    let invalid_assert_frame = EidosFrame::new(HashPrecompile::<H>::domain(), [1, 65, 0]);
     assert!(matches!(
-        HashPrecompile::<H>::decode_assert_tag(invalid_assert_tag),
+        HashPrecompile::<H>::decode_assert_frame(invalid_assert_frame),
         Err(PrecompileError::InvalidNode)
     ));
 
@@ -287,12 +270,12 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
             expected_digest: TRUE_DIGEST,
         })
     );
-    let invalid_node = Node::join(invalid_assert_tag, TRUE_DIGEST, TRUE_DIGEST).unwrap();
+    let invalid_node = Node::join(invalid_assert_frame, TRUE_DIGEST, TRUE_DIGEST).unwrap();
     assert!(matches!(
         HashPrecompile::<H>::decode_assert_node(&invalid_node),
         Err(PrecompileError::InvalidNode)
     ));
-    let invalid_shape = Node::value(assert_tag, [ZERO; 8]).unwrap();
+    let invalid_shape = Node::value(assert_frame, [ZERO; 8]).unwrap();
     assert!(HashPrecompile::<H>::decode_assert_node(&invalid_shape).is_err());
 
     let input = b"hash assertions consume generic chunks";
@@ -347,7 +330,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     assert_error(err, PrecompileError::InvalidNode);
 
     let precompile_owned_data = Node::try_data(
-        HashPrecompile::<H>::assert_tag(input.len() as u32),
+        HashPrecompile::<H>::assert_frame(input.len() as u32),
         chunks_from_bytes(input),
     )
     .expect("data node is syntactically constructible");
