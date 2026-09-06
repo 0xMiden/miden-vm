@@ -1,0 +1,128 @@
+#include "eidos_arm.h"
+#include <arm_sve.h>
+
+// The caller guarantees active_lanes <= 16. Every memory access uses the active predicate.
+#define LOAD(word) svld1_u32(pg, block + (word) * 16 + base)
+#define ADD(a, b) svadd_u32_x(pg, (a), (b))
+#define XOR(a, b) sveor_u32_x(pg, (a), (b))
+#define XOR_ROTATE(a, b, n) rotate##n(pg, XOR((a), (b)))
+
+static inline svuint32_t rotate16(svbool_t pg, svuint32_t x) {
+    return svorr_u32_x(pg, svlsr_n_u32_x(pg, x, 16), svlsl_n_u32_x(pg, x, 16));
+}
+
+static inline svuint32_t rotate12(svbool_t pg, svuint32_t x) {
+    return svorr_u32_x(pg, svlsr_n_u32_x(pg, x, 12), svlsl_n_u32_x(pg, x, 20));
+}
+
+static inline svuint32_t rotate8(svbool_t pg, svuint32_t x) {
+    return svorr_u32_x(pg, svlsr_n_u32_x(pg, x, 8), svlsl_n_u32_x(pg, x, 24));
+}
+
+static inline svuint32_t rotate7(svbool_t pg, svuint32_t x) {
+    return svorr_u32_x(pg, svlsr_n_u32_x(pg, x, 7), svlsl_n_u32_x(pg, x, 25));
+}
+
+// Advance the four independent G chains together; message vectors die at each add.
+#define G4(a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3, d0, d1, d2, d3, \
+           m0, m1, m2, m3, m4, m5, m6, m7) do { \
+    a0 = ADD(ADD(a0, b0), LOAD(m0)); \
+    a1 = ADD(ADD(a1, b1), LOAD(m2)); \
+    a2 = ADD(ADD(a2, b2), LOAD(m4)); \
+    a3 = ADD(ADD(a3, b3), LOAD(m6)); \
+    d0 = XOR_ROTATE(d0, a0, 16); \
+    d1 = XOR_ROTATE(d1, a1, 16); \
+    d2 = XOR_ROTATE(d2, a2, 16); \
+    d3 = XOR_ROTATE(d3, a3, 16); \
+    c0 = ADD(c0, d0); \
+    c1 = ADD(c1, d1); \
+    c2 = ADD(c2, d2); \
+    c3 = ADD(c3, d3); \
+    b0 = XOR_ROTATE(b0, c0, 12); \
+    b1 = XOR_ROTATE(b1, c1, 12); \
+    b2 = XOR_ROTATE(b2, c2, 12); \
+    b3 = XOR_ROTATE(b3, c3, 12); \
+    a0 = ADD(ADD(a0, b0), LOAD(m1)); \
+    a1 = ADD(ADD(a1, b1), LOAD(m3)); \
+    a2 = ADD(ADD(a2, b2), LOAD(m5)); \
+    a3 = ADD(ADD(a3, b3), LOAD(m7)); \
+    d0 = XOR_ROTATE(d0, a0, 8); \
+    d1 = XOR_ROTATE(d1, a1, 8); \
+    d2 = XOR_ROTATE(d2, a2, 8); \
+    d3 = XOR_ROTATE(d3, a3, 8); \
+    c0 = ADD(c0, d0); \
+    c1 = ADD(c1, d1); \
+    c2 = ADD(c2, d2); \
+    c3 = ADD(c3, d3); \
+    b0 = XOR_ROTATE(b0, c0, 7); \
+    b1 = XOR_ROTATE(b1, c1, 7); \
+    b2 = XOR_ROTATE(b2, c2, 7); \
+    b3 = XOR_ROTATE(b3, c3, 7); \
+} while (0)
+
+void eidos_compress16_sve(
+    const uint32_t *cv, const uint32_t *block, uint32_t *out, size_t active_lanes) {
+    for (size_t base = 0; base < active_lanes; base += svcntw()) {
+        svbool_t pg = svwhilelt_b32((uint64_t)base, (uint64_t)active_lanes);
+        svuint32_t v0 = svld1_u32(pg, cv + 0 * 16 + base);
+        svuint32_t v1 = svld1_u32(pg, cv + 1 * 16 + base);
+        svuint32_t v2 = svld1_u32(pg, cv + 2 * 16 + base);
+        svuint32_t v3 = svld1_u32(pg, cv + 3 * 16 + base);
+        svuint32_t v4 = svld1_u32(pg, cv + 4 * 16 + base);
+        svuint32_t v5 = svld1_u32(pg, cv + 5 * 16 + base);
+        svuint32_t v6 = svld1_u32(pg, cv + 6 * 16 + base);
+        svuint32_t v7 = svld1_u32(pg, cv + 7 * 16 + base);
+        svuint32_t v8 = svdup_n_u32(0x6a09e667);
+        svuint32_t v9 = svdup_n_u32(0xbb67ae85);
+        svuint32_t v10 = svdup_n_u32(0x3c6ef372);
+        svuint32_t v11 = svdup_n_u32(0xa54ff53a);
+        svuint32_t v12 = svdup_n_u32(0x510e527f);
+        svuint32_t v13 = svdup_n_u32(0x9b05688c);
+        svuint32_t v14 = svdup_n_u32(0x1f83d9ab);
+        svuint32_t v15 = svdup_n_u32(0x5be0cd19);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           0, 1, 2, 3, 4, 5, 6, 7);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           8, 9, 10, 11, 12, 13, 14, 15);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           2, 6, 3, 10, 7, 0, 4, 13);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           1, 11, 12, 5, 9, 14, 15, 8);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           3, 4, 10, 12, 13, 2, 7, 14);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           6, 5, 9, 0, 11, 15, 8, 1);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           10, 7, 12, 9, 14, 3, 13, 15);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           4, 0, 11, 2, 5, 8, 1, 6);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           12, 13, 9, 11, 15, 10, 14, 8);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           7, 2, 5, 3, 0, 1, 6, 4);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           9, 14, 11, 5, 8, 12, 15, 1);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           13, 3, 0, 10, 2, 6, 4, 7);
+
+        G4(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15,
+           11, 15, 5, 0, 1, 9, 8, 6);
+        G4(v0, v1, v2, v3, v5, v6, v7, v4, v10, v11, v8, v9, v15, v12, v13, v14,
+           14, 10, 2, 12, 3, 4, 7, 13);
+
+        svst1_u32(pg, out + 0 * 16 + base, XOR(v0, v8));
+        svst1_u32(pg, out + 1 * 16 + base, XOR(v1, v9));
+        svst1_u32(pg, out + 2 * 16 + base, XOR(v2, v10));
+        svst1_u32(pg, out + 3 * 16 + base, XOR(v3, v11));
+        svst1_u32(pg, out + 4 * 16 + base, XOR(v4, v12));
+        svst1_u32(pg, out + 5 * 16 + base, XOR(v5, v13));
+        svst1_u32(pg, out + 6 * 16 + base, XOR(v6, v14));
+        svst1_u32(pg, out + 7 * 16 + base, XOR(v7, v15));
+    }
+}

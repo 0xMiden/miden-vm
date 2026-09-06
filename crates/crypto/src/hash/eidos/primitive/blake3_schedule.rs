@@ -529,7 +529,66 @@ pub(super) fn compress_packed_native(
     cv: &[[u32; PACKED_LANES]; 8],
     block: &[[u32; PACKED_LANES]; 16],
 ) -> [[u32; PACKED_LANES]; 8] {
-    native_backend::compress(cv, block)
+    let mut out = [[0; PACKED_LANES]; 8];
+    compress_packed_native_counted(cv, block, &mut out, PACKED_LANES);
+    out
+}
+
+/// Compresses the active prefix, preserving every inactive output lane.
+pub(super) fn compress_packed_native_counted(
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
+    out: &mut [[u32; PACKED_LANES]; 8],
+    active_lanes: usize,
+) {
+    assert!(active_lanes <= PACKED_LANES);
+    if active_lanes == 0 {
+        return;
+    }
+    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+    if matches!(
+        arm_dispatch::detect_arm_tier(),
+        arm_dispatch::ArmTier::Sve | arm_dispatch::ArmTier::Sve2
+    ) {
+        // SAFETY: the selected tier supports SVE; all buffers have the fixed ABI dimensions,
+        // and the assertion bounds the active prefix.
+        unsafe {
+            eidos_compress16_sve(
+                cv.as_ptr().cast(),
+                block.as_ptr().cast(),
+                out.as_mut_ptr().cast(),
+                active_lanes,
+            );
+        }
+        return;
+    }
+    let full = native_backend::compress(cv, block);
+    for (out_word, full_word) in out.iter_mut().zip(full) {
+        out_word[..active_lanes].copy_from_slice(&full_word[..active_lanes]);
+    }
+}
+
+#[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+unsafe extern "C" {
+    fn eidos_compress16_sve(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
+}
+
+#[cfg(all(test, target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
+pub(super) unsafe fn compress_sve_counted_for_test(
+    cv: &[[u32; PACKED_LANES]; 8],
+    block: &[[u32; PACKED_LANES]; 16],
+    out: &mut [[u32; PACKED_LANES]; 8],
+    active_lanes: usize,
+) {
+    assert!(active_lanes <= PACKED_LANES);
+    unsafe {
+        eidos_compress16_sve(
+            cv.as_ptr().cast(),
+            block.as_ptr().cast(),
+            out.as_mut_ptr().cast(),
+            active_lanes,
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

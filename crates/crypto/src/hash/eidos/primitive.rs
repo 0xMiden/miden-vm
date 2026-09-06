@@ -395,6 +395,55 @@ mod tests {
         }
     }
 
+    // Catches incorrect tail routing, word-major indexing, and writes to inactive lanes.
+    fn check_counted_compression(
+        compress: impl Fn(&[[u32; 16]; 8], &[[u32; 16]; 16], &mut [[u32; 16]; 8], usize),
+    ) {
+        let cv = core::array::from_fn(|word| {
+            core::array::from_fn(|lane| TEST_CV[word].wrapping_add(lane as u32 * 0x0101_0101))
+        });
+        let block = core::array::from_fn(|word| {
+            core::array::from_fn(|lane| (word as u32 * 0x0102_0304).wrapping_add(lane as u32))
+        });
+        for active in 0..=16 {
+            let mut out = [[0xdead_beef; 16]; 8];
+            compress(&cv, &block, &mut out, active);
+            for lane in 0..16 {
+                let expected = if lane < active {
+                    reference_core_with_p(
+                        core::array::from_fn(|word| cv[word][lane]),
+                        core::array::from_fn(|word| block[word][lane]),
+                        [IV[4], IV[5], IV[6], IV[7]],
+                    )
+                } else {
+                    [0xdead_beef; 8]
+                };
+                assert_eq!(
+                    core::array::from_fn::<_, 8, _>(|word| out[word][lane]),
+                    expected,
+                    "active={active}, lane={lane}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compress_packed_counted_matches_oracle_and_preserves_tail() {
+        check_counted_compression(blake3_schedule::compress_packed_native_counted);
+    }
+
+    #[cfg(all(target_arch = "aarch64", feature = "std"))]
+    #[test]
+    fn compress_sve_counted_matches_oracle_and_preserves_tail() {
+        if std::arch::is_aarch64_feature_detected!("sve") {
+            check_counted_compression(|cv, block, out, active| unsafe {
+                blake3_schedule::compress_sve_counted_for_test(cv, block, out, active);
+            });
+        } else {
+            std::eprintln!("SVE kernel execution unavailable: host does not support SVE");
+        }
+    }
+
     #[test]
     fn compress_packed_native_matches_scalar_lanes() {
         const LANES: usize = PACKED_LANES;
