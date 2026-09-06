@@ -136,6 +136,69 @@ jobs:
       - name: Run Eidos backend equivalence and vector tests
         run: cargo nextest run --profile ci -p miden-crypto --lib --no-tests=fail 'hash::eidos::'
 
+  eidos-arm-compile:
+    name: Eidos ${{ matrix.backend }} compile
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: NEON
+            target_features: +neon,-sve,-sve2
+            required_target_features: neon
+            forbidden_target_features: sve sve2
+          - backend: SVE
+            target_features: +sve,-sve2
+            required_target_features: neon sve
+            forbidden_target_features: sve2
+          - backend: SVE2
+            target_features: +sve2
+            required_target_features: neon sve sve2
+            forbidden_target_features: ""
+    env:
+      RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Verify selected Rust backend
+        env:
+          REQUIRED_TARGET_FEATURES: ${{ matrix.required_target_features }}
+          FORBIDDEN_TARGET_FEATURES: ${{ matrix.forbidden_target_features }}
+          TARGET_FEATURES: ${{ matrix.target_features }}
+        run: |
+          set -euo pipefail
+
+          if [ "$(uname -m)" != "aarch64" ]; then
+            echo "::error::Eidos ARM compile checks require an AArch64 runner"
+            exit 1
+          fi
+
+          rust_cfg="$(rustc --print cfg -C "target-feature=${TARGET_FEATURES}")"
+          printf '%s\n' "${rust_cfg}"
+          read -r -a required_features <<<"${REQUIRED_TARGET_FEATURES}"
+          for feature in "${required_features[@]}"; do
+            if ! grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+              echo "::error::Rust did not enable required target feature '${feature}'"
+              exit 1
+            fi
+          done
+          read -r -a forbidden_features <<<"${FORBIDDEN_TARGET_FEATURES}"
+          for feature in "${forbidden_features[@]}"; do
+            if grep -Fqx "target_feature=\"${feature}\"" <<<"${rust_cfg}"; then
+              echo "::error::Rust unexpectedly enabled target feature '${feature}'"
+              exit 1
+            fi
+          done
+      # Compile only: the runner need not support executing SVE or SVE2.
+      - name: Check compile-time dispatch without std
+        run: cargo check -p miden-crypto --no-default-features
+      - name: Check std runtime dispatch and all tier objects
+        if: matrix.backend == 'NEON'
+        run: cargo check -p miden-crypto
+
   doc-tests:
     name: doc-tests
     runs-on: warp-ubuntu-latest-x64-8x
