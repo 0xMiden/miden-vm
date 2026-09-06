@@ -209,11 +209,50 @@ fn compress_encoded_blocks(mut cv: [u32; 8], blocks: impl Iterator<Item = [u32; 
     cv
 }
 
+/// Batch encoded field blocks while leaving padding and length checks to the scheduler.
+#[cfg(target_arch = "aarch64")]
+fn fold_encoded_field_blocks<I>(
+    iter: I,
+    len: usize,
+    cv: [u32; 8],
+    zero: I::Item,
+    encode: impl Fn([I::Item; BLOCK_LEN]) -> [u32; 16],
+) -> [u32; 8]
+where
+    I: Iterator,
+    I::Item: Copy,
+{
+    let mut batch = [[0; 16]; 8];
+    let mut count = 0;
+    let mut cv = framing::fold_blocks::<BLOCK_LEN, _, _>(iter, len, cv, zero, |mut cv, block| {
+        batch[count] = encode(block);
+        count += 1;
+        if count == batch.len() {
+            cv = compression::compress_blocks(cv, &batch);
+            count = 0;
+        }
+        cv
+    });
+    if count != 0 {
+        cv = compression::compress_blocks(cv, &batch[..count]);
+    }
+    cv
+}
+
 fn hash_felt_iter_in_domain_with_len<I>(iter: I, len: usize, domain: u32) -> [Felt; DIGEST_WIDTH]
 where
     I: Iterator<Item = Felt>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
+    #[cfg(target_arch = "aarch64")]
+    let cv = fold_encoded_field_blocks(
+        iter,
+        len,
+        framing::init_cv(domain, [len_u32, 0, 0]),
+        Felt::ZERO,
+        |block| encoding::encode_felt_block(&block),
+    );
+    #[cfg(not(target_arch = "aarch64"))]
     let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
@@ -229,6 +268,12 @@ where
     I: Iterator<Item = u64>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
+    #[cfg(target_arch = "aarch64")]
+    let cv =
+        fold_encoded_field_blocks(iter, len, framing::init_cv(0, [len_u32, 0, 0]), 0, |block| {
+            encoding::encode_u64_block(&block)
+        });
+    #[cfg(not(target_arch = "aarch64"))]
     let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
@@ -333,10 +378,88 @@ impl CryptographicHasher<[u64; PACKED_LANES], [[u64; PACKED_LANES]; DIGEST_WIDTH
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use alloc::vec;
 
     use super::*;
     use crate::hash::eidos::PackedBlock;
+
+    #[test]
+    fn sequential_field_batches_preserve_framing_and_exact_iterators() {
+        for blocks in [0, 1, 7, 8, 9, 63, 64, 65, 72] {
+            for tail in [0, 1, 7] {
+                let len = blocks * BLOCK_LEN + tail;
+                let values: Vec<u64> =
+                    (0..len).map(|i| u64::MAX.wrapping_sub(i as u64 * 0x0101_0101)).collect();
+                let felts: Vec<Felt> = values.iter().map(|v| Felt::new_unchecked(v >> 1)).collect();
+                for domain in [0, 17] {
+                    let initial = framing::init_cv(domain, [len as u32, 0, 0]);
+                    let expected = framing::fold_blocks::<BLOCK_LEN, _, _>(
+                        felts.iter().copied(),
+                        len,
+                        initial,
+                        Felt::ZERO,
+                        |cv, block| {
+                            compression::compress_cv(cv, encoding::encode_felt_block(&block))
+                        },
+                    );
+                    assert_eq!(
+                        Eidos::hash_elements_in_domain(&felts, Felt::from_u32(domain)),
+                        encoding::output_cv_to_word(expected),
+                    );
+                    if domain == 0 {
+                        let actual: [Felt; DIGEST_WIDTH] = Eidos.hash_iter(felts.iter().copied());
+                        assert_eq!(Word::new(actual), encoding::output_cv_to_word(expected));
+                    }
+                }
+                let initial = framing::init_cv(0, [len as u32, 0, 0]);
+                let expected = framing::fold_blocks::<BLOCK_LEN, _, _>(
+                    values.iter().copied(),
+                    len,
+                    initial,
+                    0,
+                    compression::compress_u64_cv,
+                );
+                let actual: [u64; DIGEST_WIDTH] = Eidos.hash_iter(values.iter().copied());
+                assert_eq!(actual, encoding::pack_cv_to_u64s(expected));
+                #[cfg(target_arch = "aarch64")]
+                assert_eq!(
+                    fold_encoded_field_blocks(
+                        values.iter().copied(),
+                        len,
+                        initial,
+                        0,
+                        |block: [u64; BLOCK_LEN]| encoding::encode_u64_block(&block)
+                    ),
+                    expected,
+                );
+
+                // Both over- and underreported exact hints must still be rejected,
+                // including when the actual input ends at a batch boundary.
+                for claimed in [len.checked_sub(1), Some(len + 1)].into_iter().flatten() {
+                    assert!(
+                        std::panic::catch_unwind(|| {
+                            let _: [Felt; DIGEST_WIDTH] = Eidos.hash_iter(DishonestSizeHint {
+                                inner: felts.iter().copied(),
+                                claimed,
+                            });
+                        })
+                        .is_err()
+                    );
+                    assert!(
+                        std::panic::catch_unwind(|| {
+                            let _: [u64; DIGEST_WIDTH] = Eidos.hash_iter(DishonestSizeHint {
+                                inner: values.iter().copied(),
+                                claimed,
+                            });
+                        })
+                        .is_err()
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn sequential_byte_vectors() {
