@@ -12,8 +12,8 @@ const PREPROCESSED_INDEX_MASK = 524287
 # One opened query row, in the same commitment-group order as lifted-stark's DeepOracle.
 # Each double word is one eight-felt Eidos compression block.
 const PREPROCESSED_ROW_DOUBLE_WORDS = 2
-const MAIN_ROW_DOUBLE_WORDS = 68
-const AUX_ROW_DOUBLE_WORDS = 44
+const MAIN_ROW_DOUBLE_WORDS = 66
+const AUX_ROW_DOUBLE_WORDS = 46
 const QUOTIENT_ROW_DOUBLE_WORDS = 1
 
 # ERRORS
@@ -27,8 +27,8 @@ const QUOTIENT_LEAF_VALUE_MISMATCH = "quotient query leaf hash mismatch"
 # Registered LMCS leaf initial chaining words for the fixed PVM row widths.
 const EIDOS_LMCS_INIT_CV_8 = [4280581857092832001, 2688637132020383752, 1947077364412317696, 6620516959492505600]
 const EIDOS_LMCS_INIT_CV_16 = [4280581857092832001, 2688637132020383760, 1947077364412317696, 6620516959492505600]
-const EIDOS_LMCS_INIT_CV_352 = [4280581857092832001, 2688637132020384096, 1947077364412317696, 6620516959492505600]
-const EIDOS_LMCS_INIT_CV_544 = [4280581857092832001, 2688637132020384288, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_368 = [4280581857092832001, 2688637132020384112, 1947077364412317696, 6620516959492505600]
+const EIDOS_LMCS_INIT_CV_528 = [4280581857092832001, 2688637132020384272, 1947077364412317696, 6620516959492505600]
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -137,7 +137,7 @@ proc process_main_trace
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_544
+    push.EIDOS_LMCS_INIT_CV_528
     swapw padw
     exec.load_main_trace
 
@@ -168,7 +168,7 @@ proc process_aux_trace
     adv.push_mapval
 
     dropw
-    push.EIDOS_LMCS_INIT_CV_352
+    push.EIDOS_LMCS_INIT_CV_368
     swapw padw
     exec.load_aux_trace
 

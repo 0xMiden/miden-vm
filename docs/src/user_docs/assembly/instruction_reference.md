@@ -202,46 +202,51 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
-| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes its canonical tag and payload felts to the advice stack. See deferred DAG details below. |
-| `adv.evaluate_deferred_tag` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical tag to the advice stack. |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes its canonical frame and payload felts to the advice stack. See deferred DAG details below. |
+| `adv.evaluate_deferred_frame` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical frame to the advice stack. |
 | `adv.evaluate_deferred_payload` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes only its canonical payload felts to the advice stack. |
 
 _Deferred DAG (host-side registration; no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. See deferred DAG details below. |
-| `adv.register_deferred_data` | `[TAG, ptr, n_chunks, ...]` | `[TAG, ptr, n_chunks, ...]` | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. See deferred DAG details below. |
+| `adv.register_deferred` | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | `[CV, PAYLOAD_LO, PAYLOAD_HI, ...]` | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. See deferred DAG details below. |
+| `adv.register_deferred_data` | `[n_chunks, CV, ptr, ...]` | `[n_chunks, CV, ptr, ...]` | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. See deferred DAG details below. |
 
 Deferred DAG details:
 
-- `TAG` and every digest are one word (4 field elements). One deferred data chunk is 8 field
-  elements, i.e. two words.
+- The initial `CV`, the frame returned by evaluation, and every digest each occupy one word (4
+  field elements). `CV` is derived from `(domain_tag, param0, param1, param2)`. The selected domain
+  defines the three parameters. One deferred data chunk is 8 field elements, i.e. two words.
 - `adv.register_deferred` accepts exactly one stack-resident payload block:
   `PAYLOAD_LO || PAYLOAD_HI` (8 field elements).
-  - Data tags interpret those eight felts as a one-chunk data payload.
-  - Join tags interpret them as `lhs_digest || rhs_digest`.
-  - Pair-list tags interpret them as one `lhs_digest || rhs_digest` pair.
+  - Data frames interpret those eight felts as a one-chunk data payload.
+  - Precompile-owned join frames interpret them as `lhs_digest || rhs_digest`.
+  - Pair-list frames interpret them as one `lhs_digest || rhs_digest` pair.
 
-  `TRUE` is not accepted by this instruction. Tags that semantically require more data chunks or
-  pairs fail during precompile evaluation. Code that later uses the node digest must compute it
-  inside the VM from the same `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values with the Eidos framing
-  used by `miden::precompiles::digest_expr`.
-- `adv.register_deferred_data` accepts data, pair-list, and join tags. Its stack-supplied `TAG`,
-  `ptr`, and `n_chunks` are visible in the VM execution trace, but the event does not AIR-bind the
-  host-read contents to memory.
-  - Data tags read exactly `n_chunks` 8-felt chunks from word-aligned `ptr`.
-  - Pair-list tags interpret those chunks as `lhs_digest || rhs_digest` pairs.
-  - Join tags require `n_chunks == 1` and interpret the chunk as `lhs_digest || rhs_digest`.
+  Framework-owned AND and `TRUE` nodes are not accepted by this instruction. Frames that
+  semantically require more data chunks or pairs fail during precompile evaluation. Code that later
+  uses the node digest must compute it inside the VM from the same `CV`, `PAYLOAD_LO`, and
+  `PAYLOAD_HI` values.
+- `adv.register_deferred_data` accepts data, pair-list, and precompile-owned join frames. Its
+  stack-supplied `n_chunks`, `CV`, and `ptr` are visible in the VM execution trace, but the event
+  does not AIR-bind the host-read contents to memory.
+  - Data frames read exactly `n_chunks` 8-felt chunks from word-aligned `ptr`.
+  - Pair-list frames interpret those chunks as `lhs_digest || rhs_digest` pairs.
+  - Precompile-owned join frames require `n_chunks == 1` and interpret the chunk as
+    `lhs_digest || rhs_digest`.
 
-  `TRUE` is not accepted. Code that later relies on the node must compute its digest with VM
-  instructions from the same `TAG` and ordered chunk sequence. The `register_mem` wrapper does this
-  by hashing the exact range `[ptr, ptr + 8 * n_chunks)` with one absorption per chunk.
+  Framework-owned AND and `TRUE` nodes are not accepted. Rolling AND nodes are constructed by
+  `log_deferred`. Code that later relies on the node must compute its digest with VM instructions
+  from the same `CV` and ordered chunk sequence. The `register_mem` wrapper does this by hashing the
+  exact range `[ptr, ptr + 8 * n_chunks)` with one absorption per chunk.
 - `adv.evaluate_deferred` requires `NODE_DIGEST` to be already registered. It pushes the canonical
-  tag followed by the canonical payload in advice-pop order. For a single 8-felt payload,
-  `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack.
-  `TRUE` emits only `Tag::TRUE`.
-- `adv.evaluate_deferred_tag` pushes only the canonical tag. `TRUE` emits `Tag::TRUE`.
+  frame followed by the canonical payload in advice-pop order. For a single 8-felt payload,
+  `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, FRAME, ...]` on the operand
+  stack.
+  `TRUE` emits one zero word in the frame slot.
+- `adv.evaluate_deferred_frame` pushes only the canonical frame. `TRUE` emits one zero word in the
+  frame slot.
 - `adv.evaluate_deferred_payload` pushes only the canonical payload to the advice stack.
   - Data payloads are arranged per 8-felt chunk as `HIGH` then `LOW` in advice-pop order, so
     `adv_pushw adv_pushw` leaves `LOW` above `HIGH` on the operand stack. Chunks preserve canonical
@@ -249,7 +254,7 @@ Deferred DAG details:
   - Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest`
     after two `adv_pushw`s.
   - `TRUE` emits no advice.
-- All `adv.evaluate_deferred*` outputs, including tag-only output, are host-provided hints. Before
+- All `adv.evaluate_deferred*` outputs, including frame-only output, are host-provided hints. Before
   proof-relevant use, code must relate them with VM instructions to values established independently
   of that advice.
 

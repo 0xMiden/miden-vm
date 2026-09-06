@@ -73,11 +73,11 @@ are charged.
 The precompile's `decode` result is the framework shape gate:
 
 - `NodeType::Data` authorizes a non-empty data payload. For memory-backed registration, the host
-  reads exactly the stack-supplied `n_chunks`; precompile evaluation checks any tag-derived semantic
-  data length.
+  reads exactly the stack-supplied `n_chunks`; precompile evaluation checks any frame-derived
+  semantic data length.
 - `NodeType::Join` authorizes exactly one 8-felt payload block, interpreted as two child digests.
 - `NodeType::PairList` authorizes a non-empty list of `lhs_digest || rhs_digest` chunks. Precompile
-  evaluation checks any tag-derived semantic pair count.
+  evaluation checks any frame-derived semantic pair count.
 
 Processor handlers perform a cheap deferred-budget pre-check before allocating or reading a
 memory-backed payload, but exact data/pair-list arity remains precompile-specific semantics.

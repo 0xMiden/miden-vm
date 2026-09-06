@@ -201,8 +201,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluate),
     },
     PrimitiveSpec {
-        spelling: "adv.evaluate_deferred_tag",
-        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateTag),
+        spelling: "adv.evaluate_deferred_frame",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredEvaluateFrame),
     },
     PrimitiveSpec {
         spelling: "adv.evaluate_deferred_payload",

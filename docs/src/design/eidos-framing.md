@@ -184,11 +184,10 @@ versioning policy per local ID. It cannot detect an independent registry that wr
 same namespace. `render_masm_constants` renders the declarations as MASM constants; downstream
 generators should use this output rather than copying numeric tags by hand.
 
-Dynamic registries, such as the deferred-precompile registry, may decode a numeric tag with
-`DomainTag::from_u32` and pass it to `Eidos::init_chaining_word_with_tag`. Parsing checks the
-reserved namespace/local-ID pair and namespace allocation only. The dynamic consumer must use the
-owner's registry `resolve` method, then validate the domain's parameters and payload. This runtime
-bridge constructs an initial CV; it does not make the ordinary Felt and byte hash APIs untyped.
+Dynamic boundaries may recover an `EidosFrame` from an initial chaining word. This checks the
+fixed IV lanes and the canonical `u32` representation of the domain and parameters, but not registry
+membership or domain semantics. The dynamic consumer must resolve the domain in the owner's
+registry, then validate the parameters and payload.
 
 ## Standard Felt and byte schedules
 
@@ -269,24 +268,32 @@ parameter lanes do not have global names; their interpretation belongs to the re
 
 ### Deferred-node framing
 
-A precompile-owned node stores this tag word:
+A non-TRUE deferred node stores this frame:
 
 ```text
-TAG = [domain_tag, arg0, arg1, 0]
+FRAME = [domain_tag, param0, param1, param2]
 ```
 
 For `b` complete payload blocks, its digest is:
 
 ```text
-CV_0 = init(domain_tag, [8 * b, arg0, arg1])
+CV_0 = init(domain_tag, [param0, param1, param2])
 CV_{i + 1} = compress(CV_i, payload_block_i)
 digest = CV_b
 ```
 
-The reserved fourth tag Felt and all values injected into the initial CV must fit their declared
-ranges. Every compression consumes payload; there is no terminal tag block. Framework AND and
-CHUNKS nodes store their compact framework tags but hash under the registered `DEFERRED_AND` and
-`DEFERRED_CHUNKS` domains. The TRUE node is a sentinel and is not hashed.
+Every frame value is a canonical `u32`. The domain defines the meaning of all three parameters and
+must validate them against the payload. There is no framework-wide length parameter. Every
+compression consumes payload; there is no terminal framing block. Framework AND and CHUNKS nodes
+use the registered `DEFERRED_AND` and `DEFERRED_CHUNKS` domains. The TRUE node is a sentinel and is
+not hashed.
+
+When the PVM proves a multi-block deferred digest, the semantic owner provides `EidosInit` at the
+physical chain head, `EidosBlock` for each compression, and the terminal
+`EidosOut(head, tail, digest)` relation. Including both endpoints in the terminal relation binds the
+digest to the same physical chain the owner initialized. The owner derives the tail from its
+domain's payload grammar; the generic Eidos controller consumes all three relations, proves
+contiguous chaining, and propagates the head identity.
 
 LMCS is an example. Leaf hashing has its own `Custom` domain because it absorbs matrix rows in
 commitment order, padding each row independently to eight Felts. Its first parameter binds the sum
@@ -340,8 +347,8 @@ The declarations in `core::program::domain` are normative and are the source for
 | `0x0000` | 1 | `KERNEL_COMMITMENT` | `FeltSequence` |
 | `0x0001` | 1 | `EXECUTION_CLAIM` | `FeltSequence` |
 | `0x0002` | 1 | `PROOF_REQUEST` | `FeltSequence` |
-| `0x0003` | 1 | `DEFERRED_AND` | `FeltSequence` |
-| `0x0004` | 1 | `DEFERRED_CHUNKS` | `FeltSequence` |
+| `0x0003` | 1 | `DEFERRED_AND` | `Custom` |
+| `0x0004` | 1 | `DEFERRED_CHUNKS` | `Custom` |
 | `0x0005` | 1 | `STARK_TRANSCRIPT` | `Transcript` |
 | `0x0006` | 1 | `KECCAK256_PRECOMPILE` | `Custom` |
 | `0x0007` | 1 | `UINT256_PRECOMPILE` | `Custom` |

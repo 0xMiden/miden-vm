@@ -15,6 +15,7 @@ mod construction;
 pub mod domain;
 pub mod domains;
 pub mod encoding;
+mod frame;
 mod framing;
 mod lmcs;
 mod primitive;
@@ -29,6 +30,7 @@ pub use domain::{
     DomainTag, DomainVersion, EidosDomain, EidosDomainRegistry, EidosEncoding, FeltSequence,
     NAMESPACE_REGISTRY, Transcript, namespace, render_masm_constants,
 };
+pub use frame::EidosFrame;
 pub use lmcs::{EidosLmcs, config as lmcs_config};
 
 /// Number of Felts in one Eidos message block.

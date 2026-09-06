@@ -7,8 +7,8 @@ const OOD_ROW_DOUBLE_WORDS = 230
 #! The row is the LMCS-aligned wire sequence used by the lifted PCS, in commitment-group order:
 #!
 #! - 16 preprocessed extension-field slots;
-#! - 544 main extension-field slots across ten AIRs in proof order;
-#! - 352 auxiliary-coordinate extension-field slots across ten AIRs in proof order;
+#! - 528 main extension-field slots across ten AIRs in proof order;
+#! - 368 auxiliary-coordinate extension-field slots across ten AIRs in proof order;
 #! - 8 quotient extension-field slots (four quadratic-extension chunks).
 #!
 #! This is 920 extension-field values = 1,840 felts = 230 `adv_pipe` blocks. Each block is stored,

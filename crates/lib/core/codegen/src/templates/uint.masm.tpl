@@ -12,64 +12,29 @@ use miden::core::precompiles
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.
-# - VALUE_TAG     = one word [PRECOMPILE_ID, VALUE, BOUND_PTR, 0].
-# - OP_TAG(op_id) = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/MUL/EQ.
+# - VALUE_FRAME   = one word [PRECOMPILE_ID, VALUE, BOUND_PTR, 0].
+# - OP_FRAME      = one word [PRECOMPILE_ID, op_id, 0, 0] for ADD/SUB/MUL/EQ.
 # - VALUE_U32[8]  = two words [v0, v1, v2, v3] [v4, v5, v6, v7], with v0 least significant.
 #
 const PRECOMPILE_ID = {{PRECOMPILE_ID}}
 const BOUND_PTR = {{BOUND_PTR}}
 
 # UintPrecompile op ids are fixed by the Rust precompile: VALUE=0, ADD=1, SUB=2, MUL=3,
-# EQ=4. Only VALUE_TAG carries BOUND_PTR; operation tags deliberately use zero in that slot.
-const VALUE_TAG = {{VALUE_TAG}}
-const ADD_TAG = {{ADD_TAG}}
-const SUB_TAG = {{SUB_TAG}}
-const MUL_TAG = {{MUL_TAG}}
-const EQ_TAG = {{EQ_TAG}}
-
-# Initial chaining words for the fixed one-block node shapes in this module. Codegen derives each
-# word from its matching tag as `init(domain_tag, [8, arg0, arg1])`.
+# EQ=4. Only the VALUE frame carries BOUND_PTR; operation frames use zero in that slot.
+# Codegen derives each fixed initial chaining word from its complete frame.
 const VALUE_INIT_CV = {{VALUE_INIT_CV}}
 const ADD_INIT_CV = {{ADD_INIT_CV}}
 const SUB_INIT_CV = {{SUB_INIT_CV}}
 const MUL_INIT_CV = {{MUL_INIT_CV}}
 const EQ_INIT_CV = {{EQ_INIT_CV}}
 
-#! Registers a fixed one-block expression using a codegen-paired tag and initial chaining word.
-#! Input:  [CV, TAG, PAYLOAD_LO, PAYLOAD_HI, ...]
-#! Output: [NODE_DIGEST, ...]
-proc register_fixed_expr
-    movdnw.3 movdnw.2
-    # => [PAYLOAD_LO, PAYLOAD_HI, TAG, CV, ...]
-    adv.register_deferred
-    movupw.2 dropw
-    # => [PAYLOAD_LO, PAYLOAD_HI, CV, ...]
-    compress
-    dropw dropw
-end
-
-#! Registers the fixed one-block VALUE node staged in memory.
-#! Input:  [TAG, ptr, n_chunks=1, ...]
-#! Output: [VALUE_DIGEST, ...]
-proc register_value_mem_1
-    adv.register_deferred_data
-    dropw
-    # => [ptr, n_chunks=1, ...]
-
-    push.VALUE_INIT_CV padw padw
-    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, n_chunks=1, ...]
-    mem_stream compress
-    dropw dropw
-    movup.4 drop movup.4 drop
-end
-
 #! Loads one canonical {{VALUE_KIND}} value from the operand stack and returns its deferred digest.
 #! Input:  [VALUE_U32[8], ...]
 #! Output: [VALUE_DIGEST, ...]
 pub proc load
-    push.VALUE_TAG push.VALUE_INIT_CV
-    # => [CV(VALUE), TAG(VALUE), VALUE_LO, VALUE_HI, ...]
-    exec.register_fixed_expr
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), VALUE_LO, VALUE_HI, ...]
+    exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, ...]
 end
 
@@ -80,11 +45,15 @@ end
 #! `ptr` must address eight consecutive u32-range felts and be word-aligned for the
 #! `mem_stream` used by the deferred data registration helper.
 pub proc load_mem_stream
-    dup push.1 swap push.VALUE_TAG
-    # => [TAG(VALUE), ptr, n_chunks=1, original_ptr, ...]
-    exec.register_value_mem_1
-    # => [VALUE_DIGEST, original_ptr, ...]
-    movup.4 add.8 movdn.4
+    push.VALUE_INIT_CV push.1
+    # => [n_chunks=1, CV(VALUE), ptr, ...]
+    adv.register_deferred_data
+    drop
+    # => [CV(VALUE), ptr, ...]
+    padw padw
+    # => [BLOCK_LO=0w, BLOCK_HI=0w, CV, ptr, ...]
+    mem_stream compress
+    dropw dropw
     # => [VALUE_DIGEST, ptr+8, ...]
 end
 
@@ -145,9 +114,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [SUM_DIGEST, ...]
 pub proc add
-    push.ADD_TAG push.ADD_INIT_CV
-    # => [CV(ADD), TAG(ADD), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.register_fixed_expr
+    push.ADD_INIT_CV
+    # => [CV(ADD), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [SUM_DIGEST, ...]
 end
 
@@ -155,9 +124,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [DIFF_DIGEST, ...]
 pub proc sub
-    push.SUB_TAG push.SUB_INIT_CV
-    # => [CV(SUB), TAG(SUB), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.register_fixed_expr
+    push.SUB_INIT_CV
+    # => [CV(SUB), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [DIFF_DIGEST, ...]
 end
 
@@ -165,9 +134,9 @@ end
 #! Input:  [LHS_DIGEST, RHS_DIGEST, ...]
 #! Output: [PRODUCT_DIGEST, ...]
 pub proc mul
-    push.MUL_TAG push.MUL_INIT_CV
-    # => [CV(MUL), TAG(MUL), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.register_fixed_expr
+    push.MUL_INIT_CV
+    # => [CV(MUL), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [PRODUCT_DIGEST, ...]
 end
 
@@ -236,9 +205,9 @@ end
 #! `eq(LHS_DIGEST, RHS_DIGEST)` directly; the installed Uint precompile checks equality when the
 #! logged node is evaluated as part of the deferred root.
 pub proc assert_eq
-    push.EQ_TAG push.EQ_INIT_CV
-    # => [CV(EQ), TAG(EQ), LHS_DIGEST, RHS_DIGEST, ...]
-    exec.register_fixed_expr
+    push.EQ_INIT_CV
+    # => [CV(EQ), LHS_DIGEST, RHS_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [...]
@@ -264,18 +233,18 @@ pub proc is_eq_digest
     # the return value.
     adv_pushw adv_pushw
     # => [VALUE_LO, VALUE_HI, EXPR_DIGEST, TARGET_DIGEST, ...]
-    push.VALUE_TAG push.VALUE_INIT_CV
-    # => [CV(VALUE), TAG(VALUE), VALUE_LO, VALUE_HI, EXPR_DIGEST, TARGET_DIGEST, ...]
-    exec.register_fixed_expr
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), VALUE_LO, VALUE_HI, EXPR_DIGEST, TARGET_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, EXPR_DIGEST, TARGET_DIGEST, ...]
 
     # Log eq(VALUE_DIGEST, EXPR_DIGEST). This binds the untrusted advised VALUE node to the input
     # expression digest while preserving VALUE_DIGEST for the final comparison.
     dupw movdnw.2
     # => [VALUE_DIGEST, EXPR_DIGEST, VALUE_DIGEST, TARGET_DIGEST, ...]
-    push.EQ_TAG push.EQ_INIT_CV
-    # => [CV(EQ), TAG(EQ), VALUE_DIGEST, EXPR_DIGEST, VALUE_DIGEST, TARGET_DIGEST, ...]
-    exec.register_fixed_expr
+    push.EQ_INIT_CV
+    # => [CV(EQ), VALUE_DIGEST, EXPR_DIGEST, VALUE_DIGEST, TARGET_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, VALUE_DIGEST, TARGET_DIGEST, ...]
     exec.precompiles::log_deferred
     # => [VALUE_DIGEST, TARGET_DIGEST, ...]
@@ -289,7 +258,7 @@ end
 #! Input:  [VALUE_DIGEST, ...]
 #! Output: [VALUE_U32[8], ...]
 #!
-#! Advice is untrusted, so this re-hashes the advised payload with this module's VALUE_TAG and
+#! Advice is untrusted, so this re-hashes the advised payload with this module's VALUE frame and
 #! asserts raw digest equality in the VM. This does not evaluate arbitrary expression digests or
 #! independently prove registration or canonicity; callers must establish that VALUE_DIGEST is an
 #! already proof-bound canonical VALUE node for this domain.
@@ -300,12 +269,12 @@ pub proc open_value
     adv_pushw adv_pushw
     # => [VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
 
-    # Hash the advised payload with VALUE_TAG while preserving the payload for the return.
+    # Hash the advised payload with the VALUE frame while preserving the payload for the return.
     dupw.1 dupw.1
     # => [VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
-    push.VALUE_TAG push.VALUE_INIT_CV
-    # => [CV(VALUE), TAG(VALUE), VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
-    exec.register_fixed_expr
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [ADVISED_VALUE_DIGEST, VALUE_LO, VALUE_HI, VALUE_DIGEST, ...]
 
     movupw.3
@@ -338,18 +307,18 @@ pub proc eval
     # the register payload so it can be returned after the binding predicate is logged.
     dupw.1 dupw.1
     # => [VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, EXPR_DIGEST, ...]
-    push.VALUE_TAG push.VALUE_INIT_CV
-    # => [CV(VALUE), TAG(VALUE), VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, EXPR_DIGEST, ...]
-    exec.register_fixed_expr
+    push.VALUE_INIT_CV
+    # => [CV(VALUE), VALUE_LO, VALUE_HI, VALUE_LO, VALUE_HI, EXPR_DIGEST, ...]
+    exec.precompiles::register_fixed_expr
     # => [VALUE_DIGEST, VALUE_LO, VALUE_HI, EXPR_DIGEST, ...]
 
     # Log eq(EXPR_DIGEST, VALUE_DIGEST). This binds the untrusted advised VALUE_U32[8] to the
     # expression digest evaluated by the host, while preserving the value words for the return.
     movupw.3
     # => [EXPR_DIGEST, VALUE_DIGEST, VALUE_LO, VALUE_HI, ...]
-    push.EQ_TAG push.EQ_INIT_CV
-    # => [CV(EQ), TAG(EQ), EXPR_DIGEST, VALUE_DIGEST, VALUE_LO, VALUE_HI, ...]
-    exec.register_fixed_expr
+    push.EQ_INIT_CV
+    # => [CV(EQ), EXPR_DIGEST, VALUE_DIGEST, VALUE_LO, VALUE_HI, ...]
+    exec.precompiles::register_fixed_expr
     # => [EQ_DIGEST, VALUE_LO, VALUE_HI, ...]
     exec.precompiles::log_deferred
     # => [VALUE_LO, VALUE_HI, ...]

@@ -95,6 +95,32 @@ pub fn expect_precompile_trap(source: &str) -> ExecutionError {
     run_precompile_program(source).expect_err("expected precompile program to trap")
 }
 
+pub fn expect_precompile_trap_with_processor(source: &str) -> (ExecutionError, FastProcessor) {
+    let core_lib = CoreLibrary::default();
+    let mut assembler = Assembler::default();
+    assembler
+        .link_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to link core library package");
+    let program = assembler
+        .assemble_program("precompile_test", source)
+        .expect("failed to assemble precompile test program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("failed to load CoreLibrary into the host");
+    let mut processor = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction");
+    let error = processor
+        .execute_mut_sync(&program, &mut host)
+        .expect_err("expected precompile program to trap");
+    (error, processor)
+}
+
 pub fn read_stack_felts(output: &ExecutionOutput, len: usize) -> Vec<Felt> {
     (0..len).map(|i| output.stack.get_element(i).expect("stack element")).collect()
 }

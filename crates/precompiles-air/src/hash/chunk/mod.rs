@@ -3,12 +3,11 @@
 //! Feeds input-byte chunks to any downstream hasher over the
 //! [`Memory64`](super::memory64) bus and content-hashes each
 //! invocation's chunks by driving an Eidos chain over
-//! the [`EidosIn`](crate::relations::BusId::EidosIn) bus. One
-//! row per 32-byte chunk = eight u32 felts = one atomic chain message.
+//! the [`EidosBlock`](crate::relations::BusId::EidosBlock) bus. One
+//! row per 32-byte chunk = eight u32 felts = one Eidos message block.
 //!
-//! See the design notes for
-//! the design. The chiplet does not read the Eidos digest —
-//! the terminal chaining value on `EidosOut` is consumed downstream.
+//! The chiplet does not read the Eidos digest. The semantic owner provides the terminal `EidosOut`
+//! relation and binds the chain's frame and length.
 
 pub mod message;
 
@@ -18,7 +17,6 @@ use core::array;
 pub use message::ChunkChainMsg;
 use miden_core::{
     Felt,
-    deferred::Tag,
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
@@ -31,7 +29,7 @@ use crate::{
         LookupGroup, NUM_PUBLIC_VALUES, NUM_RANDOMNESS, NUM_SIGMA_VALUES, frac_col,
     },
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    transcript::eidos::EidosChainInputMsg,
+    transcript::eidos::EidosBlockMsg,
     utils::{current_main, next_main},
 };
 
@@ -83,7 +81,7 @@ pub const NUM_MAIN_COLS: usize = COL_F_END;
 /// constraint stays at degree ≤ 3 → `log_quotient_degree = 1`:
 /// - col 0: `lane0` alone — the gated running-sum anchor.
 /// - col 1: `lane1` + `lane2` (Memory64).
-/// - col 2: `lane3` (Memory64) + one atomic Eidos chaining input.
+/// - col 2: `lane3` (Memory64) + one Eidos message block.
 /// - col 3: `emit` alone (ChunkChain, no partner left to pair).
 pub const NUM_AUX_COLS: usize = 4;
 
@@ -91,7 +89,7 @@ pub const NUM_AUX_COLS: usize = 4;
 pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 
 // The single exposed σ ([`NUM_SIGMA_VALUES`]) follows the VM-wide σ
-// contract in [`crate::logup`]; aggregating the Memory64 + EidosIn
+// contract in [`crate::logup`]; aggregating the Memory64 + EidosBlock
 // residues into one σ is the shared shape, not a chunk-specific choice.
 // The shared public values ([`NUM_PUBLIC_VALUES`]) are the transcript
 // root alone — declared but not read here; the natural last-row closing
@@ -102,8 +100,7 @@ pub(crate) const COLUMN_SHAPE: [usize; NUM_AUX_COLS] = [1, 2, 2, 1];
 
 /// Chunk chiplet AIR. Period 1 (no periodic columns). Provides chunk
 /// lanes on [`Memory64`](crate::hash::memory64) and consumes the
-/// Eidos message / chain framing context on
-/// [`EidosIn`](crate::relations::BusId::EidosIn).
+/// Eidos message blocks on [`EidosBlock`](crate::relations::BusId::EidosBlock).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChunkAir;
 
@@ -240,13 +237,10 @@ where
         // active row provides all four lanes.
         let neg_act: LB::Expr = LB::Expr::ZERO - act.clone();
 
-        // The complete Eidos chaining input is consumed on every active row. The chain framing
-        // context is repeated across continuation steps; the ChunkChain relation still fires only
-        // on chain heads.
+        // Every active row submits one complete Eidos message block. The ChunkChain relation fires
+        // only at invocation heads so the semantic owner can provide the initial CV.
         let pos_act: LB::Expr = act.clone();
         let pos_act_head: LB::Expr = act * is_head.clone();
-
-        let chunk_chain_context = Tag::CHUNKS.as_word().map(LB::Expr::from);
 
         let interaction_deg = Deg { v: 1, u: 1 };
         let provides_deg = Deg { v: 1, u: 2 };
@@ -294,7 +288,7 @@ where
                 interaction_deg
             ),
         );
-        // col 2 (paired, lqd-1): lane3 (Memory64) + the atomic Eidos chaining input.
+        // col 2 (paired, lqd-1): lane3 (Memory64) + the Eidos message block.
         frac_col!(
             builder,
             "chunk-flatten",
@@ -310,9 +304,12 @@ where
                 interaction_deg
             ),
             (
-                "eidos-chain-input",
+                "eidos-block",
                 pos_act.clone(),
-                EidosChainInputMsg::chunks(absorption_id.clone(), is_head, f, chunk_chain_context,),
+                EidosBlockMsg {
+                    compression_id: absorption_id.clone(),
+                    block: f
+                },
                 interaction_deg
             ),
         );

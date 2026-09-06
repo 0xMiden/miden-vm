@@ -370,7 +370,7 @@ fn test_masm_errors_consistency(
 /// Tests that `log_deferred` folds a statement word into the rolling deferred root.
 #[test]
 fn test_log_deferred_correctness() {
-    use miden_core::{chiplets::eidos_compression, deferred::TRUE_DIGEST};
+    use miden_core::deferred::TRUE_DIGEST;
 
     // The opcode replaces STMNT at stack[0..4] with STATE_NEW.
     // `log_deferred` only accepts a registered statement that evaluates to TRUE. The framework
@@ -381,16 +381,7 @@ fn test_log_deferred_correctness() {
     stack_inputs[0..4].copy_from_slice(TRUE_DIGEST.as_elements());
     let stmnt = TRUE_DIGEST;
     let state_prev = Word::empty();
-
-    // Hasher input: [STATE_PREV, STMNT, DEFERRED_AND_INIT_CV].
-    let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(state_prev.as_slice());
-    hasher_state[4..8].copy_from_slice(stmnt.as_slice());
-    hasher_state[8..12].copy_from_slice(miden_core::deferred::DEFERRED_AND_INIT_CV.as_slice());
-
-    eidos_compression::compress_state(&mut hasher_state);
-
-    let expected_state_new: Word = hasher_state[8..12].try_into().unwrap();
+    let expected_state_new = deferred_and_digest(state_prev, stmnt);
 
     let program_source = "begin log_deferred end";
     let program = {
@@ -416,6 +407,73 @@ fn test_log_deferred_correctness() {
             offset + 4
         );
     }
+}
+
+/// Tests that successive `log_deferred` calls fold registered DAG roots in execution order.
+#[test]
+fn successive_log_deferred_calls_build_an_ordered_and_chain() {
+    use miden_core::deferred::{DEFERRED_AND_FRAME, Node, TRUE_DIGEST};
+
+    let first_node = Node::and(TRUE_DIGEST, TRUE_DIGEST);
+    let first_statement = first_node.digest();
+    let second_node = Node::and(first_statement, TRUE_DIGEST);
+    let second_statement = second_node.digest();
+
+    let mut stack_inputs = [ZERO; 16];
+    stack_inputs[0..4].copy_from_slice(first_statement.as_elements());
+    stack_inputs[4..8].copy_from_slice(second_statement.as_elements());
+    for (offset, value) in stack_inputs[8..].iter_mut().enumerate() {
+        *value = Felt::new_unchecked(offset as u64 + 9);
+    }
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", "begin log_deferred dropw log_deferred end")
+        .unwrap()
+        .unwrap_program();
+
+    let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    processor.deferred_state_mut().register(first_node).unwrap();
+    processor.deferred_state_mut().register(second_node).unwrap();
+
+    let first_root = deferred_and_digest(TRUE_DIGEST, first_statement);
+    let expected_root = deferred_and_digest(first_root, second_statement);
+    let reversed_root =
+        deferred_and_digest(deferred_and_digest(TRUE_DIGEST, second_statement), first_statement);
+    assert_ne!(expected_root, reversed_root);
+
+    let execution_output = processor.execute_sync(&program, &mut DefaultHost::default()).unwrap();
+
+    assert_eq!(execution_output.stack.get_word(0), Some(expected_root));
+    assert_eq!(execution_output.deferred_state.root(), expected_root);
+    for (digest, expected_children) in [
+        (first_root, (TRUE_DIGEST, first_statement)),
+        (expected_root, (first_root, second_statement)),
+    ] {
+        let node = execution_output
+            .deferred_state
+            .get_node(&digest)
+            .expect("log_deferred must store its AND node");
+        assert_eq!(node.frame(), Some(DEFERRED_AND_FRAME));
+        assert_eq!(node.payload().as_join(), Ok(expected_children));
+    }
+    for (offset, expected) in stack_inputs[8..].iter().enumerate() {
+        assert_eq!(
+            execution_output.stack.get_element(offset + 4),
+            Some(*expected),
+            "stack tail changed at position {}",
+            offset + 4,
+        );
+    }
+}
+
+fn deferred_and_digest(lhs: Word, rhs: Word) -> Word {
+    use miden_core::{crypto::hash::Eidos, deferred::DEFERRED_AND_INIT_CV};
+
+    let mut block = [ZERO; 8];
+    block[0..4].copy_from_slice(lhs.as_slice());
+    block[4..8].copy_from_slice(rhs.as_slice());
+    Eidos::compress(DEFERRED_AND_INIT_CV, block)
 }
 
 // Workaround to make insta and rstest work together.

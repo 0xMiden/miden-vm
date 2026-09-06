@@ -196,7 +196,7 @@ fn core_packages_do_not_block_sibling_miden_namespaces() {
 #[test]
 fn precompile_semantic_api_is_available_from_precompiles_crate() {
     let _ = miden_precompiles::registry();
-    let _ = miden_precompiles::UintPrecompile::id();
+    let _ = miden_precompiles::UintPrecompile::domain();
 }
 
 #[test]

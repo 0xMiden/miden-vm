@@ -42,6 +42,7 @@ pub fn hash_two_words(values: &[Digest; 2]) -> Digest {
     Eidos::hash_two_words(values)
 }
 
+/// Hashes an ordered list of words under the generic Felt-sequence domain.
 #[inline(always)]
 pub fn merge_many(values: &[Digest]) -> Digest {
     Eidos::merge_many(values)
@@ -68,16 +69,19 @@ pub fn merge_in_mast_domain(values: &[Digest; 2], domain: Felt) -> Digest {
     )
 }
 
+/// Hashes a byte string under the generic byte-string domain.
 #[inline(always)]
 pub fn hash(bytes: &[u8]) -> Digest {
     Eidos::hash(bytes)
 }
 
+/// Hashes a Felt sequence under the generic Felt-sequence domain.
 #[inline(always)]
 pub fn hash_elements(elements: &[Felt]) -> Digest {
     Eidos::hash_elements(elements)
 }
 
+/// Hashes a Felt sequence under a registered Felt-sequence domain.
 #[inline(always)]
 pub fn hash_elements_in_domain<D>(elements: &[Felt], domain: D) -> Digest
 where

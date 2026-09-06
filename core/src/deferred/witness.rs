@@ -116,11 +116,13 @@ pub enum PrecompileWitnessError {
 mod tests {
     use alloc::sync::Arc;
 
+    use miden_crypto::hash::eidos::{DomainTag, EidosFrame};
+
     use super::*;
     use crate::{
-        Felt, ZERO,
+        ZERO,
         deferred::{
-            DeferredContext, Node, NodeType, Payload, Precompile, PrecompileRegistry, Tag,
+            DeferredContext, Node, NodeType, Payload, Precompile, PrecompileRegistry,
             precompile::test_precompile_domain_tag,
         },
     };
@@ -144,10 +146,10 @@ mod tests {
 
     impl FixturePrecompile {
         const NAME: &'static str = "precompile-witness-fixture";
-        const DOMAIN_TAG: Felt = test_precompile_domain_tag(3);
+        const DOMAIN: DomainTag = test_precompile_domain_tag(3);
 
-        fn tag() -> Tag {
-            Tag::precompile(Self::DOMAIN_TAG, [ZERO; 2]).expect("fixture id is precompile-owned")
+        fn frame() -> EidosFrame {
+            EidosFrame::new(Self::DOMAIN, [0; 3])
         }
     }
 
@@ -156,17 +158,17 @@ mod tests {
             Self::NAME
         }
 
-        fn id(&self) -> Felt {
-            Self::DOMAIN_TAG
+        fn domain(&self) -> DomainTag {
+            Self::DOMAIN
         }
 
-        fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
-            (args == [ZERO; 2]).then_some(NodeType::Data)
+        fn decode(&self, params: [u32; 3]) -> Option<NodeType> {
+            (params == [0; 3]).then_some(NodeType::Data)
         }
 
         fn evaluate(
             &self,
-            _args: [Felt; 2],
+            _params: [u32; 3],
             _payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
@@ -178,7 +180,7 @@ mod tests {
         let registry = Arc::new(PrecompileRegistry::new().with_precompile(FixturePrecompile));
         let mut state = DeferredState::new(registry).unwrap();
         let statement = state
-            .register(Node::value(FixturePrecompile::tag(), [ZERO; 8]).unwrap())
+            .register(Node::value(FixturePrecompile::frame(), [ZERO; 8]).unwrap())
             .unwrap();
         state.log_statement(statement).unwrap();
         PrecompileWitness::new(state).unwrap()

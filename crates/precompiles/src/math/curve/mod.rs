@@ -45,14 +45,14 @@ mod short_weierstrass;
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, ZERO,
+    Felt,
     deferred::{
         DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
-        PrecompileError, TRUE_DIGEST, Tag,
+        PrecompileError, TRUE_DIGEST,
     },
     program::domain::CurvePrecompileDomain,
 };
-use miden_crypto::hash::eidos::EidosDomain;
+use miden_crypto::hash::eidos::{DomainTag, EidosDomain, EidosFrame};
 
 use self::secp256k1::Secp256k1;
 pub use self::{
@@ -149,8 +149,8 @@ pub enum CurvePoint {
 pub trait CurveSpec: Sized + 'static {
     /// Stable local curve selector used by host-side metadata.
     ///
-    /// Deferred curve `VALUE` tags carry fixed VM-owned group pointers, while operation tags use
-    /// zero immediates.
+    /// Deferred curve `VALUE` frames carry fixed VM-owned group pointers. Fixed binary-operation
+    /// frames zero their remaining parameters, while MSM frames carry the pair count in `param1`.
     const ID: Felt;
 
     /// Base field used by affine point coordinates.
@@ -293,7 +293,7 @@ impl CurveId {
         }
     }
 
-    /// Returns the VM-owned group configuration pointer used in curve VALUE tags.
+    /// Returns the VM-owned group configuration pointer used in curve `VALUE` frames.
     pub const fn group_ptr(self) -> u32 {
         match self {
             Self::Secp256k1 => K1_GROUP_PTR,
@@ -448,21 +448,23 @@ enum CurveOp {
     Value(CurveId),
     Binary(CurveBinaryOp),
     Eq,
-    Msm,
+    Msm(u32),
 }
 
 impl CurveOp {
-    fn decode(args: [Felt; 2]) -> Option<Self> {
-        match args[0].as_canonical_u64() {
+    fn decode([operation, argument, reserved]: [u32; 3]) -> Option<Self> {
+        if reserved != 0 {
+            return None;
+        }
+        match operation as u64 {
             CurvePrecompile::VALUE_OP_ID => {
-                let group_ptr = u32::try_from(args[1].as_canonical_u64()).ok()?;
-                let curve = CurveId::from_group_ptr(group_ptr)?;
+                let curve = CurveId::from_group_ptr(argument)?;
                 Some(Self::Value(curve))
             },
-            CurvePrecompile::ADD_OP_ID if args[1] == ZERO => Some(Self::Binary(CurveBinaryOp::Add)),
-            CurvePrecompile::SUB_OP_ID if args[1] == ZERO => Some(Self::Binary(CurveBinaryOp::Sub)),
-            CurvePrecompile::EQ_OP_ID if args[1] == ZERO => Some(Self::Eq),
-            CurvePrecompile::MSM_OP_ID if args[1] == ZERO => Some(Self::Msm),
+            CurvePrecompile::ADD_OP_ID if argument == 0 => Some(Self::Binary(CurveBinaryOp::Add)),
+            CurvePrecompile::SUB_OP_ID if argument == 0 => Some(Self::Binary(CurveBinaryOp::Sub)),
+            CurvePrecompile::EQ_OP_ID if argument == 0 => Some(Self::Eq),
+            CurvePrecompile::MSM_OP_ID if argument != 0 => Some(Self::Msm(argument)),
             _ => None,
         }
     }
@@ -470,7 +472,7 @@ impl CurveOp {
     fn node_type(self) -> NodeType {
         match self {
             Self::Value(_) | Self::Binary(_) | Self::Eq => NodeType::Join,
-            Self::Msm => NodeType::PairList,
+            Self::Msm(_) => NodeType::PairList,
         }
     }
 }
@@ -510,8 +512,11 @@ impl CurveNode {
                 let (lhs, rhs) = payload.as_join()?;
                 Self::Eq { lhs, rhs }
             },
-            CurveOp::Msm => {
+            CurveOp::Msm(n_pairs) => {
                 let pairs = payload.as_pair_list()?;
+                if pairs.len() != n_pairs as usize {
+                    return Err(PrecompileError::InvalidNode);
+                }
                 Self::Msm { pairs }
             },
         })
@@ -533,31 +538,37 @@ impl CurvePrecompile {
     pub const EQ_OP_ID: u64 = 3;
     pub const MSM_OP_ID: u64 = 4;
 
-    /// Registered precompile domain tag.
-    pub fn id() -> Felt {
-        CurvePrecompileDomain::TAG.as_felt()
+    /// Registered precompile domain.
+    pub const fn domain() -> DomainTag {
+        CurvePrecompileDomain::TAG
     }
 
-    /// Builds a canonical curve `VALUE` tag for `curve`.
-    pub fn value_tag(curve: CurveId) -> Tag {
-        let op_id = Felt::new(Self::VALUE_OP_ID).expect("curve VALUE op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, Felt::from(curve.group_ptr())])
-            .expect("curve precompile id is not framework-reserved")
+    /// Builds a canonical curve `VALUE` frame for `curve`.
+    pub const fn value_frame(curve: CurveId) -> EidosFrame {
+        EidosFrame::new(Self::domain(), [Self::VALUE_OP_ID as u32, curve.group_ptr(), 0])
     }
 
-    /// Builds a curve operation tag from `op_id`.
+    /// Builds a fixed-arity curve operation frame from `op_id`.
     ///
-    /// Known operation ids decode to their declared shapes; unknown ids produce a tag that this
+    /// Known operation ids decode to their declared shapes; unknown ids produce a frame that this
     /// precompile rejects.
-    pub fn op_tag(op_id: u64) -> Tag {
-        let op_id = Felt::new(op_id).expect("curve op id must fit in a felt");
-        Tag::precompile(Self::id(), [op_id, ZERO])
-            .expect("curve precompile id is not framework-reserved")
+    ///
+    /// # Panics
+    ///
+    /// Panics if `op_id` does not fit in a `u32`.
+    pub const fn op_frame(op_id: u64) -> EidosFrame {
+        assert!(op_id <= u32::MAX as u64, "curve operation must fit in a u32");
+        EidosFrame::new(Self::domain(), [op_id as u32, 0, 0])
     }
 
-    /// Builds the canonical curve MSM tag.
-    pub fn msm_tag() -> Tag {
-        Self::op_tag(Self::MSM_OP_ID)
+    /// Builds a curve MSM frame that binds the number of point-scalar pairs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_pairs` is zero.
+    pub const fn msm_frame(n_pairs: u32) -> EidosFrame {
+        assert!(n_pairs != 0, "curve MSM must contain at least one pair");
+        EidosFrame::new(Self::domain(), [Self::MSM_OP_ID as u32, n_pairs, 0])
     }
 
     /// Builds a structural point `VALUE` node from point data.
@@ -577,8 +588,8 @@ impl CurvePrecompile {
 
     /// Builds the canonical identity point value node for `curve`.
     pub fn identity_node(curve: CurveId) -> Node {
-        Node::join(Self::value_tag(curve), TRUE_DIGEST, TRUE_DIGEST)
-            .expect("curve value tag is precompile-owned")
+        Node::join(Self::value_frame(curve), TRUE_DIGEST, TRUE_DIGEST)
+            .expect("curve value frame is precompile-owned")
     }
 
     /// Builds the canonical generator value node for `curve`.
@@ -588,7 +599,7 @@ impl CurvePrecompile {
 
     /// Builds an affine point VALUE node from coordinate digests.
     pub fn affine_node_from_digests(curve: CurveId, x: Digest, y: Digest) -> Node {
-        Node::join(Self::value_tag(curve), x, y).expect("curve value tag is precompile-owned")
+        Node::join(Self::value_frame(curve), x, y).expect("curve value frame is precompile-owned")
     }
 
     /// Decodes a curve precompile node without evaluating its children.
@@ -596,11 +607,14 @@ impl CurvePrecompile {
     /// Returns `Ok(None)` when `node` belongs to another precompile. Owned nodes return their
     /// structural child digests or pair list directly from the payload.
     pub fn decode_node(node: &Node) -> Result<Option<CurveNodeRef>, PrecompileError> {
-        if node.tag().id() != Self::id() {
+        let Some(frame) = node.frame() else {
+            return Ok(None);
+        };
+        if frame.domain() != Self::domain() {
             return Ok(None);
         }
 
-        let op = CurveOp::decode(node.tag().args()).ok_or(PrecompileError::InvalidNode)?;
+        let op = CurveOp::decode(frame.params()).ok_or(PrecompileError::InvalidNode)?;
         let parsed = CurveNode::parse(op, node.payload())?;
         Ok(Some(match parsed {
             CurveNode::Value { curve, lhs: x, rhs: y } => CurveNodeRef::Value { curve, x, y },
@@ -727,7 +741,10 @@ impl CurvePrecompile {
         node: &Node,
         context: &DeferredContext<'_>,
     ) -> Result<(CurveId, CurvePoint), PrecompileError> {
-        let Some(CurveOp::Value(curve)) = CurveOp::decode(node.tag().args()) else {
+        let Some(frame) = node.frame() else {
+            return Err(DeferredError::InvalidPayload.into());
+        };
+        let Some(CurveOp::Value(curve)) = CurveOp::decode(frame.params()) else {
             return Err(DeferredError::InvalidPayload.into());
         };
         let point = Self::point_of_canonical_node(curve, node, context)?;
@@ -737,14 +754,14 @@ impl CurvePrecompile {
     /// Decodes an already-evaluated canonical curve `VALUE` node.
     ///
     /// The caller must have reached `node` through deferred evaluation for this curve. This helper
-    /// still checks the expected curve `VALUE` tag and join structure before taking the trusted
+    /// still checks the expected curve `VALUE` frame and join structure before taking the trusted
     /// canonical payload path.
     fn point_of_canonical_node(
         curve: CurveId,
         node: &Node,
         context: &DeferredContext<'_>,
     ) -> Result<CurvePoint, PrecompileError> {
-        let payload = node.payload_for_tag(Self::value_tag(curve))?;
+        let payload = node.payload_for_frame(Self::value_frame(curve))?;
         let (x_digest, y_digest) = payload.as_join()?;
         Self::point_from_canonical_value_payload(curve, x_digest, y_digest, context)
     }
@@ -808,8 +825,8 @@ impl Precompile for CurvePrecompile {
         Self::NAME
     }
 
-    fn id(&self) -> Felt {
-        Self::id()
+    fn domain(&self) -> DomainTag {
+        Self::domain()
     }
 
     fn init(&self) -> Vec<Node> {
@@ -821,18 +838,25 @@ impl Precompile for CurvePrecompile {
         nodes
     }
 
-    fn decode(&self, args: [Felt; 2]) -> Option<NodeType> {
-        let op = CurveOp::decode(args)?;
+    fn decode(&self, params: [u32; 3]) -> Option<NodeType> {
+        let op = CurveOp::decode(params)?;
         Some(op.node_type())
+    }
+
+    fn validate_payload(&self, params: [u32; 3], payload: &Payload) -> bool {
+        let Some(CurveOp::Msm(n_pairs)) = CurveOp::decode(params) else {
+            return true;
+        };
+        payload.as_chunks().len() == n_pairs as usize
     }
 
     fn evaluate(
         &self,
-        args: [Felt; 2],
+        params: [u32; 3],
         payload: &Payload,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
-        let op = CurveOp::decode(args).ok_or(PrecompileError::InvalidNode)?;
+        let op = CurveOp::decode(params).ok_or(PrecompileError::InvalidNode)?;
 
         match CurveNode::parse(op, payload)? {
             CurveNode::Value { curve, lhs, rhs } => {
@@ -922,67 +946,58 @@ mod tests {
     }
 
     #[test]
-    fn decode_curve_value_tags() {
+    fn decode_curve_value_frames() {
         let precompile = CurvePrecompile;
         let curve = CurveId::Secp256k1;
 
+        let frame = CurvePrecompile::value_frame(curve);
+        assert_eq!(frame.domain(), CurvePrecompile::domain());
+        assert_eq!(frame.params(), [CurvePrecompile::VALUE_OP_ID as u32, curve.group_ptr(), 0]);
+        assert_eq!(precompile.decode(frame.params()), Some(NodeType::Join));
         assert_eq!(
-            CurvePrecompile::value_tag(curve).as_word(),
-            [
-                CurvePrecompile::id(),
-                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
-                Felt::from(curve.group_ptr()),
-                ZERO,
-            ],
-        );
-        assert_eq!(
-            precompile.decode(CurvePrecompile::value_tag(curve).args()),
-            Some(NodeType::Join)
-        );
-        assert_eq!(
-            precompile.decode([
-                Felt::from_u32(CurvePrecompile::VALUE_OP_ID as u32),
-                Felt::new_unchecked(99),
-            ]),
+            precompile.decode([CurvePrecompile::VALUE_OP_ID as u32, curve.group_ptr(), 1,]),
             None
         );
+        assert_eq!(precompile.decode([CurvePrecompile::VALUE_OP_ID as u32, 99, 0]), None);
     }
 
     #[test]
-    fn decode_curve_operation_tags() {
+    fn decode_curve_operation_frames() {
         let precompile = CurvePrecompile;
         let curve = CurveId::Secp256k1;
 
-        assert_eq!(
-            precompile.decode(CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID).args()),
-            Some(NodeType::Join)
-        );
+        let add_frame = CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID);
+        assert_eq!(precompile.decode(add_frame.params()), Some(NodeType::Join));
 
-        let mut add_with_curve = CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID).args();
-        add_with_curve[1] = Felt::from(curve.group_ptr());
+        let mut add_with_curve = add_frame.params();
+        add_with_curve[1] = curve.group_ptr();
         assert_eq!(precompile.decode(add_with_curve), None);
-        assert_eq!(precompile.decode(CurvePrecompile::op_tag(5).args()), None);
+        assert_eq!(precompile.decode(CurvePrecompile::op_frame(5).params()), None);
     }
 
     #[test]
-    fn decode_curve_msm_tags() {
+    fn decode_curve_msm_frames() {
         let precompile = CurvePrecompile;
-        let curve = CurveId::Secp256k1;
+        let frame = CurvePrecompile::msm_frame(2);
 
-        assert_eq!(
-            CurvePrecompile::msm_tag().as_word(),
-            [
-                CurvePrecompile::id(),
-                Felt::from_u32(CurvePrecompile::MSM_OP_ID as u32),
-                ZERO,
-                ZERO,
-            ],
-        );
-        assert_eq!(precompile.decode(CurvePrecompile::msm_tag().args()), Some(NodeType::PairList));
+        assert_eq!(frame.domain(), CurvePrecompile::domain());
+        assert_eq!(frame.params(), [CurvePrecompile::MSM_OP_ID as u32, 2, 0]);
+        assert_eq!(precompile.decode(frame.params()), Some(NodeType::PairList));
+        assert_eq!(precompile.decode([CurvePrecompile::MSM_OP_ID as u32, 0, 0]), None);
+    }
 
-        let mut msm_with_curve = CurvePrecompile::msm_tag().args();
-        msm_with_curve[1] = Felt::from(curve.group_ptr());
-        assert_eq!(precompile.decode(msm_with_curve), None);
+    #[test]
+    fn msm_registration_rejects_pair_count_mismatch() {
+        let mut state = state();
+        let node =
+            Node::try_pair_list(CurvePrecompile::msm_frame(2), vec![(TRUE_DIGEST, TRUE_DIGEST)])
+                .expect("frame is curve-owned");
+        let digest = node.digest();
+
+        let error = state.register(node).unwrap_err();
+
+        assert!(matches!(error.root(), PrecompileError::InvalidNode));
+        assert!(state.get_node(&digest).is_none(), "validation must reject before insertion");
     }
 
     #[test]
@@ -992,11 +1007,11 @@ mod tests {
         let generator = CurvePrecompile::generator_node(curve);
         let identity = CurvePrecompile::identity_node(curve);
         let node = Node::join(
-            CurvePrecompile::op_tag(CurvePrecompile::ADD_OP_ID),
+            CurvePrecompile::op_frame(CurvePrecompile::ADD_OP_ID),
             generator.digest(),
             identity.digest(),
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
 
         assert_eq!(evaluate(&mut state, node).unwrap(), generator);
     }
@@ -1009,10 +1024,10 @@ mod tests {
         let scalar = UintPrecompile::value_node(curve.scalar_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(1),
             vec![(generator.digest(), scalar.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let expected = CurvePrecompile::value_node(
             curve,
             curve
@@ -1037,13 +1052,13 @@ mod tests {
         state.register(scalar_2.clone()).expect("scalar must register");
         state.register(scalar_3.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(2),
             vec![
                 (generator.digest(), scalar_2.digest()),
                 (two_g_node.digest(), scalar_3.digest()),
             ],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let two_g_scaled = curve
             .mul_scalar(curve.generator(), [2, 0, 0, 0, 0, 0, 0, 0])
             .expect("valid scalar multiplication");
@@ -1070,10 +1085,10 @@ mod tests {
         state.register(scalar_2.clone()).expect("scalar must register");
         state.register(scalar_3.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(2),
             vec![(generator.digest(), scalar_2.digest()), (generator.digest(), scalar_3.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let expected = CurvePrecompile::value_node(
             curve,
             curve
@@ -1094,10 +1109,10 @@ mod tests {
         let zero = UintPrecompile::value_node(curve.scalar_domain(), [0; 8]);
         state.register(zero.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(1),
             vec![(generator.digest(), zero.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let expected = CurvePrecompile::value_node(curve, CurvePoint::Identity);
 
         assert_eq!(evaluate(&mut state, node).unwrap(), expected);
@@ -1117,10 +1132,10 @@ mod tests {
         state.register(zero.clone()).expect("scalar must register");
         state.register(scalar_3.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(2),
             vec![(generator.digest(), zero.digest()), (two_g_node.digest(), scalar_3.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let expected = CurvePrecompile::value_node(
             curve,
             curve
@@ -1143,10 +1158,10 @@ mod tests {
         let zero = UintPrecompile::value_node(curve.scalar_domain(), [0; 8]);
         state.register(zero.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(2),
             vec![(generator.digest(), zero.digest()), (two_g_node.digest(), zero.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
         let expected = CurvePrecompile::value_node(curve, CurvePoint::Identity);
 
         assert_eq!(evaluate(&mut state, node).unwrap(), expected);
@@ -1161,10 +1176,10 @@ mod tests {
         state.register(identity.clone()).expect("identity must register");
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(1),
             vec![(identity.digest(), scalar.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
 
         assert_invalid_payload(evaluate(&mut state, node));
     }
@@ -1177,10 +1192,10 @@ mod tests {
         let scalar = UintPrecompile::value_node(curve.base_domain(), [2, 0, 0, 0, 0, 0, 0, 0]);
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(1),
             vec![(generator.digest(), scalar.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
 
         assert_invalid_payload(evaluate(&mut state, node));
     }
@@ -1194,10 +1209,10 @@ mod tests {
         state.register(point.clone()).expect("point placeholder must register");
         state.register(scalar.clone()).expect("scalar must register");
         let node = Node::try_pair_list(
-            CurvePrecompile::msm_tag(),
+            CurvePrecompile::msm_frame(1),
             vec![(point.digest(), scalar.digest())],
         )
-        .expect("tag is curve-owned");
+        .expect("frame is curve-owned");
 
         assert_invalid_payload(evaluate(&mut state, node));
     }
