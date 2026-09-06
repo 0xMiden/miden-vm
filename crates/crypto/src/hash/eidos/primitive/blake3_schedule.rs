@@ -545,11 +545,22 @@ pub(super) fn compress_packed_native_counted(
     if active_lanes == 0 {
         return;
     }
+    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
+        // SAFETY: the selected tier supports SVE2; all buffers have the fixed ABI dimensions,
+        // and the assertion bounds the active prefix.
+        unsafe {
+            eidos_compress16_sve2(
+                cv.as_ptr().cast(),
+                block.as_ptr().cast(),
+                out.as_mut_ptr().cast(),
+                active_lanes,
+            );
+        }
+        return;
+    }
     #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
-    if matches!(
-        arm_dispatch::detect_arm_tier(),
-        arm_dispatch::ArmTier::Sve | arm_dispatch::ArmTier::Sve2
-    ) {
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve {
         // SAFETY: the selected tier supports SVE; all buffers have the fixed ABI dimensions,
         // and the assertion bounds the active prefix.
         unsafe {
@@ -571,6 +582,11 @@ pub(super) fn compress_packed_native_counted(
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
 unsafe extern "C" {
     fn eidos_compress16_sve(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
+}
+
+#[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
+unsafe extern "C" {
+    fn eidos_compress16_sve2(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
 }
 
 #[cfg(all(test, target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]

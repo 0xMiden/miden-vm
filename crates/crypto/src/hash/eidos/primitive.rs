@@ -444,6 +444,35 @@ mod tests {
         }
     }
 
+    #[cfg(all(target_arch = "aarch64", feature = "std"))]
+    #[test]
+    fn compress_sve2_counted_matches_oracle_and_preserves_tail() {
+        unsafe extern "C" {
+            fn eidos_compress16_sve2(
+                cv: *const u32,
+                block: *const u32,
+                out: *mut u32,
+                active_lanes: usize,
+            );
+        }
+        if std::arch::is_aarch64_feature_detected!("sve2") {
+            check_counted_compression(|cv, block, out, active| {
+                // SAFETY: SVE2 is available and the oracle helper uses fixed ABI dimensions
+                // with active counts bounded by 16.
+                unsafe {
+                    eidos_compress16_sve2(
+                        cv.as_ptr().cast(),
+                        block.as_ptr().cast(),
+                        out.as_mut_ptr().cast(),
+                        active,
+                    );
+                }
+            });
+        } else {
+            std::eprintln!("SVE2 kernel execution unavailable: host does not support SVE2");
+        }
+    }
+
     #[test]
     fn compress_packed_native_matches_scalar_lanes() {
         const LANES: usize = PACKED_LANES;
