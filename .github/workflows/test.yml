@@ -176,7 +176,7 @@ jobs:
             exit 1
           fi
 
-          rust_cfg="$(rustc --print cfg -C "target-feature=${TARGET_FEATURES}")"
+          rust_cfg="$(rustc --print cfg --target aarch64-unknown-linux-gnu -C "target-feature=${TARGET_FEATURES}")"
           printf '%s\n' "${rust_cfg}"
           read -r -a required_features <<<"${REQUIRED_TARGET_FEATURES}"
           for feature in "${required_features[@]}"; do
@@ -194,10 +194,10 @@ jobs:
           done
       # Compile only: the runner need not support executing SVE or SVE2.
       - name: Check compile-time dispatch without std
-        run: cargo check -p miden-crypto --no-default-features
+        run: cargo check -p miden-crypto --target aarch64-unknown-linux-gnu --no-default-features
       - name: Check std runtime dispatch and all tier objects
         if: matrix.backend == 'NEON'
-        run: cargo check -p miden-crypto
+        run: cargo check -p miden-crypto --target aarch64-unknown-linux-gnu
 
   doc-tests:
     name: doc-tests
