@@ -136,8 +136,8 @@ jobs:
       - name: Run Eidos backend equivalence and vector tests
         run: cargo nextest run --profile ci -p miden-crypto --lib --no-tests=fail 'hash::eidos::'
 
-  eidos-arm-compile:
-    name: Eidos ${{ matrix.backend }} compile
+  eidos-arm-tests:
+    name: Eidos ${{ matrix.backend }} link${{ matrix.backend == 'NEON' && ' and run' || '' }}
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
@@ -172,7 +172,7 @@ jobs:
           set -euo pipefail
 
           if [ "$(uname -m)" != "aarch64" ]; then
-            echo "::error::Eidos ARM compile checks require an AArch64 runner"
+            echo "::error::Eidos ARM test builds require an AArch64 runner"
             exit 1
           fi
 
@@ -192,12 +192,15 @@ jobs:
               exit 1
             fi
           done
-      # Compile only: the runner need not support executing SVE or SVE2.
-      - name: Check compile-time dispatch without std
-        run: cargo check -p miden-crypto --target aarch64-unknown-linux-gnu --no-default-features
-      - name: Check std runtime dispatch and all tier objects
+      - name: Link compile-time dispatch tests without std
+        run: cargo test -p miden-crypto --target aarch64-unknown-linux-gnu --no-default-features --lib --no-run 'hash::eidos::'
+      # Link only: the runner need not support executing SVE or SVE2.
+      - name: Link std runtime dispatch and all tier tests
+        if: matrix.backend != 'NEON'
+        run: cargo test -p miden-crypto --target aarch64-unknown-linux-gnu --lib --no-run 'hash::eidos::'
+      - name: Run Eidos NEON and std runtime dispatch tests
         if: matrix.backend == 'NEON'
-        run: cargo check -p miden-crypto --target aarch64-unknown-linux-gnu
+        run: cargo test -p miden-crypto --target aarch64-unknown-linux-gnu --lib 'hash::eidos::'
 
   doc-tests:
     name: doc-tests
