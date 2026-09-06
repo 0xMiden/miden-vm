@@ -566,7 +566,7 @@ pub(super) fn compress_packed_native(
     out
 }
 
-/// Uses the mask-only kernel for SVE; other tiers retain their existing counted path.
+/// Uses the mask-only kernel for SVE/SVE2; other tiers retain their counted path.
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]
 pub(in super::super) fn check_witness_batch_sve(
     cv: &[[u32; PACKED_LANES]; 8],
@@ -576,18 +576,19 @@ pub(in super::super) fn check_witness_batch_sve(
     count: usize,
     mask: u64,
 ) -> Option<u16> {
-    if arm_dispatch::detect_arm_tier() != arm_dispatch::ArmTier::Sve {
-        return None;
-    }
+    let kernel = match arm_dispatch::detect_arm_tier() {
+        #[cfg(any(feature = "std", target_feature = "sve2"))]
+        arm_dispatch::ArmTier::Sve2 => eidos_check_witness_batch_sve2,
+        arm_dispatch::ArmTier::Sve => eidos_check_witness_batch_sve,
+        _ => return None,
+    };
     assert!(buffer_len < 8 && (1..=PACKED_LANES).contains(&count));
     // Prepared rows are broadcasts. Recover canonical inputs without the output-only mask.
     let cv: [u64; 4] = array::from_fn(|i| cv[2 * i][0] as u64 | ((cv[2 * i + 1][0] as u64) << 32));
     let buffer: [u64; 8] =
         array::from_fn(|i| buffer[2 * i][0] as u64 | ((buffer[2 * i + 1][0] as u64) << 32));
-    // SAFETY: SVE is selected, arrays have the ABI dimensions, and lengths are bounded above.
-    Some(unsafe {
-        eidos_check_witness_batch_sve(cv.as_ptr(), buffer.as_ptr(), buffer_len, base, count, mask)
-    })
+    // SAFETY: The tier is selected, arrays have the ABI dimensions, and lengths are bounded above.
+    Some(unsafe { kernel(cv.as_ptr(), buffer.as_ptr(), buffer_len, base, count, mask) })
 }
 
 /// Compresses the active prefix, preserving every inactive output lane.
@@ -704,6 +705,14 @@ unsafe extern "C" {
     fn eidos_compress_raw_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress16_sve2(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
+    fn eidos_check_witness_batch_sve2(
+        cv: *const u64,
+        buffer: *const u64,
+        buffer_len: usize,
+        base: u64,
+        count: usize,
+        mask: u64,
+    ) -> u16;
 }
 
 #[cfg(all(test, target_arch = "aarch64", any(feature = "std", target_feature = "sve")))]

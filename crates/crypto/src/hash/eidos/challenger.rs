@@ -767,8 +767,20 @@ mod tests {
                 mask: u64,
             ) -> u16;
         }
-        let kernels: [(Kernel, bool); 1] =
-            [(eidos_check_witness_batch_sve, std::arch::is_aarch64_feature_detected!("sve"))];
+        unsafe extern "C" {
+            fn eidos_check_witness_batch_sve2(
+                cv: *const u64,
+                buffer: *const u64,
+                len: usize,
+                base: u64,
+                count: usize,
+                mask: u64,
+            ) -> u16;
+        }
+        let kernels: [(Kernel, bool); 2] = [
+            (eidos_check_witness_batch_sve, std::arch::is_aarch64_feature_detected!("sve")),
+            (eidos_check_witness_batch_sve2, std::arch::is_aarch64_feature_detected!("sve2")),
+        ];
         for (kernel, supported) in kernels {
             if !supported {
                 continue;
