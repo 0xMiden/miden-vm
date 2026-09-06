@@ -124,7 +124,14 @@ impl Eidos {
         if bytes.is_empty() {
             cv = compression::compress_cv(cv, [0; 16]);
         } else {
-            cv = compress_encoded_blocks(cv, bytes.chunks(64).map(encoding::encode_byte_block));
+            #[cfg(target_arch = "aarch64")]
+            {
+                cv = compress_encoded_blocks(cv, bytes.chunks(64).map(encoding::encode_byte_block));
+            }
+            #[cfg(not(target_arch = "aarch64"))]
+            for chunk in bytes.chunks(64) {
+                cv = compression::compress_cv(cv, encoding::encode_byte_block(chunk));
+            }
         }
 
         encoding::output_cv_to_word(cv)
@@ -216,6 +223,7 @@ fn exact_size_hint<I: Iterator>(iter: &I) -> Option<usize> {
 }
 
 /// Keep sequential batches bounded independently of the message length.
+#[cfg(target_arch = "aarch64")]
 fn compress_encoded_blocks(mut cv: [u32; 8], blocks: impl Iterator<Item = [u32; 16]>) -> [u32; 8] {
     let mut batch = [[0; 16]; 8];
     let mut count = 0;
