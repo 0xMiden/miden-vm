@@ -48,7 +48,11 @@ fn compile_arch_arm64_eidos_tier(library: &str, kernel: &str, march: &str) {
     if std::path::Path::new(&kernel_path).exists() {
         build.file(kernel_path);
     }
-    build.flag("-std=c11").flag(format!("-march={march}")).flag("-O3").compile(library);
+    build
+        .flag("-std=c11")
+        .flag(format!("-march={march}"))
+        .flag("-O3")
+        .compile(library);
 }
 
 /// SVE2 Poseidon2 W12 packed-permutation kernel (compiler-scheduled C

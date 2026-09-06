@@ -296,22 +296,14 @@ mod arm_dispatch {
     }
 
     /// Selects SVE when SVE2 was not enabled for this `no_std` build.
-    #[cfg(all(
-        not(feature = "std"),
-        target_feature = "sve",
-        not(target_feature = "sve2")
-    ))]
+    #[cfg(all(not(feature = "std"), target_feature = "sve", not(target_feature = "sve2")))]
     #[inline(always)]
     pub(super) fn detect_arm_tier() -> ArmTier {
         ArmTier::Sve
     }
 
     /// AArch64 NEON is the baseline when no scalable-vector tier was enabled for `no_std`.
-    #[cfg(all(
-        not(feature = "std"),
-        not(target_feature = "sve"),
-        not(target_feature = "sve2")
-    ))]
+    #[cfg(all(not(feature = "std"), not(target_feature = "sve"), not(target_feature = "sve2")))]
     #[inline(always)]
     pub(super) fn detect_arm_tier() -> ArmTier {
         ArmTier::Neon
