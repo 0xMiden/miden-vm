@@ -252,6 +252,78 @@ mod row_dispatch {
     }
 }
 
+/// Runtime and compile-time ARM tier selection for the C Eidos kernels.
+///
+/// AArch64 NEON is this crate's baseline. SVE kernels determine their vector length inside each
+/// call, so caching only the ISA tier is safe even when a Linux thread changes its SVE vector
+/// length.
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)] // Later ARM kernel tasks call this dispatch boundary.
+mod arm_dispatch {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(in super::super) enum ArmTier {
+        Neon,
+        Sve,
+        Sve2,
+    }
+
+    #[cfg(feature = "std")]
+    fn detect() -> ArmTier {
+        if std::arch::is_aarch64_feature_detected!("sve2") {
+            ArmTier::Sve2
+        } else if std::arch::is_aarch64_feature_detected!("sve") {
+            ArmTier::Sve
+        } else {
+            ArmTier::Neon
+        }
+    }
+
+    #[cfg(feature = "std")]
+    static ARM_TIER: once_cell::sync::Lazy<ArmTier> = once_cell::sync::Lazy::new(detect);
+
+    /// Selects and caches the best ISA tier in `std` builds.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub(super) fn detect_arm_tier() -> ArmTier {
+        *ARM_TIER
+    }
+
+    /// Selects the highest ISA tier enabled for this `no_std` build.
+    #[cfg(all(not(feature = "std"), target_feature = "sve2"))]
+    #[inline(always)]
+    pub(super) fn detect_arm_tier() -> ArmTier {
+        ArmTier::Sve2
+    }
+
+    /// Selects SVE when SVE2 was not enabled for this `no_std` build.
+    #[cfg(all(
+        not(feature = "std"),
+        target_feature = "sve",
+        not(target_feature = "sve2")
+    ))]
+    #[inline(always)]
+    pub(super) fn detect_arm_tier() -> ArmTier {
+        ArmTier::Sve
+    }
+
+    /// AArch64 NEON is the baseline when no scalable-vector tier was enabled for `no_std`.
+    #[cfg(all(
+        not(feature = "std"),
+        not(target_feature = "sve"),
+        not(target_feature = "sve2")
+    ))]
+    #[inline(always)]
+    pub(super) fn detect_arm_tier() -> ArmTier {
+        ArmTier::Neon
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+#[allow(dead_code)] // The cross-compiled test artifact exposes this for AArch64 test harnesses.
+pub(super) fn selected_arm_tier_for_test() -> arm_dispatch::ArmTier {
+    arm_dispatch::detect_arm_tier()
+}
+
 #[inline(always)]
 #[cfg(any(test, not(target_arch = "x86_64")))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {

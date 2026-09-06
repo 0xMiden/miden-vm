@@ -1,9 +1,13 @@
 fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_features = std::env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    let has_std = std::env::var_os("CARGO_FEATURE_STD").is_some();
     let has_sve = target_features.split(',').any(|feature| feature == "sve");
     let has_sve2 = target_features.split(',').any(|feature| feature == "sve2");
 
+    if target_arch == "aarch64" {
+        compile_arch_arm64_eidos(has_std, has_sve, has_sve2);
+    }
     if target_arch == "aarch64" && has_sve {
         compile_arch_arm64_sve();
     }
@@ -13,6 +17,38 @@ fn main() {
     if target_arch == "aarch64" && has_sve2 {
         compile_arch_arm64_sve2_poseidon2();
     }
+}
+
+/// Builds the Eidos ARM dispatch libraries. `std` builds contain every tier because selection is
+/// deferred to runtime; `no_std` only contains the AArch64 baseline and tiers selected at compile
+/// time. Later Eidos kernel tasks add their source files under this directory, which this build
+/// boundary picks up without changing the tier policy.
+fn compile_arch_arm64_eidos(has_std: bool, has_sve: bool, has_sve2: bool) {
+    const EIDOS_PATH: &str = "arch/arm64-eidos";
+
+    println!("cargo:rerun-if-changed={EIDOS_PATH}");
+
+    compile_arch_arm64_eidos_tier("eidos_neon", "eidos_neon.c", "armv8-a");
+    if has_std || has_sve || has_sve2 {
+        compile_arch_arm64_eidos_tier("eidos_sve", "eidos_sve.c", "armv8-a+sve");
+    }
+    if has_std || has_sve2 {
+        compile_arch_arm64_eidos_tier("eidos_sve2", "eidos_sve2.c", "armv8.2-a+sve2");
+    }
+}
+
+fn compile_arch_arm64_eidos_tier(library: &str, kernel: &str, march: &str) {
+    const EIDOS_PATH: &str = "arch/arm64-eidos";
+    let kernel_path = format!("{EIDOS_PATH}/{kernel}");
+    let mut build = cc::Build::new();
+
+    // The stubs validate the stable pointer ABI before a tier has an implementation. Once a
+    // kernel source is present, it joins the same tier archive and inherits that tier's ISA flag.
+    build.file(format!("{EIDOS_PATH}/dispatch_stubs.c"));
+    if std::path::Path::new(&kernel_path).exists() {
+        build.file(kernel_path);
+    }
+    build.flag("-std=c11").flag(format!("-march={march}")).flag("-O3").compile(library);
 }
 
 /// SVE2 Poseidon2 W12 packed-permutation kernel (compiler-scheduled C
