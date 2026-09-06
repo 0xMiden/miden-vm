@@ -566,6 +566,31 @@ pub(super) fn compress_packed_native(
     out
 }
 
+#[cfg(target_arch = "aarch64")]
+pub(in super::super) fn use_neon_adapter() -> bool {
+    arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Neon
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(in super::super) fn compress_packed_u64_neon(
+    cv: &[[u64; PACKED_LANES]; 4],
+    block: &[[u64; PACKED_LANES]; 8],
+    out: &mut [[u64; PACKED_LANES]; 4],
+    active_lanes: usize,
+) {
+    assert!(active_lanes <= PACKED_LANES);
+    // SAFETY: AArch64 provides NEON; all arrays have the ABI's fixed word-major layout.
+    // The kernel only reads and writes the validated active prefix.
+    unsafe {
+        eidos_compress16_u64_neon(
+            cv.as_ptr().cast(),
+            block.as_ptr().cast(),
+            out.as_mut_ptr().cast(),
+            active_lanes,
+        );
+    }
+}
+
 /// Uses the selected ARM mask-only kernel.
 #[cfg(target_arch = "aarch64")]
 pub(in super::super) fn check_witness_batch_arm(
@@ -693,6 +718,7 @@ unsafe extern "C" {
         mask: u64,
     ) -> u16;
     fn eidos_compress_blocks_neon(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
+    fn eidos_compress16_u64_neon(cv: *const u64, block: *const u64, out: *mut u64, count: usize);
     fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);
 }

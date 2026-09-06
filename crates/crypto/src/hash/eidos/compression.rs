@@ -66,6 +66,12 @@ pub(super) fn compress_packed_felt_cv(
     block: &PackedBlock,
 ) -> PackedChainingValue {
     #[cfg(target_arch = "aarch64")]
+    if super::primitive::use_neon_adapter() {
+        let mut out = [[Felt::new_unchecked(0); PACKED_LANES]; DIGEST_WIDTH];
+        compress_packed_felt_neon(cv, block, &mut out, PACKED_LANES);
+        return out;
+    }
+    #[cfg(target_arch = "aarch64")]
     let (cv, block) = (encoding::arm_unpack_felts(*cv), encoding::arm_unpack_felts(*block));
     #[cfg(not(target_arch = "aarch64"))]
     let (cv, block) = (encoding::unpack_packed_cv(*cv), encoding::encode_packed_felt_block(*block));
@@ -82,6 +88,12 @@ pub(super) fn compress_packed_u64_cv(
     cv: &[[u64; PACKED_LANES]; DIGEST_WIDTH],
     block: &[[u64; PACKED_LANES]; BLOCK_LEN],
 ) -> [[u64; PACKED_LANES]; DIGEST_WIDTH] {
+    #[cfg(target_arch = "aarch64")]
+    if super::primitive::use_neon_adapter() {
+        let mut out = [[0; PACKED_LANES]; DIGEST_WIDTH];
+        super::primitive::compress_packed_u64_neon(cv, block, &mut out, PACKED_LANES);
+        return out;
+    }
     // Raw u64 inputs are split losslessly; callers supplying field elements must canonicalize
     // them first. Arbitrary Felts use the canonicalizing adapter above.
     let cv = encoding::unpack_packed_u64_cv(*cv);
@@ -115,6 +127,11 @@ pub(super) fn compress_packed_felt_cv_counted(
     active_lanes: usize,
 ) {
     assert!(active_lanes <= PACKED_LANES);
+    #[cfg(target_arch = "aarch64")]
+    if super::primitive::use_neon_adapter() {
+        compress_packed_felt_neon(cv, block, out, active_lanes);
+        return;
+    }
     if active_lanes == PACKED_LANES {
         *out = compress_packed_felt_cv(cv, block);
         return;
@@ -159,6 +176,11 @@ pub(super) fn compress_packed_u64_cv_counted(
     active_lanes: usize,
 ) {
     assert!(active_lanes <= PACKED_LANES);
+    #[cfg(target_arch = "aarch64")]
+    if super::primitive::use_neon_adapter() {
+        super::primitive::compress_packed_u64_neon(cv, block, out, active_lanes);
+        return;
+    }
     if active_lanes == PACKED_LANES {
         *out = compress_packed_u64_cv(cv, block);
         return;
@@ -189,6 +211,38 @@ pub(super) fn compress_packed_u64_cv_counted(
         let result: [u64; DIGEST_WIDTH] = encoding::pack_cv_to_u64s(result);
         for word in 0..DIGEST_WIDTH {
             out[word][lane] = result[word];
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn compress_packed_felt_neon(
+    cv: &PackedChainingValue,
+    block: &PackedBlock,
+    out: &mut PackedChainingValue,
+    active_lanes: usize,
+) {
+    let mut canonical_cv = [[0; PACKED_LANES]; DIGEST_WIDTH];
+    let mut canonical_block = [[0; PACKED_LANES]; BLOCK_LEN];
+    for lane in 0..active_lanes {
+        for word in 0..DIGEST_WIDTH {
+            canonical_cv[word][lane] = cv[word][lane].as_canonical_u64();
+        }
+        for word in 0..BLOCK_LEN {
+            canonical_block[word][lane] = block[word][lane].as_canonical_u64();
+        }
+    }
+    let mut packed = [[0; PACKED_LANES]; DIGEST_WIDTH];
+    super::primitive::compress_packed_u64_neon(
+        &canonical_cv,
+        &canonical_block,
+        &mut packed,
+        active_lanes,
+    );
+    for word in 0..DIGEST_WIDTH {
+        for lane in 0..active_lanes {
+            // The kernel masks the high word, so each output is canonical and below 2^63.
+            out[word][lane] = Felt::new_unchecked(packed[word][lane]);
         }
     }
 }
@@ -345,6 +399,14 @@ mod tests {
 
     #[test]
     fn counted_u64_preserves_inactive_lanes() {
+        // Apple AArch64 has no SVE: this production-route oracle must exercise the fused ABI.
+        #[cfg(all(
+            target_arch = "aarch64",
+            target_os = "macos",
+            not(target_feature = "sve"),
+            not(target_feature = "sve2")
+        ))]
+        assert!(super::super::primitive::use_neon_adapter());
         for active in 0..=PACKED_LANES {
             let mut cv = array::from_fn(|word| array::from_fn(|lane| mixed_u64(1, word, lane)));
             let mut block = mixed_packed_u64_block(0);

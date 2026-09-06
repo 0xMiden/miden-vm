@@ -37,6 +37,8 @@ void eidos_compress_blocks_sve2(const uint32_t *cv, const uint32_t *blocks, uint
 
 void eidos_compress_raw_neon(const uint32_t *cv, const uint32_t *block, uint32_t *out);
 void eidos_compress_xof_neon(const uint32_t *cv, const uint32_t *block, uint32_t *out);
+// Word-major [4][16], [8][16], [4][16] u64 arrays. Counts 0..16 preserve inactive slots.
+void eidos_compress16_u64_neon(const uint64_t *cv, const uint64_t *block, uint64_t *out, size_t active_lanes);
 void eidos_compress_raw_sve2(const uint32_t *cv, const uint32_t *block, uint32_t *out);
 void eidos_compress_xof_sve2(const uint32_t *cv, const uint32_t *block, uint32_t *out);
 
