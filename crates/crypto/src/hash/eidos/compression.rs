@@ -486,6 +486,55 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(target_arch = "aarch64", feature = "std"))]
+    fn sve2_u64_adapter_preserves_active_prefix() {
+        if !std::arch::is_aarch64_feature_detected!("sve2") {
+            return;
+        }
+        unsafe extern "C" {
+            fn eidos_compress16_u64_sve2(
+                cv: *const u64,
+                block: *const u64,
+                out: *mut u64,
+                count: usize,
+            );
+        }
+        for batch in 0..32 {
+            let cv = array::from_fn::<_, DIGEST_WIDTH, _>(|word| {
+                array::from_fn::<_, PACKED_LANES, _>(|lane| mixed_u64(batch, word, lane))
+            });
+            let block = mixed_packed_u64_block(batch);
+            for active in 0..=PACKED_LANES {
+                let mut out = [[u64::MAX; PACKED_LANES]; DIGEST_WIDTH];
+                // SAFETY: SVE2 was detected and every pointer has the fixed ABI layout.
+                unsafe {
+                    eidos_compress16_u64_sve2(
+                        cv.as_ptr().cast(),
+                        block.as_ptr().cast(),
+                        out.as_mut_ptr().cast(),
+                        active,
+                    );
+                }
+                for lane in 0..PACKED_LANES {
+                    let expected = if lane < active {
+                        encoding::pack_cv_to_u64s(compress_u64_cv(
+                            encoding::unpack_u64_cv(array::from_fn(|word| cv[word][lane])),
+                            array::from_fn(|word| block[word][lane]),
+                        ))
+                    } else {
+                        [u64::MAX; DIGEST_WIDTH]
+                    };
+                    assert_eq!(
+                        array::from_fn::<_, DIGEST_WIDTH, _>(|word| out[word][lane]),
+                        expected,
+                        "batch={batch}, active={active}, lane={lane}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     #[should_panic]
     fn counted_u64_rejects_oversized_prefix() {
         compress_packed_u64_cv_counted(

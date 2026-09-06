@@ -570,7 +570,7 @@ pub(super) fn compress_packed_native(
 pub(in super::super) fn use_arm_u64_adapter() -> bool {
     matches!(
         arm_dispatch::detect_arm_tier(),
-        arm_dispatch::ArmTier::Neon | arm_dispatch::ArmTier::Sve
+        arm_dispatch::ArmTier::Neon | arm_dispatch::ArmTier::Sve | arm_dispatch::ArmTier::Sve2
     )
 }
 
@@ -582,6 +582,19 @@ pub(in super::super) fn compress_packed_u64_arm(
     active_lanes: usize,
 ) {
     assert!(active_lanes <= PACKED_LANES);
+    #[cfg(any(feature = "std", target_feature = "sve2"))]
+    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
+        // SAFETY: Detection guarantees SVE2; the kernel accesses only the validated prefix.
+        unsafe {
+            eidos_compress16_u64_sve2(
+                cv.as_ptr().cast(),
+                block.as_ptr().cast(),
+                out.as_mut_ptr().cast(),
+                active_lanes,
+            );
+        }
+        return;
+    }
     #[cfg(any(feature = "std", target_feature = "sve"))]
     if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve {
         // SAFETY: Detection guarantees SVE; the kernel accesses only the validated prefix.
@@ -755,6 +768,7 @@ unsafe extern "C" {
 
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
 unsafe extern "C" {
+    fn eidos_compress16_u64_sve2(cv: *const u64, block: *const u64, out: *mut u64, count: usize);
     fn eidos_compress_blocks_sve2(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress_raw_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_sve2(cv: *const u32, block: *const u32, out: *mut u32);
