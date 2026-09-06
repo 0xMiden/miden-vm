@@ -810,7 +810,8 @@ mod tests {
                 for count in 1..=PACKED_LANES {
                     for base in [0, u32::MAX as u64 - 7, Felt::ORDER_U64 - count as u64] {
                         for bits in 0..=24 {
-                            // SAFETY: tier checked above; valid arrays, active count and canonical nonces.
+                            // SAFETY: tier checked above; valid arrays, active count and canonical
+                            // nonces.
                             let actual = unsafe {
                                 kernel(
                                     cv.as_ptr(),
