@@ -20,11 +20,11 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use miden_crypto::hash::{
     HasherExt,
     blake::{Blake3_192, Blake3_256},
-    eidos::Eidos,
+    eidos::{Eidos, benchmarks},
     keccak::Keccak256,
     poseidon2::Poseidon2,
     rpo::Rpo256,
@@ -105,22 +105,95 @@ benchmark_hash_felt!(
 
 // 2-to-1 hash merge
 benchmark_hash_merge!(hash_eidos_merge, "eidos", |b: &mut criterion::Bencher| {
-    let input1 = Eidos::hash(&generate_byte_array_random(32));
-    let input2 = Eidos::hash(&generate_byte_array_random(32));
-    b.iter(|| Eidos::merge(black_box(&[input1, input2])))
+    let input1 = Eidos::hash(&[1; 32]);
+    let input2 = Eidos::hash(&[2; 32]);
+    b.iter(|| black_box(Eidos::merge(black_box(&[input1, input2]))))
 });
 
-// Sequential hashing of Felt elements
-benchmark_hash_felt!(
-    hash_eidos_sequential_felt,
-    "eidos",
-    HASH_ELEMENT_COUNTS,
-    |b: &mut criterion::Bencher, count| {
+fn hash_eidos_sequential_felt(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hash-eidos-sequential-felt");
+    for &count in HASH_ELEMENT_COUNTS {
         let elements = generate_felt_array_sequential(count);
-        b.iter(|| Eidos::hash_elements(black_box(&elements)))
-    },
-    |count| Some(criterion::Throughput::Elements(count as u64))
-);
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(BenchmarkId::new("felt", count), &elements, |b, elements| {
+            b.iter(|| black_box(Eidos::hash_elements(black_box(elements))))
+        });
+    }
+    group.finish();
+}
+
+fn hash_eidos_arm(c: &mut Criterion) {
+    let cv = core::array::from_fn(|i| i as u32 + 1);
+    let block = core::array::from_fn(|i| i as u32 + 17);
+    let mut raw = c.benchmark_group("hash-eidos-raw");
+    raw.bench_function("compress", |b| {
+        b.iter(|| black_box(benchmarks::compress_raw(black_box(cv), black_box(block))))
+    });
+    raw.bench_function("xof", |b| {
+        b.iter(|| black_box(benchmarks::compress_raw_xof(black_box(cv), black_box(block))))
+    });
+    raw.finish();
+
+    let mut bytes = c.benchmark_group("hash-eidos-sequential-bytes");
+    for count in [1, 64, 65, 1024, 8192] {
+        let input = common::data::generate_byte_array_sequential(count);
+        bytes.throughput(Throughput::Bytes(count as u64));
+        bytes.bench_with_input(BenchmarkId::new("bytes", count), &input, |b, input| {
+            b.iter(|| black_box(Eidos::hash(black_box(input))))
+        });
+    }
+    bytes.finish();
+
+    let cv = core::array::from_fn(|word| {
+        core::array::from_fn(|lane| miden_crypto::Felt::from_u32((word * 16 + lane + 1) as u32))
+    });
+    let block = core::array::from_fn(|word| {
+        core::array::from_fn(|lane| miden_crypto::Felt::from_u32((word * 16 + lane + 65) as u32))
+    });
+    let mut out = cv;
+    let mut packed = c.benchmark_group("hash-eidos-packed-felt");
+    for count in [1, 2, 4, 8, 16] {
+        packed.throughput(Throughput::Elements(count as u64));
+        packed.bench_with_input(BenchmarkId::new("active", count), &count, |b, &count| {
+            b.iter(|| {
+                benchmarks::compress_packed_counted(
+                    black_box(&cv),
+                    black_box(&block),
+                    black_box(&mut out),
+                    black_box(count),
+                );
+                black_box(&out);
+            })
+        });
+    }
+    packed.finish();
+
+    let mut pow = c.benchmark_group("hash-eidos-pow");
+    for buffer_len in [0, 7] {
+        let snapshot = benchmarks::WitnessBatch::new(
+            miden_crypto::Word::from([miden_crypto::Felt::from_u32(1); 4]),
+            [miden_crypto::Felt::from_u32(2); 8],
+            buffer_len,
+        );
+        for count in [1, 2, 4, 8, 16] {
+            pow.throughput(Throughput::Elements(count as u64));
+            pow.bench_with_input(
+                BenchmarkId::new(format!("buffer-{buffer_len}"), count),
+                &count,
+                |b, &count| {
+                    b.iter(|| {
+                        black_box(black_box(&snapshot).check(
+                            black_box(1234),
+                            black_box(count),
+                            black_box(0xff),
+                        ))
+                    })
+                },
+            );
+        }
+    }
+    pow.finish();
+}
 
 // === Blake3 Hash Benchmarks ===
 
@@ -202,6 +275,7 @@ criterion_group!(
     // Eidos benchmarks
     hash_eidos_merge,
     hash_eidos_sequential_felt,
+    hash_eidos_arm,
     // Blake3 benchmarks
     hash_blake3_merge,
     hash_blake3_sequential_felt,

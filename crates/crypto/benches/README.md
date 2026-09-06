@@ -130,7 +130,7 @@ Before you can run the benchmarks, you'll need to make sure you have Rust [insta
 To run the benchmarks for RPO, RPX, Poseidon2, Eidos, BLAKE3 and Keccak256, clone the current repository, and from the root directory of the repo run:
 
  ```
- cargo bench hash
+ cargo bench -p miden-crypto --bench hash --features internal
  ```
 
 To run the benchmarks for SHA3, clone the following [repository](https://github.com/Dominik1999/winterfell.git) as above, then checkout the `hash-functions-benches` branch, and from the root directory run:
@@ -138,6 +138,53 @@ To run the benchmarks for SHA3, clone the following [repository](https://github.
 ```
 cargo bench hash
 ```
+
+#### Eidos ARM measurements
+
+Run from the repository root on native AArch64 Linux with a C compiler supporting SVE2 ACLE.
+Record the machine and build environment alongside each Criterion result:
+
+```sh
+lscpu
+rustc -vV
+cc --version
+git rev-parse HEAD
+env | sort | rg '^(RUSTFLAGS|CFLAGS|CC|CARGO_ENCODED_RUSTFLAGS)='
+```
+
+Use these commands with the same compiler and workload when comparing revisions:
+
+```sh
+# Generic AArch64 build; NEON on hardware without SVE (e.g. Graviton2).
+RUSTFLAGS='-C target-cpu=generic' cargo bench -p miden-crypto --bench hash --features internal -- eidos
+# Graviton3: runtime dispatch selects SVE for packed operations.
+RUSTFLAGS='-C target-cpu=neoverse-v1 -C target-feature=+sve' cargo bench -p miden-crypto --bench hash --features internal -- eidos
+# Graviton4/5: runtime dispatch selects SVE2.
+RUSTFLAGS='-C target-cpu=generic -C target-feature=+sve2' cargo bench -p miden-crypto --bench hash --features internal -- eidos
+# Register/list cases without taking measurements.
+cargo bench -p miden-crypto --bench hash --features internal -- eidos --list
+```
+
+The `std` harness uses runtime dispatch: generic flags (or `-sve`) do not force NEON on an
+SVE-capable machine. These commands compare native tiers across machines, not forced tiers on
+one machine. Single-block compression uses NEON on SVE1 hardware and SVE2 on SVE2 hardware.
+SVE vector length is per thread; record the benchmark thread's inherited vector-length policy
+and verify its actual vector length when using a launcher that changes it. Do not infer vector
+length from compiler flags. Graviton3 normally uses 256 bits, and Graviton4/5 128 bits.
+
+`hash-eidos-raw/{compress,xof}` reports single-block latency without framing. Sequential byte
+cases cover 1/64/65/1024/8192 bytes; Felt cases cover 1/100/1000 elements. Merge uses fixed digest
+inputs. `hash-eidos-packed-felt/active/{1,2,4,8,16}` calls the production counted adapter, including
+canonicalization and output packing. `hash-eidos-pow/buffer-{0,7}/{1,2,4,8,16}` measures candidate
+batches requiring one or two compressions, at an eight-bit acceptance mask. PoW snapshot
+preparation and all input allocation occur outside timed loops; no grind search is measured.
+The `internal` feature exposes only benchmark delegates to the production paths.
+
+Criterion reports bytes/second for bytes, elements/second for Felts and packed compressions,
+and candidates/second for PoW. Compare matching case IDs and active counts; batch latency alone
+does not describe throughput. Save `target/criterion` with the recorded environment and flags.
+Compilation and local NEON execution do not establish SVE/SVE2 speedups: those require Graviton
+measurements, and no Eidos ARM speedup is claimed here.
 
 #### Digital Signature Algorithm (DSA) Benchmarks
 

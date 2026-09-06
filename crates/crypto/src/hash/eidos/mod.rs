@@ -17,6 +17,56 @@ mod framing;
 mod lmcs;
 mod primitive;
 
+/// Internal benchmark access to production adapters.
+#[doc(hidden)]
+#[cfg(feature = "internal")]
+pub mod benchmarks {
+    use super::*;
+
+    pub fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
+        primitive::CompressionCore::compress_raw(cv, block)
+    }
+
+    pub fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
+        primitive::CompressionCore::compress_raw_xof(cv, block)
+    }
+
+    pub fn compress_packed_counted(
+        cv: &PackedChainingValue,
+        block: &PackedBlock,
+        out: &mut PackedDigest,
+        count: usize,
+    ) {
+        compression::compress_packed_felt_cv_counted(cv, block, out, count);
+    }
+
+    /// Snapshot preparation is outside the timed candidate loop, as in `grind`.
+    pub struct WitnessBatch {
+        cv: [[u32; PACKED_LANES]; 8],
+        buffer: [[u32; PACKED_LANES]; 16],
+        buffer_len: usize,
+    }
+
+    impl WitnessBatch {
+        pub fn new(cv: crate::Word, buffer: [crate::Felt; BLOCK_LEN], buffer_len: usize) -> Self {
+            assert!(buffer_len < BLOCK_LEN);
+            let (cv, buffer) = challenger::prepare_witness_batch(cv, buffer, buffer_len);
+            Self { cv, buffer, buffer_len }
+        }
+
+        pub fn check(&self, base: u64, count: usize, mask: u64) -> u16 {
+            challenger::check_witness_batch(
+                &self.cv,
+                &self.buffer,
+                self.buffer_len,
+                base,
+                count,
+                mask,
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
 

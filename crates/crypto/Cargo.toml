@@ -27,7 +27,7 @@ required-features = ["std"]
 [[bench]]
 harness           = false
 name              = "hash"
-required-features = ["std"]
+required-features = ["std", "internal"]
 
 [[bench]]
 harness           = false

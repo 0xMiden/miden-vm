@@ -360,7 +360,7 @@ impl GrindingChallenger for EidosChallenger {
 
 /// Prepare invariant raw lanes once, including the transition tweak when the witness will not
 /// fill the buffer. The tweak is Goldilocks addition, even for arbitrary initial CVs.
-fn prepare_witness_batch(
+pub(super) fn prepare_witness_batch(
     cv: Word,
     buffer: [Felt; BLOCK_LEN],
     buffer_len: usize,
@@ -379,7 +379,7 @@ fn prepare_witness_batch(
 
 /// Check an active prefix of consecutive canonical witnesses against a prepared snapshot.
 /// Observing a witness always enters absorbing mode, discarding any pending squeezed output.
-fn check_witness_batch(
+pub(super) fn check_witness_batch(
     cv: &[[u32; PACKED_LANES]; 8],
     buffer: &[[u32; PACKED_LANES]; 16],
     buffer_len: usize,
