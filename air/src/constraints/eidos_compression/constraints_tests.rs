@@ -17,10 +17,12 @@ use super::{
     periodic::get_periodic_column_values,
     schedule::{EIDOS_COMPRESSION_IV, G_IDX_DIAG, fused_step_at},
     selectors::EidosCompressionSelectors,
+    test_support::{
+        generate_felt_trace_block_with_initial_state_for_test, rewrite_felt_footer_for_test,
+    },
     trace::{
         EidosCompressionFeltRow, TraceMode, generate_felt_trace_block,
         generate_felt_trace_block_with_cycle_id,
-        generate_felt_trace_block_with_initial_state_for_test, rewrite_felt_footer_for_test,
     },
 };
 use crate::{

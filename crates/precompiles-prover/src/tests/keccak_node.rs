@@ -33,7 +33,7 @@ use crate::{
         },
     },
     logup::{NUM_LOGUP_VALUES, NUM_PUBLIC_VALUES, NUM_RANDOMNESS},
-    transcript::eidos::trace::AbsorptionId,
+    transcript::eidos::trace::testing::forged_absorption_id,
 };
 
 // HELPERS
@@ -56,9 +56,9 @@ fn anchored_inv(seed: u64, len_bytes: u32) -> KeccakNodeInvocation {
         d: core::array::from_fn(|_| rng.random()),
         h_input_chunks: core::array::from_fn(|_| Felt::new(rng.random()).unwrap()),
         chunk_seq_id_head: ChunkSeqId::forged(0),
-        absorption_id_chunks: AbsorptionId::forged(0),
-        absorption_id_digest_chunks: AbsorptionId::forged(100),
-        absorption_id_keccak: AbsorptionId::forged(101),
+        absorption_id_chunks: forged_absorption_id(0),
+        absorption_id_digest_chunks: forged_absorption_id(100),
+        absorption_id_keccak: forged_absorption_id(101),
         sponge_seq_id_head: SpongeSeqId::forged(0),
         out_mult: 1,
     }
@@ -77,13 +77,13 @@ fn next_inv(prev: &KeccakNodeInvocation, seed: u64, len_bytes: u32) -> KeccakNod
         chunk_seq_id_head: ChunkSeqId::forged(
             prev.chunk_seq_id_head.seq() + prev.n_chunks() as u32,
         ),
-        absorption_id_chunks: AbsorptionId::forged(
+        absorption_id_chunks: forged_absorption_id(
             prev.absorption_id_chunks.as_u32() + prev.n_chunks() as u32,
         ),
-        absorption_id_digest_chunks: AbsorptionId::forged(
+        absorption_id_digest_chunks: forged_absorption_id(
             prev.absorption_id_digest_chunks.as_u32() + 1000,
         ),
-        absorption_id_keccak: AbsorptionId::forged(prev.absorption_id_keccak.as_u32() + 1000),
+        absorption_id_keccak: forged_absorption_id(prev.absorption_id_keccak.as_u32() + 1000),
         sponge_seq_id_head: SpongeSeqId::forged(
             prev.sponge_seq_id_head.seq() + 32 * prev.n_sponge_perms() as u32,
         ),

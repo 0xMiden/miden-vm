@@ -17,6 +17,9 @@
 
 mod algebra;
 
+#[cfg(test)]
+mod test_support;
+
 pub(crate) mod layout;
 
 #[cfg(test)]
