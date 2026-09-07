@@ -167,8 +167,9 @@ cargo bench -p miden-crypto --bench hash --features internal -- eidos --list
 
 The `std` harness uses runtime dispatch: generic flags (or `-sve`) do not force packed operations
 to use NEON on an SVE-capable machine. These commands compare native tiers across machines, not
-forced tiers on one machine. Single-state and sequential compression use NEON on AArch64; packed
-compression and PoW use SVE or SVE2 when available.
+forced tiers on one machine. Single-state and sequential compression use the scalar Rust schedule
+on Graviton and the NEON row kernel on Apple AArch64; packed compression and PoW use SVE or SVE2
+when available.
 SVE vector length is per thread; record the benchmark thread's inherited vector-length policy
 and verify its actual vector length when using a launcher that changes it. Do not infer vector
 length from compiler flags. Graviton3 normally uses 256 bits, and Graviton4/5 128 bits.

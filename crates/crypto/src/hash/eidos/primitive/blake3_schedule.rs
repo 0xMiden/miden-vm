@@ -28,11 +28,17 @@ pub(super) const IV: [u32; 8] = [
     0x5be0_cd19,
 ];
 
-#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(any(
+    test,
+    not(any(target_arch = "x86_64", all(target_arch = "aarch64", target_vendor = "apple")))
+))]
 const ROUNDS: usize = 7;
 
 /// BLAKE3 message-word schedule for the compression rounds.
-#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(any(
+    test,
+    not(any(target_arch = "x86_64", all(target_arch = "aarch64", target_vendor = "apple")))
+))]
 const MSG_SCHEDULE: [[usize; 16]; ROUNDS] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8],
@@ -317,7 +323,10 @@ pub(super) fn selected_arm_tier_for_test() -> arm_dispatch::ArmTier {
 }
 
 #[inline(always)]
-#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(any(
+    test,
+    not(any(target_arch = "x86_64", all(target_arch = "aarch64", target_vendor = "apple")))
+))]
 fn g(v: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize, x: u32, y: u32) {
     v[a] = v[a].wrapping_add(v[b]).wrapping_add(x);
     v[d] = (v[d] ^ v[a]).rotate_right(16);
@@ -385,7 +394,10 @@ fn g_packed<const LANES: usize>(
 }
 
 #[inline(always)]
-#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(any(
+    test,
+    not(any(target_arch = "x86_64", all(target_arch = "aarch64", target_vendor = "apple")))
+))]
 fn permuted_state_with_parameter_words(
     cv: [u32; 8],
     block: [u32; 16],
@@ -430,17 +442,18 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         row_x86::compress_raw(&cv, &block)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     {
         let mut out = [0; 8];
-        // A single state occupies four lanes. NEON avoids the gather and table overhead of the
-        // scalable row kernel while remaining available on every AArch64 target.
-        // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
+        // SAFETY: NEON is the Apple AArch64 baseline; buffers have the fixed ABI dimensions.
         unsafe { eidos_compress_raw_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
         return out;
     }
 
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_vendor = "apple")
+    )))]
     {
         let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         array::from_fn(|i| v[i] ^ v[i + 8])
@@ -465,15 +478,18 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
         row_x86::compress_raw_xof(&cv, &block)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     {
         let mut out = [0; 16];
-        // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
+        // SAFETY: NEON is the Apple AArch64 baseline; buffers have the fixed ABI dimensions.
         unsafe { eidos_compress_xof_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
         return out;
     }
 
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "aarch64", target_vendor = "apple")
+    )))]
     {
         let v = permuted_state_with_parameter_words(cv, block, [IV[4], IV[5], IV[6], IV[7]]);
         array::from_fn(|i| if i < 8 { v[i] ^ v[i + 8] } else { v[i] ^ cv[i - 8] })
@@ -696,13 +712,11 @@ pub(super) fn compress_packed_native_counted(
 #[cfg(any(target_arch = "aarch64", test))]
 #[inline]
 pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [u32; 8] {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     {
         let mut out = [0; 8];
-        // Sequential blocks retain one four-lane state, so they share the raw NEON path's
-        // lower single-state latency.
-        // SAFETY: NEON is always available on AArch64. The slice contains count complete blocks;
-        // CV and output each contain eight words, including when the block count is zero.
+        // SAFETY: NEON is available on Apple AArch64. The slice contains complete blocks and
+        // CV/output each contain eight words, including when the block count is zero.
         unsafe {
             eidos_compress_blocks_neon(
                 cv.as_ptr(),
@@ -711,9 +725,10 @@ pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [
                 blocks.len(),
             )
         };
-        out
+        return out;
     }
-    #[cfg(not(target_arch = "aarch64"))]
+
+    #[cfg(not(all(target_arch = "aarch64", target_vendor = "apple")))]
     blocks.iter().fold(cv, |cv, &block| super::CompressionCore::compress(cv, block))
 }
 
@@ -727,8 +742,12 @@ unsafe extern "C" {
         count: usize,
         mask: u64,
     ) -> u16;
-    fn eidos_compress_blocks_neon(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress16_u64_neon(cv: *const u64, block: *const u64, out: *mut u64, count: usize);
+}
+
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
+unsafe extern "C" {
+    fn eidos_compress_blocks_neon(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
     fn eidos_compress_raw_neon(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress_xof_neon(cv: *const u32, block: *const u32, out: *mut u32);
 }
