@@ -14,8 +14,6 @@ pub const FOOTER_START: usize = FUSED_G_ROWS;
 pub const NUM_G: usize = 4;
 pub const BYTES_PER_WORD: usize = 4;
 pub const BYTE_SLOT_WIDTH: usize = 3;
-#[cfg(test)]
-pub const BYTE_SLOTS_PER_STEP: usize = NUM_G * BYTES_PER_WORD;
 
 // --- Fused G-row layout ----------------------------------------------------
 
