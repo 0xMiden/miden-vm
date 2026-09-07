@@ -1,7 +1,5 @@
 //! Trace writer for the 32-row Eidos compression layout.
 
-use alloc::vec;
-
 use miden_core::{
     Felt,
     field::{PrimeField64, batch_inversion_allow_zeros},
@@ -15,8 +13,6 @@ use super::{
     schedule::fused_step_at,
 };
 use crate::primitives::byte_pair_lut::eidos::{self as eidos_lookup, Rotation};
-#[cfg(test)]
-pub type EidosCompressionRow = [u64; NUM_COLS];
 
 /// One row of the Eidos compression main trace over the VM base field.
 pub type EidosCompressionFeltRow = [Felt; NUM_COLS];
@@ -39,20 +35,6 @@ const CV_STORAGE_COEFFICIENT_INVERSES: [Felt; 8] = [
     INV_TWO_POW_24,
     INV_TWO_POW_16,
 ];
-
-#[cfg(test)]
-pub struct EidosCompressionTraceBlock {
-    pub rows: [EidosCompressionRow; BLOCK_PERIOD],
-    pub final_v: [u32; 16],
-}
-
-/// Materialized 32-row Eidos compression trace block and its final 16-word working state.
-pub struct EidosCompressionFeltTraceBlock {
-    /// Main-trace rows for one physical compression.
-    pub rows: [EidosCompressionFeltRow; BLOCK_PERIOD],
-    /// Eidos compression working state after all seven rounds, before output feed-forward.
-    pub final_v: [u32; 16],
-}
 
 /// Byte-table relation used while materializing an Eidos compression trace.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -82,19 +64,6 @@ trait TraceRow {
     fn set_u64(&mut self, col: usize, value: u64);
 }
 
-#[cfg(test)]
-impl TraceRow for EidosCompressionRow {
-    #[inline]
-    fn get_u64(&self, col: usize) -> u64 {
-        self[col]
-    }
-
-    #[inline]
-    fn set_u64(&mut self, col: usize, value: u64) {
-        self[col] = value;
-    }
-}
-
 impl TraceRow for EidosCompressionFeltRow {
     #[inline]
     fn get_u64(&self, col: usize) -> u64 {
@@ -107,50 +76,8 @@ impl TraceRow for EidosCompressionFeltRow {
     }
 }
 
-#[cfg(test)]
-pub fn generate_trace_block(block: [u32; 16], h: [u32; 8]) -> EidosCompressionTraceBlock {
-    generate_trace_block_with_cycle_id(block, h, 0)
-}
-
-#[cfg(test)]
-pub fn generate_trace_block_with_cycle_id(
-    block: [u32; 16],
-    h: [u32; 8],
-    compression_cycle_id: u64,
-) -> EidosCompressionTraceBlock {
-    let mut rows = vec![[0u64; NUM_COLS]; BLOCK_PERIOD];
-    let mut recorder = NoopByteLookupRecorder;
-    let final_v = write_trace_rows(&mut rows, block, h, compression_cycle_id, &mut recorder);
-    let rows = rows
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
-
-    EidosCompressionTraceBlock { rows, final_v }
-}
-
-/// Generates one field-valued Eidos compression trace block with physical cycle ID zero.
-pub fn generate_felt_trace_block(block: [u32; 16], h: [u32; 8]) -> EidosCompressionFeltTraceBlock {
-    generate_felt_trace_block_with_cycle_id(block, h, 0)
-}
-
-pub fn generate_felt_trace_block_with_cycle_id(
-    block: [u32; 16],
-    h: [u32; 8],
-    compression_cycle_id: u64,
-) -> EidosCompressionFeltTraceBlock {
-    let mut rows = vec![[Felt::ZERO; NUM_COLS]; BLOCK_PERIOD];
-    let mut recorder = NoopByteLookupRecorder;
-    let final_v = write_trace_rows(&mut rows, block, h, compression_cycle_id, &mut recorder);
-    let rows = rows
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
-
-    EidosCompressionFeltTraceBlock { rows, final_v }
-}
-
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
-pub fn rewrite_felt_footer_for_test(
+pub(super) fn rewrite_felt_footer_for_test(
     rows: &mut [EidosCompressionFeltRow; BLOCK_PERIOD],
     block: [u32; 16],
     h: [u32; 8],
