@@ -36,10 +36,10 @@ const IMPORTS: &str = r#"
   (import "miden:event/v1" "stack_get" (func $stack_get (param i32) (result i64)))
   (import "miden:event/v1" "stack_read" (func $stack_read (param i32 i32 i32)))
   (import "miden:event/v1" "clk" (func $clk (result i64)))
-  (import "miden:event/v1" "ctx" (func $ctx (result i32)))
+  (import "miden:event/v1" "is_root_context" (func $is_root_context (result i32)))
   (import "miden:event/v1" "mem_get" (func $mem_get (param i32 i32) (result i32)))
   (import "miden:event/v1" "mem_read" (func $mem_read (param i32 i32 i32) (result i32)))
-  (import "miden:event/v1" "mem_read_ctx" (func $mem_read_ctx (param i32 i32 i32 i32) (result i32)))
+  (import "miden:event/v1" "mem_read_root" (func $mem_read_root (param i32 i32 i32) (result i32)))
   (import "miden:event/v1" "merkle_get_node" (func $merkle_get_node (param i32 i32 i64 i32) (result i32)))
   (import "miden:event/v1" "merkle_has_path" (func $merkle_has_path (param i32 i32 i64) (result i32)))
   (import "miden:event/v1" "poseidon2_merge" (func $poseidon2_merge (param i32 i64 i32)))
@@ -253,10 +253,10 @@ fn mem_read_reports_uninit_and_out_of_bounds() {
 }
 
 #[test]
-fn clk_ctx_and_depth_are_visible() {
+fn clk_root_context_and_depth_are_visible() {
     let wat_src = fixture(
         "(i64.store (i32.const 0) (call $clk))
-         (i64.store (i32.const 8) (i64.extend_i32_u (call $ctx)))
+         (i64.store (i32.const 8) (i64.extend_i32_u (call $is_root_context)))
          (i64.store (i32.const 16) (i64.extend_i32_u (call $stack_depth)))
          (call $adv_stack_extend (i32.const 0) (i32.const 3))",
     );
@@ -265,7 +265,7 @@ fn clk_ctx_and_depth_are_visible() {
     let state = processor.state();
     let expected = [
         Felt::new_unchecked(u64::from(state.clock())),
-        Felt::new_unchecked(u64::from(u32::from(state.ctx()))),
+        Felt::new_unchecked(u64::from(state.ctx().is_root())),
         Felt::new_unchecked(u64::from(state.stack_depth())),
     ];
 
@@ -481,16 +481,16 @@ fn merkle_store_accepts_consistent_node() {
 }
 
 #[test]
-fn mem_read_ctx_statuses() {
-    // Context 0 of a fresh processor has no written cell, so the batch read is Uninit; a range
-    // past the u32 address space is OutOfBounds.
+fn mem_read_root_statuses() {
+    // The root context of a fresh processor has no written cell, so the batch read is Uninit; a
+    // range past the u32 address space is OutOfBounds.
     let wat_src = fixture(
         "(i64.store (i32.const 0)
              (i64.extend_i32_u
-                 (call $mem_read_ctx (i32.const 0) (i32.const 0) (i32.const 16) (i32.const 2))))
+                 (call $mem_read_root (i32.const 0) (i32.const 16) (i32.const 2))))
          (i64.store (i32.const 8)
              (i64.extend_i32_u
-                 (call $mem_read_ctx (i32.const 0) (i32.const -1) (i32.const 16) (i32.const 2))))
+                 (call $mem_read_root (i32.const -1) (i32.const 16) (i32.const 2))))
          (call $adv_stack_extend (i32.const 0) (i32.const 2))",
     );
     let module = load(&wat_src);

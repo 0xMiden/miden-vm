@@ -99,10 +99,11 @@ Version bumps are additive only: a newer ABI version may add host functions but 
 | `stack_depth() -> u32` | Depth of the operand stack. |
 | `stack_get(pos) -> u64` | Operand-stack element, returned directly in canonical form; position `0` holds the event ID, positions past the depth read as zero. |
 | `stack_read(start_pos, out, count)` | Batch read of the elements at positions `start_pos..start_pos + count`, ordered from the top down. |
-| `clk() -> u64`, `ctx() -> u32` | Clock cycle and execution context. |
+| `clk() -> u64` | Clock cycle. |
+| `is_root_context() -> i32` | `1` when the current execution context is the root context (where kernel state lives), `0` otherwise. The result is a boolean, not a status code. |
 | `mem_get(addr, out) -> status` | One memory element of the current context; `Uninit` when no cell of the memory word that holds the address was ever written. |
 | `mem_read(addr, out, count) -> status` | Batch read of `addr..addr + count`; `Uninit` when the range touches an unwritten memory word, `OutOfBounds` past the `u32` address space. |
-| `mem_read_ctx(ctx, addr, out, count) -> status` | The same batch read for an explicit execution context, for example the root context (ID `0`). |
+| `mem_read_root(addr, out, count) -> status` | The same batch read for the root context, for example kernel state read from a handler that runs in another context. |
 | `merkle_get_node(root, depth, index, out) -> status` | Merkle-store node of the tree with root `root`; `NotFound` when the store has no such tree or node. |
 | `merkle_has_path(root, depth, index) -> i32` | `1` when the Merkle store has a path for that node, `0` when it has not. The result is a boolean, not a status code: do not put it through `Status::from_raw`, because `1` is also the raw value of `Status::OutOfBounds`. |
 | `adv_stack_len() -> u32`, `adv_stack_read(offset, out, count) -> status` | Advice stack; offset `0` is the top. |
