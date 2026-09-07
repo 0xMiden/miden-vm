@@ -2,13 +2,21 @@
 
 use std::vec::Vec;
 
+use miden_air::lookup::Challenges;
 use miden_core::{
     Felt,
+    field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
+};
+use miden_precompiles_air::hash::{
+    chunk_node::NODE_COL_OFFSET, keccak::node::COL_OUT_MULT as KECCAK_OUT_MULT,
 };
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::{
+    relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+    session::Session,
+    tests::bus_balance::session_stack_residual,
     transcript::{
         eval::{
             COL_ACT, COL_H_BEGIN, COL_IS_PINNED, COL_IS_ZERO, COL_OUT_MULT, COL_PIN_CLAIM_PIN_PTR,
@@ -19,6 +27,56 @@ use crate::{
     },
     uint::trace::{UintPtr, UintStoreRequires},
 };
+
+#[test]
+fn shared_truthy_claims_balance_and_reject_wrong_multiplicities() {
+    let mut session = Session::new();
+    // Separate registrations of one Keccak input must also accumulate uses on one provider.
+    let (_, first) = session.keccak(b"shared claim");
+    let (_, second) = session.keccak(b"shared claim");
+    let pair = session.assert_and(first, first);
+    let left = session.assert_and(pair, first);
+    let right = session.assert_and(second, second);
+    let branch = session.assert_and(left, right);
+    let root = session.assert_and(branch, pair);
+    let traces = session.finish(root);
+    traces.check();
+    let mains = traces.mains();
+    assert_eq!(mains[0].values[NODE_COL_OFFSET + KECCAK_OUT_MULT], Felt::from_u32(5));
+
+    let mut rng = StdRng::seed_from_u64(3787);
+    let alpha = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
+    let beta = QuadFelt::new([Felt::new(rng.random()).unwrap(), Felt::new(rng.random()).unwrap()]);
+    let challenges = Challenges::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    assert!(session_stack_residual(&mains, &[], &challenges).is_empty());
+    let shared_and = mains[4]
+        .values
+        .as_chunks::<NUM_MAIN_COLS>()
+        .0
+        .iter()
+        .position(|row| row[COL_OUT_MULT] == Felt::from_u32(2))
+        .unwrap();
+    for (chip, offset) in [
+        (0, NODE_COL_OFFSET + KECCAK_OUT_MULT),
+        (4, shared_and * NUM_MAIN_COLS + COL_OUT_MULT),
+    ] {
+        for delta in [Felt::ONE, -Felt::ONE] {
+            let mut corrupted = mains[chip].clone();
+            corrupted.values[offset] += delta;
+            assert!(!session_stack_residual(&mains, &[(chip, &corrupted)], &challenges).is_empty());
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "stray unasserted claims")]
+fn unused_truthy_claim_is_rejected_even_when_its_hash_is_used() {
+    let mut session = Session::new();
+    let _unused = session.zero();
+    let used = session.zero();
+    let root = session.assert_and(used, used);
+    session.finish(root);
+}
 
 fn random_hash(rng: &mut impl Rng) -> P2Digest {
     P2Digest(core::array::from_fn(|_| Felt::new(rng.random()).unwrap()))

@@ -1,11 +1,17 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::deferred::{DeferredState, Node, TRUE_DIGEST};
+use miden_core::{
+    Felt,
+    deferred::{DeferredState, DeferredStateWire, Node, PrecompileRegistry, TRUE_DIGEST, Tag},
+    serde::{ByteWriter, Deserializable, Serializable},
+};
 use miden_precompiles::{CurveId, CurvePoint, CurvePrecompile, UintDomain, UintPrecompile};
 
 use crate::{
     deferred::{DeferredSession, session_from_deferred_state},
     math::{U256, from_hex, to_limbs32},
+    session::SessionTraces,
+    transcript::eval::{COL_ACT, COL_IS_AND, COL_OUT_MULT},
 };
 
 fn state() -> DeferredState {
@@ -17,6 +23,88 @@ fn limbs(value: u32) -> [u32; 8] {
     let mut limbs = [0; 8];
     limbs[0] = value;
     limbs
+}
+
+#[test]
+fn deferred_session_lowers_shared_uint_dag_from_wire() {
+    let mut state = state();
+    let zero = state
+        .register(UintPrecompile::value_node(UintDomain::U256, limbs(0)))
+        .expect("zero must register");
+    let mut current = zero;
+    // Only 24 operation nodes, but an uncached traversal expands over 16 million leaves.
+    // Every expression evaluates to zero while retaining a distinct structural digest.
+    for depth in 0..24 {
+        let op = [UintPrecompile::ADD_OP_ID, UintPrecompile::SUB_OP_ID, UintPrecompile::MUL_OP_ID]
+            [depth % 3];
+        let node = Node::join(UintPrecompile::op_tag(op), current, current).unwrap();
+        current = state.register(node).expect("shared uint expression must register");
+    }
+    let eq = Node::join(UintPrecompile::op_tag(UintPrecompile::EQ_OP_ID), current, zero).unwrap();
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).unwrap();
+    state.log_statement(eq).unwrap();
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_lowers_shared_ec_dag_from_wire() {
+    let mut state = state();
+    let identity = state
+        .register(CurvePrecompile::identity_node(CurveId::Secp256k1))
+        .expect("identity must register");
+    let mut current = identity;
+    for depth in 0..24 {
+        let op = [CurvePrecompile::ADD_OP_ID, CurvePrecompile::SUB_OP_ID][depth % 2];
+        let node = Node::join(CurvePrecompile::op_tag(op), current, current).unwrap();
+        current = state.register(node).expect("shared EC expression must register");
+    }
+    let eq =
+        Node::join(CurvePrecompile::op_tag(CurvePrecompile::EQ_OP_ID), current, identity).unwrap();
+    let eq = state.register(eq).expect("equality must register");
+    state.log_statement(eq).unwrap();
+    state.log_statement(eq).unwrap();
+    check_wire_session(state);
+}
+
+#[test]
+fn deferred_session_lowers_exponential_and_dag_from_raw_wire() {
+    for depth in [0_u32, 1, 4, 64] {
+        // Start from untrusted bytes, not an in-memory state or private wire fields.
+        let mut bytes = Vec::new();
+        bytes.write_usize(depth as usize);
+        for previous_index in 0..depth {
+            bytes.write_u8(1); // Join entry
+            Tag::AND.write_into(&mut bytes);
+            bytes.write_u32(previous_index);
+            bytes.write_u32(previous_index);
+        }
+        let wire = DeferredStateWire::read_from_bytes(&bytes).unwrap();
+        let state = DeferredState::from_wire(Arc::new(PrecompileRegistry::new()), &wire).unwrap();
+        assert_eq!(state.to_wire().unwrap().to_bytes(), bytes);
+        let traces = check_wire_session(state);
+        let eval = traces.mains()[4];
+        let rows = eval.values.chunks_exact(eval.width).collect::<Vec<_>>();
+        assert_eq!(rows.iter().filter(|row| row[COL_ACT] == Felt::ONE).count(), depth as usize + 1);
+        assert_eq!(rows.iter().filter(|row| row[COL_IS_AND] == Felt::ONE).count(), depth as usize);
+        assert_eq!(rows[0][COL_OUT_MULT], Felt::ZERO);
+        for row in rows.iter().skip(1).filter(|row| row[COL_ACT] == Felt::ONE) {
+            assert_eq!(row[COL_OUT_MULT], Felt::from_u32(2));
+        }
+    }
+}
+
+fn check_wire_session(state: DeferredState) -> SessionTraces {
+    let wire = state.to_wire().expect("state must serialize");
+    let wire = DeferredStateWire::read_from_bytes(&wire.to_bytes()).expect("wire must decode");
+    let rehydrated = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire)
+        .expect("shared DAG must pass wire validation and evaluation");
+    assert_eq!(rehydrated.root(), state.root());
+    let DeferredSession { session, root } =
+        session_from_deferred_state(&rehydrated).expect("shared DAG must lower");
+    let traces = session.finish(root);
+    traces.check();
+    traces
 }
 
 #[test]
