@@ -6,7 +6,7 @@ use miden_core::{
     },
 };
 use miden_crypto::hash::eidos::{
-    Eidos,
+    BLOCK_LEN as EIDOS_BLOCK_WIDTH, Eidos,
     domains::{
         AEAD_CTR_KEY, AEAD_MAC_KEY, FALCON_HASH_TO_POINT, FALCON_PUBLIC_KEY, GENERIC_FELT_SEQUENCE,
         LMCS_LEAF, MMR_PEAKS, SMT_BUCKET_LEAF,
@@ -207,11 +207,17 @@ fn masm_initial_chaining_words_match_rust() {
     ] {
         assert_word(VM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
     }
-    for (name, len) in [
-        ("EIDOS_LMCS_INIT_CV_8", 8),
-        ("EIDOS_LMCS_INIT_CV_288", 288),
-        ("EIDOS_LMCS_INIT_CV_512", 512),
+    for (cv_name, blocks_name) in [
+        ("PREPROCESSED_LMCS_INIT_CV", "PREPROCESSED_ROW_DOUBLE_WORDS"),
+        ("MAIN_LMCS_INIT_CV", "MAIN_ROW_DOUBLE_WORDS"),
+        ("AUX_LMCS_INIT_CV", "AUX_ROW_DOUBLE_WORDS"),
+        ("QUOTIENT_LMCS_INIT_CV", "QUOTIENT_ROW_DOUBLE_WORDS"),
     ] {
-        assert_word(PVM_DEEP_QUERIES, name, Eidos::init_chaining_word(LMCS_LEAF, len));
+        let blocks = u32::try_from(masm_scalar(PVM_DEEP_QUERIES, blocks_name))
+            .expect("PVM LMCS block count exceeds u32");
+        let encoded_len = blocks
+            .checked_mul(EIDOS_BLOCK_WIDTH as u32)
+            .expect("PVM LMCS encoded length exceeds u32");
+        assert_word(PVM_DEEP_QUERIES, cv_name, Eidos::init_chaining_word(LMCS_LEAF, encoded_len));
     }
 }

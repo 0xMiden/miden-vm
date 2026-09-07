@@ -53,7 +53,8 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
     },
     utils::{current_main, next_main},
 };
