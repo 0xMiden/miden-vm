@@ -4,7 +4,7 @@
 ### The ACE READ section is one dense vector of quadratic-extension inputs.
 ### Every boundary below is derived from the PVM circuit's InputLayout; each
 ### input occupies two base-field felts. The complete allocation, including relation-local
-### scratch after the stream, is the half-open range 3225432064..3225451110.
+### scratch after the stream, is the half-open range 3225432064..3225451046.
 ### Per-AIR heights remain in the generic 16-cell array, in ChipletAir::all()
 ### order; the PVM wrapper supplies the relation count and that shared base.
 
@@ -22,47 +22,47 @@ const PREPROCESSED_CURRENT_PTR = 3225432080
 ### 1024 felts: 3225432096..3225433120.
 const MAIN_CURRENT_PTR = 3225432096
 
-### 576 felts: 3225433120..3225433696.
+### 560 felts: 3225433120..3225433680.
 const AUX_CURRENT_PTR = 3225433120
 
+### 16 felts: 3225433680..3225433696.
+const QUOTIENT_CURRENT_PTR = 3225433680
+
 ### 16 felts: 3225433696..3225433712.
-const QUOTIENT_CURRENT_PTR = 3225433696
+const PREPROCESSED_NEXT_PTR = 3225433696
 
-### 16 felts: 3225433712..3225433728.
-const PREPROCESSED_NEXT_PTR = 3225433712
+### 1024 felts: 3225433712..3225434736.
+const MAIN_NEXT_PTR = 3225433712
 
-### 1024 felts: 3225433728..3225434752.
-const MAIN_NEXT_PTR = 3225433728
+### 560 felts: 3225434736..3225435296.
+const AUX_NEXT_PTR = 3225434736
 
-### 576 felts: 3225434752..3225435328.
-const AUX_NEXT_PTR = 3225434752
+### 16 felts: 3225435296..3225435312.
+const QUOTIENT_NEXT_PTR = 3225435296
 
-### 16 felts: 3225435328..3225435344.
-const QUOTIENT_NEXT_PTR = 3225435328
+### 20 felts: 3225435312..3225435332.
+const AUX_BUS_BOUNDARY_PTR = 3225435312
 
-### 20 felts: 3225435344..3225435364.
-const AUX_BUS_BOUNDARY_PTR = 3225435344
+### 84 felts: 3225435332..3225435416.
+const AUXILIARY_ACE_INPUTS_PTR = 3225435332
 
-### 84 felts: 3225435364..3225435448.
-const AUXILIARY_ACE_INPUTS_PTR = 3225435364
+### 14800 felts: 3225435416..3225450216.
+const ACE_CIRCUIT_STREAM_PTR = 3225435416
 
-### 14824 felts: 3225435448..3225450272.
-const ACE_CIRCUIT_STREAM_PTR = 3225435448
+### 4 felts: 3225450216..3225450220. Stores gamma = beta^18.
+const BUS_GAMMA_PTR = 3225450216
 
-### 4 felts: 3225450272..3225450276. Stores gamma = beta^18.
-const BUS_GAMMA_PTR = 3225450272
+### 4 felts: 3225450220..3225450224. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
+const C_TOTAL_PTR = 3225450220
 
-### 4 felts: 3225450276..3225450280. Stores the two-felt fixed-boundary correction; the remaining two felts are reserved.
-const C_TOTAL_PTR = 3225450276
+### 808 felts: 3225450224..3225451032. Stores one opened query row in commitment-group order.
+const CURRENT_TRACE_ROW_PTR = 3225450224
 
-### 816 felts: 3225450280..3225451096. Stores one opened query row in commitment-group order.
-const CURRENT_TRACE_ROW_PTR = 3225450280
+### 4 felts: 3225451032..3225451036. Stores the trusted preprocessed-tree commitment for DEEP openings.
+const PREPROCESSED_COM_PTR = 3225451032
 
-### 4 felts: 3225451096..3225451100. Stores the trusted preprocessed-tree commitment for DEEP openings.
-const PREPROCESSED_COM_PTR = 3225451096
-
-### 10 felts: 3225451100..3225451110. Stores, by canonical AIR index, the absolute address of its auxiliary boundary value in the proof-ordered buffer.
-const AUX_VALUE_PTRS_PTR = 3225451100
+### 10 felts: 3225451036..3225451046. Stores, by canonical AIR index, the absolute address of its auxiliary boundary value in the proof-ordered buffer.
+const AUX_VALUE_PTRS_PTR = 3225451036
 
 pub proc public_inputs_ptr() -> types::Address
     push.PUBLIC_INPUTS_PTR
