@@ -430,17 +430,11 @@ pub(super) fn compress_raw(cv: [u32; 8], block: [u32; 16]) -> [u32; 8] {
         row_x86::compress_raw(&cv, &block)
     }
 
-    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
-    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
-        let mut out = [0; 8];
-        // SAFETY: runtime detection or target features guarantee SVE2; buffers match the ABI.
-        unsafe { eidos_compress_raw_sve2(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
-        return out;
-    }
-
     #[cfg(target_arch = "aarch64")]
     {
         let mut out = [0; 8];
+        // A single state occupies four lanes. NEON avoids the gather and table overhead of the
+        // scalable row kernel while remaining available on every AArch64 target.
         // SAFETY: NEON is the AArch64 baseline; buffers have the fixed ABI dimensions.
         unsafe { eidos_compress_raw_neon(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
         return out;
@@ -469,14 +463,6 @@ pub(super) fn compress_raw_xof(cv: [u32; 8], block: [u32; 16]) -> [u32; 16] {
     #[cfg(all(target_arch = "x86_64", not(feature = "std"), not(target_feature = "avx512vl")))]
     {
         row_x86::compress_raw_xof(&cv, &block)
-    }
-
-    #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
-    if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
-        let mut out = [0; 16];
-        // SAFETY: runtime detection or target features guarantee SVE2; buffers match the ABI.
-        unsafe { eidos_compress_xof_sve2(cv.as_ptr(), block.as_ptr(), out.as_mut_ptr()) };
-        return out;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -713,16 +699,18 @@ pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [
     #[cfg(target_arch = "aarch64")]
     {
         let mut out = [0; 8];
-        let kernel = eidos_compress_blocks_neon;
-        #[cfg(any(feature = "std", target_feature = "sve2"))]
-        let kernel = if arm_dispatch::detect_arm_tier() == arm_dispatch::ArmTier::Sve2 {
-            eidos_compress_blocks_sve2
-        } else {
-            kernel
-        };
-        // SAFETY: the selected ISA is available. The slice contains count complete blocks;
+        // Sequential blocks retain one four-lane state, so they share the raw NEON path's
+        // lower single-state latency.
+        // SAFETY: NEON is always available on AArch64. The slice contains count complete blocks;
         // CV and output each contain eight words, including when the block count is zero.
-        unsafe { kernel(cv.as_ptr(), blocks.as_ptr().cast(), out.as_mut_ptr(), blocks.len()) };
+        unsafe {
+            eidos_compress_blocks_neon(
+                cv.as_ptr(),
+                blocks.as_ptr().cast(),
+                out.as_mut_ptr(),
+                blocks.len(),
+            )
+        };
         out
     }
     #[cfg(not(target_arch = "aarch64"))]
@@ -762,9 +750,6 @@ unsafe extern "C" {
 #[cfg(all(target_arch = "aarch64", any(feature = "std", target_feature = "sve2")))]
 unsafe extern "C" {
     fn eidos_compress16_u64_sve2(cv: *const u64, block: *const u64, out: *mut u64, count: usize);
-    fn eidos_compress_blocks_sve2(cv: *const u32, blocks: *const u32, out: *mut u32, count: usize);
-    fn eidos_compress_raw_sve2(cv: *const u32, block: *const u32, out: *mut u32);
-    fn eidos_compress_xof_sve2(cv: *const u32, block: *const u32, out: *mut u32);
     fn eidos_compress16_sve2(cv: *const u32, block: *const u32, out: *mut u32, active_lanes: usize);
     fn eidos_check_witness_batch_sve2(
         cv: *const u64,
