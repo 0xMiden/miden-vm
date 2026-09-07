@@ -13,7 +13,7 @@ use miden_core::{
     deferred::DeferredState,
     field::QuotientMap,
     program::ExecutionClaim,
-    proof::PrecompileProof,
+    proof::{PrecompileProof, PrecompileStatus},
     serde::{Deserializable, Serializable},
     utils::to_hex,
 };
@@ -32,7 +32,7 @@ use super::{
     recursive_host,
 };
 
-const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v2";
+const TX_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-tx-proof-cache-v3";
 const PVM_PROOF_CACHE_KEY_VERSION: &[u8] = b"miden-synthetic-recursive-pvm-proof-cache-v3";
 const INNER_PROOF_HASH: HashFunction = HashFunction::Poseidon2;
 const PVM_WORKLOAD_CONTENT_DIGEST: [u8; 32] = [
@@ -136,9 +136,9 @@ fn load_cached_tx_proof(
             return None;
         },
     };
-    let vm_proof = match &proof {
-        ExecutionProof::Complete { vm, precompile: None } => vm,
-        ExecutionProof::Complete { precompile: Some(_), .. } | ExecutionProof::Deferred { .. } => {
+    let vm_proof = match proof.precompile() {
+        PrecompileStatus::Empty => proof.vm(),
+        PrecompileStatus::Proven(_) | PrecompileStatus::Deferred(_) => {
             eprintln!(
                 "ignoring cached transaction proof with precompile data {}",
                 proof_path.display()
@@ -474,7 +474,7 @@ pub(super) fn load_tx_fixtures(config: &BenchConfig, proof_count: usize) -> Vec<
                 (stack_outputs, proof, "miss")
             };
             assert!(
-                matches!(&proof, ExecutionProof::Complete { precompile: None, .. }),
+                matches!(proof.precompile(), PrecompileStatus::Empty),
                 "recursive_verify fixture at proof index {proof_index} emits deferred proof data; \
                  this benchmark expects precompile-free fixtures"
             );

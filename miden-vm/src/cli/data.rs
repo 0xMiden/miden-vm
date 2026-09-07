@@ -194,7 +194,7 @@ impl ProofFile {
         let file = fs::read(&path)
             .map_err(|err| format!("Failed to open proof file `{}` - {}", path.display(), err))?;
 
-        // deserialize bytes into an execution proof
+        // deserialize bytes into a versioned execution proof
         ExecutionProof::read_from_bytes(&file)
             .map_err(|err| format!("Failed to decode proof data - {err}"))
     }

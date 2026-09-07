@@ -533,6 +533,10 @@ impl Deserializable for Continuation<MastForestId> {
             },
         }
     }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size() + MastNodeId::min_serialized_size()
+    }
 }
 
 // `source_node_ids` is deliberately *not* serialized: those indices point into a package's

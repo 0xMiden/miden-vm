@@ -20,6 +20,7 @@ use super::{
 use crate::PrecompileWitness;
 use crate::{
     ExecutionError, ExecutionOutput, ExecutionWitness, Host, LoadedMastForest, Stopper, SyncHost,
+    advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack, SourceInlineCallContext},
     errors::{
         MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
@@ -1195,18 +1196,23 @@ impl FastProcessor {
         ),
         ExecutionError,
     > {
-        let loaded_mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => {
-                    crate::errors::procedure_not_found_with_package_source_context(
-                        node_digest,
-                        PackageSourceDebugContext::new(debug_info, source_node_id),
-                        host,
-                    )
-                },
-                _ => crate::errors::procedure_not_found_with_context(node_digest),
-            }
-        })?;
+        let cached = self.loaded_mast_forests.get(&node_digest).cloned();
+        let was_cached = cached.is_some();
+        let loaded_mast_forest = match cached {
+            Some(mast_forest) => mast_forest,
+            None => host.get_mast_forest(&node_digest).ok_or_else(|| {
+                match (package_debug_info, source_node_id) {
+                    (Some(debug_info), Some(source_node_id)) => {
+                        crate::errors::procedure_not_found_with_package_source_context(
+                            node_digest,
+                            PackageSourceDebugContext::new(debug_info, source_node_id),
+                            host,
+                        )
+                    },
+                    _ => crate::errors::procedure_not_found_with_context(node_digest),
+                }
+            })?,
+        };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
@@ -1219,7 +1225,10 @@ impl FastProcessor {
             malformed_mast_forest_with_context(node_digest, context, host)
         })?;
 
-        self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;
+        if !was_cached {
+            self.cache_loaded_mast_forest(&loaded_mast_forest);
+        }
+        self.merge_mast_forest_advice(&mast_forest).map_exec_err()?;
         let (loaded_package_debug_info, loaded_source_node_id) =
             Self::loaded_package_source_context(
                 &loaded_mast_forest,
@@ -1246,20 +1255,26 @@ impl FastProcessor {
         ),
         ExecutionError,
     > {
-        let loaded_mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await
-        {
-            mast_forest
-        } else {
-            return Err(match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => {
-                    crate::errors::procedure_not_found_with_package_source_context(
-                        node_digest,
-                        PackageSourceDebugContext::new(debug_info, source_node_id),
-                        host,
-                    )
-                },
-                _ => crate::errors::procedure_not_found_with_context(node_digest),
-            });
+        let cached = self.loaded_mast_forests.get(&node_digest).cloned();
+        let was_cached = cached.is_some();
+        let loaded_mast_forest = match cached {
+            Some(mast_forest) => mast_forest,
+            None => {
+                if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
+                    mast_forest
+                } else {
+                    return Err(match (package_debug_info, source_node_id) {
+                        (Some(debug_info), Some(source_node_id)) => {
+                            crate::errors::procedure_not_found_with_package_source_context(
+                                node_digest,
+                                PackageSourceDebugContext::new(debug_info, source_node_id),
+                                host,
+                            )
+                        },
+                        _ => crate::errors::procedure_not_found_with_context(node_digest),
+                    });
+                }
+            },
         };
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
@@ -1273,7 +1288,10 @@ impl FastProcessor {
             malformed_mast_forest_with_context(node_digest, context, host)
         })?;
 
-        self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;
+        if !was_cached {
+            self.cache_loaded_mast_forest(&loaded_mast_forest);
+        }
+        self.merge_mast_forest_advice(&mast_forest).map_exec_err()?;
         let (loaded_package_debug_info, loaded_source_node_id) =
             Self::loaded_package_source_context(
                 &loaded_mast_forest,
@@ -1282,6 +1300,25 @@ impl FastProcessor {
             )?;
 
         Ok((root_id, mast_forest, loaded_package_debug_info, loaded_source_node_id))
+    }
+
+    fn cache_loaded_mast_forest(&mut self, loaded_mast_forest: &LoadedMastForest) {
+        for procedure_digest in loaded_mast_forest.mast_forest().local_procedure_digests() {
+            self.loaded_mast_forests
+                .entry(procedure_digest)
+                .or_insert_with(|| loaded_mast_forest.clone());
+        }
+    }
+
+    fn merge_mast_forest_advice(&mut self, mast_forest: &MastForest) -> Result<(), AdviceError> {
+        let commitment = mast_forest.commitment();
+        if self.merged_mast_forests.contains(&commitment) {
+            return Ok(());
+        }
+
+        self.advice.extend_map(mast_forest.advice_map())?;
+        self.merged_mast_forests.insert(commitment);
+        Ok(())
     }
 
     fn loaded_package_source_context(

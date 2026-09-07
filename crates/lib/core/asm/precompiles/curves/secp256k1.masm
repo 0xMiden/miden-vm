@@ -19,7 +19,12 @@ use miden::core::precompiles::fields::k1_base
 # - raw coordinate digests and raw VALUE payloads are checked at VALUE evaluation boundaries;
 # - ADD/SUB/MSM operands are evaluated to canonical curve/scalar VALUE nodes before arithmetic;
 # - invalid coordinates, wrong-domain coordinate digests, mixed identity payloads, and non-curve
-#   digests fail during deferred registration/evaluation.
+#   digests fail during deferred registration/evaluation;
+# - MSM (`mul_scalar`, `mul_scalar_generator`, `msm_mem`, `msm2`, `msm2_generator`) accepts a zero
+#   scalar for any pair (contributing identity to the sum) and a repeated, or structurally
+#   different but canonically equal, base across pairs; the result may itself be the identity
+#   point. An identity VALUE is rejected as an MSM base, failing the same way the other invalid
+#   cases above do.
 #
 # Notation used below:
 # - DIGEST        = one word [d0, d1, d2, d3], d0 on top of the stack.

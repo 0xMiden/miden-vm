@@ -46,8 +46,6 @@ latest_release_tag_on_head() {
 
 parse_version "$workspace_version" current
 
-git -C "$repo_root" fetch --tags origin
-
 baseline_tag="$(latest_release_tag_on_head)"
 if [[ -z "$baseline_tag" ]]; then
     echo "No release tag found on the current branch history; skipping MASM root stability check"

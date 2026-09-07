@@ -12,7 +12,7 @@
 pub mod message;
 pub mod program;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use core::{array, ops::Range};
 
 pub use message::KeccakSpongeMsg;
@@ -234,8 +234,8 @@ impl BaseAir<Felt> for KeccakSpongeAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        sponge_program().to_vec()
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
+        Cow::Owned(sponge_program().into())
     }
 }
 

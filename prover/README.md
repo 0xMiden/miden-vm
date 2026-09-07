@@ -7,12 +7,11 @@ synchronous `Prover` does not execute programs: it consumes `ExecutionWitness` v
 
 ## Usage
 
-`Prover` is synchronous and consumes post-execution witnesses:
-
-- `Prover::prove(ExecutionWitness)` proves the VM portion and returns `Complete` when there is no
-  deferred work, or `Deferred` carrying a passive `DeferredStateWire`.
-- `Prover::prove_full(ExecutionWitness)` proves the VM and any precompile work locally.
-- `Prover::prove_precompile(&PrecompileWitness)` proves one hydrated singleton or merged witness.
+`Prover` is synchronous and consumes post-execution witnesses. `Prover::prove(ExecutionWitness)`
+proves the VM portion. Its `PrecompileStatus` is `Empty` when there is no deferred work, or
+`Deferred` with a passive `DeferredStateWire`. `Prover::prove_full(ExecutionWitness)` proves the VM
+and any precompile work locally. `Prover::prove_precompile(&PrecompileWitness)` proves one hydrated
+singleton or merged witness.
 
 Use `Prover::with_hash_fn` to select the proof hash function.
 
@@ -24,7 +23,7 @@ will be passed to `Prover`.
 ### Deferred precompile workflow
 
 ```rust,ignore
-use miden_prover::{ExecutionProof, Prover};
+use miden_prover::{ExecutionProof, PrecompileStatus, Prover};
 use miden_verifier::Verifier;
 use miden_vm::precompile_witness_from_wire;
 
@@ -33,17 +32,17 @@ let claim = witness.claim();
 let prover = Prover::new();
 let deferred = prover.prove(witness)?;
 
-// Passively transport the proof, then decode it without a registry.
+// Transport and decode the proof without a registry.
 let bytes = deferred.to_bytes();
-let transported = ExecutionProof::read_from_bytes(&bytes)?;
-let ExecutionProof::Deferred { precompile: wire, .. } = &transported else {
+let proof = ExecutionProof::read_from_bytes(&bytes)?;
+let PrecompileStatus::Deferred(wire) = proof.precompile_status() else {
     unreachable!("precompile proving is only needed for deferred proofs");
 };
 
 // Hydration installs the bundled registry only when precompile proving begins.
 let precompile_witness = precompile_witness_from_wire(wire)?;
 let precompile_proof = prover.prove_precompile(&precompile_witness)?;
-let complete = transported.complete(precompile_proof)?;
+let complete = proof.complete(precompile_proof)?;
 let outcome = Verifier::new().verify(&claim, &complete)?;
 assert!(outcome.is_complete());
 ```

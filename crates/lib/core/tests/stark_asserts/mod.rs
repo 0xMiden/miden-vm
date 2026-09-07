@@ -8,7 +8,12 @@ use miden_processor::ExecutionOutput;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 
-use crate::helpers::read_memory_felt;
+use crate::{
+    helpers::read_memory_felt,
+    support::security::{
+        LOG_HEIGHT_MAX, MVM_LOG_HEIGHT_MIN, NUM_QUERIES_MAX, NUM_QUERIES_MIN, POW_BITS_MAX,
+    },
+};
 
 const TRACE_LENGTH_LOG_PTR: u32 = 3223322634;
 const ORDER_TAG_PTR: u32 = 3223322639;
@@ -47,10 +52,10 @@ fn execute_load_air_context(
 }
 
 fn validate_inputs_source(
-    num_queries: u32,
-    query_pow_bits: u32,
-    deep_pow_bits: u32,
-    folding_pow_bits: u32,
+    num_queries: u64,
+    query_pow_bits: u64,
+    deep_pow_bits: u64,
+    folding_pow_bits: u64,
 ) -> String {
     format!(
         "use miden::core::stark::utils
@@ -67,38 +72,51 @@ fn validate_inputs_source(
 
 #[test]
 fn load_air_context_core_trace_length_upper_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[30, 10, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[LOG_HEIGHT_MAX + 1, 10, 10],);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_core_trace_length_lower_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[5, 10, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[MVM_LOG_HEIGHT_MIN - 1, 10, 10],);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_chiplets_trace_length_upper_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[10, 30, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[10, LOG_HEIGHT_MAX + 1, 10],);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_chiplets_trace_length_lower_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[10, 5, 10]);
+    let test = build_test!(load_air_context_source(), &[], &[10, MVM_LOG_HEIGHT_MIN - 1, 10],);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_poseidon2_trace_length_upper_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[10, 10, 30]);
+    let test = build_test!(load_air_context_source(), &[], &[10, 10, LOG_HEIGHT_MAX + 1],);
     expect_assert_error_message!(test);
 }
 
 #[test]
 fn load_air_context_poseidon2_trace_length_lower_bound() {
-    let test = build_test!(load_air_context_source(), &[], &[10, 10, 5]);
+    let test = build_test!(load_air_context_source(), &[], &[10, 10, MVM_LOG_HEIGHT_MIN - 1],);
     expect_assert_error_message!(test);
+}
+
+#[test]
+fn load_air_context_accepts_trace_length_boundaries() {
+    execute_load_air_context(MVM_LOG_HEIGHT_MIN, MVM_LOG_HEIGHT_MIN, MVM_LOG_HEIGHT_MIN);
+    execute_load_air_context(LOG_HEIGHT_MAX, LOG_HEIGHT_MAX, LOG_HEIGHT_MAX);
+}
+
+#[test]
+fn load_air_context_rejects_a_non_u32_trace_length() {
+    let non_u32 = u64::from(u32::MAX) + 1;
+    let test = build_test!(load_air_context_source(), &[], &[non_u32, 10, 10]);
+    assert!(test.execute().is_err(), "a non-u32 AIR height must be rejected");
 }
 
 #[test]
@@ -140,30 +158,46 @@ fn load_air_context_derives_proof_order_tags() {
 }
 
 #[test]
-fn validate_inputs_num_queries_upper_bound() {
-    // num_queries = 151 must be rejected (must be < 151).
-    let source = validate_inputs_source(151, 0, 0, 16);
-    let test = build_test!(&source, &[]);
-    expect_assert_error_message!(test);
+fn validate_inputs_accepts_num_query_boundaries() {
+    for num_queries in [NUM_QUERIES_MIN, NUM_QUERIES_MAX] {
+        let source = validate_inputs_source(num_queries, 0, 0, 16);
+        build_test!(&source, &[])
+            .execute()
+            .unwrap_or_else(|err| panic!("num_queries={num_queries} must be accepted: {err}"));
+    }
 }
 
 #[test]
-fn validate_inputs_num_queries_lower_bound() {
-    // num_queries = 6 must be rejected (must be > 6).
-    let source = validate_inputs_source(6, 0, 0, 16);
-    let test = build_test!(&source, &[]);
-    expect_assert_error_message!(test);
+fn validate_inputs_rejects_num_queries_outside_boundaries() {
+    for (num_queries, message) in [
+        (NUM_QUERIES_MIN - 1, "num_queries must be at least 7"),
+        (NUM_QUERIES_MAX + 1, "num_queries must be at most 150"),
+    ] {
+        let source = validate_inputs_source(num_queries, 0, 0, 16);
+        let test = build_test!(&source, &[]);
+        expect_assert_error_code_from_msg!(test, message);
+    }
 }
 
 #[test]
 fn validate_inputs_pow_bit_bounds() {
     for (name, valid, invalid, message) in [
-        ("query_pow_bits", [31, 0, 0], [32, 0, 0], "query_pow_bits must be less than 32"),
-        ("deep_pow_bits", [0, 31, 0], [0, 32, 0], "deep_pow_bits must be less than 32"),
+        (
+            "query_pow_bits",
+            [POW_BITS_MAX, 0, 0],
+            [POW_BITS_MAX + 1, 0, 0],
+            "query_pow_bits must be less than 32",
+        ),
+        (
+            "deep_pow_bits",
+            [0, POW_BITS_MAX, 0],
+            [0, POW_BITS_MAX + 1, 0],
+            "deep_pow_bits must be less than 32",
+        ),
         (
             "folding_pow_bits",
-            [0, 0, 31],
-            [0, 0, 32],
+            [0, 0, POW_BITS_MAX],
+            [0, 0, POW_BITS_MAX + 1],
             "folding_pow_bits must be less than 32",
         ),
     ] {
@@ -171,12 +205,27 @@ fn validate_inputs_pow_bit_bounds() {
         let source = validate_inputs_source(27, query, deep, folding);
         build_test!(&source, &[])
             .execute()
-            .unwrap_or_else(|err| panic!("{name}=31 must be accepted: {err}"));
+            .unwrap_or_else(|err| panic!("{name}={POW_BITS_MAX} must be accepted: {err}"));
 
         let [query, deep, folding] = invalid;
         let source = validate_inputs_source(27, query, deep, folding);
         let test = build_test!(&source, &[]);
         expect_assert_error_code_from_msg!(test, message);
+    }
+}
+
+#[test]
+fn validate_inputs_rejects_non_u32_security_parameters() {
+    let non_u32 = u64::from(u32::MAX) + 1;
+    for [num_queries, query, deep, folding] in [
+        [non_u32, 0, 0, 0],
+        [27, non_u32, 0, 0],
+        [27, 0, non_u32, 0],
+        [27, 0, 0, non_u32],
+    ] {
+        let source = validate_inputs_source(num_queries, query, deep, folding);
+        let test = build_test!(&source, &[]);
+        assert!(test.execute().is_err(), "a non-u32 security parameter must be rejected");
     }
 }
 
@@ -421,6 +470,9 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         debuginfo::{DefaultSourceManager, SourceFile, SourceSpan, Span},
     };
 
+    const FRI_QUERY_REGION_SIZE: u64 = NUM_QUERIES_MAX * 4;
+    const FRI_FORWARD_REGION_SIZE: u64 = 512;
+
     /// `(name, offset from the declared address, extent in felts)`.
     ///
     /// Every address declaration must occur exactly once. There is deliberately no
@@ -479,8 +531,12 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("RELATION_DIGEST_PTR", 0, 4),
         ("ACE_REGISTRY_ROOT_PTR", 0, 4),
         ("GENERIC_ALIGNMENT_PADDING_PTR", 0, 1),
-        // Query words grow backward; FRI layers and the remainder grow forward.
-        ("FRI_COM_PTR", -600, 1112),
+        // One word per accepted query grows backward; FRI layers and the remainder grow forward.
+        (
+            "FRI_COM_PTR",
+            -(FRI_QUERY_REGION_SIZE as i64),
+            FRI_QUERY_REGION_SIZE + FRI_FORWARD_REGION_SIZE,
+        ),
     ];
 
     // These declarations name fields inside LDE_DOMAIN_INFO_PTR rather than distinct storage.
@@ -491,7 +547,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
     const GENERIC_FRAME_END: u64 = 3_223_322_764;
     const VM_FRAME_END: u64 = 3_223_323_864;
     const PVM_FRAME_START: u64 = 3_225_426_416;
-    const PVM_FRAME_END: u64 = 3_225_444_180;
+    const PVM_FRAME_END: u64 = 3_225_444_212;
 
     /// `(path below asm/sys, name, offset from the declared address, extent in felts)`.
     /// New relation-owned addresses must be added here, including one-felt cells.
@@ -508,7 +564,7 @@ fn verifier_memory_layout_is_complete_dense_and_disjoint() {
         ("pvm/layout.masm", "QUOTIENT_NEXT_PTR", 0, 16),
         ("pvm/layout.masm", "AUX_BUS_BOUNDARY_PTR", 0, 20),
         ("pvm/layout.masm", "AUXILIARY_ACE_INPUTS_PTR", 0, 84),
-        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13792),
+        ("pvm/layout.masm", "ACE_CIRCUIT_STREAM_PTR", 0, 13824),
         ("pvm/layout.masm", "BUS_GAMMA_PTR", 0, 4),
         ("pvm/layout.masm", "C_TOTAL_PTR", 0, 4),
         ("pvm/layout.masm", "CURRENT_TRACE_ROW_PTR", 0, 768),

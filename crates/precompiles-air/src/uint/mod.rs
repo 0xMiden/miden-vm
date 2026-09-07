@@ -72,7 +72,7 @@ mod aux;
 pub mod mul;
 pub mod store_mul;
 
-use alloc::{vec, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -261,16 +261,16 @@ impl BaseAir<Felt> for UintStoreAir {
         NUM_PUBLIC_VALUES
     }
 
-    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+    fn periodic_columns(&self) -> Cow<'_, [Vec<Felt>]> {
         let o = Felt::ONE;
         let z = Felt::ZERO;
         // One one-hot column per row role.
-        vec![
+        Cow::Owned(vec![
             vec![o, z, z, z], // V_LO  (row 0)
             vec![z, o, z, z], // V_HI  (row 1)
             vec![z, z, o, z], // COMP  (row 2)
             vec![z, z, z, o], // BOUND (row 3)
-        ]
+        ])
     }
 }
 

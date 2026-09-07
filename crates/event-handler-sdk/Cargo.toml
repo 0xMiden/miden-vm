@@ -1,6 +1,6 @@
 [package]
 name = "miden-event-handler-sdk"
-version = "0.31.0"
+version = "0.33.0"
 description = "Guest SDK for writing Wasm-compiled Miden VM event handlers in Rust"
 documentation = "https://docs.rs/miden-event-handler-sdk"
 readme = "README.md"

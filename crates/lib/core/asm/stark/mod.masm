@@ -4,6 +4,7 @@ pub mod deep_queries
 pub mod ood_frames
 pub mod public_inputs
 pub mod random_coin
+pub mod security
 pub mod utils
 pub mod verifier
 

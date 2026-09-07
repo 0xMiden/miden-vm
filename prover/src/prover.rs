@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 
-use miden_core::proof::{ExecutionProof, HashFunction, PrecompileProof, VmProof};
+use miden_core::proof::{ExecutionProof, HashFunction, PrecompileProof, PrecompileStatus, VmProof};
 use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionWitness, FastProcessor, PrecompileWitness, Program,
     StackInputs, StackOutputs, SyncHost, VmWitness,
@@ -66,13 +66,13 @@ impl Prover {
         let (vm_witness, precompile_witness) = witness.into_parts();
         let vm = self.prove_vm(vm_witness)?;
         let Some(precompile_witness) = precompile_witness else {
-            return Ok(ExecutionProof::Complete { vm, precompile: None });
+            return Ok(ExecutionProof::new(vm, PrecompileStatus::Empty));
         };
         let precompile = precompile_witness
             .state()
             .to_wire()
             .expect("execution witness state must have canonical deferred wire");
-        Ok(ExecutionProof::Deferred { vm, precompile })
+        Ok(ExecutionProof::new(vm, PrecompileStatus::Deferred(precompile)))
     }
 
     /// Proves a complete execution witness entirely in memory.
@@ -86,7 +86,11 @@ impl Prover {
             .as_ref()
             .map(|witness| self.prove_precompile(witness))
             .transpose()?;
-        Ok(ExecutionProof::Complete { vm, precompile })
+        let precompile = match precompile {
+            Some(precompile) => PrecompileStatus::Proven(precompile),
+            None => PrecompileStatus::Empty,
+        };
+        Ok(ExecutionProof::new(vm, precompile))
     }
 
     /// Materializes and proves the VM trace represented by `witness`.
@@ -118,7 +122,11 @@ impl Prover {
     ) -> Result<ExecutionProof, ProverError> {
         let vm = self.prove_vm_trace(trace)?;
         let precompile = precompile.map(|witness| self.prove_precompile(witness)).transpose()?;
-        Ok(ExecutionProof::Complete { vm, precompile })
+        let precompile = match precompile {
+            Some(precompile) => PrecompileStatus::Proven(precompile),
+            None => PrecompileStatus::Empty,
+        };
+        Ok(ExecutionProof::new(vm, precompile))
     }
 
     /// Proves a fully materialized VM trace.

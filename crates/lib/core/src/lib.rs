@@ -133,17 +133,17 @@ impl CoreLibrary {
         Arc::clone(&self.package)
     }
 
-    /// Returns the MAST root of `sys::vm::verify_vm_proof` — the verifier identity under
+    /// Returns the MAST root of `sys::vm::verify_proof`, the verifier identity under
     /// which recursive proofs are content-addressed.
     ///
     /// Operators pass this root when registering a proof package in the advice map
     /// (`RecursiveVerifierInputs::for_request`). A consumer derives the identical value
     /// in-VM with `procref` — a procedure's root is intrinsic to its own MAST — so the two sides
     /// agree without a shared constant; consumers key their proof fetches by this root.
-    pub fn recursive_verifier_root(&self) -> Word {
+    pub fn vm_recursive_verifier_root(&self) -> Word {
         self.package
-            .get_procedure_root_by_path("::miden::core::sys::vm::verify_vm_proof")
-            .expect("verify_vm_proof is exported from the core library")
+            .get_procedure_root_by_path("::miden::core::sys::vm::verify_proof")
+            .expect("vm::verify_proof is exported from the core library")
     }
 
     /// Returns the MAST root of `sys::pvm::verify_proof` — the verifier identity under which PVM
@@ -155,6 +155,20 @@ impl CoreLibrary {
         self.package
             .get_procedure_root_by_path("::miden::core::sys::pvm::verify_proof")
             .expect("pvm::verify_proof is exported from the core library")
+    }
+
+    /// Returns the MAST root of the common recursive conjectured security estimator.
+    ///
+    /// The MVM and PVM verifiers return relation-specific descriptors consumed by this one
+    /// procedure. Its root does not encode an acceptance threshold; each consumer compares the
+    /// returned level with its own threshold. The estimator does not verify proofs or authenticate
+    /// descriptors assembled by the caller.
+    pub fn conjectured_security_estimator_root(&self) -> Word {
+        self.package
+            .get_procedure_root_by_path(
+                "::miden::core::stark::security::compute_conjectured_security_level",
+            )
+            .expect("the conjectured security estimator is exported from the core library")
     }
 
     /// Returns the default event handlers required by the core library.
@@ -199,11 +213,18 @@ impl Default for CoreLibrary {
     }
 }
 
+/// Returns the MAST root of the common recursive conjectured security estimator.
+pub fn conjectured_security_estimator_root() -> Word {
+    CoreLibrary::default().conjectured_security_estimator_root()
+}
+
 // TESTS
 // ================================================================================================
 
 #[cfg(test)]
 mod tests {
+    use miden_verifier::Verifier;
+
     use super::*;
 
     #[test]
@@ -229,5 +250,20 @@ mod tests {
             .is_some();
 
         assert!(exists);
+    }
+
+    #[test]
+    fn proof_compatibility_roots_match_the_embedded_core_library() {
+        let core_lib = CoreLibrary::default();
+        let compatibility = Verifier::proof_compatibility();
+
+        assert_eq!(
+            compatibility.vm_verifier_roots().last(),
+            Some(&core_lib.vm_recursive_verifier_root()),
+        );
+        assert_eq!(
+            compatibility.pvm_verifier_roots().last(),
+            Some(&core_lib.pvm_recursive_verifier_root()),
+        );
     }
 }

@@ -28,6 +28,8 @@ mod pvm_public_inputs;
 mod pvm_settlement;
 mod pvm_verifier;
 mod pvm_wrapper;
+mod security;
+mod security_math;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -330,15 +332,16 @@ pub fn generate_recursive_verifier_data(
     let program_info = ProgramInfo::from(program);
     let claim = ExecutionClaim::from_program_info(program_info, stack_inputs, stack_outputs);
 
-    generate_advice_inputs(verify_vm_proof_root(), &proof, &claim).unwrap()
+    generate_advice_inputs(vm_verify_proof_root(), &proof, &claim).unwrap()
 }
 
-/// The MAST root of `sys::vm::verify_vm_proof` - the verifier identity request keys
-/// name. The operator side is `CoreLibrary::recursive_verifier_root`; a consumer computes the
-/// identical value in-VM with `procref` (a procedure's root is intrinsic to its own MAST,
-/// independent of the enclosing program), so the two sides agree without any shared constant.
-fn verify_vm_proof_root() -> Word {
-    miden_core_lib::CoreLibrary::default().recursive_verifier_root()
+/// Returns the MAST root used to identify `sys::vm::verify_proof` in proof-request keys.
+///
+/// Operators obtain it through `CoreLibrary::vm_recursive_verifier_root`. Consumers obtain the
+/// same value in MASM with `procref.vm::verify_proof`; the root belongs to the procedure itself and
+/// does not depend on the program that calls it.
+fn vm_verify_proof_root() -> Word {
+    miden_core_lib::CoreLibrary::default().vm_recursive_verifier_root()
 }
 
 /// Test helper that copies `count` felts (a multiple of 4) from advice into memory at `dst`.
@@ -358,17 +361,16 @@ pub(crate) const COPY_ADVICE_TO_MEM: &str = "
 
 /// Builds the consumer program: stage the claim from the consumer's own inputs, derive its
 /// commitment, fetch the proof package registered under
-/// `proof_request_key(verifier_root, claim_commitment)`, verify, then grade the returned security
-/// parameters and assert an acceptance threshold. `verify_vm_proof` holds no estimate formula
-/// and no policy; both live in the consumer.
+/// `proof_request_key(verifier_root, claim_commitment)`, verify it, compute its security level, and
+/// enforce the consumer's threshold. `vm::verify_proof` contains neither the estimator nor the
+/// policy.
 fn request_consumer_source() -> String {
     format!(
         "
         use miden::core::sys
-        use miden::core::stark::constants
+        use miden::core::stark::security
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
-        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
@@ -381,27 +383,19 @@ fn request_consumer_source() -> String {
             # => [CLAIM_COMMITMENT]
 
             # 2) Fetch the registered proof package by content: request keys name
-            #    verify_vm_proof's root, derived in-VM via procref.
+            #    vm::verify_proof's root, derived in-VM via procref.
             dupw
-            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw
             # => [CLAIM_COMMITMENT]
 
-            # 3) Verify the claim; verify_vm_proof returns the deferred obligation and the
-            #    proof's transcript-bound security parameters.
-            exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            # 3) Verify the claim; vm::verify_proof returns the common security descriptor followed
+            #    by the deferred obligation.
+            exec.vm::verify_proof
+            # => [security_descriptor, D]
 
-            # 4) Grade the returned parameters and assert the consumer's acceptance
-            #    threshold (>= 96 conjectured bits). The grade also depends on the proof's
-            #    largest AIR trace height, which the verifier left in its own memory.
-            swapw
-            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, D]
-            exec.constants::get_trace_length_log movdn.4
-            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
-            # => [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, log_height,
-            #     num_kernel_procedures, D]
-            exec.vm::compute_conjectured_security_level
+            # 4) Compute the security level and enforce the consumer's threshold.
+            exec.security::compute_conjectured_security_level
             # => [conjectured_level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
@@ -423,7 +417,7 @@ fn request_flow_binds_proof_to_claim() {
     let source = request_consumer_source();
     let entry = |proof_stream: &[u64]| -> (Word, Vec<Felt>) {
         let felts: Vec<Felt> = proof_stream.iter().map(|&v| Felt::new_unchecked(v)).collect();
-        (proof_request_key(verify_vm_proof_root(), intended.claim_commitment), felts)
+        (proof_request_key(vm_verify_proof_root(), intended.claim_commitment), felts)
     };
 
     // Control: the intended proof, registered under its key, verifies.
@@ -475,7 +469,7 @@ fn stark_verifier_e2f4_request_multi_proof() {
     // One advice provider for both proofs: the tape carries the claims from which the consumer
     // derives the commitments. Claim preimages, proof streams, query rows, and kernel witnesses
     // are content-addressed in the advice map.
-    let verifier_root = verify_vm_proof_root();
+    let verifier_root = vm_verify_proof_root();
     let mut tape = Vec::new();
     let mut store = MerkleStore::new();
     let mut advice_map = Vec::new();
@@ -490,27 +484,23 @@ fn stark_verifier_e2f4_request_multi_proof() {
     let source = format!(
         "
         use miden::core::sys
-        use miden::core::stark::constants
+        use miden::core::stark::security
         use miden::core::sys::vm
         use miden::core::sys::vm::claim
-        use miden::core::sys::vm::layout
 
         {COPY_ADVICE_TO_MEM}
 
         proc verify_one_claim
             # Per claim: stage the fields from the consumer's own inputs, derive the
             # commitment that names the claim, fetch and verify the proof package it
-            # addresses, then grade the returned parameters against the acceptance
-            # threshold.
+            # addresses, then compute the security level and enforce the acceptance threshold.
             push.{NUM_CLAIM_ELEMENTS} push.{CONSUMER_CLAIM_PTR} exec.copy_advice_to_mem
             push.{CONSUMER_CLAIM_PTR} exec.claim::claim_commitment # => [CLAIM_COMMITMENT]
             dupw
-            procref.vm::verify_vm_proof exec.sys::build_proof_request_key
+            procref.vm::verify_proof exec.sys::build_proof_request_key
             adv.push_mapval dropw                        # => [CLAIM_COMMITMENT]
-            exec.vm::verify_vm_proof                     # => [D, nq, q_pow, deep_pow, fold_pow]
-            swapw exec.constants::get_trace_length_log movdn.4
-            exec.layout::num_kernel_procedures_ptr mem_load movdn.5
-            exec.vm::compute_conjectured_security_level  # => [level, D]
+            exec.vm::verify_proof                        # => [security_descriptor, D]
+            exec.security::compute_conjectured_security_level # => [level, D]
             u32lt.96 assertz.err=\"proof security level is below the accepted target\"
             # => [D]
         end
@@ -527,16 +517,16 @@ fn stark_verifier_e2f4_request_multi_proof() {
     test.execute_for_output().expect("both content-addressed proofs must verify");
 }
 
-/// Runs `verify_vm_proof` with the claim commitment on the operand stack and the proof stream on
+/// Runs `vm::verify_proof` with the claim commitment on the operand stack and the proof stream on
 /// advice. This directly pins the producer and MASM consumption order.
-fn verify_vm_proof_program() -> String {
+fn vm_verify_proof_program() -> String {
     "
         use miden::core::sys
         use miden::core::sys::vm
 
         begin
-            exec.vm::verify_vm_proof
-            # => [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits]
+            exec.vm::verify_proof
+            # => [security_descriptor, D]
             exec.sys::truncate_stack
         end
     "
@@ -544,7 +534,9 @@ fn verify_vm_proof_program() -> String {
 }
 
 fn run_recursive_verifier(data: &VerifierData) {
-    let source = verify_vm_proof_program();
+    use miden_air::security;
+
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -554,19 +546,46 @@ fn run_recursive_verifier(data: &VerifierData) {
     );
     let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
 
-    // `verify_vm_proof` returns [D, num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
-    // Pin D (stack positions 0..4) to the proof-stream value and the parameter tail (positions
-    // 4..8) to the deployed PCS config so a change to the returned tuple's values or order is
-    // caught across every e2e configuration.
+    // Pin the full common descriptor and deferred root so any value or ordering drift is caught
+    // across every end-to-end configuration.
     let params = miden_air::config::pcs_params();
-    let returned = |i: usize| output.stack.get_element(i).map(|f| f.as_canonical_u64());
-    for i in 0..WORD_SIZE {
-        assert_eq!(returned(i), Some(data.proof_stream[4 + i]), "returned deferred root felt {i}");
-    }
-    assert_eq!(returned(4), Some(params.num_queries() as u64), "returned num_queries");
-    assert_eq!(returned(5), Some(params.query_pow_bits() as u64), "returned query_pow_bits");
-    assert_eq!(returned(6), Some(params.deep_pow_bits() as u64), "returned deep_pow_bits");
-    assert_eq!(returned(7), Some(params.folding_pow_bits() as u64), "returned folding_pow_bits");
+    let height_start = 4 + WORD_SIZE;
+    let log_max_height = data.proof_stream[height_start..height_start + miden_air::MIDEN_AIR_COUNT]
+        .iter()
+        .copied()
+        .max()
+        .expect("the MVM relation has AIR instances");
+    let kernel_commitment = claim_kernel_commitment(data);
+    let num_kernel_procedures = data
+        .advice_map
+        .iter()
+        .find(|(key, _)| *key == kernel_commitment)
+        .map(|(_, values)| values.len() / WORD_SIZE)
+        .expect("the authenticated kernel witness must be present");
+
+    let mut expected = vec![
+        u64::from(security::LOOKUP_POW_BITS),
+        u64::from(security::AIR_SHAPE.num_composed_constraints),
+        u64::from(security::AIR_SHAPE.max_constraint_degree),
+        u64::from(security::AIR_SHAPE.num_deep_terms.unwrap()),
+        u64::from(security::AIR_SHAPE.lookup.max_message_width),
+        u64::from(security::CORE_BOUNDARY_LOOKUP_TERMS) + num_kernel_procedures as u64,
+        u64::from(security::AIR_SHAPE.lookup.fractions_per_row),
+        log_max_height,
+        params.num_queries() as u64,
+        params.query_pow_bits() as u64,
+        params.deep_pow_bits() as u64,
+        params.folding_pow_bits() as u64,
+    ];
+    expected.extend_from_slice(&data.proof_stream[4..4 + WORD_SIZE]);
+
+    let returned: Vec<u64> = output
+        .stack
+        .get_num_elements(expected.len())
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .collect();
+    assert_eq!(returned, expected, "vm::verify_proof returned the wrong security descriptor");
 
     // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
     ace_read_check::cross_check_ace_circuit(&output);
@@ -575,10 +594,10 @@ fn run_recursive_verifier(data: &VerifierData) {
 /// Each of the four security parameters (num_queries, query_pow_bits, deep_pow_bits,
 /// folding_pow_bits) is absorbed into the Fiat-Shamir transcript, so forging any one of them in
 /// the proof stream diverges the transcript and fails verification. They are the first four
-/// advice values `verify_vm_proof` reads, i.e. `proof_stream[0..4]`.
+/// advice values `vm::verify_proof` reads, i.e. `proof_stream[0..4]`.
 #[test]
 fn each_security_parameter_is_transcript_bound() {
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let base = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
     for param in 0usize..4 {
         let mut data = base.clone();
@@ -615,7 +634,7 @@ fn tampered_kernel_witness_is_rejected() {
     // Flip one felt of the first digest while preserving the witness length.
     witness[0] = Felt::new_unchecked(witness[0].as_canonical_u64() ^ 1);
 
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -629,20 +648,21 @@ fn tampered_kernel_witness_is_rejected() {
     );
 }
 
-/// `verify_vm_proof` derives the kernel procedure count from the advice-map value length and
+/// `vm::verify_proof` derives the kernel procedure count from the advice-map value length and
 /// rejects a witness containing more than `KernelDescriptor::MAX_NUM_PROCEDURES` digests before
 /// copying it.
 #[test]
-fn verify_vm_proof_rejects_oversized_kernel_witness() {
+fn vm_verify_proof_rejects_oversized_kernel_witness() {
     let mut data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,
         fib_stack_inputs(),
         Some(KERNEL_EVEN_NUM_PROC),
     );
     let k = claim_kernel_commitment(&data);
-    *advice_map_value_mut(&mut data, k) = vec![Felt::ZERO; 256 * WORD_SIZE];
+    *advice_map_value_mut(&mut data, k) =
+        vec![Felt::ZERO; (KernelDescriptor::MAX_NUM_PROCEDURES + 1) * WORD_SIZE];
 
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -658,7 +678,7 @@ fn verify_vm_proof_rejects_oversized_kernel_witness() {
 
 /// A kernel witness is a list of four-felt procedure digests.
 #[test]
-fn verify_vm_proof_rejects_misaligned_kernel_witness() {
+fn vm_verify_proof_rejects_misaligned_kernel_witness() {
     let mut data = generate_recursive_verifier_data(
         EXAMPLE_FIB_KERNEL_SMALL,
         fib_stack_inputs(),
@@ -667,7 +687,7 @@ fn verify_vm_proof_rejects_misaligned_kernel_witness() {
     let k = claim_kernel_commitment(&data);
     advice_map_value_mut(&mut data, k).push(Felt::ZERO);
 
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -686,7 +706,7 @@ fn tampered_claim_preimage_is_rejected() {
     let preimage = advice_map_value_mut(&mut data, claim_commitment);
     preimage[0] = Felt::new_unchecked(preimage[0].as_canonical_u64() ^ 1);
 
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -710,7 +730,7 @@ fn malformed_claim_preimage_length_is_rejected(#[case] len: usize) {
     let preimage = advice_map_value_mut(&mut data, claim_commitment);
     preimage.resize(len, Felt::ZERO);
 
-    let source = verify_vm_proof_program();
+    let source = vm_verify_proof_program();
     let test = build_test!(
         source.as_str(),
         &data.initial_stack(),
@@ -790,9 +810,7 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(2)]
 #[case(3)]
 #[case(8)]
-// 255 = KernelDescriptor::MAX_NUM_PROCEDURES, the maximum number of kernel procedures a Statement
-// accepts.
-#[case(255)]
+#[case(KernelDescriptor::MAX_NUM_PROCEDURES)]
 fn boundary_inputs_and_outer_logup_boundary(#[case] num_kernel_procedures: usize) {
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

@@ -12,7 +12,10 @@ use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest},
     operations::Operation,
     program::{KernelDescriptor, Program, StackInputs, StackOutputs},
-    proof::{ExecutionProof, HashFunction, StarkProof, VmProof},
+    proof::{
+        ExecutionProof, ExecutionProofCompatibility, HashFunction, PrecompileProof,
+        PrecompileStatus, StarkProof, VmProof,
+    },
     serde::{ByteWriter, Serializable},
 };
 
@@ -281,14 +284,83 @@ fn generate_fuzz_seeds() {
             proof: stark,
             precompile_root: TRUE_DIGEST,
         };
-        let proof = ExecutionProof::Complete { vm, precompile: None };
-        let proof = proof.to_bytes();
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Empty,
+        )
+        .to_bytes();
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof);
+    }
+
+    // Execution proof seed with deferred precompile work.
+    {
+        let mut state = DeferredState::default();
+        let statement = state
+            .register(Node::and(TRUE_DIGEST, TRUE_DIGEST))
+            .expect("framework statement should register");
+        state.log_statement(statement).expect("framework statement should log");
+        let wire = state.to_wire().expect("framework state should encode as wire");
+        let vm = VmProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            precompile_root: TRUE_DIGEST,
+        };
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Deferred(wire),
+        )
+        .to_bytes();
+        write_seed("execution_proof_deserialize", "deferred_proof.bin", &proof);
+    }
+
+    // Execution proof seed with a completed precompile proof.
+    {
+        let vm = VmProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            precompile_root: TRUE_DIGEST,
+        };
+        let precompile = PrecompileProof {
+            proof: StarkProof::new(Vec::new(), HashFunction::Rpo256),
+            roots: vec![TRUE_DIGEST],
+        };
+        let proof = ExecutionProof::from_parts(
+            ExecutionProofCompatibility::new(Vec::new(), Vec::new()).unwrap(),
+            vm,
+            PrecompileStatus::Proven(precompile),
+        )
+        .to_bytes();
+        write_seed("execution_proof_deserialize", "proven_proof.bin", &proof);
+    }
+
+    // Execution proof seeds for malicious verifier-root length prefixes.
+    {
+        let mut oversized_vm_roots = Vec::new();
+        oversized_vm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_vm_roots.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_vm_roots_len.bin",
+            &oversized_vm_roots,
+        );
+
+        let mut oversized_pvm_roots = Vec::new();
+        oversized_pvm_roots.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_pvm_roots.write_usize(0);
+        oversized_pvm_roots.write_usize(usize::MAX);
+        write_seed(
+            "execution_proof_deserialize",
+            "oversized_pvm_roots_len.bin",
+            &oversized_pvm_roots,
+        );
     }
 
     // Execution proof seed for malicious VM STARK length-prefix deserialization.
     {
         let mut oversized_proof_len = Vec::new();
+        oversized_proof_len.write_u8(ExecutionProofCompatibility::FORMAT_V1);
+        oversized_proof_len.write_usize(0); // VM verifier roots.
+        oversized_proof_len.write_usize(0); // PVM verifier roots.
         oversized_proof_len.write_u8(1); // Complete execution proof discriminant.
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);

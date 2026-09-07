@@ -6,7 +6,7 @@
 //! (Miden-side) rather than alongside the adapters; the generic adapter
 //! code itself is field-polymorphic.
 //!
-//! The constraint-path adapter and the two debug builders pick up the default
+//! The constraint-path adapter and the validation builder pick up the default
 //! polynomial bodies of [`MainLookupBuilder::build_op_flags`] and
 //! [`ChipletLookupBuilder::build_chiplet_active`]. The prover-path adapter
 //! overrides `build_op_flags` with
@@ -79,24 +79,20 @@ impl<'a, EF> Poseidon2PermutationLookupBuilder for ProverLookupBuilder<'a, Felt,
 {
 }
 
-// DEBUG BUILDERS
+// VALIDATION BUILDER
 // ================================================================================================
 //
-// Empty impls for the Felt/QuadFelt-pinned debug builders. They pick up the default
-// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builders only
+// Empty impls for the Felt/QuadFelt-pinned validation builder. It picks up the default
+// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builder only
 // compile when the `debug` module is available (gated on `std`), so there's no need
 // for a boolean fast-path override.
 
 #[cfg(feature = "std")]
 mod debug_impls {
     use super::{ChipletLookupBuilder, MainLookupBuilder, Poseidon2PermutationLookupBuilder};
-    use crate::lookup::debug::{DebugTraceBuilder, ValidationBuilder};
+    use crate::lookup::debug::ValidationBuilder;
 
     impl<'ab, 'r> MainLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> Poseidon2PermutationLookupBuilder for ValidationBuilder<'ab, 'r> {}
-
-    impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
-    impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
-    impl<'a> Poseidon2PermutationLookupBuilder for DebugTraceBuilder<'a> {}
 }
