@@ -14,7 +14,8 @@ use super::{
     layout::{BLOCK_PERIOD, FUSED_G_ROWS, G_COMPRESSION_CYCLE_ID_COL, NUM_COLS},
     periodic::get_periodic_column_values,
     selectors::EidosCompressionSelectors,
-    trace::{EidosCompressionFeltRow, generate_felt_trace_block_with_cycle_id},
+    testing::generate_felt_trace_block_with_cycle_id,
+    trace::EidosCompressionFeltRow,
 };
 
 struct ConstraintEvalBuilder {

@@ -11,18 +11,18 @@ use super::{
     constraints_tests::eval_main_row,
     layout::*,
     lookup::{
-        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, EidosCompressionLookupAir, EidosCompressionMode,
-        FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN, NARROW_BATCH_COLUMNS, NarrowLookup,
-        NarrowLookupKind, OverlayRelationKind, lookup_plan,
+        EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE, FOOTER_INPUT_COLUMN, FOOTER_OUTPUT_COLUMN,
+        NARROW_BATCH_COLUMNS,
     },
     model::low_output,
     narrow::NARROW_SLOTS,
     periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values},
     schedule::fused_step_at,
-    trace::{
-        EidosCompressionRow, TraceMode, generate_felt_trace_block_with_cycle_id,
-        generate_trace_block_with_cycle_id,
+    test_support::{
+        EidosCompressionLookupAir, EidosCompressionMode, EidosCompressionRow, NarrowLookup,
+        NarrowLookupKind, OverlayRelationKind, generate_trace_block_with_cycle_id, lookup_plan,
     },
+    trace::{TraceMode, generate_felt_trace_block_with_cycle_id},
 };
 #[cfg(feature = "std")]
 use crate::lookup::debug::{ValidateLayout, ValidateLookupAir};

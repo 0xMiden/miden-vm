@@ -1,15 +1,11 @@
 //! Lookup columns for the 32-row Eidos compression layout.
 
-#[cfg(test)]
-use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use miden_core::{
     Felt,
     field::{Algebra, PrimeCharacteristicRing},
 };
-#[cfg(test)]
-use miden_crypto::stark::air::WindowAccess;
 
 use super::{
     algebra::{missing_rotation_result, pack_pair, pack_u32_le, universal_cv_word, xor_from_and},
@@ -17,8 +13,6 @@ use super::{
     narrow::{NARROW_SLOTS, NarrowSlotBus, NarrowSlotFields},
     selectors::EidosCompressionSelectors,
 };
-#[cfg(test)]
-use crate::{constraints::lookup::MIDEN_MAX_MESSAGE_WIDTH, lookup::LookupAir};
 use crate::{
     constraints::{
         and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation},
@@ -28,61 +22,6 @@ use crate::{
         Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
     },
 };
-
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum EidosCompressionMode {
-    Compression,
-    AeadXof,
-}
-
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum NarrowLookupKind {
-    And8,
-    Rot12,
-    Rot7,
-    MessageWord,
-    RangeCheck,
-}
-
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct NarrowLookup {
-    pub kind: NarrowLookupKind,
-    pub sign: i8,
-}
-
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum OverlayRelationKind {
-    FullCv,
-    CompressionLink,
-    AeadInput,
-    AeadLowOutputPair,
-    AeadHighOutputPair,
-}
-
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct OverlayRelation {
-    pub kind: OverlayRelationKind,
-    pub sign: i8,
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LookupPlan {
-    pub narrow: Vec<NarrowLookup>,
-    pub overlay_relations: Vec<OverlayRelation>,
-}
-
-#[cfg(test)]
-impl LookupPlan {
-    pub fn narrow_aux_columns(&self) -> usize {
-        self.narrow.len().div_ceil(2)
-    }
-}
 
 /// Typed view of the 108 Eidos compression main-trace columns.
 #[repr(C)]
@@ -175,43 +114,10 @@ const _: () = assert!(FOOTER_OUTPUT_COLUMN == FOOTER_INPUT_COLUMN + 1);
 
 const FOOTER_INPUT_DEG: Deg = Deg { v: 3, u: 2 };
 const FOOTER_OUTPUT_BATCH2_DEG: Deg = Deg { v: 3, u: 2 };
-#[cfg(test)]
-#[derive(Copy, Clone, Debug, Default)]
-pub struct EidosCompressionLookupAir;
-
 /// Lookup builder accepted by the Eidos compression AIR.
 pub(crate) trait EidosCompressionLookupBuilder: LookupBuilder<F = Felt> {}
 
 impl<T> EidosCompressionLookupBuilder for T where T: LookupBuilder<F = Felt> {}
-
-#[cfg(test)]
-impl<LB> LookupAir<LB> for EidosCompressionLookupAir
-where
-    LB: EidosCompressionLookupBuilder,
-{
-    fn column_shape(&self) -> &[usize] {
-        &EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE
-    }
-
-    fn max_message_width(&self) -> usize {
-        MIDEN_MAX_MESSAGE_WIDTH
-    }
-
-    fn num_bus_ids(&self) -> usize {
-        BusId::COUNT
-    }
-
-    fn eval(&self, builder: &mut LB) {
-        let main = builder.main();
-        let local: &EidosCompressionCols<_> = main.current_slice().borrow();
-        let next: &EidosCompressionCols<_> = main.next_slice().borrow();
-        let periodic_values: Vec<LB::Expr> =
-            builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
-
-        emit_lookup_columns(builder, local, next, &selectors);
-    }
-}
 
 /// Emits all Eidos compression lookup groups in their fixed auxiliary-column order.
 pub(crate) fn emit_lookup_columns<LB>(
@@ -590,97 +496,4 @@ where
     LB: EidosCompressionLookupBuilder,
 {
     selectors.is_ab() + selectors.is_cd()
-}
-
-#[cfg(test)]
-pub fn lookup_plan(row: usize, mode: EidosCompressionMode) -> LookupPlan {
-    let mut plan = LookupPlan {
-        narrow: Vec::new(),
-        overlay_relations: Vec::new(),
-    };
-
-    match row_kind(row) {
-        RowKind::Ab => {
-            add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot12);
-            if row == 0 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::FullCv,
-                    sign: -1,
-                });
-            }
-        },
-        RowKind::AbDiag => add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot12),
-        RowKind::Cd | RowKind::CdDiag => add_fused_g_lookups(&mut plan, NarrowLookupKind::Rot7),
-        RowKind::Footer(footer) => add_footer_lookups(&mut plan, footer, mode),
-    }
-
-    plan
-}
-
-#[cfg(test)]
-fn add_fused_g_lookups(plan: &mut LookupPlan, rotation_kind: NarrowLookupKind) {
-    plan.narrow.extend(NARROW_SLOTS.map(|spec| match spec.fused_bus {
-        NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
-        NarrowSlotBus::Rotation(_) => NarrowLookup { kind: rotation_kind, sign: -1 },
-        NarrowSlotBus::MessageWord => NarrowLookup {
-            kind: NarrowLookupKind::MessageWord,
-            sign: 1,
-        },
-        NarrowSlotBus::RangeCheck => unreachable!("range checks are not used on fused rows"),
-    }));
-}
-
-#[cfg(test)]
-fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: EidosCompressionMode) {
-    plan.narrow.extend(NARROW_SLOTS.into_iter().filter_map(|spec| {
-        let bus = spec.footer_bus?;
-        Some(match bus {
-            NarrowSlotBus::And8 => NarrowLookup { kind: NarrowLookupKind::And8, sign: -1 },
-            NarrowSlotBus::RangeCheck => NarrowLookup {
-                kind: NarrowLookupKind::RangeCheck,
-                sign: -1,
-            },
-            NarrowSlotBus::MessageWord => NarrowLookup {
-                kind: NarrowLookupKind::MessageWord,
-                sign: -7,
-            },
-            NarrowSlotBus::Rotation(_) => {
-                unreachable!("rotations are not used on footer rows")
-            },
-        })
-    }));
-
-    if footer == FOOTER_ROWS - 1 {
-        plan.overlay_relations.push(OverlayRelation {
-            kind: OverlayRelationKind::FullCv,
-            sign: 1,
-        });
-    }
-
-    match mode {
-        EidosCompressionMode::Compression => {
-            if footer == FOOTER_ROWS - 1 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::CompressionLink,
-                    sign: -1,
-                });
-            }
-        },
-        EidosCompressionMode::AeadXof => {
-            if footer == FOOTER_ROWS - 1 {
-                plan.overlay_relations.push(OverlayRelation {
-                    kind: OverlayRelationKind::AeadInput,
-                    sign: -1,
-                });
-            }
-            plan.overlay_relations.push(OverlayRelation {
-                kind: OverlayRelationKind::AeadLowOutputPair,
-                sign: -1,
-            });
-            plan.overlay_relations.push(OverlayRelation {
-                kind: OverlayRelationKind::AeadHighOutputPair,
-                sign: -1,
-            });
-        },
-    }
 }
