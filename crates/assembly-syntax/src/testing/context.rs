@@ -61,10 +61,6 @@ impl<T> TestOutcome<T> {
         self.into_failure()
     }
 
-    pub fn is_err(&self) -> bool {
-        self.is_failure()
-    }
-
     fn into_failure(self) -> TestFailure {
         TestFailure {
             diagnostics: self.outcome.diagnostics,
@@ -80,14 +76,6 @@ pub struct TestFailure {
 }
 
 impl TestFailure {
-    pub fn diagnostics(&self) -> &DiagnosticSet {
-        &self.diagnostics
-    }
-
-    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-        self.diagnostics.iter().find_map(|entry| entry.diagnostic.downcast_ref::<T>())
-    }
-
     pub fn iter<T: 'static>(&self) -> impl Iterator<Item = &T> {
         self.diagnostics.iter().filter_map(|entry| entry.diagnostic.downcast_ref::<T>())
     }
@@ -164,10 +152,6 @@ impl SyntaxTestContext {
             .expect("test source must fit in the source map");
         let range = TextRange::try_from_usize(0, text.len()).expect("validated source length");
         Span::new(SourceSpan::session(source_id, range), text)
-    }
-
-    pub fn assess<T>(&self, outcome: Outcome<T>) -> TestOutcome<T> {
-        TestOutcome::new(outcome, self.sources(), self.warnings_as_errors)
     }
 
     #[track_caller]

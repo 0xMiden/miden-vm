@@ -2297,7 +2297,7 @@ dependencies = [
 [[package]]
 name = "miden-diagnostics"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#9aad2d5726f4fd5a17ed1162ab3a99feac849218"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#7b87f5e37e273c81a81220d1b431bff08f97cd68"
 dependencies = [
  "annotate-snippets",
  "miden-diagnostics-macros",
@@ -2308,7 +2308,7 @@ dependencies = [
 [[package]]
 name = "miden-diagnostics-macros"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#9aad2d5726f4fd5a17ed1162ab3a99feac849218"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#7b87f5e37e273c81a81220d1b431bff08f97cd68"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",

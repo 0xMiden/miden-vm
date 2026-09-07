@@ -363,8 +363,9 @@ path = "lib.masm"
     let mut context = TestContext::default();
     let outcome = Project::load_project_reference("expected", &dep_dir, &mut context.sources);
     let err = outcome
-        .into_result()
         .expect_err("package name mismatch should be rejected")
+        .prepare(&context.sources)
+        .expect("diagnostics should prepare")
         .to_string();
 
     assert!(err.contains("dependency 'expected' resolved to package 'actual'"), "{err}");
@@ -403,8 +404,9 @@ path = "lib.masm"
     let mut context = TestContext::default();
     let outcome = Project::load_project_reference("expected", &dep_dir, &mut context.sources);
     let err = outcome
-        .into_result()
         .expect_err("workspace member package name mismatch should be rejected")
+        .prepare(&context.sources)
+        .expect("diagnostics should prepare")
         .to_string();
 
     assert!(err.contains("dependency 'expected' resolved to package 'actual'"), "{err}");

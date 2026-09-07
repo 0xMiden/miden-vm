@@ -129,6 +129,19 @@ mod maybe_inherit {
     }
 }
 
+/// Records a parsed field, rejecting duplicate occurrences.
+#[cfg(feature = "serde")]
+pub(super) fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
+where
+    E: serde::de::Error,
+{
+    if slot.replace(value).is_some() {
+        Err(E::duplicate_field(field))
+    } else {
+        Ok(())
+    }
+}
+
 /// Converts the source-local byte range produced by TOML into a canonical diagnostic span.
 pub(crate) fn source_span(source_id: SourceId, range: core::ops::Range<usize>) -> SourceSpan {
     let range = TextRange::try_from_usize(range.start, range.end)

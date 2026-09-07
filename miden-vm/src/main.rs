@@ -105,19 +105,12 @@ pub enum Actions {
 /// CLI entry point
 impl Cli {
     pub fn execute(&self) -> Outcome<()> {
-        let result = match &self.action {
-            Actions::Compile(compile) => return compile.execute(),
-            Actions::Bundle(compile) => return compile.execute(),
+        match &self.action {
+            Actions::Compile(compile) => compile.execute(),
+            Actions::Bundle(bundle) => bundle.execute(),
             Actions::Prove(prove) => prove.execute(),
             Actions::Run(run) => run.execute(),
             Actions::Verify(verify) => verify.execute(),
-        };
-        match result {
-            Ok(()) => Outcome {
-                result: Ok(()),
-                diagnostics: Default::default(),
-            },
-            Err(report) => Outcome::from_report(report),
         }
     }
 

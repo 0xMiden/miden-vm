@@ -728,6 +728,8 @@ dependencies = [
  "regex",
  "rustc_version",
  "semver",
+ "serde",
+ "serde_spanned",
  "smallvec",
  "thiserror",
 ]
@@ -841,7 +843,7 @@ dependencies = [
 [[package]]
 name = "miden-diagnostics"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#567131305e942c4982146cfa90248e847db7ec6b"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#7b87f5e37e273c81a81220d1b431bff08f97cd68"
 dependencies = [
  "annotate-snippets",
  "miden-diagnostics-macros",
@@ -852,7 +854,7 @@ dependencies = [
 [[package]]
 name = "miden-diagnostics-macros"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#567131305e942c4982146cfa90248e847db7ec6b"
+source = "git+https://github.com/0xMiden/miden-diagnostics?branch=bitwalker%2Fdiagnostics-v1#7b87f5e37e273c81a81220d1b431bff08f97cd68"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -929,8 +931,8 @@ dependencies = [
  "miden-debug-types",
  "miden-diagnostics",
  "miden-utils-indexing",
- "midenc-hir-type",
  "rustc-hash",
+ "serde",
  "thiserror",
  "zerocopy",
 ]
@@ -1744,6 +1746,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -1788,19 +1794,6 @@ dependencies = [
 ]
 
 [[package]]
- name = "serde_json"
- version = "1.0.151"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
- dependencies = [
-  "itoa",
-  "memchr",
-  "serde",
-  "serde_core",
-  "zmij",
- ]
-
- [[package]]
 name = "serde_spanned"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

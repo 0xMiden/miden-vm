@@ -51,11 +51,11 @@ pub(super) mod serialization {
 
     use serde::{
         Deserialize, Deserializer,
-        de::{Error, MapAccess, Visitor},
+        de::{MapAccess, Visitor},
     };
 
     use super::Profile;
-    use crate::{AstMetadata, TomlSpan};
+    use crate::{AstMetadata, TomlSpan, ast::parsing::set_once};
 
     impl<'de> Deserialize<'de> for Profile {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -153,16 +153,5 @@ pub(super) mod serialization {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_map(ProfileMapVisitor)
-    }
-
-    fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
-    where
-        E: Error,
-    {
-        if slot.replace(value).is_some() {
-            Err(E::duplicate_field(field))
-        } else {
-            Ok(())
-        }
     }
 }

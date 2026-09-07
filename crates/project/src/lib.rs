@@ -18,9 +18,7 @@ mod tests;
 mod workspace;
 
 #[cfg(all(feature = "std", feature = "serde"))]
-use alloc::string::String;
-#[cfg(feature = "std")]
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::{sync::Arc, vec::Vec};
 
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};

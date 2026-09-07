@@ -526,29 +526,28 @@ mod current {
         diagnostics::{DiagnosticSet, Outcome, WarningsAsErrors},
     };
     use miden_assembly_syntax_current::prettier::PrettyPrint;
-    use miden_core_lib_current::CoreLibrary;
     use miden_mast_package_current::{Package, PackageExport};
-    use miden_package_registry_current::{InMemoryPackageRegistry, PackageCache};
+    use miden_package_registry_current::InMemoryPackageRegistry;
 
     use super::*;
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
-        let mut project =
-            Assembler::default().for_project_at_path(input, &mut store).map_err(|err| {
-                format!("current: failed to load project '{}': {err}", input.display())
-            })?;
-        let package =
-            project.assemble(ProjectTargetSelector::Library, "release").map_err(|err| {
-                format!("current: failed to assemble project '{}': {err}", input.display())
-            })?;
+        let mut project = value_from_outcome(
+            Assembler::default().for_project_at_path(input, &mut store),
+            format!("current: failed to load project '{}'", input.display()),
+        )?;
+        let package = value_from_outcome(
+            project.assemble(ProjectTargetSelector::Library, "release"),
+            format!("current: failed to assemble project '{}'", input.display()),
+        )?;
 
         collect_package_exports(package.as_ref())
     }
 
-    fn value_from_outcome<T>(outcome: Outcome<Option<T>>, context: String) -> Result<T, String> {
-        let Outcome { value, diagnostics } = outcome;
-        let failed = value.is_none() || diagnostics.assess(&WarningsAsErrors);
+    fn value_from_outcome<T>(outcome: Outcome<T>, context: String) -> Result<T, String> {
+        let Outcome { result, diagnostics } = outcome;
+        let failed = result.is_err() || diagnostics.assess(&WarningsAsErrors);
         if !diagnostics.is_empty() {
             let rendered = render_diagnostics(&diagnostics);
             if failed {
@@ -557,7 +556,7 @@ mod current {
             eprintln!("{rendered}");
         }
 
-        value.ok_or_else(|| format!("{context}: no value or diagnostic was produced"))
+        result.map_err(|()| format!("{context}: no value or diagnostic was produced"))
     }
 
     fn render_diagnostics(diagnostics: &DiagnosticSet) -> String {
@@ -600,9 +599,8 @@ mod current {
 mod previous {
     use miden_assembly_previous::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_previous::prettier::PrettyPrint;
-    use miden_core_lib_previous::CoreLibrary;
     use miden_mast_package_previous::{Package, PackageExport};
-    use miden_package_registry_previous::{InMemoryPackageRegistry, PackageCache};
+    use miden_package_registry_previous::InMemoryPackageRegistry;
 
     use super::*;
 

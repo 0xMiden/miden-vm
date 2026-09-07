@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionError, ExecutionOptions, FastProcessor};
-use miden_vm::{HashFunction, Prover, internal::InputFile};
+use miden_vm::{HashFunction, Prover, diagnostics::Outcome, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -88,127 +88,156 @@ impl ProveCmd {
 
         HashFunction::try_from(self.hasher.as_str()).map_err(|err| Report::msg(format!("{err}")))
     }
-    pub fn execute(&self) -> Result<(), Report> {
-        println!("===============================================================================");
-        println!("Prove program: {}", self.program_file.display());
-        println!("-------------------------------------------------------------------------------");
+    pub fn execute(&self) -> Outcome<()> {
+        Outcome::from(()).and_then(|(), diagnostics| {
+            let preparation = (|| -> Result<_, Report> {
+                println!(
+                    "==============================================================================="
+                );
+                println!("Prove program: {}", self.program_file.display());
+                println!(
+                    "-------------------------------------------------------------------------------"
+                );
 
-        // determine file type based on extension
-        let ext = self
-            .program_file
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        if !matches!(ext.as_str(), "masm" | "masp") {
-            return Err(Report::msg("The provided file must have a .masm or .masp extension"));
-        }
-
-        // load libraries from files
-        let libraries = Libraries::new(&self.library_paths)?;
-
-        // validate kernel file if provided
-        if let Some(ref kernel_path) = self.kernel_file
-            && !kernel_path.is_file()
-        {
-            return Err(Report::msg(format!(
-                "Kernel file `{}` must be a file.",
-                kernel_path.display()
-            )));
-        }
-
-        let input_data = InputFile::read(&self.input_file, &self.program_file)?;
-
-        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
-        // Use a single match expression to load the program.
-        let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, None, None, host),
-            "masm" => {
-                let MasmProgram {
-                    program,
-                    package_debug_info,
-                    entrypoint_source_node,
-                    sources,
-                    kernel,
-                } = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_provider(sources);
-                if let Some(kernel) = kernel {
-                    host.load_library(kernel)
-                        .into_diagnostic()
-                        .wrap_err("Failed to load kernel")?;
+                // determine file type based on extension
+                let ext = self
+                    .program_file
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if !matches!(ext.as_str(), "masm" | "masp") {
+                    return Err(Report::msg("The provided file must have a .masm or .masp extension"));
                 }
-                for library in libraries.libraries.iter().cloned() {
-                    host.load_library(library)
-                        .into_diagnostic()
-                        .wrap_err("Failed to load library")?;
+
+                // load libraries from files
+                let libraries = Libraries::new(&self.library_paths)?;
+
+                // validate kernel file if provided
+                if let Some(ref kernel_path) = self.kernel_file
+                    && !kernel_path.is_file()
+                {
+                    return Err(Report::msg(format!(
+                        "Kernel file `{}` must be a file.",
+                        kernel_path.display()
+                    )));
                 }
-                (program, package_debug_info, entrypoint_source_node, host)
-            },
-            _ => unreachable!("program file extension was validated above"),
-        };
 
-        let program_hash: [u8; 32] = program.hash().into();
-        println!("Proving program with hash {}...", hex::encode(program_hash));
-        let now = Instant::now();
+                let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        // fetch the stack and program inputs from the arguments
-        let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
-        let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
+                let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+                Ok((ext, libraries, input_data, host))
+            })();
+            let (ext, libraries, input_data, host) = diagnostics.capture(preparation).ok_or(())?;
 
-        let execution_options = self.get_execution_options()?;
-        let hash_fn = self.get_hash_fn()?;
+            let assembly = if ext == "masm" {
+                let outcome =
+                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref());
+                diagnostics.merge(outcome.diagnostics);
+                Some(outcome.result?)
+            } else {
+                None
+            };
 
-        // execute program and generate proof
-        let processor =
-            FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-                .map_err(|err| Report::msg(format!("{err}")))?;
-        let witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
-            (Some(debug_info), Some(entrypoint_source_node_id)) => processor
-                .execute_for_proving_with_package_debug_info_at_source_node_sync(
-                    &program,
-                    debug_info,
-                    entrypoint_source_node_id,
-                    &mut host,
-                )
-                .map_err(ExecutionError::into_report)
-                .wrap_err("Failed to execute program")?,
-            (Some(debug_info), None) => processor
-                .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
-                .map_err(ExecutionError::into_report)
-                .wrap_err("Failed to execute program")?,
-            (None, _) => processor
-                .execute_for_proving_sync(&program, &mut host)
-                .map_err(ExecutionError::into_report)
-                .wrap_err("Failed to execute program")?,
-        };
-        let stack_outputs = *witness.claim().stack_outputs();
-        let proof = Prover::new()
-            .with_hash_fn(hash_fn)
-            .with_max_prover_memory_bytes(self.max_prover_memory)
-            .prove_full(witness)
-            .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
+            let execution = (|| -> Result<(), Report> {
+                    // Use a single match expression to load the program.
+                    let (program, package_debug_info, entrypoint_source_node, mut host) =
+                        match assembly {
+                            None => (get_masp_program(&self.program_file)?, None, None, host),
+                            Some(MasmProgram {
+                                program,
+                                package_debug_info,
+                                entrypoint_source_node,
+                                sources,
+                                kernel,
+                            }) => {
+                                let mut host = host.with_source_provider(sources);
+                                if let Some(kernel) = kernel {
+                                    host.load_library(kernel)
+                                        .into_diagnostic()
+                                        .wrap_err("Failed to load kernel")?;
+                                }
+                                for library in libraries.libraries.iter().cloned() {
+                                    host.load_library(library)
+                                        .into_diagnostic()
+                                        .wrap_err("Failed to load library")?;
+                                }
+                                (program, package_debug_info, entrypoint_source_node, host)
+                            },
+                        };
 
-        println!("Program proved in {} ms", now.elapsed().as_millis());
+                    let program_hash: [u8; 32] = program.hash().into();
+                    println!("Proving program with hash {}...", hex::encode(program_hash));
+                    let now = Instant::now();
 
-        // write proof to file
-        ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
+                    // fetch the stack and program inputs from the arguments
+                    let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
+                    let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
 
-        // provide outputs
-        if let Some(output_path) = &self.output_file {
-            // write all outputs to specified file.
-            OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
-        } else {
-            // if no output path was provided, get the stack outputs for printing to the screen.
-            let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
+                    let execution_options = self.get_execution_options()?;
+                    let hash_fn = self.get_hash_fn()?;
 
-            // write all outputs to default location if none was provided
-            let default_output_path = self.program_file.with_extension("outputs");
-            OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
+                    // execute program and generate proof
+                    let processor = FastProcessor::new_with_options(
+                        stack_inputs,
+                        advice_inputs,
+                        execution_options,
+                    )
+                    .map_err(|err| Report::msg(format!("{err}")))?;
+                    let witness = match (package_debug_info.as_ref(), entrypoint_source_node) {
+                        (Some(debug_info), Some(entrypoint_source_node_id)) => processor
+                            .execute_for_proving_with_package_debug_info_at_source_node_sync(
+                                &program,
+                                debug_info,
+                                entrypoint_source_node_id,
+                                &mut host,
+                            )
+                            .map_err(ExecutionError::into_report)
+                            .wrap_err("Failed to execute program")?,
+                        (Some(debug_info), None) => processor
+                            .execute_for_proving_with_package_debug_info_sync(
+                                &program, debug_info, &mut host,
+                            )
+                            .map_err(ExecutionError::into_report)
+                            .wrap_err("Failed to execute program")?,
+                        (None, _) => processor
+                            .execute_for_proving_sync(&program, &mut host)
+                            .map_err(ExecutionError::into_report)
+                            .wrap_err("Failed to execute program")?,
+                    };
+                    let stack_outputs = *witness.claim().stack_outputs();
+                    let proof = Prover::new()
+                        .with_hash_fn(hash_fn)
+                        .with_max_prover_memory_bytes(self.max_prover_memory)
+                        .prove_full(witness)
+                        .map_err(|err| Report::msg(format!("Failed to prove program: {err}")))?;
 
-            // print stack outputs to screen.
-            println!("Output: {stack:?}");
-        }
+                    println!("Program proved in {} ms", now.elapsed().as_millis());
 
-        Ok(())
+                    // write proof to file
+                    ProofFile::write(proof, &self.proof_file, &self.program_file)
+                        .map_err(Report::msg)?;
+
+                    // provide outputs
+                    if let Some(output_path) = &self.output_file {
+                        // write all outputs to specified file.
+                        OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
+                    } else {
+                        // if no output path was provided, get the stack outputs for printing to the screen.
+                        let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
+
+                        // write all outputs to default location if none was provided
+                        let default_output_path = self.program_file.with_extension("outputs");
+                        OutputFile::write(&stack_outputs, &default_output_path)
+                            .map_err(Report::msg)?;
+
+                        // print stack outputs to screen.
+                        println!("Output: {stack:?}");
+                    }
+
+                    Ok(())
+            })();
+            diagnostics.capture(execution).ok_or(())
+        })
     }
 }

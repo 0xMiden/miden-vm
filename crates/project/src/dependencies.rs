@@ -1,7 +1,7 @@
 #[cfg(all(feature = "std", feature = "serde"))]
 mod graph;
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 use alloc::format;
 #[cfg(feature = "serde")]
 use alloc::string::ToString;

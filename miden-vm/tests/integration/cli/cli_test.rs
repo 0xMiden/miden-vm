@@ -359,3 +359,83 @@ fn test_advmap_cli() {
     cmd.arg("run").arg(fixture("tests/integration/cli/data/adv_map.masm"));
     cmd.assert().success();
 }
+
+#[test]
+fn cli_run_and_prove_preserve_program_and_kernel_warnings() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    let kernel_path = working_dir.path().join("kernel.masm");
+    fs::write(&program_path, "use miden::core::math::u64\nbegin push.1 drop end").unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+    fs::write(&kernel_path, "pub proc noop nop end\n#! unused kernel docs\n").unwrap();
+
+    for action in ["run", "prove"] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg(action).arg(&program_path).arg("--kernel").arg(&kernel_path);
+        cmd.assert()
+            .success()
+            .stderr(predicate::str::contains("unused import"))
+            .stderr(predicate::str::contains("use miden::core::math::u64"))
+            .stderr(predicate::str::contains("#! unused kernel docs"));
+    }
+}
+
+#[test]
+fn cli_run_and_prove_preserve_warnings_on_execution_failure() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    fs::write(&program_path, "use miden::core::math::u64\nbegin push.0 assert end").unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+
+    for action in ["run", "prove"] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg(action).arg(&program_path);
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("unused import").count(1))
+            .stderr(predicate::str::contains("use miden::core::math::u64"))
+            .stderr(predicate::str::contains("Failed to execute program"));
+    }
+}
+
+#[test]
+fn cli_verify_preserves_kernel_warnings_on_success_and_failure() {
+    let working_dir = TempDir::new().unwrap();
+    let program_path = working_dir.path().join("program.masm");
+    let kernel_path = working_dir.path().join("kernel.masm");
+    fs::write(&program_path, "begin push.1 drop end").unwrap();
+    fs::write(program_path.with_extension("inputs"), r#"{"operand_stack":[]}"#).unwrap();
+    fs::write(&kernel_path, "pub proc noop nop end\n#! unused kernel docs\n").unwrap();
+
+    let mut cmd = bin_under_test(working_dir.path());
+    cmd.arg("prove").arg(&program_path).arg("--kernel").arg(&kernel_path);
+    let assertion = cmd.assert().success();
+    let stdout = String::from_utf8_lossy(&assertion.get_output().stdout);
+    let program_hash = stdout
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Proving program with hash ")
+                .and_then(|hash| hash.strip_suffix("..."))
+        })
+        .expect("prove prints the program hash");
+
+    for hash in [program_hash, &"00".repeat(32)] {
+        let mut cmd = bin_under_test(working_dir.path());
+        cmd.arg("verify")
+            .arg("--proof")
+            .arg(program_path.with_extension("proof"))
+            .arg("--program-hash")
+            .arg(hash)
+            .arg("--kernel")
+            .arg(&kernel_path);
+        let assertion =
+            cmd.assert().stderr(predicate::str::contains("#! unused kernel docs").count(1));
+        if hash == program_hash {
+            assertion.success();
+        } else {
+            assertion
+                .failure()
+                .stderr(predicate::str::contains("Program failed verification!"));
+        }
+    }
+}

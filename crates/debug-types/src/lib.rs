@@ -12,6 +12,7 @@ mod location;
 use alloc::vec;
 use alloc::{format, string::String, sync::Arc};
 
+pub use miden_diagnostics::{ColumnIndex, ColumnNumber, LineIndex, LineNumber};
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
@@ -24,8 +25,6 @@ pub use self::{
     indices::ByteIndex,
     location::{FileLineCol, Location},
 };
-
-pub use miden_diagnostics::{ColumnIndex, ColumnNumber, LineIndex, LineNumber};
 
 // URI
 // ================================================================================================

@@ -657,10 +657,8 @@ fn control_flow_nesting_depth_exceeded_during_lowering() {
     source.push_str("end\n");
 
     let error = parse_forms(test_source_file(&source))
-        .outcome
-        .into_result()
         .expect_err("lowering should reject control-flow nesting beyond the configured limit");
-    crate::assert_diagnostic!(error, "control-flow nesting depth exceeded");
+    crate::assert_diagnostic!(render_diagnostics(&error), "control-flow nesting depth exceeded");
 }
 
 #[test]

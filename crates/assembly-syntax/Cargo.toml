@@ -25,7 +25,7 @@ std = [
     "proptest?/std",
     "serde_spanned?/std"
 ]
-serde = ["dep:serde", "dep:serde_spanned", "miden-diagnostics/serde", "midenc-hir-type/serde", "semver/serde"]
+serde = ["dep:serde", "dep:serde_spanned", "miden-diagnostics/serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
@@ -36,7 +36,8 @@ miden-assembly-syntax-cst = { workspace = true, default-features = false }
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-diagnostics.workspace = true
-midenc-hir-type.workspace = true
+# HIR serde provides the binary codecs required by MAST packages, independently of TOML serde.
+midenc-hir-type = { workspace = true, features = ["serde"] }
 
 # External dependencies
 env_logger = { workspace = true, optional = true }

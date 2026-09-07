@@ -2,7 +2,7 @@ use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
     Assembler, Linkage, SourceMap,
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
+    diagnostics::{IntoDiagnostic, Outcome, Report, WrapErr},
 };
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
@@ -40,87 +40,98 @@ pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
     kernel_file: Option<&Path>,
-) -> Result<MasmProgram, Report> {
-    // Assembler debug mode is always enabled (issue #1821)
-    let program_file = ProgramFile::read(path).into_result()?;
-    let mut sources = program_file.sources().clone();
+) -> Outcome<MasmProgram> {
+    ProgramFile::read(path).and_then(|program_file, diagnostics| {
+        let mut sources = program_file.sources().clone();
 
-    // If kernel is provided, compile it and use it when compiling the program
-    let kernel_lib = if let Some(kernel_path) = kernel_file {
-        // Determine file type based on extension
-        let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-
-        // Load kernel from .masp package or compile from .masm source
-        let kernel_lib = match ext.as_str() {
-            "masp" => {
-                // Load kernel from package file
-                let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
-                    format!("Failed to read kernel package `{}`", kernel_path.display())
-                })?;
-                Package::read_from_bytes(&bytes)
-                    .map(Arc::from)
-                    .into_diagnostic()
-                    .wrap_err_with(|| {
-                        format!("Failed to deserialize kernel package `{}`", kernel_path.display())
-                    })?
-            },
-            "masm" => {
-                // Compile kernel from assembly source
-                // Assembler debug mode is always enabled (issue #1821)
-                let mut kernel_assembler = Assembler::with_sources(sources);
-                let kernel = kernel_assembler
-                    .assemble_kernel_from_root_in_place("kernel", kernel_path)
-                    .into_result()
-                    .map(Arc::from)?;
-                sources = kernel_assembler.sources().clone();
-                kernel
-            },
-            _ => {
-                return Err(Report::msg(format!(
-                    "Kernel file `{}` must have a .masm or .masp extension",
-                    kernel_path.display()
-                )));
-            },
+        let kernel_lib = if let Some(kernel_path) = kernel_file {
+            let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+            let kernel_lib = match ext.as_str() {
+                "masp" => {
+                    let package = (|| {
+                        let bytes =
+                            fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
+                                format!("Failed to read kernel package `{}`", kernel_path.display())
+                            })?;
+                        Package::read_from_bytes(&bytes)
+                            .map(Arc::from)
+                            .into_diagnostic()
+                            .wrap_err_with(|| {
+                                format!(
+                                    "Failed to deserialize kernel package `{}`",
+                                    kernel_path.display()
+                                )
+                            })
+                    })();
+                    diagnostics.capture(package).ok_or(())?
+                },
+                "masm" => {
+                    let mut kernel_assembler = Assembler::with_sources(sources);
+                    let outcome =
+                        kernel_assembler.assemble_kernel_from_root_in_place("kernel", kernel_path);
+                    diagnostics.merge(outcome.diagnostics);
+                    sources = kernel_assembler.sources().clone();
+                    Arc::from(outcome.result?)
+                },
+                _ => {
+                    diagnostics.add_report(Report::msg(format!(
+                        "Kernel file `{}` must have a .masm or .masp extension",
+                        kernel_path.display()
+                    )));
+                    return Err(());
+                },
+            };
+            Some(kernel_lib)
+        } else {
+            None
         };
-        Some(kernel_lib)
-    } else {
-        None
-    };
 
-    // Create the final program assembler from the complete source session. For a source kernel,
-    // this includes every file discovered while assembling the kernel tree.
-    let mut assembler = match kernel_lib.as_ref() {
-        Some(kernel_lib) => Assembler::with_sources_and_kernel(sources, Arc::clone(kernel_lib))?,
-        None => Assembler::with_sources(sources),
-    };
+        // Include every source discovered while assembling the kernel tree in the program session.
+        let mut assembler = match kernel_lib.as_ref() {
+            Some(kernel_lib) => diagnostics
+                .capture(Assembler::with_sources_and_kernel(sources, Arc::clone(kernel_lib)))
+                .ok_or(())?,
+            None => Assembler::with_sources(sources),
+        };
+        diagnostics
+            .capture(
+                assembler
+                    .link_package(CoreLibrary::default().package(), Linkage::Dynamic)
+                    .wrap_err("Failed to load stdlib"),
+            )
+            .ok_or(())?;
+        for library in libraries.libraries.iter().cloned() {
+            diagnostics
+                .capture(
+                    assembler
+                        .link_package(library, Linkage::Dynamic)
+                        .wrap_err("Failed to load libraries"),
+                )
+                .ok_or(())?;
+        }
 
-    assembler
-        .link_package(CoreLibrary::default().package(), Linkage::Dynamic)
-        .wrap_err("Failed to load stdlib")?;
+        let outcome = assembler.assemble_program_in_place("program", program_file.ast().clone());
+        diagnostics.merge(outcome.diagnostics);
+        let package = outcome.result?;
+        let sources = Arc::new(assembler.sources().clone());
+        let debug_info = diagnostics
+            .capture(
+                package
+                    .debug_info()
+                    .into_diagnostic()
+                    .wrap_err("Failed to read program debug info"),
+            )
+            .ok_or(())?;
+        let entrypoint_source_node = package.entrypoint_source_node();
+        let program = package.unwrap_program();
 
-    for library in libraries.libraries.iter().cloned() {
-        assembler
-            .link_package(library, Linkage::Dynamic)
-            .wrap_err("Failed to load libraries")?;
-    }
-
-    let package = assembler
-        .assemble_program_in_place("program", program_file.ast().clone())
-        .into_result()?;
-    let sources = Arc::new(assembler.sources().clone());
-    let debug_info = package
-        .debug_info()
-        .into_diagnostic()
-        .wrap_err("Failed to read program debug info")?;
-    let entrypoint_source_node = package.entrypoint_source_node();
-    let program = package.unwrap_program();
-
-    Ok(MasmProgram {
-        program,
-        package_debug_info: debug_info,
-        entrypoint_source_node,
-        sources,
-        kernel: kernel_lib,
+        Ok(MasmProgram {
+            program,
+            package_debug_info: debug_info,
+            entrypoint_source_node,
+            sources,
+            kernel: kernel_lib,
+        })
     })
 }
 

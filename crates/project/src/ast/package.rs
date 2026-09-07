@@ -100,6 +100,7 @@ mod serialization {
     };
 
     use super::*;
+    use crate::ast::parsing::set_once;
 
     impl<'de> Deserialize<'de> for PackageTable {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -240,17 +241,6 @@ mod serialization {
             }
 
             deserializer.deserialize_map(ProjectFileVisitor)
-        }
-    }
-
-    fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
-    where
-        E: Error,
-    {
-        if slot.replace(value).is_some() {
-            Err(E::duplicate_field(field))
-        } else {
-            Ok(())
         }
     }
 }

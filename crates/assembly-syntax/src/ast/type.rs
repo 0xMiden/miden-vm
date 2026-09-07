@@ -1252,9 +1252,9 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
     use core::str::FromStr;
 
-    use alloc::string::ToString;
     use miden_diagnostics::{SourceId, SourceSpan};
 
     use super::*;

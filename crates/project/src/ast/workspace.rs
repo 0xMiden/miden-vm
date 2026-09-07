@@ -27,7 +27,7 @@ mod serialization {
     };
 
     use super::*;
-    use crate::{Map, TomlSpan};
+    use crate::{Map, TomlSpan, ast::parsing::set_once};
 
     struct DependencyMap(Map<TomlSpan<Arc<str>>, TomlSpan<DependencySpec>>);
 
@@ -94,17 +94,6 @@ mod serialization {
             deserializer.deserialize_map(WorkspaceTableVisitor)
         }
     }
-
-    fn set_once<T, E>(slot: &mut Option<T>, value: T, field: &'static str) -> Result<(), E>
-    where
-        E: Error,
-    {
-        if slot.replace(value).is_some() {
-            Err(E::duplicate_field(field))
-        } else {
-            Ok(())
-        }
-    }
 }
 
 /// Represents a workspace-level `miden-project.toml` file
@@ -144,15 +133,22 @@ impl WorkspaceFile {
 
 impl WorkspaceFile {
     pub(super) fn validate(&self, context: &mut ValidationContext<'_>) {
-        // Validate that none of the package detail fields try to inherit from a workspace
-        if let Some(span) = self.workspace.package.version.as_ref().and_then(|v| {
-            if matches!(v.get_ref(), MaybeInherit::Inherit) {
-                Some(context.span(v))
-            } else {
-                None
+        // Workspace package details must be valid concrete values, never inherited.
+        if let Some(version_span) = self.workspace.package.version.as_ref() {
+            match version_span.get_ref() {
+                MaybeInherit::Inherit => {
+                    let _ = context
+                        .add(ProjectFileError::NotAWorkspace { span: context.span(version_span) });
+                },
+                MaybeInherit::Value(version) => {
+                    if let Err(error) = version.parse::<crate::SemVer>() {
+                        let _ = context.add(ProjectFileError::InvalidPackageVersion {
+                            message: error.to_string(),
+                            span: context.span(version_span),
+                        });
+                    }
+                },
             }
-        }) {
-            let _ = context.add(ProjectFileError::NotAWorkspace { span });
         }
 
         if let Some(description) = self.workspace.package.description.as_ref()

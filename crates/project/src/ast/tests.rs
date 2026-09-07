@@ -114,6 +114,22 @@ path = "mod.masm"
 }
 
 #[test]
+fn workspace_package_version_must_be_valid_even_when_not_inherited() {
+    let source = "[workspace.package]\nversion = \"not-a-version\"\n";
+    let mut context = TestContext::default();
+    let source_id =
+        context.sources.insert("workspace-test.toml", source.to_string(), None).unwrap();
+    let outcome = WorkspaceFile::parse(source_id, source);
+
+    assert!(outcome.is_err(), "invalid workspace package version should be rejected");
+    assert!(outcome.result.is_err());
+    let rendered = outcome.diagnostics.prepare(&context.sources).unwrap().to_string();
+    assert!(rendered.contains("invalid package version"), "{rendered}");
+    assert!(rendered.contains("workspace-test.toml"), "{rendered}");
+    assert!(rendered.contains("version = \"not-a-version\""), "{rendered}");
+}
+
+#[test]
 fn package_ast_preserves_toml_key_and_value_spans() {
     let source = r#"[package]
 name = "example"

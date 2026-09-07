@@ -13,7 +13,7 @@ need to instantiate the assembler, and then call one of its provided assembly me
 e.g. `assemble_program`.
 
 The `assemble_program` method takes the source code of an executable module as a string or file
-path and returns an `AssemblyOutcome`. The outcome keeps the optional executable `Package`
+path and returns an `Outcome<Box<Package>>`. The outcome keeps the executable package result
 separate from every diagnostic produced during assembly, so a successful value may coexist with
 warnings or informational diagnostics. Callers choose a failure policy and render the diagnostic
 set at their application boundary.
@@ -229,10 +229,10 @@ use miden_assembly::{
 };
 
 fn finish<T>(
-    outcome: Outcome<Option<T>>,
+    outcome: Outcome<T>,
     sources: Option<&dyn SourceProvider>,
 ) -> Result<T, Box<dyn std::error::Error>> {
-    let failed = outcome.value.is_none() || outcome.diagnostics.assess(&WarningsAsErrors);
+    let failed = outcome.result.is_err() || outcome.diagnostics.assess(&WarningsAsErrors);
     if !outcome.diagnostics.is_empty() {
         let rendered = match sources {
             Some(sources) => outcome.diagnostics.prepare(sources)?,
@@ -244,7 +244,7 @@ fn finish<T>(
     if failed {
         return Err(std::io::Error::other("assembly diagnostics prevented compilation").into());
     }
-    Ok(outcome.value.expect("successful assembly must produce a value"))
+    Ok(outcome.result.expect("successful assembly must produce a value"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

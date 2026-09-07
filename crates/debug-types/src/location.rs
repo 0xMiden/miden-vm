@@ -1,6 +1,6 @@
+use alloc::string::ToString;
 use core::{fmt, ops::Range};
 
-use alloc::string::ToString;
 use miden_diagnostics::{SourceProvider, SourceSpan, TextRange};
 use miden_serde_utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,

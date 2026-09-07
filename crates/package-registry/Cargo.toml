@@ -17,7 +17,7 @@ edition.workspace = true
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "miden-mast-package/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "miden-mast-package/serde"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "proptest?/std", "serde?/std"]
 
 [dependencies]
