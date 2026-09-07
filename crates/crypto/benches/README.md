@@ -159,22 +159,24 @@ Use these commands with the same compiler and workload when comparing revisions:
 RUSTFLAGS='-C target-cpu=generic' cargo bench -p miden-crypto --bench hash --features internal -- eidos
 # Graviton3: runtime dispatch selects SVE for packed operations.
 RUSTFLAGS='-C target-cpu=neoverse-v1 -C target-feature=+sve' cargo bench -p miden-crypto --bench hash --features internal -- eidos
-# Graviton4/5: runtime dispatch selects SVE2.
+# Graviton4/5: runtime dispatch selects SVE2 for packed operations.
 RUSTFLAGS='-C target-cpu=generic -C target-feature=+sve2' cargo bench -p miden-crypto --bench hash --features internal -- eidos
 # Register/list cases without taking measurements.
 cargo bench -p miden-crypto --bench hash --features internal -- eidos --list
 ```
 
-The `std` harness uses runtime dispatch: generic flags (or `-sve`) do not force NEON on an
-SVE-capable machine. These commands compare native tiers across machines, not forced tiers on
-one machine. Single-block compression uses NEON on SVE1 hardware and SVE2 on SVE2 hardware.
+The `std` harness uses runtime dispatch: generic flags (or `-sve`) do not force packed operations
+to use NEON on an SVE-capable machine. These commands compare native tiers across machines, not
+forced tiers on one machine. Single-state and sequential compression use NEON on AArch64; packed
+compression and PoW use SVE or SVE2 when available.
 SVE vector length is per thread; record the benchmark thread's inherited vector-length policy
 and verify its actual vector length when using a launcher that changes it. Do not infer vector
 length from compiler flags. Graviton3 normally uses 256 bits, and Graviton4/5 128 bits.
 
 `hash-eidos-raw/{compress,xof}` reports single-block latency without framing. Sequential byte
-cases cover 1/64/65/1024/8192 bytes; Felt cases cover 1/100/1000 elements. Merge uses fixed digest
-inputs. `hash-eidos-packed-felt/active/{1,2,4,8,16}` calls the production counted adapter, including
+cases cover 1/64/65/1024/8192 bytes; `hash-eidos-felt/hash_elements/{1,100,1000}` retains the
+pre-existing Felt benchmark IDs. Merge uses fixed digest inputs.
+`hash-eidos-packed-felt/active/{1,2,4,8,16}` calls the production counted adapter, including
 canonicalization and output packing. `hash-eidos-pow/buffer-{0,7}/{1,2,4,8,16}` measures candidate
 batches requiring one or two compressions, at an eight-bit acceptance mask. PoW snapshot
 preparation and all input allocation occur outside timed loops; no grind search is measured.
@@ -183,6 +185,19 @@ The `internal` feature exposes only benchmark delegates to the production paths.
 Criterion reports bytes/second for bytes, elements/second for Felts and packed compressions,
 and candidates/second for PoW. Compare matching case IDs and active counts; batch latency alone
 does not describe throughput. Save `target/criterion` with the recorded environment and flags.
+Criterion requires every selected case to exist in a comparison baseline. A baseline from before
+the ARM-specific cases were added contains only the Eidos merge and Felt IDs. Compare that subset
+with the same filter on both revisions:
+
+```sh
+# Run on the baseline revision.
+RUSTFLAGS='-C target-cpu=generic -C target-feature=+sve2' cargo bench -p miden-crypto --bench hash --features internal -- 'eidos-(merge|felt)' --save-baseline eidos-base
+# Run on the revision under test.
+RUSTFLAGS='-C target-cpu=generic -C target-feature=+sve2' cargo bench -p miden-crypto --bench hash --features internal -- 'eidos-(merge|felt)' --baseline eidos-base
+```
+
+Run the newly added raw, byte, packed, and PoW cases without `--baseline` until a baseline containing
+those IDs has been recorded.
 Compilation and local NEON execution do not establish SVE/SVE2 speedups: those require Graviton
 measurements, and no Eidos ARM speedup is claimed here.
 

@@ -105,22 +105,23 @@ benchmark_hash_felt!(
 
 // 2-to-1 hash merge
 benchmark_hash_merge!(hash_eidos_merge, "eidos", |b: &mut criterion::Bencher| {
-    let input1 = Eidos::hash(&[1; 32]);
-    let input2 = Eidos::hash(&[2; 32]);
-    b.iter(|| black_box(Eidos::merge(black_box(&[input1, input2]))))
+    let input1 = Eidos::hash(&generate_byte_array_random(32));
+    let input2 = Eidos::hash(&generate_byte_array_random(32));
+    b.iter(|| Eidos::merge(black_box(&[input1, input2])))
 });
 
-fn hash_eidos_sequential_felt(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hash-eidos-sequential-felt");
-    for &count in HASH_ELEMENT_COUNTS {
+// Preserve the benchmark IDs used before the ARM-specific cases were added so saved baselines
+// remain comparable across revisions.
+benchmark_hash_felt!(
+    hash_eidos_sequential_felt,
+    "eidos",
+    HASH_ELEMENT_COUNTS,
+    |b: &mut criterion::Bencher, count| {
         let elements = generate_felt_array_sequential(count);
-        group.throughput(Throughput::Elements(count as u64));
-        group.bench_with_input(BenchmarkId::new("felt", count), &elements, |b, elements| {
-            b.iter(|| black_box(Eidos::hash_elements(black_box(elements))))
-        });
-    }
-    group.finish();
-}
+        b.iter(|| Eidos::hash_elements(black_box(&elements)))
+    },
+    |count| Some(criterion::Throughput::Elements(count as u64))
+);
 
 fn hash_eidos_arm(c: &mut Criterion) {
     let cv = core::array::from_fn(|i| i as u32 + 1);
