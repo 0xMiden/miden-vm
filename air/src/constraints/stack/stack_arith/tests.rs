@@ -5,121 +5,13 @@ use miden_core::{
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     operations::opcodes,
 };
-use miden_crypto::stark::{
-    air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
-    matrix::RowMajorMatrix,
-};
 
 use super::enforce_main;
-use crate::{
-    constraints::{
-        columns::CoreCols,
-        op_flags::{OpFlags, generate_test_row},
-    },
-    trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
+use crate::constraints::{
+    columns::CoreCols,
+    op_flags::{OpFlags, generate_test_row},
+    stack::test_utils::ConstraintEvalBuilder,
 };
-
-struct ConstraintEvalBuilder {
-    main: RowMajorMatrix<Felt>,
-    aux: RowMajorMatrix<QuadFelt>,
-    randomness: Vec<QuadFelt>,
-    permutation_values: Vec<QuadFelt>,
-    periodic_values: Vec<Felt>,
-    preprocessed: RowWindow<'static, Felt>,
-    evaluations: Vec<QuadFelt>,
-}
-
-impl ConstraintEvalBuilder {
-    fn new() -> Self {
-        Self {
-            main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
-            aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2], AUX_TRACE_WIDTH),
-            randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
-            permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
-            periodic_values: Vec::new(),
-            preprocessed: RowWindow::from_two_rows(&[], &[]),
-            evaluations: Vec::new(),
-        }
-    }
-}
-
-impl AirBuilder for ConstraintEvalBuilder {
-    type F = Felt;
-    type Expr = Felt;
-    type Var = Felt;
-    type PreprocessedWindow = RowWindow<'static, Felt>;
-    type MainWindow = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVar = Felt;
-
-    fn main(&self) -> Self::MainWindow {
-        self.main.clone()
-    }
-
-    fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed
-    }
-
-    fn is_first_row(&self) -> Self::Expr {
-        Felt::ZERO
-    }
-
-    fn is_last_row(&self) -> Self::Expr {
-        Felt::ZERO
-    }
-
-    fn is_transition(&self) -> Self::Expr {
-        Felt::ONE
-    }
-
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "stack arithmetic tests use two-row transition windows");
-        self.is_transition()
-    }
-
-    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.evaluations.push(QuadFelt::from(x.into()));
-    }
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &[]
-    }
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
-    }
-}
-
-impl ExtensionBuilder for ConstraintEvalBuilder {
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-
-    fn assert_zero_ext<I>(&mut self, x: I)
-    where
-        I: Into<Self::ExprEF>,
-    {
-        self.evaluations.push(x.into());
-    }
-}
-
-impl PermutationAirBuilder for ConstraintEvalBuilder {
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
-    type PermutationVar = QuadFelt;
-
-    fn permutation(&self) -> Self::MP {
-        self.aux.clone()
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        &self.randomness
-    }
-
-    fn permutation_values(&self) -> &[Self::PermutationVar] {
-        &self.permutation_values
-    }
-}
 
 /// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
 fn set_u32_helpers(row: &mut CoreCols<Felt>, lo: u32, hi: u32) {
