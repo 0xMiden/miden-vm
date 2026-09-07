@@ -124,11 +124,11 @@ impl Eidos {
         if bytes.is_empty() {
             cv = compression::compress_cv(cv, [0; 16]);
         } else {
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
             {
                 cv = compress_encoded_blocks(cv, bytes.chunks(64).map(encoding::encode_byte_block));
             }
-            #[cfg(not(target_arch = "aarch64"))]
+            #[cfg(not(all(target_arch = "aarch64", target_vendor = "apple")))]
             for chunk in bytes.chunks(64) {
                 cv = compression::compress_cv(cv, encoding::encode_byte_block(chunk));
             }
@@ -223,7 +223,7 @@ fn exact_size_hint<I: Iterator>(iter: &I) -> Option<usize> {
 }
 
 /// Keep sequential batches bounded independently of the message length.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
 fn compress_encoded_blocks(mut cv: [u32; 8], blocks: impl Iterator<Item = [u32; 16]>) -> [u32; 8] {
     let mut batch = [[0; 16]; 8];
     let mut count = 0;
@@ -242,7 +242,7 @@ fn compress_encoded_blocks(mut cv: [u32; 8], blocks: impl Iterator<Item = [u32; 
 }
 
 /// Batch encoded field blocks while leaving padding and length checks to the scheduler.
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
 fn fold_encoded_field_blocks<I>(
     iter: I,
     len: usize,
@@ -276,7 +276,7 @@ where
     I: Iterator<Item = Felt>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     let cv = fold_encoded_field_blocks(
         iter,
         len,
@@ -284,7 +284,7 @@ where
         Felt::ZERO,
         |block| encoding::encode_felt_block(&block),
     );
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(all(target_arch = "aarch64", target_vendor = "apple")))]
     let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
@@ -300,12 +300,12 @@ where
     I: Iterator<Item = u64>,
 {
     let len_u32 = u32::try_from(len).expect("input too long: felt count must fit in u32");
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
     let cv =
         fold_encoded_field_blocks(iter, len, framing::init_cv(0, [len_u32, 0, 0]), 0, |block| {
             encoding::encode_u64_block(&block)
         });
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(all(target_arch = "aarch64", target_vendor = "apple")))]
     let cv = framing::fold_blocks::<BLOCK_LEN, _, _>(
         iter,
         len,
@@ -539,7 +539,7 @@ mod tests {
                 );
                 let actual: [u64; DIGEST_WIDTH] = Eidos.hash_iter(values.iter().copied());
                 assert_eq!(actual, encoding::pack_cv_to_u64s(expected));
-                #[cfg(target_arch = "aarch64")]
+                #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]
                 assert_eq!(
                     fold_encoded_field_blocks(
                         values.iter().copied(),
