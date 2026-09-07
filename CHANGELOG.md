@@ -19,6 +19,9 @@
 
 - Preserved the public `ParsingError` enum layout while adding protocol ABI attribute checks ([#3812](https://github.com/0xMiden/miden-vm/pull/3812)).
 - Fixed issue where parsing of pointer types dropped address space information ([#3790](https://github.com/0xMiden/miden-vm/pull/3790)).
+#### Changes
+
+- Reworked the `MastForest` `Arbitrary` impl. `GenerationMode::Executable` (the default) yields forests whose procedure roots run to completion on any operand stack: infallible, stack-balanced basic blocks, binary split and loop conditions, externals that resolve to local roots, and syscalls into a paired `KernelDescriptor` exposed through `forest_kernel_strategy`. `GenerationMode::StructureOnly` keeps the permissive behavior ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
 
 ## v0.32.0 (2026-09-05)
 
@@ -263,10 +266,6 @@
 - Enable simd128 Plonky3 backend for WASM builds and added related CI job ([#3433](https://github.com/0xMiden/miden-vm/pull/3433)).
 - [BREAKING] Bumped Plonky3 related dependencies to integrate SVE2 and WASM-SIMD128 speed-ups and include a NEON bugfix. ([#3441](https://github.com/0xMiden/miden-vm/pull/3441)).
 - [BREAKING] Changed `Package::read_from_trusted` and `Package::read_from_bytes_trusted` to skip embedded MAST and manifest cross-check validation, removed the package unchecked readers, and kept untrusted package reads on `Package::read_from` and `Package::read_from_bytes`, which validate MAST and drop debug sections ([#3418](https://github.com/0xMiden/miden-vm/pull/3418)).
-- Reworked `MastForest` `Arbitrary` impl to support structurally executable sampling: externals resolve to local procedure roots, syscall callees are members of a co-generated `Kernel`, and the external call graph is acyclic. A new `GenerationMode` enum (`Executable` default, `StructureOnly` opt in).
-- Reworked `MastForest` `Arbitrary` impl to support executable sampling: externals resolve to local procedure roots, syscall callees are members of a co-generated `KernelDescriptor`, the external call graph is acyclic, basic blocks contain only infallible operations, and every node is reachable from a procedure root. A new `GenerationMode` enum (`Executable` default, `StructureOnly` opt in) ([#3158](https://github.com/0xMiden/miden-vm/pull/3158)).
-- Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
-- Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
 
 #### Fixes
 
