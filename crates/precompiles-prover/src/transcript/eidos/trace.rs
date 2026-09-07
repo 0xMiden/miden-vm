@@ -27,6 +27,9 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+pub(crate) mod testing;
+
 // ABSORPTION OUTPUT
 // ================================================================================================
 
@@ -37,11 +40,6 @@ pub struct AbsorptionId(u32);
 impl AbsorptionId {
     pub fn as_u32(self) -> u32 {
         self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn forged(absorption_id: u32) -> Self {
-        Self(absorption_id)
     }
 }
 
@@ -67,10 +65,6 @@ impl AbsorptionSpan {
     pub fn tail(self) -> AbsorptionId {
         AbsorptionId(self.start + self.len - 1)
     }
-
-    pub fn n_cycles(self) -> u32 {
-        self.len
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,10 +76,6 @@ pub struct AbsorptionOutput {
 impl AbsorptionOutput {
     pub fn head(&self) -> AbsorptionId {
         self.span.head()
-    }
-
-    pub fn tail(&self) -> AbsorptionId {
-        self.span.tail()
     }
 }
 
@@ -190,17 +180,6 @@ impl EidosRequires {
         rec.out_mult =
             rec.out_mult.checked_add(1).expect("Eidos output multiplicity must fit in u32");
         Some(AbsorptionSpan::new(rec.range.clone()))
-    }
-
-    pub fn lookup(&self, digest: EidosDigest) -> Option<AbsorptionSpan> {
-        self.by_digest
-            .get(&digest)
-            .map(|&idx| AbsorptionSpan::new(self.absorptions[idx].range.clone()))
-    }
-
-    /// Number of compressions allocated to surrounding transcript buses.
-    pub fn total_cycles(&self) -> u32 {
-        self.next_seq
     }
 }
 
@@ -361,10 +340,6 @@ pub(crate) fn generate_trace_with_byte_lookups(
     }
 
     RowMajorMatrix::new(values, NUM_MAIN_COLS)
-}
-
-pub fn generate_trace(requires: EidosRequires) -> RowMajorMatrix<Felt> {
-    generate_trace_with_byte_lookups(requires, &mut BytePairLutRequires::new())
 }
 
 const _: () = assert!(EIDOS_COMPRESSION_CYCLE_LEN == 32);

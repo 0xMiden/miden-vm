@@ -36,12 +36,15 @@ use crate::{
                 NUM_COLS as NUM_EIDOS_COMPRESSION_COLS, footer_digest_col, footer_r_col,
                 g_bd_rot_slot_col,
             },
-            trace::{
+            testing::{
                 EidosCompressionFeltTraceBlock, generate_felt_trace_block_with_cycle_id,
                 rewrite_felt_footer_for_test,
             },
         },
-        trace::{EidosRequires, generate_trace},
+        trace::{
+            EidosRequires,
+            testing::{generate_trace, total_cycles},
+        },
     },
 };
 
@@ -401,7 +404,7 @@ fn digests_match_eidos_framing_and_integrated_eidos_compression_air_holds() {
         expected_msm = Eidos::compress(expected_msm, as_block(input));
     }
     assert_eq!(msm.digest, EidosDigest(expected_msm.into_elements()));
-    assert_eq!(requires.total_cycles(), 6);
+    assert_eq!(total_cycles(&requires), 6);
 
     let compression = generate_trace(requires);
     crate::tests::check_local(EidosCompressionAir, &compression);
@@ -466,7 +469,7 @@ fn distinct_generic_absorptions_use_consecutive_physical_cycles() {
     let first = requires.require_absorption(Keccak256Precompile::assert_frame(8), [payload]);
     let second = requires.require_absorption(Keccak256Precompile::assert_frame(9), [payload]);
     assert_ne!(first.digest, second.digest);
-    assert_eq!(requires.total_cycles(), 2);
+    assert_eq!(total_cycles(&requires), 2);
 
     let compression = generate_trace(requires);
     let row = |cycle: usize, col: usize| {
@@ -764,8 +767,8 @@ fn interning_reuses_logical_span_and_tallies_multiplicity() {
 
     assert_eq!(first.digest, second.digest);
     assert_eq!(first.head(), second.head());
-    assert_eq!(first.tail(), second.tail());
-    assert_eq!(requires.total_cycles(), 2);
+    assert_eq!(first.span.tail(), second.span.tail());
+    assert_eq!(total_cycles(&requires), 2);
 
     let compression = generate_trace(requires);
     for row in compression.values.as_chunks::<NUM_MAIN_COLS>().0 {

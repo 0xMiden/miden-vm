@@ -16,9 +16,6 @@ use super::{
 };
 use crate::constraints::and8_lookup::eidos::{self as eidos_lookup, BytePairRelation, Rotation};
 
-#[cfg(test)]
-pub type EidosCompressionRow = [u64; NUM_COLS];
-
 /// One row of the Eidos compression main trace over the VM base field.
 pub type EidosCompressionFeltRow = [Felt; NUM_COLS];
 
@@ -63,12 +60,6 @@ impl TraceMode {
             Self::AeadXof { .. } => 0,
         }
     }
-}
-
-#[cfg(test)]
-pub struct EidosCompressionTraceBlock {
-    pub rows: [EidosCompressionRow; BLOCK_PERIOD],
-    pub final_v: [u32; 16],
 }
 
 /// Materialized 32-row Eidos compression trace block and its final 16-word working state.
@@ -130,22 +121,9 @@ impl ByteLookupRecorder for NoopByteLookupRecorder {
     fn record(&mut self, _lookup: EidosCompressionByteLookup, _lhs: u8, _rhs: u8, _result: u32) {}
 }
 
-trait TraceRow {
+pub(super) trait TraceRow {
     fn get_u64(&self, col: usize) -> u64;
     fn set_u64(&mut self, col: usize, value: u64);
-}
-
-#[cfg(test)]
-impl TraceRow for EidosCompressionRow {
-    #[inline]
-    fn get_u64(&self, col: usize) -> u64 {
-        self[col]
-    }
-
-    #[inline]
-    fn set_u64(&mut self, col: usize, value: u64) {
-        self[col] = value;
-    }
 }
 
 impl TraceRow for EidosCompressionFeltRow {
@@ -158,32 +136,6 @@ impl TraceRow for EidosCompressionFeltRow {
     fn set_u64(&mut self, col: usize, value: u64) {
         self[col] = Felt::new_unchecked(value);
     }
-}
-
-#[cfg(test)]
-pub fn generate_trace_block(
-    block: [u32; 16],
-    h: [u32; 8],
-    mode: TraceMode,
-) -> EidosCompressionTraceBlock {
-    generate_trace_block_with_cycle_id(block, h, 0, mode)
-}
-
-#[cfg(test)]
-pub fn generate_trace_block_with_cycle_id(
-    block: [u32; 16],
-    h: [u32; 8],
-    compression_cycle_id: u64,
-    mode: TraceMode,
-) -> EidosCompressionTraceBlock {
-    let mut rows = vec![[0u64; NUM_COLS]; BLOCK_PERIOD];
-    let mut recorder = NoopByteLookupRecorder;
-    let final_v = write_trace_rows(&mut rows, block, h, compression_cycle_id, mode, &mut recorder);
-    let rows = rows
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
-
-    EidosCompressionTraceBlock { rows, final_v }
 }
 
 /// Generates one field-valued Eidos compression trace block with physical cycle ID zero.
@@ -209,39 +161,6 @@ pub fn generate_felt_trace_block_with_cycle_id(
         .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
 
     EidosCompressionFeltTraceBlock { rows, final_v }
-}
-
-#[cfg(test)]
-pub(super) fn generate_felt_trace_block_with_initial_state_for_test(
-    block: [u32; 16],
-    h: [u32; 8],
-    initial_v: [u32; 16],
-    mode: TraceMode,
-) -> EidosCompressionFeltTraceBlock {
-    assert_eq!(&initial_v[..8], &h);
-    let mut rows = vec![[Felt::ZERO; NUM_COLS]; BLOCK_PERIOD];
-    let mut recorder = NoopByteLookupRecorder;
-    let final_v =
-        write_trace_rows_from_state(&mut rows, block, h, initial_v, 0, mode, &mut recorder);
-    let rows = rows
-        .try_into()
-        .unwrap_or_else(|_| unreachable!("fixed Eidos compression trace length"));
-
-    EidosCompressionFeltTraceBlock { rows, final_v }
-}
-
-#[cfg(test)]
-pub(super) fn rewrite_felt_footer_for_test(
-    rows: &mut [EidosCompressionFeltRow; BLOCK_PERIOD],
-    block: [u32; 16],
-    h: [u32; 8],
-    final_v: [u32; 16],
-    mode: TraceMode,
-) {
-    for row in rows.iter_mut().skip(FOOTER_START) {
-        row.fill(Felt::ZERO);
-    }
-    write_footer_rows(rows, block, h, final_v, 0, mode, &mut NoopByteLookupRecorder);
 }
 
 /// Writes one Eidos compression cycle after clearing its 32-row destination.
@@ -338,7 +257,7 @@ pub fn retag_felt_trace_block_cycle_id(
     }
 }
 
-fn write_trace_rows<T, R>(
+pub(super) fn write_trace_rows<T, R>(
     rows: &mut [T],
     block: [u32; 16],
     h: [u32; 8],
@@ -376,7 +295,7 @@ fn validate_packed_inputs(block: &[u32; 16], h: &[u32; 8]) {
     }
 }
 
-fn write_trace_rows_from_state<T, R>(
+pub(super) fn write_trace_rows_from_state<T, R>(
     rows: &mut [T],
     block: [u32; 16],
     h: [u32; 8],
@@ -465,7 +384,7 @@ fn write_fused_g_row<T, R>(
     }
 }
 
-fn write_footer_rows<T, R>(
+pub(super) fn write_footer_rows<T, R>(
     rows: &mut [T],
     block: [u32; 16],
     h: [u32; 8],

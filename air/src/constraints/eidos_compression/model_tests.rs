@@ -1,7 +1,10 @@
 use miden_core::{Felt, Word};
 use miden_crypto::hash::eidos::Eidos;
 
-use super::model::{execute_fused_rounds, execute_unfused_rounds, low_output, xof_lanes};
+use super::{
+    model::low_output,
+    test_support::{execute_fused_rounds, execute_unfused_rounds, xof_lanes},
+};
 
 const BLOCK_WIDTH: usize = 8;
 

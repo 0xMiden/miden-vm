@@ -18,6 +18,9 @@ mod model;
 mod periodic;
 mod schedule;
 pub(crate) mod selectors;
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub mod testing;
 #[doc(hidden)]
 pub mod trace;
 
