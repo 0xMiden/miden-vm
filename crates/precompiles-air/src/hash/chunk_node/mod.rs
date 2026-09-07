@@ -28,7 +28,8 @@ use crate::{
     logup::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, frac_col},
     transcript::{
         binding::BindingMsg,
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
     },
     utils::{current_main, next_main},
 };

@@ -25,7 +25,10 @@ use miden_ace_codegen::{
     render_masm_constraints_eval, subtree_leaves,
 };
 use miden_core::{Felt, Word, crypto::hash::Eidos};
-use miden_crypto::{hash::eidos::BLOCK_LEN as EIDOS_BLOCK_WIDTH, merkle::MerkleTree};
+use miden_crypto::{
+    hash::eidos::{BLOCK_LEN as EIDOS_BLOCK_WIDTH, domains::LMCS_LEAF},
+    merkle::MerkleTree,
+};
 use miden_lifted_air::BaseAir;
 use miden_lifted_stark::{QuotientRecompositionInputs, quotient_recomposition_inputs};
 use miden_precompiles_air::{
@@ -225,15 +228,16 @@ impl PvmTraceGeometry {
         self.row_widths.total()
     }
 
-    fn deep_query_blocks(self) -> [(&'static str, usize); 4] {
+    fn deep_query_groups(self) -> [(&'static str, &'static str, usize); 4] {
         [
             (
                 "PREPROCESSED_ROW_DOUBLE_WORDS",
-                self.row_widths.preprocessed / EIDOS_BLOCK_WIDTH,
+                "PREPROCESSED_LMCS_INIT_CV",
+                self.row_widths.preprocessed,
             ),
-            ("MAIN_ROW_DOUBLE_WORDS", self.row_widths.main / EIDOS_BLOCK_WIDTH),
-            ("AUX_ROW_DOUBLE_WORDS", self.row_widths.auxiliary / EIDOS_BLOCK_WIDTH),
-            ("QUOTIENT_ROW_DOUBLE_WORDS", self.row_widths.quotient / EIDOS_BLOCK_WIDTH),
+            ("MAIN_ROW_DOUBLE_WORDS", "MAIN_LMCS_INIT_CV", self.row_widths.main),
+            ("AUX_ROW_DOUBLE_WORDS", "AUX_LMCS_INIT_CV", self.row_widths.auxiliary),
+            ("QUOTIENT_ROW_DOUBLE_WORDS", "QUOTIENT_LMCS_INIT_CV", self.row_widths.quotient),
         ]
     }
 }
@@ -752,10 +756,33 @@ fn render_pvm_constraints_eval(
 
 fn render_pvm_deep_queries(geometry: PvmTraceGeometry) -> Result<String, String> {
     let mut deep_queries = read_generated_file(PVM_DEEP_QUERIES_PATH)?;
-    for (name, blocks) in geometry.deep_query_blocks() {
-        replace_masm_const(&mut deep_queries, name, blocks, PVM_DEEP_QUERIES_PATH)?;
-    }
+    apply_pvm_deep_query_geometry(&mut deep_queries, geometry)?;
     Ok(deep_queries)
+}
+
+fn apply_pvm_deep_query_geometry(
+    deep_queries: &mut String,
+    geometry: PvmTraceGeometry,
+) -> Result<(), String> {
+    for (blocks_name, init_cv_name, width) in geometry.deep_query_groups() {
+        replace_masm_const(
+            deep_queries,
+            blocks_name,
+            width / EIDOS_BLOCK_WIDTH,
+            PVM_DEEP_QUERIES_PATH,
+        )?;
+
+        let encoded_len = u32::try_from(width)
+            .map_err(|_| format!("PVM {init_cv_name} LMCS encoded length exceeds u32"))?;
+        let init_cv = Eidos::init_chaining_word(LMCS_LEAF, encoded_len);
+        replace_masm_const(
+            deep_queries,
+            init_cv_name,
+            masm_word_literal(init_cv),
+            PVM_DEEP_QUERIES_PATH,
+        )?;
+    }
+    Ok(())
 }
 
 fn render_pvm_ood_frames(geometry: PvmTraceGeometry) -> Result<String, String> {
@@ -908,6 +935,17 @@ fn format_felts(felts: &[Felt]) -> String {
     })
 }
 
+fn masm_word_literal(word: Word) -> String {
+    let elements = word.as_elements();
+    format!(
+        "[{}, {}, {}, {}]",
+        elements[0].as_canonical_u64(),
+        elements[1].as_canonical_u64(),
+        elements[2].as_canonical_u64(),
+        elements[3].as_canonical_u64(),
+    )
+}
+
 fn render_registry_data(artifacts: &GeneratedArtifacts) -> String {
     let mut rows = String::new();
     for node in &artifacts.row {
@@ -1053,9 +1091,9 @@ mod tests {
     use miden_core::{Felt, Word};
 
     use super::{
-        PVM_DEEP_QUERIES_PATH, PVM_OOD_FRAMES_PATH, PvmTraceGeometry, format_felts,
-        read_generated_file, render_pvm_deep_queries, render_pvm_ood_frames, replace_masm_const,
-        replace_unique_block,
+        PVM_DEEP_QUERIES_PATH, PVM_OOD_FRAMES_PATH, PvmTraceGeometry,
+        apply_pvm_deep_query_geometry, format_felts, read_generated_file, render_pvm_deep_queries,
+        render_pvm_ood_frames, replace_masm_const, replace_unique_block,
     };
 
     #[test]
@@ -1163,5 +1201,20 @@ mod tests {
             render_pvm_ood_frames(geometry).unwrap().as_bytes(),
             checked_in_ood_frames.as_bytes(),
         );
+    }
+
+    #[test]
+    fn pvm_deep_query_renderer_repairs_block_count_and_lmcs_cv_together() {
+        let factored = crate::ace::build_precompile_factored_ace_circuit().unwrap();
+        let geometry = PvmTraceGeometry::from_input_layout(factored.layout()).unwrap();
+        let expected = read_generated_file(PVM_DEEP_QUERIES_PATH).unwrap();
+        let mut stale = expected.clone();
+
+        replace_masm_const(&mut stale, "AUX_ROW_DOUBLE_WORDS", 1, PVM_DEEP_QUERIES_PATH).unwrap();
+        replace_masm_const(&mut stale, "AUX_LMCS_INIT_CV", "[1, 2, 3, 4]", PVM_DEEP_QUERIES_PATH)
+            .unwrap();
+
+        apply_pvm_deep_query_geometry(&mut stale, geometry).unwrap();
+        assert_eq!(stale, expected);
     }
 }

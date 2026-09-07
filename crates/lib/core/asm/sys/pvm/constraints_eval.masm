@@ -8,10 +8,10 @@ use miden::core::sys::pvm::layout
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 3208
+const NUM_INPUTS_CIRCUIT = 3192
 
 # Number of evaluation gates in the constraint evaluation circuit
-const NUM_EVAL_GATES_CIRCUIT = 11792
+const NUM_EVAL_GATES_CIRCUIT = 11768
 
 # Max cycle length for periodic columns
 const MAX_CYCLE_LEN_LOG = 7
@@ -27,16 +27,16 @@ const ORDER_TAG_COUNT = 3628800
 const NUM_AIRS = 10
 
 # Number of 8-felt blocks in each authenticated ACE circuit segment.
-const ACE_PREFIX_BLOCKS = 585
-const ACE_COMMON_BLOCKS = 1268
+const ACE_PREFIX_BLOCKS = 583
+const ACE_COMMON_BLOCKS = 1267
 
 # Precomputed generic Felt-sequence chaining words for the two fixed-length segments.
 const ACE_PREFIX_INIT_CV_0 = 4280581857092831745
-const ACE_PREFIX_INIT_CV_1 = 2688637132020388424
+const ACE_PREFIX_INIT_CV_1 = 2688637132020388408
 const ACE_PREFIX_INIT_CV_2 = 1947077364412317696
 const ACE_PREFIX_INIT_CV_3 = 6620516959492505600
 const ACE_COMMON_INIT_CV_0 = 4280581857092831745
-const ACE_COMMON_INIT_CV_1 = 2688637132020393888
+const ACE_COMMON_INIT_CV_1 = 2688637132020393880
 const ACE_COMMON_INIT_CV_2 = 1947077364412317696
 const ACE_COMMON_INIT_CV_3 = 6620516959492505600
 
@@ -51,10 +51,10 @@ const QUOTIENT_FIRST_WEIGHT = 2704820172613542122
 # Eidos digest of the order-invariant common section of the ACE circuit stream
 # (common ops + root padding). The registry leaf for each ORDER_TAG is
 # hash_elements(H(constants | shuffle ops) || ACE_COMMON_COMMITMENT).
-const ACE_COMMON_COMMITMENT_0 = 1174174825003032689
-const ACE_COMMON_COMMITMENT_1 = 4023623209896522820
-const ACE_COMMON_COMMITMENT_2 = 4034422279703919850
-const ACE_COMMON_COMMITMENT_3 = 5333240959083443342
+const ACE_COMMON_COMMITMENT_0 = 473332134603064729
+const ACE_COMMON_COMMITMENT_1 = 1278414489783209700
+const ACE_COMMON_COMMITMENT_2 = 4985503720932450202
+const ACE_COMMON_COMMITMENT_3 = 197783818810683362
 
 # ERRORS
 # =================================================================================================
