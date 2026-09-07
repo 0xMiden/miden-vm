@@ -48,7 +48,29 @@ pub fn load_package_with_handlers(
         .wrap_err("Failed to register the package's Wasm event handlers")
 }
 
+/// Registers a program package and its embedded kernel package, if any, with `host`.
+///
+/// `Package::try_into_program` selects the embedded kernel package, so kernel code runs at
+/// execution time; this function loads that package's MAST forest and Wasm event handlers into
+/// the host the same way it loads the outer package's. Library packages (`-l`) have no embedded
+/// kernel to honor and go through [`load_package_with_handlers`] directly.
+pub fn load_program_package_with_handlers(
+    host: &mut DefaultHost,
+    package: &Arc<Package>,
+) -> Result<(), Report> {
+    load_package_with_handlers(host, package)?;
+    if let Some(kernel_package) = package.try_embedded_kernel_package()? {
+        load_package_with_handlers(host, &Arc::from(kernel_package))?;
+    }
+    Ok(())
+}
+
 /// Returns a `Program` type from a `.masm` assembly file.
+///
+/// When `kernel_file` is a `.masp` package, that package is returned alongside the program, so the
+/// caller can register its MAST forest and its Wasm event handlers with the host. A `.masm` kernel
+/// has neither a package nor handlers, so `None` is returned for it, as it is when no kernel is
+/// given.
 pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
@@ -59,12 +81,16 @@ pub fn get_masm_program(
         Option<PackageDebugInfo>,
         Option<DebugSourceNodeId>,
         Arc<DefaultSourceManager>,
+        Option<Arc<Package>>,
     ),
     Report,
 > {
     // Assembler debug mode is always enabled (issue #1821)
     let program_file = ProgramFile::read(path)?;
     let source_manager = program_file.source_manager().clone();
+
+    // A `.masp` kernel is handed back to the caller, which registers it with the host
+    let mut kernel_package = None;
 
     // If kernel is provided, compile it and use it when compiling the program
     let package = if let Some(kernel_path) = kernel_file {
@@ -75,12 +101,14 @@ pub fn get_masm_program(
         let kernel_lib = match ext.as_str() {
             "masp" => {
                 // Load kernel from package file
-                Package::deserialize_from_file(kernel_path)
+                let kernel_lib: Arc<Package> = Package::deserialize_from_file(kernel_path)
                     .map(Arc::from)
                     .into_diagnostic()
                     .wrap_err_with(|| {
                         format!("Failed to deserialize kernel package `{}`", kernel_path.display())
-                    })?
+                    })?;
+                kernel_package = Some(kernel_lib.clone());
+                kernel_lib
             },
             "masm" => {
                 // Compile kernel from assembly source
@@ -131,7 +159,7 @@ pub fn get_masm_program(
     let entrypoint_source_node = package.entrypoint_source_node();
     let program = package.unwrap_program();
 
-    Ok((program, debug_info, entrypoint_source_node, source_manager))
+    Ok((program, debug_info, entrypoint_source_node, source_manager, kernel_package))
 }
 
 /// Parses a byte-size string into a byte count.
