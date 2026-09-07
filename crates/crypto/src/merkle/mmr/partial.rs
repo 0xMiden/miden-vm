@@ -104,11 +104,11 @@ impl PartialMmr {
     /// This constructor validates the consistency between peaks, nodes, and tracked_leaves:
     /// - All tracked leaf positions must be within forest bounds.
     /// - All tracked leaves must have their values in the nodes map.
+    /// - All tracked leaves must have complete authentication paths.
     /// - All node indices must be valid leaf or internal node positions within the forest.
     ///
     /// Note: This performs structural validation only. It does not verify that authentication
-    /// paths for tracked leaves are complete or that node values are cryptographically
-    /// consistent with the peaks.
+    /// paths for tracked leaves are cryptographically consistent with the peaks.
     ///
     /// # Errors
     /// Returns an error if the components are inconsistent.
@@ -147,7 +147,22 @@ impl PartialMmr {
         }
 
         let peaks = peaks.into();
-        Ok(Self { forest, peaks, nodes, tracked_leaves })
+        let partial_mmr = Self { forest, peaks, nodes, tracked_leaves };
+
+        // Validate that every tracked leaf has a complete authentication path.
+        for &pos in &partial_mmr.tracked_leaves {
+            match partial_mmr.open(pos) {
+                Ok(Some(_)) => {},
+                Ok(None) => {
+                    return Err(MmrError::InconsistentPartialMmr(format!(
+                        "tracked leaf at position {pos} has no authentication path"
+                    )));
+                },
+                Err(err) => return Err(err),
+            }
+        }
+
+        Ok(partial_mmr)
     }
 
     /// Returns a new [PartialMmr] instantiated from the specified components without validation.
@@ -796,7 +811,7 @@ mod tests {
         vec::Vec,
     };
 
-    use super::{MmrPeaks, PartialMmr};
+    use super::{MmrError, MmrPeaks, PartialMmr};
     use crate::{
         Word,
         merkle::{
@@ -1368,13 +1383,19 @@ mod tests {
         let result = PartialMmr::from_parts(peaks.clone(), BTreeMap::new(), tracked_no_value);
         assert!(result.is_err());
 
-        // Valid case: tracked leaf with its value in nodes
-        let mut nodes_with_leaf = BTreeMap::new();
-        let leaf_idx = InOrderIndex::from_leaf_pos(0);
-        nodes_with_leaf.insert(leaf_idx, int_to_node(0));
+        // Valid case: tracked leaf with its complete authentication path in nodes
+        let tracked_pos = 0;
+        let mut complete_partial = PartialMmr::from_peaks(peaks.clone());
+        complete_partial
+            .track(
+                tracked_pos,
+                mmr.get(tracked_pos).unwrap(),
+                mmr.open(tracked_pos).unwrap().path().merkle_path(),
+            )
+            .unwrap();
         let mut tracked_valid = BTreeSet::new();
-        tracked_valid.insert(0);
-        let result = PartialMmr::from_parts(peaks.clone(), nodes_with_leaf, tracked_valid);
+        tracked_valid.insert(tracked_pos);
+        let result = PartialMmr::from_parts(peaks.clone(), complete_partial.nodes, tracked_valid);
         assert!(result.is_ok());
 
         // Invalid case: node index out of bounds (leaf index)
@@ -1418,6 +1439,27 @@ mod tests {
         nodes_with_empty_forest.insert(InOrderIndex::from_leaf_pos(0), int_to_node(0));
         let result = PartialMmr::from_parts(empty_peaks, nodes_with_empty_forest, BTreeSet::new());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_parts_rejects_missing_ancestor_sibling() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+        let peaks = mmr.peaks();
+        let tracked_pos = 0;
+        let mut partial_mmr = PartialMmr::from_peaks(peaks.clone());
+        partial_mmr
+            .track(
+                tracked_pos,
+                mmr.get(tracked_pos).unwrap(),
+                mmr.open(tracked_pos).unwrap().path().merkle_path(),
+            )
+            .unwrap();
+
+        let missing_sibling = InOrderIndex::from_leaf_pos(tracked_pos).parent().sibling();
+        assert!(partial_mmr.nodes.remove(&missing_sibling).is_some());
+
+        let result = PartialMmr::from_parts(peaks, partial_mmr.nodes, partial_mmr.tracked_leaves);
+        assert!(matches!(result, Err(MmrError::InconsistentPartialMmr(_))));
     }
 
     #[test]
@@ -1465,6 +1507,26 @@ mod tests {
 
         let result = PartialMmr::read_from_bytes(&bad_bytes);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deserialization_rejects_missing_ancestor_sibling() {
+        let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
+        let tracked_pos = 0;
+        let mut partial_mmr = PartialMmr::from_peaks(mmr.peaks());
+        partial_mmr
+            .track(
+                tracked_pos,
+                mmr.get(tracked_pos).unwrap(),
+                mmr.open(tracked_pos).unwrap().path().merkle_path(),
+            )
+            .unwrap();
+
+        let missing_sibling = InOrderIndex::from_leaf_pos(tracked_pos).parent().sibling();
+        assert!(partial_mmr.nodes.remove(&missing_sibling).is_some());
+
+        let result = PartialMmr::read_from_bytes(&partial_mmr.to_bytes());
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
     }
 
     #[test]
