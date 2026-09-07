@@ -28,7 +28,8 @@
 - [BREAKING] Normalized every PVM AIR's committed LogUp sum by its trace length and reduced native
   and precompile VM trace widths using shared centered LogUp, compact byte-pair tables, and
   narrower decoder and chiplet layouts. Updated the native and recursive closures and verifier
-  artifacts; this changes both proof relations.
+  artifacts; this changes both proof relations
+  ([#3756](https://github.com/0xMiden/miden-vm/pull/3756)).
 - [BREAKING] Adopted Eidos as the native hash for VM data, signatures, AEAD, deferred
   computation, and proof transcripts, changing digests, verifier roots, and proof layout;
   `crypto_stream` now derives Eidos XOF blocks and writes expanded u32 ciphertext. Replaced
