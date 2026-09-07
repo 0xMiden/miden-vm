@@ -84,7 +84,8 @@ use crate::{
     relations::{MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     transcript::{
         binding::{BindingMsg, ValueTag},
-        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg, initial_cv_from_frame},
+        eidos::{EidosBlockMsg, EidosInitMsg, EidosOutMsg},
+        initial_cv_from_frame,
         nodes::UintOpId,
     },
     uint::{UintValMsg, add::UintAddMsg, mul::UintMulMsg},

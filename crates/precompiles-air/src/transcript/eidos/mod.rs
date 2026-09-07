@@ -30,7 +30,6 @@ use miden_core::{
     field::{Algebra, PrimeCharacteristicRing, QuadFelt},
     utils::RowMajorMatrix,
 };
-use miden_crypto::hash::eidos::Eidos;
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 
 use crate::{
@@ -42,15 +41,6 @@ use crate::{
     relations::{BusId, MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     utils::{current_main, next_main},
 };
-
-/// Derives a symbolic packed initial CV from `(domain_tag, param0, param1, param2)`.
-pub(crate) fn initial_cv_from_frame<E>(frame: [E; 4]) -> [E; 4]
-where
-    E: PrimeCharacteristicRing + From<Felt>,
-{
-    let base = Eidos::merkle_node_init_chaining_word().into_elements();
-    array::from_fn(|idx| E::from(base[idx]) + frame[idx].clone())
-}
 
 // MAIN COLUMN LAYOUT
 // ================================================================================================
@@ -64,19 +54,19 @@ pub const COL_IN_MULTIPLICITY: usize = COL_EIDOS_COMPRESSION_END;
 /// Number of caller-side terminal-digest messages consumed by this chain.
 pub const COL_OUT_MULTIPLICITY: usize = COL_IN_MULTIPLICITY + 1;
 /// Whether this compression continues the chain immediately before it.
-pub const COL_IS_ABSORB: usize = COL_OUT_MULTIPLICITY + 1;
+pub const COL_IS_CONTINUATION: usize = COL_OUT_MULTIPLICITY + 1;
 /// Physical compression ID of this chain's first cycle. Carried through continuations so the
 /// terminal output binds both ends of the physical chain.
-pub const COL_CHAIN_HEAD_ID: usize = COL_IS_ABSORB + 1;
+pub const COL_CHAIN_HEAD_ID: usize = COL_IS_CONTINUATION + 1;
 /// Total PVM Eidos width: 108 compression columns and four interface columns.
 pub const NUM_MAIN_COLS: usize = COL_CHAIN_HEAD_ID + 1;
 
-// Block input, the internal full-CV bridge, and the initial/terminal boundary relation.
-const PVM_AUX_COLS: usize = 3;
+// Block input plus the internal full-CV bridge, and the initial/terminal boundary relation.
+const PVM_AUX_COLS: usize = 2;
 const EIDOS_COMPRESSION_AUX_COLS: usize = EIDOS_COMPRESSION_LOOKUP_COLUMN_SHAPE.len();
-/// Total PVM Eidos auxiliary width: 18 compression columns and three interface columns.
+/// Total PVM Eidos auxiliary width: 18 compression columns and two interface columns.
 pub const NUM_AUX_COLS: usize = PVM_AUX_COLS + EIDOS_COMPRESSION_AUX_COLS;
-const PVM_COLUMN_SHAPE: [usize; PVM_AUX_COLS] = [1, 1, 1];
+const PVM_COLUMN_SHAPE: [usize; PVM_AUX_COLS] = [2, 1];
 const INTERFACE_AUX_BEGIN: usize = EIDOS_COMPRESSION_AUX_COLS;
 
 const fn column_shape() -> [usize; NUM_AUX_COLS] {
@@ -148,6 +138,7 @@ impl LiftedAir<Felt, QuadFelt> for EidosCompressionAir {
         }
 
         enforce_interface_constraints(builder);
+        enforce_packed_interface_aux_constraint(builder);
 
         let mut lb = ConstraintLookupBuilder::new(builder, self);
         <Self as LookupAir<_>>::eval(self, &mut lb);
@@ -346,14 +337,14 @@ fn enforce_interface_constraints<AB: LiftedAirBuilder<F = Felt>>(builder: &mut A
     let is_last = selectors.is_footer_row(3);
     let not_last = AB::Expr::ONE - is_last.clone();
 
-    let is_absorb: AB::Expr = local[COL_IS_ABSORB].into();
-    let is_absorb_next: AB::Expr = next[COL_IS_ABSORB].into();
+    let is_continuation: AB::Expr = local[COL_IS_CONTINUATION].into();
+    let is_continuation_next: AB::Expr = next[COL_IS_CONTINUATION].into();
     let compression_id: AB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
     let chain_head_id: AB::Expr = local[COL_CHAIN_HEAD_ID].into();
     let chain_head_id_next: AB::Expr = next[COL_CHAIN_HEAD_ID].into();
 
-    builder.assert_bool(local[COL_IS_ABSORB]);
-    builder.when_first_row().assert_zero(is_absorb);
+    builder.assert_bool(local[COL_IS_CONTINUATION]);
+    builder.when_first_row().assert_zero(is_continuation);
 
     // Every metadata column is constant throughout its physical 32-row compression cycle.
     for col in COL_IN_MULTIPLICITY..NUM_MAIN_COLS {
@@ -367,11 +358,11 @@ fn enforce_interface_constraints<AB: LiftedAirBuilder<F = Felt>>(builder: &mut A
     // without assigning any meaning to the caller's domain parameters.
     builder.assert_zero(
         selectors.is_first_fused()
-            * (AB::Expr::ONE - AB::Expr::from(local[COL_IS_ABSORB]))
+            * (AB::Expr::ONE - AB::Expr::from(local[COL_IS_CONTINUATION]))
             * (chain_head_id.clone() - compression_id),
     );
     builder.when_transition().assert_zero(
-        is_last.clone() * is_absorb_next.clone() * (chain_head_id_next - chain_head_id),
+        is_last.clone() * is_continuation_next.clone() * (chain_head_id_next - chain_head_id),
     );
 
     // A continuation starts from the preceding compression output. The primitive core already
@@ -382,11 +373,38 @@ fn enforce_interface_constraints<AB: LiftedAirBuilder<F = Felt>>(builder: &mut A
                 * universal_cv_word(|col| AB::Expr::from(next[col]), 2 * i + 1);
         builder.when_transition().assert_zero(
             is_last.clone()
-                * is_absorb_next.clone()
+                * is_continuation_next.clone()
                 * (next_cv - AB::Expr::from(local[footer_digest_col(i)])),
         );
     }
 }
+
+/// Pins the packed Block/FullCv fraction column on rows where both multiplicities vanish.
+///
+/// The primitive columns precede the interface columns in the composed lookup argument, so this
+/// constraint addresses the first interface column at its absolute auxiliary index. It cannot be
+/// part of the standalone interface AIR: column zero there is the normalized running accumulator,
+/// whereas absolute column 18 in the composed AIR is an ordinary fraction column.
+///
+/// On the first fused row, and on footer 3 when the input multiplicity is zero, `FullCv` is the
+/// only active relation in the packed column. A zero `Block` denominator can still make the packed
+/// identity vacuous on those rows. That is an ordinary randomized LogUp bad-denominator event
+/// covered by the lookup soundness bound; this deterministic pin closes only the otherwise
+/// unconstrained inactive rows.
+fn enforce_packed_interface_aux_constraint<AB: LiftedAirBuilder<F = Felt>>(builder: &mut AB) {
+    let periodic_values: Vec<AB::Expr> =
+        builder.periodic_values().iter().map(|value| (*value).into()).collect();
+    let selectors = EidosCompressionSelectors::new(&periodic_values, 0);
+    let inactive =
+        AB::Expr::ONE - selectors.is_first_fused() - selectors.is_footer_row(FOOTER_ROWS - 1);
+    let packed_interface_aux: AB::ExprEF =
+        builder.permutation().current_slice()[INTERFACE_AUX_BEGIN].into();
+
+    // The always-present denominator product can vanish for exceptional challenges even when
+    // both signed multiplicities are zero, making the generic cross-multiplied identity vacuous.
+    builder.assert_zero_ext(packed_interface_aux * inactive);
+}
+
 #[doc(hidden)]
 pub const INTERNAL_CV_BUS_ID: usize = BusId::EidosCv as usize;
 
@@ -445,8 +463,8 @@ where
         let compression_id: LB::Expr = local[F_COMPRESSION_CYCLE_ID_COL].into();
         let in_mult: LB::Expr = local[COL_IN_MULTIPLICITY].into();
         let out_mult: LB::Expr = local[COL_OUT_MULTIPLICITY].into();
-        let is_absorb: LB::Expr = local[COL_IS_ABSORB].into();
-        let is_absorb_next: LB::Expr = next[COL_IS_ABSORB].into();
+        let is_continuation: LB::Expr = local[COL_IS_CONTINUATION].into();
+        let is_continuation_next: LB::Expr = next[COL_IS_CONTINUATION].into();
         let chain_head_id: LB::Expr = local[COL_CHAIN_HEAD_ID].into();
         let block = footer_block(|col| LB::Expr::from(local[col]));
         let digest = array::from_fn(|idx| local[footer_digest_col(idx)].into());
@@ -454,20 +472,25 @@ where
         let initial_cv =
             array::from_fn(|idx| pack_pair(raw_cv[2 * idx].clone(), raw_cv[2 * idx + 1].clone()));
 
-        let linear = Deg { v: 1, u: 1 };
         let block_deg = Deg { v: 2, u: 1 };
-        let cv_deg = Deg { v: 1, u: 2 };
+        let full_cv_deg = Deg { v: 1, u: 1 };
+        let packed_deg = Deg { v: 3, u: 2 };
         let boundary_deg = Deg { v: 3, u: 2 };
 
-        // Keep the running-sum column's denominator linear. Its numerator selects the last row
-        // and applies the cycle's input multiplicity.
+        // Pack the block and atomic full-CV bridge into one always-present batch. Row selection is
+        // carried entirely by the signed multiplicities, so both linear denominators remain in
+        // the product on every row. Its numerator is
+        //
+        //     (-footer3 * in_mult) * FullCv + (footer3 - first_fused) * Block,
+        //
+        // which has degree three over a degree-two denominator.
         builder.next_column(
             |col| {
                 col.group(
-                    "eidos-compression-block",
+                    "eidos-compression-block-and-full-cv",
                     |group| {
                         group.batch(
-                            "block",
+                            "block-and-full-cv",
                             LB::Expr::ONE,
                             |batch| {
                                 batch.insert(
@@ -479,48 +502,23 @@ where
                                     },
                                     block_deg,
                                 );
+                                batch.insert(
+                                    "full-cv",
+                                    footer3.clone() - first_fused,
+                                    FullCvMsg {
+                                        compression_cycle_id: compression_id.clone(),
+                                        words: raw_cv,
+                                    },
+                                    full_cv_deg,
+                                );
                             },
-                            block_deg,
+                            packed_deg,
                         );
                     },
-                    block_deg,
+                    packed_deg,
                 );
             },
-            block_deg,
-        );
-
-        // The internal relation carries all eight raw CV words from the first fused row to the
-        // footer, where the primitive AIR has reconstructed and constrained them.
-        builder.next_column(
-            |col| {
-                col.group(
-                    "eidos-compression-cv",
-                    |group| {
-                        group.insert(
-                            "consume-full-cv",
-                            first_fused,
-                            -LB::Expr::ONE,
-                            || FullCvMsg {
-                                compression_cycle_id: compression_id.clone(),
-                                words: raw_cv.clone(),
-                            },
-                            linear,
-                        );
-                        group.insert(
-                            "provide-full-cv",
-                            footer3.clone(),
-                            LB::Expr::ONE,
-                            || FullCvMsg {
-                                compression_cycle_id: compression_id.clone(),
-                                words: raw_cv,
-                            },
-                            linear,
-                        );
-                    },
-                    cv_deg,
-                );
-            },
-            cv_deg,
+            packed_deg,
         );
 
         // Initial CVs and terminal outputs occupy different rows, so this selected group contains
@@ -533,7 +531,7 @@ where
                         group.insert(
                             "initial-cv",
                             selectors.is_first_fused(),
-                            -in_mult * (LB::Expr::ONE - is_absorb),
+                            -in_mult * (LB::Expr::ONE - is_continuation),
                             || EidosInitMsg {
                                 compression_id: compression_id.clone(),
                                 initial_cv,
@@ -543,7 +541,7 @@ where
                         group.insert(
                             "chain-output",
                             footer3,
-                            -out_mult * (LB::Expr::ONE - is_absorb_next),
+                            -out_mult * (LB::Expr::ONE - is_continuation_next),
                             || EidosOutMsg { chain_head_id, compression_id, digest },
                             boundary_deg,
                         );
@@ -591,15 +589,17 @@ mod tests {
 
     use miden_core::{
         Felt,
-        deferred::{DEFERRED_AND_FRAME, deferred_chunks_frame},
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_lifted_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
+    use miden_lifted_air::{
+        AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, RowWindow,
+    };
 
     use super::{
-        EidosCompressionInterfaceAir, EidosInitMsg, EidosOutMsg, FullCvMsg, NUM_MAIN_COLS,
-        PVM_AUX_COLS, get_periodic_column_values, initial_cv_from_frame,
+        EidosBlockMsg, EidosCompressionAir, EidosCompressionInterfaceAir, EidosInitMsg,
+        EidosOutMsg, FullCvMsg, INTERFACE_AUX_BEGIN, NUM_AUX_COLS, NUM_MAIN_COLS, PVM_AUX_COLS,
+        get_periodic_column_values,
     };
     use crate::{
         logup::{Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage},
@@ -690,17 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn symbolic_initial_cv_matches_typed_frames() {
-        for frame in [DEFERRED_AND_FRAME, deferred_chunks_frame(3)] {
-            assert_eq!(
-                initial_cv_from_frame(frame.as_word().into_elements()),
-                frame.initial_chaining_word().into_elements(),
-            );
-        }
-    }
-
-    #[test]
-    fn inactive_interface_aux_columns_are_pinned_at_zero_denominators() {
+    fn inactive_packed_interface_column_is_pinned_when_its_denominator_vanishes() {
         const INACTIVE_FUSED_ROW: usize = 1;
 
         let challenges = Challenges::<QuadFelt>::new(
@@ -711,6 +701,11 @@ mod tests {
         );
         assert_eq!(
             [
+                EidosBlockMsg {
+                    compression_id: Felt::ZERO,
+                    block: [Felt::ZERO; 8],
+                }
+                .encode(&challenges),
                 FullCvMsg {
                     compression_cycle_id: Felt::ZERO,
                     words: [Felt::ZERO; 8],
@@ -728,7 +723,7 @@ mod tests {
                 }
                 .encode(&challenges),
             ],
-            [QuadFelt::ZERO; 3],
+            [QuadFelt::ZERO; 4],
         );
 
         let periodic_values = get_periodic_column_values()
@@ -736,8 +731,8 @@ mod tests {
             .map(|column| column[INACTIVE_FUSED_ROW % column.len()])
             .collect();
         let mut aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * PVM_AUX_COLS], PVM_AUX_COLS);
+        aux.values[0] = QuadFelt::ONE;
         aux.values[1] = QuadFelt::ONE;
-        aux.values[2] = QuadFelt::ONE;
         let mut builder = InterfaceConstraintEvalBuilder {
             main: RowMajorMatrix::new(vec![Felt::ZERO; 2 * NUM_MAIN_COLS], NUM_MAIN_COLS),
             aux,
@@ -753,14 +748,98 @@ mod tests {
         LookupAir::eval(&air, &mut lookup_builder);
         lookup_builder.finish();
 
-        // This all-zero row with alpha = beta = 0 makes both encoded interface denominators zero.
-        // Because neither the first-fused nor footer-3 flag is active, each fraction constraint
-        // must nevertheless reduce to `aux = 0`. Keeping the selectors in the flag argument is
-        // what preserves the unit denominator on these inactive rows.
+        // At alpha = beta = 0, both always-present denominators in interface-local packed column
+        // zero vanish. Its generic cross-multiplied recurrence is therefore vacuous despite the
+        // nonzero witness. Boundary column one retains selected-group algebra, whose unit
+        // denominator still pins its inactive witness to zero.
         assert_eq!(builder.extension_evaluations.len(), PVM_AUX_COLS + 1);
-        assert_eq!(
-            &builder.extension_evaluations[builder.extension_evaluations.len() - 2..],
-            &[QuadFelt::ONE, QuadFelt::ONE],
+        assert_eq!(builder.extension_evaluations, [QuadFelt::ZERO, QuadFelt::ZERO, QuadFelt::ONE,]);
+
+        // Run the production AIR entry point so this regression also pins the handwritten
+        // constraint's wiring, not merely its expression in isolation. In the composed AIR the
+        // first interface column follows all 18 primitive columns.
+        builder.extension_evaluations.clear();
+        builder.aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * NUM_AUX_COLS], NUM_AUX_COLS);
+        builder.aux.values[INTERFACE_AUX_BEGIN] = QuadFelt::ONE;
+        <EidosCompressionAir as LiftedAir<Felt, QuadFelt>>::eval(
+            &EidosCompressionAir,
+            &mut builder,
         );
+        // The handwritten pin is the composed AIR's first emitted extension constraint.
+        assert_eq!(
+            builder.extension_evaluations.first(),
+            Some(&QuadFelt::ONE),
+            "the production AIR must reject nonzero packed interface aux on inactive rows",
+        );
+    }
+
+    #[test]
+    fn one_active_packed_factor_zero_is_a_logup_bad_denominator_case() {
+        const FIRST_FUSED_ROW: usize = 0;
+        const FOOTER3_ROW: usize = 31;
+
+        let zero_alpha_challenges = Challenges::<QuadFelt>::new(
+            QuadFelt::ZERO,
+            QuadFelt::ONE,
+            MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
+        let zero_block = EidosBlockMsg {
+            compression_id: Felt::ZERO,
+            block: [Felt::ZERO; 8],
+        };
+        let zero_full_cv = FullCvMsg {
+            compression_cycle_id: Felt::ZERO,
+            words: [Felt::ZERO; 8],
+        };
+
+        // Select the exceptional alpha root of the already-fixed Block encoding. Bus-domain
+        // separation leaves the FullCv encoding nonzero at the same challenge pair.
+        let alpha = -zero_block.encode(&zero_alpha_challenges);
+        let beta = QuadFelt::ONE;
+        let challenges = Challenges::<QuadFelt>::new(alpha, beta, MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+        assert_eq!(zero_block.encode(&challenges), QuadFelt::ZERO);
+        assert_ne!(zero_full_cv.encode(&challenges), QuadFelt::ZERO);
+
+        // FullCv is the one active relation in the packed column on the first fused row and on
+        // footer 3 when in_mult=0. Nevertheless, the inactive Block denominator remains in D =
+        // B*C, and B=0 also zeroes N = m_block*C + m_cv*B. The arbitrary packed witness therefore
+        // passes the cross-multiplied identity. This deliberately selected challenge is an
+        // ordinary LogUp bad-denominator event covered by the randomized lookup soundness bound;
+        // the inactive-row pin above does not claim to eliminate it.
+        for row_idx in [FIRST_FUSED_ROW, FOOTER3_ROW] {
+            let periodic_values = get_periodic_column_values()
+                .iter()
+                .map(|column| column[row_idx % column.len()])
+                .collect();
+            let mut aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * PVM_AUX_COLS], PVM_AUX_COLS);
+            aux.values[0] = QuadFelt::ONE;
+            let mut builder = InterfaceConstraintEvalBuilder {
+                main: RowMajorMatrix::new(vec![Felt::ZERO; 2 * NUM_MAIN_COLS], NUM_MAIN_COLS),
+                aux,
+                randomness: vec![alpha, beta],
+                permutation_values: vec![QuadFelt::ZERO],
+                periodic_values,
+                extension_evaluations: Vec::new(),
+                preprocessed_window: RowWindow::from_two_rows(&[], &[]),
+            };
+
+            let air = EidosCompressionInterfaceAir;
+            let mut lookup_builder = ConstraintLookupBuilder::new(&mut builder, &air);
+            LookupAir::eval(&air, &mut lookup_builder);
+            lookup_builder.finish();
+
+            assert_eq!(builder.extension_evaluations.len(), PVM_AUX_COLS + 1);
+            assert!(
+                builder.extension_evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+                "one-active packed identity unexpectedly rejected the bad denominator on row {row_idx}",
+            );
+
+            builder.extension_evaluations.clear();
+            builder.aux = RowMajorMatrix::new(vec![QuadFelt::ZERO; 2 * NUM_AUX_COLS], NUM_AUX_COLS);
+            builder.aux.values[INTERFACE_AUX_BEGIN] = QuadFelt::ONE;
+            super::enforce_packed_interface_aux_constraint(&mut builder);
+            assert_eq!(builder.extension_evaluations, [QuadFelt::ZERO]);
+        }
     }
 }

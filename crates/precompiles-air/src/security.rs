@@ -48,7 +48,7 @@ pub const AIR_SHAPE: AirShape = AirShape {
     num_composed_constraints: 665,
     max_constraint_degree: 5,
     max_combo: NUM_OOD_POINTS,
-    num_deep_terms: Some(818),
+    num_deep_terms: Some(810),
     lookup: LookupShape {
         fractions_per_row: 278,
         max_message_width: 18,
@@ -416,7 +416,7 @@ mod tests {
         const LOOKUP_BASE_FP: u64 = 7_573_281;
         const COMPOSITION_TERM_FP: u64 = 7_774_061;
         const OOD_BASE_FP: u64 = 8_204_623;
-        const DEEP_BASE_FP: u64 = 7_754_482;
+        const DEEP_BASE_FP: u64 = 7_755_411;
         const FOLDING_BASE_FP: u64 = 8_022_589;
         const LOOKUP_POW_BITS_SNAPSHOT: u32 = 0;
 
@@ -522,7 +522,7 @@ mod tests {
             ),
             (
                 (7, 0, 0, 0, 16),
-                [6_524_704, 7_774_061, 7_170_620, 7_754_482, 6_974_013, 1_353_667, 8_257_536],
+                [6_524_704, 7_774_061, 7_170_620, 7_755_411, 6_974_013, 1_353_667, 8_257_536],
                 20,
             ),
         ];
