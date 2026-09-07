@@ -9,6 +9,7 @@ use miden_core::{
     },
     field::QuadFelt,
     proof::{HashFunction, StarkProof},
+    serde::{Deserializable, Serializable},
 };
 use miden_precompiles::{
     CurveId, CurvePrecompile, Keccak256Precompile, UintDomain, UintPrecompile,
@@ -238,6 +239,24 @@ fn translated_traces_check(state: &DeferredState) {
     assert_eq!(root.hash(), P2Digest::from(state.root()));
     let traces = session.finish(root);
     traces.check();
+}
+
+#[test]
+fn shared_truthy_dag_from_wire_proves_and_verifies() {
+    // Includes Keccak, uint and EC equality leaves, plus nested arithmetic and MSM claims.
+    let mut state = all_node_vm_state();
+    for _ in 0..8 {
+        state.log_statement(state.root()).unwrap();
+    }
+    let bytes = state.to_wire().unwrap().to_bytes();
+    let wire = miden_core::deferred::DeferredStateWire::read_from_bytes(&bytes).unwrap();
+    let state = DeferredState::from_wire(Arc::new(miden_precompiles::registry()), &wire).unwrap();
+    let DeferredSession { session, root } = session_from_deferred_state(&state).unwrap();
+    assert_eq!(root.hash(), P2Digest::from(state.root()));
+    let traces = session.finish(root);
+    traces.check();
+    let verified = verify_session(&traces.prove()).expect("shared truthy DAG proof must verify");
+    assert_eq!(verified, state.root());
 }
 
 #[test]

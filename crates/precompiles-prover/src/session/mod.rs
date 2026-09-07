@@ -142,7 +142,7 @@ impl Session {
     /// Interning is below this layer: identical input collapses onto one
     /// keccak-node row (its `out_mult` bumped) and lays no fresh sponge /
     /// chunk / Poseidon2 work — but each call still yields its own handle,
-    /// so the keccak row's `out_mult` matches its eval consumes.
+    /// whose uses are counted and forwarded to the provider at `finish`.
     pub fn keccak(&mut self, input: &[u8]) -> (KeccakDigest, Truthy) {
         // Seven disjoint fields borrowed in one expression — the borrow
         // checker's field-splitting allows it (these are direct field
@@ -155,7 +155,7 @@ impl Session {
             &mut self.bpl,
             &mut self.p2,
         );
-        let handle = self.eval.issue(out.h_keccak);
+        let handle = self.eval.issue_keccak(out.h_keccak, out.node_row);
         (out.keccak_digest, handle)
     }
 
@@ -419,8 +419,8 @@ impl Session {
     }
 
     /// Fold two claims: assert both truthy and bind their AND
-    /// `Hash(a || b || cap_transcript)` into the transcript. Consumes `a`
-    /// and `b`; returns the combined claim.
+    /// `Hash(a || b || cap_transcript)` into the transcript. Counts one use of each child
+    /// (two uses when they are the same claim); returns the shared-use combined claim.
     pub fn assert_and(&mut self, a: Truthy, b: Truthy) -> Truthy {
         self.eval.record_and(a, b, &mut self.p2)
     }
@@ -439,7 +439,7 @@ impl Session {
     /// Generate every chiplet's main trace and bundle them. `root` is the
     /// transcript's top claim (its hash becomes `public_root`); it must be
     /// an asserted node, and every other issued handle must already be
-    /// consumed — the eval chip's `generate_trace` panics otherwise.
+    /// consumed at least once — the eval chip's `generate_trace` panics otherwise.
     ///
     /// The sweep runs in dependency order — eval first (its `out_mult`
     /// checks feed BPL), the uint store's Range16 before BPL, BPL last
@@ -457,6 +457,9 @@ impl Session {
 
         let public_root = root.hash();
         self.eval.assert_no_stray_values();
+        for (row, consumers) in self.eval.additional_keccak_uses() {
+            self.node.add_consumers(row, consumers);
+        }
         // EcCreate rows hash the group pointer and bind it through their EcPoint consume.
         let eval = trace_span!("eval", eval_trace(self.eval, root));
         let chunk_node_sponge = trace_span!(

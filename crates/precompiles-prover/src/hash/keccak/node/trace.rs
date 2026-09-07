@@ -219,6 +219,15 @@ impl KeccakNodeRequires {
         Self::default()
     }
 
+    /// Count additional uses of an already registered claim without repeating its hashing work.
+    pub(crate) fn add_consumers(&mut self, row: u32, consumers: ProvideMult) {
+        let invocation = &mut self.records[row as usize].invocation;
+        invocation.out_mult = invocation
+            .out_mult
+            .checked_add(consumers)
+            .expect("too many Keccak claim consumers");
+    }
+
     /// Register a Keccak invocation. Empty input is supported: it absorbs
     /// one pad block (`keccak256("")`) and the chunk layer lays one
     /// canonical zero chunk, so the chunk-content P2 chain tail this node
@@ -241,7 +250,8 @@ impl KeccakNodeRequires {
         // count by bus balance — no `2^16` cap, no row split).
         if let Some(&idx) = self.by_keccak.get(&keccak_digest) {
             let rec = &mut self.records[idx];
-            rec.invocation.out_mult += 1;
+            rec.invocation.out_mult =
+                rec.invocation.out_mult.checked_add(1).expect("too many Keccak claim consumers");
             return KeccakNodeOutput {
                 keccak_digest,
                 h_keccak: rec.h_keccak,
