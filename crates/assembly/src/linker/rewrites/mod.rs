@@ -36,7 +36,7 @@ pub fn rewrite_symbol(
             let mut rewriter = ModuleRewriter::new(gid.module, resolver, cache);
             let mut proc = proc.borrow_mut();
             if let ControlFlow::Break(err) = rewriter.visit_mut_procedure(&mut proc) {
-                return Err(err);
+                return Err(*err);
             }
         },
         SymbolItem::Constant(item) => {

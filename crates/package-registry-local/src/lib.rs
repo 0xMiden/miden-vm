@@ -11,11 +11,11 @@ use std::{
     },
 };
 
-use miden_assembly_syntax::Report;
 use miden_core::{
     serde::{Deserializable, Serializable},
     utils::DisplayHex,
 };
+use miden_diagnostics::Report;
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,

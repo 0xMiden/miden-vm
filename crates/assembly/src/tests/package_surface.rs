@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn package_module_surface_allows_downstream_import_of_root_module() -> TestResult {
     let context = TestContext::new();
-    let dep_root = context.parse_module(source_file!(
+    let dep_root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib
@@ -14,7 +14,7 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         pub mod api
         "#
     ))?;
-    let dep_api = context.parse_module(source_file!(
+    let dep_api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::api
@@ -25,14 +25,15 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         "#
     ))?;
 
-    let dep =
-        Assembler::new(context.source_manager()).assemble_library("dep", dep_root, [dep_api])?;
+    let dep = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("dep", dep_root, [dep_api])
+        .into_result()?;
     assert!(dep.manifest.get_module(Path::new("::pkg::lib")).is_some());
     assert!(dep.manifest.get_module(Path::new("::pkg::lib::api")).is_some());
 
     let dep_bytes = dep.to_bytes();
     let dep = Arc::new(Package::read_from_bytes(&dep_bytes).map_err(Report::msg)?);
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace consumer
@@ -45,9 +46,10 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
         "#
     ))?;
 
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(dep, Linkage::Static)?
-        .assemble_library("consumer", consumer, None::<Box<Module>>)?;
+        .assemble_library("consumer", consumer, None::<Box<Module>>)
+        .into_result()?;
     let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
 
     assert!(exports.contains(&Arc::from(Path::new("::consumer::call"))));
@@ -58,7 +60,7 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
 #[test]
 fn package_module_surface_omits_private_submodules() -> TestResult {
     let context = TestContext::new();
-    let dep_root = context.parse_module(source_file!(
+    let dep_root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib
@@ -67,7 +69,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         mod internal
         "#
     ))?;
-    let dep_api = context.parse_module(source_file!(
+    let dep_api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::api
@@ -79,7 +81,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         end
         "#
     ))?;
-    let dep_internal = context.parse_module(source_file!(
+    let dep_internal = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace pkg::lib::internal
@@ -90,11 +92,9 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         "#
     ))?;
 
-    let dep = Assembler::new(context.source_manager()).assemble_library(
-        "dep",
-        dep_root,
-        [dep_api, dep_internal],
-    )?;
+    let dep = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("dep", dep_root, [dep_api, dep_internal])
+        .into_result()?;
     let root_surface = dep
         .manifest
         .get_module(Path::new("::pkg::lib"))
@@ -109,7 +109,7 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
     assert!(dep.manifest.get_module(Path::new("::pkg::lib::internal")).is_none());
 
     let dep = Arc::new(Package::read_from_bytes(&dep.to_bytes()).map_err(Report::msg)?);
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace consumer
@@ -122,9 +122,10 @@ fn package_module_surface_omits_private_submodules() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager())
+    Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(dep, Linkage::Static)?
-        .assemble_library("consumer", consumer, None::<Box<Module>>)?;
+        .assemble_library("consumer", consumer, None::<Box<Module>>)
+        .into_result()?;
 
     Ok(())
 }
@@ -134,7 +135,7 @@ fn package_with_single_proc_export(
     export_path: &'static str,
     modules: impl IntoIterator<Item = PackageModule>,
 ) -> Result<Arc<Package>, Report> {
-    let seed = context.parse_module(source_file!(
+    let seed = context.parse_module_source_file(source_file!(
         context,
         r#"
         namespace seed
@@ -144,11 +145,9 @@ fn package_with_single_proc_export(
         end
         "#
     ))?;
-    let seed = Assembler::new(context.source_manager()).assemble_library(
-        "seed",
-        seed,
-        None::<Box<Module>>,
-    )?;
+    let seed = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("seed", seed, None::<Box<Module>>)
+        .into_result()?;
     let (node, digest) = seed
         .manifest
         .exports()
@@ -180,7 +179,9 @@ fn package_link_rejects_missing_module_surface_metadata() -> TestResult {
     let context = TestContext::new();
     let dep = package_with_single_proc_export(&context, "::dep::foo", [])?;
 
-    let err = match Assembler::new(context.source_manager()).with_package(dep, Linkage::Static) {
+    let err = match Assembler::with_sources(context.sources().as_ref().clone())
+        .with_package(dep, Linkage::Static)
+    {
         Ok(_) => panic!("compiled packages without module surfaces should be rejected"),
         Err(err) => err,
     };
@@ -204,7 +205,9 @@ fn package_link_rejects_incomplete_declared_submodule_surface_metadata() -> Test
         )],
     )?;
 
-    let err = match Assembler::new(context.source_manager()).with_package(dep, Linkage::Static) {
+    let err = match Assembler::with_sources(context.sources().as_ref().clone())
+        .with_package(dep, Linkage::Static)
+    {
         Ok(_) => panic!("compiled packages with incomplete module surfaces should be rejected"),
         Err(err) => err,
     };

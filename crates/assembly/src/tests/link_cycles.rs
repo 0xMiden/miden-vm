@@ -17,12 +17,14 @@ fn imported_main_alias_self_call_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program("test", program)
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_program("test", program)
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
     let err = assembled
         .unwrap()
+        .into_result()
         .expect_err("expected self-referential alias call to be rejected");
     assert_diagnostic!(&err, "found a cycle in the call graph");
     assert_diagnostic!(&err, "::$exec::$main");
@@ -44,7 +46,9 @@ fn rootless_call_cycle_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program("test", program)
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_program("test", program)
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -75,10 +79,9 @@ fn cyclic_link_retry_is_structured_error_without_panicking() {
             "#
         ))
         .expect("program parsing must succeed");
-    let source_manager = context.source_manager();
 
     let first_attempt = catch_unwind(AssertUnwindSafe(|| {
-        let mut linker = Linker::new(source_manager.clone());
+        let mut linker = Linker::new();
         let first_err = linker
             .link([module.clone()], None::<Box<Module>>)
             .expect_err("expected cyclic program to be rejected on first link");
@@ -127,7 +130,9 @@ fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("cycle", a, [b])
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_library("cycle", a, [b])
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -169,7 +174,9 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("cycle", a, [b])
+        Assembler::with_sources(context.sources().as_ref().clone())
+            .assemble_library("cycle", a, [b])
+            .into_result()
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");

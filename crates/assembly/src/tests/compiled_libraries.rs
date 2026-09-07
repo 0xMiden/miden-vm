@@ -8,7 +8,7 @@ fn test_compiled_library() {
     let context = TestContext::new();
     let root = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib
@@ -21,7 +21,7 @@ fn test_compiled_library() {
     };
     let mod1 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib::mod1
@@ -44,7 +44,7 @@ fn test_compiled_library() {
 
     let mod2 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "
     namespace mylib::mod2
@@ -64,14 +64,14 @@ fn test_compiled_library() {
     };
 
     let compiled_library = {
-        let assembler = Assembler::new(context.source_manager());
+        let assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler.assemble_library("mylib", root, [mod1, mod2]).unwrap()
     };
 
     assert_eq!(compiled_library.manifest.num_exports(), 4);
 
     // Compile program that uses compiled library
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 
@@ -101,7 +101,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     let context = TestContext::new();
     let root = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test
 
@@ -113,7 +113,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     };
     let mod1 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod1
 
@@ -128,7 +128,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
 
     let mod2 = {
         context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod2
 
@@ -142,14 +142,14 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     };
 
     let compiled_library = {
-        let assembler = Assembler::new(context.source_manager());
+        let assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler.assemble_library("test", root, [mod1, mod2]).unwrap()
     };
 
     assert_eq!(compiled_library.manifest.num_exports(), 2);
 
     // Compile program that uses compiled library
-    let mut assembler = Assembler::new(context.source_manager());
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
 
     assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 

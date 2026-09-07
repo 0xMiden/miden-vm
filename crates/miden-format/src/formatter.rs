@@ -1781,9 +1781,17 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use miden_assembly_syntax_cst::parse_text;
+    use miden_assembly_syntax_cst::{
+        ParseOutcome,
+        diagnostics::{SourceId, SourceNamespace},
+        parse,
+    };
 
     use super::{Config, format_syntax};
+
+    fn parse_text(input: &str) -> ParseOutcome {
+        parse(SourceId::new(SourceNamespace::new_unchecked(1), 0), input)
+    }
 
     fn repo_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1868,20 +1876,10 @@ end
 
     fn assert_format_idempotent(input: &str, label: impl core::fmt::Display) {
         let config = Config::default();
-        let parse = parse_text(input);
-        assert!(
-            !parse.has_errors(),
-            "unexpected parse diagnostics for {label}: {:?}",
-            parse.diagnostics()
-        );
+        let parse = parse_text(input).expect("unexpected parse diagnostics");
 
         let formatted = format_syntax(&config, &parse.syntax());
-        let reparsed = parse_text(&formatted);
-        assert!(
-            !reparsed.has_errors(),
-            "formatted output did not parse for {label}: {:?}",
-            reparsed.diagnostics()
-        );
+        let reparsed = parse_text(&formatted).expect("formatted output did not parse");
 
         let reformatted = format_syntax(&config, &reparsed.syntax());
         assert_eq!(reformatted, formatted, "formatter was not idempotent for {label}");
@@ -1917,13 +1915,14 @@ const Y = event(\"miden::event\")
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             max_line_length: Some(80),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 const X = (1)
 const Y = event(\"miden::event\")
@@ -1932,9 +1931,12 @@ const Y = event(\"miden::event\")
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -1943,13 +1945,14 @@ const Y = event(\"miden::event\")
         let source = "const X = (alpha, beta, gamma, delta, epsilon, zeta)\n";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             max_line_length: Some(40),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 const X =
     (
@@ -1966,9 +1969,12 @@ const X =
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -1993,10 +1999,11 @@ use {
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use {
     ACCOUNT_GET_ID_OFFSET,
@@ -2019,9 +2026,12 @@ use {
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2032,10 +2042,11 @@ pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protoc
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT =
     word(
@@ -2047,9 +2058,12 @@ pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT =
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2060,13 +2074,14 @@ pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(\"miden::protoc
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             overflow_delimited_expr: Some(true),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(
     \"miden::protocol::faucet::callback::on_before_asset_added_to_account\"
@@ -2077,9 +2092,12 @@ pub const ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT = word(
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2093,10 +2111,11 @@ mod   private
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 namespace app::main # root
 extern package \"miden:base@1.0.0\"
@@ -2107,9 +2126,12 @@ mod private
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2135,10 +2157,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 #! docs
 use miden::core::mem as memory
@@ -2161,9 +2184,12 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2176,10 +2202,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let body_lines =
             formatted.lines().skip(1).take_while(|line| *line != "end").collect::<Vec<_>>();
 
@@ -2191,7 +2218,7 @@ end
         assert!(formatted.contains("\n    instruction_five\n"));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2212,10 +2239,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 begin
     foo(
@@ -2234,7 +2262,7 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2249,16 +2277,20 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2273,16 +2305,20 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2294,10 +2330,11 @@ adv_map CIRCUIT_COMMITMENT = [1, 0, 0, 0, 2305843126251553075, 114890375379, 230
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 const VERY_LONG_EVENT =
     event(
@@ -2320,7 +2357,7 @@ adv_map CIRCUIT_COMMITMENT =
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2337,10 +2374,11 @@ WAITING = 2,
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub type VeryLongTypeName = struct {
     lower_bound_key_value: u128,
@@ -2359,7 +2397,7 @@ enum Status : u16 {
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2372,10 +2410,11 @@ pub   use   {alpha}   from   core
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use some::module as sm
 use foo
@@ -2386,9 +2425,12 @@ pub use {alpha} from core
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2404,10 +2446,11 @@ bar   as   baz,
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use {
     foo, # first import
@@ -2420,9 +2463,12 @@ use {
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2436,13 +2482,14 @@ bar as baz
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             max_line_length: Some(40),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub use {
     foo, # first import
@@ -2454,9 +2501,12 @@ pub use {
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2471,13 +2521,14 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             max_line_length: Some(80),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub use {
     lowerbound_key_value as lowerbound_key_value_long_alias,
@@ -2498,9 +2549,12 @@ end
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2515,13 +2569,14 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config {
             max_line_length: Some(80),
             ..Config::default()
         };
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use ::miden::core::collections::sorted_array
     as lowerbound_key_value_really_long_alias
@@ -2541,7 +2596,7 @@ end
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2551,10 +2606,11 @@ use miden::protocol::kernel_proc_offsets::tx_update_expiration_block_delta_offse
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use miden::protocol::kernel_proc_offsets::tx_update_expiration_block_delta_offset_plus_enough_extra_to_wrap
 ";
@@ -2562,9 +2618,12 @@ use miden::protocol::kernel_proc_offsets::tx_update_expiration_block_delta_offse
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2591,10 +2650,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 use {panic} from ::miden::utils # import
 
@@ -2618,7 +2678,7 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2634,10 +2694,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 begin
     do
@@ -2652,8 +2713,11 @@ end
 
         // Formatting is idempotent.
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2678,14 +2742,15 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2701,16 +2766,20 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2730,16 +2799,20 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         assert_eq!(formatted, source);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2753,10 +2826,11 @@ pub proc foo  nop end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 @inline # keep me
 # keep standalone
@@ -2769,9 +2843,12 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2793,10 +2870,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub proc println_debug_message_with_context(
     # message
@@ -2816,7 +2894,7 @@ end
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2838,10 +2916,11 @@ adv_map TABLE = [
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 const LONG =
     event(
@@ -2863,7 +2942,7 @@ adv_map TABLE =
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
     }
 
     #[test]
@@ -2876,10 +2955,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub proc tx_prepare_fpi(
     foreign_account_id: AccountId,
@@ -2894,9 +2974,12 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 
@@ -2910,10 +2993,11 @@ end
 ";
 
         let parse = parse_text(source);
-        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+        assert!(!parse.diagnostics.has_errors(), "{:?}", parse.diagnostics);
 
         let config = Config::default();
-        let formatted = format_syntax(&config, &parse.syntax());
+        let formatted =
+            format_syntax(&config, &parse.expect("source should parse without errors").syntax());
         let expected = "\
 pub proc tx_prepare_fpi(foreign_account_id: AccountId)
     # validate the provided foreign account ID
@@ -2924,9 +3008,12 @@ end
         assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
-        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        assert!(!reparsed.diagnostics.has_errors(), "{:?}", reparsed.diagnostics);
 
-        let reformatted = format_syntax(&config, &reparsed.syntax());
+        let reformatted = format_syntax(
+            &config,
+            &reparsed.expect("formatted output should parse without errors").syntax(),
+        );
         assert_eq!(reformatted, formatted);
     }
 }

@@ -7,8 +7,8 @@ use alloc::{
 
 use miden_assembly_syntax::{
     ast::{DebugInlineCallInfo, DebugVarInfo, Instruction},
-    debuginfo::{Location, Span},
-    diagnostics::Report,
+    debuginfo::Location,
+    diagnostics::{Report, SourceProvider, Span},
 };
 use miden_core::{
     Felt,
@@ -62,7 +62,6 @@ pub(super) struct ActiveInlineCall {
 /// The same basic block builder can be used to construct many blocks. It is expected that when the
 /// last basic block in a procedure's body is constructed [`Self::try_into_basic_block`] will be
 /// used.
-#[derive(Debug)]
 pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
     epilogue: Vec<Operation>,
@@ -77,6 +76,7 @@ pub struct BasicBlockBuilder<'a> {
     /// The source-level inline call chain active for subsequently generated operations.
     active_inline_calls: Vec<ActiveInlineCall>,
     mast_forest_builder: &'a mut MastForestBuilder,
+    sources: &'a dyn SourceProvider,
 }
 
 /// Constructors
@@ -89,6 +89,7 @@ impl<'a> BasicBlockBuilder<'a> {
     pub(super) fn new(
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &'a mut MastForestBuilder,
+        sources: &'a dyn SourceProvider,
     ) -> Self {
         match wrapper {
             Some(wrapper) => Self {
@@ -100,6 +101,7 @@ impl<'a> BasicBlockBuilder<'a> {
                 inline_calls: Vec::new(),
                 active_inline_calls: Vec::new(),
                 mast_forest_builder,
+                sources,
             },
             None => Self {
                 ops: Default::default(),
@@ -110,6 +112,7 @@ impl<'a> BasicBlockBuilder<'a> {
                 inline_calls: Default::default(),
                 active_inline_calls: Vec::new(),
                 mast_forest_builder,
+                sources,
             },
         }
     }
@@ -118,8 +121,9 @@ impl<'a> BasicBlockBuilder<'a> {
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &'a mut MastForestBuilder,
         active_inline_calls: Vec<ActiveInlineCall>,
+        sources: &'a dyn SourceProvider,
     ) -> Self {
-        let mut builder = Self::new(wrapper, mast_forest_builder);
+        let mut builder = Self::new(wrapper, mast_forest_builder, sources);
         builder.active_inline_calls = active_inline_calls;
         builder
     }
@@ -212,7 +216,7 @@ impl BasicBlockBuilder<'_> {
         let span = instruction.span();
         self.pending_asm_op = Some(PendingAsmOp {
             op_start: self.ops.len(),
-            location: proc_ctx.source_manager().location(span).ok(),
+            location: Location::from_span(span, self.sources),
             context_name: proc_ctx.path().to_string(),
             op: instruction.to_string(),
         });
@@ -289,22 +293,13 @@ impl BasicBlockBuilder<'_> {
     }
 
     /// Appends one frame to the inline call chain active for subsequently generated operations.
-    pub fn push_debug_inline_call(
-        &mut self,
-        inline_call: &DebugInlineCallInfo,
-        source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
-    ) {
-        let Some(call_site_span) =
-            source_manager.file_line_col_to_span(inline_call.call_site().clone())
-        else {
-            return;
-        };
-        let Ok(call_site) = source_manager.location(call_site_span) else {
-            return;
-        };
-
-        let callee_idx = self.mast_forest_builder.register_inline_function(inline_call);
-        let loc_idx = self.mast_forest_builder.debug_info_mut().add_location(call_site);
+    pub fn push_debug_inline_call(&mut self, inline_call: &DebugInlineCallInfo) {
+        let callee_idx =
+            self.mast_forest_builder.register_inline_function(inline_call, self.sources);
+        let loc_idx = self
+            .mast_forest_builder
+            .debug_info_mut()
+            .add_location(inline_call.call_site().clone());
         self.active_inline_calls.push(ActiveInlineCall { callee_idx, loc_idx });
     }
 

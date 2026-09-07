@@ -7,11 +7,11 @@ use alloc::{
 };
 use std::path::Path as FsPath;
 
-use miden_assembly_syntax::diagnostics::Report;
+use miden_assembly_syntax::diagnostics::{DiagnosticCollector, Outcome, Report, SourceMap};
 use miden_core::{Word, utils::hash_string_to_word};
 use miden_package_registry::{PackageId, PackageRegistry, PackageRegistryAndProvider};
 use miden_project::{
-    Package as ProjectPackage, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
+    Package as ProjectPackage, Project, ProjectDependencyGraph, ProjectDependencyGraphBuilder,
     ProjectDependencyNode, ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin,
     Target,
 };
@@ -20,14 +20,16 @@ use super::{
     PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
     SourceProviderRegistry, providers::TargetAssemblyContext,
 };
-use crate::SourceManager;
+pub(super) enum Completion<T> {
+    Complete(T),
+    Incomplete,
+}
 
 // DEPENDENCY GRAPH
 // ================================================================================================
 
 pub(super) struct DependencyGraph {
     dependency_graph: ProjectDependencyGraph,
-    source_manager: Arc<dyn SourceManager>,
 }
 
 impl AsRef<ProjectDependencyGraph> for DependencyGraph {
@@ -41,32 +43,28 @@ impl DependencyGraph {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    pub fn from_project_path<S: PackageRegistry + ?Sized>(
-        manifest_path: impl AsRef<FsPath>,
+    pub fn from_loaded_project<S: PackageRegistry + ?Sized>(
+        project: Project,
         store: &S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, Report> {
-        let dependency_graph = ProjectDependencyGraphBuilder::new(store)
-            .with_source_manager(source_manager.clone())
-            .build_from_path(manifest_path)?;
-
-        Ok(Self { dependency_graph, source_manager })
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
+        ProjectDependencyGraphBuilder::new(store)
+            .build_project(project, sources)
+            .map(|dependency_graph| Self { dependency_graph })
     }
 
     pub fn from_project<S: PackageRegistry + ?Sized>(
         project: Arc<ProjectPackage>,
         store: &S,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, Report> {
-        let dependency_graph_builder =
-            ProjectDependencyGraphBuilder::new(store).with_source_manager(source_manager.clone());
-        let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
-            dependency_graph_builder.build_from_path(manifest_path)?
+        sources: &mut SourceMap,
+    ) -> Outcome<Self> {
+        let dependency_graph_builder = ProjectDependencyGraphBuilder::new(store);
+        if let Some(manifest_path) = project.manifest_path() {
+            dependency_graph_builder.build_from_path(manifest_path, sources)
         } else {
-            dependency_graph_builder.build(project)?
-        };
-
-        Ok(Self { dependency_graph, source_manager })
+            dependency_graph_builder.build(project, sources)
+        }
+        .map(|dependency_graph| Self { dependency_graph })
     }
 
     // PUBLIC ACCESSORS
@@ -93,19 +91,21 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
-    ) -> Result<Option<PackageBuildProvenance>, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<Option<PackageBuildProvenance>>, Report> {
         let Some(node) = self.dependency_graph.get(package_id) else {
-            return Ok(None);
+            return Ok(Completion::Complete(None));
         };
         let ProjectDependencyNodeProvenance::Source(source) = &node.provenance else {
-            return Ok(None);
+            return Ok(Completion::Complete(None));
         };
 
         match source {
-            ProjectSource::Virtual { .. } => Ok(None),
-            ProjectSource::Real { origin, manifest_path, .. } => self
-                .expected_source_provenance(
+            ProjectSource::Virtual { .. } => Ok(Completion::Complete(None)),
+            ProjectSource::Real { origin, manifest_path, .. } => {
+                let provenance = self.expected_source_provenance(
                     package_id,
                     project,
                     target,
@@ -114,12 +114,19 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    sources,
                     source_provenance,
-                )
-                .map(Some),
+                    diagnostics,
+                )?;
+                Ok(match provenance {
+                    Completion::Complete(provenance) => Completion::Complete(Some(provenance)),
+                    Completion::Incomplete => Completion::Incomplete,
+                })
+            },
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn expected_source_provenance(
         &self,
         package_id: &PackageId,
@@ -130,8 +137,10 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
-    ) -> Result<PackageBuildProvenance, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<PackageBuildProvenance>, Report> {
         self.expected_source_provenance_with_visited(
             package_id,
             project,
@@ -141,14 +150,19 @@ impl DependencyGraph {
             manifest_path,
             source_provider,
             package_registry,
+            sources,
             source_provenance,
             &mut BTreeSet::new(),
+            diagnostics,
         )
     }
 
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
+    // The arguments mirror the independent inputs that form package build provenance. Keeping
+    // them explicit makes the recursive dependency traversal and diagnostic collector visible.
+    #[allow(clippy::too_many_arguments)]
     fn expected_source_provenance_with_visited(
         &self,
         package_id: &PackageId,
@@ -159,32 +173,39 @@ impl DependencyGraph {
         manifest_path: &FsPath,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         source_provenance: Option<&ProjectSourceProvenanceInputs>,
         visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<PackageBuildProvenance, Report> {
-        let dependency_hash = self.compute_dependency_closure_hash(
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<PackageBuildProvenance>, Report> {
+        let Completion::Complete(dependency_hash) = self.compute_dependency_closure_hash(
             package_id,
             profile_name,
             source_provider,
             package_registry,
+            sources,
             visiting,
-        )?;
+            diagnostics,
+        )?
+        else {
+            return Ok(Completion::Incomplete);
+        };
         let profile = project.resolve_profile(profile_name)?;
         let build_settings = PackageBuildSettings::from_profile(profile);
 
         match origin {
             ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
-                Ok(PackageBuildProvenance::Git {
+                Ok(Completion::Complete(PackageBuildProvenance::Git {
                     repo: repo.to_string(),
                     resolved_revision: resolved_revision.to_string(),
                     dependency_hash,
                     build_settings,
-                })
+                }))
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root
                 if source_provenance.is_some() =>
             {
-                Ok(PackageBuildProvenance::Path {
+                Ok(Completion::Complete(PackageBuildProvenance::Path {
                     source_hash: self.compute_path_source_hash_from_sources(
                         &project,
                         None,
@@ -194,24 +215,28 @@ impl DependencyGraph {
                     ),
                     dependency_hash,
                     build_settings,
-                })
+                }))
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
-                let source_manager = self.source_manager.clone();
-                let context = TargetAssemblyContext::new(
+                let mut context = TargetAssemblyContext::new(
                     project.clone(),
                     manifest_path,
                     target,
                     profile,
                     &self.dependency_graph,
                     package_registry,
-                    source_manager,
+                    sources,
                 )?;
-                Ok(PackageBuildProvenance::Path {
-                    source_hash: self.compute_path_source_hash(&context, source_provider)?,
+                let Completion::Complete(source_hash) =
+                    self.compute_path_source_hash(&mut context, source_provider, diagnostics)?
+                else {
+                    return Ok(Completion::Incomplete);
+                };
+                Ok(Completion::Complete(PackageBuildProvenance::Path {
+                    source_hash,
                     dependency_hash,
                     build_settings,
-                })
+                }))
             },
         }
     }
@@ -222,8 +247,10 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<Word, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<Word>, Report> {
         if !visiting.insert(package_id.clone()) {
             return Err(Report::msg(format!(
                 "dependency cycle detected while computing source provenance for '{package_id}'"
@@ -235,7 +262,7 @@ impl DependencyGraph {
                 Report::msg(format!("missing dependency graph node for '{package_id}'"))
             })?;
             if node.dependencies.is_empty() {
-                return Ok(PackageBuildProvenance::empty_dependency_hash());
+                return Ok(Completion::Complete(PackageBuildProvenance::empty_dependency_hash()));
             }
 
             let mut dependencies = node.dependencies.clone();
@@ -252,16 +279,22 @@ impl DependencyGraph {
                 material.push(':');
                 material.push_str(edge.linkage.to_string().as_str());
                 material.push('\n');
-                material.push_str(&self.dependency_resolution_hash_input(
+                let Completion::Complete(input) = self.dependency_resolution_hash_input(
                     &edge.dependency,
                     profile_name,
                     source_provider,
                     package_registry,
+                    sources,
                     visiting,
-                )?);
+                    diagnostics,
+                )?
+                else {
+                    return Ok(Completion::Incomplete);
+                };
+                material.push_str(&input);
             }
 
-            Ok(hash_string_to_word(material.as_str()))
+            Ok(Completion::Complete(hash_string_to_word(material.as_str())))
         })();
 
         visiting.remove(package_id);
@@ -274,18 +307,20 @@ impl DependencyGraph {
         profile_name: &str,
         source_provider: &SourceProviderRegistry,
         package_registry: &dyn PackageRegistryAndProvider,
+        sources: &mut SourceMap,
         visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<String, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<String>, Report> {
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
             Report::msg(format!("missing dependency graph node for '{package_id}'"))
         })?;
 
         match &node.provenance {
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
-                Ok(format!("registry:{package_id}@{selected}\n"))
+                Ok(Completion::Complete(format!("registry:{package_id}@{selected}\n")))
             },
             ProjectDependencyNodeProvenance::Preassembled { selected, .. } => {
-                Ok(format!("preassembled:{package_id}@{selected}\n"))
+                Ok(Completion::Complete(format!("preassembled:{package_id}@{selected}\n")))
             },
             ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
                 origin,
@@ -293,12 +328,12 @@ impl DependencyGraph {
                 library_path: Some(_),
                 ..
             }) => {
-                let project = miden_project::Project::load_project_reference(
-                    package_id,
-                    manifest_path,
-                    &self.source_manager,
-                )
-                .map(|project| project.package())?;
+                let Outcome { result: project, diagnostics: emitted } =
+                    Project::load_project_reference(package_id, manifest_path, sources);
+                let _ = diagnostics.merge(emitted);
+                let Ok(project) = project.map(|project| project.package()) else {
+                    return Ok(Completion::Incomplete);
+                };
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -316,13 +351,21 @@ impl DependencyGraph {
                     manifest_path,
                     source_provider,
                     package_registry,
+                    sources,
                     None,
                     visiting,
+                    diagnostics,
                 )?;
-                Ok(format!("source:{package_id}:{}\n", provenance.describe()))
+                Ok(match provenance {
+                    Completion::Complete(provenance) => Completion::Complete(format!(
+                        "source:{package_id}:{}\n",
+                        provenance.describe()
+                    )),
+                    Completion::Incomplete => Completion::Incomplete,
+                })
             },
             ProjectDependencyNodeProvenance::Source(_) => {
-                Ok(format!("canonical:{package_id}@{}\n", node.version))
+                Ok(Completion::Complete(format!("canonical:{package_id}@{}\n", node.version)))
             },
         }
     }
@@ -347,9 +390,10 @@ impl DependencyGraph {
     /// the information/metadata that should contribute to the hash.
     fn compute_path_source_hash(
         &self,
-        context: &TargetAssemblyContext<'_>,
+        context: &mut TargetAssemblyContext<'_>,
         source_provider: &SourceProviderRegistry,
-    ) -> Result<Word, Report> {
+        diagnostics: &mut DiagnosticCollector,
+    ) -> Result<Completion<Word>, Report> {
         let Some(extension) = context.resolved_target_root.extension().and_then(|ext| ext.to_str())
         else {
             return Err(Report::msg(format!(
@@ -363,15 +407,19 @@ impl DependencyGraph {
                 "unsupported file type '{extension}': no source provider registered for that type"
             )));
         };
-        let source_provenance = source_provider.provide_source_provenance(context)?;
+        let outcome = source_provider.provide_source_provenance(context);
+        let _ = diagnostics.merge(outcome.diagnostics);
+        let Ok(source_provenance) = outcome.result else {
+            return Ok(Completion::Incomplete);
+        };
 
-        Ok(self.compute_path_source_hash_from_sources(
+        Ok(Completion::Complete(self.compute_path_source_hash_from_sources(
             &context.package,
             Some(context.project_root.as_ref()),
             context.target,
             context.profile,
             &source_provenance,
-        ))
+        )))
     }
 
     fn compute_path_source_hash_from_sources(

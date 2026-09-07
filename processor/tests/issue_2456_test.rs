@@ -7,10 +7,6 @@ use miden_processor::{
 
 #[test]
 fn test_issue_2456_statically_linked_library_call() {
-    use std::sync::Arc;
-
-    use miden_assembly::DefaultSourceManager;
-
     let test_module_source = "
         namespace test::module_1
 
@@ -21,8 +17,7 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let mut assembler = Assembler::new(source_manager);
+    let mut assembler = Assembler::new();
 
     let library = assembler
         .clone()

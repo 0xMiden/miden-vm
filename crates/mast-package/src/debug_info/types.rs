@@ -20,9 +20,8 @@ use core::{marker::PhantomData, num::NonZeroU32};
 
 use miden_assembly_syntax::ast::{DebugVarInfo, DebugVarLocation, TypeExpr, types::Type};
 use miden_core::{Word, mast::MastNodeId, operations::AssemblyOp};
-use miden_debug_types::{
-    ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceSpan, Span,
-};
+use miden_debug_types::{ByteIndex, ColumnIndex, ColumnNumber, LineIndex, LineNumber};
+use miden_diagnostics::{SourceSpan, Span};
 use miden_utils_indexing::{Idx, newtype_id};
 
 use super::{DebugInfo, FxHashMap, FxHashSet, PackageDebugInfo, SourceNodeIdMarker};

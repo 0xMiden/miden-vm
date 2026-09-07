@@ -71,12 +71,12 @@ fn mast_builder_acceptance_corpus() -> TestResult {
     ];
 
     for (case_name, source) in cases {
-        let program = context.assemble(source)?;
+        let program = assemble_source(&context, source)?;
         append_program_acceptance_summary(&mut summary, case_name, &program);
     }
 
     let mut static_context = TestContext::default();
-    static_context.add_module(source_file!(
+    let helper = static_context.parse_module_source_file(source_file!(
         &static_context,
         r#"
             namespace acceptance::helpers
@@ -90,9 +90,12 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             end
             "#
     ))?;
-    let static_program = static_context.assemble(source_file!(
+    static_context.add_module(helper)?;
+    let static_program = assemble_source(
         &static_context,
-        r#"
+        source_file!(
+            &static_context,
+            r#"
         use acceptance::helpers
 
         begin
@@ -101,7 +104,8 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             exec.helpers::inspect
         end
         "#
-    ))?;
+        ),
+    )?;
     append_program_acceptance_summary(&mut summary, "static_imports", &static_program);
 
     insta::assert_snapshot!("mast_builder_acceptance_corpus", summary);
@@ -140,7 +144,7 @@ fn vendoring() -> TestResult {
     let context = TestContext::new();
     let vendor_lib = {
         let mod1 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod1
 pub proc bar push.1 end pub proc prune push.2 end"
@@ -153,7 +157,7 @@ pub proc bar push.1 end pub proc prune push.2 end"
 
     let lib = {
         let mod2 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::mod2
 pub proc foo exec.::test::mod1::bar end"
@@ -175,7 +179,7 @@ pub proc foo exec.::test::mod1::bar end"
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
         let mod2 = context
-            .parse_module(source_file!(
+            .parse_module_source_file(source_file!(
                 &context,
                 "namespace test::expected\npub proc foo push.1 end"
             ))

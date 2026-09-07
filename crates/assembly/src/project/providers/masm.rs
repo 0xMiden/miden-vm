@@ -1,4 +1,4 @@
-use miden_assembly_syntax::debuginfo::Spanned;
+use miden_assembly_syntax::diagnostics::{Outcome, SourceProvider, Spanned};
 
 use super::*;
 
@@ -11,62 +11,77 @@ impl ProjectSourceProvider for MasmSourceProvider {
 
     fn provide_sources(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> Result<ProjectSourceInputs, Report> {
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceInputs> {
         let TargetAssemblyContext {
-            target,
-            resolved_target_root,
-            source_manager,
-            warnings_as_errors,
-            ..
+            target, resolved_target_root, sources, ..
         } = context;
 
         let namespace = target.namespace.inner().clone();
         let kind = target_root_module_kind(target.ty);
-        let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
+        let outcome = miden_assembly_syntax::parser::read_modules_from_root(
             resolved_target_root,
             Some(namespace),
             Some(kind),
-            source_manager.clone(),
-            *warnings_as_errors,
-        )?;
+            sources,
+        );
 
-        Ok(ProjectSourceInputs { root, support })
+        outcome.map(|(root, support)| ProjectSourceInputs { root, support })
     }
 
     fn provide_source_provenance(
         &self,
-        context: &TargetAssemblyContext<'_>,
-    ) -> Result<ProjectSourceProvenanceInputs, Report> {
+        context: &mut TargetAssemblyContext<'_>,
+    ) -> Outcome<ProjectSourceProvenanceInputs> {
         let root_path = context.resolved_target_root.as_ref();
         let namespace = context.target.namespace.inner().clone();
         let kind = target_root_module_kind(context.target.ty);
-        let (root, support_modules) = miden_assembly_syntax::parser::read_modules_from_root(
+        let Outcome { result, diagnostics } = miden_assembly_syntax::parser::read_modules_from_root(
             root_path,
             Some(namespace),
             Some(kind),
-            context.source_manager.clone(),
-            context.warnings_as_errors,
-        )?;
+            context.sources,
+        );
+
+        let Ok((root, support_modules)) = result else {
+            return Outcome { result: Err(()), diagnostics };
+        };
 
         let root = {
-            let source_file = context.source_manager.get(root.span().source_id()).unwrap();
+            let source = context
+                .sources
+                .get(root.span().source().id())
+                .expect("a parsed module must retain its registered source file");
             SourceFileProvenance {
-                path: source_file.uri().to_path().unwrap().into_boxed_path(),
-                content: source_file.as_str().to_string().into_boxed_str(),
+                path: PathBuf::from(source.display_name).into_boxed_path(),
+                content: source
+                    .text
+                    .expect("parsed source text must be retained")
+                    .to_string()
+                    .into_boxed_str(),
             }
         };
 
         let mut support = Vec::with_capacity(support_modules.len());
         for module in support_modules.iter() {
-            let source_file = context.source_manager.get(module.span().source_id()).unwrap();
+            let source = context
+                .sources
+                .get(module.span().source().id())
+                .expect("a parsed module must retain its registered source file");
             support.push(SourceFileProvenance {
-                path: source_file.uri().to_path().unwrap().into_boxed_path(),
-                content: source_file.as_str().to_string().into_boxed_str(),
+                path: PathBuf::from(source.display_name).into_boxed_path(),
+                content: source
+                    .text
+                    .expect("parsed source text must be retained")
+                    .to_string()
+                    .into_boxed_str(),
             });
         }
 
-        Ok(ProjectSourceProvenanceInputs { root, support })
+        Outcome {
+            result: Ok(ProjectSourceProvenanceInputs { root, support }),
+            diagnostics,
+        }
     }
 }
 

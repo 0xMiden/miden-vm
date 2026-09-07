@@ -10,9 +10,7 @@ pub use self::{
     path::Path,
     path_buf::PathBuf,
 };
-#[cfg(feature = "serde")]
-use crate::debuginfo::Span;
-use crate::diagnostics::{Diagnostic, miette};
+use crate::diagnostics::Diagnostic;
 
 /// Represents errors that can occur when creating, parsing, or manipulating [Path]s
 #[derive(Debug, thiserror::Error)]
@@ -43,18 +41,14 @@ pub enum PathError {
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum NamespaceError {
     #[error("invalid library namespace name: cannot be empty")]
-    #[diagnostic()]
     Empty,
     #[error("invalid library namespace name: too many characters")]
-    #[diagnostic()]
     Length,
     #[error(
         "invalid character in library namespace: expected lowercase ascii-alphanumeric character or '_'"
     )]
-    #[diagnostic()]
     InvalidChars,
     #[error("invalid library namespace name: must start with lowercase ascii-alphabetic character")]
-    #[diagnostic()]
     InvalidStart,
 }
 
@@ -100,15 +94,18 @@ where
     Ok(P::from(path))
 }
 
-/// Deserialize a [Path]-like value wrapped in a [Span].
+/// Deserialize a [Path]-like value wrapped in a [serde_spanned::Spanned].
 #[cfg(feature = "serde")]
-pub fn deserialize_spanned<'de, P, D>(deserializer: D) -> Result<Span<P>, D::Error>
+pub fn deserialize_spanned<'de, P, D>(
+    deserializer: D,
+) -> Result<serde_spanned::Spanned<P>, D::Error>
 where
     P: From<PathBuf>,
     D: serde::Deserializer<'de>,
 {
-    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
-    Ok(Span::unknown(P::from(path)))
+    let path = <serde_spanned::Spanned<PathBuf> as serde::Deserialize>::deserialize(deserializer)?;
+    let span = path.span();
+    Ok(serde_spanned::Spanned::new(span, P::from(path.into_inner())))
 }
 
 #[cfg(feature = "arbitrary")]

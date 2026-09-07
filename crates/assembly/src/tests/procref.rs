@@ -7,7 +7,7 @@ use super::*;
 fn procref_call() -> TestResult {
     let mut context = TestContext::default();
     // compile first module
-    context.add_module(source_file!(
+    let module_one = context.parse_module_source_file(source_file!(
         &context,
         "
         namespace module::path::one
@@ -20,9 +20,10 @@ fn procref_call() -> TestResult {
             push.1.2
         end"
     ))?;
+    context.add_module(module_one)?;
 
     // compile second module
-    context.add_module(source_file!(
+    let module_two = context.parse_module_source_file(source_file!(
         &context,
         "
         namespace module::path::two
@@ -34,11 +35,14 @@ fn procref_call() -> TestResult {
             procref.one::aaa
         end"
     ))?;
+    context.add_module(module_two)?;
 
     // compile program with procref calls
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use module::path::two
 
         @locals(4)
@@ -51,7 +55,8 @@ fn procref_call() -> TestResult {
             procref.two::foo
             procref.baz
         end"
-    ))?;
+        ),
+    )?;
     Ok(())
 }
 
@@ -70,10 +75,11 @@ fn get_proc_name_of_unknown_module() -> TestResult {
         procref.two::bar
     end"
     );
-    let module1 = context.parse_module(module_source1)?;
+    let module1 = context.parse_module_source_file(module_source1)?;
 
-    let report = Assembler::new(context.source_manager())
+    let report = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", module1, None::<Box<Module>>)
+        .into_result()
         .expect_err("expected unknown module error");
 
     assert_diagnostic!(&report, "undefined item 'module::path::two'");

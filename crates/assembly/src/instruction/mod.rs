@@ -1,7 +1,6 @@
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
-    debuginfo::{Span, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{Report, diagnostic},
     parser::{IntValue, PushValue},
 };
 use miden_core::{
@@ -9,6 +8,7 @@ use miden_core::{
     events::SystemEvent,
     operations::{AssemblyOp, Operation},
 };
+use miden_diagnostics::{Span, Spanned};
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
@@ -602,7 +602,7 @@ impl Assembler {
                 block_builder.push_debug_var(debug_var_info.clone())?;
             },
             Instruction::DebugInlineCall(inline_call) => {
-                block_builder.push_debug_inline_call(inline_call, proc_ctx.source_manager());
+                block_builder.push_debug_inline_call(inline_call);
             },
             Instruction::DebugInlineCallClear => {
                 block_builder.clear_debug_inline_calls();
@@ -692,15 +692,16 @@ fn push_reversew(block_builder: &mut BasicBlockBuilder) {
 /// Returns the validated address as u32 or an error if the address is not a multiple of 4.
 fn validate_local_word_alignment(
     local_addr: &ImmU16,
-    proc_ctx: &ProcedureContext,
+    _proc_ctx: &ProcedureContext,
 ) -> Result<u32, Report> {
     let addr = local_addr.expect_value();
     if !addr.is_multiple_of(WORD_SIZE as u16) {
-        return Err(RelatedLabel::error("invalid local word index")
-            .with_help("the index to a local word must be a multiple of 4")
-            .with_labeled_span(local_addr.span(), "this index is not word-aligned")
-            .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
-            .into());
+        return Err(Report::new(diagnostic! {
+            severity: Error,
+            message: "invalid local word index",
+            labels: [primary(local_addr.span(), "this index is not word-aligned")],
+            notes: [help("the index to a local word must be a multiple of 4")],
+        }));
     }
     Ok(addr as u32)
 }

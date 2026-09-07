@@ -5,7 +5,8 @@ use miden_core::{
     events::{EventId, EventName},
     mast::MastForest,
 };
-use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 use miden_mast_package::{PackageDebugInfoError, debug_info::PackageDebugInfo};
 
 use super::handlers::{
@@ -20,41 +21,19 @@ use crate::{
 // ================================================================================================
 
 /// A default SyncHost implementation that provides the essential functionality required by the VM.
-#[derive(Debug)]
-pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
+#[derive(Debug, Default)]
+pub struct DefaultHost {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
     trace_handlers: TraceHandlerRegistry,
-    source_manager: Arc<S>,
+    sources: Option<SharedSourceProvider>,
 }
 
-impl Default for DefaultHost {
-    fn default() -> Self {
-        Self {
-            store: MemMastForestStore::default(),
-            event_handlers: EventHandlerRegistry::default(),
-            trace_handlers: TraceHandlerRegistry::default(),
-            source_manager: Arc::new(DefaultSourceManager::default()),
-        }
-    }
-}
-
-impl<S> DefaultHost<S>
-where
-    S: SourceManager,
-{
-    /// Use the given source manager implementation instead of the default one
-    /// [`DefaultSourceManager`].
-    pub fn with_source_manager<O>(self, source_manager: Arc<O>) -> DefaultHost<O>
-    where
-        O: SourceManager,
-    {
-        DefaultHost::<O> {
-            store: self.store,
-            event_handlers: self.event_handlers,
-            trace_handlers: self.trace_handlers,
-            source_manager,
-        }
+impl DefaultHost {
+    /// Retains a source provider for resolving portable package debug locations during execution.
+    pub fn with_source_provider(mut self, sources: impl Into<SharedSourceProvider>) -> Self {
+        self.sources = Some(sources.into());
+        self
     }
 
     /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
@@ -138,17 +117,15 @@ where
     }
 }
 
-impl<S> BaseHost for DefaultHost<S>
-where
-    S: SourceManager,
-{
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
+impl BaseHost for DefaultHost {
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        let Some(sources) = self.sources.as_ref() else {
+            return (SourceSpan::UNKNOWN, None);
+        };
+        let Some(span) = location.to_span(sources) else {
+            return (SourceSpan::UNKNOWN, None);
+        };
+        (span, Some(sources.clone()))
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
@@ -160,10 +137,7 @@ where
     }
 }
 
-impl<S> SyncHost for DefaultHost<S>
-where
-    S: SourceManager,
-{
+impl SyncHost for DefaultHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
     }
@@ -206,10 +180,7 @@ pub struct NoopHost;
 
 impl BaseHost for NoopHost {
     #[inline(always)]
-    fn get_label_and_source_file(
-        &self,
-        _location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    fn resolve_location(&self, _location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
         (SourceSpan::UNKNOWN, None)
     }
 }

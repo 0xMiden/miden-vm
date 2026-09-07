@@ -9,8 +9,7 @@ use core::{
     str::FromStr,
 };
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
-use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
+use miden_diagnostics::{IntoDiagnostic, Report, SourceSpan, Span, Spanned};
 
 use crate::{
     Path, PathBuf,
@@ -129,7 +128,9 @@ impl FromStr for QualifiedProcedureName {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let path = PathBuf::new(s).into_diagnostic()?;
         if path.parent().is_none() {
-            return Err(Report::msg("invalid procedure path: must be qualified with a namespace"));
+            return Err(miden_diagnostics::report!(
+                message: "invalid procedure path: must be qualified with a namespace"
+            ));
         }
         let _ = path.procedure_name().into_diagnostic()?.unwrap();
         Ok(Self {
@@ -172,12 +173,6 @@ impl Ord for QualifiedProcedureName {
 impl PartialOrd for QualifiedProcedureName {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl From<QualifiedProcedureName> for miette::SourceSpan {
-    fn from(fqn: QualifiedProcedureName) -> Self {
-        fqn.span.into()
     }
 }
 
@@ -330,12 +325,6 @@ impl Hash for ProcedureName {
 impl Spanned for ProcedureName {
     fn span(&self) -> SourceSpan {
         self.0.span()
-    }
-}
-
-impl From<ProcedureName> for miette::SourceSpan {
-    fn from(name: ProcedureName) -> Self {
-        name.span().into()
     }
 }
 

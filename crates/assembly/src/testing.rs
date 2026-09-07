@@ -1,44 +1,40 @@
 #[cfg(any(feature = "std", feature = "testing"))]
 use alloc::vec::Vec;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, string::String, sync::Arc};
+use core::cell::RefCell;
 
 #[cfg(feature = "std")]
 use miden_assembly_syntax::Word;
+#[cfg(feature = "testing")]
+use miden_assembly_syntax::ast::Form;
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
     Parse, Path,
     ast::{Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceManager},
-    diagnostics::{
-        Report,
-        reporting::{ReportHandlerOpts, set_hook},
-    },
+    diagnostics::{Outcome, Report, SourceId, SourceMap, SourceSpan, Span, TextRange},
+    testing::assess_test_outcome,
 };
 pub use miden_assembly_syntax::{
     assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
 };
-#[cfg(feature = "testing")]
-use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::program::Program;
 use miden_mast_package::PackageId;
 #[cfg(feature = "std")]
 use miden_project::TargetType;
 
 use crate::assembler::Assembler;
-#[cfg(feature = "std")]
-use crate::diagnostics::reporting::set_panic_hook;
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
-/// It is used by constructing it with `TestContext::default()`, which will initialize the
-/// diagnostic reporting infrastructure, and construct a default [Assembler] instance for you. You
-/// can then optionally customize the context, or start invoking any of its test helpers.
+/// It is used by constructing it with `TestContext::default()`, which will construct a default
+/// [Assembler] instance for you. You can then optionally customize the context, or start invoking
+/// any of its test helpers.
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
-    source_manager: Arc<dyn SourceManager>,
-    assembler: Assembler,
+    assembler: RefCell<Assembler>,
+    warnings_as_errors: bool,
     #[cfg(feature = "std")]
     registry: TestRegistry,
 }
@@ -57,62 +53,59 @@ impl TestContext {
             let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
         }
 
-        #[cfg(feature = "std")]
-        {
-            let result = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-            #[cfg(feature = "std")]
-            if result.is_ok() {
-                set_panic_hook();
-            }
-        }
-
-        #[cfg(not(feature = "std"))]
-        {
-            let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
-        }
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
+        let assembler = RefCell::new(Assembler::new());
         #[cfg(feature = "std")]
         {
             Self {
-                source_manager,
                 assembler,
+                warnings_as_errors: true,
                 registry: Default::default(),
             }
         }
         #[cfg(not(feature = "std"))]
         {
-            Self { source_manager, assembler }
+            Self { assembler, warnings_as_errors: true }
         }
     }
 
     #[cfg(feature = "std")]
-    pub fn with_warnings_as_errors(self, yes: bool) -> Self {
-        let Self { source_manager, assembler, registry } = self;
-        Self {
-            source_manager,
-            assembler: assembler.with_warnings_as_errors(yes),
-            registry,
-        }
+    pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
+        self.warnings_as_errors = yes;
+        self
     }
 
     #[cfg(not(feature = "std"))]
-    pub fn with_warnings_as_errors(self, yes: bool) -> Self {
-        let Self { source_manager, assembler } = self;
-        Self {
-            source_manager,
-            assembler: assembler.with_warnings_as_errors(yes),
-        }
+    pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
+        self.warnings_as_errors = yes;
+        self
     }
 
     #[inline]
     fn assembler(&self) -> Assembler {
-        self.assembler.clone()
+        self.assembler.borrow().clone()
     }
 
+    /// Returns a shared snapshot of the sources registered with this context's assembler.
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.source_manager.clone()
+    pub fn sources(&self) -> Arc<SourceMap> {
+        Arc::new(self.assembler.borrow().sources().clone())
+    }
+
+    /// Adds test source text to this context and returns it with its canonical session span.
+    pub fn add_source(&self, name: impl Into<String>, text: impl Into<String>) -> Span<String> {
+        let text = text.into();
+        let source_id = self
+            .assembler
+            .borrow_mut()
+            .sources_mut()
+            .insert(name, text.clone(), None)
+            .expect("test source must fit in the source map");
+        let range = TextRange::try_from_usize(0, text.len()).expect("validated source length");
+        Span::new(SourceSpan::session(source_id, range), text)
+    }
+
+    fn assess<T>(&self, outcome: Outcome<T>) -> Result<T, Report> {
+        assess_test_outcome(outcome, self.sources(), self.warnings_as_errors)
     }
 
     /// Parse the given source file into a vector of top-level [Form]s.
@@ -121,8 +114,9 @@ impl TestContext {
     /// forms, and is largely intended for low-level testing of the parser.
     #[cfg(feature = "testing")]
     #[track_caller]
-    pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        parser::parse_forms(source)
+    pub fn parse_forms(&self, source: Span<String>) -> Result<Vec<Form>, Report> {
+        let source_id: SourceId = source.span().source().id();
+        self.assess(parser::parse_forms(source_id, source.inner()))
     }
 
     /// Parse the given source file into an executable [Module].
@@ -130,8 +124,9 @@ impl TestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
+    pub fn parse_program(&self, source: Span<String>) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(Some(ModuleKind::Executable));
+        self.assess(parser.parse(None, source.span().source().id(), source.inner()))
     }
 
     /// Parse the given source file into a kernel [Module].
@@ -139,10 +134,9 @@ impl TestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_kernel(&self, source: Arc<SourceFile>) -> Result<Box<Module>, Report> {
+    pub fn parse_kernel(&self, source: Span<String>) -> Result<Box<Module>, Report> {
         let mut parser = Module::parser(Some(ModuleKind::Kernel));
-        parser.set_warnings_as_errors(self.assembler.warnings_as_errors());
-        parser.parse(Some(Path::KERNEL), source, self.source_manager())
+        self.assess(parser.parse(Some(Path::KERNEL), source.span().source().id(), source.inner()))
     }
 
     /// Parse the given source file into an anonymous library [Module].
@@ -151,20 +145,39 @@ impl TestContext {
     /// valid.
     #[track_caller]
     pub fn parse_module(&self, source: impl Parse) -> Result<Box<Module>, Report> {
-        source.parse(self.assembler.warnings_as_errors(), self.source_manager())
+        let outcome = source.parse(self.assembler.borrow_mut().sources_mut());
+        self.assess(outcome)
+    }
+
+    /// Parse source already registered with this context into an anonymous library [Module].
+    #[track_caller]
+    pub fn parse_module_source_file(&self, source: Span<String>) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(None);
+        self.assess(parser.parse(None, source.span().source().id(), source.inner()))
     }
 
     /// Add `module` to the [Assembler] constructed by this context, making it available to
     /// other modules.
     #[track_caller]
     pub fn add_module(&mut self, module: impl Parse) -> Result<(), Report> {
-        self.assembler.compile_and_statically_link(module).map(|_| ())
+        let warnings_as_errors = self.warnings_as_errors;
+        let mut assembler = self.assembler.borrow_mut();
+        let outcome = assembler.compile_and_statically_link(module);
+        let outcome = Outcome {
+            result: outcome.result.map(|_| ()),
+            diagnostics: outcome.diagnostics,
+        };
+        let sources = Arc::new(assembler.sources().clone());
+        drop(assembler);
+        assess_test_outcome(outcome, sources, warnings_as_errors)
     }
 
     /// Add the modules of `library` to the [Assembler] constructed by this context.
     #[track_caller]
     pub fn add_library(&mut self, package: Arc<miden_mast_package::Package>) -> Result<(), Report> {
-        self.assembler.link_package(package, miden_project::Linkage::Dynamic)
+        self.assembler
+            .borrow_mut()
+            .link_package(package, miden_project::Linkage::Dynamic)
     }
 
     /// Compile a [Program] from `source` using the [Assembler] constructed by this context.
@@ -173,7 +186,10 @@ impl TestContext {
     /// module represented in `source`.
     #[track_caller]
     pub fn assemble(&self, source: impl Parse) -> Result<Program, Report> {
-        Ok(self.assembler().assemble_program("test", source)?.unwrap_program())
+        let parse_outcome = source.parse(self.assembler.borrow_mut().sources_mut());
+        let module = self.assess(parse_outcome)?;
+        self.assess(self.assembler().assemble_program("test", module))
+            .map(|package| package.unwrap_program())
     }
 
     /// Compile a library package from `modules` using the [Assembler] constructed by this context.
@@ -188,7 +204,7 @@ impl TestContext {
         support: impl IntoIterator<Item = Box<Module>>,
     ) -> Result<Box<miden_mast_package::Package>, Report> {
         let version = version.unwrap_or("0.0.0").parse().unwrap();
-        let mut package = self.assembler().assemble_library(name, root, support)?;
+        let mut package = self.assess(self.assembler().assemble_library(name, root, support))?;
         package.version = version;
         Ok(package)
     }
@@ -205,6 +221,7 @@ mod package_features {
         sync::{Arc, Mutex},
     };
 
+    use miden_assembly_syntax::testing::assess_test_outcome;
     use miden_mast_package::{Package, PackageId};
     use miden_package_registry::{
         PackageCache, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
@@ -375,14 +392,20 @@ mod package_features {
             &'a mut self,
             manifest_path: impl AsRef<std::path::Path>,
         ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
-            self.assembler().for_project_at_path(manifest_path, &mut self.registry)
+            let sources = self.sources();
+            let warnings_as_errors = self.warnings_as_errors;
+            let outcome = self.assembler().for_project_at_path(manifest_path, &mut self.registry);
+            assess_test_outcome(outcome, sources, warnings_as_errors)
         }
 
         pub fn project_assembler<'a>(
             &'a mut self,
             project: Arc<miden_project::Package>,
         ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
-            self.assembler().for_project(project, &mut self.registry)
+            let sources = self.sources();
+            let warnings_as_errors = self.warnings_as_errors;
+            let outcome = self.assembler().for_project(project, &mut self.registry);
+            assess_test_outcome(outcome, sources, warnings_as_errors)
         }
 
         /// Assembles the library target of the package at `manifest_path`, using `profile`.
@@ -397,9 +420,16 @@ mod package_features {
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
-            let mut project_assembler =
-                assembler.for_project_at_path(manifest_path, &mut self.registry)?;
-            project_assembler.assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"))
+            let sources = self.sources();
+            let warnings_as_errors = self.warnings_as_errors;
+            let mut project_assembler = assess_test_outcome(
+                assembler.for_project_at_path(manifest_path, &mut self.registry),
+                sources.clone(),
+                warnings_as_errors,
+            )?;
+            let outcome = project_assembler
+                .assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"));
+            assess_test_outcome(outcome, sources, warnings_as_errors)
         }
 
         /// Assembles the executable target `name` of the package from `manifest_path`, using
@@ -418,12 +448,18 @@ mod package_features {
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
-            let mut project_assembler =
-                assembler.for_project_at_path(manifest_path, &mut self.registry)?;
-            project_assembler.assemble(
+            let sources = self.sources();
+            let warnings_as_errors = self.warnings_as_errors;
+            let mut project_assembler = assess_test_outcome(
+                assembler.for_project_at_path(manifest_path, &mut self.registry),
+                sources.clone(),
+                warnings_as_errors,
+            )?;
+            let outcome = project_assembler.assemble(
                 ProjectTargetSelector::Executable(name.unwrap_or(Path::EXEC_PATH)),
                 profile.unwrap_or("dev"),
-            )
+            );
+            assess_test_outcome(outcome, sources, warnings_as_errors)
         }
 
         /// Assembles a package named `name` with `version` and `dependencies`, containing a single
@@ -454,11 +490,10 @@ mod package_features {
                 self,
                 format!("namespace {export_module}\n\npub proc {export_leaf} add end")
             );
-            let module = self.parse_module(source_file).unwrap();
+            let module = self.parse_module_source_file(source_file).unwrap();
             let name = PackageId::from(name);
             let mut package = self
-                .assembler()
-                .assemble_library(name, module, None::<Box<Module>>)
+                .assess(self.assembler().assemble_library(name, module, None::<Box<Module>>))
                 .expect("failed to assemble library");
             package.version = version.parse().unwrap();
             for (name, version, kind, digest) in dependencies {

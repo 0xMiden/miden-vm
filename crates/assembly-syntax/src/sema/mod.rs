@@ -13,13 +13,13 @@ use alloc::{
 };
 
 use miden_core::{Word, crypto::hash::Poseidon2};
-use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
+use miden_diagnostics::{Outcome, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
-    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
+    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError},
     passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
@@ -34,31 +34,30 @@ use crate::{ast::*, parser::WordValue};
 ///   * Calls to imported procedures are resolved concretely
 /// * Semantic analysis is performed on the module to validate it
 pub fn analyze(
-    source: Arc<SourceFile>,
+    source_span: SourceSpan,
     kind: Option<ModuleKind>,
     path: Option<&Path>,
     forms: Vec<Form>,
-    warnings_as_errors: bool,
-    source_manager: Arc<dyn SourceManager>,
-) -> Result<Box<Module>, SyntaxError> {
+) -> Outcome<Box<Module>> {
     log::debug!(target: "sema", "starting semantic analysis for '{}' (kind = {kind:?})", path.map(Path::as_str).unwrap_or("None"));
-    let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
-    analyzer.set_warnings_as_errors(warnings_as_errors);
+    let mut analyzer = AnalysisContext::new();
 
     let expected_path = match path {
-        Some(path) => Some(normalize_namespace_path(path).map_err(|err| SyntaxError {
-            source_file: source.clone(),
-            errors: vec![SemanticAnalysisError::InvalidNamespacePath {
-                path: path.to_path_buf().into(),
-                err,
-            }],
-        })?),
+        Some(path) => match normalize_namespace_path(path) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                analyzer.error(SemanticAnalysisError::InvalidNamespacePath {
+                    path: path.to_path_buf().into(),
+                    err,
+                });
+                return analyzer.into_outcome(Err(()));
+            },
+        },
         None => None,
     };
     let module_path = expected_path.as_deref().unwrap_or(Path::new(""));
-    let mut module = Box::new(
-        Module::new(kind.unwrap_or_default(), module_path).with_span(source.source_span()),
-    );
+    let mut module =
+        Box::new(Module::new(kind.unwrap_or_default(), module_path).with_span(source_span));
 
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();
@@ -94,14 +93,16 @@ pub fn analyze(
                 if let Some(unused) = docs.take() {
                     analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
                 }
-                let namespace =
-                    normalize_namespace_path(ns.inner()).map_err(|err| SyntaxError {
-                        source_file: source.clone(),
-                        errors: vec![SemanticAnalysisError::InvalidNamespacePath {
+                let namespace = match normalize_namespace_path(ns.inner()) {
+                    Ok(namespace) => namespace,
+                    Err(err) => {
+                        analyzer.error(SemanticAnalysisError::InvalidNamespacePath {
                             path: ns.inner().clone(),
                             err,
-                        }],
-                    })?;
+                        });
+                        return analyzer.into_outcome(Err(()));
+                    },
+                };
                 if let Some(expected_path) = expected_path.as_deref()
                     && namespace.as_ref() != expected_path
                 {
@@ -157,11 +158,17 @@ pub fn analyze(
                 if let Some(unused) = docs.take() {
                     analyzer.error(SemanticAnalysisError::ImportDocstring { span: unused.span() });
                 }
-                define_import(import, &mut module, &mut analyzer)?;
+                if define_import(import, &mut module, &mut analyzer).is_err() {
+                    return analyzer.into_outcome(Err(()));
+                }
             },
             Form::Procedure(export) => {
                 namespace_allowed = false;
-                define_procedure(export.with_docs(docs.take()), &mut module, &mut analyzer)?;
+                if define_procedure(export.with_docs(docs.take()), &mut module, &mut analyzer)
+                    .is_err()
+                {
+                    return analyzer.into_outcome(Err(()));
+                }
             },
             Form::Begin(body)
                 if actual_kind.is_none_or(|kind| matches!(kind, ModuleKind::Executable)) =>
@@ -172,7 +179,9 @@ pub fn analyze(
                 let procedure =
                     Procedure::new(body.span(), Visibility::Public, ProcedureName::main(), 0, body)
                         .with_docs(docs);
-                define_procedure(procedure, &mut module, &mut analyzer)?;
+                if define_procedure(procedure, &mut module, &mut analyzer).is_err() {
+                    return analyzer.into_outcome(Err(()));
+                }
             },
             Form::Begin(body) => {
                 namespace_allowed = false;
@@ -205,7 +214,7 @@ pub fn analyze(
         } else {
             analyzer.error(SemanticAnalysisError::MissingNamespace);
             // If we don't have a namespace, we shouldn't proceed any further
-            return Err(analyzer.into_result().unwrap_err());
+            return analyzer.into_outcome(Err(()));
         }
     }
 
@@ -264,7 +273,9 @@ pub fn analyze(
 
     verify_exported_signature_type_visibility(&module, &mut analyzer);
 
-    analyzer.has_failed()?;
+    if analyzer.has_errors() {
+        return analyzer.into_outcome(Err(()));
+    }
 
     // Run item checks
     visit_items(&mut module, &mut analyzer);
@@ -276,7 +287,7 @@ pub fn analyze(
         }
     }
 
-    analyzer.into_result().map(move |_| module)
+    analyzer.into_outcome(Ok(module))
 }
 
 fn normalize_namespace_path(path: &Path) -> Result<Arc<Path>, PathError> {
@@ -369,7 +380,7 @@ fn verify_exported_type_expr(
             }
         },
         TypeExpr::Ref(path) => {
-            let resolver = match LocalSymbolResolver::new(module, analyzer.source_manager()) {
+            let resolver = match LocalSymbolResolver::new(module) {
                 Ok(resolver) => resolver,
                 Err(_) => return,
             };
@@ -538,19 +549,19 @@ fn define_import(
     import: ImportDecl,
     module: &mut Module,
     context: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+) -> Result<(), AnalysisAborted> {
     match import {
         ImportDecl::Module(import) => {
             if import.visibility().is_public() {
                 context.error(SemanticAnalysisError::ReexportedModule { span: import.span() });
-                context.has_failed()?;
+                return Err(AnalysisAborted);
             }
             if let Err(err) = module.define_import(Import::Module(import)) {
                 match err {
                     SemanticAnalysisError::SymbolConflict { .. } => context.error(err),
                     err => {
                         context.error(err);
-                        context.has_failed()?;
+                        return Err(AnalysisAborted);
                     },
                 }
             }
@@ -575,7 +586,7 @@ fn define_import(
                         SemanticAnalysisError::SymbolConflict { .. } => context.error(err),
                         err => {
                             context.error(err);
-                            context.has_failed()?;
+                            return Err(AnalysisAborted);
                         },
                     }
                 }
@@ -591,7 +602,7 @@ fn preflight_item_import_group(
     group: &ItemImportGroup,
     module: &Module,
     context: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+) -> Result<(), AnalysisAborted> {
     let mut seen = BTreeMap::<String, SourceSpan>::new();
     let mut failed = false;
     for spec in group.specs() {
@@ -614,7 +625,7 @@ fn preflight_item_import_group(
     }
 
     if failed {
-        context.has_failed()?;
+        return Err(AnalysisAborted);
     }
 
     Ok(())
@@ -624,9 +635,9 @@ fn define_procedure(
     procedure: Procedure,
     module: &mut Module,
     context: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+) -> Result<(), AnalysisAborted> {
     let name = procedure.name().clone();
-    if let Err(err) = module.define_procedure(procedure, context.source_manager()) {
+    if let Err(err) = module.define_procedure(procedure) {
         match err {
             SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors
@@ -635,7 +646,7 @@ fn define_procedure(
             err => {
                 // We can't proceed without producing a bunch of errors
                 context.error(err);
-                context.has_failed()?;
+                return Err(AnalysisAborted);
             },
         }
     }
@@ -644,6 +655,10 @@ fn define_procedure(
 
     Ok(())
 }
+
+/// Indicates that semantic analysis cannot continue safely after recording an error diagnostic.
+#[derive(Debug, Copy, Clone)]
+struct AnalysisAborted;
 
 /// Inserts a new entry in the Advice Map and defines a constant corresposnding to the entry's
 /// key.

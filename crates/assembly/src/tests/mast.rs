@@ -18,17 +18,18 @@ fn nested_blocks() -> Result<(), Report> {
 
     let context = TestContext::new();
     let assembler = {
-        let kernel_lib = Assembler::new(context.source_manager())
+        let kernel_lib = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_kernel("kernel", context.parse_kernel(source_file!(&context, KERNEL))?, None)
             .map(Arc::<Package>::from)
             .unwrap();
 
         let dummy_module = context.parse_module(MODULE_PROCEDURE)?;
-        let dummy_library = Assembler::new(context.source_manager())
+        let dummy_library = Assembler::with_sources(context.sources().as_ref().clone())
             .assemble_library("dummy", dummy_module, None::<Box<Module>>)
             .unwrap();
 
-        let mut assembler = Assembler::with_kernel(context.source_manager(), kernel_lib)?;
+        let mut assembler =
+            Assembler::with_sources_and_kernel(context.sources().as_ref().clone(), kernel_lib)?;
         assembler.link_package(Arc::from(dummy_library), Linkage::Dynamic).unwrap();
 
         assembler
@@ -231,7 +232,7 @@ fn emit_instruction_digest() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
 
@@ -268,7 +269,7 @@ fn trace_instruction_digest() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
 
@@ -312,9 +313,9 @@ fn emit_syntax_equivalence() {
         end
     "#;
 
-    let program1 = context.assemble(program1_source).unwrap();
-    let program2 = context.assemble(program2_source).unwrap();
-    let program3 = context.assemble(program3_source).unwrap();
+    let program1 = assemble_source(&context, program1_source).unwrap();
+    let program2 = assemble_source(&context, program2_source).unwrap();
+    let program3 = assemble_source(&context, program3_source).unwrap();
 
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();
@@ -375,10 +376,10 @@ fn trace_syntax_equivalence() {
         end
     "#;
 
-    let program1 = context.assemble(program1_source).unwrap();
-    let program2 = context.assemble(program2_source).unwrap();
-    let program3 = context.assemble(program3_source).unwrap();
-    let program4 = context.assemble(program4_source).unwrap();
+    let program1 = assemble_source(&context, program1_source).unwrap();
+    let program2 = assemble_source(&context, program2_source).unwrap();
+    let program3 = assemble_source(&context, program3_source).unwrap();
+    let program4 = assemble_source(&context, program4_source).unwrap();
 
     let digest1 = program1.hash();
     assert_eq!(digest1, program2.hash(), "constant and inline trace forms differ");
@@ -414,7 +415,7 @@ fn duplicate_procedure() {
         end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
     // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
     // procedure.
     assert_eq!(program.num_procedures(), 2);
@@ -442,7 +443,7 @@ fn distinguish_grandchildren_correctly() {
     end
     "#;
 
-    let program = context.assemble(program_source).unwrap();
+    let program = assemble_source(&context, program_source).unwrap();
 
     let join_node = &program.mast_forest()[program.entrypoint()].unwrap_join();
 
@@ -477,7 +478,7 @@ fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
     let baz = context.parse_module(BAZ)?;
     let library = context.assemble_library("foo", None, root, [bar, baz]).unwrap();
 
-    let assembler = Assembler::new(context.source_manager())
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(library.into(), Linkage::Dynamic)
         .unwrap();
 
@@ -486,7 +487,7 @@ fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
         exec.::foo::baz::baz
     end"#;
 
-    assert_matches!(assembler.assemble_program("program", program), Ok(_));
+    assert!(assembler.assemble_program("program", program).is_ok());
     Ok(())
 }
 
@@ -513,7 +514,7 @@ fn re_exports() -> Result<(), Report> {
     let baz = context.parse_module(BAZ)?;
     let library = context.assemble_library("foo", None, baz, [bar]).unwrap();
 
-    let assembler = Assembler::new(context.source_manager())
+    let assembler = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(library.into(), Linkage::Dynamic)
         .unwrap();
 
@@ -527,7 +528,7 @@ fn re_exports() -> Result<(), Report> {
         exec.baz::qux
     end"#;
 
-    assert_matches!(assembler.assemble_program("test", program), Ok(_));
+    assert!(assembler.assemble_program("test", program).is_ok());
     Ok(())
 }
 
@@ -559,9 +560,13 @@ fn module_ordering_can_be_arbitrary() -> Result<(), Report> {
     let b = context.parse_module(B)?;
     let c = context.parse_module(C)?;
 
-    let mut assembler = Assembler::new(context.source_manager());
-    assembler.compile_and_statically_link(b)?.compile_and_statically_link(a)?;
-    assembler.assemble_library("lib", c, None::<Box<Module>>)?;
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    assembler
+        .compile_and_statically_link(b)
+        .into_result()?
+        .compile_and_statically_link(a)
+        .into_result()?;
+    assembler.assemble_library("lib", c, None::<Box<Module>>).into_result()?;
 
     Ok(())
 }

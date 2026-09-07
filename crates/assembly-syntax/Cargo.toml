@@ -20,11 +20,12 @@ std = [
     "miden-assembly-syntax-cst/std",
     "miden-core/std",
     "miden-debug-types/std",
-    "miden-utils-diagnostics/std",
+    "miden-diagnostics/std",
     "thiserror/std",
     "proptest?/std",
+    "serde_spanned?/std"
 ]
-serde = ["dep:serde", "miden-debug-types/serde", "semver/serde"]
+serde = ["dep:serde", "dep:serde_spanned", "miden-diagnostics/serde", "midenc-hir-type/serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
@@ -34,8 +35,8 @@ logging = ["dep:env_logger"]
 miden-assembly-syntax-cst = { workspace = true, default-features = false }
 miden-core.workspace = true
 miden-debug-types.workspace = true
-miden-utils-diagnostics.workspace = true
-midenc-hir-type = { workspace = true, features = ["serde"] }
+miden-diagnostics.workspace = true
+midenc-hir-type.workspace = true
 
 # External dependencies
 env_logger = { workspace = true, optional = true }
@@ -45,6 +46,7 @@ proptest-derive = { workspace = true, optional = true }
 regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
 semver = { version = "1.0", default-features = false }
 serde = { workspace = true, optional = true }
+serde_spanned = { version = "1.1", optional = true, default-features = false, features = ["serde"] }
 smallvec.workspace = true
 thiserror.workspace = true
 

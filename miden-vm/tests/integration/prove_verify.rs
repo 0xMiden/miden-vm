@@ -1,8 +1,6 @@
 //! Integration tests for the public proving lifecycle and recursive-verifier regressions.
 
-use alloc::sync::Arc;
-
-use miden_assembly::{Assembler, DefaultSourceManager, Linkage};
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     Felt, program::ExecutionClaim, proof::ExecutionProof, utils::bytes_to_packed_u32_elements,
 };
@@ -47,8 +45,8 @@ fn assert_prove_verify(
         .unwrap_program();
     let stack_inputs = stack_inputs_from_ints([0, 1]);
     let advice_inputs = AdviceInputs::default();
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host = DefaultHost::default();
+
     println!("Proving with {hash_name}...");
     let witness =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
@@ -549,7 +547,10 @@ mod prover_api_lifecycle {
 mod execution_witness_serialization {
     use std::sync::Arc;
 
-    use miden_assembly::{Assembler, DefaultSourceManager};
+    use miden_assembly::{
+        Assembler,
+        diagnostics::{SourceMap, SourceNamespace},
+    };
     #[cfg(feature = "arbitrary")]
     use miden_core::Felt;
     use miden_core::{
@@ -570,7 +571,8 @@ mod execution_witness_serialization {
     use miden_vm::{ExecutionWitness, Program, precompile_witness_from_wire};
 
     fn default_source_manager_host() -> DefaultHost {
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
+        DefaultHost::default()
+            .with_source_provider(Arc::new(SourceMap::new(SourceNamespace::fresh().unwrap())))
     }
 
     fn create_simple_library() -> HostLibrary {

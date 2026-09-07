@@ -30,7 +30,9 @@ pub use self::{
         MetaKeyValue, MetaList,
     },
     block::Block,
-    constants::{Constant, ConstantExpr, ConstantOp, ConstantValue, HashKind},
+    constants::{
+        ConstEvalCycleDetected, Constant, ConstantExpr, ConstantOp, ConstantValue, HashKind,
+    },
     docstring::DocString,
     form::Form,
     ident::{CaseKindError, Ident, IdentError},

@@ -10,7 +10,7 @@ fn program_with_one_procedure() -> TestResult {
         &context,
         "proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -25,7 +25,7 @@ fn program_with_nested_procedure() -> TestResult {
         proc bar push.5 exec.foo add end \
         begin push.2 push.4 add exec.foo push.11 exec.bar sub end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -47,7 +47,7 @@ fn program_with_proc_locals() -> TestResult {
             exec.foo \
         end"
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     // Note: 18446744069414584317 == -4 (mod 2^64 - 2^32 + 1)
     insta::assert_snapshot!(program);
     Ok(())
@@ -70,8 +70,7 @@ begin
     exec.foo
 end"
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid procedure local reference to be rejected");
     assert_diagnostic!(&err, "invalid procedure local reference");
     assert_diagnostic!(&err, "the procedure local index referenced here is invalid");
@@ -87,8 +86,7 @@ fn program_with_exported_procedure() {
         "pub proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected exported program procedure to be rejected");
     assert_diagnostic!(&err, "invalid program: procedure exports are not allowed");
     assert_diagnostic!(&err, "perhaps you meant to use `proc` instead of `export`");

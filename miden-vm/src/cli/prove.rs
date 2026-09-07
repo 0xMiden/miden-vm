@@ -3,12 +3,12 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, FastProcessor};
+use miden_processor::{DefaultHost, ExecutionError, ExecutionOptions, FastProcessor};
 use miden_vm::{HashFunction, Prover, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{MasmProgram, get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -124,9 +124,19 @@ impl ProveCmd {
         let (program, package_debug_info, entrypoint_source_node, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, None, None, host),
             "masm" => {
-                let (program, package_debug_info, entrypoint_source_node, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                let mut host = host.with_source_manager(source_manager);
+                let MasmProgram {
+                    program,
+                    package_debug_info,
+                    entrypoint_source_node,
+                    sources,
+                    kernel,
+                } = get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
+                let mut host = host.with_source_provider(sources);
+                if let Some(kernel) = kernel {
+                    host.load_library(kernel)
+                        .into_diagnostic()
+                        .wrap_err("Failed to load kernel")?;
+                }
                 for library in libraries.libraries.iter().cloned() {
                     host.load_library(library)
                         .into_diagnostic()
@@ -160,12 +170,15 @@ impl ProveCmd {
                     entrypoint_source_node_id,
                     &mut host,
                 )
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
             (Some(debug_info), None) => processor
                 .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
             (None, _) => processor
                 .execute_for_proving_sync(&program, &mut host)
+                .map_err(ExecutionError::into_report)
                 .wrap_err("Failed to execute program")?,
         };
         let stack_outputs = *witness.claim().stack_outputs();

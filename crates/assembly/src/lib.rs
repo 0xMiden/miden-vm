@@ -30,11 +30,8 @@ mod tests;
 pub use miden_assembly_syntax::{
     ModuleParser, Path, PathBuf, ast,
     ast::{GlobalItemIndex, ModuleIndex},
-    debuginfo::{
-        self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
-    },
-    diagnostics,
-    diagnostics::{Report, report},
+    debuginfo, diagnostics,
+    diagnostics::{Report, SourceId, SourceMap, SourceProvider, SourceSpan, Span, Spanned, report},
     module,
 };
 /// Syntax components for the Miden Assembly AST
@@ -43,7 +40,7 @@ pub use miden_core::{mast, serde, utils};
 pub use miden_mast_package as package;
 
 #[doc(hidden)]
-pub use self::linker::LinkerError;
+pub use self::linker::{LinkerError, PrivateSubmoduleDefinition};
 #[cfg(feature = "std")]
 pub use self::project::{
     AssemblyInterrupted, InterruptedTargetRole, MasmSourceProvider, ProjectAssembler,

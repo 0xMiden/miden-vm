@@ -6,7 +6,8 @@ use alloc::{
 
 use miden_assembly_syntax::{
     ast::DebugInlineCallInfo,
-    debuginfo::{FileLineCol, SourceManager},
+    debuginfo::{ColumnNumber, LineNumber, Location, Uri},
+    diagnostics::SourceProvider,
 };
 use miden_core::{
     Felt, Word,
@@ -82,7 +83,7 @@ const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 /// Domain used when basic-block interning keys must preserve source-index layout.
 const BASIC_BLOCK_SOURCE_LAYOUT_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0003);
 
-type InlineFunctionKey = (Arc<str>, Option<Arc<str>>, FileLineCol);
+type InlineFunctionKey = (Arc<str>, Option<Arc<str>>, Location);
 type InlineCallChainKey = Vec<(DebugFunctionIdx, DebugLocIdx)>;
 
 // MAST FOREST BUILDER
@@ -477,6 +478,7 @@ impl MastForestBuilder {
     pub(crate) fn register_inline_function(
         &mut self,
         inline_call: &DebugInlineCallInfo,
+        source_provider: &dyn SourceProvider,
     ) -> DebugFunctionIdx {
         let key = (
             Arc::from(inline_call.name()),
@@ -490,14 +492,15 @@ impl MastForestBuilder {
         let (name, linkage_name, declaration) = &key;
         let file_idx = self.debug_info.add_file(declaration.uri.clone(), None);
         let name_idx = self.debug_info.add_string(name.clone());
-        let mut function = FunctionInfo::new(
-            None,
-            name_idx,
-            file_idx,
-            declaration.line,
-            declaration.column,
-            Word::default(),
-        );
+        let (line, column) = match source_provider
+            .find_by_name(declaration.uri.as_str())
+            .and_then(|id| source_provider.line_column(id, declaration.start.to_u32()))
+        {
+            Some(line_col) => (line_col.line(), line_col.column()),
+            None => (LineNumber::new(1).unwrap(), ColumnNumber::new(1).unwrap()),
+        };
+        let mut function =
+            FunctionInfo::new(None, name_idx, file_idx, line, column, Word::default());
         if let Some(linkage_name) = linkage_name {
             function = function.with_linkage_name(self.debug_info.add_string(linkage_name.clone()));
         }
@@ -1086,7 +1089,7 @@ impl MastForestBuilder {
         &mut self,
         gid: GlobalItemIndex,
         procedure: Procedure,
-        source_manager: &dyn SourceManager,
+        sources: &dyn SourceProvider,
     ) -> Result<(), Report> {
         // Check if an entry is already in this cache slot.
         //
@@ -1094,10 +1097,10 @@ impl MastForestBuilder {
         // then raise an error.
         if let Some(cached) = self.procedures.get(&gid) {
             if cached.mast_root() != procedure.mast_root() {
-                return Err(report!(
+                return Err(report!(message: (format!(
                     "procedure '{}' was compiled more than once with different MAST roots",
                     procedure.path()
-                ));
+                ))));
             }
 
             log::warn!(
@@ -1126,16 +1129,16 @@ impl MastForestBuilder {
             if !is_valid {
                 let first = cached.path();
                 let second = procedure.path();
-                return Err(report!(
+                return Err(report!(message: (format!(
                     "two procedures found with same mast root, but conflicting definitions ('{}' and '{}')",
                     first,
                     second
-                ));
+                ))));
             }
         }
 
         self.record_procedure_root_use(procedure.body_node_use());
-        self.record_procedure_debug_info(&procedure, source_manager)?;
+        self.record_procedure_debug_info(&procedure, sources)?;
         self.proc_gid_by_mast_root.insert(procedure.mast_root(), gid);
 
         self.procedures.insert(gid, procedure);
@@ -1146,14 +1149,18 @@ impl MastForestBuilder {
     fn record_procedure_debug_info(
         &mut self,
         procedure: &Procedure,
-        source_manager: &dyn SourceManager,
+        sources: &dyn SourceProvider,
     ) -> Result<(), Report> {
         use miden_assembly_syntax::ast::types::Type;
 
-        let source_name = procedure.source_name_fully_qualified(source_manager)?;
-        if let Ok(file_line_col) = source_manager.file_line_col(*procedure.span()) {
+        let source_name = procedure.source_name_fully_qualified()?;
+        let span = *procedure.span();
+        if let (Some(source), Some(line_column)) = (
+            sources.get(span.source().id()),
+            sources.line_column(span.source().id(), span.range().start()),
+        ) {
             let source_ref = Some(procedure.body_source_ref());
-            let file_idx = self.debug_info.add_file(file_line_col.uri.clone(), None);
+            let file_idx = self.debug_info.add_file(Uri::from(source.display_name), None);
             let linkage_name = procedure.path().as_str();
             let name_idx = self
                 .debug_info
@@ -1176,8 +1183,8 @@ impl MastForestBuilder {
                 source_ref,
                 name_idx,
                 file_idx,
-                file_line_col.line,
-                file_line_col.column,
+                LineNumber::new(line_column.line().to_u32()).expect("line is one-based"),
+                ColumnNumber::new(line_column.column().to_u32()).expect("column is one-based"),
                 procedure.mast_root(),
             );
             if let Some(linkage_name_idx) = linkage_name_idx {
@@ -1729,6 +1736,7 @@ mod tests {
     use miden_assembly_syntax::{
         ast::{DebugVarInfo, DebugVarLocation},
         debuginfo::{ByteIndex, ColumnNumber, LineNumber, Location, Uri},
+        diagnostics::{SourceMap, SourceNamespace},
     };
     use miden_core::{
         mast::{MastNodeBuilder, MastNodeId},
@@ -1859,28 +1867,28 @@ mod tests {
         let target = builder
             .ensure_block_use(vec![Operation::Add], vec![], vec![], vec![], vec![])
             .unwrap();
+        let mut source_map = SourceMap::new(SourceNamespace::new_unchecked(1));
+        let source = r#"proc callee() push.1 end
+begin exec.callee end"#;
+        source_map.insert("file:///decorated-exec.masm", source, None).unwrap();
         let (callee_idx, loc_idx) = {
             let inline_call = DebugInlineCallInfo::new(
                 "source::callee",
-                FileLineCol::new(
-                    "file:///decorated-exec.masm",
-                    LineNumber::new(1).unwrap(),
-                    ColumnNumber::new(1).unwrap(),
+                Location::new(
+                    "file:///decorated-exec.masm".into(),
+                    ByteIndex::new(0),
+                    ByteIndex::new(24),
                 ),
-                FileLineCol::new(
-                    "file:///decorated-exec.masm",
-                    LineNumber::new(2).unwrap(),
-                    ColumnNumber::new(1).unwrap(),
+                Location::new(
+                    "file:///decorated-exec.masm".into(),
+                    ByteIndex::new(31),
+                    ByteIndex::new(42),
                 ),
             );
-            let callee_idx = builder.register_inline_function(&inline_call);
-            let duplicate_idx = builder.register_inline_function(&inline_call);
+            let call_site_span = builder.debug_info.add_location(inline_call.call_site().clone());
+            let callee_idx = builder.register_inline_function(&inline_call, &source_map);
+            let duplicate_idx = builder.register_inline_function(&inline_call, &source_map);
             assert_eq!(callee_idx, duplicate_idx);
-            let call_site_span = builder.debug_info_mut().add_location(Location::new(
-                Uri::from("file:///decorated-exec.masm"),
-                ByteIndex::from(1u32),
-                ByteIndex::from(2u32),
-            ));
             (callee_idx, call_site_span)
         };
         let inline_call = DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx };

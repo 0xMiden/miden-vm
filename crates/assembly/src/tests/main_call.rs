@@ -8,7 +8,7 @@ fn simple_main_call() -> TestResult {
     let mut context = TestContext::default();
 
     // compile account module
-    let account_code = context.parse_module(source_file!(
+    let account_code = context.parse_module_source_file(source_file!(
         &context,
         "\
         namespace context::account
@@ -25,26 +25,32 @@ fn simple_main_call() -> TestResult {
     context.add_module(account_code)?;
 
     // compile note 1 program
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use context::account
         begin
           call.account::account_method_1
         end
         "
-    ))?;
+        ),
+    )?;
 
     // compile note 2 program
-    context.assemble(source_file!(
+    assemble_source(
         &context,
-        "
+        source_file!(
+            &context,
+            "
         use context::account
         begin
           call.account::account_method_2
         end
         "
-    ))?;
+        ),
+    )?;
     Ok(())
 }
 
@@ -101,13 +107,15 @@ end
         "
     );
 
-    let account_code1 = context.parse_module(account_code1_src)?;
-    let account_code2 = context.parse_module(account_code2_src)?;
+    let account_code1 = context.parse_module_source_file(account_code1_src)?;
+    let account_code2 = context.parse_module_source_file(account_code2_src)?;
     let main = context.parse_program(main_src)?;
 
-    let mut assembler = Assembler::new(context.source_manager());
-    assembler.compile_and_statically_link_all([account_code1, account_code2])?;
-    assembler.assemble_program("main", main)?;
+    let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+    assembler
+        .compile_and_statically_link_all([account_code1, account_code2])
+        .into_result()?;
+    assembler.assemble_program("main", main).into_result()?;
 
     Ok(())
 }

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debug_types::{SourceSpan, Spanned};
+use miden_diagnostics::{SourceSpan, Spanned};
 
 use super::MetaExpr;
 use crate::ast::Ident;

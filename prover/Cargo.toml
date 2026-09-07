@@ -48,5 +48,6 @@ tracing.workspace = true
 miden-assembly.workspace = true
 miden-core = { workspace = true, features = ["testing"] }
 miden-debug-types.workspace = true
+miden-diagnostics.workspace = true
 miden-verifier = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

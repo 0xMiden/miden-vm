@@ -17,9 +17,11 @@ fn program_with_one_import_and_hex_call() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let ast =
-        context.parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))?;
-    let library = Assembler::new(context.source_manager())
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{PROCEDURE}")
+    ))?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -37,7 +39,7 @@ fn program_with_one_import_and_hex_call() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -66,9 +68,11 @@ fn program_with_two_imported_procs_with_same_mast_root() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let ast =
-        context.parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))?;
-    let library = Assembler::new(context.source_manager())
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{PROCEDURE}")
+    ))?;
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -86,7 +90,7 @@ fn program_with_two_imported_procs_with_same_mast_root() -> TestResult {
         end"#
         )
     );
-    context.assemble(source)?;
+    assemble_source(&context, source)?;
     Ok(())
 }
 
@@ -121,14 +125,20 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{MODULE_BODY}")
+        ))
         .unwrap();
 
     let ref_ast = context
-        .parse_module(source_file!(&context, format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
+        ))
         .unwrap();
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy1", ast, [ref_ast])
         .unwrap();
 
@@ -146,7 +156,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -182,14 +192,20 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{MODULE_BODY}")
+        ))
         .unwrap();
 
     let ref_ast = context
-        .parse_module(source_file!(&context, format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
+        ))
         .unwrap();
 
-    let library = Assembler::new(context.source_manager())
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy1", ast, [ref_ast])
         .unwrap();
 
@@ -207,7 +223,7 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -239,20 +255,23 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     "#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     // We reference code in this module
-    let ref_ast = context.parse_module(source_file!(
+    let ref_ast = context.parse_module_source_file(source_file!(
         &context,
         format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")
     ))?;
     // But only exports from this module are exposed by the library
-    let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))?;
+    let ast = context.parse_module_source_file(source_file!(
+        &context,
+        format!("namespace {MODULE}\n{MODULE_BODY}")
+    ))?;
 
     let dummy_library = {
-        let mut assembler = Assembler::new(source_manager);
-        assembler.compile_and_statically_link(ref_ast)?;
-        Arc::<Package>::from(assembler.assemble_library("dummy1", ast, None::<Box<Module>>)?)
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
+        assembler.compile_and_statically_link(ref_ast).into_result()?;
+        Arc::<Package>::from(
+            assembler.assemble_library("dummy1", ast, None::<Box<Module>>).into_result()?,
+        )
     };
 
     // Now we want to use the the library we've compiled
@@ -270,7 +289,7 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
         end"#
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
 
@@ -294,13 +313,18 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
         context,
         source,
         "undefined item 'dummy2::math::u64'",
-        regex!(r#",-\[test[\d]+:2:13\]"#),
+        regex!(r#" --> test[\d]+:2:13"#),
+        "  |",
         "1 |",
         "2 |         use dummy2::math::u64",
-        "  :             ^^^^^^^^^^^^^^^^^",
+        "  |             ^^^^^^^^^^^^^^^^^",
         "3 |         begin",
-        "  `----",
-        "help: you might be missing an import, or the containing library has not been linked"
+        "4 |             push.4 push.3",
+        "5 |             exec.u64::checked_eqz",
+        "6 |             exec.u64::notchecked_eqz",
+        "7 |         end",
+        "  |",
+        "  = help: you might be missing an import, or the containing library has not been linked"
     );
     Ok(())
 }
@@ -323,11 +347,13 @@ fn module_alias() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{PROCEDURE}")
+        ))
         .unwrap();
-    let library = Assembler::new(source_manager)
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -345,7 +371,7 @@ fn module_alias() -> TestResult {
         end"
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
 
     // --- invalid module alias -----------------------------------------------
@@ -360,8 +386,7 @@ fn module_alias() -> TestResult {
             exec."bad name"::checked_add
         end"#
     );
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected invalid quoted module alias to be rejected");
     assert_diagnostic!(&err, "expected an alias name after `as`");
     assert_diagnostic!(&err, "bad name");
@@ -388,11 +413,13 @@ fn module_alias_unused_import() -> TestResult {
         end"#;
 
     let mut context = TestContext::default();
-    let source_manager = context.source_manager();
     let ast = context
-        .parse_module(source_file!(&context, format!("namespace {MODULE}\n{PROCEDURE}")))
+        .parse_module_source_file(source_file!(
+            &context,
+            format!("namespace {MODULE}\n{PROCEDURE}")
+        ))
         .unwrap();
-    let library = Assembler::new(source_manager)
+    let library = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("dummy", ast, None::<Box<Module>>)
         .unwrap();
 
@@ -412,8 +439,7 @@ fn module_alias_unused_import() -> TestResult {
         end"
     );
 
-    let err = context
-        .assemble(source)
+    let err = assemble_source(&context, source)
         .expect_err("expected unused duplicate import to be rejected");
     assert_diagnostic!(&err, "unused import");
     assert_diagnostic!(&err, "this import is never used and can be safely removed");
@@ -461,12 +487,13 @@ fn program_with_import_errors() {
         context,
         source,
         "undefined item 'miden::core::math::u512'",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
+        regex!(r#" --> test[\d]+:1:5"#),
+        "  |",
         "1 | use miden::core::math::u512",
-        "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
+        "  |     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
-        "  `----",
-        "help: you might be missing an import, or the containing library has not been linked"
+        "  |",
+        "  = help: you might be missing an import, or the containing library has not been linked"
     );
 
     // --- non-existent procedure in import -----------------------------------
@@ -484,11 +511,12 @@ fn program_with_import_errors() {
         context,
         source,
         "undefined item 'miden::core::math::u256'",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
+        regex!(r#" --> test[\d]+:1:5"#),
+        "  |",
         "1 | use miden::core::math::u256",
-        "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
+        "  |     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u256::foo end",
-        "  `----",
-        "help: you might be missing an import, or the containing library has not been linked"
+        "  |",
+        "  = help: you might be missing an import, or the containing library has not been linked"
     );
 }

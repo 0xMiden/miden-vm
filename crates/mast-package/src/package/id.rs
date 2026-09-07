@@ -3,8 +3,6 @@ use core::{borrow::Borrow, fmt, ops::Deref};
 
 #[cfg(all(feature = "arbitrary", test))]
 use miden_core::serde::{Deserializable, Serializable};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// A type that represents the unique identifier for packages in a registry.
 ///
@@ -12,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// conveniences, and allow migration to some other type in the future with minimal downstream
 /// impact, if any.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),

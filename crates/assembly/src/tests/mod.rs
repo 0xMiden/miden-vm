@@ -10,7 +10,6 @@ use std::{eprintln, sync::Arc};
 use miden_assembly_syntax::{
     MAX_CONTROL_FLOW_NESTING, MAX_REPEAT_COUNT,
     ast::{Ident, Path},
-    diagnostics::WrapErr,
 };
 use miden_core::{
     Felt, Word,
@@ -21,6 +20,7 @@ use miden_core::{
     program::Program,
     serde::{Deserializable, Serializable},
 };
+use miden_diagnostics::WrapErr;
 use miden_mast_package::{
     MastForest, Package, PackageExport, PackageModule, PackageSubmodule, ProcedureExport,
     TargetType,
@@ -34,16 +34,44 @@ use crate::{
         Block, Instruction, Module, Op, Procedure, ProcedureName, QualifiedProcedureName,
         Visibility,
     },
-    diagnostics::{IntoDiagnostic, Report},
+    diagnostics::{IntoDiagnostic, Report, WarningsAsErrors},
     fmp::fmp_initialization_sequence,
     mast_forest_builder::MastForestBuilder,
-    report,
     testing::{
         TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
     },
 };
 
 type TestResult = Result<(), Report>;
+
+trait AssemblyTestSource {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report>;
+}
+
+impl AssemblyTestSource for Span<String> {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(context.parse_module_source_file(self)?)
+    }
+}
+
+impl AssemblyTestSource for &str {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(self)
+    }
+}
+
+impl AssemblyTestSource for Box<Module> {
+    fn assemble_with(self, context: &TestContext) -> Result<Program, Report> {
+        context.assemble(self)
+    }
+}
+
+fn assemble_source(
+    context: &TestContext,
+    source: impl AssemblyTestSource,
+) -> Result<Program, Report> {
+    source.assemble_with(context)
+}
 
 fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
     let mut reachable = BTreeSet::new();
@@ -87,17 +115,23 @@ mod package;
 
 macro_rules! assert_assembler_diagnostic {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
-        let error = $context
-            .assemble($source)
+        let error = assemble_source(&$context, $source)
             .expect_err("expected diagnostic to be raised, but compilation succeeded");
-        assert_diagnostic_lines!(error, $($expected),*);
+        let rendered = format!(
+            "{}",
+            error.display_with_sources($context.sources().as_ref())
+        );
+        assert_diagnostic_lines!(rendered, $($expected),*);
     }};
 
     ($context:ident, $source:expr, $($expected:expr),+) => {{
-        let error = $context
-            .assemble($source)
+        let error = assemble_source(&$context, $source)
             .expect_err("expected diagnostic to be raised, but compilation succeeded");
-        assert_diagnostic_lines!(error, $($expected),*);
+        let rendered = format!(
+            "{}",
+            error.display_with_sources($context.sources().as_ref())
+        );
+        assert_diagnostic_lines!(rendered, $($expected),*);
     }};
 }
 

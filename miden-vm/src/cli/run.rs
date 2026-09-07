@@ -4,7 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor,
     trace::{DEFAULT_MAX_PROVER_MEMORY_BYTES, VmTrace, build_trace_with_budget},
 };
 use miden_vm::internal::InputFile;
@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program, parse_byte_size},
+    utils::{MasmProgram, get_masm_program, get_masp_program, parse_byte_size},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -159,6 +159,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
 
     let witness = processor
         .execute_for_proving_sync(&program, &mut host)
+        .map_err(ExecutionError::into_report)
         .wrap_err("Failed to execute program")?;
     let (vm_witness, _) = witness.into_parts();
     let trace = build_trace_with_budget(vm_witness, params.max_prover_memory)
@@ -190,17 +191,25 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
     }
 
     // load program from file and compile
-    let (program, package_debug_info, entrypoint_source_node, source_manager) =
-        get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
+    let MasmProgram {
+        program,
+        package_debug_info,
+        entrypoint_source_node,
+        sources,
+        kernel,
+    } = get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_source_provider(sources);
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
+    if let Some(kernel) = kernel {
+        host.load_library(kernel).into_diagnostic().wrap_err("Failed to load kernel")?;
+    }
     for lib in libraries.libraries {
         host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
     }
@@ -225,12 +234,15 @@ fn run_masm_program(params: &RunCmd) -> Result<(VmTrace, [u8; 32]), Report> {
                 entrypoint_source_node_id,
                 &mut host,
             )
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
         (Some(debug_info), None) => processor
             .execute_for_proving_with_package_debug_info_sync(&program, debug_info, &mut host)
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
         (None, _) => processor
             .execute_for_proving_sync(&program, &mut host)
+            .map_err(ExecutionError::into_report)
             .wrap_err("Failed to execute program")?,
     };
     let (vm_witness, _) = execution_witness.into_parts();

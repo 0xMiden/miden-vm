@@ -4,9 +4,9 @@ use core::cell::{Cell, RefCell};
 use miden_assembly_syntax::{
     Path,
     ast::{self, GlobalItemIndex, Ident, ImportKind, Visibility},
-    debuginfo::{SourceSpan, Span, Spanned},
     module::ItemInfo,
 };
+use miden_diagnostics::{SourceSpan, Span, Spanned};
 
 use super::LinkStatus;
 

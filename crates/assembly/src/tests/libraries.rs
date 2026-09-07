@@ -17,11 +17,9 @@ fn library_exports() -> Result<(), Report> {
     "#;
     let baz = parse_module!(&context, baz);
 
-    let lib1 = Assembler::new(context.source_manager()).assemble_library(
-        "lib1",
-        baz,
-        None::<Box<Module>>,
-    )?;
+    let lib1 = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib1", baz, None::<Box<Module>>)
+        .into_result()?;
 
     // build the second library
     let foo = r#"
@@ -71,9 +69,10 @@ fn library_exports() -> Result<(), Report> {
     "#;
     let root = parse_module!(&context, root);
 
-    let lib2 = Assembler::new(context.source_manager())
+    let lib2 = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib1), Linkage::Dynamic)?
-        .assemble_library("lib2", root, [foo])?;
+        .assemble_library("lib2", root, [foo])
+        .into_result()?;
 
     let foo2 = Path::new("::lib2::foo::foo2");
     let foo3 = Path::new("::lib2::foo::foo3");
@@ -125,11 +124,9 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let foo = parse_module!(&context, foo);
-    let lib1 = Assembler::new(context.source_manager()).assemble_library(
-        "lib1",
-        foo,
-        None::<Box<Module>>,
-    )?;
+    let lib1 = Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("lib1", foo, None::<Box<Module>>)
+        .into_result()?;
 
     // build the second library which defines the same procedure as the first one
     let bar = r#"
@@ -147,9 +144,10 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let bar = parse_module!(&context, bar);
-    let lib2 = Assembler::new(context.source_manager())
+    let lib2 = Assembler::with_sources(context.sources().as_ref().clone())
         .with_package(Arc::from(lib1), Linkage::Dynamic)?
-        .assemble_library("lib2", bar, None::<Box<Module>>)?;
+        .assemble_library("lib2", bar, None::<Box<Module>>)
+        .into_result()?;
 
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.manifest.num_exports(), 2);
@@ -183,7 +181,7 @@ fn get_module_by_path() {
     let foo = parse_module!(&context, foo_source);
 
     // create the bundle with locations
-    let bundle = Assembler::new(context.source_manager())
+    let bundle = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", foo, None::<Box<Module>>)
         .unwrap();
 
@@ -211,8 +209,9 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
     let testing_module = parse_module!(&context, testing_module_source);
 
     // create the bundle with locations
-    let package = Assembler::new(context.source_manager())
+    let package = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("test", testing_module, None::<Box<Module>>)
+        .into_result()
         .context("failed to assemble library from testing module")?;
 
     // get the vector of library procedure digests

@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -19,8 +19,9 @@ fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, None::<Box<Module>>)
+        .into_result()
         .expect_err("declared missing child module should be rejected");
 
     assert_diagnostic!(&err, "undefined module '::diag::root::missing'");
@@ -31,7 +32,7 @@ fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
 #[test]
 fn link_diagnostic_for_undeclared_child_module() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -41,7 +42,7 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -52,8 +53,9 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("undeclared child module should be rejected");
 
     assert_diagnostic!(&err, "module '::diag::root::child' is not declared");
@@ -65,7 +67,7 @@ fn link_diagnostic_for_undeclared_child_module() -> TestResult {
 #[test]
 fn link_diagnostic_for_private_submodule_import() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -77,7 +79,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -87,7 +89,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -100,8 +102,9 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("private submodule import should be rejected");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::child'");
@@ -113,7 +116,7 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
 #[test]
 fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -126,7 +129,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         end
         "#
     ))?;
-    let internal = context.parse_module(source_file!(
+    let internal = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::internal
@@ -137,7 +140,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         end
         "#
     ))?;
-    let api = context.parse_module(source_file!(
+    let api = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::api
@@ -152,7 +155,9 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("diag", root, [internal, api])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("diag", root, [internal, api])
+        .into_result()?;
 
     Ok(())
 }
@@ -160,7 +165,7 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
 #[test]
 fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -173,7 +178,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         end
         "#
     ))?;
-    let parent = context.parse_module(source_file!(
+    let parent = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::parent
@@ -181,7 +186,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         mod hidden
         "#
     ))?;
-    let hidden = context.parse_module(source_file!(
+    let hidden = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::parent::hidden
@@ -189,7 +194,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         pub const VALUE = 1
         "#
     ))?;
-    let sibling = context.parse_module(source_file!(
+    let sibling = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::sibling
@@ -202,8 +207,9 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [parent, hidden, sibling])
+        .into_result()
         .expect_err("private nested submodule should not be visible to sibling of its parent");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::parent::hidden'");
@@ -215,7 +221,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
 #[test]
 fn link_diagnostic_for_module_reexport() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -227,7 +233,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -237,7 +243,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -250,8 +256,9 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("module re-export should be rejected");
 
     assert_diagnostic!(&err, "item import target '::diag::root::child' resolved to a module");
@@ -263,7 +270,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
 #[test]
 fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -275,7 +282,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -286,7 +293,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -300,8 +307,9 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [root, child])
+        .into_result()
         .expect_err("import through another import should be rejected");
 
     assert_diagnostic!(
@@ -316,7 +324,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
 #[test]
 fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> TestResult {
     let context = TestContext::new().with_warnings_as_errors(false);
-    let imported = context.parse_module(source_file!(
+    let imported = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep::child
@@ -326,7 +334,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         end
         "#
     ))?;
-    let global = context.parse_module(source_file!(
+    let global = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace child
@@ -336,7 +344,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -350,8 +358,9 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [imported, global])
+        .into_result()
         .expect_err("pub use through another import should be rejected before global lookup");
 
     assert_diagnostic!(&err, "import target 'child::p' cannot be resolved through import 'child'");
@@ -363,7 +372,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
 #[test]
 fn link_diagnostic_for_self_referential_module_import() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -375,7 +384,7 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -388,8 +397,9 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("module import of itself should be rejected");
 
     assert_diagnostic!(&err, "self-referential import of module 'diag::root::child'");
@@ -401,7 +411,7 @@ fn link_diagnostic_for_self_referential_module_import() -> TestResult {
 #[test]
 fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -414,7 +424,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -425,8 +435,9 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("same-scope submodule imports should be rejected even when aliased");
 
     assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
@@ -438,7 +449,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
 #[test]
 fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -451,7 +462,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -462,8 +473,9 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("self-relative same-scope submodule imports should be rejected");
 
     assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
@@ -475,7 +487,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
 #[test]
 fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -492,7 +504,7 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -503,7 +515,9 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("diag", root, [child])
+        .into_result()?;
 
     Ok(())
 }
@@ -511,7 +525,7 @@ fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestRes
 #[test]
 fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -523,7 +537,7 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -534,7 +548,9 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("diag", root, [child])
+        .into_result()?;
 
     Ok(())
 }
@@ -542,7 +558,7 @@ fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
 #[test]
 fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -554,7 +570,7 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -565,8 +581,9 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child])
+        .into_result()
         .expect_err("relative paths should not fall back to the global namespace");
 
     assert_diagnostic!(&err, "invalid relative item path 'diag::root::child::child_entry'");
@@ -578,7 +595,7 @@ fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
 #[test]
 fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep
@@ -590,7 +607,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep::child
@@ -600,7 +617,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -613,7 +630,9 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("diag", consumer, [dep, child])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("diag", consumer, [dep, child])
+        .into_result()?;
 
     Ok(())
 }
@@ -621,7 +640,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
 #[test]
 fn self_relative_import_walks_public_submodules() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -635,7 +654,7 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -646,7 +665,9 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
         "#
     ))?;
 
-    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+    Assembler::with_sources(context.sources().as_ref().clone())
+        .assemble_library("diag", root, [child])
+        .into_result()?;
 
     Ok(())
 }
@@ -654,7 +675,7 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
 #[test]
 fn self_relative_import_rejects_private_descendant() -> TestResult {
     let context = TestContext::new();
-    let root = context.parse_module(source_file!(
+    let root = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root
@@ -668,7 +689,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         end
         "#
     ))?;
-    let child = context.parse_module(source_file!(
+    let child = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child
@@ -676,7 +697,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         mod hidden
         "#
     ))?;
-    let hidden = context.parse_module(source_file!(
+    let hidden = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::root::child::hidden
@@ -687,8 +708,9 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", root, [child, hidden])
+        .into_result()
         .expect_err("private descendant import should be rejected");
 
     assert_diagnostic!(&err, "private submodule '::diag::root::child::hidden'");
@@ -699,7 +721,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
 #[test]
 fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
     let context = TestContext::new();
-    let dep = context.parse_module(source_file!(
+    let dep = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::dep
@@ -710,7 +732,7 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
         end
         "#
     ))?;
-    let consumer = context.parse_module(source_file!(
+    let consumer = context.parse_module_source_file(source_file!(
         &context,
         r#"
         namespace diag::consumer
@@ -723,8 +745,9 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
         "#
     ))?;
 
-    let err = Assembler::new(context.source_manager())
+    let err = Assembler::with_sources(context.sources().as_ref().clone())
         .assemble_library("diag", consumer, [dep])
+        .into_result()
         .expect_err("subpath through item should be rejected");
 
     assert_diagnostic!(&err, "invalid symbol path");
@@ -735,16 +758,9 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
 
 #[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
-    use std::{
-        panic::{AssertUnwindSafe, catch_unwind},
-        sync::Arc,
-    };
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use miden_assembly_syntax::Parse;
-
-    use crate::{Assembler, DefaultSourceManager};
-
-    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let context = TestContext::default();
 
     // Library module `b` exports a string constant and an alias to it.
     let module_b_src = r#"
@@ -753,7 +769,8 @@ namespace b
 pub const ERR1 = "oops"
 pub const ERR2 = ERR1
 "#;
-    let module_b = <&str as Parse>::parse(module_b_src, false, source_manager.clone())
+    let module_b = context
+        .parse_module_source_file(context.add_source("b.masm", module_b_src))
         .expect("module b parsing must succeed");
 
     // Executable module imports `ERR2` and uses it as an assertion error message.
@@ -766,7 +783,7 @@ end
 "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        let mut assembler = Assembler::new(source_manager);
+        let mut assembler = Assembler::with_sources(context.sources().as_ref().clone());
         assembler
             .compile_and_statically_link(module_b)
             .expect("linking module b must succeed");

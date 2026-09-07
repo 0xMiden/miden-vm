@@ -21,7 +21,7 @@ fn assert_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -45,7 +45,7 @@ fn assertz_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -69,7 +69,7 @@ fn assert_eq_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -93,7 +93,7 @@ fn assert_eqw_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -117,7 +117,7 @@ fn u32assert_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -141,7 +141,7 @@ fn u32assert2_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -165,7 +165,7 @@ fn u32assertw_with_code() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())
@@ -240,7 +240,7 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     end
     "
     );
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
     insta::assert_snapshot!(program);
     Ok(())
 }
@@ -261,7 +261,7 @@ fn mtree_verify_with_code() -> TestResult {
     "
     );
 
-    let program = context.assemble(source)?;
+    let program = assemble_source(&context, source)?;
 
     insta::assert_snapshot!(program);
     Ok(())

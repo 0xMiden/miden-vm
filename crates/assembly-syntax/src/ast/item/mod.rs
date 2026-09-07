@@ -2,13 +2,14 @@ mod index;
 mod items;
 mod resolver;
 
-use miden_debug_types::Spanned;
+use miden_diagnostics::Spanned;
 
 pub use self::{
     index::{GlobalItemIndex, ItemIndex, ModuleIndex},
     items::Item,
     resolver::{
-        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError, SymbolTable,
+        LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError,
+        SymbolResolutionRelated, SymbolTable,
     },
 };
 use super::{Ident, Import, Visibility};
@@ -21,7 +22,7 @@ pub enum Declaration<'a> {
 }
 
 impl Spanned for Declaration<'_> {
-    fn span(&self) -> miden_debug_types::SourceSpan {
+    fn span(&self) -> miden_diagnostics::SourceSpan {
         match self {
             Self::Item(item) => item.span(),
             Self::Import(import) => import.local_name().span(),

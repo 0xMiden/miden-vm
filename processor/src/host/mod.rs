@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 use core::future::Future;
 
 use miden_core::{
@@ -7,7 +7,8 @@ use miden_core::{
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
 };
-use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_debug_types::Location;
+use miden_diagnostics::{SharedSourceProvider, SourceSpan};
 
 use crate::ProcessorState;
 
@@ -70,11 +71,11 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the [`SourceSpan`] and optional [`SourceFile`] for the provided location.
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>);
+    /// Resolves a portable debug location to its session span and source provider.
+    ///
+    /// The provider is retained by execution errors so that the returned span remains renderable
+    /// after execution completes.
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>);
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
@@ -97,11 +98,8 @@ pub trait BaseHost {
 }
 
 impl<T: BaseHost + ?Sized> BaseHost for &mut T {
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        (**self).get_label_and_source_file(location)
+    fn resolve_location(&self, location: &Location) -> (SourceSpan, Option<SharedSourceProvider>) {
+        (**self).resolve_location(location)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
