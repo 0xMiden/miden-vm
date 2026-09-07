@@ -353,10 +353,10 @@ fn clk(mut caller: Caller<'_, HostCtx>) -> Result<u64, wasmi::Error> {
     state(&caller).map(|state| u64::from(state.clock()))
 }
 
-/// Returns the current execution context ID.
-fn ctx(mut caller: Caller<'_, HostCtx>) -> Result<u32, wasmi::Error> {
+/// Returns `1` when the current execution context is the root context, and `0` otherwise.
+fn is_root_context(mut caller: Caller<'_, HostCtx>) -> Result<i32, wasmi::Error> {
     charge_fuel(&mut caller, HOST_CALL_BASE_FUEL)?;
-    state(&caller).map(|state| u32::from(state.ctx()))
+    state(&caller).map(|state| i32::from(state.ctx().is_root()))
 }
 
 /// Writes the memory element at address `addr` of the current context to `out`, or returns
@@ -387,7 +387,7 @@ fn mem_get(mut caller: Caller<'_, HostCtx>, addr: u32, out: u32) -> Result<i32, 
 /// of bounds or touches a memory word no cell of which was ever written. Presence is
 /// word-granular; see [`mem_get`].
 ///
-/// `mem_read` and `mem_read_ctx` are both this function, so the single charge here is the whole
+/// `mem_read` and `mem_read_root` are both this function, so the single charge here is the whole
 /// fuel charge of one call.
 fn mem_read_range(
     caller: &mut Caller<'_, HostCtx>,
@@ -435,17 +435,16 @@ fn mem_read(
     mem_read_range(&mut caller, None, addr, out, count)
 }
 
-/// Writes the `count` memory elements at addresses `addr..addr + count` of context `ctx` to
+/// Writes the `count` memory elements at addresses `addr..addr + count` of the root context to
 /// `out`, or returns a status when the range is out of bounds or touches an unwritten memory
 /// word.
-fn mem_read_ctx(
+fn mem_read_root(
     mut caller: Caller<'_, HostCtx>,
-    ctx: u32,
     addr: u32,
     out: u32,
     count: u32,
 ) -> Result<i32, wasmi::Error> {
-    mem_read_range(&mut caller, Some(ContextId::from(ctx)), addr, out, count)
+    mem_read_range(&mut caller, Some(ContextId::root()), addr, out, count)
 }
 
 /// Charges the fuel of one Merkle-store lookup and decodes its arguments. Returns the guest
@@ -898,10 +897,10 @@ fn build_linker_with_names(
         host_fn::STACK_GET => stack_get,
         host_fn::STACK_READ => stack_read,
         host_fn::CLK => clk,
-        host_fn::CTX => ctx,
+        host_fn::IS_ROOT_CONTEXT => is_root_context,
         host_fn::MEM_GET => mem_get,
         host_fn::MEM_READ => mem_read,
-        host_fn::MEM_READ_CTX => mem_read_ctx,
+        host_fn::MEM_READ_ROOT => mem_read_root,
         host_fn::MERKLE_GET_NODE => merkle_get_node,
         host_fn::MERKLE_HAS_PATH => merkle_has_path,
         // hashing

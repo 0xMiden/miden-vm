@@ -103,10 +103,12 @@ pub fn clk() -> u64 {
     unsafe { guest::clk() }
 }
 
-/// Returns the current execution context ID.
-pub fn ctx() -> u32 {
+/// Returns `true` when the current execution context is the root context.
+///
+/// A program starts in the root context, and code under a `syscall` executes in it.
+pub fn is_root_context() -> bool {
     // SAFETY: the module contract; the call takes no pointer.
-    unsafe { guest::ctx() }
+    unsafe { guest::is_root_context() != 0 }
 }
 
 /// Returns the memory element at `addr` of the current context, or `None` when no cell of the
@@ -141,17 +143,18 @@ pub fn mem_read(addr: u32, out: &mut [Felt]) -> Status {
     }
 }
 
-/// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of context `ctx`.
+/// Reads the `out.len()` memory elements at addresses `addr..addr + out.len()` of the root
+/// context.
 ///
-/// The same contract as [`mem_read`], for an explicit execution context (for example the root
-/// context, ID `0`).
-pub fn mem_read_ctx(ctx: u32, addr: u32, out: &mut [Felt]) -> Status {
+/// The same contract as [`mem_read`], for the root context — where kernel state lives — from a
+/// handler that runs in another context.
+pub fn mem_read_root(addr: u32, out: &mut [Felt]) -> Status {
     let len = out.len() as u32;
     // SAFETY: the module contract; `len` is the element count of `out`.
-    let raw = unsafe { guest::mem_read_ctx(ctx, addr, out.as_mut_ptr(), len) };
+    let raw = unsafe { guest::mem_read_root(addr, out.as_mut_ptr(), len) };
     match status(raw) {
         result @ (Status::Ok | Status::Uninit | Status::OutOfBounds) => result,
-        _ => fail("mem_read_ctx failed"),
+        _ => fail("mem_read_root failed"),
     }
 }
 

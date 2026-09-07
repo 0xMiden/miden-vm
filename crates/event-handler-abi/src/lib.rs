@@ -185,14 +185,14 @@ pub mod host_fn {
     pub const STACK_READ: &str = "stack_read";
     /// See `guest::clk`.
     pub const CLK: &str = "clk";
-    /// See `guest::ctx`.
-    pub const CTX: &str = "ctx";
+    /// See `guest::is_root_context`.
+    pub const IS_ROOT_CONTEXT: &str = "is_root_context";
     /// See `guest::mem_get`.
     pub const MEM_GET: &str = "mem_get";
     /// See `guest::mem_read`.
     pub const MEM_READ: &str = "mem_read";
-    /// See `guest::mem_read_ctx`.
-    pub const MEM_READ_CTX: &str = "mem_read_ctx";
+    /// See `guest::mem_read_root`.
+    pub const MEM_READ_ROOT: &str = "mem_read_root";
     /// See `guest::merkle_get_node`.
     pub const MERKLE_GET_NODE: &str = "merkle_get_node";
     /// See `guest::merkle_has_path`.
@@ -238,10 +238,10 @@ pub mod host_fn {
         STACK_GET,
         STACK_READ,
         CLK,
-        CTX,
+        IS_ROOT_CONTEXT,
         MEM_GET,
         MEM_READ,
-        MEM_READ_CTX,
+        MEM_READ_ROOT,
         MERKLE_GET_NODE,
         MERKLE_HAS_PATH,
         POSEIDON2_MERGE,
@@ -299,8 +299,12 @@ pub mod guest {
         /// Returns the current clock cycle.
         pub fn clk() -> u64;
 
-        /// Returns the current execution context ID.
-        pub fn ctx() -> u32;
+        /// Returns `1` when the current execution context is the root context, and `0`
+        /// otherwise.
+        ///
+        /// A program starts in the root context, and code under a `syscall` executes in it.
+        /// The result is a plain boolean, not a [`crate::Status`].
+        pub fn is_root_context() -> i32;
 
         /// Writes the memory element at address `addr` of the current context to `out`.
         ///
@@ -319,14 +323,15 @@ pub mod guest {
         /// `mem_get`. Use `mem_get` for a per-word presence check.
         pub fn mem_read(addr: u32, out: *mut Felt, count: u32) -> i32;
 
-        /// Writes the `count` memory elements at addresses `addr..addr + count` of context
-        /// `ctx` to `out`.
+        /// Writes the `count` memory elements at addresses `addr..addr + count` of the root
+        /// context to `out`.
         ///
-        /// The same contract as `mem_read`, for an explicit execution context (for example the
-        /// root context, ID `0`). Returns `Status::OutOfBounds` when `addr + count` goes past
-        /// the `u32` address space, and `Status::Uninit` when the range touches a memory word no
-        /// cell of which was ever written; `out` is not changed in either case.
-        pub fn mem_read_ctx(ctx: u32, addr: u32, out: *mut Felt, count: u32) -> i32;
+        /// The same contract as `mem_read`, for the root context — where kernel state lives —
+        /// from a handler that runs in another context. Returns `Status::OutOfBounds` when
+        /// `addr + count` goes past the `u32` address space, and `Status::Uninit` when the
+        /// range touches a memory word no cell of which was ever written; `out` is not changed
+        /// in either case.
+        pub fn mem_read_root(addr: u32, out: *mut Felt, count: u32) -> i32;
 
         /// Writes the Merkle-store node of the tree with root `root` at `depth`/`index` to
         /// `out`.
