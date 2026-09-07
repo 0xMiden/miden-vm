@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
-BASE_COMMIT="6c54bf1fd61122086a644c40013f2932abe33e87"
+BASE_COMMIT="be6f564af17442a997703f46c78787251756b17a"
 EIDOS_REV="${EIDOS_REV:-HEAD}"
 FIXTURE_ROOT="$ROOT/bench-baselines/fixtures/bench-tx"
 MODE=""
@@ -936,6 +936,16 @@ ensure_benchmark_worktree() {
   fi
 }
 
+assert_inner_hash_source() {
+  local label="$1" worktree="$2" expected_hash="$3"
+  local fixtures="$worktree/benches/synthetic-bench/benches/recursive_verify/fixtures.rs"
+  local declaration="const INNER_PROOF_HASH: HashFunction = HashFunction::$expected_hash;"
+
+  [[ -f "$fixtures" ]] || die "$label inner-proof fixture source is missing: $fixtures"
+  grep -Fqx "$declaration" "$fixtures" ||
+    die "$label checkout does not declare $expected_hash for inner MVM proofs"
+}
+
 if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
   echo "warning: benchmark code uses committed Eidos revision $CANDIDATE_COMMIT; the live runner remains an input and its hash is recorded" >&2
 fi
@@ -949,6 +959,9 @@ else
   git -C "$ROOT" worktree add --detach "$P2_ROOT" "$BASE_COMMIT"
   git -C "$ROOT" worktree add --detach "$EIDOS_ROOT" "$CANDIDATE_COMMIT"
 fi
+
+assert_inner_hash_source Poseidon2 "$P2_ROOT" Poseidon2
+assert_inner_hash_source Eidos "$EIDOS_ROOT" Eidos
 
 install_masm_runner() {
   local worktree="$1"
@@ -1073,6 +1086,38 @@ harness = false
 TOML
 }
 
+patch_recursive_hash_guards() {
+  local worktree="$1"
+  local fixtures="$worktree/benches/synthetic-bench/benches/recursive_verify/fixtures.rs"
+  local measurements="$worktree/benches/synthetic-bench/benches/recursive_verify/measurements.rs"
+  local mvm_marker='BENCH_HASH_ROLE role=mvm_inner'
+  local pvm_marker='BENCH_HASH_ROLE role=pvm_inner'
+  local outer_marker='BENCH_HASH_ROLE role=outer'
+
+  if grep -Fq "$mvm_marker" "$fixtures" &&
+    grep -Fq "$pvm_marker" "$fixtures" &&
+    grep -Fq "$outer_marker" "$measurements"; then
+    return
+  fi
+  if grep -Fq "$mvm_marker" "$fixtures" ||
+    grep -Fq "$pvm_marker" "$fixtures" ||
+    grep -Fq "$outer_marker" "$measurements"; then
+    die "benchmark worktree contains partial recursive hash guards: $worktree"
+  fi
+
+  perl -0pi -e '
+    s/    let proof_bytes = proof\.proof\.bytes\(\);/    let pvm_proof_hash = proof.proof.hash_fn();\n    assert_eq!(\n        pvm_proof_hash,\n        INNER_PROOF_HASH,\n        "PVM proof hash must match the MVM inner-proof hash",\n    );\n    println!("BENCH_HASH_ROLE role=pvm_inner hash={pvm_proof_hash:?}");\n\n    let proof_bytes = proof.proof.bytes();/
+      or die "unexpected PVM proof source\n";
+    s/            assert!\(\n                matches!\(proof\.precompile\(\),/            let mvm_proof_hash = proof.vm().proof.hash_fn();\n            assert_eq!(\n                mvm_proof_hash,\n                INNER_PROOF_HASH,\n                "MVM proof hash must match the configured inner-proof hash",\n            );\n            println!(\n                "BENCH_HASH_ROLE role=mvm_inner index={proof_index} hash={mvm_proof_hash:?}"\n            );\n            assert!(\n                matches!(proof.precompile(),/
+      or die "unexpected MVM proof source\n";
+  ' "$fixtures"
+
+  perl -0pi -e '
+    s/    assert!\(outcome\.is_complete\(\), "recursive benchmark proof must be complete"\);\n    black_box\(proof\);/    assert!(outcome.is_complete(), "recursive benchmark proof must be complete");\n    let outer_proof_hash = proof.vm().proof.hash_fn();\n    assert_eq!(\n        outer_proof_hash,\n        hash_fn,\n        "outer recursive proof hash must match the requested hash",\n    );\n    println!("BENCH_HASH_ROLE role=outer hash={outer_proof_hash:?}");\n    black_box(proof);/
+      or die "unexpected outer proof source\n";
+  ' "$measurements"
+}
+
 patch_recursive_harness() {
   local worktree="$1"
   local lockfile="$worktree/Cargo.lock"
@@ -1119,6 +1164,8 @@ patch_recursive_harness() {
     s/    let proof_bytes = proof\.to_bytes\(\)\.len\(\);\n    black_box/    let proof_bytes = proof.to_bytes().len();\n    let claim =\n        ExecutionClaim::from_program_info(case.program.to_info(), stack_inputs, stack_outputs);\n    let outcome = Verifier::new().verify(\&claim, \&proof).expect("verify recursive proof");\n    assert!(outcome.is_complete(), "recursive benchmark proof must be complete");\n    black_box/
       or die "unexpected recursive proof footer\n";
   ' "$measurements"
+
+  patch_recursive_hash_guards "$worktree"
 }
 
 prepare_persistent_recursive_harness() {
@@ -1134,10 +1181,13 @@ prepare_persistent_recursive_harness() {
   else
     grep -q 'Verifier::new().verify' "$worktree/$measurements" ||
       die "benchmark worktree is only partially prepared: $worktree"
+    patch_recursive_hash_guards "$worktree"
     echo "[setup] reusing prepared benchmark harness in $worktree"
   fi
 
-  expected="$(printf '%s\n%s\n' "$config" "$measurements" | LC_ALL=C sort)"
+  expected="$(printf '%s\n%s\n%s\n' \
+    "$config" "$measurements" \
+    "benches/synthetic-bench/benches/recursive_verify/fixtures.rs" | LC_ALL=C sort)"
   changed="$(git -C "$worktree" diff --name-only HEAD | LC_ALL=C sort)"
   [[ "$changed" == "$expected" ]] || die "unexpected changes in benchmark worktree: $worktree"
   untracked="$(git -C "$worktree" ls-files --others --exclude-standard)"
@@ -1345,9 +1395,54 @@ benchmark_record_value() {
   ' "$log"
 }
 
+hash_variant_for_protocol() {
+  case "$1" in
+    poseidon2) echo Poseidon2 ;;
+    eidos) echo Eidos ;;
+    *) die "unknown proof-hash protocol: $1" ;;
+  esac
+}
+
+assert_logged_hash_role() {
+  local log="$1" role="$2" expected_hash="$3" expected_count="$4"
+
+  awk -v expected_role="$role" -v expected_hash="$expected_hash" \
+    -v expected_count="$expected_count" '
+    $1 == "BENCH_HASH_ROLE" {
+      role = ""
+      hash = ""
+      for (i = 2; i <= NF; i++) {
+        split($i, field, "=")
+        if (field[1] == "role") {
+          role = field[2]
+        } else if (field[1] == "hash") {
+          hash = field[2]
+        }
+      }
+      if (role == expected_role) {
+        seen++
+        if (hash != expected_hash) {
+          printf "unexpected %s proof hash: got %s, expected %s\n", \
+            expected_role, hash, expected_hash > "/dev/stderr"
+          bad = 1
+        }
+      }
+    }
+    END {
+      if (seen != expected_count) {
+        printf "unexpected %s proof record count: got %d, expected %d\n", \
+          expected_role, seen, expected_count > "/dev/stderr"
+        bad = 1
+      }
+      exit bad
+    }
+  ' "$log" || die "$role proof-hash guard failed: $log"
+}
+
 run_recursive() {
   local protocol="$1" worktree="$2" auth="$3" count="$4" fixture="$5"
   local threads="$6" cpu_list="$7" block="$8" kind="${9:-measure}"
+  local expected_hash expected_outer_count
   local tx_cache_hits pvm_cache_hits profile_stem perf_output resource_output proof_cache
   local log_name="recursive-${auth}-${count}mvm-1pvm-${protocol}.log"
   local profile_env=(
@@ -1397,6 +1492,17 @@ run_recursive() {
       "${profile_env[@]}" \
       cargo bench --locked -p miden-vm-synthetic-bench --bench recursive_verify --profile optimized
   ) 2>&1 | tee "$LOG_DIR/$log_name"
+
+  expected_hash="$(hash_variant_for_protocol "$protocol")"
+  assert_logged_hash_role "$LOG_DIR/$log_name" mvm_inner "$expected_hash" "$count"
+  assert_logged_hash_role "$LOG_DIR/$log_name" pvm_inner "$expected_hash" 1
+  if [[ "$kind" == "prime" ]]; then
+    expected_outer_count=0
+  else
+    expected_outer_count="$((WARMUPS + REPEATS))"
+  fi
+  assert_logged_hash_role "$LOG_DIR/$log_name" outer "$expected_hash" "$expected_outer_count"
+
   if (( PROFILE_ENABLED == 1 )) && [[ "$kind" == "measure" ]]; then
     [[ -s "$perf_output" ]] || die "perf did not produce counters for $block / $protocol"
     [[ -s "$resource_output" ]] ||
