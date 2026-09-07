@@ -341,8 +341,8 @@ impl WasmHandlerModule {
         export: &str,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         // Erase the lifetime for storage in the store data. The pointer stays valid for this
-        // whole function, which outlives the store; see `host::StatePtr` for the safety
-        // contract.
+        // whole function, which outlives the store; host functions dereference it only while
+        // this call runs.
         let state_ptr = core::ptr::from_ref(process).cast::<ProcessorState<'static>>();
         let mut store = self.new_store(state_ptr);
 

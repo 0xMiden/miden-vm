@@ -110,39 +110,17 @@ const FUEL_PER_BLAKE3_BYTE: u64 = 1;
 // HOST CONTEXT
 // ================================================================================================
 
-/// A type-erased pointer to the [`ProcessorState`] borrowed for the duration of one handler
-/// call.
-///
-/// # Safety
-///
-/// Two facts make the `Send`/`Sync` impls sound:
-///
-/// 1. The pointer never actually crosses a thread in use. `WasmHandlerModule::call` creates the
-///    store, runs the export, and consumes the store on one thread, and host functions dereference
-///    the pointer only during that call, while the `&ProcessorState` borrow is alive. The impls
-///    exist only to satisfy wasmi's trait bounds (the store-limiter closure and the linker's
-///    store-data type parameter), not to enable cross-thread access.
-/// 2. Even if a future wasmi internals change moved the store data, `ProcessorState` is `Sync`
-///    (checked by the static assertion below), so a shared reference reachable through this pointer
-///    is safe to read from any thread.
-pub(crate) struct StatePtr(*const ProcessorState<'static>);
-
-// SAFETY: see the type-level comment.
-unsafe impl Send for StatePtr {}
-// SAFETY: see the type-level comment.
-unsafe impl Sync for StatePtr {}
-
-// Fact 2 of the safety argument above, checked at compile time.
-const _: () = {
-    const fn assert_sync<T: Sync>() {}
-    assert_sync::<ProcessorState<'static>>();
-};
-
 /// The per-call store data: the processor state, the buffered mutations, the mutation budget,
 /// the recorded `fail` message, and the resource limits.
+///
+/// The raw pointer makes this type `!Send + !Sync`, and nothing needs otherwise: the only
+/// `Store<HostCtx>` lives inside `WasmHandlerModule::call`, on one thread, and wasmi's
+/// `Linker<T>` and its host-function bounds are independent of `T`.
 pub(crate) struct HostCtx {
-    /// The processor state for this call; see [`StatePtr`] for the unsafe contract.
-    state: StatePtr,
+    /// A type-erased pointer to the [`ProcessorState`] borrowed for the duration of one handler
+    /// call. Host functions dereference it only during that call, while the underlying
+    /// `&ProcessorState` borrow is alive; see [`state`].
+    state: *const ProcessorState<'static>,
     /// The mutations the handler buffered so far. Returned to the processor only when the
     /// handler returns without a trap.
     pub mutations: Vec<AdviceMutation>,
@@ -166,7 +144,7 @@ impl HostCtx {
     /// runs.
     pub fn new(state: *const ProcessorState<'static>, limits: &WasmHandlerLimits) -> Self {
         Self {
-            state: StatePtr(state),
+            state,
             mutations: Vec::new(),
             mutation_felts: 0,
             max_mutation_felts: limits.max_mutation_felts,
@@ -200,12 +178,13 @@ fn trap(msg: impl Into<String>) -> wasmi::Error {
 
 /// Returns the processor state for the current call.
 fn state<'c>(caller: &'c Caller<'_, HostCtx>) -> Result<&'c ProcessorState<'c>, wasmi::Error> {
-    let ptr = caller.data().state.0;
+    let ptr = caller.data().state;
     if ptr.is_null() {
         return Err(trap("processor state is not available"));
     }
-    // SAFETY: see [`StatePtr`]. The returned borrow cannot outlive `caller`, and `caller` cannot
-    // outlive the handler call that keeps the underlying `&ProcessorState` alive.
+    // SAFETY: `WasmHandlerModule::call` derives the pointer from a live `&ProcessorState` and
+    // keeps that borrow alive for the whole call. The returned borrow cannot outlive `caller`,
+    // and `caller` cannot outlive the call.
     Ok(unsafe { &*ptr.cast::<ProcessorState<'c>>() })
 }
 
