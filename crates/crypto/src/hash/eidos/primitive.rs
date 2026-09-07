@@ -9,7 +9,7 @@ mod blake3_schedule;
 
 #[cfg(target_arch = "aarch64")]
 pub(super) use blake3_schedule::check_witness_batch_arm;
-#[cfg(any(target_arch = "aarch64", test))]
+#[cfg(any(test, all(target_arch = "aarch64", target_vendor = "apple")))]
 pub(super) use blake3_schedule::compress_blocks;
 #[cfg(target_arch = "aarch64")]
 pub(super) use blake3_schedule::{compress_packed_u64_arm, use_arm_u64_adapter};

@@ -709,7 +709,7 @@ pub(super) fn compress_packed_native_counted(
 }
 
 /// Compress an ordered sequence, masking each intermediate CV. Empty input preserves the CV.
-#[cfg(any(target_arch = "aarch64", test))]
+#[cfg(any(test, all(target_arch = "aarch64", target_vendor = "apple")))]
 #[inline]
 pub(in super::super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [u32; 8] {
     #[cfg(all(target_arch = "aarch64", target_vendor = "apple"))]

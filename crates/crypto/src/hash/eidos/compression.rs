@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{Felt, Word};
 
-#[cfg(any(target_arch = "aarch64", test))]
+#[cfg(any(test, all(target_arch = "aarch64", target_vendor = "apple")))]
 #[inline]
 pub(super) fn compress_blocks(cv: [u32; 8], blocks: &[[u32; 16]]) -> [u32; 8] {
     super::primitive::compress_blocks(cv, blocks)
