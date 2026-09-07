@@ -22,8 +22,8 @@ use crate::{
     primitives::byte_pair_lut::{BytePairLutRequires, BytePairOp},
     relations::ProvideMult,
     transcript::eidos::{
-        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_ABSORB, COL_OUT_MULTIPLICITY, NUM_MAIN_COLS,
-        digest::EidosDigest,
+        COL_CHAIN_HEAD_ID, COL_IN_MULTIPLICITY, COL_IS_CONTINUATION, COL_OUT_MULTIPLICITY,
+        NUM_MAIN_COLS, digest::EidosDigest,
     },
 };
 
@@ -211,7 +211,7 @@ impl EidosRequires {
 struct CompressionCycle {
     in_mult: ProvideMult,
     out_mult: ProvideMult,
-    is_absorb: bool,
+    is_continuation: bool,
     chain_head_id: u32,
     block: [Felt; 8],
     cv_in: Word,
@@ -225,7 +225,7 @@ impl CompressionCycle {
         let col = |absolute: usize| absolute - NUM_EIDOS_COMPRESSION_COLS;
         meta[col(COL_IN_MULTIPLICITY)] = Felt::from(self.in_mult);
         meta[col(COL_OUT_MULTIPLICITY)] = Felt::from(self.out_mult);
-        meta[col(COL_IS_ABSORB)] = Felt::from_u8(self.is_absorb as u8);
+        meta[col(COL_IS_CONTINUATION)] = Felt::from_u8(self.is_continuation as u8);
         meta[col(COL_CHAIN_HEAD_ID)] = Felt::from(self.chain_head_id);
     }
 }
@@ -326,7 +326,7 @@ pub(crate) fn generate_trace_with_byte_lookups(
             cycles.push(CompressionCycle {
                 in_mult: rec.in_mult,
                 out_mult: rec.out_mult,
-                is_absorb: idx > 0,
+                is_continuation: idx > 0,
                 chain_head_id: rec.range.start,
                 block,
                 cv_in: cv,

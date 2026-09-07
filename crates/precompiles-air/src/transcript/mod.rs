@@ -12,4 +12,7 @@
 pub mod binding;
 pub mod eidos;
 pub mod eval;
+mod framing;
 pub mod nodes;
+
+pub(crate) use framing::initial_cv_from_frame;
