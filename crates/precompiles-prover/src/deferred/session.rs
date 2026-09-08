@@ -22,11 +22,9 @@ use crate::{
 
 /// wNAF window for [`msm_from_terms`](DeferredSessionBuilder::msm_from_terms)'s joint-wNAF
 /// addition chain (digits odd, `|d| < 2^{w-1}`, `2^{w-2}` odd multiples per base). A smaller window
-/// suits GLV's ~128-bit halves in isolation, but `msm_from_terms` now caches a repeating base's
-/// table across the whole batch ([`Self::wnaf_tables`](DeferredSessionBuilder::wnaf_tables)), which
-/// makes the one-time table-build cost a wash and leaves the ladder's per-signature digit density
-/// as the dominant recurring cost — `w = 5` keeps that density low for both the classic 2-base MSM
-/// and GLV's 4-base one.
+/// suits GLV's ~128-bit halves in isolation. Reusing a base's table across the batch makes ladder
+/// digit density the dominant recurring cost; `w = 5` keeps it low for both the two-base and GLV
+/// four-base MSMs.
 const MSM_WNAF_WINDOW: usize = 5;
 
 /// Cap on the term count a PairList may carry into
@@ -41,8 +39,8 @@ const MAX_TERM_PRESERVING_TERMS: usize = 4096;
 /// still stack up (a lowering-only PairList doesn't know about sibling claims), so this tracks a
 /// running total and rejects a new claim before it grows the aggregate past this bound. A generous
 /// multiple of the per-claim cap: legitimate batches (e.g. many small ECDSA-style fallback claims)
-/// stay well under it, while an attacker can no longer bypass the per-claim bound by splitting one
-/// oversized ask into many claims.
+/// stay well under it. The aggregate cap prevents splitting one oversized request across many
+/// claims.
 const MAX_TOTAL_TERM_PRESERVING_TERMS: usize = 16 * MAX_TERM_PRESERVING_TERMS;
 
 pub(crate) struct DeferredSession {
@@ -92,8 +90,7 @@ pub(crate) fn session_from_deferred_state(
     Ok(DeferredSession { session: builder.session, root })
 }
 
-// TODO: Add translator-level value caches if repeated traversal becomes measurable. Truthy
-// handles must remain uncached because they are linear session handles consumed by folds.
+// Truthy handles are linear session values consumed by folds and must not be cached.
 struct DeferredSessionBuilder<'a> {
     state: &'a DeferredState,
     session: Session,

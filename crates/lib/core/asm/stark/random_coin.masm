@@ -368,7 +368,7 @@ end
 #! The instance-specific wrapper stores the relation digest in memory before calling the generic
 #! verifier.
 #!
-#! Currently assumes a blowup factor equal to 8.
+#! The blowup factor is fixed to 8.
 #!
 #! Precondition: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, relation digest,
 #! and trace-height metadata must already be stored in memory before calling this procedure.
@@ -594,7 +594,7 @@ pub proc reseed_with_folding_pow_and_ext
     end
 end
 
-#! Canonical verifier-framework spelling for the Eidos FRI folding reseed.
+#! Alias used by the FRI verifier helpers for the Eidos folding reseed.
 #!
 #! Input: [pow_witness, commitment, ...]
 #! Output: [alpha0, alpha1, ...]

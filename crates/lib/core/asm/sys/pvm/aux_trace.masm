@@ -62,8 +62,9 @@ end
 #! The advice provider supplies the commitment followed by each AIR's exposed values in proof
 #! order. Eight AIRs expose one sigma; EidosCompression and BytePairAnd8 expose two apiece. The
 #! second value of each composite uses Miden's normalized `sigma_prime` convention, so the
-#! verifier locates those two values from the stable height order and weights them by that AIR's
-#! trace length before closing the external LogUp identity.
+#! verifier locates those two values in height-sorted proof order, with canonical instance order
+#! breaking ties, and weights them by that AIR's trace length before closing the external LogUp
+#! identity.
 #!
 #! The stream is 28 base felts: the four-felt commitment followed by twenty-four sigma
 #! coordinates. Three Eidos blocks are compressed and the final four felts remain buffered,
@@ -260,8 +261,8 @@ end
 #!
 #! The seven UintVal messages are the three fixed domain bounds followed by secp256k1's A=0 and
 #! B=7 coefficients and its GLV beta/lambda constants. The EcGroup message binds the secp256k1
-#! group to those pointers. Constants mirror `session/fixed.rs`; `pvm_aux_trace.rs` re-derives the
-#! same messages through `UintDomain` and `CurveId`, so drift between the two fails there.
+#! group to those pointers. The literals must encode the fixed messages produced by
+#! `miden_precompiles_air::fixed::{fixed_uintval_msgs, fixed_ecgroup_msgs}`.
 #!
 #! Input:  [...]
 #! Output: [...]

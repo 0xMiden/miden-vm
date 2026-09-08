@@ -318,10 +318,9 @@ impl TranscriptEvalRequires {
         Self::default()
     }
 
-    /// Issue a handle for a `Binding(hash, True)` a downstream chip
-    /// provides (the keccak chip today; future Field/Group `Eq` arms). No
-    /// eval row — the provider lays the bus provide; the eval chip only
-    /// consumes it when the handle is folded.
+    /// Issues a handle for a `Binding(hash, True)` provided by another chiplet. The provider emits
+    /// the bus entry; the eval chip consumes it only when the handle is folded, so no eval row is
+    /// added.
     pub fn issue(&mut self, hash: EidosDigest) -> Truthy {
         self.fresh(hash)
     }
@@ -1024,10 +1023,8 @@ pub fn generate_trace(requires: TranscriptEvalRequires, root: Truthy) -> RowMajo
         );
     }
 
-    // Padding rows are all-zero (out_mult = 0): the Binding provide is
-    // `−out_mult`, so they touch no bus. (The provide multiplicity is no
-    // longer range-checked — it's pinned to the consumer count by bus
-    // balance; see the design notes.)
+    // Padding rows are zero, so they contribute no output relation. Bus balance pins output
+    // multiplicities to the corresponding relation demand; no separate range check is needed.
     trace.resize(height * NUM_MAIN_COLS, Felt::ZERO);
 
     debug_assert_eq!(public_root, root_hash(&trace), "row 0's hash must pin public_root");

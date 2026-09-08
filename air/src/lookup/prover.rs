@@ -428,8 +428,8 @@ where
     {
         // The prover path short-circuits on `flag == F::ZERO`, while the constraint path
         // evaluates the encode unconditionally. The two agree only when `flag ∈ {0, 1}`.
-        // Every Miden bus emitter today drives `flag` as a product of decoder/op selectors
-        // pinned boolean by the AIR. This debug assertion catches regressions at test time.
+        // Every Miden bus emitter drives `flag` as a product of decoder/op selectors constrained
+        // to be boolean by the AIR. This assertion preserves parity with the constraint path.
         debug_assert!(
             flag == F::ZERO || flag == F::ONE,
             "ProverGroup::insert flag must be in {{0, 1}}; non-boolean flag would diverge \

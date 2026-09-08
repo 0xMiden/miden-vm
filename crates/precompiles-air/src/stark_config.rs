@@ -56,12 +56,10 @@ pub(crate) const LOG_FOLDING_ARITY: u8 = 2;
 /// Mirrors `miden_air::config::pcs_params` in every parameter, including
 /// `log_blowup = 3`. It exists as its own function so the Rust prover and
 /// verifier bind the actual PVM parameters into their transcript rather than
-/// relying on the core VM's defaults. Every chiplet AIR in [`ChipletAir`](crate::ChipletAir)
-/// requires at most four quotient chunks (see the
-/// `ace::tests::quotient_chunks_match_the_symbolic_derivation` test), below the eight chunks
-/// permitted by `log_blowup = 3`. The blowup could therefore be lowered in principle. The MASM
-/// verifier compiles the current PCS geometry, so changing it requires a coordinated MASM update
-/// and a dedicated security review; it is not an independently mutable runtime configuration.
+/// relying on the core VM's defaults. Every [`ChipletAir`](crate::ChipletAir) requires at most
+/// four quotient chunks, below the eight permitted by `log_blowup = 3`. The MASM verifier compiles
+/// this PCS geometry, so changing it requires a coordinated MASM update and security review; it is
+/// not a runtime configuration.
 pub fn precompile_pcs_params() -> PcsParams {
     PcsParams::new(
         LOG_BLOWUP, // must be >= log_quotient_degree

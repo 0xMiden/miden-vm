@@ -110,8 +110,7 @@ fn horner_sign_alternation_full_stack() {
 
     // The standalone eval AIR's 22 rows naturally pad to 32; fixed uints live only in the store
     // and verifier boundary correction, not eval rows.
-    // The add relation count is unchanged; mul no longer has its own main
-    // (shares the store's merged trace at index 5).
+    // Mul shares the store's merged trace at index 5; add uses its own trace.
     let mains = traces.mains();
     let eval = crate::tests::transcript_eval_main(&traces);
     assert_eq!(eval.height(), 32, "eval trace pads independently to 32 rows");

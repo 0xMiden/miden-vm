@@ -11,10 +11,9 @@ use crate::{AIRS, MIDEN_AIR_COUNT, ProofOrder};
 
 /// Number of quotient chunks the recursive verifier and its ACE circuit consume.
 ///
-/// This is the same symbolic derivation the lifted-STARK prover and verifier use. Keeping it
-/// executable matters even though the Miden relation currently derives eight chunks: the MASM
-/// quotient-recomposition inputs are functions of this value, not of the coincidentally equal
-/// blowup factor.
+/// This is the symbolic derivation used by the lifted-STARK prover and verifier. The MASM
+/// quotient-recomposition inputs depend on this value rather than the numerically equal blowup
+/// factor.
 fn recursive_verifier_num_quotient_chunks() -> usize {
     let max_log_quotient_degree = AIRS
         .iter()
@@ -104,9 +103,8 @@ impl RecursiveAceCircuitFactory {
 
     /// Compute the registry leaf for one proof order without assembling its circuit.
     ///
-    /// Encodes only the shuffle section and resumes the cached post-constants Eidos
-    /// chaining word; equality with [`Self::circuit_for_order`] is pinned by the registry
-    /// tests and the factory's construction oracle.
+    /// Encodes only the shuffle section and resumes the cached post-constants Eidos chaining word.
+    /// The returned leaf equals [`Self::circuit_for_order`]'s commitment.
     pub fn leaf_for_order(
         &self,
         order: &ProofOrder,
@@ -200,8 +198,8 @@ pub fn recursive_registry_entry(order: &ProofOrder) -> Result<RecursiveRegistryE
 /// Callers that need several orders should hold a [`RecursiveAceCircuitFactory`] instead;
 /// this rebuilds the composition every call.
 ///
-/// This path builds a fresh factored composition and hashes both stream segments from scratch. It
-/// is retained as a determinism oracle for the reusable factory path.
+/// This path builds a fresh factored composition and hashes both stream segments from scratch,
+/// providing a determinism oracle for the reusable factory path.
 pub fn build_recursive_verifier_ace_circuit(
     order: &ProofOrder,
 ) -> Result<RecursiveAceCircuit, AceError> {
