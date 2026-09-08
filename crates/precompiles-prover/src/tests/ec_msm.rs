@@ -73,8 +73,8 @@ fn msm_two_intro_traces() -> crate::session::SessionTraces {
     let qb = s.msm_intro(&q_pt);
     let _c = s.msm_combine(ga, qb);
 
-    // The EC create nodes must be consumed; fold tautologies so the eval
-    // bindings close (the real consumer is the future resolve seam).
+    // This intro-only fixture has no MSM resolve consumer, so fold tautologies to consume the EC
+    // create nodes and close their eval bindings.
     let claim_g = s.ec_is(&g_pt, &g_pt);
     let claim_q = s.ec_is(&q_pt, &q_pt);
     let root = s.assert_and_fold([claim_g, claim_q]);

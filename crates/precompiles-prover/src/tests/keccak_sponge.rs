@@ -117,8 +117,7 @@ fn main_column_layout_partitions_67_indices() {
     //   - byte-shadow (40): chunk, state_prev, state_new, cleared, padded — each an 8-byte
     //     little-endian decomposition (indices 27..66).
     //
-    // The boundary checks below pin the split so that any future column
-    // shuffling fails fast.
+    // The boundary checks below pin the split so layout drift fails fast.
 
     // Structural block starts at sponge_seq_id = 0 and the b_j block starts
     // immediately after it.
@@ -450,9 +449,8 @@ fn corruption_aux_cell_breaks_logup_recurrence() {
     // we wrap `KeccakSpongeAir` in an AIR that runs the standard aux
     // build and then perturbs `aux[row 1, col 0]`. The constraint at
     // row 0 (and again at row 1) then evaluates to a non-zero residue.
-    // `check_local` builds the aux trace through `LiftedAir::build_aux_trace`,
-    // so the corruption must live in that override (the 0.26 API no longer
-    // accepts a standalone `AuxBuilder` — the AIR owns the aux build).
+    // `check_local` builds the aux trace through `LiftedAir::build_aux_trace`, so the corruption
+    // must live in that override because the AIR owns the aux build.
     use miden_air::BaseAir;
     use miden_core::{field::PrimeCharacteristicRing, utils::RowMajorMatrix};
     use miden_lifted_air::{LiftedAir, LiftedAirBuilder};

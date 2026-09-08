@@ -7,7 +7,7 @@ sidebar_position: 1
 
 The Chiplets module contains specialized components dedicated to accelerating complex computations. Each chiplet specializes in executing a specific type of computation and is responsible for proving both the correctness of its computations and its own internal consistency.
 
-Currently, Miden VM relies on 5 chiplets:
+Miden VM uses five stacked chiplets:
 
 - The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), whose controller records Eidos
   sequential, control-block, Merkle, and deferred-root compressions. The computation is proved by
@@ -31,7 +31,7 @@ the bitwise region without allocating those layouts side by side.
 
 During the finalization of the overall execution trace, the chiplets' traces (including internal selectors) are appended to the trace of the Chiplets module one after another, as pictured. Thus, when one chiplet's trace ends, the trace of the next chiplet starts in the subsequent row.
 
-Additionally, a padding segment is added to the end of the Chiplets module's trace so that the number of rows in the table always matches the overall trace length of the other VM processors, regardless of the length of the chiplet traces. Padding rows use the all-ones selector prefix and zero payload columns.
+The concatenated chiplet trace is padded independently to the smallest supported power-of-two height that can contain it. Padding rows use the all-ones selector prefix and zero payload columns.
 
 ### Chiplets order
 
@@ -173,98 +173,29 @@ In other words, the above constraints enforce that if a selector is $0$ in the c
 
 ## Chiplets bus
 
-The chiplets must be explicitly connected to the rest of the VM in order for it to use their operations. This connection must prove that all specialized operations which a given VM component claimed to offload to one of the chiplets were in fact executed by the correct chiplet with the same set of inputs and outputs as those used by the offloading component.
+The Core and Chiplets AIRs connect offloaded operations through typed
+[LogUp](../lookups/logup.md) messages. Each message starts with a [`BusId`](#operation-labels), so
+relations with similar payloads remain domain-separated. The Core AIR emits requests from the
+decoder and stack, and the Chiplets AIR emits the matching responses. Their order in the trace does
+not affect the lookup argument.
 
-This is achieved via a [bus](../lookups/index.md#communication-buses-in-miden-vm) called $b_{chip}$ where a request can be sent to any chiplet and a corresponding response will be sent back by that chiplet.
-
-The bus is implemented as a single [running product column](../lookups/multiset.md) where:
-
-- Each request is “sent” by computing an operation-specific lookup value from an [operation-specific label](#operation-labels), the operation inputs, and the operation outputs, and then dividing it out of the $b_{chip}$ running product column.
-- Each chiplet response is “sent” by computing the same operation-specific lookup value from the label, inputs, and outputs, and then multiplying it into the $b_{chip}$ running product column.
-
-Thus, if the requests and responses match, then the bus column $b_{chip}$ starts at $1$ and ends at the product of randomness-reduced kernel procedure digests. The initial value is enforced by a first-row boundary constraint, while the final value is verified via `aux_finals`.
-
-Note that the order of the requests and responses does not matter, as long as they are all included in $b_{chip}$. In fact, requests and responses for the same operation will generally occur at different cycles.
+The chiplet response column carries memory, bitwise, hasher, ACE initialization, kernel ROM, and
+AEAD-stream byte-pair operations. A separate return column carries completed hasher digests and
+chaining values.
 
 ### Chiplets bus constraints
 
-The running product constraint is
-
-$$
-(b'_{chip} \cdot req - b_{chip} \cdot resp) = 0
-$$
-
-Here, $\mathit{req}$ and $\mathit{resp}$ are the request/response multipliers formed by combining
-randomness-reduced messages with their selector flags. In addition, the first row is fixed to
-$b_{chip} = 1$.
-
-$$
-f_{first} \cdot (b_{chip} - 1) = 0
-$$
-
-Lookup requests are sent to the chiplets bus by the following components:
-
-- The stack sends requests for [bitwise](../stack/u32_ops.md#u32and), [memory](../stack/io_ops.md#memory-access-operations), and [cryptographic hash operations](../stack/crypto_ops.md).
-- The decoder sends requests for [hash operations](../decoder/index.md#program-block-hashing) for program block hashing.
-- The decoder sends a procedure access request to the [Kernel ROM chiplet](./kernel_rom.md) for each `SYSCALL` during [program block hashing](../decoder/index.md#program-block-hashing).
-- The verifier initializes the bus with requests to the [Kernel ROM chiplet](./kernel_rom.md) for each unique kernel procedure digest.
-
-Responses are provided by the [hash](./hasher.md#chiplets-bus), [bitwise](./bitwise.md#ordinary-u32-operations), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
-
-The verifier computes the expected final value of $b_{chip}$ from public inputs and checks it
-against `aux_finals`. There is no explicit last-row boundary constraint in the chiplets bus.
+The verifier combines the proof-exposed normalized finals across AIRs, weighted by their trace
+lengths, with the statement boundary corrections and requires the total to be zero. These lookup
+columns do not use explicit last-row boundary constraints.
 
 ## Chiplets virtual table
 
-_Note: over time, the use of this construction has evolved to the point where its name doesn't match the way it is used. This is documented in [issue #1779](https://github.com/0xMiden/miden-vm/issues/1779)._
+The hash-kernel LogUp column multiplexes row-disjoint relations for Merkle siblings, ACE memory
+reads, AEAD memory I/O, ordinary bitwise AND8 lookups, and memory range checks. Each relation uses
+its own `BusId`.
 
-The [virtual table](../lookups/multiset.md#virtual-tables) bus $vt_{chip}$ is used by several chiplets as a way to maintain and enforce the correctness of their internal states, and enable communication with each other.
+## Chiplet LogUp bus
 
-The hasher chiplet uses it as a way to store [sibling nodes](./hasher.md#sibling-table-constraints) when performing a Merkle tree update.
-In particular, it expects an empty bus at the start of this operation, and ensures that all entries it inserts are removed once the new tree is finalized.
-Consequently, the column representing this table must be equal to 1 at the boundaries of the hasher chiplet's trace, preventing communication with other chiplets.
-
-Other chiplets use the table as an extension of the chiplet bus, since both multi-sets are merged in the last row of the overall trace.
-
-This enables chiplets to make bus requests to other chiplets, without affecting the degree of the chiplet bus.
-As currently implemented, a single constraint is required to include all requests made by the main trace and corresponding responses from the chiplets.
-The degree of this constraint is the maximum of both message types and is currently reached by the requests by the main trace,
-preventing chiplets from performing any requests using the same bus.
-Instead, a chiplet can make a request through the $vt_{chip}$ bus, with the receiving chiplet responding through the main chiplet bus $b_{chip}$.
-
-At the moment, this feature is only used by the [ACE](./ace.md) allowing it to read inputs and circuit instructions stored in the memory chiplet.
-Note that the [memory](./memory.md#chiplets-bus-constraints) chiplet responds via the chiplet bus $b_{chip}$.
-
-### Chiplets virtual table constraints
-
-The hash-kernel virtual table bus uses a running product constraint similar to the chiplets bus:
-
-$$
-(p' \cdot req - p \cdot resp) = 0
-$$
-
-To combine these correctly, the running product column must be constrained not only at the
-beginning and the end of the trace, but also where the hash chiplet ends. Using the hasher chiplet's
-selector $s_0$, the following constraint ensures the bus equals one whenever $s_0$ transitions:
-
-> $$
-> (s'_0 - s_0) \cdot (1 - vt_{chip}) = 0 \text{ | degree} = 2
-> $$
-
-To connect the chiplet virtual table and the bus, we enforce the following constraint in the last
-row, ensuring the product of both their running products is 1:
-
-> $$
-> vt_{chip} \cdot b_{chip} - 1 = 0 \text{ | degree} = 2.
-> $$
-
-TODO: today we enforce that this bus is empty (equals 1) at Merkle path verification boundaries.
-This is sound but cumbersome and interferes with log_deferred state tracking. We plan to replace
-it with a construction that supports multiple Merkle path verifications without forcing a boundary
-reset.
-
-## Chiplet logUp bus
-
-An auxiliary [logUp bus](../lookups/logup.md) is available to chiplets, though it is currently only used by the [ACE chiplet](./ace.md#wire-bus) to check the wiring of the arithmetic circuit being evaluated. We refer to that chiplet's documentation for constraint applied to the corresponding auxiliary column.
-
-Since this column could later be used by other chiplets, we require boundary constraints over the entire chiplet trace to constrain the running sum to be zero in the first and final row of the auxiliary column.
+The shared wiring column carries [ACE wiring](./ace.md#wire-bus), hasher-compression links, and AEAD
+stream traffic.

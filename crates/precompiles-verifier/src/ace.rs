@@ -552,7 +552,7 @@ mod tests {
     /// Checks the common estimator constants and bounds against the PVM configuration.
     ///
     /// Comparing only the final native and MASM levels would not detect a stale bound for a round
-    /// that does not currently determine the result.
+    /// that does not determine the result.
     #[test]
     fn pvm_security_masm_matches_air() {
         use miden_precompiles_air::security as pvm_security;

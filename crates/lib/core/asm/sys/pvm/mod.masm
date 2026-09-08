@@ -55,7 +55,8 @@ const ACE_REGISTRY_ROOT_1 = 162353523583954471
 const ACE_REGISTRY_ROOT_2 = 1013786994107186054
 const ACE_REGISTRY_ROOT_3 = 5297795383285715137
 
-# Trusted setup commitment. Regeneration updates this for the native Eidos configuration.
+# Trusted commitment to the PVM preprocessed trace tree under the Eidos configuration;
+# `random_coin::init_seed` binds it into the Fiat-Shamir transcript.
 const PREPROCESSED_COMMITMENT_0 = 3445270263026409748
 const PREPROCESSED_COMMITMENT_1 = 2000836718466682896
 const PREPROCESSED_COMMITMENT_2 = 6149950035974481416
@@ -177,8 +178,8 @@ end
 #! by the generic STARK verifier and the PVM relation data.
 #!
 #! The relation fields are fixed except for the maximum trace height, which the proof transcript
-#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages;
-#! the native AIR tests derive and check this count.
+#! binds. `FIXED_BOUNDARY_LOOKUP_TERMS` counts the fixed `UintVal` and `EcGroup` boundary messages
+#! included by the native AIR.
 #!
 #! Inputs:  [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits, ...]
 #! Outputs: [lookup_pow_bits, num_composed_constraints, max_constraint_degree, num_deep_terms,

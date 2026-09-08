@@ -32,7 +32,7 @@ Miden VM consists of several interconnected components, each providing a specifi
 * **System**, which is responsible for managing system data, including the current VM cycle (`clk`), and the current and parent execution contexts.
 * **Program decoder**, which is responsible for computing a commitment to the executing program and converting the program into a sequence of operations executed by the VM.
 * **Operand stack**, which is a push-down stack which provides operands for all operations executed by the VM.
-* **Chiplets**, which is a set of specialized circuits used to accelerate commonly-used complex computations. Currently, the VM relies on 5 chiplets:
+* **Chiplets**, which is a set of five specialized circuits used to accelerate commonly-used complex computations:
   - Hash controller, used with the standalone Eidos compression AIR to compute Eidos sequential,
     control-block, and Merkle hashes.
   - Bitwise chiplet, used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
@@ -58,7 +58,7 @@ The system, decoder, and stack use dedicated columns, while all chiplets share t
 columns. Binary selector columns identify which chiplet owns each row. Range-check requests do not
 occupy a separate main-trace segment; their multiplicities are recorded in `And8LookupAir`.
 
-The system component does not yet have a dedicated documentation section, since the design is likely to change. However, the following column is not expected to change:
+The system component uses the following trace column:
 
 * `clk` which is used to keep track of the current VM cycle. Values in this column start out at $0$ and are incremented by $1$ with each cycle.
 
