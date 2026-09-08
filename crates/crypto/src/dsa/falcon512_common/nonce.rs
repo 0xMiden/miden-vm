@@ -1,4 +1,4 @@
-//! Nonce shared by the Miden Falcon 512 variants.
+//! Nonce shared by the Miden Falcon512 variants.
 
 use core::{fmt, marker::PhantomData};
 

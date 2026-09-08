@@ -107,11 +107,9 @@ pub(crate) mod cpu {
     }
 }
 
-/// Backend selection: on x86_64 with the `std` feature, the physical SIMD tier (AVX-512, AVX2,
-/// or SSE2) is chosen at runtime through `cpu`, so an off-the-shelf build picks up whatever the
-/// host CPU actually supports. Without `std` (or off x86_64), selection falls back to
-/// `target_feature` cfg, exactly as before: a native build needs `-C target-cpu=native` or an
-/// explicit `+avx2`/`+avx512f` to get past the SSE2/NEON baseline.
+/// On x86_64 with `std`, `cpu` selects the physical AVX-512, AVX2, or SSE2 backend at runtime.
+/// Other configurations select a backend through `target_feature`; native builds require
+/// `-C target-cpu=native` or explicit target features to exceed the SSE2 or NEON baseline.
 #[cfg(all(target_arch = "x86_64", feature = "std"))]
 mod native_backend {
     use super::{
