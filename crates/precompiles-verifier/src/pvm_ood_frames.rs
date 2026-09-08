@@ -13,7 +13,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::fmt::Write as _;
+use core::{fmt::Write as _, ops::Range};
 
 use miden_ace_codegen::{
     EXT_DEGREE, InputKey, InputLayout, ProofOrderMapsConfig, render_proof_order_maps,
@@ -218,6 +218,15 @@ struct ScatterPlan {
     digest_offset: usize,
 }
 
+/// Live ranges occupied within the out-of-domain scatter table.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PvmScatterTableLayout {
+    /// `(row-relative destination, pipe digest address)` pairs for order-dependent segments.
+    pub(crate) proof_order_pairs: Range<usize>,
+    /// Procedure-digest words used to dispatch the distinct `pipe_k` lengths.
+    pub(crate) pipe_digests: Range<usize>,
+}
+
 impl ScatterPlan {
     /// Felt offset from the table base of the `pipe_k` digest covering `blocks`.
     fn digest_offset_for(&self, blocks: usize) -> usize {
@@ -232,6 +241,14 @@ impl ScatterPlan {
     /// Number of segments the proof order can move.
     fn dispatched_slots(&self) -> usize {
         self.dispatches.iter().filter(|dispatch| dispatch.slot.is_some()).count()
+    }
+
+    fn table_layout(&self) -> PvmScatterTableLayout {
+        PvmScatterTableLayout {
+            proof_order_pairs: OOD_SCATTER_SLOTS_OFFSET
+                ..OOD_SCATTER_SLOTS_OFFSET + 2 * self.dispatched_slots(),
+            pipe_digests: self.digest_offset..self.digest_offset + WORD_FELTS * self.lengths.len(),
+        }
     }
 }
 
@@ -342,6 +359,13 @@ fn pvm_scatter_plan(geometry: &PvmOodGeometry) -> Result<ScatterPlan, String> {
         lengths,
         digest_offset,
     })
+}
+
+/// Derives the occupied scatter-table ranges from the same plan that renders the ingest hook.
+pub(crate) fn pvm_scatter_table_layout(
+    geometry: &PvmOodGeometry,
+) -> Result<PvmScatterTableLayout, String> {
+    Ok(pvm_scatter_plan(geometry)?.table_layout())
 }
 
 // RENDERING
@@ -598,7 +622,13 @@ mod tests {
         assert_eq!(plan.dispatches.len(), 22, "one segment per occupied per-chiplet block");
         assert_eq!(plan.dispatched_slots(), 20, "main and aux are the order-dependent groups");
         assert_eq!(plan.lengths, vec![2, 4, 6, 8, 10, 12, 14, 18, 26, 28]);
-        assert_eq!(plan.digest_offset, 44);
+        assert_eq!(
+            plan.table_layout(),
+            PvmScatterTableLayout {
+                proof_order_pairs: 4..44,
+                pipe_digests: 44..84,
+            }
+        );
     }
 
     /// The checked-in hook must be exactly what the current chiplet widths render.

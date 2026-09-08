@@ -1408,50 +1408,97 @@ fn replace_felt_array_const(
     name: &str,
     values: &[Felt; 4],
 ) -> io::Result<()> {
-    let marker = format!("pub const {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let init_marker = " = [";
-    let init_start =
-        content[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    let block_start = init_start + init_marker.len();
-    let block_end =
-        content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-        })?;
-    let mut new_block: String = values
+    let mut body: String = values
         .iter()
         .map(|f| format!("\n    Felt::new_unchecked({}),", f.as_canonical_u64()))
         .collect();
-    new_block.push('\n');
-    content.replace_range(block_start..block_end, &new_block);
-    Ok(())
+    body.push('\n');
+    replace_rust_array_const(content, "pub const", name, &body)
 }
 
 fn replace_u64_array_const(content: &mut String, name: &str, values: &[Felt; 4]) -> io::Result<()> {
-    let marker = format!("const {name}:");
-    let start = content
-        .find(&marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
-    let init_marker = " = [";
-    let init_start =
-        content[start..].find(init_marker).map(|idx| start + idx).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
-        })?;
-    let block_start = init_start + init_marker.len();
-    let block_end =
-        content[block_start..].find("];").map(|idx| idx + block_start).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
-        })?;
-    let mut new_block: String = values
+    let mut body: String = values
         .iter()
         .map(|value| format!("\n    {},", value.as_canonical_u64()))
         .collect();
-    new_block.push('\n');
-    content.replace_range(block_start..block_end, &new_block);
+    body.push('\n');
+    replace_rust_array_const(content, "const", name, &body)
+}
+
+fn replace_rust_array_const(
+    content: &mut String,
+    declaration_prefix: &str,
+    name: &str,
+    body: &str,
+) -> io::Result<()> {
+    let marker = format!("{declaration_prefix} {name}:");
+    let start = content
+        .find(&marker)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{name} not found")))?;
+    if content[start + marker.len()..].contains(&marker) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{name} is declared more than once"),
+        ));
+    }
+
+    // These generated declarations keep `=` on the declaration line, while rustfmt may put the
+    // opening bracket on the next line. Anchoring the assignment to that line prevents a malformed
+    // declaration from borrowing an initializer from a later item.
+    let declaration_end = content[start..]
+        .find('\n')
+        .map(|offset| start + offset)
+        .unwrap_or(content.len());
+    let assign = content[start + marker.len()..declaration_end]
+        .find('=')
+        .map(|offset| start + marker.len() + offset)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
+        })?;
+
+    let init_start = content[assign + 1..]
+        .find(|character: char| !character.is_whitespace())
+        .map(|offset| assign + 1 + offset)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("{name} initializer not found"))
+        })?;
+    if content.as_bytes()[init_start] != b'[' {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("{name} initializer not found"),
+        ));
+    }
+
+    // rustfmt either closes a short array on the opening line or places the top-level `];` at
+    // column zero. Array body lines are indented. Stop at the first other unindented line so a
+    // malformed target cannot consume syntax (including brackets in strings or comments) from a
+    // later item.
+    let first_line_end = content[init_start..]
+        .find('\n')
+        .map(|offset| init_start + offset)
+        .unwrap_or(content.len());
+    let mut terminator_end = content[init_start..first_line_end]
+        .find("];")
+        .map(|offset| init_start + offset + 2);
+    let mut line_start = first_line_end.saturating_add(1);
+    while terminator_end.is_none() && line_start < content.len() {
+        let line_end = content[line_start..]
+            .find('\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(content.len());
+        let line = &content[line_start..line_end];
+        if line.starts_with("];") {
+            terminator_end = Some(line_start + 2);
+        } else if !line.is_empty() && !line.as_bytes().first().is_some_and(u8::is_ascii_whitespace)
+        {
+            break;
+        }
+        line_start = line_end.saturating_add(1);
+    }
+    let terminator_end = terminator_end.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, format!("{name} terminator not found"))
+    })?;
+    content.replace_range(assign..terminator_end, &format!("= [{body}];"));
     Ok(())
 }
 
@@ -1488,6 +1535,47 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
+
+    #[test]
+    fn generated_rust_array_replacement_is_rustfmt_safe_and_fails_closed() {
+        type Replacer = fn(&mut String, &str, &[Felt; 4]) -> io::Result<()>;
+
+        let values = [1, 2, 3, 4].map(Felt::new_unchecked);
+        for (replace, name, declaration, body, following) in [
+            (
+                replace_felt_array_const as Replacer,
+                "RELATION_DIGEST",
+                "pub const RELATION_DIGEST: [Felt; 4]",
+                "\n    Felt::new_unchecked(1),\n    Felt::new_unchecked(2),\n    \
+                 Felt::new_unchecked(3),\n    Felt::new_unchecked(4),\n",
+                "pub(crate) const UNTOUCHED: &str = \"];\";\n",
+            ),
+            (
+                replace_u64_array_const as Replacer,
+                "EIDOS_PREPROCESSED_COMMITMENT",
+                "const EIDOS_PREPROCESSED_COMMITMENT: [u64; 4]",
+                "\n    1,\n    2,\n    3,\n    4,\n",
+                "const UNTOUCHED: [u64; 4] = [9, 9, 9, 9];\n",
+            ),
+        ] {
+            let mut wrapped = format!("{declaration} =\n    [0, 0, 0, 0];\n\n{following}");
+            replace(&mut wrapped, name, &values).unwrap();
+            assert_eq!(wrapped, format!("{declaration} = [{body}];\n\n{following}"));
+
+            let mut malformed = format!("{declaration} = [0, 0, 0, 0;\n\n{following}");
+            let original = malformed.clone();
+            let error = replace(&mut malformed, name, &values).unwrap_err();
+            assert!(error.to_string().contains("terminator not found"));
+            assert_eq!(malformed, original);
+
+            let mut duplicate =
+                format!("{declaration} = [0, 0, 0, 0];\n{declaration} = [0, 0, 0, 0];\n");
+            let original = duplicate.clone();
+            let error = replace(&mut duplicate, name, &values).unwrap_err();
+            assert!(error.to_string().contains("declared more than once"));
+            assert_eq!(duplicate, original);
+        }
+    }
 
     /// A group every AIR occupies is indexed correctly by proof-order position, and one with a
     /// single occupant needs no table at all. Anything between the two would address past the
